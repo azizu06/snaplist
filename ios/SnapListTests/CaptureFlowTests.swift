@@ -465,6 +465,38 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
+    func testLivePhotoReviewHostConsumesExactRequestOnceAndPreservesEditingSession() {
+        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000011")
+        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000012")
+        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000013")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [originalCover, second, third],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+
+        XCTAssertTrue(
+            host.consume(router.captureBoundaryRequest),
+            "The live AppShell host must consume the exact Photo Review request."
+        )
+        guard let session = host.session else {
+            XCTFail("The consumed request must expose one renderable live session.")
+            return
+        }
+
+        XCTAssertEqual(session.store.photos, [originalCover, second, third])
+        XCTAssertTrue(session.store.movePhoto(id: third.id, to: 0))
+
+        XCTAssertFalse(
+            host.consume(router.captureBoundaryRequest),
+            "A view update with the same request must not recreate the editing session."
+        )
+        XCTAssertTrue(host.session === session)
+        XCTAssertEqual(host.session?.store.photos, [third, originalCover, second])
+    }
+
     func testPhotoReviewDirectReplacementRetargetsOnlyMatchingStableIdentities() {
         let fingerprints = [
             "direct-replace-photo-a-digest",

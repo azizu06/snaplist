@@ -295,6 +295,19 @@ final class PhotoReviewLiveSession {
 }
 
 @MainActor
+@Observable
+final class PhotoReviewLiveHost {
+    private(set) var session: PhotoReviewLiveSession?
+
+    @discardableResult
+    func consume(
+        _ request: CaptureBoundaryRequest?
+    ) -> Bool {
+        false
+    }
+}
+
+@MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
     let delete: () -> Void
