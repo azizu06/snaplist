@@ -497,6 +497,89 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(host.session?.store.photos, [third, originalCover, second])
     }
 
+    func testLivePhotoReviewNonFinalDeletePreservesExactSurvivorsRestoresFocusAndAnnouncesCountOnce() {
+        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000021")
+        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000022")
+        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000023")
+        let request = CaptureBoundaryRequest(
+            destination: .photoReview,
+            photos: [originalCover, second, third],
+            opener: .reviewButton
+        )
+
+        guard let middleSession = PhotoReviewLiveSession.start(from: request),
+              let trailingSession = PhotoReviewLiveSession.start(from: request) else {
+            XCTFail("Known live Photo Review requests must create isolated sessions.")
+            return
+        }
+
+        middleSession.store.selectPhotoForActions(id: second.id)
+        let middleResult = middleSession.deleteNonFinalPhoto(id: second.id)
+        XCTAssertEqual(
+            middleResult,
+            PhotoReviewLiveDeleteResult(
+                focus: .photo(third.id),
+                announcement: "2 photos remaining."
+            )
+        )
+        if middleResult == nil {
+            XCTAssertEqual(
+                middleSession.store.photos,
+                [originalCover, second, third]
+            )
+            XCTAssertEqual(middleSession.store.selectedPhotoID, second.id)
+            XCTAssertEqual(middleSession.store.actionsPhotoID, second.id)
+            XCTAssertNil(middleSession.focusedPhotoID)
+            XCTAssertNil(middleSession.consumeDeleteAnnouncement())
+        } else {
+            XCTAssertEqual(middleSession.store.photos, [originalCover, third])
+            XCTAssertEqual(middleSession.store.selectedPhotoID, third.id)
+            XCTAssertNil(middleSession.store.actionsPhotoID)
+            XCTAssertEqual(middleSession.focusedPhotoID, third.id)
+            XCTAssertEqual(
+                middleSession.consumeDeleteAnnouncement(),
+                "2 photos remaining."
+            )
+            XCTAssertNil(middleSession.consumeDeleteAnnouncement())
+
+            let stateAfterDelete = middleSession.store.photos
+            XCTAssertNil(middleSession.deleteNonFinalPhoto(id: second.id))
+            XCTAssertEqual(middleSession.store.photos, stateAfterDelete)
+            XCTAssertEqual(middleSession.focusedPhotoID, third.id)
+            XCTAssertNil(middleSession.consumeDeleteAnnouncement())
+        }
+
+        trailingSession.store.selectPhotoForActions(id: third.id)
+        let trailingResult = trailingSession.deleteNonFinalPhoto(id: third.id)
+        XCTAssertEqual(
+            trailingResult,
+            PhotoReviewLiveDeleteResult(
+                focus: .photo(second.id),
+                announcement: "2 photos remaining."
+            )
+        )
+        if trailingResult == nil {
+            XCTAssertEqual(
+                trailingSession.store.photos,
+                [originalCover, second, third]
+            )
+            XCTAssertEqual(trailingSession.store.selectedPhotoID, third.id)
+            XCTAssertEqual(trailingSession.store.actionsPhotoID, third.id)
+            XCTAssertNil(trailingSession.focusedPhotoID)
+            XCTAssertNil(trailingSession.consumeDeleteAnnouncement())
+        } else {
+            XCTAssertEqual(trailingSession.store.photos, [originalCover, second])
+            XCTAssertEqual(trailingSession.store.selectedPhotoID, second.id)
+            XCTAssertNil(trailingSession.store.actionsPhotoID)
+            XCTAssertEqual(trailingSession.focusedPhotoID, second.id)
+            XCTAssertEqual(
+                trailingSession.consumeDeleteAnnouncement(),
+                "2 photos remaining."
+            )
+            XCTAssertNil(trailingSession.consumeDeleteAnnouncement())
+        }
+    }
+
     func testPhotoReviewDirectReplacementRetargetsOnlyMatchingStableIdentities() {
         let fingerprints = [
             "direct-replace-photo-a-digest",

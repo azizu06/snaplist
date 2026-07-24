@@ -259,9 +259,15 @@ struct PhotoReviewFixtureView: View {
 }
 #endif
 
+struct PhotoReviewLiveDeleteResult: Equatable {
+    let focus: PhotoReviewDeleteFocus
+    let announcement: String
+}
+
 @MainActor
 final class PhotoReviewLiveSession {
     let store: PhotoReviewStore
+    private(set) var focusedPhotoID: StagedCapturePhoto.ID?
 
     private init(store: PhotoReviewStore) {
         self.store = store
@@ -291,6 +297,17 @@ final class PhotoReviewLiveSession {
         )
         router.returnFromPhotoReview(request)
         return request
+    }
+
+    @discardableResult
+    func deleteNonFinalPhoto(
+        id: StagedCapturePhoto.ID
+    ) -> PhotoReviewLiveDeleteResult? {
+        nil
+    }
+
+    func consumeDeleteAnnouncement() -> String? {
+        nil
     }
 }
 
