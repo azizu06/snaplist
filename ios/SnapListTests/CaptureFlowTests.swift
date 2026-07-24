@@ -189,6 +189,45 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
+    func testPhotoReviewFixtureUsesDeterministicOnePixelRendererScale() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-pixel-scale-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let photos = PhotoReviewFixtureView.photos(
+            for: .resting,
+            rootDirectory: root
+        )
+        let urls = photos.flatMap { [$0.photoURL, $0.thumbnailURL] }
+
+        XCTAssertEqual(urls.count, 6)
+        for url in urls {
+            let source = try XCTUnwrap(
+                CGImageSourceCreateWithURL(url as CFURL, nil)
+            )
+            let properties = try XCTUnwrap(
+                CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                    as? [CFString: Any]
+            )
+            let width = properties[kCGImagePropertyPixelWidth] as? NSNumber
+            let height = properties[kCGImagePropertyPixelHeight] as? NSNumber
+
+            XCTAssertEqual(
+                width?.intValue,
+                1_200,
+                "\(url.lastPathComponent) must be exactly 1200 pixels wide."
+            )
+            XCTAssertEqual(
+                height?.intValue,
+                900,
+                "\(url.lastPathComponent) must be exactly 900 pixels tall."
+            )
+        }
+    }
+
     func testPhotoReviewEditsPreserveIdentityOrderAndReturnTheExactScanPayload() {
         let originalCover = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000001")
         let second = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000002")
