@@ -186,7 +186,7 @@ struct PhotoReviewFixtureView: View {
         at urls: [URL],
         ordinal: Int
     ) {
-        guard urls.contains(where: { !isDecodableImage(at: $0) }) else {
+        guard urls.contains(where: { !isValidFixtureImage(at: $0) }) else {
             return
         }
 
@@ -215,7 +215,7 @@ struct PhotoReviewFixtureView: View {
             )
         }
 
-        for url in urls where !isDecodableImage(at: url) {
+        for url in urls where !isValidFixtureImage(at: url) {
             do {
                 try data.write(to: url, options: .atomic)
             } catch {
@@ -224,14 +224,26 @@ struct PhotoReviewFixtureView: View {
                 )
             }
             precondition(
-                isDecodableImage(at: url),
-                "REV-02 fixture image is not decodable at \(url.path)"
+                isValidFixtureImage(at: url),
+                "REV-02 fixture image is invalid at \(url.path)"
             )
         }
     }
 
-    private static func isDecodableImage(at url: URL) -> Bool {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+    private static func isValidFixtureImage(at url: URL) -> Bool {
+        guard
+            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            CGImageSourceGetType(source) as String? == "public.jpeg",
+            let properties = CGImageSourceCopyPropertiesAtIndex(
+                source,
+                0,
+                nil
+            ) as? [CFString: Any],
+            (properties[kCGImagePropertyPixelWidth] as? NSNumber)?
+                .intValue == 1_200,
+            (properties[kCGImagePropertyPixelHeight] as? NSNumber)?
+                .intValue == 900
+        else {
             return false
         }
         return CGImageSourceCreateThumbnailAtIndex(
