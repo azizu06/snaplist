@@ -109,6 +109,7 @@ function createDefaultPricer(options: CreateDefaultPricerOptions = {}) {
 
 type AuthorityRaceEvent =
   | { type: "owner-observed"; ownerToken: string | null }
+  | { type: "claim-requested"; ownerToken: string }
   | { type: "claim-aborted"; ownerToken: string }
   | { type: "claim-settled"; ownerToken: string; committed: boolean };
 
@@ -534,7 +535,6 @@ describe("createDefaultPricer Apify composition", () => {
       );
       const events: AuthorityRaceEvent[] = [];
       let seededPreviousOwner = false;
-      let delayedClaimOwner: string | null = null;
       const cache: TtlCache<ApifySoldComp[]> = {
         ...backend,
         claim: async (key, signal, ownerToken) => {
@@ -542,14 +542,18 @@ describe("createDefaultPricer Apify composition", () => {
             seededPreviousOwner = true;
             await backend.claim?.(key, signal, "owner-a");
           }
+          const requestedOwner = ownerToken ?? "legacy-owner";
+          events.push({
+            type: "claim-requested",
+            ownerToken: requestedOwner,
+          });
           return new Promise<boolean>((resolve) => {
             setTimeout(async () => {
-              delayedClaimOwner = ownerToken ?? "legacy-owner";
               const claimed =
                 (await backend.claim?.(key, signal, ownerToken)) === true;
               events.push({
                 type: "claim-settled",
-                ownerToken: delayedClaimOwner,
+                ownerToken: requestedOwner,
                 committed: claimed,
               });
               resolve(claimed);
@@ -608,14 +612,19 @@ describe("createDefaultPricer Apify composition", () => {
         (event) =>
           event.type === "owner-observed" && event.ownerToken === "owner-a",
       );
+      const requestedClaimOwner = events.find(
+        (event) => event.type === "claim-requested",
+      )?.ownerToken;
       const delayedClaimSettleIndex = events.findIndex(
         (event) =>
           event.type === "claim-settled" &&
-          event.ownerToken === delayedClaimOwner &&
+          event.ownerToken === requestedClaimOwner &&
           event.committed,
       );
 
       expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
+      expect(requestedClaimOwner).toEqual(expect.any(String));
+      expect(requestedClaimOwner).not.toBe("owner-a");
       expect(delayedClaimSettleIndex).toBeGreaterThanOrEqual(0);
       expect(oldOwnerObservationIndex).toBeLessThan(delayedClaimSettleIndex);
       expect(winnerResult.evidence).toHaveLength(3);
@@ -723,6 +732,8 @@ describe("createDefaultPricer Apify composition", () => {
           event.committed,
       );
       expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
+      expect(claimedOwner).toEqual(expect.any(String));
+      expect(claimedOwner).not.toBe("owner-a");
       expect(claimAbortIndex).toBeGreaterThanOrEqual(0);
       expect(delayedClaimCommitIndex).toBeGreaterThanOrEqual(0);
       expect(oldOwnerObservationIndex).toBeLessThan(claimAbortIndex);
