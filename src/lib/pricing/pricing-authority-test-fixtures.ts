@@ -1,5 +1,11 @@
 import type { CacheClaimAuthority, TtlCache } from "./comp-cache";
 
+export type AuthorityRaceEvent =
+  | { type: "owner-observed"; ownerToken: string | null }
+  | { type: "claim-requested"; ownerToken: string }
+  | { type: "claim-aborted"; ownerToken: string }
+  | { type: "claim-settled"; ownerToken: string; committed: boolean };
+
 type RedisSetOptions = { ex: number; nx?: true };
 
 type AuthorityTransition = {

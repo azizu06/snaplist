@@ -50,6 +50,7 @@ import {
   type ApifySoldRunRequest,
   type RunApifySoldActor,
 } from "./apify-sold";
+import type { AuthorityRaceEvent } from "../pricing-authority-test-fixtures";
 
 const SIGNAL: ItemSignal = {
   brand: "Sony",
@@ -659,7 +660,7 @@ describe("createApifySoldPricingProvider", () => {
         state: "live",
         updatedAt: Date.now(),
       };
-      const events: string[] = [];
+      const events: AuthorityRaceEvent[] = [];
       const cache: TtlCache<ApifySoldComp[]> = {
         scope: "shared",
         get: async () => {
@@ -673,23 +674,35 @@ describe("createApifySoldPricingProvider", () => {
           cached = value;
         },
         claim: (_key, _signal, ownerToken) => {
-          claimedOwner = ownerToken ?? "legacy-owner";
+          const requestedOwner = ownerToken ?? "legacy-owner";
+          claimedOwner = requestedOwner;
+          events.push({
+            type: "claim-requested",
+            ownerToken: requestedOwner,
+          });
           return new Promise<boolean>((resolve) => {
             setTimeout(() => {
-              currentOwner = claimedOwner!;
+              currentOwner = requestedOwner;
               authority = {
                 ownerToken: currentOwner,
                 state: "live",
                 updatedAt: Date.now(),
               };
               claimSettled = true;
-              events.push(`claim:${currentOwner}`);
+              events.push({
+                type: "claim-settled",
+                ownerToken: requestedOwner,
+                committed: true,
+              });
               resolve(true);
             }, 1);
           });
         },
         getClaimOwner: async () => {
-          events.push(`owner:${currentOwner}`);
+          events.push({
+            type: "owner-observed",
+            ownerToken: currentOwner,
+          });
           return currentOwner;
         },
         getClaimAuthority: async () => {
@@ -747,11 +760,22 @@ describe("createApifySoldPricingProvider", () => {
       await vi.advanceTimersByTimeAsync(2_501);
       const result = await pending;
 
-      const oldOwnerObservationIndex = events.indexOf("owner:owner-a");
-      const delayedClaimSettleIndex = events.findIndex((event) =>
-        event.startsWith("claim:"),
+      const oldOwnerObservationIndex = events.findIndex(
+        (event) =>
+          event.type === "owner-observed" && event.ownerToken === "owner-a",
+      );
+      const requestedClaimOwner = events.find(
+        (event) => event.type === "claim-requested",
+      )?.ownerToken;
+      const delayedClaimSettleIndex = events.findIndex(
+        (event) =>
+          event.type === "claim-settled" &&
+          event.ownerToken === requestedClaimOwner &&
+          event.committed,
       );
       expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
+      expect(requestedClaimOwner).toEqual(expect.any(String));
+      expect(requestedClaimOwner).not.toBe("owner-a");
       expect(delayedClaimSettleIndex).toBeGreaterThanOrEqual(0);
       expect(oldOwnerObservationIndex).toBeLessThan(delayedClaimSettleIndex);
       expect({
