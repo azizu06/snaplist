@@ -23,13 +23,29 @@ protocol UIProcessLifecycle: AnyObject {
 
 extension UIProcessLifecycle {
     func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
-        let safeState = NSPredicate { _, _ in
-            self.state.isSafeToTerminate
+        let safeStates: [XCUIApplication.State] = [
+            .runningBackground,
+            .runningBackgroundSuspended,
+            .notRunning
+        ]
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+
+        for (index, safeState) in safeStates.enumerated() {
+            if state.isSafeToTerminate {
+                return true
+            }
+
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else {
+                return state.isSafeToTerminate
+            }
+            let statesRemaining = TimeInterval(safeStates.count - index)
+            if wait(for: safeState, timeout: remaining / statesRemaining) {
+                return true
+            }
         }
-        return XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: safeState, object: nil)],
-            timeout: timeout
-        ) == .completed
+
+        return state.isSafeToTerminate
     }
 }
 
