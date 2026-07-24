@@ -29,8 +29,10 @@ extension UIProcessLifecycle {
             .notRunning
         ]
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        let probeDuration = min(0.1, timeout / 12)
+        var safeStateIndex = 0
 
-        for (index, safeState) in safeStates.enumerated() {
+        while true {
             if state.isSafeToTerminate {
                 return true
             }
@@ -39,13 +41,12 @@ extension UIProcessLifecycle {
             guard remaining > 0 else {
                 return state.isSafeToTerminate
             }
-            let statesRemaining = TimeInterval(safeStates.count - index)
-            if wait(for: safeState, timeout: remaining / statesRemaining) {
+            let safeState = safeStates[safeStateIndex]
+            if wait(for: safeState, timeout: min(remaining, probeDuration)) {
                 return true
             }
+            safeStateIndex = (safeStateIndex + 1) % safeStates.count
         }
-
-        return state.isSafeToTerminate
     }
 }
 
@@ -64,14 +65,11 @@ struct UIProcessTerminationBoundary {
         _ process: any UIProcessLifecycle,
         timeout: TimeInterval = 3
     ) -> Bool {
-        var terminationTimeout = timeout
         if process.state == .runningForeground {
-            let backgroundTimeout = timeout / 2
             pressHome()
-            guard process.waitUntilSafeToTerminate(timeout: backgroundTimeout) else {
+            guard process.waitUntilSafeToTerminate(timeout: timeout) else {
                 return false
             }
-            terminationTimeout -= backgroundTimeout
         }
         guard process.state.isSafeToTerminate else {
             return false
@@ -80,7 +78,7 @@ struct UIProcessTerminationBoundary {
             return true
         }
         process.terminate()
-        return process.wait(for: .notRunning, timeout: terminationTimeout)
+        return process.wait(for: .notRunning, timeout: timeout)
     }
 }
 
@@ -96,7 +94,7 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
             process.events,
             ["press-home", "wait-safe-to-terminate", "terminate", "wait-not-running"]
         )
-        XCTAssertEqual(process.waitTimeouts, [2, 2])
+        XCTAssertEqual(process.waitTimeouts, [4, 4])
     }
 
     func testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut() {
@@ -107,7 +105,7 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
 
         XCTAssertFalse(boundary.terminate(process, timeout: 4))
         XCTAssertEqual(process.events, ["press-home", "wait-safe-to-terminate"])
-        XCTAssertEqual(process.waitTimeouts, [2])
+        XCTAssertEqual(process.waitTimeouts, [4])
         XCTAssertEqual(process.state, .runningForeground)
     }
 
@@ -122,7 +120,7 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
             process.events,
             ["press-home", "wait-safe-to-terminate", "terminate", "wait-not-running"]
         )
-        XCTAssertEqual(process.waitTimeouts, [2, 2])
+        XCTAssertEqual(process.waitTimeouts, [4, 4])
     }
 
     func testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest() {
