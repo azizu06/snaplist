@@ -22,11 +22,17 @@ struct UIProcessTerminationBoundary {
         _ process: any UIProcessLifecycle,
         timeout: TimeInterval = 3
     ) -> Bool {
+        var terminationTimeout = timeout
         if process.state == .runningForeground {
+            let backgroundTimeout = timeout / 2
             pressHome()
+            guard process.wait(for: .runningBackground, timeout: backgroundTimeout) else {
+                return false
+            }
+            terminationTimeout -= backgroundTimeout
         }
         process.terminate()
-        return process.wait(for: .notRunning, timeout: timeout)
+        return process.wait(for: .notRunning, timeout: terminationTimeout)
     }
 }
 
