@@ -152,7 +152,56 @@ interface RedisLike {
     opts: { ex: number; nx?: true },
     signal?: AbortSignal,
   ): Promise<unknown>;
+  eval?(
+    script: string,
+    keys: string[],
+    args: Array<string | number>,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
 }
+
+const CLAIM_AUTHORITY_TRANSITION_SCRIPT = `
+local claimRaw = redis.call("GET", KEYS[1])
+if not claimRaw then
+  return 0
+end
+
+local claimOwner = claimRaw
+local claimOk, claim = pcall(cjson.decode, claimRaw)
+if claimOk and type(claim) == "table" and type(claim["ownerToken"]) == "string" then
+  claimOwner = claim["ownerToken"]
+end
+if claimOwner ~= ARGV[1] then
+  return 0
+end
+
+local authorityRaw = redis.call("GET", KEYS[2])
+if not authorityRaw then
+  authorityRaw = claimRaw
+end
+local authorityOk, authority = pcall(cjson.decode, authorityRaw)
+if not authorityOk or type(authority) ~= "table" then
+  return 0
+end
+if authority["ownerToken"] ~= ARGV[1] then
+  return 0
+end
+if authority["state"] ~= "live" and authority["state"] ~= "terminal" then
+  return 0
+end
+
+local nextState = ARGV[2]
+if nextState == "live" then
+  if authority["state"] ~= "live" then
+    return 0
+  end
+elseif nextState ~= "terminal" then
+  return 0
+end
+
+redis.call("SET", KEYS[2], ARGV[3], "EX", tonumber(ARGV[4]))
+return 1
+`;
 
 function parseClaimAuthority(raw: unknown): CacheClaimAuthority | null {
   let parsed: unknown = raw;
@@ -235,6 +284,36 @@ export function createUpstashTtlCache<T>(
         : parseClaimAuthority(authorityRaw);
     return authority?.ownerToken === ownerToken ? authority : null;
   };
+  const transitionClaimAuthority = async (
+    redis: RedisLike,
+    key: string,
+    ownerToken: string,
+    state: CacheClaimAuthority["state"],
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    if (typeof redis.eval !== "function") return false;
+    const nextAuthority: CacheClaimAuthority = {
+      ownerToken,
+      state,
+      updatedAt: Date.now(),
+    };
+    const keys = [claimKey(key), claimAuthorityKey(key, ownerToken)];
+    const args = [
+      ownerToken,
+      state,
+      JSON.stringify(nextAuthority),
+      ttlSec,
+    ];
+    const transitioned = injected
+      ? await redis.eval(
+          CLAIM_AUTHORITY_TRANSITION_SCRIPT,
+          keys,
+          args,
+          signal,
+        )
+      : await redis.eval(CLAIM_AUTHORITY_TRANSITION_SCRIPT, keys, args);
+    return transitioned === 1 || transitioned === "1" || transitioned === true;
+  };
   return {
     scope: "shared",
     async get(key, signal) {
@@ -305,51 +384,22 @@ export function createUpstashTtlCache<T>(
     },
     async refreshClaimAuthority(key, ownerToken, signal) {
       const redis = await client(signal);
-      const initialRaw = await readRedis(redis, claimKey(key), signal);
-      if (ownerFrom(initialRaw) !== ownerToken) return false;
-      const authority = await authorityForOwner(
+      return transitionClaimAuthority(
         redis,
         key,
         ownerToken,
-        initialRaw,
+        "live",
         signal,
-      );
-      if (
-        authority == null ||
-        authority.state !== "live"
-      ) {
-        return false;
-      }
-      await redis.set(
-        claimAuthorityKey(key, ownerToken),
-        JSON.stringify({ ownerToken, state: "live", updatedAt: Date.now() }),
-        { ex: ttlSec },
-        signal,
-      );
-      return (
-        ownerFrom(await readRedis(redis, claimKey(key), signal)) === ownerToken
       );
     },
     async terminateClaimAuthority(key, ownerToken, signal) {
       const redis = await client(signal);
-      const initialRaw = await readRedis(redis, claimKey(key), signal);
-      if (ownerFrom(initialRaw) !== ownerToken) return false;
-      const authority = await authorityForOwner(
+      return transitionClaimAuthority(
         redis,
         key,
         ownerToken,
-        initialRaw,
+        "terminal",
         signal,
-      );
-      if (authority == null) return false;
-      await redis.set(
-        claimAuthorityKey(key, ownerToken),
-        JSON.stringify({ ownerToken, state: "terminal", updatedAt: Date.now() }),
-        { ex: ttlSec },
-        signal,
-      );
-      return (
-        ownerFrom(await readRedis(redis, claimKey(key), signal)) === ownerToken
       );
     },
   };
