@@ -1,6 +1,9 @@
 import PhotosUI
 import SwiftUI
 import UIKit
+#if DEBUG
+import ImageIO
+#endif
 
 @MainActor
 @Observable
@@ -109,6 +112,7 @@ final class PhotoReviewPickerPresentation {
     }
 }
 
+#if DEBUG
 @MainActor
 struct PhotoReviewFixtureView: View {
     @State private var store: PhotoReviewStore
@@ -132,26 +136,96 @@ struct PhotoReviewFixtureView: View {
         for state: PhotoReviewVisualStateID,
         rootDirectory: URL = FileManager.default.temporaryDirectory
     ) -> [StagedCapturePhoto] {
+        do {
+            try FileManager.default.createDirectory(
+                at: rootDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            preconditionFailure(
+                "REV-02 fixture directory could not be created at \(rootDirectory.path): \(error)"
+            )
+        }
+
         switch state {
         case .resting:
             return (1...3).map { index in
                 let id = UUID(
                     uuidString: "45500000-0000-4000-8000-\(String(format: "%012d", index))"
                 )!
+                let photoURL = rootDirectory.appendingPathComponent(
+                    "photo-review-\(index).jpg"
+                )
+                let thumbnailURL = rootDirectory.appendingPathComponent(
+                    "photo-review-thumb-\(index).jpg"
+                )
+                materializeImages(
+                    at: [photoURL, thumbnailURL],
+                    ordinal: index
+                )
                 return StagedCapturePhoto(
                     id: id,
-                    photoURL: rootDirectory.appendingPathComponent(
-                        "photo-review-\(index).jpg"
-                    ),
-                    thumbnailURL: rootDirectory.appendingPathComponent(
-                        "photo-review-thumb-\(index).jpg"
-                    ),
+                    photoURL: photoURL,
+                    thumbnailURL: thumbnailURL,
                     createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
                 )
             }
         }
     }
+
+    private static func materializeImages(
+        at urls: [URL],
+        ordinal: Int
+    ) {
+        guard urls.contains(where: { !isDecodableImage(at: $0) }) else {
+            return
+        }
+
+        let colors = [
+            UIColor(red: 0.86, green: 0.72, blue: 0.55, alpha: 1),
+            UIColor(red: 0.52, green: 0.68, blue: 0.72, alpha: 1),
+            UIColor(red: 0.74, green: 0.66, blue: 0.78, alpha: 1)
+        ]
+        let size = CGSize(width: 1_200, height: 900)
+        let data = UIGraphicsImageRenderer(size: size).jpegData(
+            withCompressionQuality: 0.92
+        ) { context in
+            colors[ordinal - 1].setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.black.withAlphaComponent(0.55).setFill()
+            context.fill(
+                CGRect(
+                    x: size.width * 0.24,
+                    y: size.height * 0.18,
+                    width: size.width * 0.52,
+                    height: size.height * 0.64
+                )
+            )
+        }
+
+        for url in urls where !isDecodableImage(at: url) {
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {
+                preconditionFailure(
+                    "REV-02 fixture image could not be written at \(url.path): \(error)"
+                )
+            }
+            precondition(
+                isDecodableImage(at: url),
+                "REV-02 fixture image is not decodable at \(url.path)"
+            )
+        }
+    }
+
+    private static func isDecodableImage(at url: URL) -> Bool {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            return false
+        }
+        return CGImageSourceGetCount(source) > 0
+    }
 }
+#endif
 
 @MainActor
 struct PhotoReviewView: View {
