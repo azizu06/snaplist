@@ -46,6 +46,32 @@ read. Actor failures accumulate across request-scoped providers sharing one cach
 so the bounded circuit cannot reset on every request. The shared-cache deployment
 remains an activation prerequisite.
 
+The paid claim remains durable for the sold-cache TTL so an orphan never
+authorizes a second Actor. Its immutable value records the exact owner and initial
+`live` authority; subsequent liveness and terminal transitions use an
+owner-scoped authority key, so a stale writer cannot overwrite another owner. A
+live owner refreshes its record at a bounded cadence while its Actor/store path
+remains active; the default liveness window is 15 seconds and is capped at one
+quarter of the caller pricing window. Operators may tighten
+`APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS`, but the code clamps production
+configuration between 3 seconds and that 15-second/one-quarter ceiling; a
+shorter test pricing window proportionally lowers the minimum too.
+Redis applies each exact-owner authority transition atomically: refresh is valid
+only from `live`, while `terminal` is idempotent and can never transition back to
+`live`.
+Losers continue the existing bounded evidence handoff only while that exact
+authority is live. Terminal, stale, malformed, or owner-mismatched authority
+declines promptly to the existing provider-neutral fallback without releasing
+the durable paid claim. Evidence polling retains exponential backoff, authority
+heartbeats run at one-third of the effective window, and settled observation
+backoff has a 500-millisecond anti-polling floor before topping out at the
+smaller of that heartbeat cadence and five seconds. Ambiguous claim responses
+receive at most the same 500-millisecond owner-observation allowance, and an
+exact owner must refresh live authority before Actor work begins. The final
+500 milliseconds of the caller pricing window remain reserved for terminal
+authority and observation; every Actor and cache wait respects the reduced
+owner-work deadline.
+
 Production activation is not part of Issue #200. Leave the flag off until the
 owner approves a separate budget and validates current Actor schema/build/pricing
 plus shared-cache deployment. The zero-network readiness command and measured

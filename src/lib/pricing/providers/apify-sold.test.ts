@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createInMemoryTtlCache, type TtlCache } from "../comp-cache";
+import {
+  createInMemoryTtlCache,
+  type CacheClaimAuthority,
+  type TtlCache,
+} from "../comp-cache";
 import { priceResultSchema, type ItemSignal } from "../types";
 
 const apifySdk = vi.hoisted(() => ({
@@ -640,6 +644,132 @@ describe("createApifySoldPricingProvider", () => {
     }
   });
 
+  it("reconciles a delayed exact owner after observing the expiring previous owner", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-24T12:00:00.000Z"));
+      let cached: ApifySoldComp[] | null = null;
+      let cacheReads = 0;
+      let currentOwner = "owner-a";
+      let claimedOwner: string | null = null;
+      let claimSettled = false;
+      let selfObservationSeen = false;
+      let authority: CacheClaimAuthority = {
+        ownerToken: currentOwner,
+        state: "live",
+        updatedAt: Date.now(),
+      };
+      const events: string[] = [];
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => {
+          cacheReads += 1;
+          if (cacheReads === 2) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 2));
+          }
+          return cached;
+        },
+        set: async (_key, value) => {
+          cached = value;
+        },
+        claim: (_key, _signal, ownerToken) => {
+          claimedOwner = ownerToken ?? "legacy-owner";
+          return new Promise<boolean>((resolve) => {
+            setTimeout(() => {
+              currentOwner = claimedOwner!;
+              authority = {
+                ownerToken: currentOwner,
+                state: "live",
+                updatedAt: Date.now(),
+              };
+              claimSettled = true;
+              events.push(`claim:${currentOwner}`);
+              resolve(true);
+            }, 1);
+          });
+        },
+        getClaimOwner: async () => {
+          events.push(`owner:${currentOwner}`);
+          return currentOwner;
+        },
+        getClaimAuthority: async () => {
+          if (claimedOwner != null && currentOwner === claimedOwner) {
+            selfObservationSeen = true;
+          }
+          return { ...authority };
+        },
+        refreshClaimAuthority: async (_key, ownerToken) => {
+          if (
+            currentOwner !== ownerToken ||
+            authority.ownerToken !== ownerToken ||
+            authority.state !== "live"
+          ) {
+            return false;
+          }
+          authority = {
+            ownerToken,
+            state: "live",
+            updatedAt: Date.now(),
+          };
+          return true;
+        },
+        terminateClaimAuthority: async (_key, ownerToken) => {
+          if (currentOwner !== ownerToken || authority.ownerToken !== ownerToken) {
+            return false;
+          }
+          authority = {
+            ownerToken,
+            state: "terminal",
+            updatedAt: Date.now(),
+          };
+          return true;
+        },
+      };
+      const runActor = vi.fn<RunApifySoldActor>(async () => ({
+        status: "SUCCEEDED",
+        items: [
+          rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+          rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+          rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+        ],
+      }));
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+
+      const pending = provider.price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+      const result = await pending;
+
+      const oldOwnerObservationIndex = events.indexOf("owner:owner-a");
+      const delayedClaimSettleIndex = events.findIndex((event) =>
+        event.startsWith("claim:"),
+      );
+      expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
+      expect(delayedClaimSettleIndex).toBeGreaterThanOrEqual(0);
+      expect(oldOwnerObservationIndex).toBeLessThan(delayedClaimSettleIndex);
+      expect({
+        actorCalls: runActor.mock.calls.length,
+        claimSettled,
+        resultIsNull: result == null,
+        selfObservationSeen,
+      }).toEqual({
+        actorCalls: 1,
+        claimSettled: true,
+        resultIsNull: false,
+        selfObservationSeen: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reconciles an exact committed claim owner before bounded retrieval", async () => {
     vi.useFakeTimers();
     try {
@@ -714,6 +844,39 @@ describe("createApifySoldPricingProvider", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("reconciles an exact owner when the committed claim response rejects", async () => {
+    const sharedCache = sharedTestCache<ApifySoldComp[]>();
+    const cache: TtlCache<ApifySoldComp[]> = {
+      ...sharedCache,
+      claim: async (key, signal, ownerToken) => {
+        await sharedCache.claim?.(key, signal, ownerToken);
+        throw new Error("claim response rejected after remote commit");
+      },
+    };
+    const runActor = successfulRun([
+      rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+      rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+      rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+    ]);
+    const providerForRuntime = () =>
+      createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+
+    const ownerResult = await providerForRuntime().price(SIGNAL);
+    const retryResult = await providerForRuntime().price(SIGNAL);
+
+    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(ownerResult).not.toBeNull();
+    expect(retryResult).toEqual(ownerResult);
   });
 
   it("observes an exact owner committed during the final backoff interval", async () => {

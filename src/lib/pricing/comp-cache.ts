@@ -15,6 +15,12 @@
  *    abuse limiter and Sentry patterns). Stored with a native `EX` TTL.
  */
 
+export interface CacheClaimAuthority {
+  ownerToken: string;
+  state: "live" | "terminal";
+  updatedAt: number;
+}
+
 export interface TtlCache<T> {
   /** Whether atomic claims coordinate only this process or every worker runtime. */
   readonly scope?: "process" | "shared";
@@ -26,6 +32,23 @@ export interface TtlCache<T> {
   claim?(key: string, signal?: AbortSignal, ownerToken?: string): Promise<boolean>;
   /** Observe the durable owner token after an ambiguous claim response. */
   getClaimOwner?(key: string, signal?: AbortSignal): Promise<string | null>;
+  /** Observe bounded liveness/terminal truth for the exact paid-claim owner. */
+  getClaimAuthority?(
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<CacheClaimAuthority | null>;
+  /** Refresh liveness only while this exact owner still holds live authority. */
+  refreshClaimAuthority?(
+    key: string,
+    ownerToken: string,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
+  /** Mark this exact owner's authority terminal without releasing the paid claim. */
+  terminateClaimAuthority?(
+    key: string,
+    ownerToken: string,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
 }
 
 /** Redis keys all share this prefix (mirrors the abuse limiter's `snaplist:rl`). */
@@ -47,7 +70,21 @@ export function createInMemoryTtlCache<T>(
   scope: "process" | "shared" = "process",
 ): TtlCache<T> {
   const store = new Map<string, { value: T; expires: number }>();
-  const claims = new Map<string, { expires: number; ownerToken: string }>();
+  const claims = new Map<
+    string,
+    { expires: number; authority: CacheClaimAuthority }
+  >();
+  const activeClaim = (
+    key: string,
+  ): { expires: number; authority: CacheClaimAuthority } | null => {
+    const claim = claims.get(key);
+    if (!claim) return null;
+    if (now() >= claim.expires) {
+      claims.delete(key);
+      return null;
+    }
+    return claim;
+  };
   return {
     scope,
     async get(key) {
@@ -63,22 +100,41 @@ export function createInMemoryTtlCache<T>(
       store.set(key, { value, expires: now() + ttlMs });
     },
     async claim(key, _signal, ownerToken) {
-      const claim = claims.get(key);
-      if (claim != null && now() < claim.expires) return false;
+      if (activeClaim(key) != null) return false;
       claims.set(key, {
         expires: now() + ttlMs,
-        ownerToken: ownerToken ?? "1",
+        authority: {
+          ownerToken: ownerToken ?? "1",
+          state: "live",
+          updatedAt: now(),
+        },
       });
       return true;
     },
     async getClaimOwner(key) {
-      const claim = claims.get(key);
-      if (!claim) return null;
-      if (now() >= claim.expires) {
-        claims.delete(key);
-        return null;
+      return activeClaim(key)?.authority.ownerToken ?? null;
+    },
+    async getClaimAuthority(key) {
+      const authority = activeClaim(key)?.authority;
+      return authority ? { ...authority } : null;
+    },
+    async refreshClaimAuthority(key, ownerToken) {
+      const claim = activeClaim(key);
+      if (
+        !claim ||
+        claim.authority.ownerToken !== ownerToken ||
+        claim.authority.state !== "live"
+      ) {
+        return false;
       }
-      return claim.ownerToken;
+      claim.authority = { ownerToken, state: "live", updatedAt: now() };
+      return true;
+    },
+    async terminateClaimAuthority(key, ownerToken) {
+      const claim = activeClaim(key);
+      if (!claim || claim.authority.ownerToken !== ownerToken) return false;
+      claim.authority = { ownerToken, state: "terminal", updatedAt: now() };
+      return true;
     },
   };
 }
@@ -96,6 +152,84 @@ interface RedisLike {
     opts: { ex: number; nx?: true },
     signal?: AbortSignal,
   ): Promise<unknown>;
+  eval?(
+    script: string,
+    keys: string[],
+    args: Array<string | number>,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+}
+
+const CLAIM_AUTHORITY_TRANSITION_SCRIPT = `
+local claimRaw = redis.call("GET", KEYS[1])
+if not claimRaw then
+  return 0
+end
+
+local claimOwner = claimRaw
+local claimOk, claim = pcall(cjson.decode, claimRaw)
+if claimOk and type(claim) == "table" and type(claim["ownerToken"]) == "string" then
+  claimOwner = claim["ownerToken"]
+end
+if claimOwner ~= ARGV[1] then
+  return 0
+end
+
+local authorityRaw = redis.call("GET", KEYS[2])
+if not authorityRaw then
+  authorityRaw = claimRaw
+end
+local authorityOk, authority = pcall(cjson.decode, authorityRaw)
+if not authorityOk or type(authority) ~= "table" then
+  return 0
+end
+if authority["ownerToken"] ~= ARGV[1] then
+  return 0
+end
+if authority["state"] ~= "live" and authority["state"] ~= "terminal" then
+  return 0
+end
+
+local nextState = ARGV[2]
+if nextState == "live" then
+  if authority["state"] ~= "live" then
+    return 0
+  end
+elseif nextState ~= "terminal" then
+  return 0
+end
+
+redis.call("SET", KEYS[2], ARGV[3], "EX", tonumber(ARGV[4]))
+return 1
+`;
+
+function parseClaimAuthority(raw: unknown): CacheClaimAuthority | null {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof parsed !== "object" || parsed == null || Array.isArray(parsed)) {
+    return null;
+  }
+  const candidate = parsed as Partial<CacheClaimAuthority>;
+  if (
+    typeof candidate.ownerToken !== "string" ||
+    candidate.ownerToken.length === 0 ||
+    (candidate.state !== "live" && candidate.state !== "terminal") ||
+    typeof candidate.updatedAt !== "number" ||
+    !Number.isFinite(candidate.updatedAt)
+  ) {
+    return null;
+  }
+  return {
+    ownerToken: candidate.ownerToken,
+    state: candidate.state,
+    updatedAt: candidate.updatedAt,
+  };
 }
 
 export function createUpstashTtlCache<T>(
@@ -120,6 +254,66 @@ export function createUpstashTtlCache<T>(
     return pending;
   }
   const namespaced = (key: string) => `${KEY_PREFIX}:${name}:${key}`;
+  const claimKey = (key: string) => namespaced(`${key}:paid-claim`);
+  const claimAuthorityKey = (key: string, ownerToken: string) =>
+    namespaced(`${key}:paid-claim-authority:${ownerToken}`);
+  const readRedis = (
+    redis: RedisLike,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<unknown> =>
+    injected ? redis.get(key, signal) : redis.get(key);
+  const ownerFrom = (raw: unknown): string | null =>
+    parseClaimAuthority(raw)?.ownerToken ??
+    (typeof raw === "string" && raw.length > 0 ? raw : null);
+  const authorityForOwner = async (
+    redis: RedisLike,
+    key: string,
+    ownerToken: string,
+    initialRaw: unknown,
+    signal?: AbortSignal,
+  ): Promise<CacheClaimAuthority | null> => {
+    const authorityRaw = await readRedis(
+      redis,
+      claimAuthorityKey(key, ownerToken),
+      signal,
+    );
+    const authority =
+      authorityRaw == null
+        ? parseClaimAuthority(initialRaw)
+        : parseClaimAuthority(authorityRaw);
+    return authority?.ownerToken === ownerToken ? authority : null;
+  };
+  const transitionClaimAuthority = async (
+    redis: RedisLike,
+    key: string,
+    ownerToken: string,
+    state: CacheClaimAuthority["state"],
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    if (typeof redis.eval !== "function") return false;
+    const nextAuthority: CacheClaimAuthority = {
+      ownerToken,
+      state,
+      updatedAt: Date.now(),
+    };
+    const keys = [claimKey(key), claimAuthorityKey(key, ownerToken)];
+    const args = [
+      ownerToken,
+      state,
+      JSON.stringify(nextAuthority),
+      ttlSec,
+    ];
+    const transitioned = injected
+      ? await redis.eval(
+          CLAIM_AUTHORITY_TRANSITION_SCRIPT,
+          keys,
+          args,
+          signal,
+        )
+      : await redis.eval(CLAIM_AUTHORITY_TRANSITION_SCRIPT, keys, args);
+    return transitioned === 1 || transitioned === "1" || transitioned === true;
+  };
   return {
     scope: "shared",
     async get(key, signal) {
@@ -149,15 +343,19 @@ export function createUpstashTtlCache<T>(
     },
     async claim(key, signal, ownerToken) {
       const redis = await client(signal);
-      const claimKey = namespaced(`${key}:paid-claim`);
+      const authority: CacheClaimAuthority = {
+        ownerToken: ownerToken ?? "1",
+        state: "live",
+        updatedAt: Date.now(),
+      };
       const claimed = injected
         ? await redis.set(
-            claimKey,
-            ownerToken ?? "1",
+            claimKey(key),
+            JSON.stringify(authority),
             { ex: ttlSec, nx: true },
             signal,
           )
-        : await redis.set(claimKey, ownerToken ?? "1", {
+        : await redis.set(claimKey(key), JSON.stringify(authority), {
             ex: ttlSec,
             nx: true,
           });
@@ -165,11 +363,44 @@ export function createUpstashTtlCache<T>(
     },
     async getClaimOwner(key, signal) {
       const redis = await client(signal);
-      const claimKey = namespaced(`${key}:paid-claim`);
-      const owner = injected
-        ? await redis.get(claimKey, signal)
-        : await redis.get(claimKey);
-      return typeof owner === "string" ? owner : null;
+      return ownerFrom(await readRedis(redis, claimKey(key), signal));
+    },
+    async getClaimAuthority(key, signal) {
+      const redis = await client(signal);
+      const initialRaw = await readRedis(redis, claimKey(key), signal);
+      const ownerToken = ownerFrom(initialRaw);
+      if (ownerToken == null) return null;
+      const authority = await authorityForOwner(
+        redis,
+        key,
+        ownerToken,
+        initialRaw,
+        signal,
+      );
+      const confirmedOwner = ownerFrom(
+        await readRedis(redis, claimKey(key), signal),
+      );
+      return confirmedOwner === ownerToken ? authority : null;
+    },
+    async refreshClaimAuthority(key, ownerToken, signal) {
+      const redis = await client(signal);
+      return transitionClaimAuthority(
+        redis,
+        key,
+        ownerToken,
+        "live",
+        signal,
+      );
+    },
+    async terminateClaimAuthority(key, ownerToken, signal) {
+      const redis = await client(signal);
+      return transitionClaimAuthority(
+        redis,
+        key,
+        ownerToken,
+        "terminal",
+        signal,
+      );
     },
   };
 }

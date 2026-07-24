@@ -38,11 +38,18 @@ export const APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT = 0.11;
 export const APIFY_SOLD_CIRCUIT_FAILURE_THRESHOLD_DEFAULT = 3;
 export const APIFY_SOLD_CIRCUIT_COOLDOWN_MS_DEFAULT = 60_000;
 const APIFY_SOLD_COORDINATION_ALLOWANCE_MS = 500;
+const APIFY_SOLD_WINNER_OBSERVATION_POLL_MS_MAX = 5_000;
 const APIFY_SOLD_WINNER_STORE_POLL_MS = 25;
 const APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS = 10;
 const APIFY_SOLD_DEADLINE_MARGIN_MS = 1;
+const APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS_DEFAULT = 15_000;
+const APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS_MIN = 3_000;
+const APIFY_SOLD_CLAIM_AUTHORITY_CLOCK_SKEW_MS = 1_000;
 const APIFY_SOLD_PRICING_DEADLINE_EXCEEDED = Symbol(
   "apify-sold-pricing-deadline-exceeded",
+);
+const APIFY_SOLD_CLAIM_RESPONSE_REJECTED = Symbol(
+  "apify-sold-claim-response-rejected",
 );
 
 async function settleBeforeApifyPricingDeadline<T>(
@@ -218,6 +225,8 @@ export interface ApifySoldPricingProviderOptions {
   timeoutSecs?: number;
   waitSecs?: number;
   requestRetries?: number;
+  /** Exact-owner liveness window; env may tighten within the in-code safety bounds. */
+  claimAuthorityWindowMs?: number;
   cache?: TtlCache<ApifySoldComp[]>;
   now?: () => number;
   staleDays?: number;
@@ -444,6 +453,32 @@ export function createApifySoldPricingProvider(
   const pricingWindowMs =
     Math.max(timeoutSecs, waitSecs) * 1_000 * 2 +
     APIFY_SOLD_COORDINATION_ALLOWANCE_MS;
+  const claimAuthorityWindowMsMax = Math.max(
+    APIFY_SOLD_COORDINATION_ALLOWANCE_MS,
+    Math.min(
+      APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS_DEFAULT,
+      Math.floor(pricingWindowMs / 4),
+    ),
+  );
+  const claimAuthorityWindowMsMin = Math.min(
+    APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS_MIN,
+    claimAuthorityWindowMsMax,
+  );
+  const claimAuthorityWindowMs = Math.max(
+    claimAuthorityWindowMsMin,
+    Math.min(
+      claimAuthorityWindowMsMax,
+      positiveNumber(
+        options.claimAuthorityWindowMs ??
+          process.env.APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS,
+        APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS_DEFAULT,
+      ),
+    ),
+  );
+  const claimAuthorityHeartbeatMs = Math.max(
+    APIFY_SOLD_WINNER_STORE_POLL_MS,
+    Math.floor(claimAuthorityWindowMs / 3),
+  );
   const staleDays = positiveNumber(
     options.staleDays ?? process.env.EBAY_SOLD_STALE_DAYS,
     SOLD_STALE_DAYS_DEFAULT,
@@ -469,6 +504,34 @@ export function createApifySoldPricingProvider(
     cache?.scope === "shared" && typeof cache.getClaimOwner === "function"
       ? cache.getClaimOwner.bind(cache)
       : null;
+  const getClaimAuthority =
+    cache?.scope === "shared" && typeof cache.getClaimAuthority === "function"
+      ? cache.getClaimAuthority.bind(cache)
+      : null;
+  const refreshClaimAuthority =
+    cache?.scope === "shared" &&
+    typeof cache.refreshClaimAuthority === "function"
+      ? cache.refreshClaimAuthority.bind(cache)
+      : null;
+  const terminateClaimAuthority =
+    cache?.scope === "shared" &&
+    typeof cache.terminateClaimAuthority === "function"
+      ? cache.terminateClaimAuthority.bind(cache)
+      : null;
+  const hasClaimAuthorityProtocol =
+    getClaimOwner != null &&
+    getClaimAuthority != null &&
+    refreshClaimAuthority != null &&
+    terminateClaimAuthority != null;
+  const winnerObservationPollMsMax = hasClaimAuthorityProtocol
+    ? Math.max(
+        APIFY_SOLD_COORDINATION_ALLOWANCE_MS,
+        Math.min(
+          claimAuthorityHeartbeatMs,
+          APIFY_SOLD_WINNER_OBSERVATION_POLL_MS_MAX,
+        ),
+      )
+    : APIFY_SOLD_COORDINATION_ALLOWANCE_MS;
   const now = options.now;
   const emitDiagnostic = options.emitDiagnostic ?? logEvent;
   const runActor = options.runActor ?? createDefaultApifySoldActorRunner(token);
@@ -554,6 +617,7 @@ export function createApifySoldPricingProvider(
     pricingDeadline: number,
   ): Promise<ApifySoldComp[] | null> {
     if (!cache) return null;
+    let expectedOwner: string | null = null;
     let delayMs = 0;
     while (true) {
       if (delayMs > 0) {
@@ -566,18 +630,181 @@ export function createApifySoldPricingProvider(
           ),
         );
       }
-      const handedOff = await readCache(key, pricingDeadline);
+      const handoffOperationDeadline = hasClaimAuthorityProtocol
+        ? Math.min(pricingDeadline, Date.now() + claimAuthorityWindowMs)
+        : pricingDeadline;
+      const handedOff = await readCache(key, handoffOperationDeadline);
       if (handedOff != null) return handedOff;
+      if (hasClaimAuthorityProtocol) {
+        try {
+          if (expectedOwner == null) {
+            const observedOwner = await settleBeforeApifyPricingDeadline(
+              (abortSignal) => getClaimOwner(key, abortSignal),
+              handoffOperationDeadline,
+            );
+            if (
+              observedOwner === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED ||
+              observedOwner == null
+            ) {
+              emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+                reason: "claim-authority-invalid",
+              });
+              return null;
+            }
+            expectedOwner = observedOwner;
+          }
+          const observedAuthority = await settleBeforeApifyPricingDeadline(
+            (abortSignal) => getClaimAuthority(key, abortSignal),
+            handoffOperationDeadline,
+          );
+          if (
+            observedAuthority === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED ||
+            observedAuthority == null ||
+            observedAuthority.ownerToken !== expectedOwner ||
+            observedAuthority.ownerToken.length === 0 ||
+            (observedAuthority.state !== "live" &&
+              observedAuthority.state !== "terminal") ||
+            !Number.isFinite(observedAuthority.updatedAt) ||
+            observedAuthority.updatedAt >
+              Date.now() + APIFY_SOLD_CLAIM_AUTHORITY_CLOCK_SKEW_MS
+          ) {
+            emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+              reason: "claim-authority-invalid",
+            });
+            return null;
+          }
+          if (observedAuthority.state === "terminal") {
+            emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+              reason: "claim-authority-terminal",
+            });
+            return null;
+          }
+          if (
+            Date.now() - observedAuthority.updatedAt >= claimAuthorityWindowMs
+          ) {
+            emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+              reason: "claim-authority-stale",
+            });
+            return null;
+          }
+        } catch {
+          emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+            reason: "claim-authority-unavailable",
+          });
+          return null;
+        }
+      }
       if (Date.now() >= pricingDeadline) break;
       delayMs =
         delayMs === 0
           ? APIFY_SOLD_WINNER_STORE_POLL_MS
-          : Math.min(delayMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
+          : Math.min(delayMs * 2, winnerObservationPollMsMax);
     }
     emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
       reason: "handoff-timeout",
     });
     return null;
+  }
+
+  function maintainClaimAuthority(
+    key: string,
+    ownerToken: string,
+    pricingDeadline: number,
+  ): () => Promise<void> {
+    if (!hasClaimAuthorityProtocol) return async () => undefined;
+    const cancellation = new AbortController();
+    const heartbeat = (async () => {
+      while (
+        await delayBeforeApifyPricingDeadline(
+          claimAuthorityHeartbeatMs,
+          pricingDeadline,
+          cancellation.signal,
+        )
+      ) {
+        try {
+          const refreshed = await settleBeforeApifyPricingDeadline(
+            (abortSignal) =>
+              refreshClaimAuthority(key, ownerToken, abortSignal),
+            pricingDeadline,
+            cancellation.signal,
+          );
+          if (
+            refreshed === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED ||
+            refreshed !== true
+          ) {
+            return;
+          }
+        } catch {
+          return;
+        }
+      }
+    })();
+    return async () => {
+      cancellation.abort();
+      await heartbeat;
+    };
+  }
+
+  async function establishClaimAuthority(
+    key: string,
+    ownerToken: string,
+    pricingDeadline: number,
+  ): Promise<boolean> {
+    if (!hasClaimAuthorityProtocol) return true;
+    try {
+      const refreshed = await settleBeforeApifyPricingDeadline(
+        (abortSignal) =>
+          refreshClaimAuthority(key, ownerToken, abortSignal),
+        Math.min(
+          pricingDeadline,
+          Date.now() + APIFY_SOLD_COORDINATION_ALLOWANCE_MS,
+        ),
+      );
+      if (
+        refreshed === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED ||
+        refreshed !== true
+      ) {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "claim-authority-refresh-unconfirmed",
+        });
+        return false;
+      }
+      return true;
+    } catch {
+      emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+        reason: "claim-authority-refresh-unavailable",
+      });
+      return false;
+    }
+  }
+
+  async function markClaimAuthorityTerminal(
+    key: string,
+    ownerToken: string,
+    pricingDeadline: number,
+  ): Promise<void> {
+    if (!hasClaimAuthorityProtocol) return;
+    try {
+      const terminated = await settleBeforeApifyPricingDeadline(
+        (abortSignal) =>
+          terminateClaimAuthority(key, ownerToken, abortSignal),
+        pricingDeadline,
+      );
+      if (
+        terminated === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED ||
+        terminated !== true
+      ) {
+        emitDiagnostic("pricing.apify_sold.cache_error", {
+          op: "claim-authority-terminal",
+          reason: "unconfirmed",
+        });
+      }
+    } catch {
+      emitDiagnostic("pricing.apify_sold.cache_error", {
+        op: "claim-authority-terminal",
+        reason: "unavailable",
+      });
+    }
   }
 
   async function claimOrObserveExactOwner(
@@ -595,18 +822,31 @@ export function createApifySoldPricingProvider(
 
     const cancellation = new AbortController();
     try {
-      const claimResponse = settleBeforeApifyPricingDeadline(
+      const ownerObservationDeadline = hasClaimAuthorityProtocol
+        ? Math.min(
+            pricingDeadline,
+            Date.now() + APIFY_SOLD_COORDINATION_ALLOWANCE_MS,
+          )
+        : pricingDeadline;
+      const claimAttempt = settleBeforeApifyPricingDeadline(
         (abortSignal) => claimCostFence(key, abortSignal, ownerToken),
-        pricingDeadline,
+        ownerObservationDeadline,
         cancellation.signal,
       );
+      const claimResponse = hasClaimAuthorityProtocol
+        ? claimAttempt.catch(
+            (): typeof APIFY_SOLD_CLAIM_RESPONSE_REJECTED =>
+              APIFY_SOLD_CLAIM_RESPONSE_REJECTED,
+          )
+        : claimAttempt;
       const ownerObservation = (async (): Promise<
-        true | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED
+        | boolean
+        | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED
       > => {
         if (
           !(await delayBeforeApifyPricingDeadline(
             0,
-            pricingDeadline,
+            ownerObservationDeadline,
             cancellation.signal,
           ))
         ) {
@@ -618,7 +858,7 @@ export function createApifySoldPricingProvider(
           try {
             const observedOwner = await settleBeforeApifyPricingDeadline(
               (abortSignal) => getClaimOwner(key, abortSignal),
-              pricingDeadline,
+              ownerObservationDeadline,
               cancellation.signal,
             );
             if (observedOwner === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
@@ -629,7 +869,7 @@ export function createApifySoldPricingProvider(
             // A later bounded observation may still prove this exact owner.
           }
 
-          const remainingMs = pricingDeadline - Date.now();
+          const remainingMs = ownerObservationDeadline - Date.now();
           if (remainingMs <= 0) break;
           const finalReadAllowanceMs =
             APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS +
@@ -637,7 +877,7 @@ export function createApifySoldPricingProvider(
           if (remainingMs <= finalReadAllowanceMs) {
             await delayBeforeApifyPricingDeadline(
               Number.MAX_SAFE_INTEGER,
-              pricingDeadline,
+              ownerObservationDeadline,
               cancellation.signal,
             );
             break;
@@ -645,7 +885,7 @@ export function createApifySoldPricingProvider(
           if (
             !(await delayBeforeApifyPricingDeadline(
               Math.min(delayMs, remainingMs - finalReadAllowanceMs),
-              pricingDeadline,
+              ownerObservationDeadline,
               cancellation.signal,
             ))
           ) {
@@ -656,7 +896,15 @@ export function createApifySoldPricingProvider(
         return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
       })();
 
-      return await Promise.race([claimResponse, ownerObservation]);
+      const first = await Promise.race([claimResponse, ownerObservation]);
+      if (
+        first === APIFY_SOLD_CLAIM_RESPONSE_REJECTED ||
+        (hasClaimAuthorityProtocol &&
+          first === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED)
+      ) {
+        return await ownerObservation;
+      }
+      return first;
     } finally {
       cancellation.abort();
     }
@@ -914,7 +1162,39 @@ export function createApifySoldPricingProvider(
       if (!claimed) {
         return waitForClaimWinner(key, pricingDeadline);
       }
-      return fetchAndCache(key, query, signal, pricingDeadline);
+      const terminalWriteReserveMs = APIFY_SOLD_COORDINATION_ALLOWANCE_MS;
+      const ownerWorkDeadline = hasClaimAuthorityProtocol
+        ? pricingDeadline - terminalWriteReserveMs
+        : pricingDeadline;
+      if (
+        !(await establishClaimAuthority(
+          key,
+          claimOwnerToken,
+          ownerWorkDeadline,
+        ))
+      ) {
+        return null;
+      }
+      const stopMaintainingAuthority = maintainClaimAuthority(
+        key,
+        claimOwnerToken,
+        ownerWorkDeadline,
+      );
+      try {
+        return await fetchAndCache(
+          key,
+          query,
+          signal,
+          ownerWorkDeadline,
+        );
+      } finally {
+        await stopMaintainingAuthority();
+        await markClaimAuthorityTerminal(
+          key,
+          claimOwnerToken,
+          pricingDeadline,
+        );
+      }
     })().finally(() => {
       inFlight.delete(key);
     });
