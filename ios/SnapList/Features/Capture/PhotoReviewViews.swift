@@ -74,19 +74,70 @@ final class PhotoReviewAccessibilityActionPresentation {
     }
 }
 
+/// Photo Review v1.1/v1.2 REV-03. One to five ordered photos, and at five the Add tile
+/// stays visible but stops being an action.
+enum PhotoReviewCapacityPolicy {
+    static let photoLimit = 5
+
+    static func remainingCapacity(photoCount: Int) -> Int {
+        max(0, photoLimit - photoCount)
+    }
+
+    static func isAddEnabled(photoCount: Int) -> Bool {
+        remainingCapacity(photoCount: photoCount) > 0
+    }
+
+    /// v1.1/v1.2 accessibility_copy.add and .add_at_cap, without the trailing role word
+    /// the system already speaks for a button.
+    static func addAccessibilityLabel(photoCount: Int) -> String {
+        isAddEnabled(photoCount: photoCount)
+            ? "Add photos"
+            : "Add photos, unavailable at five photo limit"
+    }
+}
+
+/// Says the five-photo limit once per arrival at it.
+@MainActor
+@Observable
+final class PhotoReviewCapacityAnnouncer {
+    private(set) var hasAnnouncedLimit = false
+
+    func consumeAnnouncement(photoCount: Int) -> String? {
+        guard !PhotoReviewCapacityPolicy.isAddEnabled(photoCount: photoCount) else {
+            // Below the limit again, so the next arrival is a real transition and not a
+            // repeat of one the seller already heard.
+            hasAnnouncedLimit = false
+            return nil
+        }
+        guard !hasAnnouncedLimit else {
+            return nil
+        }
+        hasAnnouncedLimit = true
+        // Photo Review v1.1/v1.2 REV-03 five-photo limit announcement.
+        return "Five photos added. Five photo limit reached."
+    }
+}
+
 @MainActor
 @Observable
 final class PhotoReviewPickerPresentation {
     private(set) var isPresented = false
     private(set) var cancellationFocus: PhotoReviewPickerOpener?
 
+    @discardableResult
     func present(
         _ request: PhotoReviewPickerRequest,
         store: PhotoReviewStore
-    ) {
+    ) -> Bool {
+        // Add is capacity work and Replace is not, so only Add can be refused here.
+        if case .add = request,
+           !PhotoReviewCapacityPolicy.isAddEnabled(photoCount: store.photos.count) {
+            return false
+        }
         cancellationFocus = nil
         store.beginPickerRequest(request)
         isPresented = true
+        return true
     }
 
     @discardableResult
