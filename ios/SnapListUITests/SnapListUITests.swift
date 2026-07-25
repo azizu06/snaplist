@@ -219,8 +219,8 @@ final class SnapListUITests: XCTestCase {
         let startListing = app.buttons["photo-review.start-listing"]
         XCTAssertTrue(voice.waitForExistence(timeout: 2))
         XCTAssertTrue(startListing.exists)
-        // Voice v1 names this row, and its optional and collapsed state is structural
-        // truth a seller who cannot see it still needs.
+        // Voice Note + Start Listing v2 names this row, and its optional and collapsed
+        // state is structural truth a seller who cannot see it still needs.
         XCTAssertEqual(voice.label, "Voice note, optional, collapsed")
         XCTAssertEqual(startListing.label, "Start listing")
         XCTAssertTrue(startListing.isEnabled)
@@ -305,7 +305,7 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
-    // v1.1 top_bar sets `minimum_target_points: [44, 44]` and its Dynamic Type rule
+    // v1.2 top_bar sets `minimum_target_points: [44, 44]` and its Dynamic Type rule
     // expects this row to grow rather than clip, so the floor has to hold at the
     // smallest supported size, where a target derived from text height is thinnest,
     // as well as at the largest, where the row reflows.

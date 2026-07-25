@@ -339,7 +339,7 @@ final class PhotoReviewLiveSession {
             return nil
         }
 
-        // Photo Review v1.1 accessibility_copy.remove_announcement_template.
+        // Photo Review v1.2 accessibility_copy.remove_announcement_template.
         let announcement = "Photo removed. \(store.photos.count) of 5."
         self.focusedPhotoID = focusedPhotoID
         pendingDeleteAnnouncement = announcement
@@ -414,7 +414,7 @@ final class PhotoReviewLiveHost {
             photos: [],
             focus: .addPhotoButton
         )
-        // Photo Review v1.1 accessibility_copy.remove_last_announcement. The approved
+        // Photo Review v1.2 accessibility_copy.remove_last_announcement. The approved
         // catalog states the outcome and deliberately does not narrate navigation.
         let announcement = "Photo removed. No photos remain."
         router.returnFromPhotoReview(scanReturn)
@@ -553,7 +553,7 @@ struct PhotoReviewView: View {
     private var topBar: some View {
         HStack(alignment: .firstTextBaseline) {
             if let backToCamera {
-                // v1.1 top_bar requires a 44pt minimum target, and its Dynamic Type rule
+                // v1.2 top_bar requires a 44pt minimum target, and its Dynamic Type rule
                 // expects this row to grow rather than clip. A fixed vertical padding
                 // cannot hold that floor, because the padded height follows the text: at
                 // xSmall it measured 40.33pt. Sizing from the floor itself holds at every
@@ -760,11 +760,14 @@ struct PhotoReviewView: View {
         }
     }
 
-    // Voice note and Start listing are typed boundaries only. Their rendered v1 detail
-    // is superseded by an unpackaged v7, so presentation here stays minimal and on
-    // visual hold: the approved control names, the approved enabling rule, and the
-    // approved placement of the voice row above Start listing. No sizes, iconography,
-    // timer, or sheet affordance is implemented from the superseded v1 rendering.
+    // Voice note and Start listing are typed boundaries because of scope, not authority.
+    // Photo Review v1.2 (d166d0c3) and Voice Note + Start Listing v2 (7fd7bd41) are both
+    // packaged and in force, and v1.2 keeps the voice row's interior withheld from its own
+    // package. This issue owns the two boundaries and their typed events. The recorder
+    // interior is #469, and making Photo Review the single renderer of the collapsed voice
+    // row is #490, which is blocked on a design delta that does not exist yet. So this
+    // renders the approved control names, the approved enabling rule, and the approved
+    // order of the voice row above Start listing, and nothing beyond them.
     private func voiceRow(
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
@@ -778,9 +781,11 @@ struct PhotoReviewView: View {
                 )
         }
         .buttonStyle(.bordered)
-        // Voice v1 marks this row optional and collapsed, and Photo Review v1.1 states
-        // that truth in its label. Both are structural, so a seller who cannot see the
-        // row still learns it is skippable and not yet expanded.
+        // Voice Note + Start Listing v2 names this row and marks it optional and
+        // collapsed, and Photo Review v1.2 states that same truth in its label. Both are
+        // structural, so a seller who cannot see the row still learns it is skippable and
+        // not yet expanded. v1.2 calls the row "Voice context" while v2 calls it "Voice
+        // note"; v2 supersedes at this boundary, and #490 owns reconciling the two.
         .accessibilityLabel("Voice note, optional, collapsed")
         .accessibilityIdentifier("photo-review.voice")
     }
