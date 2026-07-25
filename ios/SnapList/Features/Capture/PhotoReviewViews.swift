@@ -170,15 +170,28 @@ enum PhotoReviewIntakeOutcome: Equatable {
     case applied(appliedPhotos: [StagedCapturePhoto])
 }
 
+/// What the seller is told, and where the cursor goes, when a picked photo could not be
+/// made durable. Every photo that did land is already applied by the time this appears.
+struct PhotoReviewIntakeRecovery: Equatable {
+    let message: String
+    let focus: PhotoReviewPickerOpener
+}
+
 /// Loads the seller's chosen picker items and stages each one through the durable
 /// #438 seam before it reaches the live store, so what Photo Review shows and what
 /// Scan can recover never disagree.
 @MainActor
+@Observable
 final class PhotoReviewIntake {
+    private(set) var recovery: PhotoReviewIntakeRecovery?
     private let draftStore: any CaptureDraftStoring
 
     init(draftStore: any CaptureDraftStoring) {
         self.draftStore = draftStore
+    }
+
+    func dismissRecovery() {
+        recovery = nil
     }
 
     @discardableResult
@@ -198,19 +211,43 @@ final class PhotoReviewIntake {
                 // The request has to end either way. Leaving it open would keep Start
                 // listing disabled behind a picker that is no longer on screen.
                 store.cancelPickerRequest()
+                recovery = PhotoReviewIntakeRecovery(
+                    message: Self.additionFailureMessage,
+                    focus: .addButton
+                )
                 return .inert
             }
+            recovery = stagedPhotos.count < items.count
+                ? PhotoReviewIntakeRecovery(
+                    message: Self.additionFailureMessage,
+                    focus: .addButton
+                  )
+                : nil
             return .applied(appliedPhotos: stagedPhotos)
 
         case .replace(let photoID):
             guard let staged = await stageReplacement(firstItem, for: photoID),
                   store.confirmPickerResult(.replacement(staged)) != nil else {
                 store.cancelPickerRequest()
+                recovery = PhotoReviewIntakeRecovery(
+                    message: Self.replacementFailureMessage,
+                    focus: .replaceButton(photoID: photoID)
+                )
                 return .inert
             }
+            recovery = nil
             return .applied(appliedPhotos: [staged])
         }
     }
+
+    // New seller-facing strings. The approved Photo Review copy catalog covers the
+    // resting screen and its announcements but names no intake failure, so these say
+    // only what is true: this photo did not land, and nothing the seller already had
+    // moved or disappeared.
+    private static let additionFailureMessage =
+        "Photo could not be added. Nothing else changed."
+    private static let replacementFailureMessage =
+        "Photo could not be replaced. Nothing else changed."
 
     private func stageAdditions<Item: CaptureLibraryPhotoLoading>(
         _ items: [Item]
