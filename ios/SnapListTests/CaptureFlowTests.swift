@@ -3773,6 +3773,85 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(reviewStore.actionsPhotoID, photoB.id)
     }
 
+    func testPhotoReviewReplaceChangesOnlyItsOrdinalAndLeavesStaleDeliveriesInert() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        let photoA = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemRed),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoB = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemGreen),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoC = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemTeal),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let reviewStore = PhotoReviewStore(photos: [photoA, photoB, photoC])
+        XCTAssertTrue(reviewStore.selectPhotoForActions(id: photoB.id))
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        let dataF = try makeLandscapeImageData(leftColor: .systemPink)
+        let items = [TestLibraryPhotoLoader { dataF }]
+
+        reviewStore.beginPickerRequest(.replace(photoID: photoB.id))
+        let outcome = await intake.apply(items, to: reviewStore)
+
+        guard case .applied(let appliedPhotos) = outcome,
+              let photoF = appliedPhotos.first else {
+            return XCTFail("Expected the confirmed Replace to apply, got \(outcome).")
+        }
+        XCTAssertEqual(appliedPhotos.count, 1)
+        XCTAssertNotEqual(photoF.id, photoB.id)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoF, photoC])
+        // Ordinals one and three are the seller's other work. A replace is allowed to
+        // change exactly the photo the seller opened it on.
+        XCTAssertEqual(reviewStore.photos[0], photoA)
+        XCTAssertEqual(reviewStore.photos[2], photoC)
+        let durablePhotosAfterReplace = try await draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotosAfterReplace, [photoA, photoF, photoC])
+        XCTAssertNil(reviewStore.activePickerRequest)
+        XCTAssertEqual(reviewStore.selectedPhotoID, photoF.id)
+        XCTAssertEqual(reviewStore.actionsPhotoID, photoF.id)
+
+        let settledPhotos = reviewStore.photos
+        let settledDurablePhotos = durablePhotosAfterReplace
+
+        // A picker that delivers the same confirmed result twice must not stage a second
+        // copy: the request it belonged to is already spent.
+        let replayOutcome = await intake.apply(items, to: reviewStore)
+        let durablePhotosAfterReplay = try await draftStore.loadPhotos()
+        XCTAssertEqual(replayOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterReplay, settledDurablePhotos)
+
+        // Cancelled, so the delivery that arrives afterwards belongs to nothing.
+        reviewStore.beginPickerRequest(.replace(photoID: photoF.id))
+        XCTAssertEqual(
+            reviewStore.cancelPickerRequest(),
+            PhotoReviewPickerOpener.replaceButton(photoID: photoF.id)
+        )
+        let cancelledOutcome = await intake.apply(items, to: reviewStore)
+        let durablePhotosAfterCancel = try await draftStore.loadPhotos()
+        XCTAssertEqual(cancelledOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterCancel, settledDurablePhotos)
+
+        // The target left the set while the picker was open, so there is no ordinal to
+        // write into and nothing may be staged for it.
+        reviewStore.beginPickerRequest(.replace(photoID: photoB.id))
+        let mismatchedOutcome = await intake.apply(items, to: reviewStore)
+        let durablePhotosAfterMismatch = try await draftStore.loadPhotos()
+        XCTAssertEqual(mismatchedOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterMismatch, settledDurablePhotos)
+        XCTAssertNil(reviewStore.activePickerRequest)
+    }
+
     private func makeModel(
         camera: TestCaptureCamera = TestCaptureCamera(
             isAvailable: true,
@@ -4136,6 +4215,28 @@ private final class LifetimeTrackingCaptureStore: CaptureDraftStoring {
         stagedBytes = []
     }
 
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        guard let index = stagedPhotos.firstIndex(where: { $0.id == photoID }) else {
+            throw CaptureDraftStoreError.photoNotStaged
+        }
+        let byte = try XCTUnwrap(imageData.first)
+        tracker.recordStage(byte: byte)
+        stagedBytes.append(byte)
+        let photo = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/lifetime-photo-replaced-\(index).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/lifetime-thumb-replaced-\(index).jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        stagedPhotos[index] = photo
+        return CaptureDraftReplaceResult(replacementPhoto: photo, photos: stagedPhotos)
+    }
+
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
         stagedPhotos = photos
     }
@@ -4217,6 +4318,32 @@ private final class TestCaptureStore: CaptureDraftStoring {
     func discard() async throws {
         discardCount += 1
         stagedPhotos = []
+    }
+
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        guard let index = stagedPhotos.firstIndex(where: { $0.id == photoID }) else {
+            throw CaptureDraftStoreError.photoNotStaged
+        }
+        stageCount += 1
+        lastStagedImageData = imageData
+        stagedImageData.append(imageData)
+        if let stageError {
+            self.stageError = nil
+            throw stageError
+        }
+        let photo = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/photo-replaced-\(index).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/thumb-replaced-\(index).jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        stagedPhotos[index] = photo
+        return CaptureDraftReplaceResult(replacementPhoto: photo, photos: stagedPhotos)
     }
 
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
