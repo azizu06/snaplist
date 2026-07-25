@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS,
   EBAY_SOLD_MIN_COMPS,
   assertSafeEbayUrl,
   buildSoldSearchUrl,
@@ -25,8 +26,14 @@ import {
   createUpstashTtlCache,
   type TtlCache,
 } from "../comp-cache";
+import type { LogFields } from "../../observability";
 import { PriceRouter } from "../router";
-import { priceResultSchema, type ItemSignal, type PricingProvider } from "../types";
+import {
+  priceResultSchema,
+  type ItemSignal,
+  type PriceResult,
+  type PricingProvider,
+} from "../types";
 import { TIGHT_AGREEMENT_MIN } from "./web-search";
 
 /**
@@ -142,6 +149,44 @@ function blockedFetch(): FetchPage & { urls: string[] } {
   }) as FetchPage & { urls: string[] };
   fn.urls = urls;
   return fn;
+}
+
+/**
+ * Fake-timer budget the coordination-deadline cases advance through. The provider
+ * derives its handoff deadline as `fetchTimeoutMs * maximumRequestCount +
+ * EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS`, so the `2` here is the fetch
+ * component of every case below: each passes `fetchTimeoutMs: 1` and allows the
+ * one optional expansion, giving two requests. Advancing this far lands exactly
+ * on the deadline. A case that wants a different `fetchTimeoutMs` needs its own
+ * advance rather than this helper.
+ */
+const HANDOFF_SETTLEMENT_ADVANCE_MS =
+  1 * 2 + EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS;
+
+/**
+ * Runs one deadline regression to settlement under fake timers and returns what
+ * `price` resolved to. Owns the scaffolding every such case repeated verbatim —
+ * the `settled` latch, the logical-budget advance, and the assertion that the
+ * provider actually resolved inside that budget rather than hanging. Each case
+ * keeps its own cache/fetch fakes and its own outcome assertions.
+ *
+ * Requires `vi.useFakeTimers()` to be active before the call.
+ */
+async function settleWithinHandoffBudget(
+  options: EbaySoldPricingProviderOptions,
+): Promise<PriceResult | null> {
+  let settled = false;
+  const result = createRawEbaySoldPricingProvider(options)
+    .price(BRANDED_SIGNAL)
+    .then((value) => {
+      settled = true;
+      return value;
+    });
+
+  await vi.advanceTimersByTimeAsync(HANDOFF_SETTLEMENT_ADVANCE_MS);
+
+  expect(settled).toBe(true);
+  return await result;
 }
 
 afterEach(() => {
@@ -1251,23 +1296,15 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       },
     });
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
-    let settled = false;
-    const result = createRawEbaySoldPricingProvider({
+
+    const result = await settleWithinHandoffBudget({
       fetchPage,
       fetchTimeoutMs: 1,
       cache,
       emitDiagnostic: () => undefined,
-    })
-      .price(BRANDED_SIGNAL)
-      .then((value) => {
-        settled = true;
-        return value;
-      });
+    });
 
-    await vi.advanceTimersByTimeAsync(502);
-
-    expect(settled).toBe(true);
-    await expect(result).resolves.toBeNull();
+    expect(result).toBeNull();
     expect(reads).toBe(2);
     expect(loserReadAborted).toBe(true);
     expect(fetchPage).not.toHaveBeenCalled();
@@ -1293,23 +1330,15 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       set,
     });
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
-    let settled = false;
-    const result = createRawEbaySoldPricingProvider({
+
+    const result = await settleWithinHandoffBudget({
       fetchPage,
       fetchTimeoutMs: 1,
       cache,
       emitDiagnostic: () => undefined,
-    })
-      .price(BRANDED_SIGNAL)
-      .then((value) => {
-        settled = true;
-        return value;
-      });
+    });
 
-    await vi.advanceTimersByTimeAsync(502);
-
-    expect(settled).toBe(true);
-    await expect(result).resolves.toBeNull();
+    expect(result).toBeNull();
     expect(initialReadAborted).toBe(true);
     expect(set).not.toHaveBeenCalled();
     expect(fetchPage).not.toHaveBeenCalled();
@@ -1339,23 +1368,15 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       },
     });
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
-    let settled = false;
-    const result = createRawEbaySoldPricingProvider({
+
+    const result = await settleWithinHandoffBudget({
       fetchPage,
       fetchTimeoutMs: 1,
       cache,
       emitDiagnostic: () => undefined,
-    })
-      .price(BRANDED_SIGNAL)
-      .then((value) => {
-        settled = true;
-        return value;
-      });
+    });
 
-    await vi.advanceTimersByTimeAsync(502);
-
-    expect(settled).toBe(true);
-    await expect(result).resolves.toBeNull();
+    expect(result).toBeNull();
     expect(claimAborted).toBe(true);
     expect(fetchPage).not.toHaveBeenCalled();
   });
@@ -1484,23 +1505,15 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       getClaimOwner,
     };
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
-    let settled = false;
-    const result = createRawEbaySoldPricingProvider({
+
+    const result = await settleWithinHandoffBudget({
       fetchPage,
       fetchTimeoutMs: 1,
       cache,
       emitDiagnostic: () => undefined,
-    })
-      .price(BRANDED_SIGNAL)
-      .then((value) => {
-        settled = true;
-        return value;
-      });
+    });
 
-    await vi.advanceTimersByTimeAsync(502);
-
-    expect(settled).toBe(true);
-    await expect(result).resolves.toBeNull();
+    expect(result).toBeNull();
     expect(getClaimOwner).toHaveBeenCalled();
     expect(fetchPage).not.toHaveBeenCalled();
   });
@@ -1529,23 +1542,15 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       },
     });
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
-    let settled = false;
-    const result = createRawEbaySoldPricingProvider({
+
+    const result = await settleWithinHandoffBudget({
       fetchPage,
       fetchTimeoutMs: 1,
       cache,
       emitDiagnostic: () => undefined,
-    })
-      .price(BRANDED_SIGNAL)
-      .then((value) => {
-        settled = true;
-        return value;
-      });
+    });
 
-    await vi.advanceTimersByTimeAsync(502);
-
-    expect(settled).toBe(true);
-    await expect(result).resolves.toBeNull();
+    expect(result).toBeNull();
     expect(stores).toBe(1);
     expect(storeAborted).toBe(true);
     expect(fetchPage).toHaveBeenCalledOnce();
@@ -1936,23 +1941,15 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
         ? "<html><body>No exact matches</body></html>"
         : FIXTURE_HTML;
     });
-    let settled = false;
-    const result = createRawEbaySoldPricingProvider({
+
+    const result = await settleWithinHandoffBudget({
       fetchPage,
       fetchTimeoutMs: 1,
       cache,
       emitDiagnostic: () => undefined,
-    })
-      .price(BRANDED_SIGNAL)
-      .then((value) => {
-        settled = true;
-        return value;
-      });
+    });
 
-    await vi.advanceTimersByTimeAsync(502);
-
-    expect(settled).toBe(true);
-    await expect(result).resolves.toBeNull();
+    expect(result).toBeNull();
     expect(
       fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
     ).toEqual(["10"]);
@@ -2485,10 +2482,21 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
         get: async () => payload as unknown as EbaySoldComp[],
         set: async () => undefined,
       };
-      const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+      const diagnostics: Array<{ event: string; fields: LogFields }> = [];
+      const provider = createEbaySoldPricingProvider({
+        fetchPage,
+        cache,
+        emitDiagnostic: (event, fields) => diagnostics.push({ event, fields }),
+      });
 
       await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
       expect(fetchPage.urls).toHaveLength(0);
+      // A malformed payload must not be an invisible decline: every other
+      // cache/coordination decline in the module emits before returning null.
+      expect(diagnostics).toContainEqual({
+        event: "pricing.ebay_sold.cost_fence_unavailable",
+        fields: { reason: "initial-read-malformed" },
+      });
     },
   );
 
@@ -2532,14 +2540,21 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
       claim: async () => false,
       getClaimOwner: async () => "another-owner",
     };
+    const diagnostics: Array<{ event: string; fields: LogFields }> = [];
     const provider = createRawEbaySoldPricingProvider({
       fetchPage,
       cache,
-      emitDiagnostic: () => undefined,
+      emitDiagnostic: (event, fields) => diagnostics.push({ event, fields }),
     });
 
     await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
     expect(fetchPage).not.toHaveBeenCalled();
+    // The claim loser's handoff read is the other silent decline: a malformed
+    // winner payload must name itself rather than look like an empty handoff.
+    expect(diagnostics).toContainEqual({
+      event: "pricing.ebay_sold.cost_fence_unavailable",
+      fields: { reason: "handoff-malformed" },
+    });
   });
 
   it("declines cached rows with non-positive prices without fetching", async () => {

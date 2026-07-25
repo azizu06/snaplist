@@ -1436,7 +1436,11 @@ function createEbaySoldPricingProviderInternal(
         );
         if (handedOff === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) break;
         if (handedOff != null) {
-          return isEbaySoldCompArray(handedOff) ? handedOff : null;
+          if (isEbaySoldCompArray(handedOff)) return handedOff;
+          emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+            reason: "handoff-malformed",
+          });
+          return null;
         }
       } catch {
         emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
@@ -1601,7 +1605,12 @@ function createEbaySoldPricingProviderInternal(
             });
             return null;
           }
-          if (cached != null && !isEbaySoldCompArray(cached)) return null;
+          if (cached != null && !isEbaySoldCompArray(cached)) {
+            emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+              reason: "initial-read-malformed",
+            });
+            return null;
+          }
           comps = cached;
         } catch (err) {
           emitDiagnostic("pricing.cache.error", {
