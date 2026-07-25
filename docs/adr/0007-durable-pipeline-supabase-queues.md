@@ -109,9 +109,11 @@ contract.
   inside the database image, so `gotrue`, `storage-api`, and the rest of the stack stay excluded.
 - The Supabase CLI comes from `devDependencies`, so CI and local runs share one pinned version.
 - Local invocation is unchanged: `pnpm supabase test db --local` is the same command CI runs.
-- **Measured duration**, first green run on an `ubuntu-latest` runner: 1m47s for the whole job —
-  73s to pull the image, apply 64 migrations, and seed; 4s to run 675 tests across 20 files; 13s to
-  tear down. It runs in parallel with `verify` (about 2m), so PR feedback time is unchanged.
+- **Measured duration**, first green run on an `ubuntu-latest` runner (run 30178055058): 1m50s for
+  the whole job. 75s starts the container, applies the 64 migrations, and seeds; 5s runs 675 tests
+  across 20 files; 12s tears down. It runs in parallel with `verify` at 1m34s and `image` at 1m40s,
+  so it is now the longest job and adds roughly 10 seconds to overall PR feedback. Almost all of
+  that is fixed startup cost, so adding contracts stays close to free.
 - Proven red before green: a deliberately failing contract passed CI before the job existed and
   failed the build after it, with all 20 real contract files logged as `ok` in the runner.
 
