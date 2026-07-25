@@ -47,6 +47,10 @@ class SymbolicText
     parts.empty?
   end
 
+  def expression_value
+    parts.all? { |part| part.is_a?(String) } ? parts.join : self
+  end
+
   def ==(other)
     other.is_a?(SymbolicText) && parts == other.parts
   end
@@ -193,9 +197,13 @@ class GitHubExpressionParser
     raise "Unsupported GitHub expression function #{name}" unless name == "format"
     raise "format requires a template" if arguments.empty?
 
-    arguments.drop(1).each_with_index.reduce(SymbolicText.literal(arguments.first)) do |formatted, (argument, index)|
-      formatted.replace_literal("{#{index}}", argument)
+    formatted = arguments.drop(1).each_with_index.reduce(
+      SymbolicText.literal(arguments.first)
+    ) do |value, (argument, index)|
+      value.replace_literal("{#{index}}", argument)
     end
+
+    formatted.expression_value
   end
 
   def fetch_context(name)

@@ -18,6 +18,7 @@ broken_workflow_file=${temporary_directory}/broken-ios.yml
 formatted_workflow_file=${temporary_directory}/formatted-ios.yml
 inactive_workflow_file=${temporary_directory}/inactive-ios.yml
 sample_gaming_workflow_file=${temporary_directory}/sample-gaming-ios.yml
+concrete_format_workflow_file=${temporary_directory}/concrete-format-ios.yml
 
 mkdir -p "$fake_bin" "$target_repository"
 
@@ -186,6 +187,23 @@ EOF
   ! assert_manual_dispatch_cannot_cancel_automatic_runs "$sample_gaming_workflow_file" 2>/dev/null
 }
 
+assert_concrete_formatting_remains_semantically_equivalent() {
+  cat > "$concrete_format_workflow_file" <<'EOF'
+name: Semantically formatted iOS contract
+
+concurrency:
+  group: >-
+    ios-${{ github.workflow }}-${{
+      format('{0}', github.event_name) == 'workflow_dispatch' &&
+      format('dispatch-{0}', github.run_id) ||
+      github.ref
+    }}
+  cancel-in-progress: true
+EOF
+
+  assert_manual_dispatch_cannot_cancel_automatic_runs "$concrete_format_workflow_file"
+}
+
 failures=0
 
 for contract_case in \
@@ -196,7 +214,8 @@ for contract_case in \
   assert_stale_workflow_text_cannot_mask_broken_active_contract \
   assert_harmless_workflow_expression_layout_is_ignored \
   assert_inactive_workflow_text_cannot_mask_broken_active_contract \
-  assert_fixed_samples_cannot_mask_a_non_run_scoped_manual_contract
+  assert_fixed_samples_cannot_mask_a_non_run_scoped_manual_contract \
+  assert_concrete_formatting_remains_semantically_equivalent
 do
   if $contract_case; then
     print -r -- "PASS ${contract_case}"
