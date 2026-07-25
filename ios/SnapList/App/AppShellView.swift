@@ -51,6 +51,7 @@ struct AppShellView: View {
             } else if let session = photoReviewHost.session {
                 PhotoReviewView(
                     store: session.store,
+                    isCommitting: photoReviewHost.isCommitting,
                     backToCamera: {
                         returnFromPhotoReview(session)
                     },
@@ -81,6 +82,21 @@ struct AppShellView: View {
             initial: true
         ) { _, request in
             photoReviewHost.consume(request)
+        }
+        // Home's update loop is suspended from the outermost view. Photo Review replaces
+        // the shell while it is open, so anything attached to the shell stops observing
+        // scene changes exactly when the seller is most likely to background the app.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                homeStore.resumeUpdates()
+            case .background:
+                homeStore.suspendUpdates()
+            case .inactive:
+                break
+            @unknown default:
+                break
+            }
         }
         .task(id: onboardingCaptureRouteID) {
             guard configuration.usesOnboarding,
@@ -184,18 +200,6 @@ struct AppShellView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
         }
-        .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .active:
-                homeStore.resumeUpdates()
-            case .background:
-                homeStore.suspendUpdates()
-            case .inactive:
-                break
-            @unknown default:
-                break
-            }
-        }
     }
 
     private var homeFeature: some View {
@@ -280,6 +284,11 @@ enum AppShellPhotoReviewBackTransaction {
         router: AppRouter,
         setReturnFocus: (PhotoReviewScanFocus) -> Void
     ) async -> PhotoReviewBackOutcome {
+        guard host.beginCommit() else {
+            return .sessionChanged
+        }
+        defer { host.endCommit() }
+
         let outcome = await PhotoReviewBackCoordinator.perform(
             session: session,
             captureFlow: captureFlow,
@@ -307,37 +316,45 @@ enum AppShellPhotoReviewDeleteTransaction {
         router: AppRouter,
         setReturnFocus: (PhotoReviewScanFocus) -> Void
     ) async -> PhotoReviewDeleteApplication? {
-        guard let photoID = session.store.actionsPhotoID else {
+        guard let photoID = session.store.actionsPhotoID, host.beginCommit() else {
             return nil
         }
+        defer { host.endCommit() }
 
         // A survivor keeps the seller in Photo Review, so the edited set reaches Scan
         // through the same Back transaction that already owns that hand-off.
-        if let result = session.deleteNonFinalPhoto(id: photoID),
-           let announcement = session.consumeDeleteAnnouncement() {
+        if let result = session.deleteNonFinalPhoto(id: photoID) {
+            // Drain the pending value so one accepted delete cannot be announced twice.
+            _ = session.consumeDeleteAnnouncement()
             return PhotoReviewDeleteApplication(
                 focus: result.focus,
-                announcement: announcement
+                announcement: result.announcement
             )
         }
 
         // The final photo leaves Photo Review with no Back to carry it, so Scan's
         // durable intake has to accept the empty set before the boundary is cleared.
         // A rejected write keeps the photo and the seller exactly where they are.
+        // Start the camera before the router returns, so zero-photo Scan arrives as the
+        // approved guided camera rather than transiently as "Preparing camera". This
+        // matches the ordering the Back exit already uses.
         guard session.store.photos.map(\.id) == [photoID],
               await captureFlow.applyPhotoReviewScanReturn(
                   PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
-              ) != nil,
-              let finalResult = host.deleteFinalPhoto(id: photoID, using: router),
-              let announcement = host.consumeFinalDeleteAnnouncement() else {
+              ) != nil else {
             return nil
         }
-
         await captureFlow.startCamera()
+
+        guard let finalResult = host.deleteFinalPhoto(id: photoID, using: router) else {
+            return nil
+        }
+        _ = host.consumeFinalDeleteAnnouncement()
+
         setReturnFocus(finalResult.scanReturn.focus)
         return PhotoReviewDeleteApplication(
             focus: .addButton,
-            announcement: announcement
+            announcement: finalResult.announcement
         )
     }
 }

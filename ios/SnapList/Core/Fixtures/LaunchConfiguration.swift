@@ -213,6 +213,12 @@ struct LaunchConfiguration: Equatable {
                 configuration.cameraAuthorizationFixture = CameraAuthorizationStatus(rawValue: value)
             } else if argument == "--dynamic-type=accessibility3" {
                 configuration.dynamicTypeSize = .accessibility3
+            } else if argument == "--dynamic-type=xSmall" {
+                // The smallest supported size is where a touch target derived from text
+                // height, rather than from the 44pt floor, is thinnest.
+                configuration.dynamicTypeSize = .xSmall
+            } else if argument == "--dynamic-type=medium" {
+                configuration.dynamicTypeSize = .medium
             } else if argument.hasPrefix("--run-detail-fixture=") {
                 let value = String(argument.dropFirst("--run-detail-fixture=".count))
                 configuration.runDetailFixture = RunDetailFixture(rawValue: value)

@@ -219,7 +219,9 @@ final class SnapListUITests: XCTestCase {
         let startListing = app.buttons["photo-review.start-listing"]
         XCTAssertTrue(voice.waitForExistence(timeout: 2))
         XCTAssertTrue(startListing.exists)
-        XCTAssertEqual(voice.label, "Voice note")
+        // Voice v1 names this row, and its optional and collapsed state is structural
+        // truth a seller who cannot see it still needs.
+        XCTAssertEqual(voice.label, "Voice note, optional, collapsed")
         XCTAssertEqual(startListing.label, "Start listing")
         XCTAssertTrue(startListing.isEnabled)
         XCTAssertGreaterThanOrEqual(voice.frame.height, 44)
@@ -303,46 +305,65 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
-    func testLivePhotoReviewBackReachesTheTouchFloorOnTheApprovedTopBarRow() {
-        let fixture = launch(extraArguments: ["--photo-review-state=REV-02"])
-        XCTAssertTrue(
-            fixture.scrollViews["photo-review.screen"].waitForExistence(timeout: 3)
-        )
-        let approvedRow = fixture.staticTexts["photo-review.count"].frame
-        XCTAssertTrue(
-            UIProcessTerminationBoundary().terminate(fixture),
-            "The approved fixture must exit before the live shell is measured."
-        )
+    // v1.1 top_bar sets `minimum_target_points: [44, 44]` and its Dynamic Type rule
+    // expects this row to grow rather than clip, so the floor has to hold at the
+    // smallest supported size, where a target derived from text height is thinnest,
+    // as well as at the largest, where the row reflows.
+    func testLivePhotoReviewTopBarHoldsTheTouchFloorAcrossDynamicType() {
+        for typeSize in ["xSmall", "medium", "accessibility3"] {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "--restored-capture-fixture",
+                "--dynamic-type=\(typeSize)"
+            ]
+            app.launch()
 
-        let app = XCUIApplication()
-        app.launchArguments = ["--restored-capture-fixture"]
-        app.launch()
+            let resume = app.buttons["button.primary.resume-captured-photo"]
+            XCTAssertTrue(resume.waitForExistence(timeout: 5), typeSize)
+            resume.tap()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
+            let review = app.buttons["scan.review"]
+            XCTAssertTrue(review.waitForExistence(timeout: 5), typeSize)
+            review.tap()
 
-        let review = app.buttons["scan.review"]
-        XCTAssertTrue(review.waitForExistence(timeout: 3))
-        review.tap()
-        XCTAssertTrue(
-            app.scrollViews["photo-review.screen"].waitForExistence(timeout: 3)
-        )
+            let screen = app.scrollViews["photo-review.screen"]
+            XCTAssertTrue(screen.waitForExistence(timeout: 5), typeSize)
 
-        let back = app.buttons["photo-review.back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 2))
-        let liveRow = app.staticTexts["photo-review.count"].frame
+            for control in [
+                app.buttons["photo-review.back"],
+                app.buttons["photo-review.voice"],
+                app.buttons["photo-review.start-listing"]
+            ] {
+                XCTAssertTrue(control.waitForExistence(timeout: 3), typeSize)
+                XCTAssertGreaterThanOrEqual(
+                    control.frame.width,
+                    44,
+                    "\(control.identifier) width at \(typeSize)"
+                )
+                XCTAssertGreaterThanOrEqual(
+                    control.frame.height,
+                    44,
+                    "\(control.identifier) height at \(typeSize)"
+                )
+            }
 
-        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+            // The approved order survives the reflow, and the row never overlaps the
+            // hero it sits above.
+            let back = app.buttons["photo-review.back"].frame
+            let count = app.staticTexts["photo-review.count"].frame
+            let hero = app.buttons["photo-review.hero"].frame
+            XCTAssertLessThanOrEqual(back.maxX, count.minX, "order at \(typeSize)")
+            XCTAssertLessThanOrEqual(
+                count.maxY,
+                hero.maxY,
+                "top bar must stay above the hero at \(typeSize)"
+            )
 
-        // The live shell adds Back to the same baseline-aligned top bar row the approved
-        // fixture renders. Back's touch target is grown inside the label and given back
-        // with negative outer padding, so it must not push that shared row off its
-        // approved position. A target grown by enlarging Back's own layout box instead
-        // would move every baseline-aligned sibling in this row.
-        XCTAssertEqual(liveRow.minY, approvedRow.minY, accuracy: 0.5)
-        XCTAssertEqual(liveRow.height, approvedRow.height, accuracy: 0.5)
+            XCTAssertTrue(
+                UIProcessTerminationBoundary().terminate(app),
+                "SnapList did not terminate after \(typeSize)"
+            )
+        }
     }
 
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {

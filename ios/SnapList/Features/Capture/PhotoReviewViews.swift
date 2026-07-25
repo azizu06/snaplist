@@ -326,28 +326,21 @@ final class PhotoReviewLiveSession {
     }
 
     @discardableResult
-    func returnToScan(
-        using router: AppRouter
-    ) -> PhotoReviewScanReturn? {
-        let request = scanReturn()
-        router.returnFromPhotoReview(request)
-        return request
-    }
-
-    @discardableResult
     func deleteNonFinalPhoto(
         id: StagedCapturePhoto.ID
     ) -> PhotoReviewLiveDeleteResult? {
-        guard store.photos.count > 1,
-              case .photo(let focusedPhotoID)? =
+        // Decide before mutating. Folding the store write into the guard list would let
+        // a later clause fail with the photo already gone while reporting no delete.
+        guard store.photos.count > 1, store.photos.contains(where: { $0.id == id }) else {
+            return nil
+        }
+        guard case .photo(let focusedPhotoID)? =
                 store.deletePhotoForReview(id: id) else {
             return nil
         }
 
-        let count = store.photos.count
-        let announcement = count == 1
-            ? "1 photo remaining."
-            : "\(count) photos remaining."
+        // Photo Review v1.1 accessibility_copy.remove_announcement_template.
+        let announcement = "Photo removed. \(store.photos.count) of 5."
         self.focusedPhotoID = focusedPhotoID
         pendingDeleteAnnouncement = announcement
         return PhotoReviewLiveDeleteResult(
@@ -366,8 +359,26 @@ final class PhotoReviewLiveSession {
 @Observable
 final class PhotoReviewLiveHost {
     private(set) var session: PhotoReviewLiveSession?
+    /// True while an exit transaction is between its snapshot and its commit.
+    ///
+    /// Both exits await durable work, and the screen stays mounted across that await.
+    /// Without this the seller could reorder or delete in the gap, hear the edit
+    /// announced, and then watch the pre-await snapshot commit over it.
+    private(set) var isCommitting = false
     private var activeRequest: CaptureBoundaryRequest?
     private var pendingFinalDeleteAnnouncement: String?
+
+    func beginCommit() -> Bool {
+        guard !isCommitting else {
+            return false
+        }
+        isCommitting = true
+        return true
+    }
+
+    func endCommit() {
+        isCommitting = false
+    }
 
     @discardableResult
     func consume(
@@ -403,7 +414,9 @@ final class PhotoReviewLiveHost {
             photos: [],
             focus: .addPhotoButton
         )
-        let announcement = "0 photos remaining. Returning to Scan."
+        // Photo Review v1.1 accessibility_copy.remove_last_announcement. The approved
+        // catalog states the outcome and deliberately does not narrate navigation.
+        let announcement = "Photo removed. No photos remain."
         router.returnFromPhotoReview(scanReturn)
         self.session = nil
         activeRequest = nil
@@ -469,6 +482,9 @@ enum PhotoReviewBackCoordinator {
 @MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
+    /// Set while an exit transaction is committing, so the seller cannot make an edit
+    /// that the in-flight snapshot would silently discard.
+    var isCommitting: Bool = false
     var backToCamera: (() -> Void)? = nil
     let delete: () async -> PhotoReviewDeleteApplication?
     var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
@@ -516,6 +532,7 @@ struct PhotoReviewView: View {
                 .contentShape(.rect)
                 .onTapGesture(perform: dismissActionsOutside)
         }
+        .disabled(isCommitting)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("photo-review.screen")
         .photosPicker(
@@ -536,15 +553,16 @@ struct PhotoReviewView: View {
     private var topBar: some View {
         HStack(alignment: .firstTextBaseline) {
             if let backToCamera {
-                // Symmetric padding grows the tappable frame to the 44pt floor and the
-                // negative outer padding gives it back, so the rendered v1.1 top bar
-                // geometry does not move. 10pt stays inside the 20pt section gap below.
+                // v1.1 top_bar requires a 44pt minimum target, and its Dynamic Type rule
+                // expects this row to grow rather than clip. A fixed vertical padding
+                // cannot hold that floor, because the padded height follows the text: at
+                // xSmall it measured 40.33pt. Sizing from the floor itself holds at every
+                // type size, and matches every other control on this screen.
                 Button(action: backToCamera) {
                     Text("Back to camera")
-                        .padding(.vertical, 10)
+                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
                         .contentShape(Rectangle())
                 }
-                .padding(.vertical, -10)
                 .accessibilityIdentifier("photo-review.back")
             }
 
@@ -760,6 +778,10 @@ struct PhotoReviewView: View {
                 )
         }
         .buttonStyle(.bordered)
+        // Voice v1 marks this row optional and collapsed, and Photo Review v1.1 states
+        // that truth in its label. Both are structural, so a seller who cannot see the
+        // row still learns it is skippable and not yet expanded.
+        .accessibilityLabel("Voice note, optional, collapsed")
         .accessibilityIdentifier("photo-review.voice")
     }
 

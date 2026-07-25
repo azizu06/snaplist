@@ -430,23 +430,59 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.photoReviewScanReturn, returned)
     }
 
-    func testLivePhotoReviewBackReturnsExactScanValuesOrderAndReviewFocus() {
-        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000001")
-        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000002")
-        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000003")
+    func testLivePhotoReviewBackCommitsTheReorderedSetThroughTheProductionExit() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-back-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let store = LocalCaptureDraftStore(rootDirectory: root)
+        let originalCover = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemRed,
+                rightColor: .systemOrange
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let second = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemGreen,
+                rightColor: .systemBlue
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let third = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemPurple,
+                rightColor: .systemYellow
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: store
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        XCTAssertEqual(captureFlow.stagedPhotos, [originalCover, second, third])
+
         let router = AppRouter(initialFullScreen: .guidedCamera)
         router.openCaptureBoundary(
             destination: .photoReview,
-            photos: [originalCover, second, third],
+            photos: captureFlow.stagedPhotos,
             opener: .reviewButton
         )
-
-        guard let session = PhotoReviewLiveSession.start(
-            from: router.captureBoundaryRequest
-        ) else {
-            XCTFail(
-                "A live Photo Review request must create one feature-local editing session."
-            )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("A live Photo Review request must create one editing session.")
             return
         }
 
@@ -454,16 +490,36 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(session.store.selectedPhotoID, originalCover.id)
         XCTAssertTrue(session.store.movePhoto(id: third.id, to: 0))
 
-        let returned = session.returnToScan(using: router)
+        var returnFocus: [PhotoReviewScanFocus] = []
+        let outcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
+
         let expected = PhotoReviewScanReturn(
             photos: [third, originalCover, second],
             focus: .reviewButton
         )
-
-        XCTAssertEqual(returned, expected)
+        XCTAssertEqual(outcome, .completed(expected))
         XCTAssertEqual(router.photoReviewScanReturn, expected)
+        XCTAssertEqual(returnFocus, [.reviewButton])
+        XCTAssertNil(host.session)
         XCTAssertNil(router.captureBoundaryRequest)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+        XCTAssertEqual(captureFlow.stagedPhotos, [third, originalCover, second])
+        XCTAssertFalse(
+            host.isCommitting,
+            "The commit gate must reopen once the exit resolves."
+        )
+
+        // The reorder has to survive as durable truth, not only in memory.
+        let reloaded = try await LocalCaptureDraftStore(
+            rootDirectory: root
+        ).loadPhotos()
+        XCTAssertEqual(reloaded, [third, originalCover, second])
     }
 
     func testPhotoReviewBackCoordinatorCompletesWithRestoredCaptureFixture() async {
@@ -939,7 +995,7 @@ final class CaptureFlowTests: XCTestCase {
             middleResult,
             PhotoReviewLiveDeleteResult(
                 focus: .photo(third.id),
-                announcement: "2 photos remaining."
+                announcement: "Photo removed. 2 of 5."
             )
         )
         if middleResult == nil {
@@ -958,7 +1014,7 @@ final class CaptureFlowTests: XCTestCase {
             XCTAssertEqual(middleSession.focusedPhotoID, third.id)
             XCTAssertEqual(
                 middleSession.consumeDeleteAnnouncement(),
-                "2 photos remaining."
+                "Photo removed. 2 of 5."
             )
             XCTAssertNil(middleSession.consumeDeleteAnnouncement())
 
@@ -975,7 +1031,7 @@ final class CaptureFlowTests: XCTestCase {
             trailingResult,
             PhotoReviewLiveDeleteResult(
                 focus: .photo(second.id),
-                announcement: "2 photos remaining."
+                announcement: "Photo removed. 2 of 5."
             )
         )
         if trailingResult == nil {
@@ -994,7 +1050,7 @@ final class CaptureFlowTests: XCTestCase {
             XCTAssertEqual(trailingSession.focusedPhotoID, second.id)
             XCTAssertEqual(
                 trailingSession.consumeDeleteAnnouncement(),
-                "2 photos remaining."
+                "Photo removed. 2 of 5."
             )
             XCTAssertNil(trailingSession.consumeDeleteAnnouncement())
         }
@@ -1027,7 +1083,7 @@ final class CaptureFlowTests: XCTestCase {
             result,
             PhotoReviewLiveFinalDeleteResult(
                 scanReturn: expectedReturn,
-                announcement: "0 photos remaining. Returning to Scan."
+                announcement: "Photo removed. No photos remain."
             )
         )
 
@@ -1049,7 +1105,7 @@ final class CaptureFlowTests: XCTestCase {
             XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
             XCTAssertEqual(
                 host.consumeFinalDeleteAnnouncement(),
-                "0 photos remaining. Returning to Scan."
+                "Photo removed. No photos remain."
             )
             XCTAssertNil(host.consumeFinalDeleteAnnouncement())
 
@@ -1108,7 +1164,7 @@ final class CaptureFlowTests: XCTestCase {
             application,
             PhotoReviewDeleteApplication(
                 focus: .photo(third.id),
-                announcement: "2 photos remaining."
+                announcement: "Photo removed. 2 of 5."
             )
         )
         XCTAssertEqual(session.store.photos, [originalCover, third])
@@ -1162,7 +1218,7 @@ final class CaptureFlowTests: XCTestCase {
             application,
             PhotoReviewDeleteApplication(
                 focus: .addButton,
-                announcement: "0 photos remaining. Returning to Scan."
+                announcement: "Photo removed. No photos remain."
             )
         )
         XCTAssertNil(host.session, "The final delete clears the Photo Review boundary.")
