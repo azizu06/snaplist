@@ -3941,6 +3941,128 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
     }
 
+    func testPhotoReviewIntakeFailurePreservesDurableValuesAndExposesTypedRecovery() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        func ownedArtifactCount() throws -> Int {
+            try FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            ).filter { $0.pathExtension == "jpg" }.count
+        }
+
+        let photoA = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemRed),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoB = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemGreen),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoC = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemTeal),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let reviewStore = PhotoReviewStore(photos: [photoA, photoB, photoC])
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        XCTAssertNil(intake.recovery)
+
+        let dataD = try makeLandscapeImageData(leftColor: .systemPink)
+        let dataF = try makeLandscapeImageData(leftColor: .systemYellow)
+        reviewStore.beginPickerRequest(.add)
+        let partialOutcome = await intake.apply(
+            [
+                TestLibraryPhotoLoader { dataD },
+                TestLibraryPhotoLoader { throw TestCaptureError.failed },
+                TestLibraryPhotoLoader { dataF }
+            ],
+            to: reviewStore
+        )
+
+        guard case .applied(let appliedPhotos) = partialOutcome,
+              let photoD = appliedPhotos.first else {
+            return XCTFail("Expected the durable photo to apply, got \(partialOutcome).")
+        }
+        XCTAssertEqual(appliedPhotos.count, 1)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoB, photoC, photoD])
+        let durablePhotosAfterPartial = try await draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotosAfterPartial, reviewStore.photos)
+        // Nothing half-written survives the failure: four photos, one image and one
+        // thumbnail each, and no orphan from the item that could not be read.
+        XCTAssertEqual(try ownedArtifactCount(), 8)
+        XCTAssertEqual(
+            intake.recovery,
+            PhotoReviewIntakeRecovery(
+                message: "Photo could not be added. Nothing else changed.",
+                focus: .addButton
+            )
+        )
+        XCTAssertNil(reviewStore.activePickerRequest)
+
+        let settledPhotos = reviewStore.photos
+        intake.dismissRecovery()
+        XCTAssertNil(intake.recovery)
+
+        // A replace that cannot be read leaves its target exactly where it was, still
+        // pointing at bytes that are still on disk.
+        reviewStore.beginPickerRequest(.replace(photoID: photoB.id))
+        let failedReplaceOutcome = await intake.apply(
+            [TestLibraryPhotoLoader { nil }],
+            to: reviewStore
+        )
+        let durablePhotosAfterFailedReplace = try await draftStore.loadPhotos()
+        XCTAssertEqual(failedReplaceOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterFailedReplace, settledPhotos)
+        XCTAssertEqual(try ownedArtifactCount(), 8)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: photoB.photoURL.path)
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: photoB.thumbnailURL.path)
+        )
+        XCTAssertEqual(
+            intake.recovery,
+            PhotoReviewIntakeRecovery(
+                message: "Photo could not be replaced. Nothing else changed.",
+                focus: .replaceButton(photoID: photoB.id)
+            )
+        )
+        XCTAssertNil(reviewStore.activePickerRequest)
+
+        // An Add whose very first item fails changes nothing at all.
+        intake.dismissRecovery()
+        reviewStore.beginPickerRequest(.add)
+        let failedAddOutcome = await intake.apply(
+            [TestLibraryPhotoLoader { throw TestCaptureError.failed }],
+            to: reviewStore
+        )
+        let durablePhotosAfterFailedAdd = try await draftStore.loadPhotos()
+        XCTAssertEqual(failedAddOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterFailedAdd, settledPhotos)
+        XCTAssertEqual(try ownedArtifactCount(), 8)
+        XCTAssertEqual(intake.recovery?.focus, PhotoReviewPickerOpener.addButton)
+        XCTAssertNil(reviewStore.activePickerRequest)
+
+        // A successful transaction clears a recovery the seller has already seen.
+        let dataG = try makeLandscapeImageData(leftColor: .systemPurple)
+        reviewStore.beginPickerRequest(.add)
+        let recoveredOutcome = await intake.apply(
+            [TestLibraryPhotoLoader { dataG }],
+            to: reviewStore
+        )
+        guard case .applied = recoveredOutcome else {
+            return XCTFail("Expected the retry to apply, got \(recoveredOutcome).")
+        }
+        XCTAssertNil(intake.recovery)
+        XCTAssertEqual(reviewStore.photos.count, 5)
+    }
+
     private func makeModel(
         camera: TestCaptureCamera = TestCaptureCamera(
             isAvailable: true,
