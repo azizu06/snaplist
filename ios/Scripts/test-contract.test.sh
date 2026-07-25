@@ -6,6 +6,7 @@ set -o pipefail
 script_directory=${0:A:h}
 test_script=${script_directory}/test.sh
 workflow_file=${script_directory:h:h}/.github/workflows/ios.yml
+workflow_contract_parser=${script_directory}/validate-workflow-concurrency.rb
 temporary_parent=${TMPDIR:-/tmp}
 temporary_directory=$(mktemp -d "${temporary_parent%/}/snaplist-ios-test-contract.XXXXXX")
 fake_bin=${temporary_directory}/bin
@@ -13,6 +14,11 @@ arguments_file=${temporary_directory}/xcodebuild-arguments
 working_directory_file=${temporary_directory}/xcodebuild-working-directory
 injection_marker=${temporary_directory}/selector-was-evaluated
 target_repository=${temporary_directory}/target-repository
+broken_workflow_file=${temporary_directory}/broken-ios.yml
+formatted_workflow_file=${temporary_directory}/formatted-ios.yml
+inactive_workflow_file=${temporary_directory}/inactive-ios.yml
+sample_gaming_workflow_file=${temporary_directory}/sample-gaming-ios.yml
+concrete_format_workflow_file=${temporary_directory}/concrete-format-ios.yml
 
 mkdir -p "$fake_bin" "$target_repository"
 
@@ -107,9 +113,95 @@ assert_malformed_selectors_fail_before_xcodebuild() {
 }
 
 assert_manual_dispatch_cannot_cancel_automatic_runs() {
-  local expected_group="group: ios-\${{ github.workflow }}-\${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}"
+  local candidate_workflow_file=${1:-$workflow_file}
 
-  grep -Fq -- "$expected_group" "$workflow_file"
+  ruby "$workflow_contract_parser" "$candidate_workflow_file"
+}
+
+assert_stale_workflow_text_cannot_mask_broken_active_contract() {
+  cat > "$broken_workflow_file" <<'EOF'
+name: Broken iOS contract
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  # group: ios-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: true
+EOF
+
+  ! assert_manual_dispatch_cannot_cancel_automatic_runs "$broken_workflow_file" 2>/dev/null
+}
+
+assert_harmless_workflow_expression_layout_is_ignored() {
+  cat > "$formatted_workflow_file" <<'EOF'
+name: Formatted iOS contract
+
+concurrency:
+  group: >-
+    ios-${{
+      github.workflow
+    }}-${{
+      (
+        github.event_name == 'workflow_dispatch' &&
+        format('dispatch-{0}', github.run_id)
+      ) || github.ref
+    }}
+  cancel-in-progress: true
+EOF
+
+  assert_manual_dispatch_cannot_cancel_automatic_runs "$formatted_workflow_file"
+}
+
+assert_inactive_workflow_text_cannot_mask_broken_active_contract() {
+  cat > "$inactive_workflow_file" <<'EOF'
+name: Broken iOS contract with inactive example
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+inactive_example:
+  group: ios-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+EOF
+
+  ! assert_manual_dispatch_cannot_cancel_automatic_runs "$inactive_workflow_file" 2>/dev/null
+}
+
+assert_fixed_samples_cannot_mask_a_non_run_scoped_manual_contract() {
+  cat > "$sample_gaming_workflow_file" <<'EOF'
+name: Broken iOS contract that games fixed samples
+
+concurrency:
+  group: >-
+    ios-${{ github.workflow }}-${{
+      github.event_name == 'workflow_dispatch' &&
+      (
+        (github.run_id == '702' || github.run_id == '703') &&
+        format('dispatch-{0}', github.run_id) ||
+        github.ref
+      ) ||
+      github.ref
+    }}
+  cancel-in-progress: true
+EOF
+
+  ! assert_manual_dispatch_cannot_cancel_automatic_runs "$sample_gaming_workflow_file" 2>/dev/null
+}
+
+assert_concrete_formatting_remains_semantically_equivalent() {
+  cat > "$concrete_format_workflow_file" <<'EOF'
+name: Semantically formatted iOS contract
+
+concurrency:
+  group: >-
+    ios-${{ github.workflow }}-${{
+      format('{0}', github.event_name) == 'workflow_dispatch' &&
+      format('dispatch-{0}', github.run_id) ||
+      github.ref
+    }}
+  cancel-in-progress: true
+EOF
+
+  assert_manual_dispatch_cannot_cancel_automatic_runs "$concrete_format_workflow_file"
 }
 
 failures=0
@@ -118,7 +210,12 @@ for contract_case in \
   assert_default_runs_the_full_suite \
   assert_focused_selector_uses_the_target_repository \
   assert_malformed_selectors_fail_before_xcodebuild \
-  assert_manual_dispatch_cannot_cancel_automatic_runs
+  assert_manual_dispatch_cannot_cancel_automatic_runs \
+  assert_stale_workflow_text_cannot_mask_broken_active_contract \
+  assert_harmless_workflow_expression_layout_is_ignored \
+  assert_inactive_workflow_text_cannot_mask_broken_active_contract \
+  assert_fixed_samples_cannot_mask_a_non_run_scoped_manual_contract \
+  assert_concrete_formatting_remains_semantically_equivalent
 do
   if $contract_case; then
     print -r -- "PASS ${contract_case}"
