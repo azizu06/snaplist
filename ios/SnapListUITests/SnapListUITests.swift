@@ -263,13 +263,15 @@ final class SnapListUITests: XCTestCase {
 
     // v1.2 primary_action.position is a sticky bottom action above the home-indicator
     // safe area, and its adaptive-layout contract says that action never covers the
-    // thumbnails, Voice context, or the home indicator. Accessibility3 guarantees the
-    // review content is taller than the screen, so the scroll is real.
+    // thumbnails, Voice context, or the home indicator. The hero and thumbnail strip are
+    // fixed, so text is the only thing that lengthens this page; the largest Dynamic Type
+    // is what puts the content decisively past the viewport, which is what makes the
+    // scroll below real rather than a rubber-band that settles back to its start.
     func testLivePhotoReviewKeepsStartListingStickyBelowTheScrollingReviewContent() {
         let app = XCUIApplication()
         app.launchArguments = [
             "--restored-capture-fixture",
-            "--dynamic-type=accessibility3"
+            "--dynamic-type=accessibility5"
         ]
         app.launch()
 

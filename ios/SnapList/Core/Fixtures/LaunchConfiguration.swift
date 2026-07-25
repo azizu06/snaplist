@@ -211,6 +211,11 @@ struct LaunchConfiguration: Equatable {
             } else if argument.hasPrefix("--camera-status=") {
                 let value = String(argument.dropFirst("--camera-status=".count))
                 configuration.cameraAuthorizationFixture = CameraAuthorizationStatus(rawValue: value)
+            } else if argument == "--dynamic-type=accessibility5" {
+                // The largest supported size. Photo Review's hero and thumbnail strip are
+                // fixed, so text is the only thing that lengthens the page; a scroll proof
+                // there needs the widest text metrics available.
+                configuration.dynamicTypeSize = .accessibility5
             } else if argument == "--dynamic-type=accessibility3" {
                 configuration.dynamicTypeSize = .accessibility3
             } else if argument == "--dynamic-type=xSmall" {
