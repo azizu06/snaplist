@@ -5,10 +5,8 @@ import {
   createDurableVisionPipelineProcessor,
   type PipelineWorkerCheckpoint,
 } from "./durable-processor";
-import {
-  pipelineWorkerCheckpointSchema,
-  type PipelineWorkerCheckpointWrite,
-} from "./checkpoint";
+import type { PipelineWorkerCheckpointWrite } from "./checkpoint";
+import { createDatabaseCheckpointClock } from "./checkpoint-clock.testing";
 import type { PipelineWorkerContext } from "./worker-store";
 
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
@@ -90,17 +88,13 @@ function stages(): VisionPipelineStages & Record<string, ReturnType<typeof vi.fn
   } as unknown as VisionPipelineStages & Record<string, ReturnType<typeof vi.fn>>;
 }
 
+const databaseClock = createDatabaseCheckpointClock(() => EVIDENCE_AS_OF);
+
 async function persistTestCheckpoint(
   _stage: string,
   checkpoint: PipelineWorkerCheckpointWrite,
 ): Promise<PipelineWorkerCheckpoint> {
-  return pipelineWorkerCheckpointSchema.parse({
-    ...checkpoint,
-    priced:
-      checkpoint.priced && !checkpoint.priced.evidenceAsOf
-        ? { ...checkpoint.priced, evidenceAsOf: EVIDENCE_AS_OF }
-        : checkpoint.priced,
-  });
+  return databaseClock.stamp(checkpoint);
 }
 
 describe("durable vision pipeline processor", () => {
@@ -138,12 +132,6 @@ describe("durable vision pipeline processor", () => {
         context: workerContext({ identified: IDENTIFIED }),
         onCheckpoint: async (stage, checkpoint) => {
           saved.push([stage, checkpoint]);
-          if (stage === "pricing") {
-            return pipelineWorkerCheckpointSchema.parse({
-              ...checkpoint,
-              priced: { ...checkpoint.priced!, evidenceAsOf: EVIDENCE_AS_OF },
-            });
-          }
           return persistTestCheckpoint(stage, checkpoint);
         },
       });

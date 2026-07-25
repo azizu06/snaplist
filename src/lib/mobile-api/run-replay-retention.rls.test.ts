@@ -80,6 +80,31 @@ async function backendPid(client: Client): Promise<number> {
   return result.rows[0]!.pid;
 }
 
+/**
+ * One seeding shape for every capacity fixture, so the receipt columns and the
+ * parameter order cannot drift between the full-capacity and boundary setups.
+ * Callers still state their own receipt count explicitly.
+ */
+async function seedVerifiedRetryReceipts(
+  runId: string,
+  receiptKeys: string[],
+  result: MobileRunOperationResult,
+): Promise<void> {
+  await admin.query(
+    `insert into private.mobile_run_operation_replays (
+       user_id,
+       idempotency_key,
+       requested_run_id,
+       run_id,
+       operation,
+       result
+     )
+     select $1, receipt_key, $2::uuid, $2::uuid, 'retry', $4::jsonb
+     from unnest($3::uuid[]) as receipt_key`,
+    [ownerUserId, runId, receiptKeys, JSON.stringify(result)],
+  );
+}
+
 async function waitForBothOperationsToBlock(
   firstPid: number,
   secondPid: number,
@@ -477,19 +502,7 @@ describe("mobile run replay receipt retention", () => {
         message: "The stored retry result must remain durable",
       },
     };
-    await admin.query(
-      `insert into private.mobile_run_operation_replays (
-         user_id,
-         idempotency_key,
-         requested_run_id,
-         run_id,
-         operation,
-         result
-       )
-       select $1, receipt_key, $2::uuid, $2::uuid, 'retry', $4::jsonb
-       from unnest($3::uuid[]) as receipt_key`,
-      [ownerUserId, quotaRunId, quotaKeys, JSON.stringify(storedResult)],
-    );
+    await seedVerifiedRetryReceipts(quotaRunId, quotaKeys, storedResult);
 
     const rejectedRetryKey = randomUUID();
     const rejectedRetry = await applyOperation(
@@ -529,23 +542,10 @@ describe("mobile run replay receipt retention", () => {
       { length: replayLimit - 1 },
       () => randomUUID(),
     );
-    await admin.query(
-      `insert into private.mobile_run_operation_replays (
-         user_id,
-         idempotency_key,
-         requested_run_id,
-         run_id,
-         operation,
-         result
-       )
-       select $1, receipt_key, $2::uuid, $2::uuid, 'retry', $4::jsonb
-       from unnest($3::uuid[]) as receipt_key`,
-      [
-        ownerUserId,
-        concurrentQuotaRunId,
-        boundaryKeys,
-        JSON.stringify(storedResult),
-      ],
+    await seedVerifiedRetryReceipts(
+      concurrentQuotaRunId,
+      boundaryKeys,
+      storedResult,
     );
     const concurrentKeys = [randomUUID(), randomUUID()];
     const [ownerPid, ownerConcurrentPid] = await Promise.all([

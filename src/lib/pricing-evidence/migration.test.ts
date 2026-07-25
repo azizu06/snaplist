@@ -121,18 +121,21 @@ describe("pricing-evidence snapshot migration", () => {
     expect(migration).toMatch(/status = 'succeeded'/i);
   });
 
+  /**
+   * Discovery only, same as the migration-chain check above. That the RPC
+   * stamps the first priced checkpoint from the database clock, refuses a
+   * worker-supplied timestamp, and holds that value across a retry is proved
+   * behaviorally against the installed database by
+   * `src/lib/pipeline-queue/worker.rls.test.ts`. Re-asserting the SQL tokens for
+   * `drop function`, `jsonb_set`, `statement_timestamp()`, and
+   * `returning checkpoint` only coupled this suite to how that function is
+   * spelled; the returning signature stays so a rename or a dropped version
+   * still fails fast offline.
+   */
   it("uses the database clock when the first priced checkpoint becomes durable", () => {
-    expect(migration).toMatch(
-      /drop function if exists public\.checkpoint_pipeline_run\(uuid, uuid, text, jsonb, integer\)/i,
-    );
     expect(migration).toMatch(
       /create function public\.checkpoint_pipeline_run[\s\S]+returns jsonb/i,
     );
-    expect(migration).toMatch(
-      /not \(checkpoint \? 'priced'\)[\s\S]+jsonb_set\([\s\S]+\{priced,evidenceAsOf\}[\s\S]+to_jsonb\(v_checkpointed_at\)/i,
-    );
-    expect(migration).toMatch(/v_checkpointed_at timestamptz := statement_timestamp\(\)/i);
-    expect(migration).toMatch(/returning checkpoint into v_checkpoint/i);
   });
 
   it("rejects snapshot confidence that diverges from the canonical prediction", () => {

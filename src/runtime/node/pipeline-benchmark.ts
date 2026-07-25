@@ -7,6 +7,8 @@ import {
   type PipelineQueueRpcClient,
   type PipelineWorkerRpcClient,
 } from "@/lib/pipeline-queue";
+import type { PipelineWorkerCheckpointWrite } from "@/lib/pipeline-queue/checkpoint";
+import { createDatabaseCheckpointClock } from "@/lib/pipeline-queue/checkpoint-clock.testing";
 import { createVisionPipelineStages } from "@/lib/vision";
 import type { PriceResult } from "@/lib/pricing";
 import type { ListingCopy } from "@/lib/pipeline";
@@ -17,6 +19,9 @@ const LEASE_TOKEN = "33333333-3333-4333-8333-333333333333";
 const LISTING_ID = "44444444-4444-4444-8444-444444444444";
 const REVIEW_REVISION = "55555555-5555-4555-8555-555555555555";
 const CONTENT_REVISION = "66666666-6666-4666-8666-666666666666";
+const benchmarkCheckpointClock = createDatabaseCheckpointClock(
+  () => "2026-07-16T20:00:01.000Z",
+);
 
 const EXTRACTION: ExtractItemAttributesResult = {
   attributes: {
@@ -197,19 +202,10 @@ export async function runOfflinePipelineBenchmark(input: {
       }
       if (functionName === "checkpoint_pipeline_run") {
         counters.checkpoints += 1;
-        const checkpoint = args.p_checkpoint as Record<string, unknown>;
-        const priced = checkpoint.priced as Record<string, unknown> | undefined;
         return {
-          data:
-            priced && !priced.evidenceAsOf
-              ? {
-                  ...checkpoint,
-                  priced: {
-                    ...priced,
-                    evidenceAsOf: "2026-07-16T20:00:01.000Z",
-                  },
-                }
-              : checkpoint,
+          data: benchmarkCheckpointClock.stamp(
+            args.p_checkpoint as PipelineWorkerCheckpointWrite,
+          ),
           error: null,
         };
       }
