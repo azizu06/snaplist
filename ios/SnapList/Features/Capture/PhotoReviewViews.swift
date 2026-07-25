@@ -205,11 +205,23 @@ final class PhotoReviewIntake {
 
         switch request {
         case .add:
-            let stagedPhotos = await stageAdditions(items)
+            let (stagedPhotos, stop) = await stageAdditions(
+                items,
+                for: request,
+                in: store
+            )
+            guard stop != .abandoned else {
+                // The seller left this transaction behind while it was still reading.
+                // Anything it already wrote belongs to nobody, so take it back off disk.
+                await rollBackAdditions(stagedPhotos, keeping: store.photos)
+                recovery = nil
+                return .inert
+            }
             guard !stagedPhotos.isEmpty,
                   store.confirmPickerResult(.additions(stagedPhotos)) != nil else {
                 // The request has to end either way. Leaving it open would keep Start
                 // listing disabled behind a picker that is no longer on screen.
+                await rollBackAdditions(stagedPhotos, keeping: store.photos)
                 store.cancelPickerRequest()
                 recovery = PhotoReviewIntakeRecovery(
                     message: Self.additionFailureMessage,
@@ -217,7 +229,7 @@ final class PhotoReviewIntake {
                 )
                 return .inert
             }
-            recovery = stagedPhotos.count < items.count
+            recovery = stop == .loadFailed
                 ? PhotoReviewIntakeRecovery(
                     message: Self.additionFailureMessage,
                     focus: .addButton
@@ -226,7 +238,26 @@ final class PhotoReviewIntake {
             return .applied(appliedPhotos: stagedPhotos)
 
         case .replace(let photoID):
-            guard let staged = await stageReplacement(firstItem, for: photoID),
+            guard let imageData = try? await firstItem.loadPhotoData() else {
+                store.cancelPickerRequest()
+                recovery = PhotoReviewIntakeRecovery(
+                    message: Self.replacementFailureMessage,
+                    focus: .replaceButton(photoID: photoID)
+                )
+                return .inert
+            }
+            // Re-read the request in the moment before the durable write. Replacement is
+            // the one transaction that cannot be taken back: committing it retires the
+            // photo it stands in for, and an abandoned transaction may not do that.
+            guard store.activePickerRequest == request else {
+                recovery = nil
+                return .inert
+            }
+            guard let staged = try? await draftStore.replace(
+                    photoID: photoID,
+                    imageData: imageData,
+                    libraryTransferReceipt: nil
+                  ).replacementPhoto,
                   store.confirmPickerResult(.replacement(staged)) != nil else {
                 store.cancelPickerRequest()
                 recovery = PhotoReviewIntakeRecovery(
@@ -249,37 +280,51 @@ final class PhotoReviewIntake {
     private static let replacementFailureMessage =
         "Photo could not be replaced. Nothing else changed."
 
+    /// Why a run of additions stopped before it ran out of items.
+    private enum AdditionStop {
+        case completed
+        case loadFailed
+        /// The request being served is no longer the store's active one.
+        case abandoned
+    }
+
     private func stageAdditions<Item: CaptureLibraryPhotoLoading>(
-        _ items: [Item]
-    ) async -> [StagedCapturePhoto] {
+        _ items: [Item],
+        for request: PhotoReviewPickerRequest,
+        in store: PhotoReviewStore
+    ) async -> ([StagedCapturePhoto], AdditionStop) {
         var stagedPhotos: [StagedCapturePhoto] = []
         for item in items {
             // One item at a time: read, make it durable, then read the next. Holding the
             // whole selection in memory would stake every chosen photo on the last write.
-            guard let imageData = try? await item.loadPhotoData(),
-                  let staged = try? await draftStore.append(
-                    imageData: imageData,
-                    libraryTransferReceipt: nil
-                  ).appendedPhoto else {
-                break
+            guard store.activePickerRequest == request else {
+                return (stagedPhotos, .abandoned)
+            }
+            guard let imageData = try? await item.loadPhotoData() else {
+                return (stagedPhotos, .loadFailed)
+            }
+            guard store.activePickerRequest == request else {
+                return (stagedPhotos, .abandoned)
+            }
+            guard let staged = try? await draftStore.append(
+                imageData: imageData,
+                libraryTransferReceipt: nil
+            ).appendedPhoto else {
+                return (stagedPhotos, .loadFailed)
             }
             stagedPhotos.append(staged)
         }
-        return stagedPhotos
+        return (stagedPhotos, .completed)
     }
 
-    private func stageReplacement<Item: CaptureLibraryPhotoLoading>(
-        _ item: Item,
-        for photoID: StagedCapturePhoto.ID
-    ) async -> StagedCapturePhoto? {
-        guard let imageData = try? await item.loadPhotoData() else {
-            return nil
+    private func rollBackAdditions(
+        _ staged: [StagedCapturePhoto],
+        keeping photos: [StagedCapturePhoto]
+    ) async {
+        guard !staged.isEmpty else {
+            return
         }
-        return try? await draftStore.replace(
-            photoID: photoID,
-            imageData: imageData,
-            libraryTransferReceipt: nil
-        ).replacementPhoto
+        try? await draftStore.replacePhotos(with: photos)
     }
 }
 
