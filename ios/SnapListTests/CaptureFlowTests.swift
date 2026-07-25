@@ -4063,6 +4063,75 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(reviewStore.photos.count, 5)
     }
 
+    func testPhotoReviewIntakeCancelledWhileLoadingLeavesNothingStagedDurably() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        func ownedArtifactCount() throws -> Int {
+            try FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            ).filter { $0.pathExtension == "jpg" }.count
+        }
+
+        let photoA = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemRed),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoB = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemGreen),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let reviewStore = PhotoReviewStore(photos: [photoA, photoB])
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        let dataD = try makeLandscapeImageData(leftColor: .systemPink)
+        let dataE = try makeLandscapeImageData(leftColor: .systemIndigo)
+
+        // The seller cancels while the second chosen photo is still being read. The
+        // first one already reached disk, so an inert result has to take it back.
+        reviewStore.beginPickerRequest(.add)
+        let cancelledAddOutcome = await intake.apply(
+            [
+                TestLibraryPhotoLoader { dataD },
+                TestLibraryPhotoLoader {
+                    reviewStore.cancelPickerRequest()
+                    return dataE
+                }
+            ],
+            to: reviewStore
+        )
+        let durablePhotosAfterCancelledAdd = try await draftStore.loadPhotos()
+        XCTAssertEqual(cancelledAddOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoB])
+        XCTAssertEqual(durablePhotosAfterCancelledAdd, [photoA, photoB])
+        XCTAssertEqual(try ownedArtifactCount(), 4)
+        // Cancelling is the seller's own choice, so it is not a failure to report.
+        XCTAssertNil(intake.recovery)
+        XCTAssertNil(reviewStore.activePickerRequest)
+
+        reviewStore.beginPickerRequest(.replace(photoID: photoB.id))
+        let cancelledReplaceOutcome = await intake.apply(
+            [
+                TestLibraryPhotoLoader {
+                    reviewStore.cancelPickerRequest()
+                    return dataE
+                }
+            ],
+            to: reviewStore
+        )
+        let durablePhotosAfterCancelledReplace = try await draftStore.loadPhotos()
+        XCTAssertEqual(cancelledReplaceOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoB])
+        XCTAssertEqual(durablePhotosAfterCancelledReplace, [photoA, photoB])
+        XCTAssertEqual(try ownedArtifactCount(), 4)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: photoB.photoURL.path))
+        XCTAssertNil(intake.recovery)
+        XCTAssertNil(reviewStore.activePickerRequest)
+    }
+
     private func makeModel(
         camera: TestCaptureCamera = TestCaptureCamera(
             isAvailable: true,
