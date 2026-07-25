@@ -70,6 +70,13 @@ Photos referenced by a successful listing never enter cleanup work.
    pnpm supabase test db --local supabase/tests/pipeline_operations.test.sql
    ```
 
+   Drop the path to run every contract in `supabase/tests`, which is what the
+   `database` CI job runs:
+
+   ```sh
+   pnpm supabase test db --local
+   ```
+
 2. Put a throwaway local `CRON_SECRET` in `.env.local`, start the app, and enqueue
    work through the normal upload path. Do not use a hosted credential.
 

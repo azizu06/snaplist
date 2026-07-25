@@ -95,6 +95,33 @@ stack without introducing another pipeline implementation.
   owns hosted Cron, retention, health, and observability. Hosted scheduling remains unactivated until
   its owner-controlled slice lands.
 
+## Amendment — the pgTAP contracts run in CI (2026-07-25, issue #496)
+
+Decision 7 above, and every other pgTAP contract in the repo, previously ran only when a developer
+started a local stack by hand. Nothing on a push or pull request exercised them, so a database
+invariant could break and CI would still pass. Issue #496 closes that gap and does not change any
+contract.
+
+- The `database` job in `.github/workflows/ci.yml` starts a throwaway local Postgres, applies the
+  branch's own migrations, and runs `supabase test db --local`. Building from migrations each run
+  also keeps CI free of the drift a long-lived local database accumulates.
+- Only the database container starts. The `auth` and `storage` schemas the migrations depend on ship
+  inside the database image, so `gotrue`, `storage-api`, and the rest of the stack stay excluded.
+- The Supabase CLI comes from `devDependencies`, so CI and local runs share one pinned version.
+- Local invocation is unchanged: `pnpm supabase test db --local` is the same command CI runs.
+- Two guards keep the job from passing while proving less than it claims. An exclude name the CLI
+  stops recognising is only a warning that starts the container anyway, so the job treats that
+  warning as fatal. And pg_prove reports `PASS` for whatever it globs, so the job compares the file
+  count it reports against the `.sql` files in `supabase/tests` and fails on a mismatch.
+- **Measured duration** across the two green runs on `ubuntu-latest`, 1m50s (run 30178055058) and
+  1m47s (run 30178457265). Starting the container, applying the 64 migrations, and seeding is 75s of
+  that. Running 675 tests across 20 files takes 4 to 5 seconds, and teardown 12 to 13s. `verify`
+  measured 1m34s and 1m52s on the same two runs, so which job is the critical path varies, and this
+  one adds at most about ten seconds to PR feedback. Nearly all the cost is fixed startup, so adding
+  contracts stays close to free.
+- Proven red before green: a deliberately failing contract passed CI before the job existed and
+  failed the build after it, with all 20 real contract files logged as `ok` in the runner.
+
 ## References
 
 - [Supabase Queues quickstart](https://supabase.com/docs/guides/queues/quickstart)
