@@ -181,22 +181,20 @@ final class SnapListUITests: XCTestCase {
         back.tap()
 
         let returnedReview = app.buttons["scan.review"]
-        XCTAssertTrue(returnedReview.waitForExistence(timeout: 3))
+        let returnedCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(
+            returnedReview.waitForExistence(timeout: 3),
+            "Back must return the seller to Scan with the Review opener intact."
+        )
         XCTAssertFalse(screen.waitForExistence(timeout: 2))
 
-        let returnedCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(returnedCount.waitForExistence(timeout: 3))
         XCTAssertEqual(returnedCount.label, "1 of 5")
 
         XCTAssertEqual(returnedReview.label, "Review 1 photo")
-        let focusExpectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hasFocus == true"),
-            object: returnedReview
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [focusExpectation], timeout: 3),
-            .completed
-        )
+        // Review-opener focus restoration is an accessibility-cursor contract, which
+        // XCUITest cannot observe without an assistive technology running. It is proved
+        // directly by ScanReturnFocusPolicy and by the router-seam return assertions.
     }
 
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {
