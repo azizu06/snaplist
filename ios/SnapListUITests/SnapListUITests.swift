@@ -199,6 +199,51 @@ final class SnapListUITests: XCTestCase {
         // directly by ScanReturnFocusPolicy and by the router-seam return assertions.
     }
 
+    func testLivePhotoReviewDeletingTheOnlyPhotoReturnsToGuidedScanWithNoPhotos() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "1 of 5")
+
+        let delete = app.buttons["photo-review.delete"]
+        XCTAssertFalse(
+            delete.exists,
+            "Delete stays hidden until the seller opens actions on a photo."
+        )
+        app.buttons["photo-review.hero"].tap()
+        XCTAssertTrue(delete.waitForExistence(timeout: 2))
+        delete.tap()
+
+        XCTAssertTrue(
+            app.buttons["scan.shutter"].waitForExistence(timeout: 3),
+            "Deleting the only photo must return the approved zero-photo guided Scan."
+        )
+        XCTAssertFalse(
+            app.buttons["button.primary.start-with-one-item"].exists,
+            "Emptying the intake must not restart onboarding behind the camera."
+        )
+        XCTAssertFalse(screen.waitForExistence(timeout: 2))
+        XCTAssertFalse(
+            app.buttons["scan.review"].exists,
+            "Zero-photo Scan has nothing to review."
+        )
+        XCTAssertFalse(
+            app.staticTexts["scan.photo-count"].exists,
+            "The deleted photo must leave the Scan intake, not only Photo Review."
+        )
+    }
+
     func testLivePhotoReviewBackReachesTheTouchFloorOnTheApprovedTopBarRow() {
         let fixture = launch(extraArguments: ["--photo-review-state=REV-02"])
         XCTAssertTrue(

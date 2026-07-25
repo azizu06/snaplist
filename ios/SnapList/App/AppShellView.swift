@@ -54,7 +54,15 @@ struct AppShellView: View {
                     backToCamera: {
                         returnFromPhotoReview(session)
                     },
-                    delete: {}
+                    delete: {
+                        await AppShellPhotoReviewDeleteTransaction.perform(
+                            session: session,
+                            captureFlow: captureFlow,
+                            host: photoReviewHost,
+                            router: router,
+                            setReturnFocus: { pendingScanReturnFocus = $0 }
+                        )
+                    }
                 )
             } else {
                 shell
@@ -224,6 +232,10 @@ struct AppShellView: View {
         configuration.usesOnboarding
             && onboardingModel.state.screen != .captureBoundary
             && captureFlow.stagedPhoto == nil
+            // A seller standing in the guided camera has already started. Emptying the
+            // intake there, by deleting the last photo in Photo Review, must leave them
+            // in zero-photo Scan rather than restart onboarding behind the camera.
+            && router.presentedFullScreen != .guidedCamera
     }
 
     private var onboardingCaptureRouteID: OnboardingCaptureRouteID {
@@ -286,14 +298,17 @@ enum AppShellPhotoReviewBackTransaction {
 enum AppShellPhotoReviewDeleteTransaction {
     static func perform(
         session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
         host: PhotoReviewLiveHost,
         router: AppRouter,
         setReturnFocus: (PhotoReviewScanFocus) -> Void
-    ) -> PhotoReviewDeleteApplication? {
+    ) async -> PhotoReviewDeleteApplication? {
         guard let photoID = session.store.actionsPhotoID else {
             return nil
         }
 
+        // A survivor keeps the seller in Photo Review, so the edited set reaches Scan
+        // through the same Back transaction that already owns that hand-off.
         if let result = session.deleteNonFinalPhoto(id: photoID),
            let announcement = session.consumeDeleteAnnouncement() {
             return PhotoReviewDeleteApplication(
@@ -302,11 +317,19 @@ enum AppShellPhotoReviewDeleteTransaction {
             )
         }
 
-        guard let finalResult = host.deleteFinalPhoto(id: photoID, using: router),
+        // The final photo leaves Photo Review with no Back to carry it, so Scan's
+        // durable intake has to accept the empty set before the boundary is cleared.
+        // A rejected write keeps the photo and the seller exactly where they are.
+        guard session.store.photos.map(\.id) == [photoID],
+              await captureFlow.applyPhotoReviewScanReturn(
+                  PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+              ) != nil,
+              let finalResult = host.deleteFinalPhoto(id: photoID, using: router),
               let announcement = host.consumeFinalDeleteAnnouncement() else {
             return nil
         }
 
+        await captureFlow.startCamera()
         setReturnFocus(finalResult.scanReturn.focus)
         return PhotoReviewDeleteApplication(
             focus: .addButton,

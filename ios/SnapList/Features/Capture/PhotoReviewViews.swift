@@ -126,9 +126,10 @@ struct PhotoReviewFixtureView: View {
     }
 
     var body: some View {
+        // REV-02 is a fixture-only state: it stages no live session, so delete is inert.
         PhotoReviewView(
             store: store,
-            delete: {}
+            delete: { nil }
         )
     }
 
@@ -453,7 +454,7 @@ enum PhotoReviewBackCoordinator {
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
     var backToCamera: (() -> Void)? = nil
-    let delete: () -> Void
+    let delete: () async -> PhotoReviewDeleteApplication?
 
     @State private var actionPresentation = PhotoReviewActionPresentation()
     @State private var accessibilityActionPresentation =
@@ -711,7 +712,7 @@ struct PhotoReviewView: View {
                 )
             }
 
-            Button("Delete", role: .destructive, action: delete)
+            Button("Delete", role: .destructive, action: performDelete)
                 .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Delete this photo")
@@ -745,6 +746,22 @@ struct PhotoReviewView: View {
         pickerItems = []
         focusedPickerOpener = nil
         pickerPresentation.present(request, store: store)
+    }
+
+    private func performDelete() {
+        Task {
+            guard let application = await delete() else { return }
+            switch application.focus {
+            case .photo(let photoID):
+                focusedThumbnailID = photoID
+            case .addButton:
+                focusedPickerOpener = .addButton
+            }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: application.announcement
+            )
+        }
     }
 
     private func dismissActionsOutside() {

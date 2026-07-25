@@ -1060,10 +1060,15 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
-    func testLivePhotoReviewDeleteRoutesTheOpenActionsPhotoToTheSurvivingNeighbour() {
+    func testLivePhotoReviewDeleteRoutesTheOpenActionsPhotoToTheSurvivingNeighbour() async {
         let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000041")
         let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000042")
         let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000043")
+        let captureFlow = makeRestoredCaptureFlow()
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let durableIntake = captureFlow.stagedPhotos
+
         let router = AppRouter(initialFullScreen: .guidedCamera)
         router.openCaptureBoundary(
             destination: .photoReview,
@@ -1078,19 +1083,22 @@ final class CaptureFlowTests: XCTestCase {
         }
 
         var returnFocus: [PhotoReviewScanFocus] = []
+        let withoutOpenActions = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
         XCTAssertNil(
-            AppShellPhotoReviewDeleteTransaction.perform(
-                session: session,
-                host: host,
-                router: router,
-                setReturnFocus: { returnFocus.append($0) }
-            ),
+            withoutOpenActions,
             "Delete is inert until the seller opens actions on an exact photo."
         )
 
         session.store.selectPhotoForActions(id: second.id)
-        let application = AppShellPhotoReviewDeleteTransaction.perform(
+        let application = await AppShellPhotoReviewDeleteTransaction.perform(
             session: session,
+            captureFlow: captureFlow,
             host: host,
             router: router,
             setReturnFocus: { returnFocus.append($0) }
@@ -1110,14 +1118,27 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(router.photoReviewScanReturn, nil)
         XCTAssertEqual(returnFocus, [])
+        XCTAssertEqual(
+            captureFlow.stagedPhotos,
+            durableIntake,
+            "A survivor delete reaches Scan through Back, never as its own write."
+        )
     }
 
-    func testLivePhotoReviewDeletingTheFinalPhotoLeavesForGuidedScanWithNoPhotos() {
-        let onlyPhoto = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000051")
+    func testLivePhotoReviewDeletingTheFinalPhotoLeavesForGuidedScanWithNoPhotos() async {
+        let captureFlow = makeRestoredCaptureFlow()
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let restoredPhotos = captureFlow.stagedPhotos
+        guard let onlyPhoto = restoredPhotos.first, restoredPhotos.count == 1 else {
+            XCTFail("The restored capture fixture must stage exactly one photo.")
+            return
+        }
+
         let router = AppRouter(initialFullScreen: .guidedCamera)
         router.openCaptureBoundary(
             destination: .photoReview,
-            photos: [onlyPhoto],
+            photos: restoredPhotos,
             opener: .reviewButton
         )
         let host = PhotoReviewLiveHost()
@@ -1129,8 +1150,9 @@ final class CaptureFlowTests: XCTestCase {
         session.store.selectPhotoForActions(id: onlyPhoto.id)
 
         var returnFocus: [PhotoReviewScanFocus] = []
-        let application = AppShellPhotoReviewDeleteTransaction.perform(
+        let application = await AppShellPhotoReviewDeleteTransaction.perform(
             session: session,
+            captureFlow: captureFlow,
             host: host,
             router: router,
             setReturnFocus: { returnFocus.append($0) }
@@ -1151,14 +1173,25 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(returnFocus, [.addPhotoButton])
+        XCTAssertTrue(
+            captureFlow.stagedPhotos.isEmpty,
+            "The deleted photo must leave Scan's durable intake, not only the session."
+        )
+        XCTAssertEqual(
+            captureFlow.phase,
+            .camera,
+            "Zero-photo Scan is the live guided camera, not a stalled boundary."
+        )
 
+        let repeated = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
         XCTAssertNil(
-            AppShellPhotoReviewDeleteTransaction.perform(
-                session: session,
-                host: host,
-                router: router,
-                setReturnFocus: { returnFocus.append($0) }
-            ),
+            repeated,
             "Repeating the final delete is inert and never announces twice."
         )
         XCTAssertEqual(returnFocus, [.addPhotoButton])
@@ -2198,6 +2231,19 @@ final class CaptureFlowTests: XCTestCase {
 
         XCTAssertEqual(camera.captureCount, 5)
         XCTAssertEqual(model.stagedPhotos.count, 5)
+    }
+
+    private func makeRestoredCaptureFlow() -> CaptureFlowModel {
+        let dependencies = AppDependencies.make(
+            configuration: LaunchConfiguration.parse(
+                arguments: ["--restored-capture-fixture"]
+            )
+        )
+        return CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            store: dependencies.captureDraftStore
+        )
     }
 
     private func makeStagedPhoto(id: String) -> StagedCapturePhoto {
