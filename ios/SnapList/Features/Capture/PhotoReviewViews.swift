@@ -126,9 +126,10 @@ struct PhotoReviewFixtureView: View {
     }
 
     var body: some View {
+        // REV-02 is a fixture-only state: it stages no live session, so delete is inert.
         PhotoReviewView(
             store: store,
-            delete: {}
+            delete: { nil }
         )
     }
 
@@ -259,10 +260,234 @@ struct PhotoReviewFixtureView: View {
 }
 #endif
 
+/// The two typed boundaries Photo Review opens. Photo Review owns neither
+/// destination: #469 owns the Voice recorder interior and which approved VOX state
+/// it resolves to, and #457 owns submission transport. Emitting one of these makes
+/// no claim about recording, upload, acceptance, queueing, AI work, or credit use.
+enum PhotoReviewBoundaryEvent: Equatable {
+    case openVoiceNote
+    case startListing
+}
+
+/// When the approved Start listing control is offered.
+enum PhotoReviewStartListingPolicy {
+    static func isEnabled(photoCount: Int, isPickerActive: Bool) -> Bool {
+        (1...5).contains(photoCount) && !isPickerActive
+    }
+}
+
+/// What Photo Review should do after one accepted delete: where the accessibility
+/// cursor lands, and the one count sentence the seller hears.
+struct PhotoReviewDeleteApplication: Equatable {
+    let focus: PhotoReviewDeleteFocus
+    let announcement: String
+}
+
+struct PhotoReviewLiveDeleteResult: Equatable {
+    let focus: PhotoReviewDeleteFocus
+    let announcement: String
+}
+
+struct PhotoReviewLiveFinalDeleteResult: Equatable {
+    let scanReturn: PhotoReviewScanReturn
+    let announcement: String
+}
+
+@MainActor
+final class PhotoReviewLiveSession {
+    let store: PhotoReviewStore
+    private(set) var focusedPhotoID: StagedCapturePhoto.ID?
+    private var pendingDeleteAnnouncement: String?
+
+    private init(store: PhotoReviewStore) {
+        self.store = store
+    }
+
+    static func start(
+        from request: CaptureBoundaryRequest?
+    ) -> PhotoReviewLiveSession? {
+        guard let request,
+              request.destination == .photoReview,
+              request.opener == .reviewButton,
+              (1...5).contains(request.photos.count) else {
+            return nil
+        }
+        return PhotoReviewLiveSession(
+            store: PhotoReviewStore(photos: request.photos)
+        )
+    }
+
+    @discardableResult
+    func scanReturn() -> PhotoReviewScanReturn {
+        PhotoReviewScanReturn(
+            photos: store.photos,
+            focus: .reviewButton
+        )
+    }
+
+    @discardableResult
+    func deleteNonFinalPhoto(
+        id: StagedCapturePhoto.ID
+    ) -> PhotoReviewLiveDeleteResult? {
+        // Decide before mutating. Folding the store write into the guard list would let
+        // a later clause fail with the photo already gone while reporting no delete.
+        guard store.photos.count > 1, store.photos.contains(where: { $0.id == id }) else {
+            return nil
+        }
+        guard case .photo(let focusedPhotoID)? =
+                store.deletePhotoForReview(id: id) else {
+            return nil
+        }
+
+        // Photo Review v1.2 accessibility_copy.remove_announcement_template.
+        let announcement = "Photo removed. \(store.photos.count) of 5."
+        self.focusedPhotoID = focusedPhotoID
+        pendingDeleteAnnouncement = announcement
+        return PhotoReviewLiveDeleteResult(
+            focus: .photo(focusedPhotoID),
+            announcement: announcement
+        )
+    }
+
+    func consumeDeleteAnnouncement() -> String? {
+        defer { pendingDeleteAnnouncement = nil }
+        return pendingDeleteAnnouncement
+    }
+}
+
+@MainActor
+@Observable
+final class PhotoReviewLiveHost {
+    private(set) var session: PhotoReviewLiveSession?
+    /// True while an exit transaction is between its snapshot and its commit.
+    ///
+    /// Both exits await durable work, and the screen stays mounted across that await.
+    /// Without this the seller could reorder or delete in the gap, hear the edit
+    /// announced, and then watch the pre-await snapshot commit over it.
+    private(set) var isCommitting = false
+    private var activeRequest: CaptureBoundaryRequest?
+    private var pendingFinalDeleteAnnouncement: String?
+
+    func beginCommit() -> Bool {
+        guard !isCommitting else {
+            return false
+        }
+        isCommitting = true
+        return true
+    }
+
+    func endCommit() {
+        isCommitting = false
+    }
+
+    @discardableResult
+    func consume(
+        _ request: CaptureBoundaryRequest?
+    ) -> Bool {
+        guard let request else {
+            return false
+        }
+        if activeRequest == request, session != nil {
+            return false
+        }
+        guard let session = PhotoReviewLiveSession.start(from: request) else {
+            return false
+        }
+        activeRequest = request
+        self.session = session
+        return true
+    }
+
+    @discardableResult
+    func deleteFinalPhoto(
+        id: StagedCapturePhoto.ID,
+        using router: AppRouter
+    ) -> PhotoReviewLiveFinalDeleteResult? {
+        guard let session,
+              session.store.photos.count == 1,
+              case .addButton? =
+                session.store.deletePhotoForReview(id: id) else {
+            return nil
+        }
+
+        let scanReturn = PhotoReviewScanReturn(
+            photos: [],
+            focus: .addPhotoButton
+        )
+        // Photo Review v1.2 accessibility_copy.remove_last_announcement. The approved
+        // catalog states the outcome and deliberately does not narrate navigation.
+        let announcement = "Photo removed. No photos remain."
+        router.returnFromPhotoReview(scanReturn)
+        self.session = nil
+        activeRequest = nil
+        pendingFinalDeleteAnnouncement = announcement
+        return PhotoReviewLiveFinalDeleteResult(
+            scanReturn: scanReturn,
+            announcement: announcement
+        )
+    }
+
+    func consumeFinalDeleteAnnouncement() -> String? {
+        defer { pendingFinalDeleteAnnouncement = nil }
+        return pendingFinalDeleteAnnouncement
+    }
+
+    @discardableResult
+    func completeReturnToScan(
+        from returningSession: PhotoReviewLiveSession
+    ) -> Bool {
+        guard session === returningSession else {
+            return false
+        }
+        session = nil
+        activeRequest = nil
+        return true
+    }
+}
+
+enum PhotoReviewBackOutcome: Equatable {
+    case persistenceRejected
+    case sessionChanged
+    case completed(PhotoReviewScanReturn)
+}
+
+@MainActor
+enum PhotoReviewBackCoordinator {
+    static func perform(
+        session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost
+    ) async -> PhotoReviewBackOutcome {
+        let request = session.scanReturn()
+        guard let focus = await captureFlow.applyPhotoReviewScanReturn(
+            request
+        ) else {
+            return .persistenceRejected
+        }
+
+        await captureFlow.startCamera()
+        guard host.completeReturnToScan(from: session) else {
+            return .sessionChanged
+        }
+
+        return .completed(
+            PhotoReviewScanReturn(
+                photos: request.photos,
+                focus: focus
+            )
+        )
+    }
+}
+
 @MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
-    let delete: () -> Void
+    /// Set while an exit transaction is committing, so the seller cannot make an edit
+    /// that the in-flight snapshot would silently discard.
+    var isCommitting: Bool = false
+    var backToCamera: (() -> Void)? = nil
+    let delete: () async -> PhotoReviewDeleteApplication?
+    var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
 
     @State private var actionPresentation = PhotoReviewActionPresentation()
     @State private var accessibilityActionPresentation =
@@ -293,17 +518,36 @@ struct PhotoReviewView: View {
                 if store.actionsPhotoID != nil {
                     actionRow
                 }
+
+                if let openBoundary {
+                    voiceRow(openBoundary)
+                }
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
             .padding(.vertical, 16)
+        }
+        // The screen identity stays on the scrolling region itself, so the sticky action
+        // below is genuinely outside the scrollable content rather than merely painted
+        // over it.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("photo-review.screen")
+        // v1.2 primary_action.position is a sticky bottom action above the home-indicator
+        // safe area, and its adaptive-layout contract requires that action never cover the
+        // thumbnails, Voice context, or the home indicator. safeAreaInset pins it there and
+        // shortens the scrollable region by exactly its height, so it covers nothing.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let openBoundary {
+                startListingControl(openBoundary)
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                    .padding(.vertical, 12)
+            }
         }
         .background {
             SnapListColorToken.groupingFill.color
                 .contentShape(.rect)
                 .onTapGesture(perform: dismissActionsOutside)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("photo-review.screen")
+        .disabled(isCommitting)
         .photosPicker(
             isPresented: pickerIsPresented,
             selection: $pickerItems,
@@ -321,6 +565,20 @@ struct PhotoReviewView: View {
 
     private var topBar: some View {
         HStack(alignment: .firstTextBaseline) {
+            if let backToCamera {
+                // v1.2 top_bar requires a 44pt minimum target, and its Dynamic Type rule
+                // expects this row to grow rather than clip. A fixed vertical padding
+                // cannot hold that floor, because the padded height follows the text: at
+                // xSmall it measured 40.33pt. Sizing from the floor itself holds at every
+                // type size, and matches every other control on this screen.
+                Button(action: backToCamera) {
+                    Text("Back to camera")
+                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("photo-review.back")
+            }
+
             Text("Review photos")
                 .snapListTypography(.sectionHeader)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
@@ -507,12 +765,63 @@ struct PhotoReviewView: View {
                 )
             }
 
-            Button("Delete", role: .destructive, action: delete)
+            Button("Delete", role: .destructive, action: performDelete)
                 .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Delete this photo")
                 .accessibilityIdentifier("photo-review.delete")
         }
+    }
+
+    // Voice context and Start listing are typed boundaries because of scope, not authority.
+    // Photo Review v1.2 (d166d0c3) and Voice Note + Start Listing v2 (7fd7bd41) are both
+    // packaged and in force, and v1.2 keeps the voice row's interior withheld from its own
+    // package. This issue owns the two boundaries and their typed events. The recorder
+    // interior is #469, and making Photo Review the single renderer of the collapsed voice
+    // row is #490, which is blocked on a design delta that does not exist yet. So this
+    // renders the approved control names, the approved enabling rule, and the approved
+    // order of the voice row above Start listing, and nothing beyond them.
+    private func voiceRow(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
+    ) -> some View {
+        Button {
+            openBoundary(.openVoiceNote)
+        } label: {
+            Text("Voice context")
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: SnapListMetrics.minimumTouchTarget
+                )
+        }
+        .buttonStyle(.bordered)
+        // v1.2 owns this screen and names the row "Voice context". Its optional and
+        // collapsed state is structural, so a seller who cannot see the row still learns
+        // it is skippable and not yet expanded. v2 owns the recorder interior, #469, and
+        // does not name this control.
+        .accessibilityLabel("Voice context, optional, collapsed")
+        .accessibilityIdentifier("photo-review.voice")
+    }
+
+    private func startListingControl(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
+    ) -> some View {
+        Button {
+            openBoundary(.startListing)
+        } label: {
+            Text("Start listing")
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: SnapListMetrics.minimumTouchTarget
+                )
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(
+            !PhotoReviewStartListingPolicy.isEnabled(
+                photoCount: store.photos.count,
+                isPickerActive: store.activePickerRequest != nil
+            )
+        )
+        .accessibilityIdentifier("photo-review.start-listing")
     }
 
     private var pickerIsPresented: Binding<Bool> {
@@ -541,6 +850,22 @@ struct PhotoReviewView: View {
         pickerItems = []
         focusedPickerOpener = nil
         pickerPresentation.present(request, store: store)
+    }
+
+    private func performDelete() {
+        Task {
+            guard let application = await delete() else { return }
+            switch application.focus {
+            case .photo(let photoID):
+                focusedThumbnailID = photoID
+            case .addButton:
+                focusedPickerOpener = .addButton
+            }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: application.announcement
+            )
+        }
     }
 
     private func dismissActionsOutside() {

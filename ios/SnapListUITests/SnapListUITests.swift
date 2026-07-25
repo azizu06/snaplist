@@ -103,7 +103,329 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(reviewButton.frame.height, 44)
         reviewButton.tap()
         XCTAssertFalse(app.buttons["scan.review"].waitForExistence(timeout: 1))
-        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.scrollViews["photo-review.screen"].waitForExistence(timeout: 3))
+    }
+
+    func testLiveScanReviewOpensApprovedPhotoReviewShellWithExactRestoredPhoto() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let scanCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(scanCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(scanCount.label, "1 of 5")
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.exists)
+        XCTAssertEqual(review.label, "Review 1 photo")
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        guard screen.waitForExistence(timeout: 3) else {
+            XCTFail(
+                "The live Scan request must render the typed Photo Review screen."
+            )
+            return
+        }
+
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "1 of 5")
+
+        let hero = app.buttons["photo-review.hero"]
+        let thumbnail = app.buttons["photo-review.thumbnail.1"]
+        XCTAssertTrue(hero.exists)
+        XCTAssertTrue(thumbnail.exists)
+        XCTAssertTrue(hero.label.contains("Photo 1 of 1"))
+        XCTAssertTrue(hero.label.contains("Cover"))
+        XCTAssertTrue(hero.label.contains("selected"))
+        XCTAssertTrue(thumbnail.label.contains("Photo 1 of 1"))
+        XCTAssertTrue(thumbnail.label.contains("Cover"))
+        XCTAssertTrue(thumbnail.isSelected)
+
+        XCTAssertFalse(app.buttons["scan.review"].exists)
+        XCTAssertFalse(app.staticTexts["Home"].exists)
+    }
+
+    func testLivePhotoReviewBackReturnsExactRestoredPhotoAndFocusesScanReview() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let initialCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(initialCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(initialCount.label, "1 of 5")
+
+        let initialReview = app.buttons["scan.review"]
+        XCTAssertTrue(initialReview.exists)
+        XCTAssertEqual(initialReview.label, "Review 1 photo")
+        initialReview.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+
+        let back = app.buttons["photo-review.back"]
+        guard back.waitForExistence(timeout: 2) else {
+            XCTFail(
+                "Live Photo Review must expose the native Back to camera control."
+            )
+            return
+        }
+        XCTAssertEqual(back.label, "Back to camera")
+        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        back.tap()
+
+        let returnedReview = app.buttons["scan.review"]
+        let returnedCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(
+            returnedReview.waitForExistence(timeout: 3),
+            "Back must return the seller to Scan with the Review opener intact."
+        )
+        XCTAssertFalse(screen.waitForExistence(timeout: 2))
+
+        XCTAssertTrue(returnedCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(returnedCount.label, "1 of 5")
+
+        XCTAssertEqual(returnedReview.label, "Review 1 photo")
+        // Review-opener focus restoration is an accessibility-cursor contract, which
+        // XCUITest cannot observe without an assistive technology running. It is proved
+        // directly by ScanReturnFocusPolicy and by the router-seam return assertions.
+    }
+
+    func testLivePhotoReviewVoiceAndStartListingStayTypedBoundariesOverIntake() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+
+        let voice = app.buttons["photo-review.voice"]
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 2))
+        XCTAssertTrue(startListing.exists)
+        // Photo Review v1.2 owns this screen and names the row "Voice context". Its
+        // optional and collapsed state is structural truth a seller who cannot see the
+        // row still needs. v2 owns the recorder interior, which is #469, not this label.
+        XCTAssertEqual(voice.label, "Voice context, optional, collapsed")
+        XCTAssertEqual(startListing.label, "Start listing")
+        XCTAssertTrue(startListing.isEnabled)
+        XCTAssertGreaterThanOrEqual(voice.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(startListing.frame.height, 44)
+
+        let count = app.staticTexts["photo-review.count"]
+        let coverLabel = app.buttons["photo-review.thumbnail.1"].label
+        XCTAssertEqual(count.label, "1 of 5")
+
+        voice.tap()
+        startListing.tap()
+
+        XCTAssertTrue(
+            screen.exists,
+            "Neither boundary owns a destination in this shell."
+        )
+        XCTAssertEqual(
+            count.label,
+            "1 of 5",
+            "A typed boundary never clears or mutates photo intake."
+        )
+        XCTAssertEqual(app.buttons["photo-review.thumbnail.1"].label, coverLabel)
+
+        // Neither control may claim work this shell does not do.
+        for claim in [
+            "Recording", "Uploaded", "Analyzing", "Queued", "Credit used",
+            "Item saved", "Saving your item", "Shared"
+        ] {
+            XCTAssertEqual(
+                app.staticTexts.matching(
+                    NSPredicate(format: "label CONTAINS %@", claim)
+                ).count,
+                0,
+                "Photo Review must not claim \(claim)."
+            )
+        }
+    }
+
+    // v1.2 primary_action.position is a sticky bottom action above the home-indicator
+    // safe area, and its adaptive-layout contract says that action never covers the
+    // thumbnails, Voice context, or the home indicator. The hero and thumbnail strip are
+    // fixed, so text is the only thing that lengthens this page; the largest Dynamic Type
+    // is what puts the content decisively past the viewport, which is what makes the
+    // scroll below real rather than a rubber-band that settles back to its start.
+    func testLivePhotoReviewKeepsStartListingStickyBelowTheScrollingReviewContent() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--dynamic-type=accessibility5"
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 5))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 5))
+
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(startListing.waitForExistence(timeout: 3))
+
+        // Structural truth: Start listing is pinned outside the scrolling content while
+        // Voice context stays in flow above it.
+        XCTAssertFalse(
+            screen.buttons["photo-review.start-listing"].exists,
+            "Start listing must be a sticky action, not part of the scrolling content."
+        )
+        XCTAssertTrue(
+            screen.buttons["photo-review.voice"].exists,
+            "Voice context stays in flow; only Start listing is sticky."
+        )
+
+        // Behavioural truth: the content scrolls under it and the action does not move.
+        let voiceBefore = screen.buttons["photo-review.voice"].frame
+        let stickyBefore = startListing.frame
+        screen.swipeUp()
+
+        XCTAssertNotEqual(
+            screen.buttons["photo-review.voice"].frame.minY,
+            voiceBefore.minY,
+            "The review content must actually scroll for this to prove anything."
+        )
+        XCTAssertEqual(
+            startListing.frame.minY,
+            stickyBefore.minY,
+            accuracy: 0.5,
+            "Start listing must stay pinned while the content scrolls."
+        )
+
+        let window = app.windows.firstMatch.frame
+        XCTAssertLessThanOrEqual(startListing.frame.maxY, window.maxY)
+        XCTAssertGreaterThanOrEqual(startListing.frame.height, 44)
+    }
+
+    func testLivePhotoReviewDeletingTheOnlyPhotoReturnsToGuidedScanWithNoPhotos() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "1 of 5")
+
+        let delete = app.buttons["photo-review.delete"]
+        XCTAssertFalse(
+            delete.exists,
+            "Delete stays hidden until the seller opens actions on a photo."
+        )
+        app.buttons["photo-review.hero"].tap()
+        XCTAssertTrue(delete.waitForExistence(timeout: 2))
+        delete.tap()
+
+        XCTAssertTrue(
+            app.buttons["scan.shutter"].waitForExistence(timeout: 3),
+            "Deleting the only photo must return the approved zero-photo guided Scan."
+        )
+        XCTAssertFalse(
+            app.buttons["button.primary.start-with-one-item"].exists,
+            "Emptying the intake must not restart onboarding behind the camera."
+        )
+        XCTAssertFalse(screen.waitForExistence(timeout: 2))
+        XCTAssertFalse(
+            app.buttons["scan.review"].exists,
+            "Zero-photo Scan has nothing to review."
+        )
+        XCTAssertFalse(
+            app.staticTexts["scan.photo-count"].exists,
+            "The deleted photo must leave the Scan intake, not only Photo Review."
+        )
+    }
+
+    // v1.2 top_bar sets `minimum_target_points: [44, 44]` and its Dynamic Type rule
+    // expects this row to grow rather than clip, so the floor has to hold at the
+    // smallest supported size, where a target derived from text height is thinnest,
+    // as well as at the largest, where the row reflows.
+    func testLivePhotoReviewTopBarHoldsTheTouchFloorAcrossDynamicType() {
+        for typeSize in ["xSmall", "medium", "accessibility3"] {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "--restored-capture-fixture",
+                "--dynamic-type=\(typeSize)"
+            ]
+            app.launch()
+
+            let resume = app.buttons["button.primary.resume-captured-photo"]
+            XCTAssertTrue(resume.waitForExistence(timeout: 5), typeSize)
+            resume.tap()
+
+            let review = app.buttons["scan.review"]
+            XCTAssertTrue(review.waitForExistence(timeout: 5), typeSize)
+            review.tap()
+
+            let screen = app.scrollViews["photo-review.screen"]
+            XCTAssertTrue(screen.waitForExistence(timeout: 5), typeSize)
+
+            for control in [
+                app.buttons["photo-review.back"],
+                app.buttons["photo-review.voice"],
+                app.buttons["photo-review.start-listing"]
+            ] {
+                XCTAssertTrue(control.waitForExistence(timeout: 3), typeSize)
+                XCTAssertGreaterThanOrEqual(
+                    control.frame.width,
+                    44,
+                    "\(control.identifier) width at \(typeSize)"
+                )
+                XCTAssertGreaterThanOrEqual(
+                    control.frame.height,
+                    44,
+                    "\(control.identifier) height at \(typeSize)"
+                )
+            }
+
+            // The approved order survives the reflow, and the row never overlaps the
+            // hero it sits above.
+            let back = app.buttons["photo-review.back"].frame
+            let count = app.staticTexts["photo-review.count"].frame
+            let hero = app.buttons["photo-review.hero"].frame
+            XCTAssertLessThanOrEqual(back.maxX, count.minX, "order at \(typeSize)")
+            XCTAssertLessThanOrEqual(
+                count.maxY,
+                hero.maxY,
+                "top bar must stay above the hero at \(typeSize)"
+            )
+
+            XCTAssertTrue(
+                UIProcessTerminationBoundary().terminate(app),
+                "SnapList did not terminate after \(typeSize)"
+            )
+        }
     }
 
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {

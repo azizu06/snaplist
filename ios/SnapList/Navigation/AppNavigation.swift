@@ -121,6 +121,7 @@ struct CaptureBoundaryRequest: Equatable {
 
 enum PhotoReviewScanFocus: Equatable {
     case reviewButton
+    case addPhotoButton
 }
 
 struct PhotoReviewScanReturn: Equatable {

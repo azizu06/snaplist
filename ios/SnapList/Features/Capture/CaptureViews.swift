@@ -261,6 +261,7 @@ private struct CaptureOptionRow: View {
 
 struct ScanCameraView: View {
     @Bindable var flow: CaptureFlowModel
+    @Binding var returnFocus: PhotoReviewScanFocus?
     let openBoundary: (
         CaptureBoundaryDestination,
         [StagedCapturePhoto],
@@ -336,6 +337,7 @@ struct ScanCameraView: View {
                 guard let captureID = flow.reservePhotoCapture() else { return }
                 Task { await flow.takePhoto(reservation: captureID) }
             },
+            returnFocus: $returnFocus,
             review: { open(.photoReview, opener: .reviewButton) },
             openTrophyWall: { open(.trophyWall, opener: .trophyWallTab) }
         )
@@ -347,6 +349,7 @@ struct ScanCameraView: View {
             thumbnailURLs: flow.stagedPhotos.map { Optional($0.thumbnailURL) },
             reduceMotion: reduceMotion,
             libraryControl: { libraryPicker(labelStyle: .recovery) },
+            returnFocus: $returnFocus,
             review: { open(.photoReview, opener: .reviewButton) },
             openSettings: {
                 guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
@@ -462,6 +465,33 @@ enum ScanReviewAccessibilityPriority: String, CaseIterable {
     }
 }
 
+private enum ScanReviewFocusTarget: Hashable {
+    case reviewButton
+}
+
+/// What a Scan camera surface should do with a pending Photo Review focus request.
+///
+/// Scan restores the accessibility cursor, not UIKit first-responder focus, so the
+/// decision is kept separate from the view that applies it and is asserted directly.
+enum ScanReturnFocusOutcome: Equatable {
+    /// Nothing to restore on this surface; leave the pending request untouched.
+    case none
+    /// Move the accessibility cursor to the Review opener and consume the request.
+    case focusReviewOpener
+}
+
+enum ScanReturnFocusPolicy {
+    static func outcome(
+        pendingFocus: PhotoReviewScanFocus?,
+        stagedPhotoCount: Int
+    ) -> ScanReturnFocusOutcome {
+        guard pendingFocus == .reviewButton, stagedPhotoCount > 0 else {
+            return .none
+        }
+        return .focusReviewOpener
+    }
+}
+
 private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View {
     let thumbnailURLs: [URL?]
     let isShutterEnabled: Bool
@@ -474,10 +504,12 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     @ViewBuilder let libraryControl: () -> LibraryControl
     let toggleFlash: () -> Void
     let takePhoto: () -> Void
+    @Binding var returnFocus: PhotoReviewScanFocus?
     let review: () -> Void
     let openTrophyWall: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AccessibilityFocusState private var focusedScanControl: ScanReviewFocusTarget?
 
     var body: some View {
         ZStack {
@@ -621,6 +653,25 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             )
             .accessibilityIdentifier("scan.review")
             .accessibilitySortPriority(ScanReviewAccessibilityPriority.live.value)
+            .accessibilityFocused(
+                $focusedScanControl,
+                equals: .reviewButton
+            )
+            .onAppear(perform: consumeReviewFocusIfPossible)
+            .onChange(of: returnFocus) { _, _ in
+                consumeReviewFocusIfPossible()
+            }
+    }
+
+    private func consumeReviewFocusIfPossible() {
+        guard ScanReturnFocusPolicy.outcome(
+            pendingFocus: returnFocus,
+            stagedPhotoCount: thumbnailURLs.count
+        ) == .focusReviewOpener else {
+            return
+        }
+        focusedScanControl = .reviewButton
+        returnFocus = nil
     }
 }
 
@@ -629,9 +680,11 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
     let thumbnailURLs: [URL?]
     let reduceMotion: Bool
     @ViewBuilder let libraryControl: () -> LibraryControl
+    @Binding var returnFocus: PhotoReviewScanFocus?
     let review: () -> Void
     let openSettings: () -> Void
     let openTrophyWall: () -> Void
+    @AccessibilityFocusState private var focusedScanControl: ScanReviewFocusTarget?
 
     var body: some View {
         ZStack {
@@ -695,6 +748,14 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
                             .accessibilitySortPriority(
                                 ScanReviewAccessibilityPriority.recovery.value
                             )
+                            .accessibilityFocused(
+                                $focusedScanControl,
+                                equals: .reviewButton
+                            )
+                            .onAppear(perform: consumeReviewFocusIfPossible)
+                            .onChange(of: returnFocus) { _, _ in
+                                consumeReviewFocusIfPossible()
+                            }
                     }
                     .padding(.bottom, 10)
                     .transition(
@@ -716,6 +777,17 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
             reduceMotion ? nil : .easeOut(duration: 0.18),
             value: thumbnailURLs.count
         )
+    }
+
+    private func consumeReviewFocusIfPossible() {
+        guard ScanReturnFocusPolicy.outcome(
+            pendingFocus: returnFocus,
+            stagedPhotoCount: thumbnailURLs.count
+        ) == .focusReviewOpener else {
+            return
+        }
+        focusedScanControl = .reviewButton
+        returnFocus = nil
     }
 }
 
@@ -842,6 +914,7 @@ struct ScanCameraVisualStateView: View {
                     Button(action: {}) { ScanLibraryLabel(style: .recovery) }
                         .buttonStyle(.plain)
                 },
+                returnFocus: .constant(nil),
                 review: {},
                 openSettings: {},
                 openTrophyWall: {}
@@ -855,6 +928,7 @@ struct ScanCameraVisualStateView: View {
                     Button(action: {}) { ScanLibraryLabel(style: .recovery) }
                         .buttonStyle(.plain)
                 },
+                returnFocus: .constant(nil),
                 review: {},
                 openSettings: {},
                 openTrophyWall: {}
@@ -875,6 +949,7 @@ struct ScanCameraVisualStateView: View {
                 },
                 toggleFlash: {},
                 takePhoto: {},
+                returnFocus: .constant(nil),
                 review: {},
                 openTrophyWall: {}
             )

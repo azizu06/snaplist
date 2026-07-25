@@ -1,5 +1,6 @@
 import AVFoundation
 import ImageIO
+import SwiftUI
 import UIKit
 import XCTest
 @testable import SnapList
@@ -427,6 +428,829 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(store.photos.map(\.id), [third.id, replacement.id])
         XCTAssertEqual(store.selectedPhotoID, third.id)
         XCTAssertEqual(router.photoReviewScanReturn, returned)
+    }
+
+    func testLivePhotoReviewBackCommitsTheReorderedSetThroughTheProductionExit() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-back-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let store = LocalCaptureDraftStore(rootDirectory: root)
+        let originalCover = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemRed,
+                rightColor: .systemOrange
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let second = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemGreen,
+                rightColor: .systemBlue
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let third = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemPurple,
+                rightColor: .systemYellow
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: store
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        XCTAssertEqual(captureFlow.stagedPhotos, [originalCover, second, third])
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("A live Photo Review request must create one editing session.")
+            return
+        }
+
+        XCTAssertEqual(session.store.photos, [originalCover, second, third])
+        XCTAssertEqual(session.store.selectedPhotoID, originalCover.id)
+        XCTAssertTrue(session.store.movePhoto(id: third.id, to: 0))
+
+        var returnFocus: [PhotoReviewScanFocus] = []
+        let outcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
+
+        let expected = PhotoReviewScanReturn(
+            photos: [third, originalCover, second],
+            focus: .reviewButton
+        )
+        XCTAssertEqual(outcome, .completed(expected))
+        XCTAssertEqual(router.photoReviewScanReturn, expected)
+        XCTAssertEqual(returnFocus, [.reviewButton])
+        XCTAssertNil(host.session)
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+        XCTAssertEqual(captureFlow.stagedPhotos, [third, originalCover, second])
+        XCTAssertFalse(
+            host.isCommitting,
+            "The commit gate must reopen once the exit resolves."
+        )
+
+        // The reorder has to survive as durable truth, not only in memory.
+        let reloaded = try await LocalCaptureDraftStore(
+            rootDirectory: root
+        ).loadPhotos()
+        XCTAssertEqual(reloaded, [third, originalCover, second])
+    }
+
+    func testPhotoReviewBackCoordinatorCompletesWithRestoredCaptureFixture() async {
+        let configuration = LaunchConfiguration.parse(
+            arguments: ["--restored-capture-fixture"]
+        )
+        let dependencies = AppDependencies.make(configuration: configuration)
+        let captureFlow = CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            store: dependencies.captureDraftStore
+        )
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let host = PhotoReviewLiveHost()
+
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let restoredPhotos = captureFlow.stagedPhotos
+        XCTAssertEqual(restoredPhotos.count, 1)
+
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: restoredPhotos,
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The restored Photo Review request must create a live session.")
+            return
+        }
+
+        let outcome = await PhotoReviewBackCoordinator.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host
+        )
+        let expectedReturn = PhotoReviewScanReturn(
+            photos: restoredPhotos,
+            focus: .reviewButton
+        )
+
+        XCTAssertEqual(outcome, .completed(expectedReturn))
+        XCTAssertEqual(captureFlow.phase, .camera)
+        XCTAssertEqual(captureFlow.stagedPhotos, restoredPhotos)
+        XCTAssertNil(host.session)
+        if case .completed(let returnedRequest) = outcome {
+            XCTAssertEqual(returnedRequest, expectedReturn)
+            XCTAssertEqual(returnedRequest.focus, .reviewButton)
+        } else {
+            XCTFail("The coordinator must return the exact restored Scan request.")
+        }
+    }
+
+    func testAppShellPhotoReviewBackTransactionAppliesCompletedRestoredCaptureReturn() async {
+        let configuration = LaunchConfiguration.parse(
+            arguments: ["--restored-capture-fixture"]
+        )
+        let dependencies = AppDependencies.make(configuration: configuration)
+        let captureFlow = CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            store: dependencies.captureDraftStore
+        )
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let host = PhotoReviewLiveHost()
+
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let restoredPhotos = captureFlow.stagedPhotos
+        XCTAssertEqual(restoredPhotos.count, 1)
+
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: restoredPhotos,
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The restored Photo Review request must create a live session.")
+            return
+        }
+
+        var receivedFocuses: [PhotoReviewScanFocus] = []
+        let outcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { receivedFocuses.append($0) }
+        )
+        let expectedReturn = PhotoReviewScanReturn(
+            photos: restoredPhotos,
+            focus: .reviewButton
+        )
+
+        XCTAssertEqual(outcome, .completed(expectedReturn))
+        XCTAssertEqual(captureFlow.phase, .camera)
+        XCTAssertEqual(captureFlow.stagedPhotos, restoredPhotos)
+        XCTAssertNil(host.session)
+        XCTAssertEqual(receivedFocuses, [.reviewButton])
+        XCTAssertEqual(router.photoReviewScanReturn, expectedReturn)
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+    }
+
+    func testPhotoReviewConditionalShellRemountPresentsPrepopulatedGuidedCamera() async {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000051")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let host = PhotoReviewLiveHost()
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [photo],
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The presentation contract requires an active Photo Review session.")
+            return
+        }
+
+        let coverPresented = expectation(
+            description: "The prepopulated guided-camera cover appears after shell remount."
+        )
+        let hostingController = UIHostingController(
+            rootView: PhotoReviewConditionalPresentationHarness(
+                router: router,
+                host: host,
+                coverPresented: coverPresented.fulfill
+            )
+        )
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        await Task.yield()
+        XCTAssertNil(hostingController.presentedViewController)
+
+        XCTAssertTrue(host.completeReturnToScan(from: session))
+        router.presentedFullScreen = .guidedCamera
+
+        await fulfillment(of: [coverPresented], timeout: 3)
+        XCTAssertNotNil(hostingController.presentedViewController)
+        window.isHidden = true
+        withExtendedLifetime(window) {}
+    }
+
+    func testPhotoReviewOutgoingCameraDismissalAllowsDistinctReturnPresentation() async throws {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000052")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let host = PhotoReviewLiveHost()
+        let firstCoverPresented = expectation(
+            description: "The outgoing guided-camera cover presents."
+        )
+        let reviewPresented = expectation(
+            description: "Photo Review replaces the dismissed camera shell."
+        )
+        let secondCoverPresented = expectation(
+            description: "A distinct guided-camera cover presents after Back."
+        )
+        var coverPresentationCount = 0
+        let hostingController = UIHostingController(
+            rootView: PhotoReviewConditionalPresentationHarness(
+                router: router,
+                host: host,
+                coverPresented: {
+                    coverPresentationCount += 1
+                    if coverPresentationCount == 1 {
+                        firstCoverPresented.fulfill()
+                    } else if coverPresentationCount == 2 {
+                        secondCoverPresented.fulfill()
+                    }
+                },
+                reviewPresented: reviewPresented.fulfill
+            )
+        )
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+
+        await fulfillment(of: [firstCoverPresented], timeout: 3)
+        let firstPresentedController = try XCTUnwrap(
+            hostingController.presentedViewController
+        )
+
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [photo],
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The outgoing-cover contract requires an exact live session.")
+            return
+        }
+
+        await fulfillment(of: [reviewPresented], timeout: 3)
+        let firstControllerDismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                hostingController.presentedViewController == nil
+                    && firstPresentedController.presentingViewController == nil
+            },
+            object: hostingController
+        )
+        await fulfillment(of: [firstControllerDismissed], timeout: 3)
+        XCTAssertNil(hostingController.presentedViewController)
+        XCTAssertNil(firstPresentedController.presentingViewController)
+
+        XCTAssertTrue(host.completeReturnToScan(from: session))
+        router.presentedFullScreen = .guidedCamera
+
+        await fulfillment(of: [secondCoverPresented], timeout: 3)
+        let secondPresentedController = try XCTUnwrap(
+            hostingController.presentedViewController
+        )
+        XCTAssertFalse(firstPresentedController === secondPresentedController)
+        XCTAssertEqual(coverPresentationCount, 2)
+        window.isHidden = true
+        withExtendedLifetime(window) {}
+    }
+
+    func testLivePhotoReviewScanReturnPersistsExactValuesOrderBeforeGuidedScan() async throws {
+        let fileManager = FileManager.default
+        let parent = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-return-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: parent) }
+
+        let nonemptyRoot = parent.appendingPathComponent(
+            "nonempty",
+            isDirectory: true
+        )
+        let nonemptyStore = LocalCaptureDraftStore(rootDirectory: nonemptyRoot)
+        let originalCover = try await nonemptyStore.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemRed,
+                rightColor: .systemOrange
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let second = try await nonemptyStore.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemGreen,
+                rightColor: .systemBlue
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let third = try await nonemptyStore.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemPurple,
+                rightColor: .systemYellow
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let nonemptyModel = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: nonemptyStore
+        )
+        let nonemptyRestoration = await nonemptyModel.restore()
+        XCTAssertEqual(nonemptyRestoration, .stagedPhoto)
+
+        let nonemptyFocus = await nonemptyModel.applyPhotoReviewScanReturn(
+            PhotoReviewScanReturn(
+                photos: [third, originalCover],
+                focus: .reviewButton
+            )
+        )
+
+        XCTAssertEqual(nonemptyFocus, .reviewButton)
+        XCTAssertEqual(nonemptyModel.stagedPhotos, [third, originalCover])
+        let persistedNonemptyPhotos = try await nonemptyStore.loadPhotos()
+        XCTAssertEqual(persistedNonemptyPhotos, [third, originalCover])
+        XCTAssertEqual(nonemptyModel.phase, .captured)
+        for removedURL in [second.photoURL, second.thumbnailURL] {
+            XCTAssertFalse(
+                fileManager.fileExists(atPath: removedURL.path),
+                "Superseded artifacts must be removed only after the ordered manifest commits."
+            )
+        }
+
+        let emptyRoot = parent.appendingPathComponent("empty", isDirectory: true)
+        let emptyStore = LocalCaptureDraftStore(rootDirectory: emptyRoot)
+        let solePhoto = try await emptyStore.append(
+            imageData: makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let emptyModel = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: emptyStore
+        )
+        let emptyRestoration = await emptyModel.restore()
+        XCTAssertEqual(emptyRestoration, .stagedPhoto)
+
+        let emptyFocus = await emptyModel.applyPhotoReviewScanReturn(
+            PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+        )
+
+        XCTAssertEqual(emptyFocus, .addPhotoButton)
+        XCTAssertEqual(emptyModel.stagedPhotos, [])
+        let persistedEmptyPhotos = try await emptyStore.loadPhotos()
+        XCTAssertEqual(persistedEmptyPhotos, [])
+        XCTAssertEqual(emptyModel.phase, .idle)
+        for removedURL in [solePhoto.photoURL, solePhoto.thumbnailURL] {
+            XCTAssertFalse(
+                fileManager.fileExists(atPath: removedURL.path),
+                "Final-delete artifacts must be removed after the empty manifest commits."
+            )
+        }
+
+        let failingRoot = parent.appendingPathComponent(
+            "failing",
+            isDirectory: true
+        )
+        let originalFailingStore = LocalCaptureDraftStore(rootDirectory: failingRoot)
+        let failingImageData = try [
+            makeLandscapeImageData(leftColor: .systemRed, rightColor: .systemOrange),
+            makeLandscapeImageData(leftColor: .systemGreen, rightColor: .systemBlue),
+            makeLandscapeImageData(leftColor: .systemPurple, rightColor: .systemYellow)
+        ]
+        var failingPhotos: [StagedCapturePhoto] = []
+        for imageData in failingImageData {
+            let photo = try await originalFailingStore.append(
+                imageData: imageData,
+                libraryTransferReceipt: nil
+            ).appendedPhoto
+            failingPhotos.append(photo)
+        }
+        let failingWriter = PhotoReviewManifestWriteFailer()
+        let failingStore = LocalCaptureDraftStore(
+            rootDirectory: failingRoot,
+            writeData: failingWriter.write
+        )
+        let failingModel = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: failingStore
+        )
+        let failingRestoration = await failingModel.restore()
+        XCTAssertEqual(failingRestoration, .stagedPhoto)
+        let originalArtifacts = failingPhotos.flatMap {
+            [$0.photoURL, $0.thumbnailURL]
+        }
+
+        let failingFocus = await failingModel.applyPhotoReviewScanReturn(
+            PhotoReviewScanReturn(
+                photos: [failingPhotos[2], failingPhotos[0]],
+                focus: .reviewButton
+            )
+        )
+
+        XCTAssertNil(failingFocus)
+        XCTAssertEqual(failingWriter.writeCount, 1)
+        XCTAssertEqual(failingModel.stagedPhotos, failingPhotos)
+        let persistedFailingPhotos = try await failingStore.loadPhotos()
+        XCTAssertEqual(persistedFailingPhotos, failingPhotos)
+        XCTAssertEqual(failingModel.phase, .captured)
+        XCTAssertTrue(
+            originalArtifacts.allSatisfy {
+                fileManager.fileExists(atPath: $0.path)
+            },
+            "A failed ordered-manifest write must preserve every prior artifact."
+        )
+
+        let foreignPhoto = makeStagedPhoto(
+            id: "45800000-0000-4000-8000-000000000099"
+        )
+        let modifiedPhoto = StagedCapturePhoto(
+            id: failingPhotos[0].id,
+            photoURL: failingPhotos[0].photoURL,
+            thumbnailURL: failingPhotos[0].thumbnailURL,
+            createdAt: failingPhotos[0].createdAt.addingTimeInterval(1),
+            libraryTransferReceipt: failingPhotos[0].libraryTransferReceipt
+        )
+        let invalidReturns = [
+            PhotoReviewScanReturn(
+                photos: [failingPhotos[0], foreignPhoto],
+                focus: .reviewButton
+            ),
+            PhotoReviewScanReturn(
+                photos: [modifiedPhoto, failingPhotos[1]],
+                focus: .reviewButton
+            ),
+            PhotoReviewScanReturn(
+                photos: [failingPhotos[0], failingPhotos[0]],
+                focus: .reviewButton
+            ),
+            PhotoReviewScanReturn(
+                photos: [
+                    failingPhotos[0],
+                    failingPhotos[1],
+                    failingPhotos[2],
+                    foreignPhoto,
+                    modifiedPhoto,
+                    failingPhotos[0]
+                ],
+                focus: .reviewButton
+            )
+        ]
+        for invalidReturn in invalidReturns {
+            let invalidFocus = await failingModel.applyPhotoReviewScanReturn(
+                invalidReturn
+            )
+            XCTAssertNil(invalidFocus)
+            XCTAssertEqual(failingWriter.writeCount, 1)
+            XCTAssertEqual(failingModel.stagedPhotos, failingPhotos)
+            let persistedPhotos = try await failingStore.loadPhotos()
+            XCTAssertEqual(persistedPhotos, failingPhotos)
+            XCTAssertEqual(failingModel.phase, .captured)
+        }
+    }
+
+    func testLivePhotoReviewHostConsumesExactRequestOnceAndPreservesEditingSession() {
+        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000011")
+        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000012")
+        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000013")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [originalCover, second, third],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+
+        XCTAssertTrue(
+            host.consume(router.captureBoundaryRequest),
+            "The live AppShell host must consume the exact Photo Review request."
+        )
+        guard let session = host.session else {
+            XCTFail("The consumed request must expose one renderable live session.")
+            return
+        }
+
+        XCTAssertEqual(session.store.photos, [originalCover, second, third])
+        XCTAssertTrue(session.store.movePhoto(id: third.id, to: 0))
+
+        XCTAssertFalse(
+            host.consume(router.captureBoundaryRequest),
+            "A view update with the same request must not recreate the editing session."
+        )
+        XCTAssertTrue(host.session === session)
+        XCTAssertEqual(host.session?.store.photos, [third, originalCover, second])
+    }
+
+    func testLivePhotoReviewNonFinalDeletePreservesExactSurvivorsRestoresFocusAndAnnouncesCountOnce() {
+        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000021")
+        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000022")
+        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000023")
+        let request = CaptureBoundaryRequest(
+            destination: .photoReview,
+            photos: [originalCover, second, third],
+            opener: .reviewButton
+        )
+
+        guard let middleSession = PhotoReviewLiveSession.start(from: request),
+              let trailingSession = PhotoReviewLiveSession.start(from: request) else {
+            XCTFail("Known live Photo Review requests must create isolated sessions.")
+            return
+        }
+
+        middleSession.store.selectPhotoForActions(id: second.id)
+        let middleResult = middleSession.deleteNonFinalPhoto(id: second.id)
+        XCTAssertEqual(
+            middleResult,
+            PhotoReviewLiveDeleteResult(
+                focus: .photo(third.id),
+                announcement: "Photo removed. 2 of 5."
+            )
+        )
+        if middleResult == nil {
+            XCTAssertEqual(
+                middleSession.store.photos,
+                [originalCover, second, third]
+            )
+            XCTAssertEqual(middleSession.store.selectedPhotoID, second.id)
+            XCTAssertEqual(middleSession.store.actionsPhotoID, second.id)
+            XCTAssertNil(middleSession.focusedPhotoID)
+            XCTAssertNil(middleSession.consumeDeleteAnnouncement())
+        } else {
+            XCTAssertEqual(middleSession.store.photos, [originalCover, third])
+            XCTAssertEqual(middleSession.store.selectedPhotoID, third.id)
+            XCTAssertNil(middleSession.store.actionsPhotoID)
+            XCTAssertEqual(middleSession.focusedPhotoID, third.id)
+            XCTAssertEqual(
+                middleSession.consumeDeleteAnnouncement(),
+                "Photo removed. 2 of 5."
+            )
+            XCTAssertNil(middleSession.consumeDeleteAnnouncement())
+
+            let stateAfterDelete = middleSession.store.photos
+            XCTAssertNil(middleSession.deleteNonFinalPhoto(id: second.id))
+            XCTAssertEqual(middleSession.store.photos, stateAfterDelete)
+            XCTAssertEqual(middleSession.focusedPhotoID, third.id)
+            XCTAssertNil(middleSession.consumeDeleteAnnouncement())
+        }
+
+        trailingSession.store.selectPhotoForActions(id: third.id)
+        let trailingResult = trailingSession.deleteNonFinalPhoto(id: third.id)
+        XCTAssertEqual(
+            trailingResult,
+            PhotoReviewLiveDeleteResult(
+                focus: .photo(second.id),
+                announcement: "Photo removed. 2 of 5."
+            )
+        )
+        if trailingResult == nil {
+            XCTAssertEqual(
+                trailingSession.store.photos,
+                [originalCover, second, third]
+            )
+            XCTAssertEqual(trailingSession.store.selectedPhotoID, third.id)
+            XCTAssertEqual(trailingSession.store.actionsPhotoID, third.id)
+            XCTAssertNil(trailingSession.focusedPhotoID)
+            XCTAssertNil(trailingSession.consumeDeleteAnnouncement())
+        } else {
+            XCTAssertEqual(trailingSession.store.photos, [originalCover, second])
+            XCTAssertEqual(trailingSession.store.selectedPhotoID, second.id)
+            XCTAssertNil(trailingSession.store.actionsPhotoID)
+            XCTAssertEqual(trailingSession.focusedPhotoID, second.id)
+            XCTAssertEqual(
+                trailingSession.consumeDeleteAnnouncement(),
+                "Photo removed. 2 of 5."
+            )
+            XCTAssertNil(trailingSession.consumeDeleteAnnouncement())
+        }
+    }
+
+    func testLivePhotoReviewFinalDeleteReturnsExactEmptyScanStateAndClearsSessionOnce() {
+        let onlyPhoto = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000031")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [onlyPhoto],
+            opener: .reviewButton
+        )
+        let request = router.captureBoundaryRequest
+        let host = PhotoReviewLiveHost()
+
+        XCTAssertTrue(host.consume(request))
+        guard let session = host.session else {
+            XCTFail("The exact one-photo request must expose one live session.")
+            return
+        }
+        XCTAssertTrue(session.store.selectPhotoForActions(id: onlyPhoto.id))
+
+        let result = host.deleteFinalPhoto(id: onlyPhoto.id, using: router)
+        let expectedReturn = PhotoReviewScanReturn(
+            photos: [],
+            focus: .addPhotoButton
+        )
+        XCTAssertEqual(
+            result,
+            PhotoReviewLiveFinalDeleteResult(
+                scanReturn: expectedReturn,
+                announcement: "Photo removed. No photos remain."
+            )
+        )
+
+        if result == nil {
+            XCTAssertEqual(session.store.photos, [onlyPhoto])
+            XCTAssertEqual(session.store.selectedPhotoID, onlyPhoto.id)
+            XCTAssertEqual(session.store.actionsPhotoID, onlyPhoto.id)
+            XCTAssertTrue(host.session === session)
+            XCTAssertEqual(router.captureBoundaryRequest, request)
+            XCTAssertNil(router.photoReviewScanReturn)
+            XCTAssertNil(host.consumeFinalDeleteAnnouncement())
+        } else {
+            XCTAssertTrue(session.store.photos.isEmpty)
+            XCTAssertNil(session.store.selectedPhotoID)
+            XCTAssertNil(session.store.actionsPhotoID)
+            XCTAssertNil(host.session)
+            XCTAssertNil(router.captureBoundaryRequest)
+            XCTAssertEqual(router.photoReviewScanReturn, expectedReturn)
+            XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+            XCTAssertEqual(
+                host.consumeFinalDeleteAnnouncement(),
+                "Photo removed. No photos remain."
+            )
+            XCTAssertNil(host.consumeFinalDeleteAnnouncement())
+
+            XCTAssertNil(host.deleteFinalPhoto(id: onlyPhoto.id, using: router))
+            XCTAssertNil(host.session)
+            XCTAssertEqual(router.photoReviewScanReturn, expectedReturn)
+            XCTAssertNil(host.consumeFinalDeleteAnnouncement())
+        }
+    }
+
+    func testLivePhotoReviewDeleteRoutesTheOpenActionsPhotoToTheSurvivingNeighbour() async {
+        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000041")
+        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000042")
+        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000043")
+        let captureFlow = makeRestoredCaptureFlow()
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let durableIntake = captureFlow.stagedPhotos
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [originalCover, second, third],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The exact three-photo request must expose one live session.")
+            return
+        }
+
+        var returnFocus: [PhotoReviewScanFocus] = []
+        let withoutOpenActions = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
+        XCTAssertNil(
+            withoutOpenActions,
+            "Delete is inert until the seller opens actions on an exact photo."
+        )
+
+        session.store.selectPhotoForActions(id: second.id)
+        let application = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
+
+        XCTAssertEqual(
+            application,
+            PhotoReviewDeleteApplication(
+                focus: .photo(third.id),
+                announcement: "Photo removed. 2 of 5."
+            )
+        )
+        XCTAssertEqual(session.store.photos, [originalCover, third])
+        XCTAssertTrue(
+            host.session === session,
+            "A surviving photo keeps the seller inside Photo Review."
+        )
+        XCTAssertEqual(router.photoReviewScanReturn, nil)
+        XCTAssertEqual(returnFocus, [])
+        XCTAssertEqual(
+            captureFlow.stagedPhotos,
+            durableIntake,
+            "A survivor delete reaches Scan through Back, never as its own write."
+        )
+    }
+
+    func testLivePhotoReviewDeletingTheFinalPhotoLeavesForGuidedScanWithNoPhotos() async {
+        let captureFlow = makeRestoredCaptureFlow()
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let restoredPhotos = captureFlow.stagedPhotos
+        guard let onlyPhoto = restoredPhotos.first, restoredPhotos.count == 1 else {
+            XCTFail("The restored capture fixture must stage exactly one photo.")
+            return
+        }
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: restoredPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The exact one-photo request must expose one live session.")
+            return
+        }
+        session.store.selectPhotoForActions(id: onlyPhoto.id)
+
+        var returnFocus: [PhotoReviewScanFocus] = []
+        let application = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
+
+        XCTAssertEqual(
+            application,
+            PhotoReviewDeleteApplication(
+                focus: .addButton,
+                announcement: "Photo removed. No photos remain."
+            )
+        )
+        XCTAssertNil(host.session, "The final delete clears the Photo Review boundary.")
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(
+            router.photoReviewScanReturn,
+            PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+        )
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+        XCTAssertEqual(returnFocus, [.addPhotoButton])
+        XCTAssertTrue(
+            captureFlow.stagedPhotos.isEmpty,
+            "The deleted photo must leave Scan's durable intake, not only the session."
+        )
+        XCTAssertEqual(
+            captureFlow.phase,
+            .camera,
+            "Zero-photo Scan is the live guided camera, not a stalled boundary."
+        )
+
+        let repeated = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
+        XCTAssertNil(
+            repeated,
+            "Repeating the final delete is inert and never announces twice."
+        )
+        XCTAssertEqual(returnFocus, [.addPhotoButton])
     }
 
     func testPhotoReviewDirectReplacementRetargetsOnlyMatchingStableIdentities() {
@@ -1463,6 +2287,19 @@ final class CaptureFlowTests: XCTestCase {
 
         XCTAssertEqual(camera.captureCount, 5)
         XCTAssertEqual(model.stagedPhotos.count, 5)
+    }
+
+    private func makeRestoredCaptureFlow() -> CaptureFlowModel {
+        let dependencies = AppDependencies.make(
+            configuration: LaunchConfiguration.parse(
+                arguments: ["--restored-capture-fixture"]
+            )
+        )
+        return CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            store: dependencies.captureDraftStore
+        )
     }
 
     private func makeStagedPhoto(id: String) -> StagedCapturePhoto {
@@ -2918,6 +3755,51 @@ final class CaptureFlowTests: XCTestCase {
     }
 }
 
+@MainActor
+private struct PhotoReviewConditionalPresentationHarness: View {
+    @Bindable var router: AppRouter
+    @Bindable var host: PhotoReviewLiveHost
+    let coverPresented: () -> Void
+    let coverDismissed: () -> Void
+    let reviewPresented: () -> Void
+
+    init(
+        router: AppRouter,
+        host: PhotoReviewLiveHost,
+        coverPresented: @escaping () -> Void,
+        coverDismissed: @escaping () -> Void = {},
+        reviewPresented: @escaping () -> Void = {}
+    ) {
+        self.router = router
+        self.host = host
+        self.coverPresented = coverPresented
+        self.coverDismissed = coverDismissed
+        self.reviewPresented = reviewPresented
+    }
+
+    var body: some View {
+        if host.session != nil {
+            Color.clear
+                .accessibilityIdentifier("photo-review.contract")
+                .onAppear(perform: reviewPresented)
+        } else {
+            Color.clear
+                .accessibilityIdentifier("scan-shell.contract")
+                .fullScreenCover(
+                    item: $router.presentedFullScreen,
+                    onDismiss: coverDismissed
+                ) { destination in
+                    switch destination {
+                    case .guidedCamera:
+                        Color.clear
+                            .accessibilityIdentifier("guided-camera.contract")
+                            .onAppear(perform: coverPresented)
+                    }
+                }
+        }
+    }
+}
+
 private final class TestCaptureCamera: CaptureCamera {
     let session = AVCaptureSession()
     let isAvailable: Bool
@@ -3187,6 +4069,10 @@ private final class LifetimeTrackingCaptureStore: CaptureDraftStoring {
         stagedPhotos = []
         stagedBytes = []
     }
+
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        stagedPhotos = photos
+    }
 }
 
 private final class TestCaptureStore: CaptureDraftStoring {
@@ -3265,5 +4151,31 @@ private final class TestCaptureStore: CaptureDraftStoring {
     func discard() async throws {
         discardCount += 1
         stagedPhotos = []
+    }
+
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        stagedPhotos = photos
+    }
+}
+
+private final class PhotoReviewManifestWriteFailer: @unchecked Sendable {
+    enum InjectedError: Error {
+        case writeFailed
+    }
+
+    private let lock = NSLock()
+    private var writes = 0
+
+    var writeCount: Int {
+        lock.withLock { writes }
+    }
+
+    func write(
+        data _: Data,
+        url _: URL,
+        options _: Data.WritingOptions
+    ) throws {
+        lock.withLock { writes += 1 }
+        throw InjectedError.writeFailed
     }
 }
