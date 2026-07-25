@@ -259,6 +259,13 @@ struct PhotoReviewFixtureView: View {
 }
 #endif
 
+/// What Photo Review should do after one accepted delete: where the accessibility
+/// cursor lands, and the one count sentence the seller hears.
+struct PhotoReviewDeleteApplication: Equatable {
+    let focus: PhotoReviewDeleteFocus
+    let announcement: String
+}
+
 struct PhotoReviewLiveDeleteResult: Equatable {
     let focus: PhotoReviewDeleteFocus
     let announcement: String

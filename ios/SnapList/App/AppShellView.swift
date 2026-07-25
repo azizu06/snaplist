@@ -283,6 +283,39 @@ enum AppShellPhotoReviewBackTransaction {
 }
 
 @MainActor
+enum AppShellPhotoReviewDeleteTransaction {
+    static func perform(
+        session: PhotoReviewLiveSession,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
+    ) -> PhotoReviewDeleteApplication? {
+        guard let photoID = session.store.actionsPhotoID else {
+            return nil
+        }
+
+        if let result = session.deleteNonFinalPhoto(id: photoID),
+           let announcement = session.consumeDeleteAnnouncement() {
+            return PhotoReviewDeleteApplication(
+                focus: result.focus,
+                announcement: announcement
+            )
+        }
+
+        guard let finalResult = host.deleteFinalPhoto(id: photoID, using: router),
+              let announcement = host.consumeFinalDeleteAnnouncement() else {
+            return nil
+        }
+
+        setReturnFocus(finalResult.scanReturn.focus)
+        return PhotoReviewDeleteApplication(
+            focus: .addButton,
+            announcement: announcement
+        )
+    }
+}
+
+@MainActor
 enum AppCaptureHandoffCoordinator {
     static func presentCaptureLauncher(
         onboardingModel: OnboardingFlowModel,

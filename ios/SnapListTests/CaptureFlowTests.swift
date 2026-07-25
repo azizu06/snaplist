@@ -1060,6 +1060,110 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
+    func testLivePhotoReviewDeleteRoutesTheOpenActionsPhotoToTheSurvivingNeighbour() {
+        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000041")
+        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000042")
+        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000043")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [originalCover, second, third],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The exact three-photo request must expose one live session.")
+            return
+        }
+
+        var returnFocus: [PhotoReviewScanFocus] = []
+        XCTAssertNil(
+            AppShellPhotoReviewDeleteTransaction.perform(
+                session: session,
+                host: host,
+                router: router,
+                setReturnFocus: { returnFocus.append($0) }
+            ),
+            "Delete is inert until the seller opens actions on an exact photo."
+        )
+
+        session.store.selectPhotoForActions(id: second.id)
+        let application = AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
+
+        XCTAssertEqual(
+            application,
+            PhotoReviewDeleteApplication(
+                focus: .photo(third.id),
+                announcement: "2 photos remaining."
+            )
+        )
+        XCTAssertEqual(session.store.photos, [originalCover, third])
+        XCTAssertTrue(
+            host.session === session,
+            "A surviving photo keeps the seller inside Photo Review."
+        )
+        XCTAssertEqual(router.photoReviewScanReturn, nil)
+        XCTAssertEqual(returnFocus, [])
+    }
+
+    func testLivePhotoReviewDeletingTheFinalPhotoLeavesForGuidedScanWithNoPhotos() {
+        let onlyPhoto = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000051")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [onlyPhoto],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The exact one-photo request must expose one live session.")
+            return
+        }
+        session.store.selectPhotoForActions(id: onlyPhoto.id)
+
+        var returnFocus: [PhotoReviewScanFocus] = []
+        let application = AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            host: host,
+            router: router,
+            setReturnFocus: { returnFocus.append($0) }
+        )
+
+        XCTAssertEqual(
+            application,
+            PhotoReviewDeleteApplication(
+                focus: .addButton,
+                announcement: "0 photos remaining. Returning to Scan."
+            )
+        )
+        XCTAssertNil(host.session, "The final delete clears the Photo Review boundary.")
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(
+            router.photoReviewScanReturn,
+            PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+        )
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+        XCTAssertEqual(returnFocus, [.addPhotoButton])
+
+        XCTAssertNil(
+            AppShellPhotoReviewDeleteTransaction.perform(
+                session: session,
+                host: host,
+                router: router,
+                setReturnFocus: { returnFocus.append($0) }
+            ),
+            "Repeating the final delete is inert and never announces twice."
+        )
+        XCTAssertEqual(returnFocus, [.addPhotoButton])
+    }
+
     func testPhotoReviewDirectReplacementRetargetsOnlyMatchingStableIdentities() {
         let fingerprints = [
             "direct-replace-photo-a-digest",
