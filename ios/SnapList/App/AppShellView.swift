@@ -8,6 +8,7 @@ struct AppShellView: View {
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
     @Bindable var runStore: RunDetailStore
+    @Bindable var submissionHost: ItemRunSubmissionHost
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -65,10 +66,17 @@ struct AppShellView: View {
                             setReturnFocus: { pendingScanReturnFocus = $0 }
                         )
                     },
-                    // Typed boundaries only. #469 owns the Voice recorder interior and
-                    // #457 owns submission, so neither destination exists in this shell
-                    // and neither event may touch the seller's photo intake.
-                    openBoundary: { _ in },
+                    // #469 still owns the Voice recorder interior, so that event stays
+                    // inert here. Start listing submits the photos in their displayed
+                    // order; only a validated receipt may clear the intake.
+                    openBoundary: { event in
+                        guard case .startListing = event else { return }
+                        Task {
+                            await submissionHost.startListing(
+                                photos: session.store.photos
+                            )
+                        }
+                    },
                     intake: photoReviewIntake
                 )
             } else {
@@ -462,6 +470,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             service: UnavailableRunService(),
             bearerToken: { "preview-bearer" }
         ),
+        submissionHost: ItemRunSubmissionHost(coordinator: nil),
         configuration: .preview
     )
 }
