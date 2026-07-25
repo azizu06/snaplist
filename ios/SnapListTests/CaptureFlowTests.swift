@@ -3716,6 +3716,63 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(onboarding.state.stagedPhotoCount, 2)
     }
 
+    func testPhotoReviewAddStagesConfirmedPickerItemsSequentiallyInExactReturnOrder() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        let photoA = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemRed),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoB = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemGreen),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoC = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemTeal),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let reviewStore = PhotoReviewStore(photos: [photoA, photoB, photoC])
+        XCTAssertTrue(reviewStore.selectPhotoForActions(id: photoB.id))
+        reviewStore.beginPickerRequest(.add)
+
+        let dataD = try makeLandscapeImageData(leftColor: .systemPink)
+        let dataE = try makeLandscapeImageData(leftColor: .systemIndigo)
+        let durableCountsWhenLoadBegan = DurableCountRecorder()
+        let items = [dataD, dataE].map { data in
+            TestLibraryPhotoLoader {
+                durableCountsWhenLoadBegan.record(
+                    try await draftStore.loadPhotos().count
+                )
+                return data
+            }
+        }
+
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        let outcome = await intake.apply(items, to: reviewStore)
+
+        // E is only read after D is durable. Loading the whole selection into memory
+        // first would put every chosen photo at risk of one late staging failure.
+        XCTAssertEqual(durableCountsWhenLoadBegan.counts, [3, 4])
+
+        guard case .applied(let appliedPhotos) = outcome else {
+            return XCTFail("Expected the confirmed Add to apply, got \(outcome).")
+        }
+        XCTAssertEqual(appliedPhotos.count, 2)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoB, photoC] + appliedPhotos)
+        // Byte-for-byte, not merely same identity: A, B, and C keep their exact URLs,
+        // creation dates, and receipts through someone else's transaction.
+        XCTAssertEqual(Array(reviewStore.photos.prefix(3)), [photoA, photoB, photoC])
+        let durablePhotos = try await draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotos, reviewStore.photos)
+        XCTAssertNil(reviewStore.activePickerRequest)
+        XCTAssertEqual(reviewStore.selectedPhotoID, photoB.id)
+        XCTAssertEqual(reviewStore.actionsPhotoID, photoB.id)
+    }
+
     private func makeModel(
         camera: TestCaptureCamera = TestCaptureCamera(
             isAvailable: true,
@@ -3954,6 +4011,15 @@ private actor TestFramingEvaluator: FramingEvaluating {
 
     func evaluate(frame: CaptureFrame) async throws -> FramingObservation {
         observations.isEmpty ? .noSubject : observations.removeFirst()
+    }
+}
+
+@MainActor
+private final class DurableCountRecorder {
+    private(set) var counts: [Int] = []
+
+    func record(_ count: Int) {
+        counts.append(count)
     }
 }
 
