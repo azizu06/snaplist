@@ -506,8 +506,16 @@ struct PhotoReviewView: View {
     private var topBar: some View {
         HStack(alignment: .firstTextBaseline) {
             if let backToCamera {
-                Button("Back to camera", action: backToCamera)
-                    .accessibilityIdentifier("photo-review.back")
+                // Symmetric padding grows the tappable frame to the 44pt floor and the
+                // negative outer padding gives it back, so the rendered v1.1 top bar
+                // geometry does not move. 10pt stays inside the 20pt section gap below.
+                Button(action: backToCamera) {
+                    Text("Back to camera")
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                }
+                .padding(.vertical, -10)
+                .accessibilityIdentifier("photo-review.back")
             }
 
             Text("Review photos")

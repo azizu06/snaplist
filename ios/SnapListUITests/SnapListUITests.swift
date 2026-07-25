@@ -178,6 +178,8 @@ final class SnapListUITests: XCTestCase {
             return
         }
         XCTAssertEqual(back.label, "Back to camera")
+        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
         back.tap()
 
         let returnedReview = app.buttons["scan.review"]
