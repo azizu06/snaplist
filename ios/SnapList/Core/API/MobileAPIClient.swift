@@ -231,6 +231,22 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
         return photo
     }
 
+    // The fixture has no image pipeline, so like `stage` it yields the photo it already
+    // holds rather than inventing a new artifact.
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        guard let index = photos.firstIndex(where: { $0.id == photoID }) else {
+            throw CaptureDraftStoreError.photoNotStaged
+        }
+        return CaptureDraftReplaceResult(
+            replacementPhoto: photos[index],
+            photos: photos
+        )
+    }
+
     func replacePhotos(with replacement: [StagedCapturePhoto]) async throws {
         let currentByID = Dictionary(
             uniqueKeysWithValues: photos.map { ($0.id, $0) }

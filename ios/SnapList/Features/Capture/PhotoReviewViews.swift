@@ -135,10 +135,35 @@ final class PhotoReviewIntake {
         _ items: [Item],
         to store: PhotoReviewStore
     ) async -> PhotoReviewIntakeOutcome {
-        guard case .add? = store.activePickerRequest, !items.isEmpty else {
+        guard let request = store.activePickerRequest, let firstItem = items.first else {
             return .inert
         }
 
+        switch request {
+        case .add:
+            let stagedPhotos = await stageAdditions(items)
+            guard !stagedPhotos.isEmpty,
+                  store.confirmPickerResult(.additions(stagedPhotos)) != nil else {
+                // The request has to end either way. Leaving it open would keep Start
+                // listing disabled behind a picker that is no longer on screen.
+                store.cancelPickerRequest()
+                return .inert
+            }
+            return .applied(appliedPhotos: stagedPhotos)
+
+        case .replace(let photoID):
+            guard let staged = await stageReplacement(firstItem, for: photoID),
+                  store.confirmPickerResult(.replacement(staged)) != nil else {
+                store.cancelPickerRequest()
+                return .inert
+            }
+            return .applied(appliedPhotos: [staged])
+        }
+    }
+
+    private func stageAdditions<Item: CaptureLibraryPhotoLoading>(
+        _ items: [Item]
+    ) async -> [StagedCapturePhoto] {
         var stagedPhotos: [StagedCapturePhoto] = []
         for item in items {
             // One item at a time: read, make it durable, then read the next. Holding the
@@ -152,12 +177,21 @@ final class PhotoReviewIntake {
             }
             stagedPhotos.append(staged)
         }
+        return stagedPhotos
+    }
 
-        guard !stagedPhotos.isEmpty,
-              store.confirmPickerResult(.additions(stagedPhotos)) != nil else {
-            return .inert
+    private func stageReplacement<Item: CaptureLibraryPhotoLoading>(
+        _ item: Item,
+        for photoID: StagedCapturePhoto.ID
+    ) async -> StagedCapturePhoto? {
+        guard let imageData = try? await item.loadPhotoData() else {
+            return nil
         }
-        return .applied(appliedPhotos: stagedPhotos)
+        return try? await draftStore.replace(
+            photoID: photoID,
+            imageData: imageData,
+            libraryTransferReceipt: nil
+        ).replacementPhoto
     }
 }
 

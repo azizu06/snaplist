@@ -473,6 +473,11 @@ struct CaptureDraftAppendResult: Equatable {
     let photos: [StagedCapturePhoto]
 }
 
+struct CaptureDraftReplaceResult: Equatable {
+    let replacementPhoto: StagedCapturePhoto
+    let photos: [StagedCapturePhoto]
+}
+
 protocol CaptureCamera: AnyObject {
     var session: AVCaptureSession { get }
     var captureDevice: AVCaptureDevice? { get }
@@ -526,6 +531,16 @@ protocol CaptureDraftStoring {
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
     ) async throws -> CaptureDraftAppendResult
+    /// Stages one new photo into an existing ordinal.
+    ///
+    /// Distinct from append plus `replacePhotos`, which cannot express this at five
+    /// photos: appending first exceeds the cap, and dropping the target first would
+    /// delete a photo the seller still has before its replacement is known to exist.
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws
     func discard() async throws
 }
@@ -562,6 +577,7 @@ enum CaptureDraftStoreError: Error {
     case invalidManifest
     case partialStageCleanupFailed
     case photoLimitReached
+    case photoNotStaged
 }
 
 actor LocalCaptureDraftStore: CaptureDraftStoring {
@@ -704,6 +720,31 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
         )
     }
 
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        let existingPhotos = try await loadPhotos()
+        guard let replacedIndex = existingPhotos.firstIndex(where: { $0.id == photoID }) else {
+            throw CaptureDraftStoreError.photoNotStaged
+        }
+        // The replaced photo's artifacts survive until the new manifest commits, so a
+        // failure anywhere above leaves the seller exactly the photos they already had.
+        let staged = try persist(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt,
+            existingPhotos: existingPhotos,
+            replacedIndex: replacedIndex,
+            manifestURL: orderedManifestURL,
+            encodeManifest: { try self.encoder.encode($0) }
+        )
+        try? fileManager.removeItem(at: manifestURL)
+        var photos = existingPhotos
+        photos[replacedIndex] = staged
+        return CaptureDraftReplaceResult(replacementPhoto: staged, photos: photos)
+    }
+
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
         let existingPhotos = try await loadPhotos()
         let existingIDs = Set(existingPhotos.map(\.id))
@@ -736,6 +777,7 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?,
         existingPhotos: [StagedCapturePhoto],
+        replacedIndex: Int? = nil,
         manifestURL: URL,
         encodeManifest: ([StagedCapturePhoto]) throws -> Data
     ) throws -> StagedCapturePhoto {
@@ -779,7 +821,12 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
                 createdAt: now(),
                 libraryTransferReceipt: libraryTransferReceipt
             )
-            let photos = existingPhotos + [staged]
+            var photos = existingPhotos
+            if let replacedIndex {
+                photos[replacedIndex] = staged
+            } else {
+                photos.append(staged)
+            }
             try writeData(try encodeManifest(photos), manifestURL, Self.writingOptions)
             let currentURLs = Set(photos.flatMap { [$0.photoURL, $0.thumbnailURL] })
             try? removeSupersededImages(keeping: currentURLs)
