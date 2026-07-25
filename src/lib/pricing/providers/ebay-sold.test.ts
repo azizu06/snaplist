@@ -2474,6 +2474,49 @@ describe("parseSoldComps — sale-date capture (#59)", () => {
 });
 
 describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
+  it.each([
+    { label: "object", payload: { rows: [] } },
+    { label: "scalar", payload: 42 },
+  ])(
+    "declines a malformed non-array $label cache hit without fetching",
+    async ({ payload }) => {
+      const fetchPage = fakeFetch(FIXTURE_HTML);
+      const cache: TtlCache<EbaySoldComp[]> = {
+        get: async () => payload as unknown as EbaySoldComp[],
+        set: async () => undefined,
+      };
+      const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+      await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+      expect(fetchPage.urls).toHaveLength(0);
+    },
+  );
+
+  it("declines a mixed-row cache hit without fetching", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      get: async () =>
+        [
+          {
+            url: "https://www.ebay.com/itm/cache-a",
+            title: "Sony WH-1000XM4 Wireless Headphones",
+            price: 170,
+          },
+          null,
+          {
+            url: "https://www.ebay.com/itm/cache-b",
+            title: "Sony WH-1000XM4 Wireless Headphones",
+            price: 190,
+          },
+        ] as unknown as EbaySoldComp[],
+      set: async () => undefined,
+    };
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage.urls).toHaveLength(0);
+  });
+
   it("rejects hostile cached rows before they can produce sold authority", async () => {
     const fetchPage = fakeFetch(FIXTURE_HTML);
     const cache: TtlCache<EbaySoldComp[]> = {

@@ -88,6 +88,25 @@ export interface EbaySoldComp {
   soldAt?: number;
 }
 
+function isEbaySoldCompArray(value: unknown): value is EbaySoldComp[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (comp) =>
+        comp != null &&
+        typeof comp === "object" &&
+        !Array.isArray(comp) &&
+        typeof comp.url === "string" &&
+        typeof comp.price === "number" &&
+        Number.isFinite(comp.price) &&
+        (comp.title === undefined || typeof comp.title === "string") &&
+        (comp.condition === undefined || typeof comp.condition === "string") &&
+        (comp.soldAt === undefined ||
+          (typeof comp.soldAt === "number" && Number.isFinite(comp.soldAt))),
+    )
+  );
+}
+
 function sameEbaySoldComps(
   observed: readonly EbaySoldComp[],
   expected: readonly EbaySoldComp[],
@@ -1579,6 +1598,7 @@ function createEbaySoldPricingProviderInternal(
             });
             return null;
           }
+          if (cached != null && !isEbaySoldCompArray(cached)) return null;
           comps = cached;
         } catch (err) {
           emitDiagnostic("pricing.cache.error", {
