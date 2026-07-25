@@ -190,10 +190,6 @@ final class PhotoReviewIntake {
         self.draftStore = draftStore
     }
 
-    func dismissRecovery() {
-        recovery = nil
-    }
-
     @discardableResult
     func apply<Item: CaptureLibraryPhotoLoading>(
         _ items: [Item],
@@ -976,8 +972,9 @@ struct PhotoReviewView: View {
         }
         .buttonStyle(.plain)
         // REV-03 keeps the tile in place at five photos and takes its action away, so
-        // the strip does not reflow and the seller can see why nothing more fits.
-        .opacity(isAddEnabled ? 1 : 0.4)
+        // the strip does not reflow and the seller can see why nothing more fits. The
+        // capped value is the live canvas addOpacity.
+        .opacity(isAddEnabled ? 1 : 0.5)
         .disabled(!isAddEnabled)
         .accessibilityLabel(
             PhotoReviewCapacityPolicy.addAccessibilityLabel(

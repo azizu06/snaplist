@@ -4004,8 +4004,6 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(reviewStore.activePickerRequest)
 
         let settledPhotos = reviewStore.photos
-        intake.dismissRecovery()
-        XCTAssertNil(intake.recovery)
 
         // A replace that cannot be read leaves its target exactly where it was, still
         // pointing at bytes that are still on disk.
@@ -4034,8 +4032,8 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertNil(reviewStore.activePickerRequest)
 
-        // An Add whose very first item fails changes nothing at all.
-        intake.dismissRecovery()
+        // An Add whose very first item fails changes nothing at all, and its recovery
+        // replaces the replace-shaped one still standing rather than accumulating.
         reviewStore.beginPickerRequest(.add)
         let failedAddOutcome = await intake.apply(
             [TestLibraryPhotoLoader { throw TestCaptureError.failed }],
