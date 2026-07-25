@@ -199,6 +199,45 @@ final class SnapListUITests: XCTestCase {
         // directly by ScanReturnFocusPolicy and by the router-seam return assertions.
     }
 
+    func testLivePhotoReviewBackReachesTheTouchFloorOnTheApprovedTopBarRow() {
+        let fixture = launch(extraArguments: ["--photo-review-state=REV-02"])
+        XCTAssertTrue(
+            fixture.scrollViews["photo-review.screen"].waitForExistence(timeout: 3)
+        )
+        let approvedRow = fixture.staticTexts["photo-review.count"].frame
+        fixture.terminate()
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+        XCTAssertTrue(
+            app.scrollViews["photo-review.screen"].waitForExistence(timeout: 3)
+        )
+
+        let back = app.buttons["photo-review.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 2))
+        let liveRow = app.staticTexts["photo-review.count"].frame
+
+        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+
+        // The live shell adds Back to the same baseline-aligned top bar row the approved
+        // fixture renders. Back's touch target is grown inside the label and given back
+        // with negative outer padding, so it must not push that shared row off its
+        // approved position. A target grown by enlarging Back's own layout box instead
+        // would move every baseline-aligned sibling in this row.
+        XCTAssertEqual(liveRow.minY, approvedRow.minY, accuracy: 0.5)
+        XCTAssertEqual(liveRow.height, approvedRow.height, accuracy: 0.5)
+    }
+
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {
         let expectedTextByState = [
             ("CAP-01", "Add an item"),
