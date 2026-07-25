@@ -3716,6 +3716,420 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(onboarding.state.stagedPhotoCount, 2)
     }
 
+    func testPhotoReviewAddStagesConfirmedPickerItemsSequentiallyInExactReturnOrder() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        let photoA = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemRed),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoB = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemGreen),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoC = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemTeal),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let reviewStore = PhotoReviewStore(photos: [photoA, photoB, photoC])
+        XCTAssertTrue(reviewStore.selectPhotoForActions(id: photoB.id))
+        reviewStore.beginPickerRequest(.add)
+
+        let dataD = try makeLandscapeImageData(leftColor: .systemPink)
+        let dataE = try makeLandscapeImageData(leftColor: .systemIndigo)
+        let durableCountsWhenLoadBegan = DurableCountRecorder()
+        let items = [dataD, dataE].map { data in
+            TestLibraryPhotoLoader {
+                durableCountsWhenLoadBegan.record(
+                    try await draftStore.loadPhotos().count
+                )
+                return data
+            }
+        }
+
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        let outcome = await intake.apply(items, to: reviewStore)
+
+        // E is only read after D is durable. Loading the whole selection into memory
+        // first would put every chosen photo at risk of one late staging failure.
+        XCTAssertEqual(durableCountsWhenLoadBegan.counts, [3, 4])
+
+        guard case .applied(let appliedPhotos) = outcome else {
+            return XCTFail("Expected the confirmed Add to apply, got \(outcome).")
+        }
+        XCTAssertEqual(appliedPhotos.count, 2)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoB, photoC] + appliedPhotos)
+        // Byte-for-byte, not merely same identity: A, B, and C keep their exact URLs,
+        // creation dates, and receipts through someone else's transaction.
+        XCTAssertEqual(Array(reviewStore.photos.prefix(3)), [photoA, photoB, photoC])
+        let durablePhotos = try await draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotos, reviewStore.photos)
+        XCTAssertNil(reviewStore.activePickerRequest)
+        XCTAssertEqual(reviewStore.selectedPhotoID, photoB.id)
+        XCTAssertEqual(reviewStore.actionsPhotoID, photoB.id)
+    }
+
+    func testPhotoReviewReplaceChangesOnlyItsOrdinalAndLeavesStaleDeliveriesInert() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        let photoA = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemRed),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoB = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemGreen),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoC = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemTeal),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let reviewStore = PhotoReviewStore(photos: [photoA, photoB, photoC])
+        XCTAssertTrue(reviewStore.selectPhotoForActions(id: photoB.id))
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        let dataF = try makeLandscapeImageData(leftColor: .systemPink)
+        let items = [TestLibraryPhotoLoader { dataF }]
+
+        reviewStore.beginPickerRequest(.replace(photoID: photoB.id))
+        let outcome = await intake.apply(items, to: reviewStore)
+
+        guard case .applied(let appliedPhotos) = outcome,
+              let photoF = appliedPhotos.first else {
+            return XCTFail("Expected the confirmed Replace to apply, got \(outcome).")
+        }
+        XCTAssertEqual(appliedPhotos.count, 1)
+        XCTAssertNotEqual(photoF.id, photoB.id)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoF, photoC])
+        // Ordinals one and three are the seller's other work. A replace is allowed to
+        // change exactly the photo the seller opened it on.
+        XCTAssertEqual(reviewStore.photos[0], photoA)
+        XCTAssertEqual(reviewStore.photos[2], photoC)
+        let durablePhotosAfterReplace = try await draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotosAfterReplace, [photoA, photoF, photoC])
+        XCTAssertNil(reviewStore.activePickerRequest)
+        XCTAssertEqual(reviewStore.selectedPhotoID, photoF.id)
+        XCTAssertEqual(reviewStore.actionsPhotoID, photoF.id)
+
+        let settledPhotos = reviewStore.photos
+        let settledDurablePhotos = durablePhotosAfterReplace
+
+        // A picker that delivers the same confirmed result twice must not stage a second
+        // copy: the request it belonged to is already spent.
+        let replayOutcome = await intake.apply(items, to: reviewStore)
+        let durablePhotosAfterReplay = try await draftStore.loadPhotos()
+        XCTAssertEqual(replayOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterReplay, settledDurablePhotos)
+
+        // Cancelled, so the delivery that arrives afterwards belongs to nothing.
+        reviewStore.beginPickerRequest(.replace(photoID: photoF.id))
+        XCTAssertEqual(
+            reviewStore.cancelPickerRequest(),
+            PhotoReviewPickerOpener.replaceButton(photoID: photoF.id)
+        )
+        let cancelledOutcome = await intake.apply(items, to: reviewStore)
+        let durablePhotosAfterCancel = try await draftStore.loadPhotos()
+        XCTAssertEqual(cancelledOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterCancel, settledDurablePhotos)
+
+        // The target left the set while the picker was open, so there is no ordinal to
+        // write into and nothing may be staged for it.
+        reviewStore.beginPickerRequest(.replace(photoID: photoB.id))
+        let mismatchedOutcome = await intake.apply(items, to: reviewStore)
+        let durablePhotosAfterMismatch = try await draftStore.loadPhotos()
+        XCTAssertEqual(mismatchedOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterMismatch, settledDurablePhotos)
+        XCTAssertNil(reviewStore.activePickerRequest)
+    }
+
+    func testPhotoReviewFivePhotoCapacityMakesAddInertAndAnnouncesTheLimitOnce() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        var priorPhotos: [StagedCapturePhoto] = []
+        for color in [UIColor.systemRed, .systemGreen, .systemTeal, .systemBrown] {
+            priorPhotos.append(
+                try await draftStore.append(
+                    imageData: makeLandscapeImageData(leftColor: color),
+                    libraryTransferReceipt: nil
+                ).appendedPhoto
+            )
+        }
+
+        let reviewStore = PhotoReviewStore(photos: priorPhotos)
+        let announcer = PhotoReviewCapacityAnnouncer()
+        let presentation = PhotoReviewPickerPresentation()
+
+        XCTAssertEqual(PhotoReviewCapacityPolicy.remainingCapacity(photoCount: 4), 1)
+        XCTAssertTrue(PhotoReviewCapacityPolicy.isAddEnabled(photoCount: 4))
+        XCTAssertEqual(
+            PhotoReviewCapacityPolicy.addAccessibilityLabel(photoCount: 4),
+            "Add photos"
+        )
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 4))
+
+        XCTAssertTrue(presentation.present(.add, store: reviewStore))
+        // The confirmed sheet dismisses first and leaves its request standing, exactly as
+        // the live screen does, so the intake still has a transaction to apply.
+        XCTAssertNil(
+            presentation.dismiss(hasConfirmedSelection: true, store: reviewStore)
+        )
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        let dataE = try makeLandscapeImageData(leftColor: .systemIndigo)
+        let outcome = await intake.apply(
+            [TestLibraryPhotoLoader { dataE }],
+            to: reviewStore
+        )
+        guard case .applied = outcome else {
+            return XCTFail("Expected the fifth photo to apply, got \(outcome).")
+        }
+        XCTAssertEqual(reviewStore.photos.count, 5)
+
+        XCTAssertEqual(PhotoReviewCapacityPolicy.remainingCapacity(photoCount: 5), 0)
+        XCTAssertFalse(PhotoReviewCapacityPolicy.isAddEnabled(photoCount: 5))
+        XCTAssertEqual(
+            PhotoReviewCapacityPolicy.addAccessibilityLabel(photoCount: 5),
+            "Add photos, unavailable at five photo limit"
+        )
+        XCTAssertEqual(
+            announcer.consumeAnnouncement(photoCount: 5),
+            "Five photos added. Five photo limit reached."
+        )
+
+        // Rerender and focus movement both re-read the same count. Neither is a new
+        // arrival at the limit, so neither may speak again.
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+
+        // Repeated activation of the inert Add opens no picker and says nothing.
+        for _ in 0..<3 {
+            XCTAssertFalse(presentation.present(.add, store: reviewStore))
+            XCTAssertNil(reviewStore.activePickerRequest)
+            XCTAssertFalse(presentation.isPresented)
+            XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+        }
+
+        // Replace is not capacity work, so the cap never blocks it.
+        let fifthPhotoID = try XCTUnwrap(reviewStore.photos.last?.id)
+        XCTAssertTrue(
+            presentation.present(.replace(photoID: fifthPhotoID), store: reviewStore)
+        )
+        XCTAssertEqual(
+            presentation.dismiss(hasConfirmedSelection: false, store: reviewStore),
+            PhotoReviewPickerOpener.replaceButton(photoID: fifthPhotoID)
+        )
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+
+        // Leaving capacity re-arms the limit, so the next arrival is a real transition.
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 4))
+        XCTAssertEqual(
+            announcer.consumeAnnouncement(photoCount: 5),
+            "Five photos added. Five photo limit reached."
+        )
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+    }
+
+    func testPhotoReviewIntakeFailurePreservesDurableValuesAndExposesTypedRecovery() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        func ownedArtifactCount() throws -> Int {
+            try FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            ).filter { $0.pathExtension == "jpg" }.count
+        }
+
+        let photoA = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemRed),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoB = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemGreen),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoC = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemTeal),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let reviewStore = PhotoReviewStore(photos: [photoA, photoB, photoC])
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        XCTAssertNil(intake.recovery)
+
+        let dataD = try makeLandscapeImageData(leftColor: .systemPink)
+        let dataF = try makeLandscapeImageData(leftColor: .systemYellow)
+        reviewStore.beginPickerRequest(.add)
+        let partialOutcome = await intake.apply(
+            [
+                TestLibraryPhotoLoader { dataD },
+                TestLibraryPhotoLoader { throw TestCaptureError.failed },
+                TestLibraryPhotoLoader { dataF }
+            ],
+            to: reviewStore
+        )
+
+        guard case .applied(let appliedPhotos) = partialOutcome,
+              let photoD = appliedPhotos.first else {
+            return XCTFail("Expected the durable photo to apply, got \(partialOutcome).")
+        }
+        XCTAssertEqual(appliedPhotos.count, 1)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoB, photoC, photoD])
+        let durablePhotosAfterPartial = try await draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotosAfterPartial, reviewStore.photos)
+        // Nothing half-written survives the failure: four photos, one image and one
+        // thumbnail each, and no orphan from the item that could not be read.
+        XCTAssertEqual(try ownedArtifactCount(), 8)
+        XCTAssertEqual(
+            intake.recovery,
+            PhotoReviewIntakeRecovery(
+                message: "Photo could not be added. Nothing else changed.",
+                focus: .addButton
+            )
+        )
+        XCTAssertNil(reviewStore.activePickerRequest)
+
+        let settledPhotos = reviewStore.photos
+
+        // A replace that cannot be read leaves its target exactly where it was, still
+        // pointing at bytes that are still on disk.
+        reviewStore.beginPickerRequest(.replace(photoID: photoB.id))
+        let failedReplaceOutcome = await intake.apply(
+            [TestLibraryPhotoLoader { nil }],
+            to: reviewStore
+        )
+        let durablePhotosAfterFailedReplace = try await draftStore.loadPhotos()
+        XCTAssertEqual(failedReplaceOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterFailedReplace, settledPhotos)
+        XCTAssertEqual(try ownedArtifactCount(), 8)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: photoB.photoURL.path)
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: photoB.thumbnailURL.path)
+        )
+        XCTAssertEqual(
+            intake.recovery,
+            PhotoReviewIntakeRecovery(
+                message: "Photo could not be replaced. Nothing else changed.",
+                focus: .replaceButton(photoID: photoB.id)
+            )
+        )
+        XCTAssertNil(reviewStore.activePickerRequest)
+
+        // An Add whose very first item fails changes nothing at all, and its recovery
+        // replaces the replace-shaped one still standing rather than accumulating.
+        reviewStore.beginPickerRequest(.add)
+        let failedAddOutcome = await intake.apply(
+            [TestLibraryPhotoLoader { throw TestCaptureError.failed }],
+            to: reviewStore
+        )
+        let durablePhotosAfterFailedAdd = try await draftStore.loadPhotos()
+        XCTAssertEqual(failedAddOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, settledPhotos)
+        XCTAssertEqual(durablePhotosAfterFailedAdd, settledPhotos)
+        XCTAssertEqual(try ownedArtifactCount(), 8)
+        XCTAssertEqual(intake.recovery?.focus, PhotoReviewPickerOpener.addButton)
+        XCTAssertNil(reviewStore.activePickerRequest)
+
+        // A successful transaction clears a recovery the seller has already seen.
+        let dataG = try makeLandscapeImageData(leftColor: .systemPurple)
+        reviewStore.beginPickerRequest(.add)
+        let recoveredOutcome = await intake.apply(
+            [TestLibraryPhotoLoader { dataG }],
+            to: reviewStore
+        )
+        guard case .applied = recoveredOutcome else {
+            return XCTFail("Expected the retry to apply, got \(recoveredOutcome).")
+        }
+        XCTAssertNil(intake.recovery)
+        XCTAssertEqual(reviewStore.photos.count, 5)
+    }
+
+    func testPhotoReviewIntakeCancelledWhileLoadingLeavesNothingStagedDurably() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        func ownedArtifactCount() throws -> Int {
+            try FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            ).filter { $0.pathExtension == "jpg" }.count
+        }
+
+        let photoA = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemRed),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let photoB = try await draftStore.append(
+            imageData: makeLandscapeImageData(leftColor: .systemGreen),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let reviewStore = PhotoReviewStore(photos: [photoA, photoB])
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        let dataD = try makeLandscapeImageData(leftColor: .systemPink)
+        let dataE = try makeLandscapeImageData(leftColor: .systemIndigo)
+
+        // The seller cancels while the second chosen photo is still being read. The
+        // first one already reached disk, so an inert result has to take it back.
+        reviewStore.beginPickerRequest(.add)
+        let cancelledAddOutcome = await intake.apply(
+            [
+                TestLibraryPhotoLoader { dataD },
+                TestLibraryPhotoLoader {
+                    reviewStore.cancelPickerRequest()
+                    return dataE
+                }
+            ],
+            to: reviewStore
+        )
+        let durablePhotosAfterCancelledAdd = try await draftStore.loadPhotos()
+        XCTAssertEqual(cancelledAddOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoB])
+        XCTAssertEqual(durablePhotosAfterCancelledAdd, [photoA, photoB])
+        XCTAssertEqual(try ownedArtifactCount(), 4)
+        // Cancelling is the seller's own choice, so it is not a failure to report.
+        XCTAssertNil(intake.recovery)
+        XCTAssertNil(reviewStore.activePickerRequest)
+
+        reviewStore.beginPickerRequest(.replace(photoID: photoB.id))
+        let cancelledReplaceOutcome = await intake.apply(
+            [
+                TestLibraryPhotoLoader {
+                    reviewStore.cancelPickerRequest()
+                    return dataE
+                }
+            ],
+            to: reviewStore
+        )
+        let durablePhotosAfterCancelledReplace = try await draftStore.loadPhotos()
+        XCTAssertEqual(cancelledReplaceOutcome, .inert)
+        XCTAssertEqual(reviewStore.photos, [photoA, photoB])
+        XCTAssertEqual(durablePhotosAfterCancelledReplace, [photoA, photoB])
+        XCTAssertEqual(try ownedArtifactCount(), 4)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: photoB.photoURL.path))
+        XCTAssertNil(intake.recovery)
+        XCTAssertNil(reviewStore.activePickerRequest)
+    }
+
     private func makeModel(
         camera: TestCaptureCamera = TestCaptureCamera(
             isAvailable: true,
@@ -3957,6 +4371,15 @@ private actor TestFramingEvaluator: FramingEvaluating {
     }
 }
 
+@MainActor
+private final class DurableCountRecorder {
+    private(set) var counts: [Int] = []
+
+    func record(_ count: Int) {
+        counts.append(count)
+    }
+}
+
 private struct TestLibraryPhotoLoader: CaptureLibraryPhotoLoading {
     let load: @MainActor () async throws -> Data?
 
@@ -4070,6 +4493,28 @@ private final class LifetimeTrackingCaptureStore: CaptureDraftStoring {
         stagedBytes = []
     }
 
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        guard let index = stagedPhotos.firstIndex(where: { $0.id == photoID }) else {
+            throw CaptureDraftStoreError.photoNotStaged
+        }
+        let byte = try XCTUnwrap(imageData.first)
+        tracker.recordStage(byte: byte)
+        stagedBytes.append(byte)
+        let photo = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/lifetime-photo-replaced-\(index).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/lifetime-thumb-replaced-\(index).jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        stagedPhotos[index] = photo
+        return CaptureDraftReplaceResult(replacementPhoto: photo, photos: stagedPhotos)
+    }
+
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
         stagedPhotos = photos
     }
@@ -4151,6 +4596,32 @@ private final class TestCaptureStore: CaptureDraftStoring {
     func discard() async throws {
         discardCount += 1
         stagedPhotos = []
+    }
+
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        guard let index = stagedPhotos.firstIndex(where: { $0.id == photoID }) else {
+            throw CaptureDraftStoreError.photoNotStaged
+        }
+        stageCount += 1
+        lastStagedImageData = imageData
+        stagedImageData.append(imageData)
+        if let stageError {
+            self.stageError = nil
+            throw stageError
+        }
+        let photo = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/photo-replaced-\(index).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/thumb-replaced-\(index).jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        stagedPhotos[index] = photo
+        return CaptureDraftReplaceResult(replacementPhoto: photo, photos: stagedPhotos)
     }
 
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws {

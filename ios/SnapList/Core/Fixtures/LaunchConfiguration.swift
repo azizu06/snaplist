@@ -124,6 +124,16 @@ enum RunDetailFixture: String, Equatable {
 
 enum PhotoReviewVisualStateID: String, Equatable {
     case resting = "REV-02"
+    case fivePhotos = "REV-03"
+
+    var photoCount: Int {
+        switch self {
+        case .resting:
+            3
+        case .fivePhotos:
+            PhotoReviewCapacityPolicy.photoLimit
+        }
+    }
 }
 
 struct LaunchConfiguration: Equatable {

@@ -16,6 +16,7 @@ struct AppShellView: View {
     @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
+    @State private var photoReviewIntake: PhotoReviewIntake?
 
     var body: some View {
         Group {
@@ -67,7 +68,8 @@ struct AppShellView: View {
                     // Typed boundaries only. #469 owns the Voice recorder interior and
                     // #457 owns submission, so neither destination exists in this shell
                     // and neither event may touch the seller's photo intake.
-                    openBoundary: { _ in }
+                    openBoundary: { _ in },
+                    intake: photoReviewIntake
                 )
             } else {
                 shell
@@ -81,7 +83,10 @@ struct AppShellView: View {
             of: router.captureBoundaryRequest,
             initial: true
         ) { _, request in
-            photoReviewHost.consume(request)
+            guard photoReviewHost.consume(request) else { return }
+            // A new session gets a new intake, so a recovery the seller already resolved
+            // cannot reappear on the next item they review.
+            photoReviewIntake = PhotoReviewIntake(draftStore: captureFlow.draftStore)
         }
         // Home's update loop is suspended from the outermost view. Photo Review replaces
         // the shell while it is open, so anything attached to the shell stops observing
