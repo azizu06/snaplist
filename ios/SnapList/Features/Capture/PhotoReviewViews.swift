@@ -112,6 +112,55 @@ final class PhotoReviewPickerPresentation {
     }
 }
 
+/// What one bounded system-picker transaction did to the live Photo Review store.
+enum PhotoReviewIntakeOutcome: Equatable {
+    /// Nothing changed. No active picker request matched this delivery.
+    case inert
+    case applied(appliedPhotos: [StagedCapturePhoto])
+}
+
+/// Loads the seller's chosen picker items and stages each one through the durable
+/// #438 seam before it reaches the live store, so what Photo Review shows and what
+/// Scan can recover never disagree.
+@MainActor
+final class PhotoReviewIntake {
+    private let draftStore: any CaptureDraftStoring
+
+    init(draftStore: any CaptureDraftStoring) {
+        self.draftStore = draftStore
+    }
+
+    @discardableResult
+    func apply<Item: CaptureLibraryPhotoLoading>(
+        _ items: [Item],
+        to store: PhotoReviewStore
+    ) async -> PhotoReviewIntakeOutcome {
+        guard case .add? = store.activePickerRequest, !items.isEmpty else {
+            return .inert
+        }
+
+        var stagedPhotos: [StagedCapturePhoto] = []
+        for item in items {
+            // One item at a time: read, make it durable, then read the next. Holding the
+            // whole selection in memory would stake every chosen photo on the last write.
+            guard let imageData = try? await item.loadPhotoData(),
+                  let staged = try? await draftStore.append(
+                    imageData: imageData,
+                    libraryTransferReceipt: nil
+                  ).appendedPhoto else {
+                break
+            }
+            stagedPhotos.append(staged)
+        }
+
+        guard !stagedPhotos.isEmpty,
+              store.confirmPickerResult(.additions(stagedPhotos)) != nil else {
+            return .inert
+        }
+        return .applied(appliedPhotos: stagedPhotos)
+    }
+}
+
 #if DEBUG
 @MainActor
 struct PhotoReviewFixtureView: View {
