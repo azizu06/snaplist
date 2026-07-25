@@ -351,7 +351,9 @@ function pipelineWithConfidence(
               priceDisclosure: "displayed-sold-price",
             },
           ],
-          tier: "isbn-lookup",
+          // Headphones have no ISBN, and every source/evidence row above is an
+          // eBay sold comp, so this is the tier the router would have fired.
+          tier: "ebay-sold",
         },
         confidence,
         listing: { platform: "ebay", title: "Item", description: "desc", fields: {} },

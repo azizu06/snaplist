@@ -13,16 +13,10 @@ const boundedMatchesMigrationPath = join(
   process.cwd(),
   "supabase/migrations/20260721210000_bounded_verified_sold_matches.sql",
 );
-const boundedMatchesMigration = existsSync(boundedMatchesMigrationPath)
-  ? readFileSync(boundedMatchesMigrationPath, "utf8")
-  : "";
 const legacyRestoreMigrationPath = join(
   process.cwd(),
   "supabase/migrations/20260722035415_preserve_legacy_pricing_evidence_restore.sql",
 );
-const legacyRestoreMigration = existsSync(legacyRestoreMigrationPath)
-  ? readFileSync(legacyRestoreMigrationPath, "utf8")
-  : "";
 const guidedAuthorityOrderMigrationPath = join(
   process.cwd(),
   "supabase/migrations/20260722040255_preserve_guided_correction_authority_order.sql",
@@ -32,22 +26,28 @@ const guidedAuthorityOrderMigration = existsSync(guidedAuthorityOrderMigrationPa
   : "";
 
 describe("pricing-evidence snapshot migration", () => {
-  it("versions current write bounds without redefining historical V1 validity", () => {
-    expect(boundedMatchesMigration).toMatch(
-      /create or replace function private\.pricing_evidence_rows_coarse\(p_evidence jsonb\)[\s\S]*jsonb_array_length\(p_evidence\) > 5/i,
-    );
-    expect(legacyRestoreMigration).toMatch(
-      /create or replace function private\.pricing_evidence_rows_coarse\(p_evidence jsonb\)[\s\S]*jsonb_array_length\(p_evidence\) > 60/i,
-    );
-    expect(legacyRestoreMigration).toMatch(
-      /create or replace function private\.pricing_evidence_rows_current_write\([\s\S]*jsonb_array_length\(p_evidence\) > 5/i,
-    );
-    expect(legacyRestoreMigration).toMatch(
-      /create function public\.complete_pipeline_run\([\s\S]*pricing_evidence_rows_current_write/i,
-    );
-    expect(legacyRestoreMigration).toMatch(
-      /create function public\.complete_guided_review_correction\([\s\S]*pricing_evidence_rows_current_write/i,
-    );
+  /**
+   * Discovery only. The evidence validators' behavior is proved against the
+   * installed database in `supabase/tests/pricing_evidence_snapshots.test.sql`:
+   * that the historical V1 validator still accepts sixty records and rejects a
+   * sixty-first, that the current bounded-write validator accepts five verified
+   * sold matches and rejects a sixth, that the snapshot table constraint keeps
+   * the V1 validator, and that both completion RPCs apply the bounded-write one.
+   * Re-asserting the SQL text here only coupled this suite to how those
+   * functions are spelled.
+   *
+   * That pgTAP suite needs a running local stack and is not a CI step, same as
+   * every other pgTAP contract in this repo, so this offline check is what still
+   * fails fast when a version in the chain is renamed or dropped.
+   */
+  it("keeps every version of the evidence-bound migration chain discoverable", () => {
+    for (const path of [
+      boundedMatchesMigrationPath,
+      legacyRestoreMigrationPath,
+      guidedAuthorityOrderMigrationPath,
+    ]) {
+      expect(existsSync(path), `missing migration: ${path}`).toBe(true);
+    }
   });
 
   it("preserves guided-correction authority precedence before bounded validation", () => {
@@ -88,7 +88,8 @@ describe("pricing-evidence snapshot migration", () => {
   });
 
   it("leaves pricing semantics to the strict reader and enforces coarse SQL bounds", () => {
-    expect(migration).toMatch(/jsonb_array_length\(p_evidence\) > 60/i);
+    // The record-count bound is proved behaviorally by pgTAP; the byte bound is
+    // not reachable from that suite, so it stays asserted here.
     expect(migration).toMatch(/octet_length\(p_evidence::text\) > 131072/i);
     expect(migration).toMatch(/evidenceAsOf/i);
     expect(migration).toMatch(/not \(price_result \? 'evidence'\)/i);
