@@ -2517,6 +2517,54 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
     expect(fetchPage.urls).toHaveLength(0);
   });
 
+  it("declines a malformed claimed-cache handoff without fetching", async () => {
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    let reads = 0;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        reads += 1;
+        return reads === 1
+          ? null
+          : ({ rows: [] } as unknown as EbaySoldComp[]);
+      },
+      set: async () => undefined,
+      claim: async () => false,
+      getClaimOwner: async () => "another-owner",
+    };
+    const provider = createRawEbaySoldPricingProvider({
+      fetchPage,
+      cache,
+      emitDiagnostic: () => undefined,
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("declines cached rows with non-positive prices without fetching", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      get: async () => [
+        {
+          url: "https://www.ebay.com/itm/cache-a",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: -170,
+        },
+        {
+          url: "https://www.ebay.com/itm/cache-b",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 0,
+        },
+      ],
+      set: async () => undefined,
+    };
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage.urls).toHaveLength(0);
+  });
+
   it("rejects hostile cached rows before they can produce sold authority", async () => {
     const fetchPage = fakeFetch(FIXTURE_HTML);
     const cache: TtlCache<EbaySoldComp[]> = {

@@ -99,6 +99,7 @@ function isEbaySoldCompArray(value: unknown): value is EbaySoldComp[] {
         typeof comp.url === "string" &&
         typeof comp.price === "number" &&
         Number.isFinite(comp.price) &&
+        comp.price > 0 &&
         (comp.title === undefined || typeof comp.title === "string") &&
         (comp.condition === undefined || typeof comp.condition === "string") &&
         (comp.soldAt === undefined ||
@@ -1434,7 +1435,9 @@ function createEbaySoldPricingProviderInternal(
           deadline,
         );
         if (handedOff === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) break;
-        if (handedOff != null) return handedOff;
+        if (handedOff != null) {
+          return isEbaySoldCompArray(handedOff) ? handedOff : null;
+        }
       } catch {
         emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
           reason: "handoff-read-failed",
