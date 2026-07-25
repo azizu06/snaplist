@@ -543,9 +543,26 @@ protocol CaptureDraftStoring {
     ) async throws -> CaptureDraftReplaceResult
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws
     func discard() async throws
+    /// Discards the draft only when it still holds exactly `photos`, in that order.
+    /// Returns whether the discard happened.
+    ///
+    /// Submission clears intake the seller can no longer see on screen, so an
+    /// unconditional discard would delete photos added or replaced while a request was
+    /// in flight. Refusing is always the recoverable answer.
+    func discardExactly(_ photos: [StagedCapturePhoto]) async throws -> Bool
 }
 
 extension CaptureDraftStoring {
+    /// Conformers that isolate their state should override this. The default reads and
+    /// discards as two separate calls, so anything landing between them is not seen.
+    func discardExactly(_ photos: [StagedCapturePhoto]) async throws -> Bool {
+        guard try await loadPhotos() == photos else {
+            return false
+        }
+        try await discard()
+        return true
+    }
+
     func loadPhotos() async throws -> [StagedCapturePhoto] {
         if let photo = try await load() {
             [photo]
@@ -847,6 +864,16 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
     func discard() async throws {
         guard fileManager.fileExists(atPath: rootDirectory.path) else { return }
         try discardRoot(rootDirectory)
+    }
+
+    /// Compares and deletes inside one actor entry, the way every other mutation here
+    /// reads before it writes. Going through the protocol default would leave the actor
+    /// between the comparison and the deletion, and a photo staged in that window would
+    /// be deleted despite never having been submitted.
+    func discardExactly(_ photos: [StagedCapturePhoto]) async throws -> Bool {
+        guard try await loadPhotos() == photos else { return false }
+        try await discard()
+        return true
     }
 
     private func purgeOwnedDraft(photos: [StagedCapturePhoto]) {
