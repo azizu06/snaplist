@@ -469,6 +469,29 @@ private enum ScanReviewFocusTarget: Hashable {
     case reviewButton
 }
 
+/// What a Scan camera surface should do with a pending Photo Review focus request.
+///
+/// Scan restores the accessibility cursor, not UIKit first-responder focus, so the
+/// decision is kept separate from the view that applies it and is asserted directly.
+enum ScanReturnFocusOutcome: Equatable {
+    /// Nothing to restore on this surface; leave the pending request untouched.
+    case none
+    /// Move the accessibility cursor to the Review opener and consume the request.
+    case focusReviewOpener
+}
+
+enum ScanReturnFocusPolicy {
+    static func outcome(
+        pendingFocus: PhotoReviewScanFocus?,
+        stagedPhotoCount: Int
+    ) -> ScanReturnFocusOutcome {
+        guard pendingFocus == .reviewButton, stagedPhotoCount > 0 else {
+            return .none
+        }
+        return .focusReviewOpener
+    }
+}
+
 private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View {
     let thumbnailURLs: [URL?]
     let isShutterEnabled: Bool
@@ -641,8 +664,10 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     }
 
     private func consumeReviewFocusIfPossible() {
-        guard returnFocus == .reviewButton,
-              !thumbnailURLs.isEmpty else {
+        guard ScanReturnFocusPolicy.outcome(
+            pendingFocus: returnFocus,
+            stagedPhotoCount: thumbnailURLs.count
+        ) == .focusReviewOpener else {
             return
         }
         focusedScanControl = .reviewButton
@@ -755,8 +780,10 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
     }
 
     private func consumeReviewFocusIfPossible() {
-        guard returnFocus == .reviewButton,
-              !thumbnailURLs.isEmpty else {
+        guard ScanReturnFocusPolicy.outcome(
+            pendingFocus: returnFocus,
+            stagedPhotoCount: thumbnailURLs.count
+        ) == .focusReviewOpener else {
             return
         }
         focusedScanControl = .reviewButton
