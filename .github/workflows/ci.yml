@@ -1,6 +1,8 @@
-# CI (issue #18): typecheck → unit/contract tests → offline eval → build.
-# Runs with NO secrets: no API keys, no database. Each gate is offline by
-# construction (see the per-step comments).
+# CI (issue #18): typecheck → unit/contract tests → offline eval → build,
+# plus the pgTAP database contracts (issue #496) and the Docker image build.
+# Runs with NO secrets: no API keys, no hosted database. `verify` is offline by
+# construction; `database` builds a throwaway local Postgres from the branch's
+# own migrations (see the per-step comments).
 name: CI
 
 on:
@@ -41,6 +43,42 @@ jobs:
       # The production build must succeed without secrets (env validation is
       # lazy) — the same property the Docker image build relies on.
       - run: pnpm build
+
+  # Database contracts (issue #496): the pgTAP suite is the behavioural proof
+  # for database-level invariants — RLS tenancy, lifecycle triggers, queue
+  # authority (ADR-0007). It needs a Postgres carrying this branch's
+  # migrations, so it runs as its own job instead of inside `verify`, which is
+  # offline by construction. Building from migrations every run also means CI
+  # never inherits the drift a long-lived local database accumulates.
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The Supabase CLI is a devDependency, so CI runs the same version
+      # developers do — no second place to bump it. Only the database
+      # container starts: pgTAP talks to Postgres directly, and the `auth` and
+      # `storage` schemas the migrations depend on ship inside the database
+      # image rather than being created by the excluded services. `start`
+      # applies every migration in supabase/migrations, then seeds.
+      - run: pnpm exec supabase start -x edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector
+
+      # Byte-identical to the local invocation in
+      # docs/runbooks/durable-pipeline-operations.md. pg_prove exits non-zero
+      # on any failing contract, which fails the build.
+      - run: pnpm exec supabase test db --local
+
+      - if: always()
+        run: pnpm exec supabase stop --no-backup
 
   # Proves the Dockerfile end-to-end (deps → standalone build → runner stage)
   # on every PR — also with zero secrets, since the image build injects none.
