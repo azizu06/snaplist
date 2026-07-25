@@ -260,6 +260,22 @@ struct PhotoReviewFixtureView: View {
 }
 #endif
 
+/// The two typed boundaries Photo Review opens. Photo Review owns neither
+/// destination: #469 owns the Voice recorder interior and which approved VOX state
+/// it resolves to, and #457 owns submission transport. Emitting one of these makes
+/// no claim about recording, upload, acceptance, queueing, AI work, or credit use.
+enum PhotoReviewBoundaryEvent: Equatable {
+    case openVoiceNote
+    case startListing
+}
+
+/// When the approved Start listing control is offered.
+enum PhotoReviewStartListingPolicy {
+    static func isEnabled(photoCount: Int, isPickerActive: Bool) -> Bool {
+        (1...5).contains(photoCount) && !isPickerActive
+    }
+}
+
 /// What Photo Review should do after one accepted delete: where the accessibility
 /// cursor lands, and the one count sentence the seller hears.
 struct PhotoReviewDeleteApplication: Equatable {
@@ -455,6 +471,7 @@ struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
     var backToCamera: (() -> Void)? = nil
     let delete: () async -> PhotoReviewDeleteApplication?
+    var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
 
     @State private var actionPresentation = PhotoReviewActionPresentation()
     @State private var accessibilityActionPresentation =
@@ -484,6 +501,11 @@ struct PhotoReviewView: View {
 
                 if store.actionsPhotoID != nil {
                     actionRow
+                }
+
+                if let openBoundary {
+                    voiceRow(openBoundary)
+                    startListingControl(openBoundary)
                 }
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
@@ -718,6 +740,49 @@ struct PhotoReviewView: View {
                 .accessibilityLabel("Delete this photo")
                 .accessibilityIdentifier("photo-review.delete")
         }
+    }
+
+    // Voice note and Start listing are typed boundaries only. Their rendered v1 detail
+    // is superseded by an unpackaged v7, so presentation here stays minimal and on
+    // visual hold: the approved control names, the approved enabling rule, and the
+    // approved placement of the voice row above Start listing. No sizes, iconography,
+    // timer, or sheet affordance is implemented from the superseded v1 rendering.
+    private func voiceRow(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
+    ) -> some View {
+        Button {
+            openBoundary(.openVoiceNote)
+        } label: {
+            Text("Voice note")
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: SnapListMetrics.minimumTouchTarget
+                )
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("photo-review.voice")
+    }
+
+    private func startListingControl(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
+    ) -> some View {
+        Button {
+            openBoundary(.startListing)
+        } label: {
+            Text("Start listing")
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: SnapListMetrics.minimumTouchTarget
+                )
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(
+            !PhotoReviewStartListingPolicy.isEnabled(
+                photoCount: store.photos.count,
+                isPickerActive: store.activePickerRequest != nil
+            )
+        )
+        .accessibilityIdentifier("photo-review.start-listing")
     }
 
     private var pickerIsPresented: Binding<Bool> {

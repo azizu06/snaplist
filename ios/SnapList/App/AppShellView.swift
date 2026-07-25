@@ -62,7 +62,11 @@ struct AppShellView: View {
                             router: router,
                             setReturnFocus: { pendingScanReturnFocus = $0 }
                         )
-                    }
+                    },
+                    // Typed boundaries only. #469 owns the Voice recorder interior and
+                    // #457 owns submission, so neither destination exists in this shell
+                    // and neither event may touch the seller's photo intake.
+                    openBoundary: { _ in }
                 )
             } else {
                 shell

@@ -37,6 +37,40 @@ final class AccessibilityFoundationTests: XCTestCase {
         }
     }
 
+    func testStartListingIsOfferedOnlyForOneToFivePhotosWithNoPickerInFlight() {
+        for photoCount in 1...5 {
+            XCTAssertTrue(
+                PhotoReviewStartListingPolicy.isEnabled(
+                    photoCount: photoCount,
+                    isPickerActive: false
+                ),
+                "\(photoCount) durable photos are a complete intake."
+            )
+        }
+
+        XCTAssertFalse(
+            PhotoReviewStartListingPolicy.isEnabled(
+                photoCount: 0,
+                isPickerActive: false
+            ),
+            "There is nothing to list without a photo."
+        )
+        XCTAssertFalse(
+            PhotoReviewStartListingPolicy.isEnabled(
+                photoCount: 6,
+                isPickerActive: false
+            ),
+            "Six photos are outside the approved intake."
+        )
+        XCTAssertFalse(
+            PhotoReviewStartListingPolicy.isEnabled(
+                photoCount: 3,
+                isPickerActive: true
+            ),
+            "An in-flight picker means the intake is still changing."
+        )
+    }
+
     func testScanRestoresReviewOpenerFocusOnlyWhenAReviewablePhotoRemains() {
         XCTAssertEqual(
             ScanReturnFocusPolicy.outcome(

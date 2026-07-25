@@ -199,6 +199,65 @@ final class SnapListUITests: XCTestCase {
         // directly by ScanReturnFocusPolicy and by the router-seam return assertions.
     }
 
+    func testLivePhotoReviewVoiceAndStartListingStayTypedBoundariesOverIntake() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+
+        let voice = app.buttons["photo-review.voice"]
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 2))
+        XCTAssertTrue(startListing.exists)
+        XCTAssertEqual(voice.label, "Voice note")
+        XCTAssertEqual(startListing.label, "Start listing")
+        XCTAssertTrue(startListing.isEnabled)
+        XCTAssertGreaterThanOrEqual(voice.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(startListing.frame.height, 44)
+
+        let count = app.staticTexts["photo-review.count"]
+        let coverLabel = app.buttons["photo-review.thumbnail.1"].label
+        XCTAssertEqual(count.label, "1 of 5")
+
+        voice.tap()
+        startListing.tap()
+
+        XCTAssertTrue(
+            screen.exists,
+            "Neither boundary owns a destination in this shell."
+        )
+        XCTAssertEqual(
+            count.label,
+            "1 of 5",
+            "A typed boundary never clears or mutates photo intake."
+        )
+        XCTAssertEqual(app.buttons["photo-review.thumbnail.1"].label, coverLabel)
+
+        // Neither control may claim work this shell does not do.
+        for claim in [
+            "Recording", "Uploaded", "Analyzing", "Queued", "Credit used",
+            "Item saved", "Saving your item", "Shared"
+        ] {
+            XCTAssertEqual(
+                app.staticTexts.matching(
+                    NSPredicate(format: "label CONTAINS %@", claim)
+                ).count,
+                0,
+                "Photo Review must not claim \(claim)."
+            )
+        }
+    }
+
     func testLivePhotoReviewDeletingTheOnlyPhotoReturnsToGuidedScanWithNoPhotos() {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
