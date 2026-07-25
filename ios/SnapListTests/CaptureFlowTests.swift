@@ -3852,6 +3852,95 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(reviewStore.activePickerRequest)
     }
 
+    func testPhotoReviewFivePhotoCapacityMakesAddInertAndAnnouncesTheLimitOnce() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draftStore = LocalCaptureDraftStore(rootDirectory: root)
+
+        var priorPhotos: [StagedCapturePhoto] = []
+        for color in [UIColor.systemRed, .systemGreen, .systemTeal, .systemBrown] {
+            priorPhotos.append(
+                try await draftStore.append(
+                    imageData: makeLandscapeImageData(leftColor: color),
+                    libraryTransferReceipt: nil
+                ).appendedPhoto
+            )
+        }
+
+        let reviewStore = PhotoReviewStore(photos: priorPhotos)
+        let announcer = PhotoReviewCapacityAnnouncer()
+        let presentation = PhotoReviewPickerPresentation()
+
+        XCTAssertEqual(PhotoReviewCapacityPolicy.remainingCapacity(photoCount: 4), 1)
+        XCTAssertTrue(PhotoReviewCapacityPolicy.isAddEnabled(photoCount: 4))
+        XCTAssertEqual(
+            PhotoReviewCapacityPolicy.addAccessibilityLabel(photoCount: 4),
+            "Add photos"
+        )
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 4))
+
+        XCTAssertTrue(presentation.present(.add, store: reviewStore))
+        // The confirmed sheet dismisses first and leaves its request standing, exactly as
+        // the live screen does, so the intake still has a transaction to apply.
+        XCTAssertNil(
+            presentation.dismiss(hasConfirmedSelection: true, store: reviewStore)
+        )
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+        let dataE = try makeLandscapeImageData(leftColor: .systemIndigo)
+        let outcome = await intake.apply(
+            [TestLibraryPhotoLoader { dataE }],
+            to: reviewStore
+        )
+        guard case .applied = outcome else {
+            return XCTFail("Expected the fifth photo to apply, got \(outcome).")
+        }
+        XCTAssertEqual(reviewStore.photos.count, 5)
+
+        XCTAssertEqual(PhotoReviewCapacityPolicy.remainingCapacity(photoCount: 5), 0)
+        XCTAssertFalse(PhotoReviewCapacityPolicy.isAddEnabled(photoCount: 5))
+        XCTAssertEqual(
+            PhotoReviewCapacityPolicy.addAccessibilityLabel(photoCount: 5),
+            "Add photos, unavailable at five photo limit"
+        )
+        XCTAssertEqual(
+            announcer.consumeAnnouncement(photoCount: 5),
+            "Five photos added. Five photo limit reached."
+        )
+
+        // Rerender and focus movement both re-read the same count. Neither is a new
+        // arrival at the limit, so neither may speak again.
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+
+        // Repeated activation of the inert Add opens no picker and says nothing.
+        for _ in 0..<3 {
+            XCTAssertFalse(presentation.present(.add, store: reviewStore))
+            XCTAssertNil(reviewStore.activePickerRequest)
+            XCTAssertFalse(presentation.isPresented)
+            XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+        }
+
+        // Replace is not capacity work, so the cap never blocks it.
+        let fifthPhotoID = try XCTUnwrap(reviewStore.photos.last?.id)
+        XCTAssertTrue(
+            presentation.present(.replace(photoID: fifthPhotoID), store: reviewStore)
+        )
+        XCTAssertEqual(
+            presentation.dismiss(hasConfirmedSelection: false, store: reviewStore),
+            PhotoReviewPickerOpener.replaceButton(photoID: fifthPhotoID)
+        )
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+
+        // Leaving capacity re-arms the limit, so the next arrival is a real transition.
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 4))
+        XCTAssertEqual(
+            announcer.consumeAnnouncement(photoCount: 5),
+            "Five photos added. Five photo limit reached."
+        )
+        XCTAssertNil(announcer.consumeAnnouncement(photoCount: 5))
+    }
+
     private func makeModel(
         camera: TestCaptureCamera = TestCaptureCamera(
             isAvailable: true,
