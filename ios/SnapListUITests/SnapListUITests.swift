@@ -309,7 +309,10 @@ final class SnapListUITests: XCTestCase {
             fixture.scrollViews["photo-review.screen"].waitForExistence(timeout: 3)
         )
         let approvedRow = fixture.staticTexts["photo-review.count"].frame
-        fixture.terminate()
+        XCTAssertTrue(
+            UIProcessTerminationBoundary().terminate(fixture),
+            "The approved fixture must exit before the live shell is measured."
+        )
 
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
