@@ -521,11 +521,26 @@ struct PhotoReviewView: View {
 
                 if let openBoundary {
                     voiceRow(openBoundary)
-                    startListingControl(openBoundary)
                 }
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
             .padding(.vertical, 16)
+        }
+        // The screen identity stays on the scrolling region itself, so the sticky action
+        // below is genuinely outside the scrollable content rather than merely painted
+        // over it.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("photo-review.screen")
+        // v1.2 primary_action.position is a sticky bottom action above the home-indicator
+        // safe area, and its adaptive-layout contract requires that action never cover the
+        // thumbnails, Voice context, or the home indicator. safeAreaInset pins it there and
+        // shortens the scrollable region by exactly its height, so it covers nothing.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let openBoundary {
+                startListingControl(openBoundary)
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                    .padding(.vertical, 12)
+            }
         }
         .background {
             SnapListColorToken.groupingFill.color
@@ -533,8 +548,6 @@ struct PhotoReviewView: View {
                 .onTapGesture(perform: dismissActionsOutside)
         }
         .disabled(isCommitting)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("photo-review.screen")
         .photosPicker(
             isPresented: pickerIsPresented,
             selection: $pickerItems,
@@ -760,7 +773,7 @@ struct PhotoReviewView: View {
         }
     }
 
-    // Voice note and Start listing are typed boundaries because of scope, not authority.
+    // Voice context and Start listing are typed boundaries because of scope, not authority.
     // Photo Review v1.2 (d166d0c3) and Voice Note + Start Listing v2 (7fd7bd41) are both
     // packaged and in force, and v1.2 keeps the voice row's interior withheld from its own
     // package. This issue owns the two boundaries and their typed events. The recorder
@@ -774,19 +787,18 @@ struct PhotoReviewView: View {
         Button {
             openBoundary(.openVoiceNote)
         } label: {
-            Text("Voice note")
+            Text("Voice context")
                 .frame(
                     maxWidth: .infinity,
                     minHeight: SnapListMetrics.minimumTouchTarget
                 )
         }
         .buttonStyle(.bordered)
-        // Voice Note + Start Listing v2 names this row and marks it optional and
-        // collapsed, and Photo Review v1.2 states that same truth in its label. Both are
-        // structural, so a seller who cannot see the row still learns it is skippable and
-        // not yet expanded. v1.2 calls the row "Voice context" while v2 calls it "Voice
-        // note"; v2 supersedes at this boundary, and #490 owns reconciling the two.
-        .accessibilityLabel("Voice note, optional, collapsed")
+        // v1.2 owns this screen and names the row "Voice context". Its optional and
+        // collapsed state is structural, so a seller who cannot see the row still learns
+        // it is skippable and not yet expanded. v2 owns the recorder interior, #469, and
+        // does not name this control.
+        .accessibilityLabel("Voice context, optional, collapsed")
         .accessibilityIdentifier("photo-review.voice")
     }
 

@@ -219,9 +219,10 @@ final class SnapListUITests: XCTestCase {
         let startListing = app.buttons["photo-review.start-listing"]
         XCTAssertTrue(voice.waitForExistence(timeout: 2))
         XCTAssertTrue(startListing.exists)
-        // Voice Note + Start Listing v2 names this row, and its optional and collapsed
-        // state is structural truth a seller who cannot see it still needs.
-        XCTAssertEqual(voice.label, "Voice note, optional, collapsed")
+        // Photo Review v1.2 owns this screen and names the row "Voice context". Its
+        // optional and collapsed state is structural truth a seller who cannot see the
+        // row still needs. v2 owns the recorder interior, which is #469, not this label.
+        XCTAssertEqual(voice.label, "Voice context, optional, collapsed")
         XCTAssertEqual(startListing.label, "Start listing")
         XCTAssertTrue(startListing.isEnabled)
         XCTAssertGreaterThanOrEqual(voice.frame.height, 44)
@@ -258,6 +259,65 @@ final class SnapListUITests: XCTestCase {
                 "Photo Review must not claim \(claim)."
             )
         }
+    }
+
+    // v1.2 primary_action.position is a sticky bottom action above the home-indicator
+    // safe area, and its adaptive-layout contract says that action never covers the
+    // thumbnails, Voice context, or the home indicator. Accessibility3 guarantees the
+    // review content is taller than the screen, so the scroll is real.
+    func testLivePhotoReviewKeepsStartListingStickyBelowTheScrollingReviewContent() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--dynamic-type=accessibility3"
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 5))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 5))
+
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(startListing.waitForExistence(timeout: 3))
+
+        // Structural truth: Start listing is pinned outside the scrolling content while
+        // Voice context stays in flow above it.
+        XCTAssertFalse(
+            screen.buttons["photo-review.start-listing"].exists,
+            "Start listing must be a sticky action, not part of the scrolling content."
+        )
+        XCTAssertTrue(
+            screen.buttons["photo-review.voice"].exists,
+            "Voice context stays in flow; only Start listing is sticky."
+        )
+
+        // Behavioural truth: the content scrolls under it and the action does not move.
+        let voiceBefore = screen.buttons["photo-review.voice"].frame
+        let stickyBefore = startListing.frame
+        screen.swipeUp()
+
+        XCTAssertNotEqual(
+            screen.buttons["photo-review.voice"].frame.minY,
+            voiceBefore.minY,
+            "The review content must actually scroll for this to prove anything."
+        )
+        XCTAssertEqual(
+            startListing.frame.minY,
+            stickyBefore.minY,
+            accuracy: 0.5,
+            "Start listing must stay pinned while the content scrolls."
+        )
+
+        let window = app.windows.firstMatch.frame
+        XCTAssertLessThanOrEqual(startListing.frame.maxY, window.maxY)
+        XCTAssertGreaterThanOrEqual(startListing.frame.height, 44)
     }
 
     func testLivePhotoReviewDeletingTheOnlyPhotoReturnsToGuidedScanWithNoPhotos() {
