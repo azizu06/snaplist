@@ -3,10 +3,8 @@ import type { PipelineResult } from "@/lib/pipeline";
 import { createPipelineQueueEnvelope } from "./envelope";
 import { createInMemoryPipelineQueue } from "./memory";
 import type { PipelineQueue } from "./queue";
-import {
-  pipelineWorkerCheckpointSchema,
-  type PipelineWorkerCheckpointWrite,
-} from "./checkpoint";
+import type { PipelineWorkerCheckpointWrite } from "./checkpoint";
+import { createDatabaseCheckpointClock } from "./checkpoint-clock.testing";
 import type {
   PipelineAttemptFailureResult,
   PipelineRunStatus,
@@ -57,6 +55,10 @@ interface AcceptanceRun {
 
 class AcceptanceStore implements PipelineWorkerStore {
   readonly runs = new Map<string, AcceptanceRun>();
+
+  private readonly databaseClock = createDatabaseCheckpointClock(
+    () => new Date(this.now()).toISOString(),
+  );
 
   constructor(private readonly now: () => number) {}
 
@@ -123,20 +125,10 @@ class AcceptanceStore implements PipelineWorkerStore {
     leaseSeconds: number;
   }) {
     const run = this.currentLease(input.runId, input.leaseToken);
-    const candidate = {
+    const checkpoint = this.databaseClock.stamp({
       ...run.checkpoint,
       ...input.checkpoint,
-    };
-    const priced = candidate.priced as
-      | { result: PipelineResult["price"]; evidenceAsOf?: string }
-      | undefined;
-    const checkpoint = pipelineWorkerCheckpointSchema.parse({
-      ...candidate,
-      priced:
-        priced && !priced.evidenceAsOf
-          ? { ...priced, evidenceAsOf: new Date(this.now()).toISOString() }
-          : priced,
-    });
+    } as PipelineWorkerCheckpointWrite);
     run.checkpoint = checkpoint;
     run.leaseExpiresAt = this.now() + input.leaseSeconds * 1_000;
     return checkpoint;

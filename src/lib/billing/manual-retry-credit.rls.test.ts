@@ -236,25 +236,81 @@ async function cleanupManualRetryAllowancePeriods(
   }
 }
 
-async function waitForApplicationLock(
+interface ObservedLockWait {
+  waiter_pid: number;
+  locktype: string | null;
+  mode: string | null;
+  relation_name: string | null;
+  blocker_pids: number[] | null;
+}
+
+async function backendPid(client: Client): Promise<number> {
+  const result = await client.query<{ pid: number }>(
+    "select pg_backend_pid() as pid",
+  );
+  return result.rows[0]!.pid;
+}
+
+function describeLockWait(observed: ObservedLockWait | undefined): string {
+  if (!observed) return "no backend from that application name was waiting on a lock";
+  return [
+    `waiter pid ${observed.waiter_pid}`,
+    `locktype ${observed.locktype ?? "none"}`,
+    `mode ${observed.mode ?? "none"}`,
+    `relation ${observed.relation_name ?? "none"}`,
+    `blocking pids [${(observed.blocker_pids ?? []).join(", ")}]`,
+  ].join(", ");
+}
+
+/**
+ * Any ungranted lock from the right application name is not proof of the fence.
+ * `retry_pipeline_run` also waits on the `snaplist:pipeline-retention` advisory
+ * lock, so an unrelated blocker reads as a pass unless the exact blocked
+ * relation and the exact blocking backend are both checked.
+ */
+async function waitForRelationLockWait(
   observer: Client,
   applicationName: string,
+  expectedRelation: string,
+  expectedBlockerPid: number,
 ): Promise<void> {
+  let observed: ObservedLockWait | undefined;
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    const waiting = await observer.query<{ waiting: boolean }>(
-      `select exists (
-         select 1
-         from pg_stat_activity
-         where application_name = $1
-           and state = 'active'
-           and wait_event_type = 'Lock'
-       ) as waiting`,
+    const waiting = await observer.query<ObservedLockWait>(
+      `select waiter.pid as waiter_pid,
+              blocked_lock.locktype as locktype,
+              blocked_lock.mode as mode,
+              (select namespace.nspname || '.' || class.relname
+                 from pg_class class
+                 join pg_namespace namespace
+                   on namespace.oid = class.relnamespace
+                where class.oid = blocked_lock.relation) as relation_name,
+              pg_blocking_pids(waiter.pid) as blocker_pids
+       from pg_stat_activity waiter
+       left join pg_locks blocked_lock
+         on blocked_lock.pid = waiter.pid
+        and not blocked_lock.granted
+       where waiter.application_name = $1
+         and waiter.state = 'active'
+         and waiter.wait_event_type = 'Lock'
+       limit 1`,
       [applicationName],
     );
-    if (waiting.rows[0]?.waiting) return;
+    // Keep the last informative poll. A final empty one would otherwise erase
+    // the blocker detail this helper exists to report.
+    observed = waiting.rows[0] ?? observed;
+    if (
+      observed?.relation_name === expectedRelation
+      && (observed.blocker_pids ?? []).includes(expectedBlockerPid)
+    ) {
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error(`Timed out waiting for ${applicationName} to reach the DDL fence`);
+  throw new Error(
+    `Timed out waiting for ${applicationName} to block on ${expectedRelation} `
+      + `held by backend ${expectedBlockerPid}: ${describeLockWait(observed)}`,
+  );
 }
 
 beforeAll(async () => {
@@ -819,6 +875,7 @@ describe("manual retry AI-item credit accounting", () => {
       | undefined;
     try {
       await Promise.all([migration.connect(), retry.connect()]);
+      const fencePid = await backendPid(migration);
       await migration.query("begin");
       await migration.query(
         "lock table public.pipeline_runs in share row exclusive mode",
@@ -834,7 +891,12 @@ describe("manual retry AI-item credit accounting", () => {
         "select public.retry_pipeline_run($1::uuid) as value",
         [run.run_id],
       );
-      await waitForApplicationLock(migration, "issue-278-overlap-retry");
+      await waitForRelationLockWait(
+        migration,
+        "issue-278-overlap-retry",
+        "public.pipeline_runs",
+        fencePid,
+      );
       await migration.query("commit");
 
       const retried = await retryCall;
