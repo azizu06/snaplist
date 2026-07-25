@@ -3,6 +3,78 @@
 require "strscan"
 require "yaml"
 
+class SymbolicText
+  Variable = Struct.new(:name)
+
+  attr_reader :parts
+
+  def self.literal(value)
+    new([value.to_s])
+  end
+
+  def self.variable(name)
+    new([Variable.new(name)])
+  end
+
+  def initialize(parts)
+    @parts = parts.each_with_object([]) do |part, normalized|
+      next if part == ""
+
+      if part.is_a?(String) && normalized.last.is_a?(String)
+        normalized[-1] += part
+      else
+        normalized << part
+      end
+    end
+  end
+
+  def +(other)
+    SymbolicText.new(parts + SymbolicText.coerce(other).parts)
+  end
+
+  def replace_literal(needle, replacement)
+    replacement_parts = SymbolicText.coerce(replacement).parts
+    replaced = parts.flat_map do |part|
+      next [part] unless part.is_a?(String)
+
+      replace_in_string(part, needle, replacement_parts)
+    end
+
+    SymbolicText.new(replaced)
+  end
+
+  def empty?
+    parts.empty?
+  end
+
+  def ==(other)
+    other.is_a?(SymbolicText) && parts == other.parts
+  end
+
+  def self.coerce(value)
+    value.is_a?(SymbolicText) ? value : literal(value)
+  end
+
+  private
+
+  def replace_in_string(value, needle, replacement_parts)
+    output = []
+    cursor = 0
+
+    while (match = value.index(needle, cursor))
+      output << value[cursor...match]
+      output.concat(replacement_parts)
+      cursor = match + needle.length
+    end
+
+    output << value[cursor..-1]
+    output
+  end
+end
+
+class DeferredBoolean
+end
+
 class GitHubExpressionParser
   Token = Struct.new(:type, :value)
 
@@ -80,7 +152,7 @@ class GitHubExpressionParser
   def parse_equality
     value = parse_primary
 
-    value = value == parse_primary while accept(:equal)
+    value = compare(value, parse_primary) while accept(:equal)
 
     value
   end
@@ -121,8 +193,8 @@ class GitHubExpressionParser
     raise "Unsupported GitHub expression function #{name}" unless name == "format"
     raise "format requires a template" if arguments.empty?
 
-    arguments.drop(1).each_with_index.reduce(arguments.first.to_s) do |formatted, (argument, index)|
-      formatted.gsub("{#{index}}", argument.to_s)
+    arguments.drop(1).each_with_index.reduce(SymbolicText.literal(arguments.first)) do |formatted, (argument, index)|
+      formatted.replace_literal("{#{index}}", argument)
     end
   end
 
@@ -131,7 +203,17 @@ class GitHubExpressionParser
   end
 
   def truthy?(value)
+    raise "Concurrency branching cannot depend on a symbolic context value" if value.is_a?(DeferredBoolean)
+    return !value.empty? if value.is_a?(SymbolicText)
+
     value != false && !value.nil? && value != "" && value != 0
+  end
+
+  def compare(left, right)
+    return left == right unless left.is_a?(SymbolicText) || right.is_a?(SymbolicText)
+    return left == right if left.is_a?(SymbolicText) && right.is_a?(SymbolicText)
+
+    DeferredBoolean.new
   end
 
   def accept(type)
@@ -159,27 +241,27 @@ class GitHubExpressionParser
 end
 
 def evaluate_template(template, context)
-  output = +""
+  output = SymbolicText.literal("")
   cursor = 0
 
   while (expression = template.match(/\$\{\{(.*?)\}\}/m, cursor))
-    output << template[cursor...expression.begin(0)]
-    output << GitHubExpressionParser.new(expression[1], context).parse.to_s
+    output += template[cursor...expression.begin(0)]
+    output += GitHubExpressionParser.new(expression[1], context).parse
     cursor = expression.end(0)
   end
 
   remainder = template[cursor..-1]
   raise "Unterminated GitHub expression" if remainder.include?("${{")
 
-  output << remainder
+  output + remainder
 end
 
-def context(event_name:, ref:, run_id:)
+def context(event_name:)
   {
     "github.workflow" => "iOS",
     "github.event_name" => event_name,
-    "github.ref" => ref,
-    "github.run_id" => run_id
+    "github.ref" => SymbolicText.variable("github.ref"),
+    "github.run_id" => SymbolicText.variable("github.run_id")
   }
 end
 
@@ -187,20 +269,15 @@ workflow = YAML.load_file(ARGV.fetch(0))
 group = workflow.dig("concurrency", "group")
 raise "concurrency.group must be an active string" unless group.is_a?(String)
 
-automatic_contexts = [
-  context(event_name: "pull_request", ref: "refs/pull/42/merge", run_id: "700"),
-  context(event_name: "push", ref: "refs/heads/main", run_id: "701")
-]
+automatic_expected = SymbolicText.literal("ios-iOS-") + SymbolicText.variable("github.ref")
 
-automatic_contexts.each do |automatic_context|
+["pull_request", "push"].each do |event_name|
+  automatic_context = context(event_name: event_name)
   actual = evaluate_template(group, automatic_context)
-  expected = "ios-iOS-#{automatic_context.fetch("github.ref")}"
-  raise "automatic concurrency group must resolve through github.ref" unless actual == expected
+  raise "automatic concurrency group must resolve through github.ref" unless actual == automatic_expected
 end
 
-["702", "703"].each do |run_id|
-  manual_context = context(event_name: "workflow_dispatch", ref: "refs/heads/main", run_id: run_id)
-  actual = evaluate_template(group, manual_context)
-  expected = "ios-iOS-dispatch-#{run_id}"
-  raise "manual concurrency group must be scoped by github.run_id" unless actual == expected
-end
+manual_context = context(event_name: "workflow_dispatch")
+manual_actual = evaluate_template(group, manual_context)
+manual_expected = SymbolicText.literal("ios-iOS-dispatch-") + SymbolicText.variable("github.run_id")
+raise "manual concurrency group must be scoped by github.run_id" unless manual_actual == manual_expected
