@@ -127,14 +127,22 @@ describe("pricing-evidence snapshot migration", () => {
    * worker-supplied timestamp, and holds that value across a retry is proved
    * behaviorally against the installed database by
    * `src/lib/pipeline-queue/worker.rls.test.ts`. Re-asserting the SQL tokens for
-   * `drop function`, `jsonb_set`, `statement_timestamp()`, and
-   * `returning checkpoint` only coupled this suite to how that function is
-   * spelled; the returning signature stays so a rename or a dropped version
-   * still fails fast offline.
+   * `jsonb_set`, `statement_timestamp()`, and `returning checkpoint` only
+   * coupled this suite to how that body is spelled.
+   *
+   * The `drop function if exists` assertion stays because that statement is
+   * load-bearing, not an implementation detail: 20260715041327 defines this
+   * same argument signature as `returns boolean`, and this migration recreates
+   * it with a bare `create function`, which fails with 42723 against an
+   * existing name. Dropping the statement breaks `supabase db reset`, and
+   * nothing in CI installs a database to catch that.
    */
   it("uses the database clock when the first priced checkpoint becomes durable", () => {
     expect(migration).toMatch(
-      /create function public\.checkpoint_pipeline_run[\s\S]+returns jsonb/i,
+      /drop function if exists public\.checkpoint_pipeline_run\(uuid, uuid, text, jsonb, integer\)/i,
+    );
+    expect(migration).toMatch(
+      /create function public\.checkpoint_pipeline_run\([^)]*\)\s*returns jsonb/i,
     );
   });
 

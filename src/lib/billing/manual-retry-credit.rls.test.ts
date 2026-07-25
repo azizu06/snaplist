@@ -296,7 +296,9 @@ async function waitForRelationLockWait(
        limit 1`,
       [applicationName],
     );
-    observed = waiting.rows[0];
+    // Keep the last informative poll. A final empty one would otherwise erase
+    // the blocker detail this helper exists to report.
+    observed = waiting.rows[0] ?? observed;
     if (
       observed?.relation_name === expectedRelation
       && (observed.blocker_pids ?? []).includes(expectedBlockerPid)
@@ -873,6 +875,7 @@ describe("manual retry AI-item credit accounting", () => {
       | undefined;
     try {
       await Promise.all([migration.connect(), retry.connect()]);
+      const fencePid = await backendPid(migration);
       await migration.query("begin");
       await migration.query(
         "lock table public.pipeline_runs in share row exclusive mode",
@@ -892,7 +895,7 @@ describe("manual retry AI-item credit accounting", () => {
         migration,
         "issue-278-overlap-retry",
         "public.pipeline_runs",
-        await backendPid(migration),
+        fencePid,
       );
       await migration.query("commit");
 
