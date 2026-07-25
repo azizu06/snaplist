@@ -1001,6 +1001,9 @@ final class CaptureFlowModel {
         self.stabilizer = stabilizer
     }
 
+    /// The durable draft Photo Review's intake writes through, so both surfaces stage
+    /// into one manifest instead of keeping two that can disagree.
+    var draftStore: any CaptureDraftStoring { store }
     var previewSession: AVCaptureSession { camera.session }
     var captureDevice: AVCaptureDevice? { camera.captureDevice }
     var isFlashAvailable: Bool { camera.isFlashAvailable }

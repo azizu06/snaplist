@@ -365,37 +365,34 @@ struct PhotoReviewFixtureView: View {
             )
         }
 
-        switch state {
-        case .resting:
-            let descriptors = (1...3).map { index in
-                (
-                    id: UUID(
-                        uuidString: "45500000-0000-4000-8000-\(String(format: "%012d", index))"
-                    )!,
-                    photoURL: rootDirectory.appendingPathComponent(
-                        "photo-review-\(index).jpg"
-                    ),
-                    thumbnailURL: rootDirectory.appendingPathComponent(
-                        "photo-review-thumb-\(index).jpg"
-                    ),
-                    createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
-                )
-            }
-            for (offset, descriptor) in descriptors.enumerated() {
-                materializeImages(
-                    at: [descriptor.photoURL, descriptor.thumbnailURL],
-                    ordinal: offset + 1
-                )
-            }
-            return descriptors.map { descriptor in
-                beforePhotoConstruction()
-                return StagedCapturePhoto(
-                    id: descriptor.id,
-                    photoURL: descriptor.photoURL,
-                    thumbnailURL: descriptor.thumbnailURL,
-                    createdAt: descriptor.createdAt
-                )
-            }
+        let descriptors = (1...state.photoCount).map { index in
+            (
+                id: UUID(
+                    uuidString: "45500000-0000-4000-8000-\(String(format: "%012d", index))"
+                )!,
+                photoURL: rootDirectory.appendingPathComponent(
+                    "photo-review-\(index).jpg"
+                ),
+                thumbnailURL: rootDirectory.appendingPathComponent(
+                    "photo-review-thumb-\(index).jpg"
+                ),
+                createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
+            )
+        }
+        for (offset, descriptor) in descriptors.enumerated() {
+            materializeImages(
+                at: [descriptor.photoURL, descriptor.thumbnailURL],
+                ordinal: offset + 1
+            )
+        }
+        return descriptors.map { descriptor in
+            beforePhotoConstruction()
+            return StagedCapturePhoto(
+                id: descriptor.id,
+                photoURL: descriptor.photoURL,
+                thumbnailURL: descriptor.thumbnailURL,
+                createdAt: descriptor.createdAt
+            )
         }
     }
 
@@ -410,7 +407,9 @@ struct PhotoReviewFixtureView: View {
         let colors = [
             UIColor(red: 0.86, green: 0.72, blue: 0.55, alpha: 1),
             UIColor(red: 0.52, green: 0.68, blue: 0.72, alpha: 1),
-            UIColor(red: 0.74, green: 0.66, blue: 0.78, alpha: 1)
+            UIColor(red: 0.74, green: 0.66, blue: 0.78, alpha: 1),
+            UIColor(red: 0.62, green: 0.76, blue: 0.60, alpha: 1),
+            UIColor(red: 0.82, green: 0.62, blue: 0.60, alpha: 1)
         ]
         let size = CGSize(width: 1_200, height: 900)
         let format = UIGraphicsImageRendererFormat()
@@ -704,12 +703,16 @@ struct PhotoReviewView: View {
     var backToCamera: (() -> Void)? = nil
     let delete: () async -> PhotoReviewDeleteApplication?
     var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
+    /// Absent in fixtures, which stage no durable session and so cannot apply a picker
+    /// result. The picker still opens; nothing lands.
+    var intake: PhotoReviewIntake? = nil
 
     @State private var actionPresentation = PhotoReviewActionPresentation()
     @State private var accessibilityActionPresentation =
         PhotoReviewAccessibilityActionPresentation()
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
+    @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
     // Outside dismissal focus stays independent from picker cancellation focus.
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
@@ -730,6 +733,14 @@ struct PhotoReviewView: View {
                 topBar
                 hero
                 thumbnailStrip
+
+                if let recovery = intake?.recovery {
+                    Text(recovery.message)
+                        .snapListTypography(.metadata)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("photo-review.intake-recovery")
+                }
 
                 if store.actionsPhotoID != nil {
                     actionRow
@@ -772,10 +783,14 @@ struct PhotoReviewView: View {
         )
         .onChange(of: pickerItems) { _, items in
             guard !items.isEmpty else { return }
+            // Clear before applying so the next transaction starts from an empty
+            // selection and a redelivered result cannot be read as a new one.
+            pickerItems = []
             _ = pickerPresentation.dismiss(
                 hasConfirmedSelection: true,
                 store: store
             )
+            applyPickerSelection(items)
         }
     }
 
@@ -929,6 +944,10 @@ struct PhotoReviewView: View {
         return truths.joined(separator: ", ")
     }
 
+    private var isAddEnabled: Bool {
+        PhotoReviewCapacityPolicy.isAddEnabled(photoCount: store.photos.count)
+    }
+
     private var addButton: some View {
         Button {
             presentPicker(.add)
@@ -956,7 +975,15 @@ struct PhotoReviewView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Add photos")
+        // REV-03 keeps the tile in place at five photos and takes its action away, so
+        // the strip does not reflow and the seller can see why nothing more fits.
+        .opacity(isAddEnabled ? 1 : 0.4)
+        .disabled(!isAddEnabled)
+        .accessibilityLabel(
+            PhotoReviewCapacityPolicy.addAccessibilityLabel(
+                photoCount: store.photos.count
+            )
+        )
         .accessibilityIdentifier("photo-review.add")
         .accessibilityFocused(
             $focusedPickerOpener,
@@ -1056,16 +1083,50 @@ struct PhotoReviewView: View {
     }
 
     private var pickerSelectionLimit: Int? {
-        guard case .replace = store.activePickerRequest else {
-            return nil
+        switch store.activePickerRequest {
+        case .replace:
+            1
+        case .add:
+            // The picker itself refuses a sixth photo, so the seller never chooses one
+            // and then watches it silently not arrive.
+            PhotoReviewCapacityPolicy.remainingCapacity(photoCount: store.photos.count)
+        case nil:
+            nil
         }
-        return 1
     }
 
     private func presentPicker(_ request: PhotoReviewPickerRequest) {
         pickerItems = []
+        guard pickerPresentation.present(request, store: store) else {
+            return
+        }
         focusedPickerOpener = nil
-        pickerPresentation.present(request, store: store)
+    }
+
+    private func applyPickerSelection(_ selection: [PhotosPickerItem]) {
+        guard let intake else {
+            return
+        }
+        Task {
+            let outcome = await intake.apply(selection, to: store)
+            if let recovery = intake.recovery {
+                restorePickerCancellationFocus(recovery.focus)
+                UIAccessibility.post(
+                    notification: .announcement,
+                    argument: recovery.message
+                )
+            }
+            guard case .applied = outcome,
+                  let announcement = capacityAnnouncer.consumeAnnouncement(
+                    photoCount: store.photos.count
+                  ) else {
+                return
+            }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: announcement
+            )
+        }
     }
 
     private func performDelete() {
@@ -1077,6 +1138,9 @@ struct PhotoReviewView: View {
             case .addButton:
                 focusedPickerOpener = .addButton
             }
+            // Leaving the limit re-arms it, so the next arrival at five is a transition
+            // the seller has not already heard announced.
+            _ = capacityAnnouncer.consumeAnnouncement(photoCount: store.photos.count)
             UIAccessibility.post(
                 notification: .announcement,
                 argument: application.announcement

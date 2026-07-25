@@ -538,6 +538,43 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(firstPhoto.isSelected)
     }
 
+    func testPhotoReviewAtFivePhotosShowsAddDimmedDisabledAndInert() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-03"])
+        let screen = app.scrollViews["photo-review.screen"]
+
+        XCTAssertTrue(
+            screen.waitForExistence(timeout: 3),
+            "The approved REV-03 fixture must render the public screen."
+        )
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "5 of 5")
+
+        let add = app.buttons["photo-review.add"]
+        // REV-03 keeps Add visible so the strip does not reflow at the limit. It stops
+        // being an action instead of disappearing.
+        XCTAssertTrue(add.exists)
+        XCTAssertFalse(add.isEnabled)
+        XCTAssertEqual(
+            add.label,
+            "Add photos, unavailable at five photo limit"
+        )
+
+        // A disabled control has no activation point at all: XCUITest cannot even
+        // evaluate its hittability, and tapping it raises rather than doing nothing. That
+        // it opens no picker and repeats no announcement is proved directly against
+        // PhotoReviewPickerPresentation and PhotoReviewCapacityAnnouncer.
+        let fifthPhoto = app.buttons["photo-review.thumbnail.5"]
+        XCTAssertTrue(fifthPhoto.exists)
+        XCTAssertTrue(fifthPhoto.label.contains("Photo 5 of 5"))
+
+        // Replace stays available at the limit, because replacing is not capacity work.
+        app.buttons["photo-review.thumbnail.1"].tap()
+        let replace = app.buttons["photo-review.replace"]
+        XCTAssertTrue(replace.waitForExistence(timeout: 2))
+        XCTAssertTrue(replace.isEnabled)
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "5 of 5")
+        XCTAssertFalse(add.isEnabled)
+    }
+
     func testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity() {
         let app = launch(extraArguments: ["--photo-review-state=REV-02"])
         let screen = app.scrollViews["photo-review.screen"]
