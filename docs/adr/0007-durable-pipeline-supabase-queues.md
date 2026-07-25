@@ -95,6 +95,26 @@ stack without introducing another pipeline implementation.
   owns hosted Cron, retention, health, and observability. Hosted scheduling remains unactivated until
   its owner-controlled slice lands.
 
+## Amendment — the pgTAP contracts run in CI (2026-07-25, issue #496)
+
+Decision 7 above, and every other pgTAP contract in the repo, previously ran only when a developer
+started a local stack by hand. Nothing on a push or pull request exercised them, so a database
+invariant could break and CI would still pass. Issue #496 closes that gap and does not change any
+contract.
+
+- The `database` job in `.github/workflows/ci.yml` starts a throwaway local Postgres, applies the
+  branch's own migrations, and runs `supabase test db --local`. Building from migrations each run
+  also keeps CI free of the drift a long-lived local database accumulates.
+- Only the database container starts. The `auth` and `storage` schemas the migrations depend on ship
+  inside the database image, so `gotrue`, `storage-api`, and the rest of the stack stay excluded.
+- The Supabase CLI comes from `devDependencies`, so CI and local runs share one pinned version.
+- Local invocation is unchanged: `pnpm supabase test db --local` is the same command CI runs.
+- **Measured duration**, first green run on an `ubuntu-latest` runner: 1m47s for the whole job —
+  73s to pull the image, apply 64 migrations, and seed; 4s to run 675 tests across 20 files; 13s to
+  tear down. It runs in parallel with `verify` (about 2m), so PR feedback time is unchanged.
+- Proven red before green: a deliberately failing contract passed CI before the job existed and
+  failed the build after it, with all 20 real contract files logged as `ok` in the runner.
+
 ## References
 
 - [Supabase Queues quickstart](https://supabase.com/docs/guides/queues/quickstart)
