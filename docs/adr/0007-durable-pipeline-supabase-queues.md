@@ -109,6 +109,10 @@ contract.
   inside the database image, so `gotrue`, `storage-api`, and the rest of the stack stay excluded.
 - The Supabase CLI comes from `devDependencies`, so CI and local runs share one pinned version.
 - Local invocation is unchanged: `pnpm supabase test db --local` is the same command CI runs.
+- Two guards keep the job from passing while proving less than it claims. An exclude name the CLI
+  stops recognising is only a warning that starts the container anyway, so the job treats that
+  warning as fatal. And pg_prove reports `PASS` for whatever it globs, so the job compares the file
+  count it reports against the `.sql` files in `supabase/tests` and fails on a mismatch.
 - **Measured duration**, first green run on an `ubuntu-latest` runner (run 30178055058): 1m50s for
   the whole job. 75s starts the container, applies the 64 migrations, and seeds; 5s runs 675 tests
   across 20 files; 12s tears down. It runs in parallel with `verify` at 1m34s and `image` at 1m40s,

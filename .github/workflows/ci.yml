@@ -70,15 +70,50 @@ jobs:
       # `storage` schemas the migrations depend on ship inside the database
       # image rather than being created by the excluded services. `start`
       # applies every migration in supabase/migrations, then seeds.
-      - run: pnpm exec supabase start -x edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector
+      #
+      # An exclude name the CLI no longer recognises is only a warning — it
+      # starts that container anyway and exits 0. A CLI upgrade could then
+      # quietly boot the whole stack and make the paragraph above false, so
+      # treat the warning as fatal.
+      - name: Start the database
+        id: start
+        run: |
+          set -o pipefail
+          pnpm supabase start -x edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector 2>&1 | tee start.log
+          if grep -q 'not valid to exclude' start.log; then
+            echo "::error::supabase start rejected an exclude name; the container set has drifted"
+            exit 1
+          fi
 
-      # Byte-identical to the local invocation in
+      # Same command as the local whole-suite run in
       # docs/runbooks/durable-pipeline-operations.md. pg_prove exits non-zero
       # on any failing contract, which fails the build.
-      - run: pnpm exec supabase test db --local
+      #
+      # pg_prove also reports PASS for whatever it globs, so a contract that
+      # stops matching would vanish silently — the same gap this job exists to
+      # close. Compare what ran against every .sql file in the directory, the
+      # superset the CLI selects from. Counting *.test.sql instead would let a
+      # contract renamed off that pattern lower both sides and slip through.
+      # This catches a file that stops being collected; a contract deleted
+      # outright still lowers both sides and is left to code review, where it
+      # is visible in the diff.
+      - name: Run the pgTAP contracts
+        run: |
+          set -o pipefail
+          pnpm supabase test db --local 2>&1 | tee pgtap.log
+          expected=$(ls supabase/tests/*.sql | wc -l | tr -d ' ')
+          reported=$(grep -oE 'Files=[0-9]+' pgtap.log | tail -1 | cut -d= -f2)
+          if [ "$reported" != "$expected" ]; then
+            echo "::error::pgTAP ran $reported contract files, expected $expected"
+            exit 1
+          fi
+          echo "pgTAP ran all $expected contract files"
 
-      - if: always()
-        run: pnpm exec supabase stop --no-backup
+      # Ephemeral runners discard the containers anyway, but stop cleanly so a
+      # self-hosted runner behaves the same. Skipped when the database never
+      # started, so an earlier failure cannot add a confusing second red step.
+      - if: always() && (steps.start.outcome == 'success' || steps.start.outcome == 'failure')
+        run: pnpm supabase stop --no-backup
 
   # Proves the Dockerfile end-to-end (deps → standalone build → runner stage)
   # on every PR — also with zero secrets, since the image build injects none.
