@@ -150,17 +150,19 @@ final class AppNavigationTests: XCTestCase {
         )
     }
 
-    @MainActor
-    func testRunDeepLinksAcceptTrustedWebRoutesAndRejectMalformedOrForeignURLs() {
+    func testRunDeepLinksAcceptOnlyTheCustomSchemeAndRejectWebOrMalformedURLs() {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000031")!
-        let router = AppRouter(initialTab: .listings, initialRoute: .account)
 
-        XCTAssertTrue(
-            router.open(URL(string: "https://snaplist.dev/runs/\(runID.uuidString)")!)
+        XCTAssertEqual(
+            RunDeepLink(
+                url: URL(string: "snaplist://runs/\(runID.uuidString.lowercased())")!
+            ),
+            .run(runID)
         )
-        XCTAssertEqual(router.pathBinding(for: .home).wrappedValue, [.home(.run(runID))])
 
         let rejected = [
+            "https://snaplist.dev/runs/\(runID.uuidString)",
+            "https://www.snaplist.dev/runs/\(runID.uuidString)",
             "snaplist://runs/not-a-uuid",
             "snaplist://runs/\(runID.uuidString)?item=another",
             "https://evil.example/runs/\(runID.uuidString)",
@@ -168,8 +170,7 @@ final class AppNavigationTests: XCTestCase {
             "https://snaplist.dev/runs/\(runID.uuidString)/extra"
         ]
         for rawURL in rejected {
-            XCTAssertFalse(router.open(URL(string: rawURL)!))
-            XCTAssertEqual(router.pathBinding(for: .home).wrappedValue, [.home(.run(runID))])
+            XCTAssertNil(RunDeepLink(url: URL(string: rawURL)!))
         }
     }
 }
