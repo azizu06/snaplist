@@ -34,8 +34,15 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         // path was never a submission and cannot be one. Removing it keeps the fail-closed
         // rule below from refusing every later submission over something that guards
         // nothing.
-        guard (try? attemptURL.resourceValues(forKeys: [.isRegularFileKey]))?
-            .isRegularFile == true else {
+        //
+        // Only a definite answer of "not a regular file" earns that removal. A metadata
+        // read that fails, or that comes back without the value, says nothing about what
+        // is here, and deleting on that would throw away a key a committed submission may
+        // still be using. Both fall through to the read and fail closed with everything
+        // else that cannot be identified.
+        if try attemptURL.resourceValues(
+            forKeys: [.isRegularFileKey]
+        ).isRegularFile == false {
             return discardUnusableAttempt()
         }
         // A regular record that exists but cannot be read is not the same as no record.

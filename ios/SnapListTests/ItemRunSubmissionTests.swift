@@ -662,15 +662,20 @@ final class ItemRunSubmissionTests: XCTestCase {
             at: root,
             withIntermediateDirectories: true
         )
-        // Exactly the shape a live attempt has, a regular file written by `saveAttempt`,
-        // whose bytes then cannot be read. Anything less than a regular file would be
-        // provably not a submission and is a different case.
+        // A real live attempt, written by the store itself, whose bytes then cannot be
+        // read. Anything less than a regular file would be provably not a submission and
+        // is a different case.
         let attemptURL = root.appendingPathComponent("attempt.json")
-        let attempt = ItemRunSubmissionAttempt(
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let attempt = try ItemRunSubmissionAttempt(
             idempotencyKey: Self.firstKey,
-            photos: []
+            photos: ItemRunSubmissionSnapshot.make(
+                for: intake.photos,
+                readData: intake.read
+            ).photos
         )
-        try JSONEncoder().encode(attempt).write(to: attemptURL)
+        try await LocalItemRunSubmissionAttemptStore(rootDirectory: root)
+            .saveAttempt(attempt)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0],
             ofItemAtPath: attemptURL.path
