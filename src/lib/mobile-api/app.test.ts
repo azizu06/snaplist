@@ -2,6 +2,8 @@ import { createHmac, hkdfSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createSupabaseNativeSubscriptionBridge } from "@/lib/billing/revenuecat-store";
 import {
+  GuestClaimAllowanceInFlightError,
+  GuestClaimAllowanceSpentError,
   GuestClaimIdempotencyConflictError,
   GuestClaimInProgressError,
 } from "@/lib/guest-recovery/service";
@@ -2820,6 +2822,8 @@ describe("mobile API v1 provider-neutral handler", () => {
     for (const [error, status, code] of [
       [new GuestClaimInProgressError(5), 409, "conflict"],
       [new GuestClaimIdempotencyConflictError(), 409, "conflict"],
+      [new GuestClaimAllowanceSpentError(), 409, "conflict"],
+      [new GuestClaimAllowanceInFlightError(), 409, "conflict"],
       [new Error("private storage credential detail"), 503, "internal_error"],
     ] as const) {
       const response = await handler({
@@ -2842,6 +2846,36 @@ describe("mobile API v1 provider-neutral handler", () => {
       });
       expect(body).not.toContain("credential");
     }
+  });
+
+  it("keeps a permanent and a transient guest-claim denial distinguishable", async () => {
+    const messages = await Promise.all(
+      [new GuestClaimAllowanceSpentError(), new GuestClaimAllowanceInFlightError()]
+        .map(async (error) => {
+          const response = await handler({
+            claimGuestRecovery: vi.fn().mockRejectedValue(error),
+            reportError: vi.fn(),
+          })(
+            new Request("http://localhost/v1/guest/claims", {
+              method: "POST",
+              headers: {
+                authorization: "Bearer signed-account-jwt",
+                "idempotency-key": "55555555-5555-4555-8555-555555555555",
+                "x-snaplist-guest-handoff": "opaque-174-handoff",
+              },
+            }),
+          );
+          const body = await response.json() as { error: { message: string } };
+          return body.error.message;
+        }),
+    );
+
+    // Pinned, not merely distinct: this is the wire contract, and it would
+    // otherwise move silently with an edit to the Error subclass constructor.
+    expect(messages).toEqual([
+      "The account's included item credit is already spent on another run.",
+      "The account's included item credit is reserved by a run in flight.",
+    ]);
   });
 
   it("requires authentication before either native billing seam", async () => {

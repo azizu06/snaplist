@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { GuestClaimIdempotencyConflictError } from "./service";
+import {
+  GuestClaimAllowanceInFlightError,
+  GuestClaimAllowanceSpentError,
+  GuestClaimIdempotencyConflictError,
+} from "./service";
 import { createSupabaseGuestClaimStore } from "./store";
 
 const identity = {
@@ -148,6 +152,85 @@ describe("guest claim fixed-RPC store", () => {
       guestUserId: "guest_fixture",
       leaseSeconds: 300,
     })).rejects.toBeInstanceOf(GuestClaimIdempotencyConflictError);
+  });
+
+  it.each([
+    [
+      "Account included credit is already spent on another run",
+      GuestClaimAllowanceSpentError,
+    ],
+    [
+      "Account included credit is reserved by a run in flight",
+      GuestClaimAllowanceInFlightError,
+    ],
+  ])("carries the %s denial to the caller as its own outcome", async (
+    message,
+    expected,
+  ) => {
+    const store = createSupabaseGuestClaimStore({
+      rpc: vi.fn().mockResolvedValue({ data: null, error: { message } }),
+    });
+
+    const calls = [
+      () => store.beginClaim({
+        ...identity,
+        guestUserId: "guest_fixture",
+        leaseSeconds: 300,
+      }),
+      () => store.completeClaim({
+        ...identity,
+        claimLeaseToken: "55555555-5555-4555-8555-555555555555",
+        verifiedObjects: [{
+          destinationPath: "user_account/items/front.enc",
+          sha256: "b".repeat(64),
+          byteLength: 128,
+          encryption,
+        }],
+      }),
+    ];
+    for (const call of calls) {
+      await expect(call()).rejects.toBeInstanceOf(expected);
+      await expect(call()).rejects.not.toBeInstanceOf(
+        GuestClaimIdempotencyConflictError,
+      );
+    }
+  });
+
+  it("keys the allowance denials on SQLSTATE, so a reworded message still maps", async () => {
+    const store = createSupabaseGuestClaimStore({
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: "SL001", message: "some future rewording" },
+      }),
+    });
+
+    await expect(store.beginClaim({
+      ...identity,
+      guestUserId: "guest_fixture",
+      leaseSeconds: 300,
+    })).rejects.toBeInstanceOf(GuestClaimAllowanceSpentError);
+  });
+
+  it("never reads a generic unique violation as an allowance denial", async () => {
+    // 23505 is raised by the idempotency bind and by any real constraint, so it
+    // is not safe to dispatch on. Only the two dedicated codes are.
+    const store = createSupabaseGuestClaimStore({
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: "23505", message: "duplicate key value violates unique constraint" },
+      }),
+    });
+
+    const rejection = store.beginClaim({
+      ...identity,
+      guestUserId: "guest_fixture",
+      leaseSeconds: 300,
+    });
+    await expect(rejection).rejects.not.toBeInstanceOf(GuestClaimAllowanceSpentError);
+    await expect(rejection).rejects.not.toBeInstanceOf(GuestClaimAllowanceInFlightError);
+    await expect(rejection).rejects.not.toBeInstanceOf(
+      GuestClaimIdempotencyConflictError,
+    );
   });
 
   it("requeues cleanup only through the exact recovery and copy lease capability", async () => {

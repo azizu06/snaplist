@@ -4,6 +4,8 @@ import {
   guestClaimTerminalOutcomeSchema,
   guestClaimVerifiedObjectSchema,
   guestRecoveryOutcomeSchema,
+  GuestClaimAllowanceInFlightError,
+  GuestClaimAllowanceSpentError,
   GuestClaimIdempotencyConflictError,
   MAX_GUEST_RECOVERY_PHOTOS,
   type GuestClaimStore,
@@ -18,7 +20,8 @@ type GuestClaimRpcName =
 
 interface GuestClaimRpcResult {
   data: unknown;
-  error: { message: string } | null;
+  /** PostgREST surfaces the raise message and its SQLSTATE as `code`. */
+  error: { message: string; code?: string } | null;
 }
 
 export interface GuestClaimRpcClient {
@@ -28,11 +31,38 @@ export interface GuestClaimRpcClient {
   ): PromiseLike<GuestClaimRpcResult>;
 }
 
+// This seam is the only place a caller learns which denial it hit, so it keys on
+// the most stable signal available. `SL001` and `SL002` exist for exactly this
+// dispatch and nothing else raises them (issue #504). A generic SQLSTATE is not
+// safe to key on: `23505` is raised by the idempotency bind and by any real
+// unique constraint alike, so that one stays on its message.
+const guestClaimErrorsByCode = new Map<string, () => Error>([
+  ["SL001", () => new GuestClaimAllowanceSpentError()],
+  ["SL002", () => new GuestClaimAllowanceInFlightError()],
+]);
+
+const guestClaimErrorsByMessage = new Map<string, () => Error>([
+  [
+    "Guest claim Idempotency-Key is already bound",
+    () => new GuestClaimIdempotencyConflictError(),
+  ],
+  [
+    "Account included credit is already spent on another run",
+    () => new GuestClaimAllowanceSpentError(),
+  ],
+  [
+    "Account included credit is reserved by a run in flight",
+    () => new GuestClaimAllowanceInFlightError(),
+  ],
+]);
+
 function rpcData(operation: string, result: GuestClaimRpcResult): unknown {
   if (result.error) {
-    if (result.error.message === "Guest claim Idempotency-Key is already bound") {
-      throw new GuestClaimIdempotencyConflictError();
-    }
+    const known = (result.error.code
+      ? guestClaimErrorsByCode.get(result.error.code)
+      : undefined)
+      ?? guestClaimErrorsByMessage.get(result.error.message);
+    if (known) throw known();
     throw new Error(`Guest recovery ${operation} failed: ${result.error.message}`);
   }
   return result.data;

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  GuestClaimAllowanceInFlightError,
+  GuestClaimAllowanceSpentError,
   GuestClaimStorageError,
   claimGuestRecovery,
   guestClaimStartSchema,
@@ -279,6 +281,34 @@ describe("guest claim-or-expire orchestrator", () => {
     });
     expect(privateStorage.remove).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["spent", GuestClaimAllowanceSpentError],
+    ["in-flight", GuestClaimAllowanceInFlightError],
+  ])(
+    "reports a late %s account allowance instead of a generic copy failure",
+    async (_label, ErrorType) => {
+      const claimStore = store({
+        completeClaim: vi.fn().mockRejectedValue(new ErrorType()),
+      });
+
+      await expect(
+        claimGuestRecovery(
+          {
+            handoff,
+            targetUserId: "user_account",
+            idempotencyKey: "66666666-6666-4666-8666-666666666666",
+          },
+          { store: claimStore, storage: storage() },
+        ),
+      ).rejects.toBeInstanceOf(ErrorType);
+
+      // The copy already happened, so the obsolete namespace still has to be
+      // swept and the lease handed back before the truth reaches the seller.
+      expect(claimStore.queueCopyCleanup).toHaveBeenCalledTimes(1);
+      expect(claimStore.releaseClaim).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("fails closed when failed-copy expiry cleanup cannot be confirmed", async () => {
     const claimStore = store({

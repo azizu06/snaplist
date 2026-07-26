@@ -9,6 +9,8 @@ import {
 } from "./runs";
 import { z } from "zod";
 import {
+  GuestClaimAllowanceInFlightError,
+  GuestClaimAllowanceSpentError,
   GuestClaimIdempotencyConflictError,
   GuestClaimInProgressError,
   type GuestClaimTerminalOutcome,
@@ -601,18 +603,16 @@ export function createMobileApiHandler(
           }),
         );
       } catch (error) {
+        // A denied claim is a conflict the caller can act on, not a server
+        // fault to retry. The two allowance denials stay distinguishable
+        // because "never" and "not right now" are different promises (#504).
         if (
           error instanceof GuestClaimInProgressError
           || error instanceof GuestClaimIdempotencyConflictError
+          || error instanceof GuestClaimAllowanceSpentError
+          || error instanceof GuestClaimAllowanceInFlightError
         ) {
-          return errorResponse(
-            requestId,
-            409,
-            "conflict",
-            error instanceof GuestClaimIdempotencyConflictError
-              ? "The Idempotency-Key is already bound to another guest claim."
-              : "The guest draft claim is already in progress.",
-          );
+          return errorResponse(requestId, 409, "conflict", error.message);
         }
         dependencies.reportError?.("mobile-api.guest-claim", error);
         return errorResponse(
