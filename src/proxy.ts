@@ -21,6 +21,8 @@ const isPublic = createRouteMatcher([
   "/login(.*)",
   "/signup(.*)",
   "/api/health",
+  "/api/app-attest",
+  "/api/app-attest/",
   "/api/ebay/account-deletion",
   "/api/cron/inbox-sync",
   "/dev(.*)",
@@ -50,9 +52,10 @@ export const proxy = clerkMiddleware(async (auth, request) => {
 export const config = {
   // Match everything except Next internals and static asset files.
   matcher: [
+    // App Attest authenticates its exact evidence route inside the handler.
     // Native bearer routes authenticate inside their handlers. Keep the whole
     // /v1 surface outside cookie middleware so missing web configuration cannot
     // replace their own HTTP contracts with a login redirect.
-    "/((?!_next/static|_next/image|favicon.ico|v1(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/app-attest/?$|v1(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
   ],
 };
