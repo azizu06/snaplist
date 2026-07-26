@@ -221,22 +221,29 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
 
     func load() async throws -> StagedCapturePhoto? { photos.first }
     func loadPhotos() async throws -> [StagedCapturePhoto] { photos }
+
+    // The fixture has no image pipeline, so it cannot turn `imageData` into a staged
+    // artifact and will not invent one. Handing back the photo it already holds would
+    // report an addition that never happened, and because the protocol-default `append`
+    // is built on this call, that photo would land a second time in the strip. It
+    // refuses instead, and each caller then handles the refusal exactly as it handles a
+    // real staging failure: Photo Review's Add shows its addition failure recovery unless
+    // the seller had already abandoned the request, the Scan shutter treats it as a
+    // retryable failure on the still-live camera and shows nothing, and library staging
+    // fails the phase only when the seller was not already on camera, denied, or
+    // unavailable, since those phases are their own recovery surface. So under this
+    // fixture the shutter is a no-op, which is the honest report for a store that cannot
+    // stage.
     func stage(
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
     ) async throws -> StagedCapturePhoto {
-        guard let photo = photos.first else {
-            throw CaptureDraftStoreError.invalidManifest
-        }
-        return photo
+        throw CaptureDraftStoreError.stagingUnsupported
     }
 
-    // The fixture has no image pipeline, so it cannot turn `imageData` into a staged
-    // artifact and will not invent one. Handing back the photo it already holds would
-    // report a replacement that never happened, so it refuses and the seller reads
-    // `PhotoReviewIntake`'s replacement failure recovery instead. `stage` above still
-    // yields the photo it holds rather than refusing, so a fixture Add is not yet held
-    // to this standard.
+    // Same refusal for the same reason: handing back the held photo would report a
+    // replacement that never happened. `PhotoReviewIntake` is this call's only caller, so
+    // a still-live replacement transaction shows the replacement failure recovery.
     func replace(
         photoID: StagedCapturePhoto.ID,
         imageData: Data,
@@ -245,7 +252,7 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
         guard photos.contains(where: { $0.id == photoID }) else {
             throw CaptureDraftStoreError.photoNotStaged
         }
-        throw CaptureDraftStoreError.invalidManifest
+        throw CaptureDraftStoreError.stagingUnsupported
     }
 
     func replacePhotos(with replacement: [StagedCapturePhoto]) async throws {

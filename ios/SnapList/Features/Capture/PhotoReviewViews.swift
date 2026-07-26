@@ -996,7 +996,15 @@ struct PhotoReviewView: View {
         .buttonStyle(.plain)
         // REV-03 keeps the tile in place at five photos and takes its action away, so
         // the strip does not reflow and the seller can see why nothing more fits. The
-        // capped value comes from Photo Review v1.1, this screen's frozen authority.
+        // `0.5` does not depend on which package governs this attribute, because every
+        // approved Photo Review package binds the capped tile to it. v1 and v1.1
+        // (c2d84f02) carry `opacity: 0.5` inline on the tile labelled for the five-photo
+        // limit, and v1.2 (d166d0c3) parameterises the same value as
+        // `addOpacity: capd?0.5:1`. Read the capped instance specifically: v1.1's canvas
+        // holds eighteen Add tiles and only one of them is the capped state, so sampling
+        // the first one suggests `1` and invites exactly the change this comment exists to
+        // prevent. No package binds this attribute in `contracts/`; the canvases are the
+        // only record of it.
         .opacity(isAddEnabled ? 1 : 0.5)
         .disabled(!isAddEnabled)
         .accessibilityLabel(
