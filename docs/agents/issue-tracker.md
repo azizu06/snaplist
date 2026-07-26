@@ -69,8 +69,10 @@ does not satisfy these gates.
 
 ## Review convergence
 
-Before review, compare the exact diff to the frozen issue contract and remove or split unasked
-behavior. Once independent review starts, do not add product or architecture scope.
+Before review, compare the exact diff to the frozen issue contract, remove unrelated behavior, and
+record any legitimate small corrections that ride the PR. Split on size, not contract purity: route
+work out only when its size, independence, or blast radius makes the active PR unsafe or
+unreviewable. Once independent review starts, do not add product or architecture scope.
 
 One review round is the combined assessment of one exact head. Run the fresh Standards/Spec pair
 first. Fix qualifying local blockers and obtain delta-focused local acceptance before requesting
@@ -81,15 +83,20 @@ are delta-focused unless a fix changes a security, tenancy, data, billing, provi
 boundary.
 
 P0/P1 findings block. P2 blocks only for a proved in-scope acceptance, security/tenancy, data,
-external-side-effect or direct-cost, unrecoverable-reliability, or required-test-validity defect. P3,
-optional hardening, cleanup, cosmetics, and adjacent discoveries go to a focused existing or new issue
-and do not extend the active PR. If qualifying blockers remain after round 3, stop and return to the
-hub for split, redesign, or explicit owner direction.
+external-side-effect or direct-cost, unrecoverable-reliability, or required-test-validity defect.
+Small legitimate P3, optional-hardening, cleanup, cosmetic, and adjacent corrections ride the active
+PR when they remain safe and reviewable and are recorded in its body. Route them only when their
+size, independence, or blast radius makes the PR unsafe or unreviewable. A one-value correction,
+modifier move, helper extraction, test rename, or small nonblocking finding never earns its own
+issue, branch, worktree, PR, reviewer pair, and CI run. When nothing is in flight, batch related
+small fixes into one issue rather than filing them one by one. If qualifying blockers remain after
+round 3, stop and return to the hub for split, redesign, or explicit owner direction.
 
 GitHub Codex findings use the same filter and shared counter. They are independent evidence, not
-automatic commands. Fix qualifying blockers. Route every valid adjacent or non-blocking finding to a
-focused existing or new issue; document invalid or out-of-scope findings with evidence. Do not
-optimize for a zero-comment review.
+automatic commands. Fix qualifying blockers. Keep valid small adjacent or non-blocking corrections in
+the active PR when they remain safe and reviewable and record them in its body; route only work whose
+size, independence, or blast radius warrants a focused existing or new issue. Document invalid
+findings with evidence. Do not optimize for a zero-comment review.
 
 ## When a skill says "publish to the issue tracker"
 

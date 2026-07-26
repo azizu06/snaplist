@@ -112,9 +112,15 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   author cannot approve either axis. Every PR handoff names the applicable gates
   and evidence.
 - **One issue, one branch, one isolated worktree, one PR.** Collision-check open
-  issues, branches, worktrees, and PR diffs before implementation. If discovered
-  work is not required by the frozen issue contract, split or route it instead
-  of widening the branch.
+  issues, branches, worktrees, and PR diffs before implementation. Split on
+  size, not contract purity. A legitimate small correction discovered during
+  implementation or review stays in the active PR and is recorded in its body,
+  even when it sits outside the frozen contract text. A one-value correction,
+  modifier move, helper extraction, test rename, or small nonblocking finding
+  does not earn a separate issue, branch, worktree, PR, reviewer pair, and CI
+  run. When nothing is in flight, batch related small fixes into one issue
+  rather than filing them one by one. Route work only when its size,
+  independence, or blast radius makes the active PR unsafe or unreviewable.
 - **One visible implementation task per issue.** The orchestration hub stays
   available for product decisions, design intake, dependency release, and
   status relays. A substantive implementation owner runs in a separate
@@ -134,19 +140,29 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   proportional gates before implementation. More than two major production surfaces or roughly 15
   production files / 800 non-generated production lines is a mandatory re-scope checkpoint. Keep one
   slice only when the hub records why splitting would make correctness or delivery worse. Once review
-  begins, do not add product or architecture scope. One review round is the combined assessment of one
-  exact head by fresh Standards and Spec reviewers plus GitHub Codex. Count the first candidate as
-  round 1/3 and request another round only after qualifying fixes change the head. P0/P1 block. P2
-  blocks only for a proved in-scope acceptance, security/tenancy, data, external-side-effect or direct
-  cost, unrecoverable-reliability, or required-test-validity defect. P3, cleanup, optional hardening,
-  cosmetics, and adjacent discoveries become follow-up issues. After round 3, stop for split,
+  begins, do not add product or architecture scope; that freeze does not force a
+  legitimate small correction into a separate issue merely because it sits
+  outside the original contract text. One review round is the combined
+  assessment of one exact head by fresh Standards and Spec reviewers plus GitHub
+  Codex. Count the first candidate as round 1/3 and request another round only
+  after qualifying fixes change the head. P0/P1 block. P2 blocks only for a
+  proved in-scope acceptance, security/tenancy, data, external-side-effect or
+  direct cost, unrecoverable-reliability, or required-test-validity defect.
+  Small legitimate P3, cleanup, optional-hardening, cosmetic, and adjacent
+  corrections ride the active PR when they remain safe and reviewable and are
+  recorded in its body. Route them only when their size, independence, or blast
+  radius makes the PR unsafe or unreviewable. After round 3, stop for split,
   redesign, or explicit owner direction.
 - **Adjudicate GitHub Codex findings.** Treat the App as independent evidence, not authority. Apply
-  the frozen issue contract, severity filter, scope split, and shared three-round counter. Run the
-  fresh local Standards and Spec reviews first. Fix qualifying local blockers and obtain the required
-  delta-focused local acceptance before requesting GitHub Codex on the resulting locally approved
-  exact head. Route every valid adjacent or non-blocking finding to a focused existing or new issue,
-  and explain invalid or out-of-scope findings with evidence. Do not chase a zero-comment review.
+  the frozen issue contract, severity filter, size-based routing rule, and
+  shared three-round counter. Run the fresh local Standards and Spec reviews
+  first. Fix qualifying local blockers and obtain the required delta-focused
+  local acceptance before requesting GitHub Codex on the resulting locally
+  approved exact head. Keep valid small adjacent or non-blocking corrections in
+  the active PR when they remain safe and reviewable, record them in its body,
+  and route only work whose size, independence, or blast radius warrants a
+  focused existing or new issue. Explain invalid findings with evidence. Do not
+  chase a zero-comment review.
 - **Test external behavior at the highest seam**, not implementation details. Key seams: the
   `PricingProvider` router (stub providers, assert tier selection), the **pure confidence function**
   (unit-test directly with crafted signals), vision/listing **contract** tests (output validates
@@ -220,5 +236,7 @@ Rules:
   next parallel wave. Unblocked, independent slices can be worked **in parallel**.
 - Move a slice's lane to reflect reality: Ready → In progress → In review → Done.
 - Before moving a slice to In review, record the frozen issue contract and `Review round: 0/3`.
-  Compare the exact diff to the issue and remove or split anything unasked. Review never expands the
-  issue contract.
+  Compare the exact diff to the issue, remove unrelated work, and record any
+  legitimate small corrections that ride the PR. Split only when size,
+  independence, or blast radius makes the PR unsafe or unreviewable. Review
+  never expands product or architecture scope.
