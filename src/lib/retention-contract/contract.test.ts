@@ -27,7 +27,7 @@ describe("lean-MVP release retention contract", () => {
     const datumWithoutDisposition = {
       contract: "snaplist.lean-mvp-retention",
       version: 1,
-      status: "release-blocked",
+      status: "complete",
       ownerIssue: 383,
       data: [
         {
@@ -47,7 +47,7 @@ describe("lean-MVP release retention contract", () => {
     const datumWithTwoDispositions = {
       contract: "snaplist.lean-mvp-retention",
       version: 1,
-      status: "release-blocked",
+      status: "complete",
       ownerIssue: 383,
       data: [
         {
@@ -68,7 +68,7 @@ describe("lean-MVP release retention contract", () => {
     const datumWithIncompleteDisposition = {
       contract: "snaplist.lean-mvp-retention",
       version: 1,
-      status: "release-blocked",
+      status: "complete",
       ownerIssue: 383,
       data: [
         {
@@ -195,40 +195,80 @@ describe("lean-MVP release retention contract", () => {
     expect(() => parseReleaseRetentionContract(invalid)).toThrow();
   });
 
-  it("keeps every unresolved legal or provider obligation as an explicit blocker", () => {
-    expect(contract.blockers).toEqual([
-      {
-        id: "hosted-transcription-retention",
-        affectedData: ["hosted-transcription-provider-copy"],
-        requiredEvidence:
-          "current provider retention policy and approved zero-retention control evidence before activation",
-      },
-      {
-        id: "ebay-publish-receipt-obligations",
-        affectedData: ["ebay-publish-receipts"],
-        requiredEvidence:
-          "approved legal and eBay rule for SnapList publish receipts, external records, retention duration, and deletion proof",
-      },
-      {
-        id: "clerk-identity-retention",
-        affectedData: ["clerk-identity"],
-        requiredEvidence:
-          "current Clerk account deletion behavior, retention policy, and deletion proof",
-      },
-      {
-        id: "apple-revenuecat-reference-obligations",
-        affectedData: ["apple-revenuecat-references"],
-        requiredEvidence:
-          "approved Apple, RevenueCat, refund, tax, and legal rule with duration and provider-side proof",
-      },
-    ]);
+  it("gives every release datum a resolved disposition, with no blocked row left", () => {
+    const blocked = contract.data.filter(
+      ({ dispositions }) => dispositions[0].treatment === "blocked",
+    );
+
+    expect(blocked.map(({ id }) => id)).toEqual([]);
+    expect(contract.blockers).toEqual([]);
+  });
+
+  it("cites the published provider authority behind every resolved provider obligation", () => {
+    const providerObligations = [
+      "hosted-transcription-provider-copy",
+      "ebay-publish-receipts",
+      "clerk-identity",
+      "apple-revenuecat-references",
+    ];
+
+    for (const id of providerObligations) {
+      const disposition = contract.data.find(
+        (datum) => datum.id === id,
+      )?.dispositions[0];
+
+      expect(disposition?.citations?.length ?? 0).toBeGreaterThan(0);
+      for (const citation of disposition?.citations ?? []) {
+        expect(citation.url).toMatch(/^https:\/\//);
+        expect(citation.clause.length).toBeGreaterThan(0);
+        expect(citation.quote.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("rejects a resolved provider obligation with no cited authority", () => {
+    const invalid = structuredClone(contract);
+    const clerk = invalid.data.find(({ id }) => id === "clerk-identity");
+    if (!clerk) throw new Error("Clerk identity release datum is missing");
+    delete clerk.dispositions[0].citations;
+
+    expect(() => parseReleaseRetentionContract(invalid)).toThrow(
+      /must cite the published provider authority/i,
+    );
+  });
+
+  it("rejects a complete contract that still carries a blocked disposition", () => {
+    const invalid = structuredClone(contract);
+    const clerk = invalid.data.find(({ id }) => id === "clerk-identity");
+    if (!clerk) throw new Error("Clerk identity release datum is missing");
+    clerk.dispositions[0].treatment = "blocked";
+
+    expect(() => parseReleaseRetentionContract(invalid)).toThrow(
+      /complete contract cannot carry a blocked disposition/i,
+    );
+  });
+
+  it("rejects a release-blocked contract with nothing blocking it", () => {
+    const invalid = structuredClone(contract);
+    invalid.status = "release-blocked";
+
+    expect(() => parseReleaseRetentionContract(invalid)).toThrow(
+      /must identify the blocked disposition holding it back/i,
+    );
   });
 
   it("rejects blocked dispositions without a matching blocker record", () => {
     const invalid = structuredClone(contract);
+    invalid.status = "release-blocked";
+    const clerk = invalid.data.find(({ id }) => id === "clerk-identity");
+    if (!clerk) throw new Error("Clerk identity release datum is missing");
+    clerk.dispositions[0].treatment = "blocked";
+    clerk.dispositions[0].blockerId = "clerk-identity-retention";
     invalid.blockers = [];
 
-    expect(() => parseReleaseRetentionContract(invalid)).toThrow();
+    expect(() => parseReleaseRetentionContract(invalid)).toThrow(
+      /must reference a matching blocker record/i,
+    );
   });
 
   it("links the singular authoritative matrix from the PRD and retention ADR", () => {
