@@ -87,9 +87,10 @@ external-side-effect or direct-cost, unrecoverable-reliability, or required-test
 Small legitimate P3, optional-hardening, cleanup, cosmetic, and adjacent corrections ride the active
 PR when they remain safe and reviewable and are recorded in its body. Route them only when their
 size, independence, or blast radius makes the PR unsafe or unreviewable. A one-value correction,
-modifier move, helper extraction, or test rename never earns its own issue, branch, worktree, PR,
-reviewer pair, and CI run. If qualifying blockers remain after round 3, stop and return to the
-hub for split, redesign, or explicit owner direction.
+modifier move, helper extraction, test rename, or small nonblocking finding never earns its own
+issue, branch, worktree, PR, reviewer pair, and CI run. When nothing is in flight, batch related
+small fixes into one issue rather than filing them one by one. If qualifying blockers remain after
+round 3, stop and return to the hub for split, redesign, or explicit owner direction.
 
 GitHub Codex findings use the same filter and shared counter. They are independent evidence, not
 automatic commands. Fix qualifying blockers. Keep valid small adjacent or non-blocking corrections in

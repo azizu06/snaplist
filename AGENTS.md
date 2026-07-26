@@ -118,9 +118,9 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   even when it sits outside the frozen contract text. A one-value correction,
   modifier move, helper extraction, test rename, or small nonblocking finding
   does not earn a separate issue, branch, worktree, PR, reviewer pair, and CI
-  run. When nothing is in flight, batch related small fixes. Route work only
-  when its size, independence, or blast radius makes the active PR unsafe or
-  unreviewable.
+  run. When nothing is in flight, batch related small fixes into one issue
+  rather than filing them one by one. Route work only when its size,
+  independence, or blast radius makes the active PR unsafe or unreviewable.
 - **One visible implementation task per issue.** The orchestration hub stays
   available for product decisions, design intake, dependency release, and
   status relays. A substantive implementation owner runs in a separate
