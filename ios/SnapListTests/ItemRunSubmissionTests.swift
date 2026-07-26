@@ -195,7 +195,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
         // Each call hands back a different token, and the double records only how long
         // each one was. Distinct lengths are enough to tell a freshly fetched bearer from
-        // the first one being replayed, without a test ever holding a token value.
+        // the first one being replayed, without recording or asserting a token value.
         let tokens = TokenSequence(
             tokens: ["clerk-session-token", "clerk-session-token-renewed"]
         )
@@ -658,12 +658,29 @@ final class ItemRunSubmissionTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
-        // The record exists, so it may well be a live attempt, but its bytes are not
-        // readable.
         try FileManager.default.createDirectory(
-            at: root.appendingPathComponent("attempt.json"),
+            at: root,
             withIntermediateDirectories: true
         )
+        // Exactly the shape a live attempt has, a regular file written by `saveAttempt`,
+        // whose bytes then cannot be read. Anything less than a regular file would be
+        // provably not a submission and is a different case.
+        let attemptURL = root.appendingPathComponent("attempt.json")
+        let attempt = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: []
+        )
+        try JSONEncoder().encode(attempt).write(to: attemptURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0],
+            ofItemAtPath: attemptURL.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: attemptURL.path
+            )
+        }
 
         let store = LocalItemRunSubmissionAttemptStore(rootDirectory: root)
 
@@ -679,6 +696,32 @@ final class ItemRunSubmissionTests: XCTestCase {
             FileManager.default.fileExists(
                 atPath: root.appendingPathComponent("attempt.json").path
             )
+        )
+    }
+
+    /// Failing closed on an unreadable record has a cost: nothing can remove it, so while
+    /// the read keeps failing every submission refuses. That has to be reserved for
+    /// something that could actually be a live attempt. `saveAttempt` only ever writes a
+    /// regular file, so anything else at that path is cleared instead of blocking the
+    /// seller forever.
+    func testSomethingOtherThanARecordIsClearedRatherThanBlockingEverySubmission() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let attemptURL = root.appendingPathComponent("attempt.json")
+        try FileManager.default.createDirectory(
+            at: attemptURL,
+            withIntermediateDirectories: true
+        )
+
+        let restored = try await LocalItemRunSubmissionAttemptStore(
+            rootDirectory: root
+        ).loadAttempt()
+
+        XCTAssertNil(restored)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: attemptURL.path),
+            "A path that was never a submission stayed behind and will refuse every tap"
         )
     }
 
@@ -1056,7 +1099,7 @@ struct SubmissionIntakeFixture: Sendable {
 }
 
 /// Bearer tokens that differ per call, so a replayed one is visible in the recorded
-/// lengths without any test holding a token value.
+/// lengths without recording or asserting a token value.
 final class TokenSequence: @unchecked Sendable {
     private let lock = NSLock()
     private var tokens: [String]

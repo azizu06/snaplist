@@ -30,10 +30,18 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         guard fileManager.fileExists(atPath: attemptURL.path) else {
             return nil
         }
-        // A record that exists but cannot be read is not the same as no record. Reporting
-        // it as absent mints a second key for photos the first submission may already have
-        // committed, which is the duplicate run this file exists to prevent. Fail closed
-        // and let the caller stop before the network instead.
+        // `saveAttempt` only ever writes a regular file, so anything else standing at this
+        // path was never a submission and cannot be one. Removing it keeps the fail-closed
+        // rule below from refusing every later submission over something that guards
+        // nothing.
+        guard (try? attemptURL.resourceValues(forKeys: [.isRegularFileKey]))?
+            .isRegularFile == true else {
+            return discardUnusableAttempt()
+        }
+        // A regular record that exists but cannot be read is not the same as no record.
+        // Reporting it as absent mints a second key for photos the first submission may
+        // already have committed, which is the duplicate run this file exists to prevent.
+        // Fail closed and let the caller stop before the network instead.
         let data = try Data(contentsOf: attemptURL)
         // Read the version before the body. Decoding the whole record first cannot tell
         // a renamed or removed field from genuine corruption, so every future schema
@@ -59,9 +67,15 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
     /// record guards nothing, so keeping it would leave an unusable file behind on every
     /// later load for no benefit. The next submission overwrites it either way.
     ///
-    /// A file that could not be read at all is deliberately not routed here. That case
-    /// is indistinguishable from a live attempt, and treating it as absent is what buys
-    /// the seller a second run.
+    /// A regular file that could not be read at all is deliberately not routed here. That
+    /// case is indistinguishable from a live attempt, and treating it as absent is what
+    /// buys the seller a second run.
+    ///
+    /// The cost of that choice is real and worth naming. Nothing in the app can remove a
+    /// regular record it cannot read, so while the read keeps failing every submission
+    /// refuses, for any photo set. The remaining causes are a locked device, which clears
+    /// itself, and filesystem damage. Corrupt bytes are not among them, because those read
+    /// successfully and fail to decode, which lands here instead.
     private func discardUnusableAttempt() -> ItemRunSubmissionAttempt? {
         try? fileManager.removeItem(at: attemptURL)
         return nil
