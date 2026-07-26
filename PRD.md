@@ -138,7 +138,8 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 
 - `docs/contracts/lean-mvp-retention-v1.json` is the singular row-level authority for every release
   datum's owner, deletion triggers, maximum retention, executor, and completion proof. ADR-0012
-  explains the policy and preserves unresolved legal or provider obligations as release blockers.
+  explains the policy. Every row is resolved; a disposition that rests on external authority cites
+  the provider clause it relies on, and one resting on an owner's judgement says so in the row.
 - Raw seller voice is temporary private processing input. Delete it after the first durable terminal
   transcription outcome and never later than 24 hours after durable acceptance. A retained transcript
   follows the voice context, item, guest-claim/expiry, and account deletion lifecycle instead.

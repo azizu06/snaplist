@@ -1,7 +1,7 @@
 {
   "contract": "snaplist.lean-mvp-retention",
   "version": 1,
-  "status": "release-blocked",
+  "status": "complete",
   "ownerIssue": 383,
   "data": [
     {
@@ -56,13 +56,39 @@
       "id": "hosted-transcription-provider-copy",
       "releaseDatum": true,
       "dispositions": [{
-        "treatment": "blocked",
-        "owner": "hosted-transcription-provider",
-        "deletionTriggers": ["provider-policy-or-approved-zero-retention-control"],
-        "maximumRetention": "unresolved until the selected provider current policy and approved controls are verified",
-        "executor": "unassigned-until-hosted-transcription-activation-review",
-        "completionProof": "provider policy citation and activation evidence for the selected retention control",
-        "blockerId": "hosted-transcription-retention"
+        "treatment": "provider-owned",
+        "owner": "openai-api-abuse-monitoring",
+        "deletionTriggers": ["openai-abuse-monitoring-retention-expires"],
+        "maximumRetention": "None for abuse monitoring and None for application state, as OpenAI publishes for /v1/audio/transcriptions; bounded by the general default-policy ceiling of up to 30 days if any copy exists despite that. SnapList cannot shorten either and does not report the provider copy as deleted",
+        "executor": "openai-platform-under-its-default-api-data-policy-no-snaplist-executor",
+        "completionProof": "the transcription request is sent to /v1/audio/transcriptions, whose published abuse-monitoring and application-state retention are both None, under the default API data policy with no Zero Data Retention approval recorded. A retention claim below the published endpoint values may only be made once an OpenAI ZDR approval receipt exists",
+        "citations": [
+          {
+            "url": "https://developers.openai.com/api/docs/guides/your-data",
+            "clause": "How we use your data",
+            "quote": "As of March 1, 2023, data sent to the OpenAI API is not used to train or improve OpenAI models (unless you explicitly opt in to share data with us).",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developers.openai.com/api/docs/guides/your-data",
+            "clause": "Storage requirements and retention controls per endpoint, /v1/audio/transcriptions row",
+            "quote": "/v1/audio/transcriptions | Data used for training: No | Abuse monitoring retention: None | Application state retention: None | Zero Data Retention eligible: Yes",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developers.openai.com/api/docs/guides/your-data",
+            "clause": "Abuse monitoring retention, general default",
+            "quote": "By default, abuse monitoring logs are generated for all API feature usage and retained for up to 30 days, unless longer retention is required by law, or is reasonably necessary to protect our services or any third party from harm.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developers.openai.com/api/docs/guides/your-data",
+            "clause": "Zero data retention",
+            "quote": "Currently, these controls are subject to prior approval by OpenAI and acceptance of additional requirements.",
+            "retrieved": "2026-07-25"
+          }
+        ],
+        "ownerDecision": "Owner decision, not provider evidence: OpenAI is the pinned transcription provider and the default API data policy is the selected retention control. Zero Data Retention is not requested and not active, so it must not be recorded as the ceiling even though this endpoint is listed as eligible. Activating ZDR needs an OpenAI org-level approval and is an owner action outside this contract. The endpoint table's None is OpenAI's published figure, not something SnapList has observed, so the row keeps provider-owned treatment and does not promise the seller that no copy exists. This row is pinned to one adapter on purpose: ADR-0011 keeps seller voice context provider-neutral and docs/contracts/voice-context-v1.json does not freeze the provider or model, so activating a non-OpenAI transcription adapter reopens this row and its retention must be re-cited before that adapter carries seller audio."
       }]
     },
     {
@@ -213,62 +239,131 @@
       "id": "ebay-publish-receipts",
       "releaseDatum": true,
       "dispositions": [{
-        "treatment": "blocked",
-        "owner": "seller-snaplist-tenant-and-ebay-provider",
-        "deletionTriggers": ["item-deletion", "account-erasure", "verified-ebay-account-deletion-notification"],
-        "maximumRetention": "unresolved until legal record obligations and eBay deletion requirements are verified",
-        "executor": "unassigned-until-ebay-legal-provider-review",
-        "completionProof": "approved legal/provider rule identifies the SnapList receipt fields to delete or retain and distinguishes eBay-owned records",
-        "blockerId": "ebay-publish-receipt-obligations"
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["item-deletion", "account-erasure", "verified-ebay-account-deletion-notification", "ebay-api-license-agreement-termination"],
+        "maximumRetention": "while the seller retains the published item, and no later than item deletion, account erasure, or a verified eBay account deletion notice; within ten days of eBay API License Agreement termination for every stored identifier",
+        "executor": "snaplist-tenant-data-deletion-capability-and-issue-384-account-erasure-capability",
+        "completionProof": "the SnapList-stored publish identifiers are absent for that tenant: listings.ebay_offer_id, listings.ebay_listing_id, and listings.ebay_status. The live eBay listing is an eBay-owned record; SnapList never reports it deleted because it removed its own copy of the identifier",
+        "citations": [
+          {
+            "url": "https://developer.ebay.com/join/api-license-agreement",
+            "clause": "Section 1 (Definitions), \"Personal Information\"",
+            "quote": "“Personal Information” means any information that directly or indirectly identifies an eBay User that you obtain or send to eBay through your participation in the Program and your use of the Developer Tools, including information that you collect or receive, or have access to, directly from Your Users in connection with your Application, information that is included in eBay Content, or information that you otherwise receive from eBay about Your Users or other eBay Users and their trading activities.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developer.ebay.com/join/api-license-agreement",
+            "clause": "Section 9 (Protecting User Privacy), Collecting and Storing Personal Information",
+            "quote": "You agree to promptly delete Personal Information on the earlier of: (i) when required by your data privacy and data retention policies; (ii) when requested by eBay or by the applicable eBay User to whom the Personal Information pertains, (iii) when the Personal Information is no longer necessary for the specific, legitimate purpose for which it was collected or processed for your Application, or (iv) when your participation in the Program is terminated.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developer.ebay.com/join/api-license-agreement",
+            "clause": "Section 16.2, Effect of Termination",
+            "quote": "You must destroy all copies of, or anything containing, eBay Content and Personal Information in your possession within ten (10) days after termination, and you will provide written certification of destruction to eBay upon eBay’s request.",
+            "retrieved": "2026-07-25"
+          }
+        ],
+        "ownerDecision": "Owner decision, not provider evidence: eBay-issued offer and listing identifiers stored against a seller are classified as Personal Information under the Section 1 definition, because they are received from eBay through the Program and indirectly identify an eBay User. eBay has not been asked to confirm this and the conservative reading is deliberate. If eBay later states these identifiers are not Personal Information, the only cost of this choice is a deleted column nobody was reading."
       }]
     },
     {
       "id": "clerk-identity",
       "releaseDatum": true,
       "dispositions": [{
-        "treatment": "blocked",
+        "treatment": "delete",
         "owner": "clerk-identity-provider",
         "deletionTriggers": ["account-erasure"],
-        "maximumRetention": "unresolved until current Clerk deletion and retention behavior is verified",
-        "executor": "unassigned-until-clerk-account-deletion-review",
-        "completionProof": "provider deletion receipt or verified absence plus current policy evidence",
-        "blockerId": "clerk-identity-retention"
+        "maximumRetention": "for the account lifetime; account erasure deletes the Clerk user and verifies its absence in the same operation. Clerk's public documentation states no post-deletion backup or archive window, so SnapList claims none",
+        "executor": "snaplist-account-erasure-capability-calling-clerk-users-delete-user",
+        "completionProof": "after clerkClient.users.deleteUser(userId), reading that user back through the Clerk Backend API reports it absent with status 404. A user.deleted webhook is an acknowledgement that the request was accepted and is never accepted as proof on its own. The executable form of this proof is src/lib/retention-contract/clerk-identity-absence.test.ts. OBSERVED 2026-07-26 against a live Clerk development instance (sk_test_ secret, no production data): the suite created a user, read it back successfully by id, called deleteUser on it, and the subsequent read of the same id was reported absent — status 404, error code resource_not_found, longMessage 'No user was found with id <deleted id>'. The test asserts the reported 404 status rather than merely that the read rejected, so a network or auth failure cannot be mistaken for absence. It skips when no sk_test_ CLERK_RETENTION_PROOF_SECRET_KEY is configured, so CI, which runs without secrets, does not re-observe this proof",
+        "citations": [
+          {
+            "url": "https://clerk.com/docs/reference/backend/user/delete-user",
+            "clause": "deleteUser()",
+            "quote": "Deletes the given User",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://clerk.com/legal/privacy",
+            "clause": "Retention of personal information",
+            "quote": "We store the personal information we collect as described in this Privacy Policy for as long as you use our Services or as necessary to fulfill the purpose(s) for which it was collected, provide our Services, resolve disputes, establish legal defenses, conduct audits, pursue legitimate business purposes, enforce our agreements, and comply with applicable laws.",
+            "retrieved": "2026-07-25"
+          }
+        ],
+        "ownerDecision": "Owner decision, not provider evidence: the verified-absence branch is selected instead of waiting on Clerk to describe its internal backup retention. Clerk's published retention clause is duration-by-purpose and states no numeric window, so a cited maximum is not available from the provider. Observed absence through Clerk's own API is what SnapList proves and all it claims. That proof has now been performed rather than merely defined: the absence test was run once against a Clerk development instance on 2026-07-26 and the observed result is recorded in completionProof. The same accepted-versus-verified distinction that blocked this row was applied to the proof itself, which is why the row waited for an observed run instead of asserting that the test would pass."
       }]
     },
     {
       "id": "apple-revenuecat-references",
       "releaseDatum": true,
       "dispositions": [{
-        "treatment": "blocked",
-        "owner": "snaplist-ledger-with-apple-and-revenuecat-provider-references",
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
         "deletionTriggers": ["account-erasure-after-entitlement-reconciliation"],
-        "maximumRetention": "unresolved until Apple transaction, RevenueCat customer-reference, refund, tax, and legal record obligations are verified",
-        "executor": "unassigned-until-billing-legal-provider-review",
-        "completionProof": "approved rule identifies deletable SnapList mappings, any required retained reference, its duration, and provider-side evidence",
-        "blockerId": "apple-revenuecat-reference-obligations"
+        "maximumRetention": "for the account lifetime, then deleted at account erasure once every open credit reservation is settled or restored. No multi-year retention applies, because SnapList holds no per-user tax record; see ownerDecision for why",
+        "executor": "snaplist-account-erasure-capability-and-revenuecat-delete-customer-api",
+        "completionProof": "the tenant's mapping rows are absent: public.revenuecat_customer_bindings, public.ai_item_allowance_periods, private.revenuecat_webhook_events, and private.storekit_ai_item_period_events; and reading the RevenueCat customer back after deletion reports it absent. Apple's payout and financial reports in App Store Connect and RevenueCat's own retained records are provider-owned and are never reported deleted by SnapList",
+        "citations": [
+          {
+            "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
+            "clause": "PAYMENTS, TAXES, AND REFUNDS",
+            "quote": "Apple will charge your selected payment method for any paid Transactions, including any applicable taxes.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
+            "clause": "Apps and In-App Purchases, merchant of record; conditional on the contracting Apple entity",
+            "quote": "However, if you are a customer of Apple Distribution International Ltd. or Apple Services Pte. Ltd., then the merchant of record is that entity, which means that you acquire the App license from Apple Distribution International Ltd. or Apple Services Pte. Ltd., as applicable, but the App is licensed by the App Provider.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
+            "clause": "PAYMENTS, TAXES, AND REFUNDS, counterparty to the transaction",
+            "quote": "Each Transaction is an electronic contract between you and Apple, and/or you and the entity providing the Content on our Services.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developer.apple.com/help/app-store-connect/getting-paid/overview-of-receiving-payments/",
+            "clause": "Overview of receiving payments; Apple, not the developer, collects payment from the customer",
+            "quote": "Reports only include paid transactions where we are able to collect payment from the customer (view Schedule 2 of your Apple Developer Agreement).",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developer.apple.com/help/app-store-connect/making-payments-to-apple/understanding-taxes/",
+            "clause": "Understanding taxes, alternative payment processing",
+            "quote": "For In-App Purchases made using alternative payment processing or linking out to a webpage, you're responsible for taxes, including (but not limited to):",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload",
+            "clause": "appAccountToken",
+            "quote": "A UUID you create at the time of purchase that associates the transaction with a customer on your own service.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://www.revenuecat.com/docs/dashboard-and-metrics/customer-profile",
+            "clause": "Deleting customers",
+            "quote": "Deleting customers through the RevenueCat dashboard or API clears out all of their data and is sufficient for GDPR erasure requests.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://www.revenuecat.com/docs/dashboard-and-metrics/customer-profile",
+            "clause": "Deleting customers, scope",
+            "quote": "Deleting a customer will also remove all their purchase history for sandbox and production data",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://www.revenuecat.com/docs/customers/identifying-customers",
+            "clause": "Aliases",
+            "quote": "there will be only one App User ID within the original_app_user_id field",
+            "retrieved": "2026-07-25"
+          }
+        ],
+        "ownerDecision": "Owner decision, not provider evidence, on three points. Apple charges the customer for the transaction including any applicable taxes, never discloses the customer to the developer, and keeps the payout and financial reports in App Store Connect that are the tax record. For customers of Apple Distribution International Ltd. or Apple Services Pte. Ltd. the cited terms name that entity the merchant of record; elsewhere the terms make the transaction a contract with Apple. The conclusion rests on who charges the customer and who holds the records, which holds either way. First, SnapList's Apple and RevenueCat references are an entitlement mapping, not a tax record: the stored rows carry a Clerk user id, a RevenueCat app user id, an Apple original transaction id, and allowance state, and carry no customer identity, price, or tax amount. Apple never discloses the customer to the developer; the only per-customer link is a UUID the developer itself creates. So the row is deleted at account erasure rather than retained for a fixed number of years, and the 7-year fallback is deliberately not used. This conclusion has not been reviewed by a tax professional. Second, one RevenueCat customer is the original_app_user_id plus its aliases array, so deleting the customer deletes the whole alias set; that follows from the two cited clauses read together rather than from a single sentence stating it. Third, RevenueCat's public documentation does not state that deletion is synchronous, so completion requires reading the customer back rather than trusting the delete response. If SnapList ever adopts alternative payment processing or external purchase links, Apple stops collecting the tax and this row must be reopened."
       }]
     }
   ],
-  "blockers": [
-    {
-      "id": "hosted-transcription-retention",
-      "affectedData": ["hosted-transcription-provider-copy"],
-      "requiredEvidence": "current provider retention policy and approved zero-retention control evidence before activation"
-    },
-    {
-      "id": "ebay-publish-receipt-obligations",
-      "affectedData": ["ebay-publish-receipts"],
-      "requiredEvidence": "approved legal and eBay rule for SnapList publish receipts, external records, retention duration, and deletion proof"
-    },
-    {
-      "id": "clerk-identity-retention",
-      "affectedData": ["clerk-identity"],
-      "requiredEvidence": "current Clerk account deletion behavior, retention policy, and deletion proof"
-    },
-    {
-      "id": "apple-revenuecat-reference-obligations",
-      "affectedData": ["apple-revenuecat-references"],
-      "requiredEvidence": "approved Apple, RevenueCat, refund, tax, and legal rule with duration and provider-side proof"
-    }
-  ]
+  "blockers": []
 }
