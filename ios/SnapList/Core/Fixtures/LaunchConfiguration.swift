@@ -122,6 +122,10 @@ enum RunDetailFixture: String, Equatable {
     case reviewable
 }
 
+enum SubmissionFixture: String, Equatable {
+    case delayed
+}
+
 enum PhotoReviewVisualStateID: String, Equatable {
     case resting = "REV-02"
     case fivePhotos = "REV-03"
@@ -152,6 +156,7 @@ struct LaunchConfiguration: Equatable {
     var resetOnboardingProgress: Bool
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
+    var submissionFixture: SubmissionFixture?
     var runDetailFixture: RunDetailFixture?
 
     static let standard = LaunchConfiguration(
@@ -166,6 +171,7 @@ struct LaunchConfiguration: Equatable {
         resetOnboardingProgress: false,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
+        submissionFixture: nil,
         runDetailFixture: nil
     )
 
@@ -181,6 +187,7 @@ struct LaunchConfiguration: Equatable {
         resetOnboardingProgress: false,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
+        submissionFixture: nil,
         runDetailFixture: .loaded
     )
 
@@ -204,6 +211,16 @@ struct LaunchConfiguration: Equatable {
             } else if argument == "--restored-capture-fixture" {
                 configuration.usesRestoredCaptureFixture = true
                 configuration.usesZeroNetworkFixtures = true
+            } else if argument.hasPrefix("--submission-fixture=") {
+                let value = String(
+                    argument.dropFirst("--submission-fixture=".count)
+                )
+                configuration.submissionFixture = SubmissionFixture(rawValue: value)
+#if DEBUG
+                if configuration.submissionFixture != nil {
+                    configuration.usesZeroNetworkFixtures = true
+                }
+#endif
             } else if argument.hasPrefix("--fixture=") {
                 let value = String(argument.dropFirst("--fixture=".count))
                 configuration.fixture = FoundationFixture(rawValue: value) ?? .home

@@ -1,6 +1,14 @@
 import Foundation
 import Observation
 
+#if DEBUG
+struct DelayedItemRunSubmissionFixture {
+    func complete() async {
+        try? await Task.sleep(for: .seconds(2))
+    }
+}
+#endif
+
 /// What the live Photo Review Start listing boundary resolves to. It holds the last
 /// canonical run for #375 to consume and the last typed recovery, and it makes no
 /// claim about analysis, pricing, review, or delivery.
@@ -18,11 +26,25 @@ final class ItemRunSubmissionHost {
     /// Fixture launches render approved states with no server behind them, so Start
     /// listing is inert by design there rather than unavailable.
     private let isInert: Bool
+#if DEBUG
+    private let delayedFixture: DelayedItemRunSubmissionFixture?
+#endif
 
     init(coordinator: ItemRunSubmissionCoordinator?, isInert: Bool = false) {
         self.coordinator = coordinator
         self.isInert = isInert
+#if DEBUG
+        delayedFixture = nil
+#endif
     }
+
+#if DEBUG
+    init(delayedFixture: DelayedItemRunSubmissionFixture) {
+        coordinator = nil
+        isInert = false
+        self.delayedFixture = delayedFixture
+    }
+#endif
 
     /// One tap, one submission. A second tap while a request is open would build a
     /// second attempt from the same photos and could buy the seller a second run.
@@ -30,6 +52,14 @@ final class ItemRunSubmissionHost {
         guard !isSubmitting, !isInert else {
             return
         }
+#if DEBUG
+        if let delayedFixture {
+            isSubmitting = true
+            defer { isSubmitting = false }
+            await delayedFixture.complete()
+            return
+        }
+#endif
         guard let coordinator else {
             // A build with no API origin has nowhere to submit. Saying so beats a
             // button that silently does nothing.
@@ -54,6 +84,74 @@ final class ItemRunSubmissionHost {
     }
 }
 
+/// Seller-facing Photo Review state derived from the live submission boundary.
+///
+/// Keep this value type-driven: transport reason strings are server diagnostics,
+/// never presentation authority.
+struct PhotoReviewSubmissionPresentation: Equatable {
+    enum AnnouncementEvent: Equatable {
+        case saving
+    }
+
+    let primaryActionLabel: String
+    let mutationControlsLocked: Bool
+    let announcementEvent: AnnouncementEvent?
+    let accessibilityAnnouncement: String?
+
+    static let idle = PhotoReviewSubmissionPresentation(
+        primaryActionLabel: "Start listing",
+        mutationControlsLocked: false,
+        announcementEvent: nil,
+        accessibilityAnnouncement: nil
+    )
+
+    private init(
+        primaryActionLabel: String,
+        mutationControlsLocked: Bool,
+        announcementEvent: AnnouncementEvent?,
+        accessibilityAnnouncement: String?
+    ) {
+        self.primaryActionLabel = primaryActionLabel
+        self.mutationControlsLocked = mutationControlsLocked
+        self.announcementEvent = announcementEvent
+        self.accessibilityAnnouncement = accessibilityAnnouncement
+    }
+
+    @MainActor
+    init(host: ItemRunSubmissionHost) {
+        if host.isSubmitting {
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Saving your item",
+                mutationControlsLocked: true,
+                announcementEvent: .saving,
+                accessibilityAnnouncement: "Saving your item."
+            )
+        } else {
+            self = .idle
+        }
+    }
+}
+
+/// Consumes one announcement when Photo Review enters a new visible submission state.
+/// Re-reading the same still-visible presentation is a render, not a new event.
+struct PhotoReviewSubmissionAnnouncementTracker {
+    private var lastEvent: PhotoReviewSubmissionPresentation.AnnouncementEvent?
+
+    mutating func consume(
+        _ presentation: PhotoReviewSubmissionPresentation
+    ) -> String? {
+        guard let event = presentation.announcementEvent else {
+            lastEvent = nil
+            return nil
+        }
+        guard event != lastEvent else {
+            return nil
+        }
+        lastEvent = event
+        return presentation.accessibilityAnnouncement
+    }
+}
+
 @MainActor
 enum ItemRunSubmissionHostFactory {
     static func make(
@@ -63,6 +161,14 @@ enum ItemRunSubmissionHostFactory {
         session: URLSession,
         draftStore: any CaptureDraftStoring
     ) -> ItemRunSubmissionHost {
+#if DEBUG
+        if configuration.usesZeroNetworkFixtures,
+           configuration.submissionFixture == .delayed {
+            return ItemRunSubmissionHost(
+                delayedFixture: DelayedItemRunSubmissionFixture()
+            )
+        }
+#endif
         guard !configuration.usesZeroNetworkFixtures else {
             return ItemRunSubmissionHost(coordinator: nil, isInert: true)
         }

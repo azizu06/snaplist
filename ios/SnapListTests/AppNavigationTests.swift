@@ -107,6 +107,20 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertTrue(configuration.usesZeroNetworkFixtures)
     }
 
+    func testDelayedSubmissionFixtureIsTypedAndUnknownValuesStayInert() {
+        let delayed = LaunchConfiguration.parse(
+            arguments: ["--submission-fixture=delayed"]
+        )
+        let unknown = LaunchConfiguration.parse(
+            arguments: ["--submission-fixture=unknown"]
+        )
+
+        XCTAssertEqual(delayed.submissionFixture, .delayed)
+        XCTAssertTrue(delayed.usesZeroNetworkFixtures)
+        XCTAssertNil(unknown.submissionFixture)
+        XCTAssertFalse(unknown.usesZeroNetworkFixtures)
+    }
+
     func testExplicitVisualStateUsesItsOwningFamilyOverTheDefaultOnboardingFixture() {
         let onboarding = LaunchConfiguration.parse(arguments: ["--visual-state=ONB-01"])
         let capture = LaunchConfiguration.parse(arguments: ["--visual-state=CAP-01"])

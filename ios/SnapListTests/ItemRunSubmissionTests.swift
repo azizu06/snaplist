@@ -949,6 +949,59 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Live Start listing boundary
 
+    func testLivePhotoReviewPresentationShowsSavingStateOnceDuringOneRequest() async {
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let responseGate = SubmissionResponseGate()
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.created(Self.receipt(for: intake))],
+            beforeResponse: {
+                await responseGate.hold()
+            }
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                submitter: submitter,
+                keys: [Self.firstKey]
+            )
+        )
+        var announcementTracker = PhotoReviewSubmissionAnnouncementTracker()
+
+        let idle = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(idle.primaryActionLabel, "Start listing")
+        XCTAssertFalse(idle.mutationControlsLocked)
+        XCTAssertNil(announcementTracker.consume(idle))
+
+        let submission = Task {
+            await host.startListing(photos: intake.photos)
+        }
+        await responseGate.waitUntilHeld()
+
+        let saving = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(saving.primaryActionLabel, "Saving your item")
+        XCTAssertTrue(saving.mutationControlsLocked)
+        XCTAssertEqual(
+            announcementTracker.consume(saving),
+            "Saving your item."
+        )
+        XCTAssertNil(
+            announcementTracker.consume(
+                PhotoReviewSubmissionPresentation(host: host)
+            ),
+            "Re-rendering the same in-flight state must not announce it twice."
+        )
+
+        await responseGate.release()
+        await submission.value
+
+        let completed = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(completed.primaryActionLabel, "Start listing")
+        XCTAssertFalse(completed.mutationControlsLocked)
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+    }
+
     func testStartListingEmitsTheReceiptRunAsTheCanonicalHandoff() async {
         let intake = SubmissionIntakeFixture(photoCount: 5)
         let attemptStore = InMemoryItemRunSubmissionAttemptStore()
@@ -1401,6 +1454,34 @@ actor RecordingItemRunSubmitter: ItemRunSubmitting {
         bearerTokenLengths.append(bearerToken.count)
         guard !outcomes.isEmpty else { return .ambiguous }
         return outcomes.count == 1 ? outcomes[0] : outcomes.removeFirst()
+    }
+}
+
+private actor SubmissionResponseGate {
+    private var isHeld = false
+    private var heldWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func hold() async {
+        isHeld = true
+        let waiters = heldWaiters
+        heldWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    func waitUntilHeld() async {
+        guard !isHeld else { return }
+        await withCheckedContinuation { continuation in
+            heldWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
     }
 }
 

@@ -261,6 +261,64 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
+    func testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--submission-fixture=delayed"
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+
+        let startListing = app.buttons["photo-review.start-listing"]
+        let addPhoto = app.buttons["photo-review.add"]
+        XCTAssertTrue(startListing.waitForExistence(timeout: 2))
+        XCTAssertTrue(addPhoto.waitForExistence(timeout: 2))
+        XCTAssertEqual(startListing.label, "Start listing")
+        XCTAssertTrue(startListing.isEnabled)
+        XCTAssertTrue(addPhoto.isEnabled)
+
+        startListing.tap()
+
+        let saving = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                startListing.label == "Saving your item"
+                    && !startListing.isEnabled
+                    && !addPhoto.isEnabled
+            },
+            object: startListing
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [saving], timeout: 3),
+            .completed,
+            "The real Photo Review must expose the bounded saving label and mutation lock."
+        )
+
+        let completed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                startListing.label == "Start listing"
+                    && startListing.isEnabled
+                    && addPhoto.isEnabled
+            },
+            object: startListing
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [completed], timeout: 3),
+            .completed,
+            "Only the in-flight interval may keep Photo Review mutations locked."
+        )
+    }
+
     // v1.2 primary_action.position is a sticky bottom action above the home-indicator
     // safe area, and its adaptive-layout contract says that action never covers the
     // thumbnails, Voice context, or the home indicator. The hero and thumbnail strip are

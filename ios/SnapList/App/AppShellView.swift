@@ -54,6 +54,9 @@ struct AppShellView: View {
                 PhotoReviewView(
                     store: session.store,
                     isCommitting: photoReviewHost.isCommitting,
+                    submissionPresentation: PhotoReviewSubmissionPresentation(
+                        host: submissionHost
+                    ),
                     backToCamera: {
                         returnFromPhotoReview(session)
                     },

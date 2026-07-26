@@ -719,6 +719,10 @@ struct PhotoReviewView: View {
     /// Set while an exit transaction is committing, so the seller cannot make an edit
     /// that the in-flight snapshot would silently discard.
     var isCommitting: Bool = false
+    var submissionPresentation: PhotoReviewSubmissionPresentation = .idle
+    var postSubmissionAnnouncement: (String) -> Void = {
+        UIAccessibility.post(notification: .announcement, argument: $0)
+    }
     var backToCamera: (() -> Void)? = nil
     let delete: () async -> PhotoReviewDeleteApplication?
     var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
@@ -732,6 +736,8 @@ struct PhotoReviewView: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
+    @State private var submissionAnnouncementTracker =
+        PhotoReviewSubmissionAnnouncementTracker()
     // Outside dismissal focus stays independent from picker cancellation focus.
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
@@ -793,7 +799,19 @@ struct PhotoReviewView: View {
                 .contentShape(.rect)
                 .onTapGesture(perform: dismissActionsOutside)
         }
-        .disabled(isCommitting)
+        .disabled(
+            isCommitting || submissionPresentation.mutationControlsLocked
+        )
+        .onChange(
+            of: submissionPresentation,
+            initial: true
+        ) { _, presentation in
+            guard let announcement =
+                submissionAnnouncementTracker.consume(presentation) else {
+                return
+            }
+            postSubmissionAnnouncement(announcement)
+        }
         .photosPicker(
             isPresented: pickerIsPresented,
             selection: $pickerItems,
@@ -1079,7 +1097,7 @@ struct PhotoReviewView: View {
         Button {
             openBoundary(.startListing)
         } label: {
-            Text("Start listing")
+            Text(submissionPresentation.primaryActionLabel)
                 .frame(
                     maxWidth: .infinity,
                     minHeight: SnapListMetrics.minimumTouchTarget
