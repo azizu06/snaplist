@@ -278,16 +278,35 @@ def resolved_group(concurrency)
 end
 
 # The workflow-level group is pinned to an exact contract, so an unrecognized context there is a
-# typo worth raising on. A job group is not pinned, and jobs legitimately key on `matrix.*`,
-# `inputs.*`, or `github.job`. Raising on those would reject a correctly isolated job, so they
-# resolve to opaque variables instead and the isolation comparison still runs.
+# typo worth raising on. A job group is not pinned, and jobs legitimately interpolate `matrix.*`,
+# `inputs.*`, `needs.*`, `strategy.*`, or `github.job`. Raising on those would reject a correctly
+# isolated job, so they resolve to opaque variables and the isolation comparison still runs.
+#
+# The list is an allow-list rather than a blanket fallback. Accepting every unknown name would
+# turn `github.rev` into an opaque variable too, and that group collapses to a single value at
+# runtime, so one branch's job would cancel another's. Only interpolation is covered: branching
+# on one of these still raises, because the comparison cannot be resolved symbolically.
+OPAQUE_JOB_CONTEXT_PREFIXES = ["matrix.", "inputs.", "needs.", "strategy."].freeze
+OPAQUE_JOB_CONTEXT_NAMES = ["github.job"].freeze
+
+def opaque_job_context?(name)
+  OPAQUE_JOB_CONTEXT_NAMES.include?(name) ||
+    OPAQUE_JOB_CONTEXT_PREFIXES.any? { |prefix| name.start_with?(prefix) }
+end
+
 class OpaqueContext
   def initialize(values)
     @values = values
   end
 
+  # `fetch_context` passes its own raising block. This ignores that block deliberately so the
+  # allow-list decides, and raises the same message for every name outside it.
   def fetch(name)
-    @values.fetch(name) { SymbolicText.variable(name) }
+    @values.fetch(name) do
+      raise "Unsupported GitHub context value #{name}" unless opaque_job_context?(name)
+
+      SymbolicText.variable(name)
+    end
   end
 end
 
@@ -338,6 +357,10 @@ raise "jobs must be a mapping when present" unless jobs.nil? || jobs.is_a?(Hash)
 
   ["pull_request", "push"].each do |event_name|
     job_automatic = evaluate_template(job_group, job_context(event_name: event_name))
+    # A group carrying `github.run_id` is unique to one run and cannot collide with anything, so
+    # a job that scopes every event that way is maximally isolated even though both events
+    # resolve to the same template. Comparing them there reports a conflict that cannot happen.
+    next if scoped_by_run_id?(job_automatic)
     next unless job_manual == job_automatic
 
     raise "job #{job_name} concurrency group must separate workflow_dispatch from #{event_name}"

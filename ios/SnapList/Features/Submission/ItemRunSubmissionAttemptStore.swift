@@ -36,8 +36,8 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         // for two reasons. A URL caches the resource values it has already fetched, and this
         // store holds one long-lived `attemptURL`, so a second load answers from the state
         // before `clearAttempt` deleted the file. That is observed, not assumed:
-        // `testStoredAttemptSurvivesRelaunchAndClearsOnlyItself` failed exactly that way once
-        // the `fileExists` pre-check above stopped short-circuiting the deleted path. It also
+        // `testStoredAttemptSurvivesRelaunchAndClearsOnlyItself` failed exactly that way once the
+        // `fileExists` pre-check this replaced stopped short-circuiting the deleted path. It also
         // gives the fail-closed and unknown-type branches a seam a test can actually reach.
         let isRegularFile: Bool?
         do {
