@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "cli": {
+    "package": "supabase",
+    "version": "2.105.0",
+    "integrity": "sha512-UB2aFLYAVujTQsZ9l+aCbDfLNaZApZucByRNP/1j0L1pXXzFhSgEyZSrvHSUO5LIvOb09AGHWishL/usVTuHTg==",
+    "packageJsonSha256": "eb22fd042399352b8abf4581c5b9f33932703e5a78315913130914f0ca8542a4",
+    "shimSha256": "253caa8c31ee5976322d04a8bd7752622c0915e7943de3f74e2b73395c54a240"
+  },
+  "source": {
+    "repository": "https://github.com/supabase/cli.git",
+    "tag": "v2.105.0",
+    "tagObject": "6b84c68f097184b3221dc44c8cee45d3ccb0d7c1",
+    "commit": "b749d52b8e86813dfbcef4b34d0f038b78695131",
+    "tree": "b98153e6684637de7da209e511614bd36c7a5f01",
+    "patchedTree": "68900ffc3a41480589e26c55e01a4722ca7edcca"
+  },
+  "patch": {
+    "path": "patches/supabase-go-v2.105.0-loopback.patch",
+    "sha256": "cf73522ff089add29bc595afee79bfb584dcf059a95f74b60f390e8c8ce03687"
+  },
+  "internalOverride": {
+    "environmentVariable": "SUPABASE_GO_BINARY",
+    "sourcePath": "apps/cli/src/shared/legacy/go-proxy.layer.ts",
+    "sourceSha256": "f562172096a1c9f2d10fec61451bf5df79750174fabc9aa97fef465b1d899003",
+    "resolutionPriority": 1,
+    "childEnvironment": "inherited"
+  },
+  "build": {
+    "goVersion": "go1.25.5",
+    "cgoEnabled": "0",
+    "trimpath": true,
+    "buildVcs": false,
+    "ldflags": "-s -w -X github.com/supabase/cli/internal/utils.Version=2.105.0"
+  },
+  "artifacts": {
+    "darwin-arm64": {
+      "platform": "darwin",
+      "architecture": "arm64",
+      "platformPackage": "@supabase/cli-darwin-arm64",
+      "platformPackageVersion": "2.105.0",
+      "platformPackageJsonSha256": "57fa6eb86f67b62f32b9d65811c3f1403fd3e9635a3ef83c8a1ec047f0f0c945",
+      "platformCliSha256": "635c7f8360df5f098628a0ee1c1d489fb8e45e0a7ca7d1b1299cce51c1e1e184",
+      "binaryPath": ".cache/v2.105.0/darwin-arm64/supabase-go",
+      "binarySha256": "bd3df832d2597eed5558950e9729a4fa64863894fe4f5ea1b32e403be71cca34",
+      "binarySize": 96332018,
+      "receiptPath": ".cache/v2.105.0/darwin-arm64/build-receipt.json"
+    }
+  }
+}

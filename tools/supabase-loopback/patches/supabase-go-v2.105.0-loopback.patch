@@ -1,0 +1,200 @@
+diff --git a/apps/cli-go/internal/utils/docker.go b/apps/cli-go/internal/utils/docker.go
+index 9736fa6..1c494eb 100644
+--- a/apps/cli-go/internal/utils/docker.go
++++ b/apps/cli-go/internal/utils/docker.go
+@@ -33,6 +33,7 @@ import (
+ 	"github.com/docker/docker/pkg/stdcopy"
+ 	"github.com/go-errors/errors"
+ 	"github.com/spf13/viper"
++	"github.com/supabase/cli/internal/utils/loopback"
+ 	"go.opentelemetry.io/otel"
+ )
+ 
+@@ -248,6 +249,9 @@ func DockerPullImageIfNotCached(ctx context.Context, imageName string) error {
+ var suggestDockerInstall = "Docker Desktop is a prerequisite for local development. Follow the official docs to install: https://docs.docker.com/desktop"
+ 
+ func DockerStart(ctx context.Context, config container.Config, hostConfig container.HostConfig, networkingConfig network.NetworkingConfig, containerName string) (string, error) {
++	if err := loopback.BindPublishedPorts(hostConfig.PortBindings); err != nil {
++		return "", errors.Errorf("failed to secure published Docker ports: %w", err)
++	}
+ 	// Pull container image
+ 	if err := DockerPullImageIfNotCached(ctx, config.Image); err != nil {
+ 		if client.IsErrConnectionFailed(err) {
+diff --git a/apps/cli-go/internal/utils/loopback/portbindings.go b/apps/cli-go/internal/utils/loopback/portbindings.go
+new file mode 100644
+index 0000000..0df0346
+--- /dev/null
++++ b/apps/cli-go/internal/utils/loopback/portbindings.go
+@@ -0,0 +1,96 @@
++package loopback
++
++import (
++	"fmt"
++	"sort"
++
++	"github.com/docker/go-connections/nat"
++)
++
++const (
++	ipv4 = "127.0.0.1"
++	ipv6 = "::1"
++)
++
++func BindPublishedPorts(portBindings nat.PortMap) error {
++	for port, bindings := range portBindings {
++		if len(bindings) == 0 {
++			return fmt.Errorf("published port %s has no host bindings", port)
++		}
++
++		hostPorts := make(map[string]struct{}, len(bindings))
++		hasOmittedHostIP := false
++		hasExplicitHostIP := false
++		for _, binding := range bindings {
++			if binding.HostPort == "" {
++				return fmt.Errorf("published port %s has an empty host port", port)
++			}
++			hostPorts[binding.HostPort] = struct{}{}
++			if binding.HostIP == "" {
++				hasOmittedHostIP = true
++			} else {
++				hasExplicitHostIP = true
++			}
++		}
++		if hasOmittedHostIP && hasExplicitHostIP {
++			return fmt.Errorf("published port %s mixes omitted and explicit host IPs", port)
++		}
++		if hasExplicitHostIP {
++			if err := ValidatePublishedPorts(nat.PortMap{port: bindings}); err != nil {
++				return err
++			}
++			continue
++		}
++
++		sortedHostPorts := make([]string, 0, len(hostPorts))
++		for hostPort := range hostPorts {
++			sortedHostPorts = append(sortedHostPorts, hostPort)
++		}
++		sort.Strings(sortedHostPorts)
++
++		normalized := make([]nat.PortBinding, 0, len(sortedHostPorts)*2)
++		for _, hostPort := range sortedHostPorts {
++			normalized = append(normalized,
++				nat.PortBinding{HostIP: ipv4, HostPort: hostPort},
++				nat.PortBinding{HostIP: ipv6, HostPort: hostPort},
++			)
++		}
++		portBindings[port] = normalized
++	}
++	return ValidatePublishedPorts(portBindings)
++}
++
++func ValidatePublishedPorts(portBindings nat.PortMap) error {
++	for port, bindings := range portBindings {
++		if len(bindings) == 0 {
++			return fmt.Errorf("published port %s has no host bindings", port)
++		}
++
++		hostIPsByPort := map[string]map[string]int{}
++		for _, binding := range bindings {
++			if binding.HostPort == "" {
++				return fmt.Errorf("published port %s has an empty host port", port)
++			}
++			if binding.HostIP != ipv4 && binding.HostIP != ipv6 {
++				return fmt.Errorf("published port %s has unsafe host IP %q", port, binding.HostIP)
++			}
++			if hostIPsByPort[binding.HostPort] == nil {
++				hostIPsByPort[binding.HostPort] = map[string]int{}
++			}
++			hostIPsByPort[binding.HostPort][binding.HostIP]++
++		}
++
++		for hostPort, hostIPs := range hostIPsByPort {
++			if hostIPs[ipv4] != 1 || hostIPs[ipv6] != 1 || len(hostIPs) != 2 {
++				return fmt.Errorf(
++					"published port %s:%s must bind exactly once to %s and %s",
++					port,
++					hostPort,
++					ipv4,
++					ipv6,
++				)
++			}
++		}
++	}
++	return nil
++}
+diff --git a/apps/cli-go/internal/utils/loopback/portbindings_test.go b/apps/cli-go/internal/utils/loopback/portbindings_test.go
+new file mode 100644
+index 0000000..7dcbde7
+--- /dev/null
++++ b/apps/cli-go/internal/utils/loopback/portbindings_test.go
+@@ -0,0 +1,70 @@
++package loopback
++
++import (
++	"testing"
++
++	"github.com/docker/go-connections/nat"
++	"github.com/stretchr/testify/require"
++)
++
++func TestBindPublishedPortsNormalizesEveryPort(t *testing.T) {
++	t.Parallel()
++
++	bindings := nat.PortMap{
++		"5432/tcp": {{HostPort: "41234"}},
++		"6543/tcp": {{HostPort: "51234"}},
++	}
++
++	require.NoError(t, BindPublishedPorts(bindings))
++	require.Equal(t, []nat.PortBinding{
++		{HostIP: "127.0.0.1", HostPort: "41234"},
++		{HostIP: "::1", HostPort: "41234"},
++	}, bindings["5432/tcp"])
++	require.Equal(t, []nat.PortBinding{
++		{HostIP: "127.0.0.1", HostPort: "51234"},
++		{HostIP: "::1", HostPort: "51234"},
++	}, bindings["6543/tcp"])
++}
++
++func TestValidatePublishedPortsRejectsUnsafeBindings(t *testing.T) {
++	t.Parallel()
++
++	tests := map[string]nat.PortMap{
++		"empty host IP": {
++			"5432/tcp": {{HostIP: "", HostPort: "41234"}},
++		},
++		"wildcard IPv4": {
++			"5432/tcp": {{HostIP: "0.0.0.0", HostPort: "41234"}},
++		},
++		"wildcard IPv6": {
++			"5432/tcp": {{HostIP: "::", HostPort: "41234"}},
++		},
++		"missing IPv6 family": {
++			"5432/tcp": {{HostIP: "127.0.0.1", HostPort: "41234"}},
++		},
++		"empty host port": {
++			"5432/tcp": {
++				{HostIP: "127.0.0.1", HostPort: ""},
++				{HostIP: "::1", HostPort: ""},
++			},
++		},
++	}
++
++	for name, bindings := range tests {
++		bindings := bindings
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++			require.Error(t, ValidatePublishedPorts(bindings))
++		})
++	}
++}
++
++func TestBindPublishedPortsRejectsUnsafeExplicitBindings(t *testing.T) {
++	t.Parallel()
++
++	bindings := nat.PortMap{
++		"5432/tcp": {{HostIP: "0.0.0.0", HostPort: "41234"}},
++	}
++
++	require.Error(t, BindPublishedPorts(bindings))
++}

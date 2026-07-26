@@ -1,2 +1,5 @@
 # Preserve canonical package Markdown hard breaks byte-for-byte.
 ios/DesignContracts/Resolved/V1PlusRunRev/README-FIRST.md whitespace=-trailing-space
+
+# Unified diff context markers intentionally precede source indentation.
+tools/supabase-loopback/patches/*.patch -whitespace

@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     // Agent worktrees and design scratch — never lint targets.
     ".claude/**",
     ".design-iterations/**",
+    "tools/supabase-loopback/.cache/**",
   ]),
 ]);
 
