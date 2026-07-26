@@ -193,7 +193,7 @@
       "dispositions": [{
         "treatment": "delete",
         "owner": "guest-device-entitlement",
-        "deletionTriggers": ["successful-claim-transfers-ownership", "guest-recovery-expires", "guest-deletion"],
+        "deletionTriggers": ["successful-claim-transfers-ownership", "guest-recovery-expires"],
         "maximumRetention": "24 hours after durable guest result acceptance unless atomically claimed sooner",
         "executor": "guest-claim-or-expiry-capability-owned-by-issue-175",
         "completionProof": "stable claimed outcome names the tenant owner or stable expired outcome proves guest artifacts were deleted"
