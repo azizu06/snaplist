@@ -10,6 +10,9 @@ const DATABASE_URL = resolveLocalTestDatabaseUrl(
 );
 const APP_ID = "TEAMID1234.dev.snaplist.ios";
 const KEY_ID = Buffer.alloc(32, 0x33).toString("base64");
+const RETENTION_KEY_IDS = [0x41, 0x42, 0x43, 0x44, 0x45].map((byte) =>
+  Buffer.alloc(32, byte).toString("base64"),
+);
 
 let reachable = false;
 let admin: Client;
@@ -102,8 +105,8 @@ afterAll(async () => {
     [challengeIds],
   );
   await admin.query(
-    "delete from private.app_attest_keys where key_id = $1",
-    [KEY_ID],
+    "delete from private.app_attest_keys where key_id = any($1::text[])",
+    [[KEY_ID, ...RETENTION_KEY_IDS]],
   );
   await Promise.all([admin.end(), first.end(), second.end()]);
 });
@@ -214,5 +217,288 @@ describe("App Attest private replay boundary", () => {
     ).rejects.toThrow(/permission denied/i);
     await first.query("reset role");
     await asServiceRole(first);
+  });
+
+  it("deletes consumed and expired challenges while preserving active state", async () => {
+    if (!reachable) return;
+    const consumedId = randomUUID();
+    const expiredId = randomUUID();
+    const activeId = randomUUID();
+    challengeIds.push(consumedId, expiredId, activeId);
+
+    await admin.query(
+      `insert into private.app_attest_challenges (
+         challenge_id, challenge, kind, key_id, environment,
+         created_at, expires_at, consumed_at
+       ) values
+         ($1, $4, 'attestation', null, 'production',
+          statement_timestamp() - interval '5 minutes',
+          statement_timestamp() + interval '5 minutes',
+          statement_timestamp()),
+         ($2, $4, 'attestation', null, 'production',
+          statement_timestamp() - interval '10 minutes',
+          statement_timestamp() - interval '1 second',
+          null),
+         ($3, $4, 'attestation', null, 'production',
+          statement_timestamp(),
+          statement_timestamp() + interval '5 minutes',
+          null)`,
+      [consumedId, expiredId, activeId, Buffer.alloc(32, 0x45)],
+    );
+
+    const firstCleanup = await admin.query<{
+      result: { deletedChallenges: number; deletedKeys: number };
+    }>(
+      `select private.cleanup_app_attest_retention(
+         statement_timestamp(), true, false
+       ) as result`,
+    );
+    expect(firstCleanup.rows[0]!.result).toEqual({
+      deletedChallenges: 2,
+      deletedKeys: 0,
+    });
+
+    const remaining = await admin.query<{ challenge_id: string }>(
+      `select challenge_id
+       from private.app_attest_challenges
+       where challenge_id = any($1::uuid[])
+       order by challenge_id`,
+      [[consumedId, expiredId, activeId]],
+    );
+    expect(remaining.rows.map(({ challenge_id }) => challenge_id)).toEqual([
+      activeId,
+    ]);
+
+    const repeat = await admin.query<{
+      result: { deletedChallenges: number; deletedKeys: number };
+    }>(
+      `select private.cleanup_app_attest_retention(
+         statement_timestamp(), true, false
+       ) as result`,
+    );
+    expect(repeat.rows[0]!.result).toEqual({
+      deletedChallenges: 0,
+      deletedKeys: 0,
+    });
+  });
+
+  it("deletes asserted and never-asserted keys only after 90 inactive days", async () => {
+    if (!reachable) return;
+    const [assertedStale, neverAssertedStale, active] = RETENTION_KEY_IDS;
+    await admin.query(
+      `insert into private.app_attest_keys (
+         key_id, app_id, environment, public_key_pem, receipt,
+         assertion_counter, bundle_version, validation_category,
+         attested_at, last_asserted_at
+       ) values
+         ($1, $4, 'production', $5, $6, 7, '1', 1,
+          statement_timestamp() - interval '100 days',
+          statement_timestamp() - interval '91 days'),
+         ($2, $4, 'production', $5, $6, 0, '1', 1,
+          statement_timestamp() - interval '91 days', null),
+         ($3, $4, 'production', $5, $6, 8, '1', 1,
+          statement_timestamp() - interval '100 days',
+          statement_timestamp() - interval '1 day')`,
+      [
+        assertedStale,
+        neverAssertedStale,
+        active,
+        APP_ID,
+        "-----BEGIN PUBLIC KEY-----\nretention\n-----END PUBLIC KEY-----",
+        Buffer.from("current-receipt"),
+      ],
+    );
+
+    const cleanup = await admin.query<{
+      result: { deletedChallenges: number; deletedKeys: number };
+    }>(
+      `select private.cleanup_app_attest_retention(
+         statement_timestamp(), false, true
+       ) as result`,
+    );
+    expect(cleanup.rows[0]!.result).toEqual({
+      deletedChallenges: 0,
+      deletedKeys: 2,
+    });
+
+    const remaining = await admin.query<{ key_id: string }>(
+      `select key_id
+       from private.app_attest_keys
+       where key_id = any($1::text[])`,
+      [[assertedStale, neverAssertedStale, active]],
+    );
+    expect(remaining.rows.map(({ key_id }) => key_id)).toEqual([active]);
+  });
+
+  it("serializes concurrent cleanup and remains idempotent", async () => {
+    if (!reachable) return;
+    const concurrentKey = RETENTION_KEY_IDS[3]!;
+    await admin.query(
+      `insert into private.app_attest_keys (
+         key_id, app_id, environment, public_key_pem, receipt,
+         bundle_version, validation_category, attested_at
+       ) values (
+         $1, $2, 'production', $3, $4, '1', 1,
+         statement_timestamp() - interval '91 days'
+       )`,
+      [
+        concurrentKey,
+        APP_ID,
+        "-----BEGIN PUBLIC KEY-----\nconcurrent\n-----END PUBLIC KEY-----",
+        Buffer.from("current-receipt"),
+      ],
+    );
+
+    await Promise.all([first.query("reset role"), second.query("reset role")]);
+    try {
+      const outcomes = await Promise.all(
+        [first, second].map((client) =>
+          client.query<{
+            result: { deletedChallenges: number; deletedKeys: number };
+          }>(
+            `select private.cleanup_app_attest_retention(
+               statement_timestamp(), false, true
+             ) as result`,
+          ),
+        ),
+      );
+      expect(
+        outcomes.reduce(
+          (total, outcome) => total + outcome.rows[0]!.result.deletedKeys,
+          0,
+        ),
+      ).toBe(1);
+    } finally {
+      await Promise.all([asServiceRole(first), asServiceRole(second)]);
+    }
+  });
+
+  it("immediately erases only explicitly supplied App Attest state", async () => {
+    if (!reachable) return;
+    const erasureKey = RETENTION_KEY_IDS[4]!;
+    const linkedChallenge = randomUUID();
+    const explicitChallenge = randomUUID();
+    challengeIds.push(linkedChallenge, explicitChallenge);
+
+    await admin.query(
+      `insert into private.app_attest_keys (
+         key_id, app_id, environment, public_key_pem, receipt,
+         bundle_version, validation_category
+       ) values ($1, $2, 'production', $3, $4, '1', 1)`,
+      [
+        erasureKey,
+        APP_ID,
+        "-----BEGIN PUBLIC KEY-----\nerasure\n-----END PUBLIC KEY-----",
+        Buffer.from("current-receipt"),
+      ],
+    );
+    await admin.query(
+      `insert into private.app_attest_challenges (
+         challenge_id, challenge, kind, key_id, environment, expires_at
+       ) values
+         ($1, $3, 'assertion', $4, 'production',
+          statement_timestamp() + interval '5 minutes'),
+         ($2, $3, 'attestation', null, 'production',
+          statement_timestamp() + interval '5 minutes')`,
+      [linkedChallenge, explicitChallenge, Buffer.alloc(32, 0x46), erasureKey],
+    );
+
+    const erased = await first.query<{
+      result: { deletedChallenges: number; deletedKeys: number };
+    }>(
+      `select public.delete_app_attest_state_for_erasure(
+         $1::uuid[], $2::text[]
+       ) as result`,
+      [[explicitChallenge], [erasureKey]],
+    );
+    expect(erased.rows[0]!.result).toEqual({
+      deletedChallenges: 2,
+      deletedKeys: 1,
+    });
+
+    const repeated = await first.query<{
+      result: { deletedChallenges: number; deletedKeys: number };
+    }>(
+      `select public.delete_app_attest_state_for_erasure(
+         $1::uuid[], $2::text[]
+       ) as result`,
+      [[explicitChallenge], [erasureKey]],
+    );
+    expect(repeated.rows[0]!.result).toEqual({
+      deletedChallenges: 0,
+      deletedKeys: 0,
+    });
+  });
+
+  it("registers one exact hourly scheduler and reports its run-history health", async () => {
+    if (!reachable) return;
+    const jobs = await admin.query<{
+      active: boolean;
+      command: string;
+      jobid: number;
+      schedule: string;
+    }>(
+      `select jobid, schedule, command, active
+       from cron.job
+       where jobname = 'snaplist-app-attest-retention-hourly'`,
+    );
+    expect(jobs.rows).toEqual([
+      expect.objectContaining({
+        active: true,
+        command:
+          "select private.cleanup_app_attest_retention(statement_timestamp(), true, true);",
+        schedule: "17 * * * *",
+      }),
+    ]);
+
+    const privileges = await admin.query<{
+      anon: boolean;
+      authenticated: boolean;
+      service_role: boolean;
+    }>(
+      `select
+         has_function_privilege(
+           'anon',
+           'private.cleanup_app_attest_retention(timestamptz,boolean,boolean)',
+           'EXECUTE'
+         ) as anon,
+         has_function_privilege(
+           'authenticated',
+           'private.cleanup_app_attest_retention(timestamptz,boolean,boolean)',
+           'EXECUTE'
+         ) as authenticated,
+         has_function_privilege(
+           'service_role',
+           'private.cleanup_app_attest_retention(timestamptz,boolean,boolean)',
+           'EXECUTE'
+         ) as service_role`,
+    );
+    expect(privileges.rows[0]).toEqual({
+      anon: false,
+      authenticated: false,
+      service_role: false,
+    });
+
+    const history = await admin.query<{ last_succeeded_at: Date | null }>(
+      `select max(coalesce(history.end_time, history.start_time)) as last_succeeded_at
+       from cron.job_run_details history
+       where history.jobid = $1
+         and history.status = 'succeeded'`,
+      [jobs.rows[0]!.jobid],
+    );
+    const health = await admin.query<{
+      last_succeeded_at: Date | null;
+      retention_breach: boolean;
+    }>(
+      `select last_succeeded_at, retention_breach
+       from private.app_attest_retention_scheduler_health`,
+    );
+    expect(health.rows).toHaveLength(1);
+    expect(health.rows[0]!.last_succeeded_at).toEqual(
+      history.rows[0]!.last_succeeded_at,
+    );
+    if (history.rows[0]!.last_succeeded_at === null) {
+      expect(health.rows[0]!.retention_breach).toBe(true);
+    }
   });
 });

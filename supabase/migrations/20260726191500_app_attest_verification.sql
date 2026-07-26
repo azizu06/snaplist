@@ -3,6 +3,7 @@
 -- No guest principal, allowance, tenant-domain row, or public client authority.
 
 create schema if not exists private;
+create extension if not exists pg_cron;
 
 create table private.app_attest_challenges (
   challenge_id uuid primary key,
@@ -31,7 +32,8 @@ create table private.app_attest_keys (
   bundle_version text not null check (nullif(btrim(bundle_version), '') is not null),
   validation_category integer not null check (validation_category between 1 and 6),
   attested_at timestamptz not null default statement_timestamp(),
-  last_asserted_at timestamptz
+  last_asserted_at timestamptz,
+  check (last_asserted_at is null or last_asserted_at >= attested_at)
 );
 
 revoke all on table private.app_attest_challenges from public;
@@ -220,14 +222,142 @@ begin
 end;
 $$;
 
+create or replace function private.cleanup_app_attest_retention(
+  p_now timestamptz,
+  p_cleanup_challenges boolean,
+  p_cleanup_keys boolean
+)
+returns jsonb
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_deleted_challenges integer := 0;
+  v_deleted_keys integer := 0;
+begin
+  if p_now is null
+    or p_cleanup_challenges is null
+    or p_cleanup_keys is null
+  then
+    raise exception 'invalid_app_attest_retention_cleanup';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('snaplist:app-attest-retention', 0)
+  );
+
+  if p_cleanup_challenges then
+    delete from private.app_attest_challenges
+    where consumed_at is not null
+      or expires_at <= p_now;
+    get diagnostics v_deleted_challenges = row_count;
+  end if;
+
+  if p_cleanup_keys then
+    delete from private.app_attest_keys
+    where coalesce(last_asserted_at, attested_at)
+      <= p_now - interval '90 days';
+    get diagnostics v_deleted_keys = row_count;
+  end if;
+
+  return jsonb_build_object(
+    'deletedChallenges', v_deleted_challenges,
+    'deletedKeys', v_deleted_keys
+  );
+end;
+$$;
+
+create or replace function public.delete_app_attest_state_for_erasure(
+  p_challenge_ids uuid[],
+  p_key_ids text[]
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_deleted_challenges integer := 0;
+  v_deleted_keys integer := 0;
+begin
+  if p_challenge_ids is null
+    or p_key_ids is null
+    or array_position(p_challenge_ids, null) is not null
+    or array_position(p_key_ids, null) is not null
+    or exists (
+      select 1
+      from unnest(p_key_ids) key_id
+      where nullif(btrim(key_id), '') is null
+    )
+  then
+    raise exception 'invalid_app_attest_erasure_scope';
+  end if;
+
+  delete from private.app_attest_challenges
+  where challenge_id = any(p_challenge_ids)
+    or key_id = any(p_key_ids);
+  get diagnostics v_deleted_challenges = row_count;
+
+  delete from private.app_attest_keys
+  where key_id = any(p_key_ids);
+  get diagnostics v_deleted_keys = row_count;
+
+  return jsonb_build_object(
+    'deletedChallenges', v_deleted_challenges,
+    'deletedKeys', v_deleted_keys
+  );
+end;
+$$;
+
 revoke all on function public.issue_app_attest_challenge(uuid, bytea, text, text, text, timestamptz) from public, anon, authenticated;
 revoke all on function public.claim_app_attest_challenge(uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.commit_app_attest_attestation(text, text, text, text, bytea, text, integer) from public, anon, authenticated;
 revoke all on function public.read_app_attest_key(text) from public, anon, authenticated;
 revoke all on function public.commit_app_attest_assertion(text, text, text, bigint, text, integer) from public, anon, authenticated;
+revoke all on function public.delete_app_attest_state_for_erasure(uuid[], text[]) from public, anon, authenticated;
+revoke all on function private.cleanup_app_attest_retention(timestamptz, boolean, boolean) from public, anon, authenticated, service_role;
 
 grant execute on function public.issue_app_attest_challenge(uuid, bytea, text, text, text, timestamptz) to service_role;
 grant execute on function public.claim_app_attest_challenge(uuid, text, text, text) to service_role;
 grant execute on function public.commit_app_attest_attestation(text, text, text, text, bytea, text, integer) to service_role;
 grant execute on function public.read_app_attest_key(text) to service_role;
 grant execute on function public.commit_app_attest_assertion(text, text, text, bigint, text, integer) to service_role;
+grant execute on function public.delete_app_attest_state_for_erasure(uuid[], text[]) to service_role;
+
+select cron.schedule(
+  'snaplist-app-attest-retention-hourly',
+  '17 * * * *',
+  'select private.cleanup_app_attest_retention(statement_timestamp(), true, true);'
+);
+
+create view private.app_attest_retention_scheduler_health
+with (security_invoker = true)
+as
+select
+  job.jobid,
+  job.schedule,
+  job.command,
+  job.active,
+  run.last_succeeded_at,
+  (
+    job.jobid is null
+    or job.schedule is distinct from '17 * * * *'
+    or job.command is distinct from
+      'select private.cleanup_app_attest_retention(statement_timestamp(), true, true);'
+    or job.active is distinct from true
+    or run.last_succeeded_at is null
+    or run.last_succeeded_at
+      < statement_timestamp() - interval '23 hours'
+  ) as retention_breach
+from (values (true)) singleton(present)
+left join cron.job job
+  on job.jobname = 'snaplist-app-attest-retention-hourly'
+left join lateral (
+  select max(coalesce(history.end_time, history.start_time)) as last_succeeded_at
+  from cron.job_run_details history
+  where history.jobid = job.jobid
+    and history.status = 'succeeded'
+) run on true;
+
+revoke all on private.app_attest_retention_scheduler_health
+from public, anon, authenticated, service_role;
