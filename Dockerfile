@@ -7,7 +7,11 @@
 # Supabase, eBay keys) is injected when the container starts:
 #
 #   docker build -t snaplist .
-#   docker run --rm -p 3000:3000 --env-file .env.local snaplist
+#   docker run --rm -p 3000:3000 --env-file .env.local -e LLM_PROVIDER=gemini snaplist
+#
+# LLM_PROVIDER is required here even for a local container: the runner sets
+# NODE_ENV=production, so the provider must be chosen explicitly (#501). Without it
+# the server starts and then answers every route with a 500.
 
 FROM node:22-alpine AS base
 # pnpm via corepack, pinned by package.json's `packageManager` field.

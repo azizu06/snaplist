@@ -35,7 +35,17 @@ describe("resolveProvider", () => {
     // The provider must never be reached by fallthrough in a deploy: Google's
     // free tier permits product-improvement use and human review of submitted
     // content, and seller photos resolve through this function.
-    expect(() => resolveProvider({ NODE_ENV: "production" })).toThrowError(/LLM_PROVIDER/);
+    for (const NODE_ENV of ["production", "staging", "preview"]) {
+      expect(() => resolveProvider({ NODE_ENV })).toThrowError(/LLM_PROVIDER/);
+    }
+  });
+
+  it("still resolves for a deploy that DID choose a provider (#501)", () => {
+    // The other direction of the fence. Without this, inverting the local-development
+    // check would break every deploy and leave the suite green.
+    expect(resolveProvider({ NODE_ENV: "production", LLM_PROVIDER: "openai" })).toBe("openai");
+    expect(resolveProvider({ NODE_ENV: "production", LLM_PROVIDER: "gemini" })).toBe("google");
+    expect(resolveProvider({ VERCEL: "1", LLM_PROVIDER: "openai" })).toBe("openai");
   });
 
   it("rejects a misspelled LLM_PROVIDER instead of falling through to a default (#501)", () => {

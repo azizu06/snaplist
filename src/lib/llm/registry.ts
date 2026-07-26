@@ -226,7 +226,7 @@ export function resolveApiKey(
 }
 
 export interface ResolveLanguageModelOptions {
-  /** Force a provider (else `LLM_PROVIDER` / NODE_ENV default). */
+  /** Force a provider (else `LLM_PROVIDER`, which is required outside local dev). */
   provider?: LlmProvider;
   /** Explicit model id (else role env var / provider default). */
   modelId?: string;

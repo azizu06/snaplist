@@ -9,8 +9,6 @@ export {
   resolveModelId,
   resolveApiKey,
   oppositeProvider,
-  isLocalDevelopment,
-  llmProviderConfigError,
   LLM_PROVIDERS,
   LLM_ROLES,
   type LlmProvider,

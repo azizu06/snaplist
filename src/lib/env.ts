@@ -28,13 +28,18 @@ const optionalProxyTemplateSchema = z.preprocess(
  * Keep secrets server-only. Only NEXT_PUBLIC_* values reach the browser.
  */
 const envSchema = z.object({
-  // LLM provider registry (issue #55). Provider is a config flip: dev defaults to
-  // Gemini (free tier — protects the OpenAI budget), the showcase runs on OpenAI.
-  // `LLM_PROVIDER` overrides the NODE_ENV default (gemini/google | openai). At least
-  // one provider key is required (enforced below) — OPENAI_API_KEY for the showcase,
-  // GOOGLE_GENERATIVE_AI_API_KEY (or GEMINI_API_KEY) for dev. Keys are never required
-  // together, so a Gemini-only dev env validates without an OpenAI key.
-  LLM_PROVIDER: z.enum(["openai", "google", "gemini"]).optional(),
+  // LLM provider registry (issue #55). `LLM_PROVIDER` (gemini/google | openai) is
+  // REQUIRED outside local development and may be omitted only on a developer's own
+  // machine, where it means Gemini (#501). The key for the SELECTED provider must be
+  // present — OPENAI_API_KEY for OpenAI, GOOGLE_GENERATIVE_AI_API_KEY (or
+  // GEMINI_API_KEY) for Gemini. Keys are never required together, so a Gemini-only
+  // dev env validates without an OpenAI key.
+  //
+  // Typed as a plain string on purpose: `llmProviderConfigError` in the registry is
+  // the SINGLE owner of the provider vocabulary, including its casing and whitespace
+  // rules. A second z.enum here would report a differently-worded issue for the same
+  // variable and disagree with the registry on values like `GEMINI` (see below).
+  LLM_PROVIDER: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
   GEMINI_API_KEY: z.string().min(1).optional(),
@@ -210,17 +215,13 @@ export type Env = z.infer<typeof envSchema>;
  */
 export function parseEnv(raw: Record<string, unknown>): Env {
   const parsed = envSchema.safeParse(raw);
-  const providerIssues = llmProviderIssues(raw);
-  if (!parsed.success) {
-    const issues = parsed.error.issues
-      .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
-      .concat(providerIssues)
-      .join("\n");
-    throw new Error(`Invalid environment variables:\n${issues}`);
-  }
-  if (providerIssues.length > 0) {
-    throw new Error(`Invalid environment variables:\n${providerIssues.join("\n")}`);
-  }
+  const issues = parsed.success
+    ? []
+    : parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`);
+  issues.push(...llmProviderIssues(raw));
+
+  if (!parsed.success) throw new Error(`Invalid environment variables:\n${issues.join("\n")}`);
+  if (issues.length > 0) throw new Error(`Invalid environment variables:\n${issues.join("\n")}`);
   return parsed.data;
 }
 

@@ -83,15 +83,29 @@ omitted it.
   Gemini **by name** (`LOCAL_DEVELOPMENT_PROVIDER`) rather than by falling through a NODE_ENV branch
   a deploy shares.
 - Anywhere else, an unset value throws from `resolveProvider`, fails `parseEnv` at config startup,
-  and refuses server boot from `instrumentation.register()`. So does a misspelled one, which is a
-  set value the "unset" check would otherwise miss.
-- The check is deliberately absent from `next build`: `register()` is not invoked there, preserving
-  CI's "the production build must succeed without secrets" property. A build serves no seller, so
-  the earliest point worth failing is boot.
+  and rejects from `instrumentation.register()`. So does a misspelled one, which is a set value the
+  "unset" check would otherwise miss.
+- **What the startup failure actually looks like.** Next.js does not exit on a rejected `register()`.
+  It logs `Ready`, binds the port, fails `prepare()`, and then answers **every** route with a 500 for
+  the life of the process — marketing pages and `/api/health` included, because the failure is at
+  `prepare()` rather than at the model call. Verified against `next start` on this change. The
+  deploy is unusable and fails closed, but it is not a crash loop and will not trip a platform
+  health gate that only checks whether the port is bound. `resolveProvider` throwing at request time
+  is the guarantee that holds identically on every platform; on Vercel's per-function path the
+  `register()` rejection surfaces as an unhandled rejection rather than a clean startup failure.
+  Sentry is initialized before the check so the config error reaches alerting rather than only the
+  platform's raw logs.
+- The check is deliberately absent from `next build`: `register()` is not invoked there (Next returns
+  early during `phase-production-build`), preserving CI's "the production build must succeed without
+  secrets" property. A build serves no seller, so the earliest point worth failing is startup.
+- `LLM_PROVIDER`'s accepted vocabulary, casing, and whitespace rules live in one function,
+  `llmProviderConfigError`. The env schema deliberately types it as a plain string rather than
+  repeating a `z.enum`, which previously disagreed with the registry on values like `GEMINI`.
 - **Local development** requires *both*: `NODE_ENV` absent or `development`/`test` (so `staging`,
   `preview`, and `production` all fail), **and** no hosted-platform runtime marker present
-  (`VERCEL`, `RENDER`, `RAILWAY_ENVIRONMENT`, `FLY_APP_NAME`, `AWS_LAMBDA_FUNCTION_NAME`,
-  `AWS_EXECUTION_ENV`, `KUBERNETES_SERVICE_HOST`, `NETLIFY`, `DYNO`). Every deploy target this
+  (`VERCEL`, `VERCEL_ENV`, `RENDER`, `RAILWAY_ENVIRONMENT`, `FLY_APP_NAME`,
+  `AWS_LAMBDA_FUNCTION_NAME`, `AWS_EXECUTION_ENV`, `KUBERNETES_SERVICE_HOST`, `NETLIFY`,
+  `DYNO`). Every deploy target this
   project names sets one of them, and `next build` / `next start` set `NODE_ENV=production` on their
   own. `CI` is deliberately excluded: CI is not a deploy and gating on it would make the offline
   suite behave differently in CI than on the machine that wrote it.
@@ -113,9 +127,21 @@ foreseeably via a sourced (rather than self-shot) gold set, a seeded corpus carr
 photos, or a TestFlight/friend-testing build pointed at a dev configuration. Revisit the local
 default if any of those land.
 
-The `AGENTS.md` non-negotiable still describes Gemini as the dev default "for the free tier" without
-its data terms. That line is amended in a follow-up, to avoid colliding with PR #500, which is open
-against that file.
+### Migration required before this ships
+
+Any existing deployment whose environment omits `LLM_PROVIDER` works today and becomes **entirely
+unavailable** under this change — every route, not only the LLM ones. Set `LLM_PROVIDER` in every
+deploy environment (including Vercel Preview, which builds every pull request) **before** merging.
+This is a configuration step; the code cannot perform it and deliberately will not guess.
+
+### Still outstanding
+
+`AGENTS.md:41` still describes Gemini as the dev default "for the free tier" without its data terms,
+and now also misdescribes behavior, since there is no longer a production OpenAI default to fall
+through to. That one-line amendment is excluded from this change by the issue owner, not by a merge
+conflict: PR #500's `AGENTS.md` hunks are at lines 112, 134, and 220 and do not touch line 41. Issue
+#501 stays open to carry that line, and it should ride the next change that touches `AGENTS.md`
+rather than becoming an issue of its own.
 
 ## Alternatives considered
 

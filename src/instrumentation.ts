@@ -12,17 +12,25 @@
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  // Fail the server before it can serve anything if the LLM provider was not
-  // chosen (#501). The registry refuses to resolve an unset LLM_PROVIDER outside
-  // local development, so this only surfaces that refusal at boot instead of at
-  // the first seller request. Checked before Sentry so a misconfigured deploy
-  // stops immediately rather than initializing around a broken config.
+  const { initSentry, captureError } = await import("./lib/sentry");
+  await initSentry();
+
+  // Reject startup if the LLM provider was not chosen (#501). The registry
+  // refuses to resolve an unset LLM_PROVIDER outside local development; raising
+  // it here surfaces the refusal when the server starts rather than on the first
+  // seller request.
+  //
+  // Next.js does not exit on this. It fails `prepare()` and then answers EVERY
+  // route with a 500 for the life of the process, so the deploy is unusable but
+  // still bound to its port — see ADR-0002. Sentry is initialized FIRST so the
+  // config failure reaches alerting instead of only the platform's raw logs.
   const { llmProviderConfigError } = await import("./lib/llm/registry");
   const providerError = llmProviderConfigError();
-  if (providerError) throw new Error(providerError);
-
-  const { initSentry } = await import("./lib/sentry");
-  await initSentry();
+  if (providerError) {
+    const error = new Error(providerError);
+    captureError(error, { phase: "instrumentation.register" });
+    throw error;
+  }
 }
 
 export async function onRequestError(
