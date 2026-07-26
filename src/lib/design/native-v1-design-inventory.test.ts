@@ -43,6 +43,8 @@ type NativeDesignInventory = {
     voice_context_owner_issue: number;
   }>;
   implementation_states: unknown[];
+  seller_facing_copy_supersessions: Array<Record<string, unknown>>;
+  package_claim_overrides: Array<Record<string, unknown>>;
   stop_rules: string[];
 };
 
@@ -203,6 +205,145 @@ describe("lean native design authority contract", () => {
         voiceContextImplementationGapOwnerIssue: 351,
       });
     }
+  });
+
+  it("governs the included-first-run allowance noun without reopening RUN-08", () => {
+    const inventory = readInventory();
+
+    expect(inventory.seller_facing_copy_supersessions).toEqual([
+      {
+        attribute: "seller_facing_noun_for_included_first_run_allowance",
+        allowance_object: {
+          table: "public.ai_item_allowance_periods",
+          period_key: "included-first-run",
+        },
+        governed_by: {
+          package: "snaplist-pro-gate-design-package-v1-2026-07-25",
+          path: "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-pro-gate-design-package-v1-2026-07-25.zip",
+          sha256:
+            "baafa88bb48cdd4b2f0a485b72c55724376986dc0d39f9091b0b37456c2d1670",
+          state_id: "PAY-01",
+          noun: "AI listing",
+          string: "You made one AI listing for free.",
+        },
+        supersedes: [
+          {
+            package:
+              "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+            path: "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16.zip",
+            sha256:
+              "93bb1571b2926c4c79744a8fe28905f972a7fda506a81765376b704dbb964884",
+            state_id: "RUN-08",
+            noun: "item",
+            strings: [
+              "Your first item is on us",
+              "Item 1 will finish free. The rest stay staged and safe — you choose whether to continue them on SnapList Pro. Nothing starts or is discarded without you.",
+            ],
+          },
+        ],
+        scope: "attribute_only",
+        reopens_superseded_package_states: false,
+        sealed_packages_modified: false,
+        rule: "New or revised seller-facing copy naming this allowance uses `AI listing`. `item` remains the seller's physical object. Every other RUN-08 attribute stays approved and in force; only the allowance noun is superseded, and the sealed packages stay byte-identical.",
+        live_occurrences_of_superseded_noun: {
+          note: "The superseded noun is not confined to sealed packages. It still ships in the working tree at the surfaces below. This record does not change them: seller-facing copy is owned by the active design round and its implementing issue, not by a documentation-authority change. Recorded so the supersession cannot be mistaken for already-reconciled product copy.",
+          reconciled_by_this_record: false,
+          surfaces_are_exhaustive_as_of: "2026-07-26",
+          surfaces_exclude:
+            "sealed design-contract archives under ios/DesignContracts, and this inventory and its own validator",
+          surfaces: [
+            {
+              state_id: "ONB-06",
+              path: "ios/SnapList/Features/Onboarding/OnboardingDomain.swift",
+              symbol: "OnboardingCopy.allowanceTitle",
+              rendered_at:
+                "ios/SnapList/Features/Onboarding/OnboardingFlowView.swift",
+              string: "Your first item is on us",
+              has_retired_state_record: false,
+            },
+            {
+              state_id: "HOME-02",
+              path: "ios/SnapList/Features/Home/HomeViews.swift",
+              string: "Your first item is on us — no account needed to try it.",
+              has_retired_state_record: true,
+            },
+            {
+              state_id: "HOME-02",
+              path: "src/lib/scout-guidance/catalog.v1.json",
+              keys: ["empty.home.body", "empty.home.accessibilityLabel"],
+              string: "Your first item is on us — no account needed to try it.",
+              has_retired_state_record: true,
+            },
+            {
+              state_id: "HOME-02",
+              path: "src/lib/scout-guidance/approved-copy-provenance.v1.json",
+              string: "Your first item is on us — no account needed to try it.",
+              has_retired_state_record: true,
+              note: "Provenance record for the catalog entry above, not a separate render site.",
+            },
+            {
+              state_id: "ONB-06",
+              path: "ios/SnapListUITests/SnapListUITests.swift",
+              string: "Your first item is on us",
+              has_retired_state_record: false,
+              note: "Test assertion pinning the current string. It fails when the copy is reconciled, which is the intended signal, not a defect.",
+            },
+          ],
+        },
+        third_noun_survey: {
+          performed_on: "2026-07-26",
+          scope:
+            "all 87 packages under the design-review outputs directory, including the pre-redirect kit and fidelity-delta packages, plus the in-repo live copy surfaces under ios/SnapList and src/lib/scout-guidance",
+          distinct_seller_facing_nouns_found: ["AI listing", "item"],
+          third_noun_found: false,
+          notes: [
+            "No other currently approved lean-MVP family names this allowance at all. Scan Camera v2, Photo Review v1.2, Voice Note + Start Listing v2, Trophy Wall Processing v2, Listing Review v2, and Assisted Export v1 contain no allowance-naming seller-facing string.",
+            "The pre-redirect kit and fidelity-delta packages (connected-marketplaces, ebay-publish, identity-guided-correction, net-proceeds-listing-draft, durable-runs-recovery, accountless-onboarding, account-claim-ebay-connect, capture-entry-guided-camera, seller-home) were included in the sweep and introduce no additional noun.",
+            "`AI item` appears only inside families ADR-0008 already retired (bulk_haul_capture, barcode_only_capture, garment_measurements) and denotes the internal accounting unit, not a competing seller-facing noun.",
+            "The retired Seller Home family already used `AI listing` (`One complete AI listing is free on this device.`), so the governing noun is continuous with prior approved copy rather than newly invented.",
+            "The in-repo live surfaces carry the superseded `item` noun only. They add no third noun, and they are itemized under live_occurrences_of_superseded_noun.",
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("denies implementation authority to the Pro Gate free-publish claim", () => {
+    const inventory = readInventory();
+
+    expect(inventory.package_claim_overrides).toEqual([
+      {
+        attribute: "first_item_free_end_to_end_including_first_ebay_publish",
+        asserted_by: {
+          package: "snaplist-pro-gate-design-package-v1-2026-07-25",
+          path: "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-pro-gate-design-package-v1-2026-07-25.zip",
+          sha256:
+            "baafa88bb48cdd4b2f0a485b72c55724376986dc0d39f9091b0b37456c2d1670",
+          file: "README-FIRST.md",
+          claim:
+            "The first item is free end to end, including its first eBay publish.",
+        },
+        classification: "product_intent_not_available_behavior",
+        product_intent_authority:
+          "docs/adr/0008-native-launch-entitlement-credits-and-ebay-authority.md",
+        shipped_schema_state: {
+          publish_entitlement_object_exists: false,
+          entitlement_objects_present: [
+            "public.ai_item_allowance_periods",
+            "public.ai_item_credit_reservations",
+            "public.revenuecat_customer_bindings",
+          ],
+          note: "Every shipped entitlement object grants AI item runs. No object grants, reserves, or settles an eBay publish, so an implementer has nothing to read a free-first-publish state from.",
+        },
+        must_not_implement_from: true,
+        blocked_until:
+          "a publish entitlement object exists in the shipped schema under its own approved issue",
+        seller_facing_strings_affected: [],
+        cross_reference: "https://github.com/azizu06/snaplist/issues/377",
+        sealed_packages_modified: false,
+        rule: "Treat the README sentence as intent only. Do not build a free-first-publish entitlement, gate, or seller-facing claim from it, and do not write later copy from it. The package's own seller-facing strings promise nothing about publish and are unaffected.",
+      },
+    ]);
   });
 
   it("keeps the canonical handoff explicit about retired launch concepts", () => {
