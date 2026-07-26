@@ -143,12 +143,24 @@ begin
   --
   -- Ordering is load-bearing twice over. It runs after the idempotency checks
   -- so a rebind still raises its own 23505, and before the bind below so a
-  -- denial leaves the recovery unbound and claimable by another account. It
-  -- defers to the terminal and expiry branches further down, so a claim that
-  -- already succeeded replays its outcome instead of being denied by the very
-  -- credit it just consumed.
+  -- denial leaves the recovery unbound and claimable by another account.
+  --
+  -- It guards exactly one outcome: minting a fresh copy plan. Every branch that
+  -- already answers something else answers it unchanged. A claim that succeeded
+  -- or expired replays its terminal outcome rather than being denied by the very
+  -- credit it just consumed. A retry arriving while this target's own lease is
+  -- still live keeps returning `in_progress`: that call was never going to hand
+  -- out a copy plan, so it has no copy to save, and denying a valid in-flight
+  -- lease because the account happens to hold an unrelated reservation would
+  -- refuse a claim that may still complete. An expired lease falls through,
+  -- because the branch below mints a new namespace and that is a fresh plan.
+  -- Whatever the account does during the upload stays `complete`'s to answer.
   if v_recovery.state not in ('claimed', 'expired')
-    and statement_timestamp() < v_recovery.expires_at then
+    and statement_timestamp() < v_recovery.expires_at
+    and not (
+      v_recovery.state = 'copying'
+      and v_recovery.claim_lease_expires_at > statement_timestamp()
+    ) then
     select period.id into v_target_period_id
     from public.ai_item_allowance_periods period
     where period.user_id = p_target_user_id

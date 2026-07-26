@@ -228,8 +228,10 @@ describe("guest claim-or-expire database contract", () => {
       expect(rebindConflictAt).toBeGreaterThan(-1);
       expect(preflightAt).toBeGreaterThan(rebindConflictAt);
       expect(bindAt).toBeGreaterThan(preflightAt);
+      // The guard must also step aside for the pre-existing `in_progress`
+      // branch: a retry on a live lease is resuming a copy, not minting one.
       expect(preflight).toMatch(
-        /v_recovery\.state not in \('claimed', 'expired'\)\s*\n\s*and statement_timestamp\(\) < v_recovery\.expires_at then\s*\n\s*select period\.id into v_target_period_id/i,
+        /v_recovery\.state not in \('claimed', 'expired'\)\s*\n\s*and statement_timestamp\(\) < v_recovery\.expires_at\s*\n\s*and not \(\s*\n\s*v_recovery\.state = 'copying'\s*\n\s*and v_recovery\.claim_lease_expires_at > statement_timestamp\(\)\s*\n\s*\) then\s*\n\s*select period\.id into v_target_period_id/i,
       );
     });
 

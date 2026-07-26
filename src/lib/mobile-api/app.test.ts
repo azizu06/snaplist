@@ -2870,8 +2870,12 @@ describe("mobile API v1 provider-neutral handler", () => {
         }),
     );
 
-    expect(messages[0]).not.toBe(messages[1]);
-    expect(new Set(messages).size).toBe(2);
+    // Pinned, not merely distinct: this is the wire contract, and it would
+    // otherwise move silently with an edit to the Error subclass constructor.
+    expect(messages).toEqual([
+      "The account's included item credit is already spent on another run.",
+      "The account's included item credit is reserved by a run in flight.",
+    ]);
   });
 
   it("requires authentication before either native billing seam", async () => {

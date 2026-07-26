@@ -20,7 +20,8 @@ type GuestClaimRpcName =
 
 interface GuestClaimRpcResult {
   data: unknown;
-  error: { message: string } | null;
+  /** PostgREST surfaces the raise message and its SQLSTATE as `code`. */
+  error: { message: string; code?: string } | null;
 }
 
 export interface GuestClaimRpcClient {
@@ -30,10 +31,17 @@ export interface GuestClaimRpcClient {
   ): PromiseLike<GuestClaimRpcResult>;
 }
 
-// The database raises one message per outcome, so the seam that turns them into
-// typed errors is the only place a caller learns which denial it hit. Both
-// allowance messages arrive from claim start and from completion (issue #504).
-const guestClaimErrors = new Map<string, () => Error>([
+// This seam is the only place a caller learns which denial it hit, so it keys on
+// the most stable signal available. `SL001` and `SL002` exist for exactly this
+// dispatch and nothing else raises them (issue #504). A generic SQLSTATE is not
+// safe to key on: `23505` is raised by the idempotency bind and by any real
+// unique constraint alike, so that one stays on its message.
+const guestClaimErrorsByCode = new Map<string, () => Error>([
+  ["SL001", () => new GuestClaimAllowanceSpentError()],
+  ["SL002", () => new GuestClaimAllowanceInFlightError()],
+]);
+
+const guestClaimErrorsByMessage = new Map<string, () => Error>([
   [
     "Guest claim Idempotency-Key is already bound",
     () => new GuestClaimIdempotencyConflictError(),
@@ -50,7 +58,10 @@ const guestClaimErrors = new Map<string, () => Error>([
 
 function rpcData(operation: string, result: GuestClaimRpcResult): unknown {
   if (result.error) {
-    const known = guestClaimErrors.get(result.error.message);
+    const known = (result.error.code
+      ? guestClaimErrorsByCode.get(result.error.code)
+      : undefined)
+      ?? guestClaimErrorsByMessage.get(result.error.message);
     if (known) throw known();
     throw new Error(`Guest recovery ${operation} failed: ${result.error.message}`);
   }

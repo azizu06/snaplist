@@ -13,7 +13,7 @@
 
 begin;
 
-select plan(12);
+select plan(13);
 
 -- Test-only visibility. Transaction rollback restores the production grants.
 grant select on private.guest_draft_recoveries to service_role;
@@ -553,20 +553,56 @@ select throws_ok(
   'the cross-account fence still answers before any allowance is read'
 );
 
-select throws_ok(
-  $$
-    select public.begin_guest_draft_claim(
-      '77770000-0000-4000-8000-000000000504',
-      'guest_pgtap_504',
-      repeat('5', 64),
-      'user_pgtap_504_clean',
-      '11111111-1111-4111-8111-000000000513',
-      300
-    )
-  $$,
-  'SL001',
-  'Account included credit is already spent on another run',
-  'a same-key retry after the account spends its run is told the truth, not to wait'
+-- ---------------------------------------------------------------------------
+-- The resume path. A retry arriving while this target's own lease is still live
+-- was never going to be handed a copy plan, so the preflight has no copy to save
+-- and must not turn a valid in-flight lease into a denial. Whatever the account
+-- did during the upload stays `complete`'s answer, above.
+-- ---------------------------------------------------------------------------
+
+select is(
+  public.begin_guest_draft_claim(
+    '77770000-0000-4000-8000-000000000504',
+    'guest_pgtap_504',
+    repeat('5', 64),
+    'user_pgtap_504_clean',
+    '11111111-1111-4111-8111-000000000513',
+    300
+  )->>'outcome',
+  'in_progress',
+  'a same-key retry on a live lease still resumes, even once the account is spent'
+);
+
+reset role;
+delete from public.ai_item_credit_reservations
+where id = '66660000-0000-4000-8000-000000000533';
+insert into public.ai_item_credit_reservations (
+  id, user_id, pipeline_run_id, item_id, allowance_period_id,
+  logical_run_key, photo_set_fingerprint, state
+) values (
+  '66660000-0000-4000-8000-000000000543',
+  'user_pgtap_504_clean',
+  '22220000-0000-4000-8000-000000000513',
+  '11110000-0000-4000-8000-000000000513',
+  '55550000-0000-4000-8000-000000000513',
+  'user-pgtap-504-clean',
+  repeat('c', 64),
+  'reserved'
+);
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select is(
+  public.begin_guest_draft_claim(
+    '77770000-0000-4000-8000-000000000504',
+    'guest_pgtap_504',
+    repeat('5', 64),
+    'user_pgtap_504_clean',
+    '11111111-1111-4111-8111-000000000513',
+    300
+  )->>'outcome',
+  'in_progress',
+  'an unrelated in-flight account run never cancels a valid lease this seller holds'
 );
 
 select * from finish();
