@@ -111,6 +111,9 @@ run(
   [
     "add",
     "apps/cli-go/internal/utils/docker.go",
+    "apps/cli-go/internal/utils/docker_isolation_test.go",
+    "apps/cli-go/internal/utils/isolation/hostconfig.go",
+    "apps/cli-go/internal/utils/isolation/hostconfig_test.go",
     "apps/cli-go/internal/utils/loopback/portbindings.go",
     "apps/cli-go/internal/utils/loopback/portbindings_test.go",
   ],
@@ -135,7 +138,23 @@ const goEnvironment = {
 
 run(
   "go",
-  ["test", "./internal/utils/loopback", "-count=1"],
+  [
+    "test",
+    "./internal/utils/loopback",
+    "./internal/utils/isolation",
+    "-count=1",
+  ],
+  { cwd: goRoot, env: goEnvironment, stdio: "inherit" },
+);
+run(
+  "go",
+  [
+    "test",
+    "./internal/utils",
+    "-run",
+    "^TestDockerStartRejectsBeforeDockerAction$",
+    "-count=1",
+  ],
   { cwd: goRoot, env: goEnvironment, stdio: "inherit" },
 );
 

@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const toolRoot = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(toolRoot, "..", "..");
 const require = createRequire(import.meta.url);
 
 export const DEFAULT_CONTRACT = Object.freeze({
@@ -23,10 +24,10 @@ export const DEFAULT_CONTRACT = Object.freeze({
   sourceTagObject: "6b84c68f097184b3221dc44c8cee45d3ccb0d7c1",
   sourceCommit: "b749d52b8e86813dfbcef4b34d0f038b78695131",
   sourceTree: "b98153e6684637de7da209e511614bd36c7a5f01",
-  patchedTree: "68900ffc3a41480589e26c55e01a4722ca7edcca",
+  patchedTree: "a28a31a1aff3dfde1615150c7da999fb132aa616",
   patchPath: "patches/supabase-go-v2.105.0-loopback.patch",
   patchSha256:
-    "cf73522ff089add29bc595afee79bfb584dcf059a95f74b60f390e8c8ce03687",
+    "1a16d0969d08d44cd573c3029ab04afcad7b5270f189318185f4c96c9939e1ba",
   overrideVariable: "SUPABASE_GO_BINARY",
   overrideSourcePath: "apps/cli/src/shared/legacy/go-proxy.layer.ts",
   overrideSourceSha256:
@@ -51,8 +52,8 @@ export const DEFAULT_CONTRACT = Object.freeze({
         "635c7f8360df5f098628a0ee1c1d489fb8e45e0a7ca7d1b1299cce51c1e1e184",
       binaryPath: ".cache/v2.105.0/darwin-arm64/supabase-go",
       binarySha256:
-        "bd3df832d2597eed5558950e9729a4fa64863894fe4f5ea1b32e403be71cca34",
-      binarySize: 96332018,
+        "485a51ab033d72b46baa5e2a8223921b961f02600c172c0b8477ef6bd5c91171",
+      binarySize: 96348530,
       receiptPath:
         ".cache/v2.105.0/darwin-arm64/build-receipt.json",
     },
@@ -82,6 +83,88 @@ function assertEqual(actual, expected, label) {
   if (actual !== expected) {
     fail(`${label} mismatch: expected ${expected}, found ${actual}`);
   }
+}
+
+function resolveWorkdir(args) {
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--workdir") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("-")) {
+        fail("--workdir requires exactly one path");
+      }
+      values.push(value);
+      index += 1;
+    } else if (arg.startsWith("--workdir=")) {
+      values.push(arg.slice("--workdir=".length));
+    }
+  }
+  if (values.length > 1) fail("wrapper refuses multiple --workdir values");
+  if (values.length === 0) return repoRoot;
+  if (values[0].length === 0) fail("--workdir requires exactly one path");
+  return path.resolve(values[0]);
+}
+
+function rejectUnsafeNetworkOverride(args) {
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--network-id") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("-")) {
+        fail("--network-id requires exactly one value");
+      }
+      values.push(value);
+      index += 1;
+    } else if (arg.startsWith("--network-id=")) {
+      values.push(arg.slice("--network-id=".length));
+    }
+  }
+  if (values.length > 1) fail("wrapper refuses multiple --network-id values");
+  if (values.some((value) => value === "host")) {
+    fail("wrapper refuses caller-provided host network");
+  }
+}
+
+function parseAnalyticsDisabled(config) {
+  let inAnalytics = false;
+  let analyticsSections = 0;
+  let enabledValues = 0;
+
+  for (const line of config.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+
+    const section = trimmed.match(/^\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (section) {
+      inAnalytics = section[1].trim() === "analytics";
+      if (inAnalytics) analyticsSections += 1;
+      continue;
+    }
+    if (!inAnalytics) continue;
+
+    const enabled = trimmed.match(/^enabled\s*=\s*(\S+)(?:\s+#.*)?$/);
+    if (!enabled) continue;
+    enabledValues += 1;
+    if (enabled[1] !== "false") {
+      fail('effective [analytics] enabled must be the boolean literal false');
+    }
+  }
+
+  if (analyticsSections !== 1 || enabledValues !== 1) {
+    fail(
+      "effective Supabase config must contain exactly one [analytics] block with enabled = false",
+    );
+  }
+}
+
+async function preflightAnalytics(args) {
+  if (!args.includes("start")) return;
+  const workdir = resolveWorkdir(args);
+  const configPath = path.join(workdir, "supabase", "config.toml");
+  const config = await readRequired(configPath, "effective Supabase config");
+  parseAnalyticsDisabled(config.toString("utf8"));
 }
 
 function resolveInstalledCli(artifact) {
@@ -338,6 +421,8 @@ export async function runSupabase(args, options = {}) {
     }
   }
 
+  rejectUnsafeNetworkOverride(args);
+  await preflightAnalytics(args);
   const validated = await preflightSupabase(options);
   const environment = {
     ...processEnvironment,

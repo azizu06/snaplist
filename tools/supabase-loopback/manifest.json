@@ -13,11 +13,11 @@
     "tagObject": "6b84c68f097184b3221dc44c8cee45d3ccb0d7c1",
     "commit": "b749d52b8e86813dfbcef4b34d0f038b78695131",
     "tree": "b98153e6684637de7da209e511614bd36c7a5f01",
-    "patchedTree": "68900ffc3a41480589e26c55e01a4722ca7edcca"
+    "patchedTree": "a28a31a1aff3dfde1615150c7da999fb132aa616"
   },
   "patch": {
     "path": "patches/supabase-go-v2.105.0-loopback.patch",
-    "sha256": "cf73522ff089add29bc595afee79bfb584dcf059a95f74b60f390e8c8ce03687"
+    "sha256": "1a16d0969d08d44cd573c3029ab04afcad7b5270f189318185f4c96c9939e1ba"
   },
   "internalOverride": {
     "environmentVariable": "SUPABASE_GO_BINARY",
@@ -42,8 +42,8 @@
       "platformPackageJsonSha256": "57fa6eb86f67b62f32b9d65811c3f1403fd3e9635a3ef83c8a1ec047f0f0c945",
       "platformCliSha256": "635c7f8360df5f098628a0ee1c1d489fb8e45e0a7ca7d1b1299cce51c1e1e184",
       "binaryPath": ".cache/v2.105.0/darwin-arm64/supabase-go",
-      "binarySha256": "bd3df832d2597eed5558950e9729a4fa64863894fe4f5ea1b32e403be71cca34",
-      "binarySize": 96332018,
+      "binarySha256": "485a51ab033d72b46baa5e2a8223921b961f02600c172c0b8477ef6bd5c91171",
+      "binarySize": 96348530,
       "receiptPath": ".cache/v2.105.0/darwin-arm64/build-receipt.json"
     }
   }

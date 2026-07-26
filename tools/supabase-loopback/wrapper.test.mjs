@@ -270,3 +270,87 @@ test("wrapper exports validated SUPABASE_GO_BINARY and blocks stock fallback", a
     );
   }
 });
+
+test("wrapper rejects unsafe effective Analytics config before child spawn", async (t) => {
+  const cases = [
+    ["missing analytics block", "[api]\nport = 54321\n"],
+    ["analytics enabled", "[analytics]\nenabled = true\n"],
+    ["malformed analytics flag", '[analytics]\nenabled = "false"\n'],
+  ];
+
+  for (const [name, config] of cases) {
+    await t.test(name, async (t) => {
+      const fixture = await makeFixture(t);
+      const supabaseRoot = path.join(fixture.root, "supabase");
+      await mkdir(supabaseRoot);
+      await writeFile(path.join(supabaseRoot, "config.toml"), config);
+      let childSpawned = false;
+
+      await assert.rejects(
+        runSupabase(["start", "--workdir", fixture.root], {
+          ...fixture.options,
+          processEnvironment: {},
+          invokeCli: async () => {
+            childSpawned = true;
+            return { status: 0 };
+          },
+        }),
+        /analytics/i,
+      );
+      assert.equal(childSpawned, false);
+    });
+  }
+
+  const fixture = await makeFixture(t);
+  const supabaseRoot = path.join(fixture.root, "supabase");
+  await mkdir(supabaseRoot);
+  await writeFile(
+    path.join(supabaseRoot, "config.toml"),
+    "[analytics]\nenabled = false\n",
+  );
+  const calls = [];
+  await runSupabase(["start", "--workdir", fixture.root], {
+    ...fixture.options,
+    processEnvironment: {},
+    invokeCli: async (command, args, options) => {
+      calls.push({ command, args, options });
+      return { status: 0 };
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].options.env.SUPABASE_GO_BINARY,
+    fixture.paths.binaryPath,
+  );
+});
+
+test("wrapper rejects caller host-network override before child spawn", async (t) => {
+  for (const args of [
+    ["start", "--network-id", "host"],
+    ["start", "--network-id=host"],
+  ]) {
+    await t.test(args.at(-1), async (t) => {
+      const fixture = await makeFixture(t);
+      const supabaseRoot = path.join(fixture.root, "supabase");
+      await mkdir(supabaseRoot);
+      await writeFile(
+        path.join(supabaseRoot, "config.toml"),
+        "[analytics]\nenabled = false\n",
+      );
+      let childSpawned = false;
+
+      await assert.rejects(
+        runSupabase([...args, "--workdir", fixture.root], {
+          ...fixture.options,
+          processEnvironment: {},
+          invokeCli: async () => {
+            childSpawned = true;
+            return { status: 0 };
+          },
+        }),
+        /host network/i,
+      );
+      assert.equal(childSpawned, false);
+    });
+  }
+});

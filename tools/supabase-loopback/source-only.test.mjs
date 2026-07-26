@@ -123,11 +123,28 @@ test("every published-port constructor crosses central dual-loopback guard", asy
   const guardIndex = dockerStartSource.indexOf(
     "loopback.BindPublishedPorts(hostConfig.PortBindings)",
   );
+  const isolationIndex = dockerStartSource.indexOf(
+    "isolation.ValidateContainer(config, hostConfig)",
+  );
+  const networkModeIndex = dockerStartSource.indexOf(
+    "hostConfig.NetworkMode = container.NetworkMode(NetId)",
+  );
   const pullIndex = dockerStartSource.indexOf("DockerPullImageIfNotCached(");
+  const networkCreateIndex = dockerStartSource.indexOf(
+    "DockerNetworkCreateIfNotExists(",
+  );
+  const volumeCreateIndex = dockerStartSource.indexOf("Docker.VolumeCreate(");
   const createIndex = dockerStartSource.indexOf("Docker.ContainerCreate(");
   assert.ok(dockerStartIndex >= 0);
+  assert.ok(networkModeIndex >= 0);
+  assert.ok(isolationIndex >= 0);
   assert.ok(guardIndex >= 0);
+  assert.ok(networkModeIndex < isolationIndex);
+  assert.ok(isolationIndex < guardIndex);
   assert.ok(guardIndex < pullIndex);
+  assert.ok(pullIndex < networkCreateIndex);
+  assert.ok(networkCreateIndex < volumeCreateIndex);
+  assert.ok(volumeCreateIndex < createIndex);
   assert.ok(pullIndex < createIndex);
 
   const patch = await readFile(
@@ -161,6 +178,36 @@ test("patched pure source rejects unsafe bindings and normalizes future ports", 
   assert.match(result.stdout, /^ok\s+/);
 });
 
+test("patched source rejects Docker host capabilities before side effects", () => {
+  const goRoot = path.join(sourceRoot, "apps", "cli-go");
+  for (const [packages, testName] of [
+    [["./internal/utils/isolation"], "."],
+    [["./internal/utils"], "^TestDockerStartRejectsBeforeDockerAction$"],
+  ]) {
+    const result = spawnSync(
+      "go",
+      ["test", ...packages, "-run", testName, "-count=1"],
+      {
+        cwd: goRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GOTOOLCHAIN: manifest.build.goVersion,
+          CGO_ENABLED: manifest.build.cgoEnabled,
+          GOOS: process.platform,
+          GOARCH: process.arch,
+        },
+      },
+    );
+    assert.equal(
+      result.status,
+      0,
+      [result.stdout, result.stderr].filter(Boolean).join("\n"),
+    );
+    assert.match(result.stdout, /^ok\s+/);
+  }
+});
+
 test("pinned internal override remains first-priority and inherits child environment", async () => {
   const overridePath = path.join(
     sourceRoot,
@@ -179,6 +226,34 @@ test("pinned internal override remains first-priority and inherits child environ
   assert.match(source, /ChildProcess\.make\(binary,/);
   assert.match(source, /env: opts\?\.env,/);
   assert.match(source, /extendEnv: true,/);
+});
+
+test("effective project config disables Vector, Logflare, and analytics publication", async () => {
+  const config = await readFile(
+    path.join(repoRoot, "supabase", "config.toml"),
+    "utf8",
+  );
+  assert.match(
+    config,
+    /^\[analytics\]\r?\nenabled = false\r?$/m,
+  );
+  assert.doesNotMatch(
+    config,
+    /^\[analytics\]\r?\nenabled = true\r?$/m,
+  );
+
+  const startSource = await readFile(
+    path.join(sourceRoot, "apps", "cli-go", "internal", "start", "start.go"),
+    "utf8",
+  );
+  assert.match(
+    startSource,
+    /\/\/ Start Logflare\s+if utils\.Config\.Analytics\.Enabled /,
+  );
+  assert.match(
+    startSource,
+    /\/\/ Start vector\s+if utils\.Config\.Analytics\.Enabled /,
+  );
 });
 
 test("all project-owned Supabase entrypoints use fail-closed wrapper", async () => {

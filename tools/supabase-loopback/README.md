@@ -25,5 +25,17 @@ The wrapper also pins the base npm shim and platform CLI digests and supplies
 If Supabase changes or removes either override seam, the pinned source or CLI
 digest check fails before CLI execution; there is no stock-binary fallback.
 
+Before `start`, the wrapper parses the effective workdir's
+`supabase/config.toml` and requires exactly one `[analytics]` block with the
+boolean literal `enabled = false`. Missing, enabled, or malformed Analytics
+configuration and caller-provided host networking fail before child spawn.
+Disabling Analytics removes both Vector and Logflare, so local analytics port
+`54327` is intentionally absent.
+
+The exact-tag Go patch also rejects Docker socket binds/mounts, container
+`DOCKER_HOST`, privileged mode, host networking, devices/device requests, and
+`PublishAllPorts`. That guard runs after effective network selection but before
+image inspection or pull, network/volume creation, or container creation.
+
 The generated source checkout, binary, and build receipt live under `.cache/`
 and are intentionally ignored. The executable is never committed.

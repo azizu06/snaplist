@@ -1,25 +1,271 @@
 diff --git a/apps/cli-go/internal/utils/docker.go b/apps/cli-go/internal/utils/docker.go
-index 9736fa6..1c494eb 100644
+index 9736fa6..c6a4a78 100644
 --- a/apps/cli-go/internal/utils/docker.go
 +++ b/apps/cli-go/internal/utils/docker.go
-@@ -33,6 +33,7 @@ import (
+@@ -33,6 +33,8 @@ import (
  	"github.com/docker/docker/pkg/stdcopy"
  	"github.com/go-errors/errors"
  	"github.com/spf13/viper"
++	"github.com/supabase/cli/internal/utils/isolation"
 +	"github.com/supabase/cli/internal/utils/loopback"
  	"go.opentelemetry.io/otel"
  )
  
-@@ -248,6 +249,9 @@ func DockerPullImageIfNotCached(ctx context.Context, imageName string) error {
+@@ -248,13 +250,6 @@ func DockerPullImageIfNotCached(ctx context.Context, imageName string) error {
  var suggestDockerInstall = "Docker Desktop is a prerequisite for local development. Follow the official docs to install: https://docs.docker.com/desktop"
  
  func DockerStart(ctx context.Context, config container.Config, hostConfig container.HostConfig, networkingConfig network.NetworkingConfig, containerName string) (string, error) {
+-	// Pull container image
+-	if err := DockerPullImageIfNotCached(ctx, config.Image); err != nil {
+-		if client.IsErrConnectionFailed(err) {
+-			CmdSuggestion = suggestDockerInstall
+-		}
+-		return "", err
+-	}
+ 	// Setup default config
+ 	config.Image = GetRegistryImageUrl(config.Image)
+ 	if config.Labels == nil {
+@@ -269,6 +264,19 @@ func DockerStart(ctx context.Context, config container.Config, hostConfig contai
+ 	} else if len(hostConfig.NetworkMode) == 0 {
+ 		hostConfig.NetworkMode = container.NetworkMode(NetId)
+ 	}
++	if err := isolation.ValidateContainer(config, hostConfig); err != nil {
++		return "", errors.Errorf("unsafe Docker container capability: %w", err)
++	}
 +	if err := loopback.BindPublishedPorts(hostConfig.PortBindings); err != nil {
 +		return "", errors.Errorf("failed to secure published Docker ports: %w", err)
 +	}
- 	// Pull container image
- 	if err := DockerPullImageIfNotCached(ctx, config.Image); err != nil {
- 		if client.IsErrConnectionFailed(err) {
++	// Pull container image
++	if err := DockerPullImageIfNotCached(ctx, config.Image); err != nil {
++		if client.IsErrConnectionFailed(err) {
++			CmdSuggestion = suggestDockerInstall
++		}
++		return "", err
++	}
+ 	if err := DockerNetworkCreateIfNotExists(ctx, hostConfig.NetworkMode, config.Labels); err != nil {
+ 		return "", err
+ 	}
+diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
+new file mode 100644
+index 0000000..26e15c7
+--- /dev/null
++++ b/apps/cli-go/internal/utils/docker_isolation_test.go
+@@ -0,0 +1,54 @@
++package utils
++
++import (
++	"context"
++	"io"
++	"net/http"
++	"strings"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/network"
++	"github.com/docker/docker/client"
++	"github.com/stretchr/testify/require"
++)
++
++type countingRoundTripper struct {
++	calls int
++}
++
++func (transport *countingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
++	transport.calls++
++	return &http.Response{
++		StatusCode: http.StatusInternalServerError,
++		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestDockerStartRejectsBeforeDockerAction(t *testing.T) {
++	transport := &countingRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	_, err = DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/test:latest"},
++		container.HostConfig{Privileged: true},
++		network.NetworkingConfig{},
++		"unsafe-test",
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, transport.calls)
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostconfig.go b/apps/cli-go/internal/utils/isolation/hostconfig.go
+new file mode 100644
+index 0000000..862ecd6
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostconfig.go
+@@ -0,0 +1,49 @@
++package isolation
++
++import (
++	"fmt"
++	"strings"
++
++	"github.com/docker/docker/api/types/container"
++)
++
++func ValidateContainer(config container.Config, hostConfig container.HostConfig) error {
++	for _, bind := range hostConfig.Binds {
++		if containsDockerSocket(bind) {
++			return fmt.Errorf("docker socket bind is forbidden")
++		}
++	}
++	for _, mounted := range hostConfig.Mounts {
++		if containsDockerSocket(mounted.Source) || containsDockerSocket(mounted.Target) {
++			return fmt.Errorf("docker socket mount is forbidden")
++		}
++	}
++	for _, environment := range config.Env {
++		name, _, _ := strings.Cut(environment, "=")
++		if strings.EqualFold(name, "DOCKER_HOST") {
++			return fmt.Errorf("container DOCKER_HOST is forbidden")
++		}
++	}
++	if hostConfig.Privileged {
++		return fmt.Errorf("privileged mode is forbidden")
++	}
++	if hostConfig.NetworkMode.IsHost() {
++		return fmt.Errorf("host network is forbidden")
++	}
++	if len(hostConfig.Resources.Devices) > 0 {
++		return fmt.Errorf("device mappings are forbidden")
++	}
++	if len(hostConfig.Resources.DeviceRequests) > 0 {
++		return fmt.Errorf("device requests are forbidden")
++	}
++	if hostConfig.PublishAllPorts {
++		return fmt.Errorf("PublishAllPorts is forbidden")
++	}
++	return nil
++}
++
++func containsDockerSocket(value string) bool {
++	normalized := strings.ToLower(strings.ReplaceAll(value, "\\", "/"))
++	return strings.Contains(normalized, "docker.sock") ||
++		strings.Contains(normalized, "//./pipe/docker_engine")
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostconfig_test.go b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
+new file mode 100644
+index 0000000..ea83350
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
+@@ -0,0 +1,100 @@
++package isolation
++
++import (
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++	"github.com/stretchr/testify/require"
++)
++
++func TestValidateContainerRejectsDockerHostCapabilities(t *testing.T) {
++	t.Parallel()
++
++	tests := map[string]struct {
++		config     container.Config
++		hostConfig container.HostConfig
++	}{
++		"docker socket bind": {
++			hostConfig: container.HostConfig{
++				Binds: []string{"/var/run/docker.sock:/var/run/docker.sock:ro"},
++			},
++		},
++		"rootless docker socket bind": {
++			hostConfig: container.HostConfig{
++				Binds: []string{"/home/user/.docker/run/docker.sock:/var/run/docker.sock:ro"},
++			},
++		},
++		"docker socket mount": {
++			hostConfig: container.HostConfig{
++				Mounts: []mount.Mount{{
++					Type:   mount.TypeBind,
++					Source: "/var/run/docker.sock",
++					Target: "/var/run/docker.sock",
++				}},
++			},
++		},
++		"docker host environment": {
++			config: container.Config{
++				Env: []string{"DOCKER_HOST=tcp://docker:2375"},
++			},
++		},
++		"privileged mode": {
++			hostConfig: container.HostConfig{Privileged: true},
++		},
++		"host network": {
++			hostConfig: container.HostConfig{
++				NetworkMode: container.NetworkMode("host"),
++			},
++		},
++		"device mapping": {
++			hostConfig: container.HostConfig{
++				Resources: container.Resources{
++					Devices: []container.DeviceMapping{{
++						PathOnHost:        "/dev/null",
++						PathInContainer:   "/dev/null",
++						CgroupPermissions: "r",
++					}},
++				},
++			},
++		},
++		"device request": {
++			hostConfig: container.HostConfig{
++				Resources: container.Resources{
++					DeviceRequests: []container.DeviceRequest{{Driver: "nvidia"}},
++				},
++			},
++		},
++		"publish all ports": {
++			hostConfig: container.HostConfig{PublishAllPorts: true},
++		},
++	}
++
++	for name, testCase := range tests {
++		testCase := testCase
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++			require.Error(t, ValidateContainer(testCase.config, testCase.hostConfig))
++		})
++	}
++}
++
++func TestValidateContainerAllowsOrdinaryBridgeAndStorage(t *testing.T) {
++	t.Parallel()
++
++	config := container.Config{Env: []string{"APP_ENV=local"}}
++	hostConfig := container.HostConfig{
++		NetworkMode: container.NetworkMode("supabase_network_snaplist"),
++		Binds: []string{
++			"/tmp/snaplist:/work:ro",
++			"snaplist-db-data:/var/lib/postgresql/data",
++		},
++		Mounts: []mount.Mount{{
++			Type:   mount.TypeBind,
++			Source: "/tmp/snaplist-config",
++			Target: "/etc/snaplist",
++		}},
++	}
++
++	require.NoError(t, ValidateContainer(config, hostConfig))
++}
 diff --git a/apps/cli-go/internal/utils/loopback/portbindings.go b/apps/cli-go/internal/utils/loopback/portbindings.go
 new file mode 100644
 index 0000000..0df0346
@@ -124,7 +370,7 @@ index 0000000..0df0346
 +}
 diff --git a/apps/cli-go/internal/utils/loopback/portbindings_test.go b/apps/cli-go/internal/utils/loopback/portbindings_test.go
 new file mode 100644
-index 0000000..7dcbde7
+index 0000000..f6436fa
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/loopback/portbindings_test.go
 @@ -0,0 +1,70 @@
