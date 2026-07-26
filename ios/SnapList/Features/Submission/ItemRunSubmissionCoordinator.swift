@@ -34,6 +34,7 @@ final class ItemRunSubmissionHost {
             // A build with no API origin has nowhere to submit. Saying so beats a
             // button that silently does nothing.
             acceptedRun = nil
+            clearedIntake = false
             retention = .submissionUnavailable
             return
         }
@@ -124,19 +125,27 @@ final class ItemRunSubmissionCoordinator {
         }
         let snapshot = intake.photos
 
-        // Reordering inside Photo Review only moves photos in memory. Submitting one
-        // order while the durable draft holds another would make the exact clear refuse
-        // its own validated receipt, leaving the seller looking at photos they already
-        // submitted.
+        // Photo Review defers its edits. Deleting or reordering a photo there only
+        // changes what is on screen; the durable draft learns about it when an exit
+        // commits. Back is one such exit and writes the displayed set as it leaves.
+        // Submitting is a third exit, so it commits the same way before the request.
         //
-        // Only the order is synced, and only when the two hold the same photos. Writing
-        // a smaller set would delete the omitted photos' files, turning a submission
-        // into a durable delete on paths that never even reach the network. A draft
-        // that disagrees about membership is left alone, and the clear then declines.
+        // Without this the receipt would validate against photos the durable draft still
+        // holds, the exact clear would refuse the run it just accepted, and the seller
+        // would be charged for an item with nothing on screen to show for it.
+        //
+        // The store accepts only a reorder or a removal of photos it already holds, byte
+        // for byte. A rejected write means the screen and the draft disagree in a way
+        // this submission cannot resolve, and nothing is sent: a request whose clear is
+        // already known to refuse would spend an AI-item credit for a run the seller
+        // never sees.
         let durablePhotos = (try? await draftStore.loadPhotos()) ?? []
-        if durablePhotos != photos,
-           Set(durablePhotos.map(\.id)) == Set(photos.map(\.id)) {
-            try? await draftStore.replacePhotos(with: photos)
+        if durablePhotos != photos {
+            do {
+                try await draftStore.replacePhotos(with: photos)
+            } catch {
+                return .retained(.intakeUnavailable)
+            }
         }
 
         // A stored attempt standing for these exact photos is the same logical

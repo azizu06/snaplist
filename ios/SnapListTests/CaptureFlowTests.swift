@@ -464,7 +464,7 @@ final class CaptureFlowTests: XCTestCase {
         let session = try XCTUnwrap(host.session)
 
         var lockedDuringFlight = false
-        let intake = SubmissionIntakeFixture(photos: [staged], readingFrom: store)
+        let intake = SubmissionIntakeFixture(stagedPhotos: [staged])
         let submissionHost = ItemRunSubmissionHost(
             coordinator: ItemRunSubmissionCoordinator(
                 submitter: RecordingItemRunSubmitter(

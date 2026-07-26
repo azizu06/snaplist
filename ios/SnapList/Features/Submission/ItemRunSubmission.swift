@@ -153,7 +153,8 @@ enum ItemRunSubmissionRetention: Equatable, Sendable {
     case authenticationRequired
     /// A `200`/`202` whose receipt did not describe what was submitted.
     case receiptMismatch
-    /// The local intake could not be read as one to five valid photos.
+    /// The local intake could not be read as one to five valid photos, or the photos on
+    /// screen could not be committed to the durable draft before the request.
     case intakeUnavailable
     /// The attempt identity could not be made durable, so no request was sent. Sending
     /// without a persisted key would let a retry mint a second key for the same photos

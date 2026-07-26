@@ -361,7 +361,7 @@ enum AppShellPhotoReviewSubmissionTransaction {
         }
         captureFlow.dropIntakeDiscardedElsewhere()
         await captureFlow.startCamera()
-        host.leaveForClearedIntake(using: router)
+        _ = host.leaveForClearedIntake(from: session, using: router)
     }
 }
 

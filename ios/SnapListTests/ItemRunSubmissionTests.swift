@@ -167,6 +167,60 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertGreaterThan(tokenLengths.first ?? 0, 0)
     }
 
+    /// Photo Review's non-final delete is memory-only: the edited set reaches disk
+    /// through the Back exit. Submitting is a third exit, so it has to commit that
+    /// pending delete the same way, or the receipt validates against photos the durable
+    /// draft still holds and the clear silently declines. The seller would then be
+    /// charged for a run with nothing on screen to show for it.
+    func testPendingDeleteIsCommittedSoTheAcceptedRunStillClearsTheIntake() async {
+        let intake = SubmissionIntakeFixture(photoCount: 3)
+        let displayed = [intake.photos[0], intake.photos[2]]
+        let displayedBytes = displayed.map(intake.bytes(for:))
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        // The durable draft still holds all three. Only the screen knows about the delete.
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [
+                .created(
+                    Self.receipt(photos: Self.receiptPhotos(for: displayedBytes))
+                )
+            ]
+        )
+        let coordinator = makeCoordinator(
+            intake: intake,
+            attemptStore: attemptStore,
+            submitter: submitter,
+            draftStore: draftStore,
+            keys: [Self.firstKey]
+        )
+
+        let outcome = await coordinator.submit(photos: displayed)
+
+        XCTAssertEqual(
+            outcome,
+            .accepted(
+                ItemRunAcceptance(
+                    run: AcceptedItemRun(
+                        runID: Self.canonicalRunID,
+                        itemID: Self.canonicalItemID,
+                        status: "queued",
+                        stage: "queued"
+                    ),
+                    clearedIntake: true
+                )
+            )
+        )
+        let remaining = await draftStore.photos
+        XCTAssertTrue(remaining.isEmpty)
+        // The deleted photo is not resurrected into the submission.
+        let sentDigests = await submitter.payloads.first?.attempt.photos
+            .map(\.contentSha256)
+        XCTAssertEqual(
+            sentDigests,
+            displayedBytes.map(LocalPhotoFingerprint.digest(of:))
+        )
+    }
+
     func testIntakeChangedDuringFlightSurvivesTheAcceptedRun() async {
         let submitted = SubmissionIntakeFixture(photoCount: 2, seed: "submitted")
         let edited = SubmissionIntakeFixture(photoCount: 3, seed: "edited")
@@ -706,7 +760,7 @@ struct SubmissionIntakeFixture: Sendable {
 
     /// Backs the fixture with photos a real draft store staged, so a test can drive the
     /// live transaction against files that actually exist on disk.
-    init(photos: [StagedCapturePhoto], readingFrom _: LocalCaptureDraftStore) {
+    init(stagedPhotos photos: [StagedCapturePhoto]) {
         self.photos = photos
         dataByPath = Dictionary(
             uniqueKeysWithValues: photos.map {
@@ -880,7 +934,18 @@ actor RecordingCaptureDraftStore: CaptureDraftStoring {
         self.photos = photos
     }
 
+    /// Mirrors `LocalCaptureDraftStore`: a replacement may reorder or drop photos the
+    /// draft already holds, byte for byte, and nothing else. A permissive double would
+    /// let the coordinator commit a set the real store rejects.
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        let existingByID = Dictionary(
+            uniqueKeysWithValues: self.photos.map { ($0.id, $0) }
+        )
+        guard photos.count <= 5,
+              Set(photos.map(\.id)).count == photos.count,
+              photos.allSatisfy({ existingByID[$0.id] == $0 }) else {
+            throw CaptureDraftStoreError.invalidManifest
+        }
         self.photos = photos
     }
 
