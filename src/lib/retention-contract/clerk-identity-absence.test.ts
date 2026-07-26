@@ -54,8 +54,12 @@ describe.runIf(developmentInstance)(
       async () => {
         const clerk = createClerkClient({ secretKey: SECRET_KEY });
 
+        // example.com, not a .test address: Clerk validates the address format
+        // and rejects the RFC 6761 special-use .test TLD with
+        // form_param_format_invalid. example.com is RFC 2606 documentation
+        // space, so it passes validation and still cannot reach a real mailbox.
         const user = await clerk.users.createUser({
-          emailAddress: [`retention-proof-${Date.now()}@snaplist.test`],
+          emailAddress: [`retention-proof-${Date.now()}@example.com`],
           password: `Retention-proof-${Date.now()}!`,
           skipPasswordChecks: true,
         });
