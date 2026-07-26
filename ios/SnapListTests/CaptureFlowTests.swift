@@ -670,10 +670,10 @@ final class CaptureFlowTests: XCTestCase {
                 """
             )
             return
-        } catch CaptureDraftStoreError.invalidManifest {
+        } catch CaptureDraftStoreError.stagingUnsupported {
             // The refusal Photo Review turns into its replacement failure recovery.
         } catch {
-            XCTFail("Replace must refuse with invalidManifest, not \(error).")
+            XCTFail("Replace must refuse with stagingUnsupported, not \(error).")
             return
         }
 
@@ -683,6 +683,82 @@ final class CaptureFlowTests: XCTestCase {
             before,
             "A refused replacement must leave the draft exactly as it was."
         )
+    }
+
+    func testRestoredCaptureFixtureRefusesToStageWithoutClaimingAnInvalidManifest() async throws {
+        let dependencies = AppDependencies.make(
+            configuration: LaunchConfiguration.parse(
+                arguments: ["--restored-capture-fixture"]
+            )
+        )
+        let store = dependencies.captureDraftStore
+        let before = try await store.loadPhotos()
+
+        do {
+            let result = try await store.append(
+                imageData: Data([0x01]),
+                libraryTransferReceipt: nil
+            )
+            XCTFail(
+                """
+                The fixture has no image pipeline, so an addition must refuse rather \
+                than report \(result.appendedPhoto.id) as staged.
+                """
+            )
+            return
+        } catch CaptureDraftStoreError.stagingUnsupported {
+            // Nothing about the draft manifest is wrong. This store simply cannot stage.
+        } catch {
+            XCTFail("Staging must refuse with stagingUnsupported, not \(error).")
+            return
+        }
+
+        let after = try await store.loadPhotos()
+        XCTAssertEqual(
+            after,
+            before,
+            "A refused addition must leave the draft exactly as it was."
+        )
+    }
+
+    func testRestoredCaptureFixtureAddReportsFailureRatherThanDuplicatingItsPhoto() async throws {
+        let dependencies = AppDependencies.make(
+            configuration: LaunchConfiguration.parse(
+                arguments: ["--restored-capture-fixture"]
+            )
+        )
+        let draftStore = dependencies.captureDraftStore
+        let restored = try await draftStore.loadPhotos()
+        XCTAssertEqual(restored.count, 1)
+        let reviewStore = PhotoReviewStore(photos: restored)
+        let intake = PhotoReviewIntake(draftStore: draftStore)
+
+        reviewStore.beginPickerRequest(.add)
+        let outcome = await intake.apply(
+            [TestLibraryPhotoLoader { Data([0x01]) }],
+            to: reviewStore
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .inert,
+            "The fixture cannot stage the seller's photo, so nothing may be reported as added."
+        )
+        XCTAssertEqual(
+            reviewStore.photos,
+            restored,
+            "A fixture Add must not put a second copy of the held photo on screen."
+        )
+        let durablePhotos = try await draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotos, restored)
+        XCTAssertEqual(
+            intake.recovery,
+            PhotoReviewIntakeRecovery(
+                message: "Photo could not be added. Nothing else changed.",
+                focus: .addButton
+            )
+        )
+        XCTAssertNil(reviewStore.activePickerRequest)
     }
 
     func testPhotoReviewBackCoordinatorCompletesWithRestoredCaptureFixture() async {

@@ -595,6 +595,11 @@ enum CaptureDraftStoreError: Error {
     case partialStageCleanupFailed
     case photoLimitReached
     case photoNotStaged
+    /// This store cannot turn image data into a staged photo at all. It is not a
+    /// failed attempt: no store that can stage would report this. A store that
+    /// holds photos without owning an image pipeline refuses with this rather than
+    /// inventing an artifact or handing back a photo it already had.
+    case stagingUnsupported
 }
 
 actor LocalCaptureDraftStore: CaptureDraftStoring {
