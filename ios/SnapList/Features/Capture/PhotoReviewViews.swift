@@ -209,7 +209,7 @@ final class PhotoReviewIntake {
             guard stop != .abandoned else {
                 // The seller left this transaction behind while it was still reading.
                 // Anything it already wrote belongs to nobody, so take it back off disk.
-                await rollBackAdditions(stagedPhotos, keeping: store.photos)
+                await rollBackAdditions(ifAny: stagedPhotos, keeping: store.photos)
                 recovery = nil
                 return .inert
             }
@@ -217,7 +217,7 @@ final class PhotoReviewIntake {
                   store.confirmPickerResult(.additions(stagedPhotos)) != nil else {
                 // The request has to end either way. Leaving it open would keep Start
                 // listing disabled behind a picker that is no longer on screen.
-                await rollBackAdditions(stagedPhotos, keeping: store.photos)
+                await rollBackAdditions(ifAny: stagedPhotos, keeping: store.photos)
                 store.cancelPickerRequest()
                 recovery = PhotoReviewIntakeRecovery(
                     message: Self.additionFailureMessage,
@@ -314,7 +314,7 @@ final class PhotoReviewIntake {
     }
 
     private func rollBackAdditions(
-        _ staged: [StagedCapturePhoto],
+        ifAny staged: [StagedCapturePhoto],
         keeping photos: [StagedCapturePhoto]
     ) async {
         guard !staged.isEmpty else {
@@ -996,7 +996,7 @@ struct PhotoReviewView: View {
         .buttonStyle(.plain)
         // REV-03 keeps the tile in place at five photos and takes its action away, so
         // the strip does not reflow and the seller can see why nothing more fits. The
-        // capped value is the live canvas addOpacity.
+        // capped value comes from Photo Review v1.1, this screen's frozen authority.
         .opacity(isAddEnabled ? 1 : 0.5)
         .disabled(!isAddEnabled)
         .accessibilityLabel(
