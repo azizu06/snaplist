@@ -685,7 +685,7 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
-    func testRestoredCaptureFixtureRefusesToStageWithoutClaimingAnInvalidManifest() async throws {
+    func testRestoredCaptureFixtureRefusesToStageAndNamesTheRefusalForWhatItIs() async throws {
         let dependencies = AppDependencies.make(
             configuration: LaunchConfiguration.parse(
                 arguments: ["--restored-capture-fixture"]

@@ -1406,7 +1406,7 @@ actor RecordingCaptureDraftStore: CaptureDraftStoring {
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
     ) async throws -> StagedCapturePhoto {
-        throw CaptureDraftStoreError.invalidManifest
+        throw CaptureDraftStoreError.stagingUnsupported
     }
 
     func replace(

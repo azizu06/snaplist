@@ -996,13 +996,13 @@ struct PhotoReviewView: View {
         .buttonStyle(.plain)
         // REV-03 keeps the tile in place at five photos and takes its action away, so
         // the strip does not reflow and the seller can see why nothing more fits. The
-        // capped value comes from Photo Review v1.1 (c2d84f02), which still governs this
-        // attribute even though v1.2 (d166d0c3) is packaged and named in force below.
-        // Supersession is attribute-scoped, not wholesale: v1.2 is an ungated delta
-        // (`gates: NOT RERUN FOR THIS DELTA`, `routed_to_issues: ["458"]`), so it cannot
-        // displace a gated predecessor here, and v1.1 remains #459's frozen authority at
-        // `0.5`. v1.2's own canvas binds the same `0.5`, so which package governs does not
-        // change the rendered value. Do not "correct" this citation to v1.2.
+        // `0.5` is Photo Review v1.1 (c2d84f02), where the value was derived and what #459
+        // implemented against. v1.2 (d166d0c3) supersedes v1.1 and is named in force
+        // below, but it did not re-derive this attribute: by its own record its
+        // `contracts/` are carried forward from v1.1 and not re-derived, they are identical
+        // to v1.1's byte for byte, and its canvas binds the same `0.5`. The two packages do
+        // not disagree here, so citing v1.1 marks where this number came from and is not a
+        // claim that v1.2 stopped governing the screen.
         .opacity(isAddEnabled ? 1 : 0.5)
         .disabled(!isAddEnabled)
         .accessibilityLabel(

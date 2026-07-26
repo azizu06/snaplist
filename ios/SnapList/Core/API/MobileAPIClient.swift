@@ -226,8 +226,12 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
     // artifact and will not invent one. Handing back the photo it already holds would
     // report an addition that never happened, and because the protocol-default `append`
     // is built on this call, that photo would land a second time in the strip. It
-    // refuses instead, and the seller reads `PhotoReviewIntake`'s addition failure
-    // recovery.
+    // refuses instead, and each caller then handles the refusal exactly as it handles a
+    // real staging failure: Photo Review's Add shows its addition failure recovery unless
+    // the seller had already abandoned the request, the Scan shutter treats it as a
+    // retryable failure on the still-live camera and shows nothing, and library staging
+    // fails the phase. So under this fixture the shutter is a no-op, which is the honest
+    // report for a store that cannot stage.
     func stage(
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
@@ -236,8 +240,8 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
     }
 
     // Same refusal for the same reason: handing back the held photo would report a
-    // replacement that never happened, so the seller reads `PhotoReviewIntake`'s
-    // replacement failure recovery instead.
+    // replacement that never happened. `PhotoReviewIntake` is this call's only caller, so
+    // a still-live replacement transaction shows the replacement failure recovery.
     func replace(
         photoID: StagedCapturePhoto.ID,
         imageData: Data,
