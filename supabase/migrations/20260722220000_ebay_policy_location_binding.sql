@@ -304,7 +304,8 @@ begin
     raise exception using errcode = '22023', message = 'An active eBay connection is required';
   end if;
   if v_connection.connection_generation is distinct from p_connection_generation then
-    raise exception using errcode = '40001', message = 'The eBay connection changed during policy discovery';
+    -- PostgREST retries transaction-conflict SQLSTATEs, but this conflict is deterministic.
+    raise exception using errcode = 'PT409', message = 'The eBay connection changed during policy discovery';
   end if;
 
   update public.ebay_connections connection

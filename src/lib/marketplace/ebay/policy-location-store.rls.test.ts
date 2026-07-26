@@ -29,6 +29,8 @@ const SECRET_KEY =
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
 const TEST_TIMEOUT_MS = 30_000;
 const DIAGNOSTIC_REQUEST_TIMEOUT_MS = 2_000;
+const STALE_CONNECTION_MESSAGE =
+  "The eBay connection changed during policy discovery";
 const TEST_ENV = {
   EBAY_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
 };
@@ -363,9 +365,10 @@ describe("eBay policy/location binding (DB-gated)", () => {
         },
       ).abortSignal(AbortSignal.timeout(DIAGNOSTIC_REQUEST_TIMEOUT_MS)),
     );
-    expect(crossTenantAttempt.error?.message).toContain(
-      "connection changed during policy discovery",
-    );
+    expect(crossTenantAttempt.error).toMatchObject({
+      code: "PT409",
+      message: STALE_CONNECTION_MESSAGE,
+    });
 
     const rowA = await admin
       .from("ebay_connections")
@@ -409,7 +412,7 @@ describe("eBay policy/location binding (DB-gated)", () => {
         "stale-generation-store-rpc",
         () => boundedStoreA.saveBinding(bindingA),
       ),
-    ).rejects.toThrow("eBay connection changed during policy discovery");
+    ).rejects.toThrow(STALE_CONNECTION_MESSAGE);
 
     const rowA = await admin
       .from("ebay_connections")
