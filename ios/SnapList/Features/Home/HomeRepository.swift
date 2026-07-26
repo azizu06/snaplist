@@ -495,6 +495,9 @@ final class HomeStore {
     }
 
     private static func failure(for error: any Error) -> HomeLoadFailure {
+        if error as? BearerTokenProviderError == .sessionAbsent {
+            return .operationUnavailable
+        }
         if error as? HomeRepositoryError == .operationUnavailable {
             return .operationUnavailable
         }

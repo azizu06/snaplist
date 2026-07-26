@@ -154,6 +154,27 @@ final class HomeFeatureTests: XCTestCase {
         XCTAssertEqual(app.homeStore.model?.listings.first?.title, "Canon AE-1 film camera")
     }
 
+    func testAbsentClerkSessionPreservesTheSignedOutHomeState() async {
+        let session = makeHomeURLSession { _ in
+            XCTFail("An absent Clerk session must stop before Home transport.")
+            throw HomeRepositoryError.operationUnavailable
+        }
+        let app = SnapListApp(
+            configuration: .standard,
+            tokenProvider: ClerkBearerTokenProvider(
+                session: TestClerkSessionToken(token: nil)
+            ),
+            apiOrigin: URL(string: "http://127.0.0.1:3001")!,
+            urlSession: session
+        )
+
+        await app.homeStore.load()
+
+        XCTAssertNil(app.homeStore.model)
+        XCTAssertEqual(app.homeStore.loadState, .failed(.operationUnavailable))
+        XCTAssertEqual(app.homeStore.freshness, .unavailable)
+    }
+
     func testAuthenticatedHomeDecodesActionableBuyerConversationDestination() async throws {
         let conversationID = UUID(
             uuidString: "29600000-0000-4000-8000-000000000063"
