@@ -10,10 +10,19 @@
  */
 
 export async function register(): Promise<void> {
-  if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { initSentry } = await import("./lib/sentry");
-    await initSentry();
-  }
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  // Fail the server before it can serve anything if the LLM provider was not
+  // chosen (#501). The registry refuses to resolve an unset LLM_PROVIDER outside
+  // local development, so this only surfaces that refusal at boot instead of at
+  // the first seller request. Checked before Sentry so a misconfigured deploy
+  // stops immediately rather than initializing around a broken config.
+  const { llmProviderConfigError } = await import("./lib/llm/registry");
+  const providerError = llmProviderConfigError();
+  if (providerError) throw new Error(providerError);
+
+  const { initSentry } = await import("./lib/sentry");
+  await initSentry();
 }
 
 export async function onRequestError(

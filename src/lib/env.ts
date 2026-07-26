@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { resolveApiKey, resolveProvider } from "./llm/registry";
+import { llmProviderConfigError, resolveApiKey, resolveProvider } from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
 
 const optionalProxyTemplateSchema = z.preprocess(
@@ -166,21 +166,41 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
-}).refine(
-  (e) => {
-    const env = e as Record<string, string | undefined>;
-    // The key for the SELECTED provider must be present — not merely *some* key.
-    // resolveProvider is key-aware (a single-key env selects the usable provider),
-    // so this still accepts a Gemini-only dev box, but rejects an explicit
-    // LLM_PROVIDER with no matching key, or no keys at all (#55 review).
-    return Boolean(resolveApiKey(resolveProvider(env), env));
-  },
-  {
-    message:
-      "Missing the API key for the selected LLM provider. Set OPENAI_API_KEY (OpenAI) or GOOGLE_GENERATIVE_AI_API_KEY / GEMINI_API_KEY (Gemini), or set LLM_PROVIDER to match the key you have.",
-    path: ["OPENAI_API_KEY"],
-  },
-);
+});
+
+/**
+ * LLM provider issues, in `parseEnv`'s "  - VAR: message" issue format.
+ *
+ * Checked against the RAW environment rather than the schema's parsed output, for
+ * two reasons. The deployment markers that prove a process is not a local machine
+ * (#501) are the hosting platform's own variables, which this schema does not
+ * declare and zod therefore strips. And NODE_ENV's schema default must not soften
+ * the fence: an absent NODE_ENV has to mean the same thing here as it does to
+ * `resolveProvider(process.env)` at call time.
+ */
+function llmProviderIssues(raw: Record<string, unknown>): string[] {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string") env[key] = value;
+  }
+
+  // The provider must be SELECTABLE before anything can be said about its key.
+  // Outside local development an unset LLM_PROVIDER is a config failure, never a
+  // default that quietly lands on Google's unpaid tier (#501).
+  const providerError = llmProviderConfigError(env);
+  if (providerError) return [`  - LLM_PROVIDER: ${providerError}`];
+
+  // The key for the SELECTED provider must be present — not merely *some* key.
+  // resolveProvider is key-aware in local development (a single-key box selects
+  // the usable provider), so this still accepts a Gemini-only dev box, but rejects
+  // an explicit LLM_PROVIDER with no matching key, or no keys at all (#55 review).
+  if (!resolveApiKey(resolveProvider(env), env)) {
+    return [
+      "  - OPENAI_API_KEY: Missing the API key for the selected LLM provider. Set OPENAI_API_KEY (OpenAI) or GOOGLE_GENERATIVE_AI_API_KEY / GEMINI_API_KEY (Gemini), or set LLM_PROVIDER to match the key you have.",
+    ];
+  }
+  return [];
+}
 
 export type Env = z.infer<typeof envSchema>;
 
@@ -190,11 +210,16 @@ export type Env = z.infer<typeof envSchema>;
  */
 export function parseEnv(raw: Record<string, unknown>): Env {
   const parsed = envSchema.safeParse(raw);
+  const providerIssues = llmProviderIssues(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues
       .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
+      .concat(providerIssues)
       .join("\n");
     throw new Error(`Invalid environment variables:\n${issues}`);
+  }
+  if (providerIssues.length > 0) {
+    throw new Error(`Invalid environment variables:\n${providerIssues.join("\n")}`);
   }
   return parsed.data;
 }

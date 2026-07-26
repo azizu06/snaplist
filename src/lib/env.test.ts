@@ -45,6 +45,18 @@ describe("parseEnv", () => {
     );
   });
 
+  it("fails config startup when LLM_PROVIDER is unset outside local development (#501)", () => {
+    // Reported as a normal validation issue, alongside every other bad variable,
+    // rather than escaping as a bare provider error mid-parse.
+    expect(() => parseEnv({ ...valid, NODE_ENV: "production" })).toThrowError(
+      /Invalid environment variables[\s\S]*LLM_PROVIDER/,
+    );
+    // A deploy marker makes it a deploy even when NODE_ENV reads as local.
+    expect(() => parseEnv({ ...valid, NODE_ENV: "development", VERCEL: "1" })).toThrowError(
+      /Invalid environment variables[\s\S]*LLM_PROVIDER/,
+    );
+  });
+
   it("treats web-search and service-role keys as optional", () => {
     const env = parseEnv(valid);
     expect(env.TAVILY_API_KEY).toBeUndefined();

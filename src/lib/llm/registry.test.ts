@@ -31,10 +31,38 @@ describe("oppositeProvider", () => {
 });
 
 describe("resolveProvider", () => {
-  it("defaults to Gemini in dev and OpenAI in production", () => {
+  it("refuses to resolve an unset LLM_PROVIDER outside local development (#501)", () => {
+    // The provider must never be reached by fallthrough in a deploy: Google's
+    // free tier permits product-improvement use and human review of submitted
+    // content, and seller photos resolve through this function.
+    expect(() => resolveProvider({ NODE_ENV: "production" })).toThrowError(/LLM_PROVIDER/);
+  });
+
+  it("rejects a misspelled LLM_PROVIDER instead of falling through to a default (#501)", () => {
+    // A typo is a set value, so the "unset" fence never sees it. Left to fall
+    // through it would land on the same default the fence exists to remove.
+    expect(() => resolveProvider({ LLM_PROVIDER: "gemni" })).toThrowError(/"gemni"/);
+    expect(() =>
+      resolveProvider({ LLM_PROVIDER: "openal", NODE_ENV: "development" }),
+    ).toThrowError(/not a provider/);
+  });
+
+  it("treats a hosted platform's runtime marker as a deploy, whatever NODE_ENV says (#501)", () => {
+    // A deploy that sets NODE_ENV=development must not read as a local machine.
+    for (const marker of ["VERCEL", "RENDER", "RAILWAY_ENVIRONMENT", "FLY_APP_NAME"]) {
+      expect(() =>
+        resolveProvider({ NODE_ENV: "development", [marker]: "1" }),
+      ).toThrowError(/LLM_PROVIDER/);
+    }
+    // CI is not a deploy: the offline suite must behave the same in CI as locally.
+    expect(resolveProvider({ NODE_ENV: "test", CI: "true" })).toBe("google");
+  });
+
+  it("defaults to Gemini in local development, by name", () => {
     expect(resolveProvider({ NODE_ENV: "development" })).toBe("google");
     expect(resolveProvider({ NODE_ENV: "test" })).toBe("google");
-    expect(resolveProvider({ NODE_ENV: "production" })).toBe("openai");
+    // A bare `tsx` script leaves NODE_ENV unset; that is still a local machine.
+    expect(resolveProvider({})).toBe("google");
   });
 
   it("honors an explicit LLM_PROVIDER (with `gemini` as an alias for google)", () => {
@@ -47,16 +75,26 @@ describe("resolveProvider", () => {
     ).toBe("openai");
   });
 
-  it("is key-aware: falls back to the provider whose key is present", () => {
-    // Dev default is Gemini, but with only an OpenAI key it picks OpenAI (usable)
-    // instead of a keyless Gemini (#55 review).
+  it("is key-aware in local development: falls back to the provider whose key is present", () => {
+    // Local default is Gemini, but with only an OpenAI key it picks OpenAI (usable)
+    // instead of a keyless Gemini (#55 review). Both keys are the developer's own.
     expect(resolveProvider({ NODE_ENV: "development", OPENAI_API_KEY: "x" })).toBe("openai");
-    // Prod default is OpenAI, but with only a Gemini key it picks Gemini.
-    expect(resolveProvider({ NODE_ENV: "production", GEMINI_API_KEY: "y" })).toBe("google");
+    expect(resolveProvider({ NODE_ENV: "development", GEMINI_API_KEY: "y" })).toBe("google");
     // Explicit LLM_PROVIDER still wins even against the available key.
     expect(
       resolveProvider({ LLM_PROVIDER: "google", OPENAI_API_KEY: "x" }),
     ).toBe("google");
+  });
+
+  it("does not let key-awareness pick a provider for a deploy (#501)", () => {
+    // The sharpest form of the old defect: a production env holding only a Gemini
+    // key silently resolved to Google. The key is a credential, never a choice.
+    expect(() =>
+      resolveProvider({ NODE_ENV: "production", GEMINI_API_KEY: "y" }),
+    ).toThrowError(/LLM_PROVIDER/);
+    expect(() =>
+      resolveProvider({ NODE_ENV: "production", OPENAI_API_KEY: "x" }),
+    ).toThrowError(/LLM_PROVIDER/);
   });
 });
 
