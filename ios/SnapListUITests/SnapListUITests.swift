@@ -662,6 +662,19 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
+    // Scan Camera v2 (outer SHA-256 62d8f0c97c97ac68fdf0072444429a02ccadea1335bf7436f60b5ffa414bc49c)
+    // pairs Flash and Library as matched 48x48 frosted circles. The superseded v1 package
+    // stated both 44x44 and 48x48, which is how the smaller value shipped. Pin the size so a
+    // later package or refactor cannot quietly take the 44pt accessibility floor again.
+    func testScanCameraFlashControlMatchesTheApprovedFortyEightPointCircle() {
+        let app = launch(extraArguments: ["--visual-state=CAM-03"])
+        let flash = app.buttons["scan.flash"]
+
+        XCTAssertTrue(flash.waitForExistence(timeout: 2))
+        XCTAssertEqual(flash.frame.width, 48, accuracy: 0.5)
+        XCTAssertEqual(flash.frame.height, 48, accuracy: 0.5)
+    }
+
     func testCaptureLauncherSurvivesAccessibilityTypeAndReducedMotion() {
         let app = launch(extraArguments: [
             "--visual-state=CAP-01",

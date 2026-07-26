@@ -2529,26 +2529,17 @@ final class CaptureFlowTests: XCTestCase {
         let states = [
             (
                 name: "below-cap idle",
-                accessibility: ScanShutterAccessibility(
-                    isEnabled: true,
-                    durablePhotoCount: 0
-                ),
+                accessibility: ScanShutterAccessibility(durablePhotoCount: 0),
                 expectedLabel: "Take photo"
             ),
             (
                 name: "below-cap pending intake",
-                accessibility: ScanShutterAccessibility(
-                    isEnabled: false,
-                    durablePhotoCount: 2
-                ),
+                accessibility: ScanShutterAccessibility(durablePhotoCount: 2),
                 expectedLabel: "Take photo"
             ),
             (
                 name: "at cap",
-                accessibility: ScanShutterAccessibility(
-                    isEnabled: false,
-                    durablePhotoCount: 5
-                ),
+                accessibility: ScanShutterAccessibility(durablePhotoCount: 5),
                 expectedLabel: "Take photo, unavailable at five photo limit"
             )
         ]
@@ -4396,11 +4387,11 @@ private final class TestCaptureCamera: CaptureCamera {
         }
         guard suspendsCapture else { return Self.photoData }
         return try await withCheckedThrowingContinuation { continuation in
-            pendingCaptureLock.lock()
-            pendingCaptures.append(continuation)
-            let waiters = Array(pendingCaptureWaiters.values)
-            pendingCaptureWaiters.removeAll()
-            pendingCaptureLock.unlock()
+            let waiters = pendingCaptureLock.withLock {
+                pendingCaptures.append(continuation)
+                defer { pendingCaptureWaiters.removeAll() }
+                return Array(pendingCaptureWaiters.values)
+            }
             for waiter in waiters {
                 waiter.resume(returning: true)
             }
@@ -4412,29 +4403,30 @@ private final class TestCaptureCamera: CaptureCamera {
     ) async -> Bool {
         let waiterID = UUID()
         return await withCheckedContinuation { continuation in
-            pendingCaptureLock.lock()
-            guard pendingCaptures.isEmpty else {
-                pendingCaptureLock.unlock()
+            let isAlreadyPending = pendingCaptureLock.withLock {
+                guard pendingCaptures.isEmpty else { return true }
+                pendingCaptureWaiters[waiterID] = continuation
+                return false
+            }
+            guard !isAlreadyPending else {
                 continuation.resume(returning: true)
                 return
             }
-            pendingCaptureWaiters[waiterID] = continuation
-            pendingCaptureLock.unlock()
             Task<Void, Never> {
                 try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                self.pendingCaptureLock.lock()
-                let waiter = self.pendingCaptureWaiters.removeValue(forKey: waiterID)
-                self.pendingCaptureLock.unlock()
+                let waiter = self.pendingCaptureLock.withLock {
+                    self.pendingCaptureWaiters.removeValue(forKey: waiterID)
+                }
                 waiter?.resume(returning: false)
             }
         }
     }
 
     func completePendingCaptures() {
-        pendingCaptureLock.lock()
-        let captures = pendingCaptures
-        pendingCaptures.removeAll()
-        pendingCaptureLock.unlock()
+        let captures = pendingCaptureLock.withLock {
+            defer { pendingCaptures.removeAll() }
+            return pendingCaptures
+        }
         for capture in captures {
             capture.resume(returning: Self.photoData)
         }

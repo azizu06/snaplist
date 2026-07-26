@@ -19,6 +19,8 @@ formatted_workflow_file=${temporary_directory}/formatted-ios.yml
 inactive_workflow_file=${temporary_directory}/inactive-ios.yml
 sample_gaming_workflow_file=${temporary_directory}/sample-gaming-ios.yml
 concrete_format_workflow_file=${temporary_directory}/concrete-format-ios.yml
+job_override_workflow_file=${temporary_directory}/job-override-ios.yml
+job_isolated_workflow_file=${temporary_directory}/job-isolated-ios.yml
 
 mkdir -p "$fake_bin" "$target_repository"
 
@@ -204,6 +206,42 @@ EOF
   assert_manual_dispatch_cannot_cancel_automatic_runs "$concrete_format_workflow_file"
 }
 
+assert_job_level_override_cannot_reshare_the_automatic_group() {
+  cat > "$job_override_workflow_file" <<'EOF'
+name: Broken iOS contract with a job-level override
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    concurrency:
+      group: ios-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+EOF
+
+  ! assert_manual_dispatch_cannot_cancel_automatic_runs "$job_override_workflow_file" 2>/dev/null
+}
+
+assert_job_level_isolation_is_still_accepted() {
+  cat > "$job_isolated_workflow_file" <<'EOF'
+name: iOS contract with an isolated job-level group
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    concurrency:
+      group: ios-test-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+      cancel-in-progress: true
+EOF
+
+  assert_manual_dispatch_cannot_cancel_automatic_runs "$job_isolated_workflow_file"
+}
+
 failures=0
 
 for contract_case in \
@@ -215,7 +253,9 @@ for contract_case in \
   assert_harmless_workflow_expression_layout_is_ignored \
   assert_inactive_workflow_text_cannot_mask_broken_active_contract \
   assert_fixed_samples_cannot_mask_a_non_run_scoped_manual_contract \
-  assert_concrete_formatting_remains_semantically_equivalent
+  assert_concrete_formatting_remains_semantically_equivalent \
+  assert_job_level_override_cannot_reshare_the_automatic_group \
+  assert_job_level_isolation_is_still_accepted
 do
   if $contract_case; then
     print -r -- "PASS ${contract_case}"

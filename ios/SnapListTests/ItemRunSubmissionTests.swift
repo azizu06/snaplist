@@ -704,6 +704,122 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
     }
 
+    /// The same rule one step earlier. `fileExists` answers false both for a path that is
+    /// absent and for one it cannot stat, and returning nil for the second mints a fresh
+    /// key for photos the first submission may already have committed. Existence has to
+    /// come from the same read that fails closed, not from a pre-check that cannot tell
+    /// the two apart.
+    func testAnAttemptThatCannotBeStattedIsNotReportedAsAbsent() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let attempt = try ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: ItemRunSubmissionSnapshot.make(
+                for: intake.photos,
+                readData: intake.read
+            ).photos
+        )
+        try await LocalItemRunSubmissionAttemptStore(rootDirectory: root)
+            .saveAttempt(attempt)
+        // An unsearchable containing directory leaves the record in place and writable
+        // while every stat of it fails, which is exactly the state the pre-check reported
+        // as "no attempt".
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0],
+            ofItemAtPath: root.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: root.path
+            )
+        }
+
+        let store = LocalItemRunSubmissionAttemptStore(rootDirectory: root)
+
+        do {
+            let restored = try await store.loadAttempt()
+            XCTFail(
+                "Expected a record that cannot be statted to fail closed, got \(String(describing: restored))"
+            )
+        } catch {
+            // Failing closed is the point; the caller decides what to do about it.
+        }
+    }
+
+    /// The metadata answer no filesystem will produce: the read succeeds and says nothing
+    /// about what is there. An unknown type is not proof that the path holds something
+    /// other than a record, so the record is honored instead of deleted. Tightening the
+    /// branch to `isRegularFile == true` would delete a live key here.
+    func testARecordWhoseTypeCannotBeDeterminedIsHonoredRatherThanDeleted() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let attempt = try ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: ItemRunSubmissionSnapshot.make(
+                for: intake.photos,
+                readData: intake.read
+            ).photos
+        )
+        try await LocalItemRunSubmissionAttemptStore(rootDirectory: root)
+            .saveAttempt(attempt)
+
+        let restored = try await LocalItemRunSubmissionAttemptStore(
+            rootDirectory: root,
+            fileManager: StubbedMetadataFileManager(metadata: .withoutType)
+        ).loadAttempt()
+
+        XCTAssertEqual(restored, attempt)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("attempt.json").path
+            )
+        )
+    }
+
+    /// A metadata read that fails for any reason other than absence leaves the question
+    /// open, and an open question is treated as a live attempt rather than as nothing.
+    func testAFailedMetadataReadFailsClosedAndKeepsTheRecord() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let attempt = try ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: ItemRunSubmissionSnapshot.make(
+                for: intake.photos,
+                readData: intake.read
+            ).photos
+        )
+        try await LocalItemRunSubmissionAttemptStore(rootDirectory: root)
+            .saveAttempt(attempt)
+
+        let store = LocalItemRunSubmissionAttemptStore(
+            rootDirectory: root,
+            fileManager: StubbedMetadataFileManager(
+                metadata: .failure(CocoaError(.fileReadNoPermission))
+            )
+        )
+
+        do {
+            let restored = try await store.loadAttempt()
+            XCTFail(
+                "Expected a failed metadata read to fail closed, got \(String(describing: restored))"
+            )
+        } catch {
+            // Failing closed is the point; the caller decides what to do about it.
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("attempt.json").path
+            )
+        )
+    }
+
     /// Failing closed on an unreadable record has a cost: nothing can remove it, so while
     /// the read keeps failing every submission refuses. That has to be reserved for
     /// something that could actually be a live attempt. `saveAttempt` only ever writes a
@@ -1140,6 +1256,38 @@ final class KeySequence: @unchecked Sendable {
 
 enum SubmissionAttemptStoreError: Error {
     case unavailable
+}
+
+/// A `FileManager` whose metadata read answers the way a real filesystem will not.
+///
+/// The store's absent, unknown-type, and fail-closed branches turn on what that one read
+/// reports. A real file cannot report an unknown type, and only a permission trick reaches
+/// the failure, so the store injects the reader and this stands in for it.
+final class StubbedMetadataFileManager: FileManager, @unchecked Sendable {
+    enum Metadata {
+        /// The read succeeds but carries no file type.
+        case withoutType
+        /// The read cannot be answered at all.
+        case failure(Error)
+    }
+
+    private let metadata: Metadata
+
+    init(metadata: Metadata) {
+        self.metadata = metadata
+        super.init()
+    }
+
+    override func attributesOfItem(atPath path: String) throws -> [FileAttributeKey: Any] {
+        switch metadata {
+        case .withoutType:
+            var attributes = try super.attributesOfItem(atPath: path)
+            attributes.removeValue(forKey: .type)
+            return attributes
+        case .failure(let error):
+            throw error
+        }
+    }
 }
 
 /// A durable store that cannot answer a read, as opposed to one that is empty.

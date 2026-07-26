@@ -273,8 +273,12 @@ def context(event_name:)
   }
 end
 
+def resolved_group(concurrency)
+  concurrency.is_a?(Hash) ? concurrency["group"] : concurrency
+end
+
 workflow = YAML.load_file(ARGV.fetch(0))
-group = workflow.dig("concurrency", "group")
+group = resolved_group(workflow["concurrency"])
 raise "concurrency.group must be an active string" unless group.is_a?(String)
 
 automatic_expected = SymbolicText.literal("ios-iOS-") + SymbolicText.variable("github.ref")
@@ -289,3 +293,27 @@ manual_context = context(event_name: "workflow_dispatch")
 manual_actual = evaluate_template(group, manual_context)
 manual_expected = SymbolicText.literal("ios-iOS-dispatch-") + SymbolicText.variable("github.run_id")
 raise "manual concurrency group must be scoped by github.run_id" unless manual_actual == manual_expected
+
+# GitHub applies a job's own `concurrency:` in place of the workflow-level one, so a job
+# override re-shares the automatic group at runtime while the checks above still pass. The
+# workflow-level group is pinned to an exact contract; a job may legitimately choose its own
+# name, so the job rule is the isolation itself: a manual dispatch must not land in the same
+# group as an automatic run.
+jobs = workflow["jobs"]
+raise "jobs must be a mapping when present" unless jobs.nil? || jobs.is_a?(Hash)
+
+(jobs || {}).each do |job_name, job|
+  next unless job.is_a?(Hash) && job.key?("concurrency")
+
+  job_group = resolved_group(job["concurrency"])
+  raise "job #{job_name} concurrency.group must be an active string" unless job_group.is_a?(String)
+
+  job_manual = evaluate_template(job_group, context(event_name: "workflow_dispatch"))
+
+  ["pull_request", "push"].each do |event_name|
+    job_automatic = evaluate_template(job_group, context(event_name: event_name))
+    next unless job_manual == job_automatic
+
+    raise "job #{job_name} concurrency group must separate workflow_dispatch from #{event_name}"
+  end
+end
