@@ -20,10 +20,13 @@ export async function register(): Promise<void> {
   // it here surfaces the refusal when the server starts rather than on the first
   // seller request.
   //
-  // Next.js does not exit on this. It fails `prepare()` and then answers EVERY
-  // route with a 500 for the life of the process, so the deploy is unusable but
-  // still bound to its port — see ADR-0002. Sentry is initialized FIRST so the
-  // config failure reaches alerting instead of only the platform's raw logs.
+  // How hard this stops depends on the host, so do not treat it as THE fence.
+  // Under `next start` it fails `prepare()` and every route then 500s for the
+  // life of the process. On Vercel, registration is not awaited, so this only
+  // surfaces as an unhandled rejection and requests keep serving. Either way the
+  // guarantee that holds everywhere is `resolveProvider` throwing when a model is
+  // resolved — see ADR-0002. Sentry is initialized FIRST so the config failure
+  // reaches alerting instead of only the platform's raw logs.
   const { llmProviderConfigError } = await import("./lib/llm/registry");
   const providerError = llmProviderConfigError();
   if (providerError) {

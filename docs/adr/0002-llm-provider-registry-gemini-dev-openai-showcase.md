@@ -129,10 +129,23 @@ default if any of those land.
 
 ### Migration required before this ships
 
-Any existing deployment whose environment omits `LLM_PROVIDER` works today and becomes **entirely
-unavailable** under this change — every route, not only the LLM ones. Set `LLM_PROVIDER` in every
-deploy environment (including Vercel Preview, which builds every pull request) **before** merging.
-This is a configuration step; the code cannot perform it and deliberately will not guess.
+Set `LLM_PROVIDER` in every deploy environment. This is a configuration step; the code cannot
+perform it and deliberately will not guess.
+
+The consequence of omitting it **depends on the host**, and the difference is worth recording
+because it is easy to overstate:
+
+- **Self-hosted, Docker, or any `next start`:** total outage. `register()` rejects, `prepare()`
+  fails, and every route returns 500 for the life of the process. Verified directly.
+- **Vercel:** no route-level regression observed. Vercel invokes `ensureInstrumentationRegistered`
+  without awaiting it, so a rejected `register()` surfaces as an unhandled rejection rather than
+  failing request handling. A preview deployment carrying this change served `/`, `/pricing`,
+  `/login`, `/signup`, and `/api/health` identically to a deployment without it. On this host the
+  protection therefore comes from `resolveProvider` throwing when a model is resolved, which is the
+  platform-independent guarantee, not from the startup check.
+
+So the startup check is a genuine hard stop only where the runtime awaits it. Do not rely on it as
+the sole fence, and do not describe it as one.
 
 ### Still outstanding
 
