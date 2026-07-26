@@ -647,6 +647,40 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(reloaded, [third, originalCover, second])
     }
 
+    func testRestoredCaptureFixtureRefusesReplaceRatherThanReportingItApplied() async throws {
+        let dependencies = AppDependencies.make(
+            configuration: LaunchConfiguration.parse(
+                arguments: ["--restored-capture-fixture"]
+            )
+        )
+        let store = dependencies.captureDraftStore
+        let before = try await store.loadPhotos()
+        let target = try XCTUnwrap(before.first)
+
+        do {
+            let result = try await store.replace(
+                photoID: target.id,
+                imageData: Data([0x01]),
+                libraryTransferReceipt: nil
+            )
+            XCTFail(
+                """
+                The fixture has no image pipeline, so replace must refuse rather than \
+                hand back \(result.replacementPhoto.id) as an applied replacement.
+                """
+            )
+        } catch CaptureDraftStoreError.invalidManifest {
+            // The refusal the seller reads as "Photo could not be replaced."
+        }
+
+        let after = try await store.loadPhotos()
+        XCTAssertEqual(
+            after,
+            before,
+            "A refused replacement must leave the draft exactly as it was."
+        )
+    }
+
     func testPhotoReviewBackCoordinatorCompletesWithRestoredCaptureFixture() async {
         let configuration = LaunchConfiguration.parse(
             arguments: ["--restored-capture-fixture"]

@@ -231,20 +231,19 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
         return photo
     }
 
-    // The fixture has no image pipeline, so like `stage` it yields the photo it already
-    // holds rather than inventing a new artifact.
+    // The fixture has no image pipeline, so it cannot turn `imageData` into a staged
+    // artifact and will not invent one. Handing back the photo it already holds would
+    // report a replacement that never happened, so it refuses instead and the seller
+    // reads the truthful "Photo could not be replaced. Nothing else changed."
     func replace(
         photoID: StagedCapturePhoto.ID,
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
     ) async throws -> CaptureDraftReplaceResult {
-        guard let index = photos.firstIndex(where: { $0.id == photoID }) else {
+        guard photos.contains(where: { $0.id == photoID }) else {
             throw CaptureDraftStoreError.photoNotStaged
         }
-        return CaptureDraftReplaceResult(
-            replacementPhoto: photos[index],
-            photos: photos
-        )
+        throw CaptureDraftStoreError.invalidManifest
     }
 
     func replacePhotos(with replacement: [StagedCapturePhoto]) async throws {
