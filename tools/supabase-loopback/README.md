@@ -28,12 +28,14 @@ digest check fails before CLI execution; there is no stock-binary fallback.
 Before `start`, the wrapper parses the effective workdir's
 `supabase/config.toml` and requires exactly one `[analytics]` block with the
 boolean literal `enabled = false`. Missing, enabled, or malformed Analytics
-configuration and caller-provided host networking fail before child spawn.
+configuration, caller-provided Docker transport overrides, and caller-provided
+host networking fail before child spawn.
 Disabling Analytics removes both Vector and Logflare, so local analytics port
 `54327` is intentionally absent.
 
-The exact-tag Go patch also rejects Docker socket binds/mounts, container
-`DOCKER_HOST`, privileged mode, host networking, devices/device requests, and
+The exact-tag Go patch also rejects Docker, containerd, Podman, CRI-O, and
+Windows Docker Engine socket binds/mounts; container `DOCKER_HOST`; privileged
+mode; host networking; devices, device requests, and device cgroup rules; and
 `PublishAllPorts`. That guard runs after effective network selection but before
 image inspection or pull, network/volume creation, or container creation.
 

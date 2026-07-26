@@ -47,10 +47,10 @@ index 9736fa6..c6a4a78 100644
  	}
 diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
 new file mode 100644
-index 0000000..26e15c7
+index 0000000..28e4a6d
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_isolation_test.go
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,85 @@
 +package utils
 +
 +import (
@@ -105,12 +105,43 @@ index 0000000..26e15c7
 +	require.ErrorContains(t, err, "unsafe Docker container capability")
 +	require.Zero(t, transport.calls)
 +}
++
++func TestDockerStartRejectsDeviceCgroupRulesBeforeDockerAction(t *testing.T) {
++	transport := &countingRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	_, err = DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/test:latest"},
++		container.HostConfig{
++			Resources: container.Resources{
++				DeviceCgroupRules: []string{"c 1:3 rwm"},
++			},
++		},
++		network.NetworkingConfig{},
++		"unsafe-device-cgroup-test",
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, transport.calls)
++}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig.go b/apps/cli-go/internal/utils/isolation/hostconfig.go
 new file mode 100644
-index 0000000..862ecd6
+index 0000000..92a948f
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig.go
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,55 @@
 +package isolation
 +
 +import (
@@ -122,13 +153,13 @@ index 0000000..862ecd6
 +
 +func ValidateContainer(config container.Config, hostConfig container.HostConfig) error {
 +	for _, bind := range hostConfig.Binds {
-+		if containsDockerSocket(bind) {
-+			return fmt.Errorf("docker socket bind is forbidden")
++		if containsContainerRuntimeSocket(bind) {
++			return fmt.Errorf("container runtime socket bind is forbidden")
 +		}
 +	}
 +	for _, mounted := range hostConfig.Mounts {
-+		if containsDockerSocket(mounted.Source) || containsDockerSocket(mounted.Target) {
-+			return fmt.Errorf("docker socket mount is forbidden")
++		if containsContainerRuntimeSocket(mounted.Source) || containsContainerRuntimeSocket(mounted.Target) {
++			return fmt.Errorf("container runtime socket mount is forbidden")
 +		}
 +	}
 +	for _, environment := range config.Env {
@@ -149,23 +180,29 @@ index 0000000..862ecd6
 +	if len(hostConfig.Resources.DeviceRequests) > 0 {
 +		return fmt.Errorf("device requests are forbidden")
 +	}
++	if len(hostConfig.Resources.DeviceCgroupRules) > 0 {
++		return fmt.Errorf("device cgroup rules are forbidden")
++	}
 +	if hostConfig.PublishAllPorts {
 +		return fmt.Errorf("PublishAllPorts is forbidden")
 +	}
 +	return nil
 +}
 +
-+func containsDockerSocket(value string) bool {
++func containsContainerRuntimeSocket(value string) bool {
 +	normalized := strings.ToLower(strings.ReplaceAll(value, "\\", "/"))
 +	return strings.Contains(normalized, "docker.sock") ||
++		strings.Contains(normalized, "containerd.sock") ||
++		strings.Contains(normalized, "podman.sock") ||
++		strings.Contains(normalized, "crio.sock") ||
 +		strings.Contains(normalized, "//./pipe/docker_engine")
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig_test.go b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
 new file mode 100644
-index 0000000..ea83350
+index 0000000..90b24cc
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,157 @@
 +package isolation
 +
 +import (
@@ -233,6 +270,13 @@ index 0000000..ea83350
 +				},
 +			},
 +		},
++		"device cgroup rule": {
++			hostConfig: container.HostConfig{
++				Resources: container.Resources{
++					DeviceCgroupRules: []string{"c 1:3 rwm"},
++				},
++			},
++		},
 +		"publish all ports": {
 +			hostConfig: container.HostConfig{PublishAllPorts: true},
 +		},
@@ -243,6 +287,56 @@ index 0000000..ea83350
 +		t.Run(name, func(t *testing.T) {
 +			t.Parallel()
 +			require.Error(t, ValidateContainer(testCase.config, testCase.hostConfig))
++		})
++	}
++}
++
++func TestValidateContainerRejectsContainerRuntimeSockets(t *testing.T) {
++	t.Parallel()
++
++	socketPaths := map[string]string{
++		"docker":         "/var/run/DOCKER.SOCK",
++		"docker windows": `\\.\pipe\DOCKER_ENGINE`,
++		"containerd":     `\run\CONTAINERD\containerd.sock`,
++		"podman":         "/run/user/501/PODMAN/PODMAN.SOCK",
++		"crio":           "/var/run/CRIO/CRIO.SOCK",
++	}
++
++	for name, socketPath := range socketPaths {
++		name, socketPath := name, socketPath
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++
++			cases := map[string]container.HostConfig{
++				"bind source": {
++					Binds: []string{socketPath + ":/safe/runtime:ro"},
++				},
++				"bind destination": {
++					Binds: []string{"/safe/runtime:" + socketPath + ":ro"},
++				},
++				"mount source": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: socketPath,
++						Target: "/safe/runtime",
++					}},
++				},
++				"mount destination": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: "/safe/runtime",
++						Target: socketPath,
++					}},
++				},
++			}
++
++			for form, hostConfig := range cases {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					t.Parallel()
++					require.Error(t, ValidateContainer(container.Config{}, hostConfig))
++				})
++			}
 +		})
 +	}
 +}

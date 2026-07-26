@@ -236,7 +236,7 @@ test("wrapper exports validated SUPABASE_GO_BINARY and blocks stock fallback", a
 
   const result = await runSupabase(["--version"], {
     ...fixture.options,
-    processEnvironment: {},
+    processEnvironment: { SNAPLIST_SAFE: "preserved" },
     invokeCli: async (command, args, options) => {
       calls.push({ command, args, options });
       return { status: 0 };
@@ -253,6 +253,7 @@ test("wrapper exports validated SUPABASE_GO_BINARY and blocks stock fallback", a
     calls[0].options.env.SUPABASE_CLI_BINARY_OVERRIDE,
     fixture.paths.platformCliPath,
   );
+  assert.equal(calls[0].options.env.SNAPLIST_SAFE, "preserved");
 
   for (const variable of [
     "SUPABASE_GO_BINARY",
@@ -268,6 +269,28 @@ test("wrapper exports validated SUPABASE_GO_BINARY and blocks stock fallback", a
       }),
       /refuses caller-provided/,
     );
+  }
+});
+
+test("wrapper rejects caller Docker transport overrides before child spawn", async (t) => {
+  for (const variable of ["DOCKER_HOST", "DOCKER_CONTEXT"]) {
+    await t.test(variable, async (t) => {
+      const fixture = await makeFixture(t);
+      let childSpawned = false;
+
+      await assert.rejects(
+        runSupabase(["--version"], {
+          ...fixture.options,
+          processEnvironment: { [variable]: "caller-controlled" },
+          invokeCli: async () => {
+            childSpawned = true;
+            return { status: 0 };
+          },
+        }),
+        new RegExp(`refuses caller-provided ${variable}`),
+      );
+      assert.equal(childSpawned, false);
+    });
   }
 });
 

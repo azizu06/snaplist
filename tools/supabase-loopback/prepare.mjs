@@ -152,7 +152,7 @@ run(
     "test",
     "./internal/utils",
     "-run",
-    "^TestDockerStartRejectsBeforeDockerAction$",
+    "^TestDockerStartRejects(DeviceCgroupRules)?BeforeDockerAction$",
     "-count=1",
   ],
   { cwd: goRoot, env: goEnvironment, stdio: "inherit" },

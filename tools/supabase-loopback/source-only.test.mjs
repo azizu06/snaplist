@@ -182,7 +182,10 @@ test("patched source rejects Docker host capabilities before side effects", () =
   const goRoot = path.join(sourceRoot, "apps", "cli-go");
   for (const [packages, testName] of [
     [["./internal/utils/isolation"], "."],
-    [["./internal/utils"], "^TestDockerStartRejectsBeforeDockerAction$"],
+    [
+      ["./internal/utils"],
+      "^TestDockerStartRejects(DeviceCgroupRules)?BeforeDockerAction$",
+    ],
   ]) {
     const result = spawnSync(
       "go",
