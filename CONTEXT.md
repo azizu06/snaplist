@@ -92,6 +92,15 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
 
 ## Marketplace delivery
 
+- **eBay connection generation** — a reconnect-sensitive identifier for the current encrypted OAuth
+  grant. It advances whenever the seller replaces that grant, even when they reconnect the same eBay
+  identity. Read-only discovery and later marketplace work use it to reject results produced by an
+  earlier connection.
+- **eBay policy/location binding** — the connected seller's fulfillment, payment, and return policy
+  choices plus enabled inventory location for one eBay marketplace and one eBay connection
+  generation. A unique usable choice may bind automatically; otherwise the binding remains
+  **setup required** or **selection required**. Candidate labels never include addresses, phone
+  numbers, seller descriptions, or other provider-private details.
 - **Adapter** — an isolating interface around an eBay capability. The transactional eBay adapter is
   the only direct marketplace mutation seam and must remain testable against mocks.
 - **Publish** — putting a listing live on eBay after account claim/connection, current review
