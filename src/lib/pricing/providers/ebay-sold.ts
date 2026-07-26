@@ -63,7 +63,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Fetch a page's raw HTML. Real default: SSRF-guarded `fetch`. Tests inject a fake. */
-export type FetchPage = (url: string) => Promise<string>;
+export type FetchPage = (url: string, signal?: AbortSignal) => Promise<string>;
 
 /** One sold comparable parsed from the results page. Always a completed sale. */
 export interface EbaySoldComp {
@@ -1261,7 +1261,7 @@ export function createDefaultFetchPage(
       ? process.env
       : { EBAY_SOLD_PROXY_TEMPLATE: opts.proxyTemplate },
   );
-  return async (rawUrl) => {
+  return async (rawUrl, signal) => {
     const safe = assertSafeEbayUrl(rawUrl); // validate the eBay TARGET before any request
     // When proxy egress is configured, route the request through it. Hosted direct
     // fetches can be blocked; the optional operator-selected provider offers an
@@ -1273,6 +1273,12 @@ export function createDefaultFetchPage(
       : safe;
     const followRedirect = usingProxy; // proxies may 30x to the rendered page
     const controller = new AbortController();
+    const abortFromCaller = () => controller.abort();
+    if (signal?.aborted) {
+      abortFromCaller();
+    } else {
+      signal?.addEventListener("abort", abortFromCaller, { once: true });
+    }
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await doFetch(requestUrl, {
@@ -1293,6 +1299,7 @@ export function createDefaultFetchPage(
       return await res.text();
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromCaller);
     }
   };
 }
@@ -1375,13 +1382,17 @@ function createEbaySoldPricingProviderInternal(
     if (remainingMs <= 0) {
       throw new DOMException("aborted", "AbortError");
     }
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        fetchPage(url),
+        fetchPage(url, controller.signal),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
-            () => reject(new DOMException("aborted", "AbortError")),
+            () => {
+              controller.abort();
+              reject(new DOMException("aborted", "AbortError"));
+            },
             Math.min(effectiveFetchTimeoutMs, remainingMs),
           );
         }),

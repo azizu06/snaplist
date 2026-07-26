@@ -720,6 +720,47 @@ describe("createDefaultFetchPage (#56 review: SSRF + timeout)", () => {
     ).rejects.toThrow();
   });
 
+  it.each([
+    ["direct", ""],
+    ["proxy", "https://proxy.example/get?url={url}"],
+  ])(
+    "combines the caller abort signal with the internal timeout for %s requests",
+    async (_mode, proxyTemplate) => {
+      vi.useFakeTimers();
+      let requestSignal: AbortSignal | undefined;
+      const hangingFetch = ((
+        _input: unknown,
+        init?: { signal?: AbortSignal },
+      ) => {
+        requestSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }) as unknown as typeof fetch;
+      const fetchPage = createDefaultFetchPage({
+        timeoutMs: 10_000,
+        fetchImpl: hangingFetch,
+        proxyTemplate,
+      });
+      const caller = new AbortController();
+      const result = fetchPage(
+        "https://www.ebay.com/sch/i.html?_nkw=x&LH_Sold=1",
+        caller.signal,
+      );
+      const rejection = expect(result).rejects.toThrow();
+
+      caller.abort();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(requestSignal?.aborted).toBe(true);
+      await rejection;
+    },
+  );
+
   it("routes through a proxy template when configured (eBay 403s direct server fetches)", async () => {
     let requestedUrl = "";
     const spyFetch = (async (input: unknown) => {
@@ -1953,6 +1994,52 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(
       fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
     ).toEqual(["10"]);
+  });
+
+  it("aborts the active fetch before settling at the remaining logical deadline", async () => {
+    vi.useFakeTimers();
+    const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
+      async get() {
+        await new Promise<void>((resolve) => setTimeout(resolve, 501));
+        return null;
+      },
+      async set() {
+        return "OK";
+      },
+    });
+    let fetchCount = 0;
+    let observedSignal: AbortSignal | undefined;
+    let aborted = false;
+    const fetchPage = ((
+      _url: string,
+      signal?: AbortSignal,
+    ): Promise<string> => {
+      fetchCount += 1;
+      observedSignal = signal;
+      return new Promise<string>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            reject(new DOMException("aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    }) as FetchPage;
+
+    const result = await settleWithinHandoffBudget({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    });
+
+    expect(result).toBeNull();
+    expect(fetchCount).toBe(1);
+    expect(observedSignal).toBeDefined();
+    expect(observedSignal?.aborted).toBe(true);
+    expect(aborted).toBe(true);
   });
 
   it("does not await a newer in-process retrieval past the caller deadline", async () => {
