@@ -41,6 +41,33 @@ Their former `implementation_frozen` labels no longer authorize new work. Retain
 their historical migration/implementation evidence does not make their five-tab navigation or broad
 state families current product authority.
 
+## Attribute-scoped overrides on sealed packages
+
+A newer package does not replace an older one wholesale. These records govern a single named
+attribute each; every other attribute of the cited packages stays approved and in force, and the
+sealed ZIPs are unmodified. `native-v1-design-inventory.json` holds the machine-readable form under
+`seller_facing_copy_supersessions` and `package_claim_overrides`.
+
+**Allowance noun.** The seller-facing noun for the included-first-run allowance
+(`ai_item_allowance_periods`, `period_key = 'included-first-run'`) is **`AI listing`**, governed by
+`snaplist-pro-gate-design-package-v1-2026-07-25` (`PAY-01`: `You made one AI listing for free.`).
+`RUN-08`'s `Your first item is on us` / `Item 1 will finish free` phrasing is superseded **for that
+attribute only** — `item` still means the seller's physical object, and RUN-08's other approved
+states are untouched. New or revised copy naming this allowance uses `AI listing`.
+
+The superseded noun still ships in the working tree at `ONB-06`
+(`OnboardingDomain.swift` / `OnboardingFlowView.swift`), `HomeViews.swift`, and
+`src/lib/scout-guidance/catalog.v1.json`. Recording the supersession does not reconcile them;
+seller-facing copy changes are owned by the active design round and its implementing issue.
+
+**Pro Gate free-publish claim.** `snaplist-pro-gate-design-package-v1-2026-07-25`'s README states
+the first item is free end to end including its first eBay publish. That is **product intent, not
+available behavior**, and must not be implemented from. No publish entitlement object exists in the
+shipped schema: `ai_item_allowance_periods`, `ai_item_credit_reservations`, and
+`revenuecat_customer_bindings` all grant AI item runs, and nothing grants, reserves, or settles a
+publish. The package's own seller-facing strings promise nothing about publish and are unaffected.
+See [#377](https://github.com/azizu06/snaplist/issues/377).
+
 ## Retired lean-launch families
 
 | Family | Superseded records | Disposition |
@@ -80,3 +107,7 @@ Documentation describes the approved target; it must not claim those gaps are al
    pricing, credit, marketplace, or seller-confirmation policy in the client.
 5. Preserve Dynamic Type, VoiceOver, Reduced Motion, non-color status cues, truthful progress, and
    minimum 44-by-44-point targets in any future approved design.
+6. Stop if new or revised seller-facing copy names the included-first-run allowance anything other
+   than `AI listing`.
+7. Stop if a free-first-eBay-publish entitlement, gate, or seller-facing claim is being built from a
+   design package README. No such entitlement exists in the shipped schema.
