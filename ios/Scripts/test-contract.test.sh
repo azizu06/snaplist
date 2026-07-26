@@ -21,6 +21,8 @@ sample_gaming_workflow_file=${temporary_directory}/sample-gaming-ios.yml
 concrete_format_workflow_file=${temporary_directory}/concrete-format-ios.yml
 job_override_workflow_file=${temporary_directory}/job-override-ios.yml
 job_isolated_workflow_file=${temporary_directory}/job-isolated-ios.yml
+job_shared_dispatch_workflow_file=${temporary_directory}/job-shared-dispatch-ios.yml
+job_matrix_workflow_file=${temporary_directory}/job-matrix-ios.yml
 
 mkdir -p "$fake_bin" "$target_repository"
 
@@ -242,6 +244,42 @@ EOF
   assert_manual_dispatch_cannot_cancel_automatic_runs "$job_isolated_workflow_file"
 }
 
+assert_job_level_manual_dispatches_cannot_cancel_each_other() {
+  cat > "$job_shared_dispatch_workflow_file" <<'EOF'
+name: iOS contract whose job group collapses every manual dispatch
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    concurrency:
+      group: ios-test-${{ github.event_name == 'workflow_dispatch' && 'dispatch' || github.ref }}
+      cancel-in-progress: true
+EOF
+
+  ! assert_manual_dispatch_cannot_cancel_automatic_runs "$job_shared_dispatch_workflow_file" 2>/dev/null
+}
+
+assert_job_level_matrix_isolation_is_accepted() {
+  cat > "$job_matrix_workflow_file" <<'EOF'
+name: iOS contract whose isolated job group keys on a matrix value
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    concurrency:
+      group: ios-${{ matrix.device }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+      cancel-in-progress: true
+EOF
+
+  assert_manual_dispatch_cannot_cancel_automatic_runs "$job_matrix_workflow_file"
+}
+
 failures=0
 
 for contract_case in \
@@ -255,7 +293,9 @@ for contract_case in \
   assert_fixed_samples_cannot_mask_a_non_run_scoped_manual_contract \
   assert_concrete_formatting_remains_semantically_equivalent \
   assert_job_level_override_cannot_reshare_the_automatic_group \
-  assert_job_level_isolation_is_still_accepted
+  assert_job_level_isolation_is_still_accepted \
+  assert_job_level_manual_dispatches_cannot_cancel_each_other \
+  assert_job_level_matrix_isolation_is_accepted
 do
   if $contract_case; then
     print -r -- "PASS ${contract_case}"

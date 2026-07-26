@@ -277,6 +277,28 @@ def resolved_group(concurrency)
   concurrency.is_a?(Hash) ? concurrency["group"] : concurrency
 end
 
+# The workflow-level group is pinned to an exact contract, so an unrecognized context there is a
+# typo worth raising on. A job group is not pinned, and jobs legitimately key on `matrix.*`,
+# `inputs.*`, or `github.job`. Raising on those would reject a correctly isolated job, so they
+# resolve to opaque variables instead and the isolation comparison still runs.
+class OpaqueContext
+  def initialize(values)
+    @values = values
+  end
+
+  def fetch(name)
+    @values.fetch(name) { SymbolicText.variable(name) }
+  end
+end
+
+def job_context(event_name:)
+  OpaqueContext.new(context(event_name: event_name))
+end
+
+def scoped_by_run_id?(group)
+  group.parts.any? { |part| part.is_a?(SymbolicText::Variable) && part.name == "github.run_id" }
+end
+
 workflow = YAML.load_file(ARGV.fetch(0))
 group = resolved_group(workflow["concurrency"])
 raise "concurrency.group must be an active string" unless group.is_a?(String)
@@ -294,11 +316,12 @@ manual_actual = evaluate_template(group, manual_context)
 manual_expected = SymbolicText.literal("ios-iOS-dispatch-") + SymbolicText.variable("github.run_id")
 raise "manual concurrency group must be scoped by github.run_id" unless manual_actual == manual_expected
 
-# GitHub applies a job's own `concurrency:` in place of the workflow-level one, so a job
-# override re-shares the automatic group at runtime while the checks above still pass. The
-# workflow-level group is pinned to an exact contract; a job may legitimately choose its own
-# name, so the job rule is the isolation itself: a manual dispatch must not land in the same
-# group as an automatic run.
+# A job's own `concurrency:` applies in addition to the workflow-level one, and it forms its own
+# independent group. So a job override can re-share a group at runtime while every check above
+# still passes. The workflow-level group is pinned to an exact contract; a job may legitimately
+# choose its own name, so the job rule is the isolation itself, and it is the same isolation the
+# workflow-level rule enforces: a manual dispatch must not land in the same group as an automatic
+# run, and two concurrent manual dispatches must not land in the same group as each other.
 jobs = workflow["jobs"]
 raise "jobs must be a mapping when present" unless jobs.nil? || jobs.is_a?(Hash)
 
@@ -308,10 +331,13 @@ raise "jobs must be a mapping when present" unless jobs.nil? || jobs.is_a?(Hash)
   job_group = resolved_group(job["concurrency"])
   raise "job #{job_name} concurrency.group must be an active string" unless job_group.is_a?(String)
 
-  job_manual = evaluate_template(job_group, context(event_name: "workflow_dispatch"))
+  job_manual = evaluate_template(job_group, job_context(event_name: "workflow_dispatch"))
+  unless scoped_by_run_id?(job_manual)
+    raise "job #{job_name} manual concurrency group must be scoped by github.run_id"
+  end
 
   ["pull_request", "push"].each do |event_name|
-    job_automatic = evaluate_template(job_group, context(event_name: event_name))
+    job_automatic = evaluate_template(job_group, job_context(event_name: event_name))
     next unless job_manual == job_automatic
 
     raise "job #{job_name} concurrency group must separate workflow_dispatch from #{event_name}"

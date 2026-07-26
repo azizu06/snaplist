@@ -1263,7 +1263,7 @@ enum SubmissionAttemptStoreError: Error {
 /// The store's absent, unknown-type, and fail-closed branches turn on what that one read
 /// reports. A real file cannot report an unknown type, and only a permission trick reaches
 /// the failure, so the store injects the reader and this stands in for it.
-final class StubbedMetadataFileManager: FileManager, @unchecked Sendable {
+private final class StubbedMetadataFileManager: FileManager, @unchecked Sendable {
     enum Metadata {
         /// The read succeeds but carries no file type.
         case withoutType

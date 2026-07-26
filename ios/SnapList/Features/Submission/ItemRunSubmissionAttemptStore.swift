@@ -34,9 +34,11 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         //
         // The read goes through the injected `FileManager` rather than `URL.resourceValues`
         // for two reasons. A URL caches the resource values it has already fetched, and this
-        // store holds one long-lived `attemptURL`, so a second load would answer from the
-        // state before `clearAttempt` deleted the file. It also gives the fail-closed and
-        // unknown-type branches a seam a test can actually reach.
+        // store holds one long-lived `attemptURL`, so a second load answers from the state
+        // before `clearAttempt` deleted the file. That is observed, not assumed:
+        // `testStoredAttemptSurvivesRelaunchAndClearsOnlyItself` failed exactly that way once
+        // the `fileExists` pre-check above stopped short-circuiting the deleted path. It also
+        // gives the fail-closed and unknown-type branches a seam a test can actually reach.
         let isRegularFile: Bool?
         do {
             let attributes = try fileManager.attributesOfItem(atPath: attemptURL.path)

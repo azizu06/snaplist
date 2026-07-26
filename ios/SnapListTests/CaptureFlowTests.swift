@@ -2528,12 +2528,12 @@ final class CaptureFlowTests: XCTestCase {
     func testShutterAccessibleNameOnlyAnnouncesTheLimitAtFiveDurablePhotos() {
         let states = [
             (
-                name: "below-cap idle",
+                name: "no durable photos",
                 accessibility: ScanShutterAccessibility(durablePhotoCount: 0),
                 expectedLabel: "Take photo"
             ),
             (
-                name: "below-cap pending intake",
+                name: "below the five-photo cap",
                 accessibility: ScanShutterAccessibility(durablePhotoCount: 2),
                 expectedLabel: "Take photo"
             ),

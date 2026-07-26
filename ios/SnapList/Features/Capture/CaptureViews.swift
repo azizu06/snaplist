@@ -472,8 +472,8 @@ private enum ScanReviewFocusTarget: Hashable {
 ///
 /// The live and recovery surfaces show the same control with the same styling, the same
 /// count-sensitive name, the same identifier, and the same accessibility-focus handoff back
-/// from Photo Review. Only the sort priority differs, so that is the one input each surface
-/// supplies.
+/// from Photo Review. Each surface still supplies its own sort-priority case, which is the one
+/// input that is allowed to differ, even though `.live` and `.recovery` both resolve to 40 today.
 private struct ScanReviewButton: View {
     let photoCount: Int
     let priority: ScanReviewAccessibilityPriority
@@ -603,9 +603,9 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
 
                 ScanDestinationDock(openTrophyWall: openTrophyWall)
-                .padding(.top, 5)
-                .padding(.bottom, 8)
-                .offset(y: 20)
+                    .padding(.top, 5)
+                    .padding(.bottom, 8)
+                    .offset(y: 20)
             }
             .safeAreaPadding(.top, 2)
             .safeAreaPadding(.bottom, 2)
@@ -764,8 +764,8 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
                     )
                 }
                 ScanDestinationDock(openTrophyWall: openTrophyWall)
-                .padding(.bottom, 8)
-                .offset(y: 20)
+                    .padding(.bottom, 8)
+                    .offset(y: 20)
             }
             .safeAreaPadding(.vertical, 2)
         }
