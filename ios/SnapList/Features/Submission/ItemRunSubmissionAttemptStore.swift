@@ -1,9 +1,5 @@
 import Foundation
 
-enum ItemRunSubmissionAttemptStoreError: Error, Equatable {
-    case unreadableAttempt
-}
-
 /// Durable, device-local home for the one in-flight submission attempt.
 ///
 /// The attempt outlives the process on purpose: a seller who force-quits mid-request
@@ -34,26 +30,37 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         guard fileManager.fileExists(atPath: attemptURL.path) else {
             return nil
         }
-        let stored: ItemRunSubmissionAttempt
-        do {
-            stored = try decoder.decode(
-                ItemRunSubmissionAttempt.self,
-                from: Data(contentsOf: attemptURL)
-            )
-        } catch {
-            // Absence and unreadability are not the same answer. Absence means no key
-            // exists, so minting one is correct. Unreadability means a key may exist
-            // and is unknown, and minting one there submits photos that may already
-            // have a run and charges the seller for them twice.
-            throw ItemRunSubmissionAttemptStoreError.unreadableAttempt
+        guard let data = try? Data(contentsOf: attemptURL) else {
+            return discardUnusableAttempt()
         }
-        // A record another version wrote is stale rather than unknown. Attempts only
-        // live while one submission is unresolved, so an older one no longer guards
-        // anything and discarding it cannot duplicate a run.
-        guard stored.schemaVersion == ItemRunSubmissionAttempt.currentSchemaVersion else {
-            return nil
+        // Read the version before the body. Decoding the whole record first cannot tell
+        // a renamed or removed field from genuine corruption, so every future schema
+        // change would look like a broken file.
+        let version = try? decoder.decode(
+            ItemRunSubmissionAttempt.StoredVersion.self,
+            from: data
+        )
+        guard version?.schemaVersion == ItemRunSubmissionAttempt.currentSchemaVersion,
+              let stored = try? decoder.decode(
+                  ItemRunSubmissionAttempt.self,
+                  from: data
+              ) else {
+            return discardUnusableAttempt()
         }
         return stored
+    }
+
+    /// A record this build cannot use is removed rather than kept.
+    ///
+    /// The tradeoff is deliberate. Keeping it would refuse every later submission,
+    /// because nothing else can clear it, so one unusable file would end the seller's
+    /// ability to list anything until they reinstalled. Discarding it risks a second run
+    /// only if a submission was genuinely unresolved at that moment, which needs a
+    /// record that survived an atomic write and then became unreadable. A permanently
+    /// dead Start listing is the worse of the two.
+    private func discardUnusableAttempt() -> ItemRunSubmissionAttempt? {
+        try? fileManager.removeItem(at: attemptURL)
+        return nil
     }
 
     func saveAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {

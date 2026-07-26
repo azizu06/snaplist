@@ -72,8 +72,12 @@ struct AppShellView: View {
                     openBoundary: { event in
                         guard case .startListing = event else { return }
                         Task {
-                            await submissionHost.startListing(
-                                photos: session.store.photos
+                            await AppShellPhotoReviewSubmissionTransaction.perform(
+                                session: session,
+                                captureFlow: captureFlow,
+                                host: photoReviewHost,
+                                router: router,
+                                submissionHost: submissionHost
                             )
                         }
                     },
@@ -317,6 +321,47 @@ enum AppShellPhotoReviewBackTransaction {
         }
 
         return outcome
+    }
+}
+
+@MainActor
+enum AppShellPhotoReviewSubmissionTransaction {
+    static func perform(
+        session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        submissionHost: ItemRunSubmissionHost
+    ) async {
+        // Photo Review stays mounted across the request and the exact clear, exactly
+        // like the two exits. Without the lock the seller could delete or reorder in
+        // that gap: neither reaches disk, so the clear would not see the change and
+        // would remove photos the receipt never described.
+        guard host.beginCommit() else {
+            return
+        }
+        defer { host.endCommit() }
+
+        await submissionHost.startListing(photos: session.store.photos)
+
+        // A cleared intake leaves no photos to review, and Photo Review has no empty
+        // state: its thumbnails would point at deleted files and Back would refuse,
+        // because the durable draft it tries to commit is already gone. Zero photos
+        // returns to Scan, the same rule the final delete already follows.
+        //
+        // The final delete hands Scan the empty set to commit because the photo is still
+        // on disk at that point. Here the receipt already took it, so Scan is told the
+        // draft is gone rather than asked to remove it again. Start the camera before the
+        // router returns, so zero-photo Scan arrives as the approved guided camera rather
+        // than transiently as "Preparing camera", matching both existing exits.
+        //
+        // Where an accepted run should actually take the seller is #503.
+        guard submissionHost.acceptedRun != nil, submissionHost.clearedIntake else {
+            return
+        }
+        captureFlow.dropIntakeDiscardedElsewhere()
+        await captureFlow.startCamera()
+        host.leaveForClearedIntake(using: router)
     }
 }
 

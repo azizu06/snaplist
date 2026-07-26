@@ -1079,6 +1079,18 @@ final class CaptureFlowModel {
         }
     }
 
+    /// Drops the in-memory intake after the durable draft was already discarded
+    /// elsewhere, leaving Scan the way an empty draft leaves it.
+    ///
+    /// Submission clears the draft itself, on a receipt that accounts for those exact
+    /// photos. Routing that through `applyPhotoReviewScanReturn` would ask the store to
+    /// write the empty set a second time, and a discard removes the draft directory, so
+    /// the write throws and the model keeps photos that no longer exist.
+    func dropIntakeDiscardedElsewhere() {
+        stagedPhotos = []
+        phase = .idle
+    }
+
     func startCamera() async {
         guard camera.isAvailable else {
             phase = .unavailable

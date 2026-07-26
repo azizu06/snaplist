@@ -9,6 +9,9 @@ import Observation
 final class ItemRunSubmissionHost {
     private(set) var isSubmitting = false
     private(set) var acceptedRun: AcceptedItemRun?
+    /// Whether the accepted run also took the seller's photos with it. False means the
+    /// intake changed while the request was open and those photos are still theirs.
+    private(set) var clearedIntake = false
     private(set) var retention: ItemRunSubmissionRetention?
 
     private let coordinator: ItemRunSubmissionCoordinator?
@@ -41,8 +44,10 @@ final class ItemRunSubmissionHost {
         case .accepted(let acceptance):
             retention = nil
             acceptedRun = acceptance.run
+            clearedIntake = acceptance.clearedIntake
         case .retained(let retention):
             acceptedRun = nil
+            clearedIntake = false
             self.retention = retention
         }
     }
@@ -122,18 +127,22 @@ final class ItemRunSubmissionCoordinator {
         // Reordering inside Photo Review only moves photos in memory. Submitting one
         // order while the durable draft holds another would make the exact clear refuse
         // its own validated receipt, leaving the seller looking at photos they already
-        // submitted. A refused write is safe: the clear below simply declines.
-        try? await draftStore.replacePhotos(with: photos)
+        // submitted.
+        //
+        // Only the order is synced, and only when the two hold the same photos. Writing
+        // a smaller set would delete the omitted photos' files, turning a submission
+        // into a durable delete on paths that never even reach the network. A draft
+        // that disagrees about membership is left alone, and the clear then declines.
+        let durablePhotos = (try? await draftStore.loadPhotos()) ?? []
+        if durablePhotos != photos,
+           Set(durablePhotos.map(\.id)) == Set(photos.map(\.id)) {
+            try? await draftStore.replacePhotos(with: photos)
+        }
 
         // A stored attempt standing for these exact photos is the same logical
         // submission, so it keeps its key. Retrying under a new key would ask the server
         // to create a second run and spend a second AI-item credit for one item.
-        let storedAttempt: ItemRunSubmissionAttempt?
-        do {
-            storedAttempt = try await attemptStore.loadAttempt()
-        } catch {
-            return .retained(.attemptUnreadable)
-        }
+        let storedAttempt = try? await attemptStore.loadAttempt()
         let attempt: ItemRunSubmissionAttempt
         if let storedAttempt, storedAttempt.standsFor(snapshot) {
             attempt = storedAttempt

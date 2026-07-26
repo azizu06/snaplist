@@ -427,7 +427,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertNil(cleared)
     }
 
-    func testUnreadableStoredAttemptFailsClosedRatherThanMintingASecondKey() async throws {
+    func testUnreadableStoredAttemptIsDiscardedSoStartListingCannotDieForever() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -439,19 +439,42 @@ final class ItemRunSubmissionTests: XCTestCase {
             to: root.appendingPathComponent("attempt.json")
         )
 
-        // A key may exist and is now unknown. Reading this as "no attempt" would mint a
-        // second key for photos that may already have a run and charge for them twice.
-        do {
-            _ = try await LocalItemRunSubmissionAttemptStore(
-                rootDirectory: root
-            ).loadAttempt()
-            XCTFail("Expected an unreadable attempt to fail closed")
-        } catch {
-            XCTAssertEqual(
-                error as? ItemRunSubmissionAttemptStoreError,
-                .unreadableAttempt
+        // Refusing forever would be worse than the duplicate it prevents: nothing else
+        // clears this file, so one unreadable record would end the seller's ability to
+        // list anything. It is removed instead, and the next submission starts clean.
+        let restored = try await LocalItemRunSubmissionAttemptStore(
+            rootDirectory: root
+        ).loadAttempt()
+
+        XCTAssertNil(restored)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("attempt.json").path
             )
-        }
+        )
+    }
+
+    func testAnAttemptWrittenBeforeVersioningIsDiscardedRatherThanBlocking() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        // Exactly what an earlier build wrote: no schemaVersion key at all. A missing
+        // version is stale, not corrupt, so it must not fail closed and strand the
+        // seller behind a record that no longer guards anything.
+        let legacy = """
+        {"idempotencyKey":"\(Self.firstKey.uuidString)","photos":[]}
+        """
+        try Data(legacy.utf8).write(to: root.appendingPathComponent("attempt.json"))
+
+        let restored = try await LocalItemRunSubmissionAttemptStore(
+            rootDirectory: root
+        ).loadAttempt()
+
+        XCTAssertNil(restored)
     }
 
     func testAnAttemptFromAnotherSchemaVersionIsDiscardedRatherThanBlocking() async throws {
@@ -679,6 +702,32 @@ struct SubmissionIntakeFixture: Sendable {
         }
         self.photos = photos
         self.dataByPath = dataByPath
+    }
+
+    /// Backs the fixture with photos a real draft store staged, so a test can drive the
+    /// live transaction against files that actually exist on disk.
+    init(photos: [StagedCapturePhoto], readingFrom _: LocalCaptureDraftStore) {
+        self.photos = photos
+        dataByPath = Dictionary(
+            uniqueKeysWithValues: photos.map {
+                ($0.photoURL.path, (try? Data(contentsOf: $0.photoURL)) ?? Data())
+            }
+        )
+    }
+
+    /// A truthful server receipt for exactly this fixture.
+    var receipt: MobileItemSubmissionEnvelope.DataPayload {
+        MobileItemSubmissionEnvelope.DataPayload(
+            itemId: UUID(),
+            runId: UUID(),
+            status: "queued",
+            stage: "queued",
+            photoIdentity: .init(
+                kind: "content_sha256_set_v1",
+                fingerprint: String(repeating: "a", count: 64)
+            ),
+            photos: expectedReceiptPhotos
+        )
     }
 
     var read: @Sendable (URL) throws -> Data {

@@ -610,6 +610,22 @@ final class PhotoReviewLiveHost {
     }
 
     @discardableResult
+    /// Leaves Photo Review because the intake it was editing is gone.
+    ///
+    /// Submission clears the draft on a validated receipt, and the same rule the final
+    /// delete follows applies: with no photos left there is nothing to review, and the
+    /// screen would otherwise render files that no longer exist.
+    func leaveForClearedIntake(using router: AppRouter) {
+        guard session != nil else {
+            return
+        }
+        router.returnFromPhotoReview(
+            PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+        )
+        session = nil
+        activeRequest = nil
+    }
+
     func deleteFinalPhoto(
         id: StagedCapturePhoto.ID,
         using router: AppRouter

@@ -78,6 +78,13 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
     let photos: [ItemRunSubmissionPhoto]
     var schemaVersion = ItemRunSubmissionAttempt.currentSchemaVersion
 
+    /// Just enough of a stored record to tell a different shape from a broken one. A
+    /// synthesised decode of the whole attempt cannot: a renamed or removed field and
+    /// genuine corruption both surface as a decoding error.
+    struct StoredVersion: Decodable {
+        let schemaVersion: Int?
+    }
+
     /// True when this attempt stands for the same submission the server would see.
     func standsFor(_ photos: [ItemRunSubmissionPhoto]) -> Bool {
         self.photos.map(\.fingerprint) == photos.map(\.fingerprint)
@@ -152,9 +159,6 @@ enum ItemRunSubmissionRetention: Equatable, Sendable {
     /// without a persisted key would let a retry mint a second key for the same photos
     /// and buy a second run.
     case attemptNotPersisted
-    /// A stored attempt exists but cannot be read, so its key is unknown. Minting a new
-    /// one would submit photos that may already have a run and charge for them twice.
-    case attemptUnreadable
     /// The app has no API origin configured, so there is nowhere to submit.
     case submissionUnavailable
 }
