@@ -230,8 +230,10 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
     // real staging failure: Photo Review's Add shows its addition failure recovery unless
     // the seller had already abandoned the request, the Scan shutter treats it as a
     // retryable failure on the still-live camera and shows nothing, and library staging
-    // fails the phase. So under this fixture the shutter is a no-op, which is the honest
-    // report for a store that cannot stage.
+    // fails the phase only when the seller was not already on camera, denied, or
+    // unavailable, since those phases are their own recovery surface. So under this
+    // fixture the shutter is a no-op, which is the honest report for a store that cannot
+    // stage.
     func stage(
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
