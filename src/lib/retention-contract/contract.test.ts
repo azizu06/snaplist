@@ -332,6 +332,17 @@ describe("lean-MVP release retention contract", () => {
     );
   });
 
+  // The skip warning is the sentence a developer sees most often, since the
+  // suite skips by default. It described the same closed gate as open.
+  it("does not describe the Clerk proof as unobserved where the suite skips", () => {
+    const absenceTest = readFileSync(
+      resolve("src/lib/retention-contract/clerk-identity-absence.test.ts"),
+      "utf8",
+    );
+
+    expect(absenceTest).not.toMatch(/not yet observed/);
+  });
+
   it("routes lean-MVP and voice retention authority to ADR-0012", () => {
     const leanMvpAdr = readFileSync(
       resolve("docs/adr/0008-native-launch-entitlement-credits-and-ebay-authority.md"),

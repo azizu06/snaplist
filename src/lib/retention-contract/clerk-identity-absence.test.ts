@@ -31,7 +31,7 @@ if (!developmentInstance) {
   console.warn(
     "[clerk-identity-absence.test] No sk_test_ CLERK_RETENTION_PROOF_SECRET_KEY — skipping the " +
       "Clerk deletion-absence proof. The clerk-identity disposition records this " +
-      "proof as defined but not yet observed until this suite runs.",
+      "proof as observed on 2026-07-26; re-observing it is an owner-run step.",
   );
 }
 
