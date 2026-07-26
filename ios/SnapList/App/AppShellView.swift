@@ -513,10 +513,16 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
         homeStore: HomeStore(repository: HomeFixtureRepository(model: HomeFixtures.active)),
         runStore: RunDetailStore(
             service: UnavailableRunService(),
-            bearerToken: { "preview-bearer" }
+            tokenProvider: PreviewBearerTokenProvider()
         ),
         submissionHost: ItemRunSubmissionHost(coordinator: nil),
         configuration: .preview
     )
+}
+
+private struct PreviewBearerTokenProvider: BearerTokenProviding {
+    func bearerToken() async throws -> String {
+        "preview-bearer"
+    }
 }
 #endif

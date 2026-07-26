@@ -59,7 +59,7 @@ enum ItemRunSubmissionHostFactory {
     static func make(
         configuration: LaunchConfiguration,
         apiOrigin: URL?,
-        authentication: any HomeAuthenticationProviding,
+        tokenProvider: any BearerTokenProviding,
         session: URLSession,
         draftStore: any CaptureDraftStoring
     ) -> ItemRunSubmissionHost {
@@ -77,7 +77,7 @@ enum ItemRunSubmissionHostFactory {
                 ),
                 attemptStore: LocalItemRunSubmissionAttemptStore(),
                 draftStore: draftStore,
-                bearerToken: { try await authentication.bearerToken() }
+                tokenProvider: tokenProvider
             )
         )
     }
@@ -89,7 +89,7 @@ final class ItemRunSubmissionCoordinator {
     private let submitter: any ItemRunSubmitting
     private let attemptStore: any ItemRunSubmissionAttemptStoring
     private let draftStore: any CaptureDraftStoring
-    private let bearerToken: @Sendable () async throws -> String
+    private let tokenProvider: any BearerTokenProviding
     private let readData: @Sendable (URL) throws -> Data
     private let newIdempotencyKey: @Sendable () -> UUID
 
@@ -97,7 +97,7 @@ final class ItemRunSubmissionCoordinator {
         submitter: any ItemRunSubmitting,
         attemptStore: any ItemRunSubmissionAttemptStoring,
         draftStore: any CaptureDraftStoring,
-        bearerToken: @escaping @Sendable () async throws -> String,
+        tokenProvider: any BearerTokenProviding,
         readData: @escaping @Sendable (URL) throws -> Data = {
             try Data(contentsOf: $0)
         },
@@ -106,7 +106,7 @@ final class ItemRunSubmissionCoordinator {
         self.submitter = submitter
         self.attemptStore = attemptStore
         self.draftStore = draftStore
-        self.bearerToken = bearerToken
+        self.tokenProvider = tokenProvider
         self.readData = readData
         self.newIdempotencyKey = newIdempotencyKey
     }
@@ -180,7 +180,7 @@ final class ItemRunSubmissionCoordinator {
 
         let token: String
         do {
-            token = try await bearerToken()
+            token = try await tokenProvider.bearerToken()
         } catch {
             return .retained(.authenticationRequired)
         }

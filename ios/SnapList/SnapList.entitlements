@@ -6,6 +6,7 @@
 	<array>
 		<string>applinks:snaplist.dev</string>
 		<string>applinks:www.snaplist.dev</string>
+		<string>webcredentials:witty-walrus-27.clerk.accounts.dev</string>
 	</array>
 </dict>
 </plist>

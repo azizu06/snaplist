@@ -1,0 +1,6 @@
+// Public native runtime configuration. Scheme environment variables may
+// override these values for local testing, but ordinary builds must not depend
+// on an unshared scheme.
+DEVELOPMENT_TEAM = 35YFS8XJRQ
+SNAPLIST_API_ORIGIN = https:/$()/snaplist.dev
+SNAPLIST_CLERK_PUBLISHABLE_KEY = pk_test_d2l0dHktd2FscnVzLTI3LmNsZXJrLmFjY291bnRzLmRldiQ

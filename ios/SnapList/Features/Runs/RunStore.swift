@@ -14,16 +14,16 @@ final class RunDetailStore {
     private(set) var state: RunDetailLoadState = .idle
 
     private let service: any RunServing
-    private let bearerToken: @Sendable () async throws -> String
+    private let tokenProvider: any BearerTokenProviding
     private var requestedRunID: UUID?
     private var requestGeneration = 0
 
     init(
         service: any RunServing,
-        bearerToken: @escaping @Sendable () async throws -> String
+        tokenProvider: any BearerTokenProviding
     ) {
         self.service = service
-        self.bearerToken = bearerToken
+        self.tokenProvider = tokenProvider
     }
 
     func load(runID: UUID) async {
@@ -41,7 +41,7 @@ final class RunDetailStore {
         let generation = requestGeneration
         state = .loading
         do {
-            let token = try await bearerToken()
+            let token = try await tokenProvider.bearerToken()
             let run = try await service.fetchRun(id: runID, bearerToken: token)
             guard generation == requestGeneration, requestedRunID == runID else { return }
             guard run.id == runID else { throw RunAPIError.invalidResponse }
@@ -61,7 +61,7 @@ enum RunDetailStoreFactory {
     static func make(
         configuration: LaunchConfiguration,
         apiOrigin: URL?,
-        authentication: any HomeAuthenticationProviding,
+        tokenProvider: any BearerTokenProviding,
         session: URLSession
     ) -> RunDetailStore {
 #if DEBUG
@@ -84,7 +84,7 @@ enum RunDetailStoreFactory {
             }
             return RunDetailStore(
                 service: service,
-                bearerToken: { "fixture-bearer" }
+                tokenProvider: FixtureRunBearerTokenProvider()
             )
         }
 #endif
@@ -93,12 +93,18 @@ enum RunDetailStoreFactory {
         } ?? UnavailableRunService()
         return RunDetailStore(
             service: service,
-            bearerToken: { try await authentication.bearerToken() }
+            tokenProvider: tokenProvider
         )
     }
 }
 
 #if DEBUG
+private struct FixtureRunBearerTokenProvider: BearerTokenProviding {
+    func bearerToken() async throws -> String {
+        "fixture-bearer"
+    }
+}
+
 private actor FixtureRunService: RunServing {
     private var runs: [DurableRun]
 

@@ -2,9 +2,9 @@ import Foundation
 
 protocol MobileAPIClient {
     func getHealth() async throws -> HealthEnvelope
-    func getSession(bearerToken: String) async throws -> SessionEnvelope
-    func getRevenueCatConfiguration(bearerToken: String) async throws -> RevenueCatConfigurationEnvelope
-    func getAiItemEntitlement(bearerToken: String) async throws -> AiItemEntitlementEnvelope
+    func getSession() async throws -> SessionEnvelope
+    func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope
+    func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope
 }
 
 protocol ContractOnlyFixtureProviding {
@@ -18,11 +18,17 @@ enum MobileAPIClientError: Error, Equatable {
 
 struct URLSessionMobileAPIClient: MobileAPIClient {
     private let baseURL: URL
+    private let tokenProvider: any BearerTokenProviding
     private let session: URLSession
     private let decoder: JSONDecoder
 
-    init(baseURL: URL, session: URLSession = .shared) {
+    init(
+        baseURL: URL,
+        tokenProvider: any BearerTokenProviding,
+        session: URLSession = .shared
+    ) {
         self.baseURL = baseURL
+        self.tokenProvider = tokenProvider
         self.session = session
         self.decoder = JSONDecoder()
     }
@@ -31,22 +37,32 @@ struct URLSessionMobileAPIClient: MobileAPIClient {
         try await send(path: "/v1/health", method: "GET", bearerToken: nil)
     }
 
-    func getSession(bearerToken: String) async throws -> SessionEnvelope {
-        try await send(path: "/v1/session", method: "GET", bearerToken: bearerToken)
+    func getSession() async throws -> SessionEnvelope {
+        try await sendAuthenticated(path: "/v1/session", method: "GET")
     }
 
-    func getRevenueCatConfiguration(bearerToken: String) async throws -> RevenueCatConfigurationEnvelope {
-        try await send(
+    func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope {
+        try await sendAuthenticated(
             path: "/v1/billing/revenuecat/identity",
-            method: "POST",
-            bearerToken: bearerToken
+            method: "POST"
         )
     }
 
-    func getAiItemEntitlement(bearerToken: String) async throws -> AiItemEntitlementEnvelope {
-        try await send(
+    func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope {
+        try await sendAuthenticated(
             path: "/v1/entitlements/ai-items",
-            method: "GET",
+            method: "GET"
+        )
+    }
+
+    private func sendAuthenticated<Response: Decodable>(
+        path: String,
+        method: String
+    ) async throws -> Response {
+        let bearerToken = try await tokenProvider.bearerToken()
+        return try await send(
+            path: path,
+            method: method,
             bearerToken: bearerToken
         )
     }
@@ -83,14 +99,14 @@ struct ZeroNetworkMobileAPIClient: MobileAPIClient, ContractOnlyFixtureProviding
         )
     }
 
-    func getSession(bearerToken: String) async throws -> SessionEnvelope {
+    func getSession() async throws -> SessionEnvelope {
         SessionEnvelope(
             data: .init(userId: "fixture-clerk-user"),
             meta: .init(requestId: "fixture-session")
         )
     }
 
-    func getRevenueCatConfiguration(bearerToken: String) async throws -> RevenueCatConfigurationEnvelope {
+    func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope {
         RevenueCatConfigurationEnvelope(
             data: .init(
                 configured: false,
@@ -106,7 +122,7 @@ struct ZeroNetworkMobileAPIClient: MobileAPIClient, ContractOnlyFixtureProviding
         )
     }
 
-    func getAiItemEntitlement(bearerToken: String) async throws -> AiItemEntitlementEnvelope {
+    func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope {
         AiItemEntitlementEnvelope(
             data: .init(
                 billingSource: .included,
@@ -140,7 +156,11 @@ struct AppDependencies {
     let subscriptionClient: any SubscriptionClient
     let analyticsClient: any AnalyticsClient
 
-    static func make(configuration: LaunchConfiguration) -> AppDependencies {
+    static func make(
+        configuration: LaunchConfiguration,
+        apiOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
+        tokenProvider: any BearerTokenProviding = UnavailableBearerTokenProvider()
+    ) -> AppDependencies {
         let cameraAuthorization: any CameraAuthorizationProviding
         if let fixtureStatus = configuration.cameraAuthorizationFixture {
             cameraAuthorization = FixtureCameraAuthorizationClient(status: fixtureStatus)
@@ -166,12 +186,13 @@ struct AppDependencies {
             )
         }
 
-        let origin = ProcessInfo.processInfo.environment["SNAPLIST_API_ORIGIN"]
-            .flatMap(URL.init(string:))
-            ?? URL(string: "http://127.0.0.1:3001")!
+        let origin = apiOrigin ?? URL(string: "http://127.0.0.1:3001")!
 
         return AppDependencies(
-            mobileAPIClient: URLSessionMobileAPIClient(baseURL: origin),
+            mobileAPIClient: URLSessionMobileAPIClient(
+                baseURL: origin,
+                tokenProvider: tokenProvider
+            ),
             contractFixtureProvider: ZeroNetworkMobileAPIClient(),
             cameraAuthorization: cameraAuthorization,
             onboardingProgressStore: UserDefaultsOnboardingProgressStore(),

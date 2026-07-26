@@ -1,14 +1,135 @@
+import Foundation
 import XCTest
 @testable import SnapList
 
 final class MobileAPIContractTests: XCTestCase {
+    func testBearerTokenProviderKeepsAbsentSessionTyped() async {
+        let provider = ClerkBearerTokenProvider(
+            session: StubClerkSessionToken(token: nil)
+        )
+
+        do {
+            _ = try await provider.bearerToken()
+            XCTFail("An absent Clerk session must not become an empty bearer.")
+        } catch {
+            XCTAssertEqual(
+                error as? BearerTokenProviderError,
+                .sessionAbsent
+            )
+        }
+    }
+
+    func testAuthenticatedMobileRequestGetsBearerFromTokenProvider() async throws {
+        let recorder = MobileAPIRequestRecorder()
+        let session = Self.makeSession { request in
+            recorder.record(request)
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(
+                    #"{"data":{"userId":"user_517"},"meta":{"requestId":"req_517"}}"#.utf8
+                )
+            )
+        }
+        let client = URLSessionMobileAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            tokenProvider: StubBearerTokenProvider(token: "fixed-clerk-token"),
+            session: session
+        )
+
+        _ = try await client.getSession()
+
+        XCTAssertEqual(
+            recorder.request?.value(forHTTPHeaderField: "Authorization"),
+            "Bearer fixed-clerk-token"
+        )
+    }
+
+    func testAuthenticatedMobileRequestStopsBeforeTransportWithoutSession() async {
+        let recorder = MobileAPIRequestRecorder()
+        let session = Self.makeSession { request in
+            recorder.record(request)
+            throw MobileAPIClientError.invalidResponse
+        }
+        let client = URLSessionMobileAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            tokenProvider: StubBearerTokenProvider(token: nil),
+            session: session
+        )
+
+        do {
+            _ = try await client.getSession()
+            XCTFail("A missing session must stop before transport.")
+        } catch {
+            XCTAssertEqual(
+                error as? BearerTokenProviderError,
+                .sessionAbsent
+            )
+        }
+        XCTAssertNil(recorder.request)
+    }
+
+    func testNativeAppConfigurationRejectsUndefinedAPIOrigin() {
+        XCTAssertThrowsError(
+            try NativeAppConfiguration.resolve(
+                environment: [:],
+                apiOriginBundleValue: nil,
+                clerkPublishableKeyBundleValue: "pk_test_fixture",
+                allowsLocalDevelopment: false
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? NativeAppConfigurationError,
+                .missingAPIOrigin
+            )
+        }
+    }
+
+    func testNativeAppConfigurationRejectsUndefinedClerkKey() {
+        XCTAssertThrowsError(
+            try NativeAppConfiguration.resolve(
+                environment: [:],
+                apiOriginBundleValue: "https://snaplist.dev",
+                clerkPublishableKeyBundleValue: nil,
+                allowsLocalDevelopment: false
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? NativeAppConfigurationError,
+                .missingClerkPublishableKey
+            )
+        }
+    }
+
+    func testNativeAppConfigurationResolvesCheckedInBuildValues() throws {
+        let configuration = try NativeAppConfiguration.resolve(
+            environment: [:],
+            apiOriginBundleValue: "https://snaplist.dev",
+            clerkPublishableKeyBundleValue: "pk_test_checked_in_public_key",
+            allowsLocalDevelopment: false
+        )
+
+        XCTAssertEqual(
+            configuration.apiOrigin,
+            URL(string: "https://snaplist.dev")
+        )
+        XCTAssertEqual(
+            configuration.clerkPublishableKey,
+            "pk_test_checked_in_public_key"
+        )
+    }
+
     func testZeroNetworkClientProvidesProofFixtures() async throws {
         let client = ZeroNetworkMobileAPIClient()
 
         let health = try await client.getHealth()
-        let session = try await client.getSession(bearerToken: "fixture-token")
-        let configuration = try await client.getRevenueCatConfiguration(bearerToken: "fixture-token")
-        let entitlement = try await client.getAiItemEntitlement(bearerToken: "fixture-token")
+        let session = try await client.getSession()
+        let configuration = try await client.getRevenueCatConfiguration()
+        let entitlement = try await client.getAiItemEntitlement()
 
         XCTAssertEqual(health.data.apiVersion, "v1")
         XCTAssertEqual(health.data.status, "ok")
@@ -91,4 +212,73 @@ final class MobileAPIContractTests: XCTestCase {
             Set(ContractOnlyOperation.allCases.map(\.rawValue))
         )
     }
+
+    private static func makeSession(
+        handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> URLSession {
+        MobileAPIURLProtocolStub.handler = handler
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MobileAPIURLProtocolStub.self]
+        return URLSession(configuration: configuration)
+    }
+}
+
+private struct StubClerkSessionToken: ClerkSessionTokenProviding {
+    let token: String?
+
+    func sessionToken() async throws -> String? { token }
+}
+
+private struct StubBearerTokenProvider: BearerTokenProviding {
+    let token: String?
+
+    func bearerToken() async throws -> String {
+        guard let token else {
+            throw BearerTokenProviderError.sessionAbsent
+        }
+        return token
+    }
+}
+
+private final class MobileAPIRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRequest: URLRequest?
+
+    var request: URLRequest? {
+        lock.withLock { storedRequest }
+    }
+
+    func record(_ request: URLRequest) {
+        lock.withLock {
+            storedRequest = request
+        }
+    }
+}
+
+private final class MobileAPIURLProtocolStub: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var handler:
+        (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(
+                self,
+                didFailWithError: MobileAPIClientError.invalidResponse
+            )
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

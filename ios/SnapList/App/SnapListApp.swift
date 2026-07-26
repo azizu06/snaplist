@@ -13,31 +13,54 @@ struct SnapListApp: App {
     private let dependencies: AppDependencies
 
     init() {
+        let environment = ProcessInfo.processInfo.environment
+        let nativeConfiguration: NativeAppConfiguration
+        do {
+            nativeConfiguration = try NativeAppConfiguration.resolve(
+                environment: environment,
+                apiOriginBundleValue: Bundle.main.object(
+                    forInfoDictionaryKey: "SnapListAPIOrigin"
+                ) as? String,
+                clerkPublishableKeyBundleValue: Bundle.main.object(
+                    forInfoDictionaryKey: "SnapListClerkPublishableKey"
+                ) as? String,
+                allowsLocalDevelopment: Self.allowsLocalDevelopment
+            )
+        } catch {
+            fatalError("Invalid SnapList native configuration: \(error)")
+        }
         self.init(
             configuration: LaunchConfiguration.parse(
                 arguments: ProcessInfo.processInfo.arguments
             ),
-            homeAuthentication: HomeAuthenticationComposition.make()
+            tokenProvider: ClerkAuthenticationComposition.make(
+                publishableKey: nativeConfiguration.clerkPublishableKey
+            ),
+            apiOrigin: nativeConfiguration.apiOrigin
         )
     }
 
-    init(homeAuthentication: any HomeAuthenticationProviding) {
+    init(tokenProvider: any BearerTokenProviding) {
         self.init(
             configuration: LaunchConfiguration.parse(
                 arguments: ProcessInfo.processInfo.arguments
             ),
-            homeAuthentication: homeAuthentication
+            tokenProvider: tokenProvider
         )
     }
 
     init(
         configuration: LaunchConfiguration,
-        homeAuthentication: any HomeAuthenticationProviding,
-        homeAPIOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
-        homeURLSession: URLSession = .shared
+        tokenProvider: any BearerTokenProviding,
+        apiOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
+        urlSession: URLSession = .shared
     ) {
         self.configuration = configuration
-        self.dependencies = AppDependencies.make(configuration: configuration)
+        self.dependencies = AppDependencies.make(
+            configuration: configuration,
+            apiOrigin: apiOrigin,
+            tokenProvider: tokenProvider
+        )
         _router = State(
             initialValue: AppRouter(
                 initialTab: configuration.fixture.initialTab,
@@ -74,29 +97,37 @@ struct SnapListApp: App {
             initialValue: HomeStore(
                 repository: HomeRepositoryFactory.make(
                     configuration: configuration,
-                    apiOrigin: homeAPIOrigin,
-                    authentication: homeAuthentication,
-                    session: homeURLSession
+                    apiOrigin: apiOrigin,
+                    tokenProvider: tokenProvider,
+                    session: urlSession
                 )
             )
         )
         _runStore = State(
             initialValue: RunDetailStoreFactory.make(
                 configuration: configuration,
-                apiOrigin: homeAPIOrigin,
-                authentication: homeAuthentication,
-                session: homeURLSession
+                apiOrigin: apiOrigin,
+                tokenProvider: tokenProvider,
+                session: urlSession
             )
         )
         _submissionHost = State(
             initialValue: ItemRunSubmissionHostFactory.make(
                 configuration: configuration,
-                apiOrigin: homeAPIOrigin,
-                authentication: homeAuthentication,
-                session: homeURLSession,
+                apiOrigin: apiOrigin,
+                tokenProvider: tokenProvider,
+                session: urlSession,
                 draftStore: dependencies.captureDraftStore
             )
         )
+    }
+
+    private static var allowsLocalDevelopment: Bool {
+#if DEBUG
+        true
+#else
+        false
+#endif
     }
 
     var body: some Scene {

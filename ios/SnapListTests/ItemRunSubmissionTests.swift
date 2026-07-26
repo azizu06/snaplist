@@ -187,6 +187,28 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Ambiguous outcome and exact retry
 
+    func testAbsentSessionStopsBeforeRunSubmissionTransport() async {
+        let intake = SubmissionIntakeFixture(photoCount: 1)
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let firstKey = Self.firstKey
+        let coordinator = ItemRunSubmissionCoordinator(
+            submitter: submitter,
+            attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+            draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+            tokenProvider: TestBearerTokenProvider {
+                throw BearerTokenProviderError.sessionAbsent
+            },
+            readData: intake.read,
+            newIdempotencyKey: { firstKey }
+        )
+
+        let outcome = await coordinator.submit(photos: intake.photos)
+
+        XCTAssertEqual(outcome, .retained(.authenticationRequired))
+        let payloads = await submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+    }
+
     func testAmbiguousResponseRetriesTheIdenticalBytesUnderTheSameKey() async {
         let intake = SubmissionIntakeFixture(photoCount: 3)
         let attemptStore = InMemoryItemRunSubmissionAttemptStore()
@@ -204,7 +226,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             attemptStore: attemptStore,
             submitter: submitter,
             keys: [Self.firstKey, Self.secondKey],
-            bearerToken: { tokens.next() }
+            tokenProvider: TestBearerTokenProvider { tokens.next() }
         )
 
         let first = await coordinator.submit(photos: intake.photos)
@@ -242,7 +264,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             submitter: submitter,
             attemptStore: attemptStore,
             draftStore: RecordingCaptureDraftStore(photos: submitted.photos),
-            bearerToken: { "clerk-session-token" },
+            tokenProvider: TestBearerTokenProvider { "clerk-session-token" },
             readData: submitted.read,
             newIdempotencyKey: { keys.next() }
         )
@@ -250,7 +272,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             submitter: submitter,
             attemptStore: attemptStore,
             draftStore: RecordingCaptureDraftStore(photos: replaced.photos),
-            bearerToken: { "clerk-session-token" },
+            tokenProvider: TestBearerTokenProvider { "clerk-session-token" },
             readData: replaced.read,
             newIdempotencyKey: { keys.next() }
         )
@@ -856,7 +878,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             submitter: submitter,
             attemptStore: UnreadableItemRunSubmissionAttemptStore(),
             draftStore: draftStore,
-            bearerToken: { "clerk-session-token" },
+            tokenProvider: TestBearerTokenProvider { "clerk-session-token" },
             readData: intake.read,
             newIdempotencyKey: { Self.firstKey }
         )
@@ -1065,7 +1087,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         draftStore: RecordingCaptureDraftStore? = nil,
         keys: [UUID],
         readData: (@Sendable (URL) throws -> Data)? = nil,
-        bearerToken: @escaping @Sendable () async throws -> String = {
+        tokenProvider: any BearerTokenProviding = TestBearerTokenProvider {
             "clerk-session-token"
         }
     ) -> ItemRunSubmissionCoordinator {
@@ -1077,7 +1099,7 @@ final class ItemRunSubmissionTests: XCTestCase {
                 draftStore: draftStore ?? RecordingCaptureDraftStore(
                     photos: intake.photos
                 ),
-                bearerToken: bearerToken,
+                tokenProvider: tokenProvider,
                 readData: readData,
                 newIdempotencyKey: { keySequence.next() }
             )
@@ -1089,7 +1111,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             draftStore: draftStore ?? RecordingCaptureDraftStore(
                 photos: intake.photos
             ),
-            bearerToken: bearerToken,
+            tokenProvider: tokenProvider,
             readData: intake.read,
             newIdempotencyKey: { keySequence.next() }
         )
@@ -1097,6 +1119,18 @@ final class ItemRunSubmissionTests: XCTestCase {
 }
 
 // MARK: - Fixtures
+
+private struct TestBearerTokenProvider: BearerTokenProviding {
+    let resolve: @Sendable () async throws -> String
+
+    init(resolve: @escaping @Sendable () async throws -> String) {
+        self.resolve = resolve
+    }
+
+    func bearerToken() async throws -> String {
+        try await resolve()
+    }
+}
 
 /// Ordered staged photos backed by in-memory JPEG bytes, so the coordinator's file
 /// reads stay deterministic without touching the durable draft directory.
