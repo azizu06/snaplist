@@ -13,8 +13,11 @@ type EnvLike = Record<string, string | undefined>;
  * an edit across the ~9 model call sites.
  *
  * Why two providers: dev/build runs on **Gemini** (generous free tier, protects
- * the small OpenAI budget); the **showcase** runs on **OpenAI**. Default is
- * Gemini in dev and OpenAI in production, overridable by `LLM_PROVIDER`.
+ * the small OpenAI budget); the **showcase** runs on **OpenAI**. `LLM_PROVIDER`
+ * selects one. It may be omitted ONLY on a local development machine, where it
+ * means Gemini; everywhere else omitting it is a hard failure, because the free
+ * tier's terms permit product-improvement use and human review of submitted
+ * content and seller photos resolve through here (#501).
  *
  * Scope: this covers the GENERATION roles (`generateObject`/`generateText`).
  * EMBEDDINGS are deliberately excluded from the provider switch — the pgvector
@@ -93,22 +96,105 @@ const MODEL_DEFAULTS: Record<LlmProvider, Record<LlmRole, string>> = {
   },
 };
 
+/** Accepted `LLM_PROVIDER` spellings (`gemini` is the friendly alias for `google`). */
+const PROVIDER_ALIASES: Record<string, LlmProvider | undefined> = {
+  openai: "openai",
+  google: "google",
+  gemini: "google",
+};
+
+/**
+ * Env vars set by the runtime of a hosted platform, never by a developer's shell.
+ * Presence of ANY of them means this process is deployed, so an unset
+ * `LLM_PROVIDER` must fail rather than default (#501).
+ *
+ * `CI` is deliberately NOT here: continuous integration is not a deploy, serves
+ * no seller, and gating on it would make the offline suite behave differently in
+ * CI than on the machine that wrote it.
+ */
+const DEPLOYMENT_MARKERS = [
+  "VERCEL",
+  "VERCEL_ENV",
+  "RENDER",
+  "RAILWAY_ENVIRONMENT",
+  "FLY_APP_NAME",
+  "AWS_LAMBDA_FUNCTION_NAME",
+  "AWS_EXECUTION_ENV",
+  "KUBERNETES_SERVICE_HOST",
+  "NETLIFY",
+  "DYNO",
+] as const;
+
+/** NODE_ENV values a developer's own machine runs under (`next dev`, vitest, a bare `tsx` script). */
+const LOCAL_NODE_ENVS = new Set(["", "development", "test"]);
+
+/**
+ * The provider local development uses when `LLM_PROVIDER` is unset. Named here
+ * rather than derived from NODE_ENV: the old code reached Gemini by falling
+ * through the same branch a deploy would fall through, which is exactly how a
+ * production deploy could have landed on it (#501).
+ */
+const LOCAL_DEVELOPMENT_PROVIDER: LlmProvider = "google";
+
+/**
+ * Is this process a developer's own machine — the ONE place an unset
+ * `LLM_PROVIDER` may resolve to a default?
+ *
+ * Both conditions must hold, so it cannot be satisfied by forgetting something:
+ * NODE_ENV is absent or a local value (`staging`/`preview`/`production` all
+ * fail), AND no hosted platform's runtime marker is present.
+ */
+export function isLocalDevelopment(env: EnvLike = process.env): boolean {
+  if (!LOCAL_NODE_ENVS.has(env.NODE_ENV?.trim() ?? "")) return false;
+  return !DEPLOYMENT_MARKERS.some((marker) => (env[marker]?.trim() ?? "") !== "");
+}
+
+/**
+ * Why this env cannot select a provider, or `undefined` if it can. Pure and
+ * non-throwing so the env schema can report it as a validation issue alongside
+ * every other bad variable instead of blowing up mid-parse.
+ */
+export function llmProviderConfigError(env: EnvLike = process.env): string | undefined {
+  const raw = env.LLM_PROVIDER?.trim();
+  if (raw) {
+    if (PROVIDER_ALIASES[raw.toLowerCase()]) return undefined;
+    return (
+      `LLM_PROVIDER is set to "${raw}", which is not a provider. ` +
+      `Set it to one of: ${Object.keys(PROVIDER_ALIASES).join(", ")}.`
+    );
+  }
+  if (isLocalDevelopment(env)) return undefined;
+  return (
+    "LLM_PROVIDER is not set. Outside local development the provider must be chosen " +
+    "explicitly (openai, google, or gemini). It must never be reached by fallthrough: " +
+    "Google's unpaid tier permits use of submitted content to improve Google products " +
+    "and permits human review of it, and seller photos resolve through this registry."
+  );
+}
+
 /**
  * Resolve the active provider. Explicit `LLM_PROVIDER` (accepting the friendly
- * alias `gemini` for `google`) always wins. Otherwise the NODE_ENV default —
- * Gemini in dev, OpenAI in production ("Gemini dev / OpenAI showcase" with zero
- * config) — but it is KEY-AWARE: if the preferred provider has no key while the
- * other does, fall back to the one that's actually usable. So a single-key env
- * (e.g. an existing dev box with only OPENAI_API_KEY) selects the provider it can
- * run, instead of defaulting to a keyless one (#55 review). With neither key set
- * it returns the preferred default (the env guard then rejects the config).
+ * alias `gemini` for `google`) always wins.
+ *
+ * With it unset, resolution is allowed ONLY on a local development machine, and
+ * there it selects Gemini by name (generous free tier, protects the small OpenAI
+ * budget). Anywhere else this THROWS — a deploy that omits the variable fails
+ * loudly instead of silently routing seller photos to a free tier whose terms
+ * permit product-improvement use and human review (#501).
+ *
+ * The local path stays KEY-AWARE: if Gemini has no key while OpenAI does, use the
+ * provider that can actually run, instead of a keyless one (#55 review). With
+ * neither key set it returns Gemini and the env guard rejects the config.
  */
 export function resolveProvider(env: EnvLike = process.env): LlmProvider {
-  const explicit = env.LLM_PROVIDER?.trim().toLowerCase();
-  if (explicit === "openai") return "openai";
-  if (explicit === "google" || explicit === "gemini") return "google";
-  const preferred: LlmProvider = env.NODE_ENV === "production" ? "openai" : "google";
-  const fallback: LlmProvider = preferred === "openai" ? "google" : "openai";
+  const error = llmProviderConfigError(env);
+  if (error) throw new Error(error);
+
+  const explicit = PROVIDER_ALIASES[env.LLM_PROVIDER?.trim().toLowerCase() ?? ""];
+  if (explicit) return explicit;
+
+  const preferred = LOCAL_DEVELOPMENT_PROVIDER;
+  const fallback = oppositeProvider(preferred);
   if (resolveApiKey(preferred, env)) return preferred;
   if (resolveApiKey(fallback, env)) return fallback;
   return preferred;
@@ -140,7 +226,7 @@ export function resolveApiKey(
 }
 
 export interface ResolveLanguageModelOptions {
-  /** Force a provider (else `LLM_PROVIDER` / NODE_ENV default). */
+  /** Force a provider (else `LLM_PROVIDER`, which is required outside local dev). */
   provider?: LlmProvider;
   /** Explicit model id (else role env var / provider default). */
   modelId?: string;
