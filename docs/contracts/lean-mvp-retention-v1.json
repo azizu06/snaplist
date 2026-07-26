@@ -59,9 +59,9 @@
         "treatment": "provider-owned",
         "owner": "openai-api-abuse-monitoring",
         "deletionTriggers": ["openai-abuse-monitoring-retention-expires"],
-        "maximumRetention": "up to 30 days in OpenAI abuse-monitoring logs under the default API data policy, unless OpenAI is required or reasonably needs to keep it longer; SnapList cannot shorten this and does not report it as deleted",
+        "maximumRetention": "None for abuse monitoring and None for application state, as OpenAI publishes for /v1/audio/transcriptions; bounded by the general default-policy ceiling of up to 30 days if any copy exists despite that. SnapList cannot shorten either and does not report the provider copy as deleted",
         "executor": "openai-platform-under-its-default-api-data-policy-no-snaplist-executor",
-        "completionProof": "the cited OpenAI default API data policy is the retention control in force, and no Zero Data Retention approval is recorded; a shorter ceiling may only be claimed once an OpenAI ZDR approval receipt exists",
+        "completionProof": "the transcription request is sent to /v1/audio/transcriptions, whose published abuse-monitoring and application-state retention are both None, under the default API data policy with no Zero Data Retention approval recorded. A retention claim below the published endpoint values may only be made once an OpenAI ZDR approval receipt exists",
         "citations": [
           {
             "url": "https://developers.openai.com/api/docs/guides/your-data",
@@ -71,18 +71,24 @@
           },
           {
             "url": "https://developers.openai.com/api/docs/guides/your-data",
-            "clause": "Abuse monitoring retention",
-            "quote": "retained for up to 30 days, unless longer retention is required by law, or is reasonably necessary to protect our services",
+            "clause": "Storage requirements and retention controls per endpoint, /v1/audio/transcriptions row",
+            "quote": "/v1/audio/transcriptions | Data used for training: No | Abuse monitoring retention: None | Application state retention: None | Zero Data Retention eligible: Yes",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://developers.openai.com/api/docs/guides/your-data",
+            "clause": "Abuse monitoring retention, general default",
+            "quote": "By default, abuse monitoring logs are generated for all API feature usage and retained for up to 30 days, unless longer retention is required by law, or is reasonably necessary to protect our services or any third party from harm.",
             "retrieved": "2026-07-25"
           },
           {
             "url": "https://developers.openai.com/api/docs/guides/your-data",
             "clause": "Zero data retention",
-            "quote": "Currently, these controls are subject to prior approval by OpenAI.",
+            "quote": "Currently, these controls are subject to prior approval by OpenAI and acceptance of additional requirements.",
             "retrieved": "2026-07-25"
           }
         ],
-        "ownerDecision": "Owner decision, not provider evidence: OpenAI is the pinned transcription provider and the default API data policy is the selected retention control. Zero Data Retention is not requested and not active, so it must not be recorded as the ceiling. Activating ZDR needs an OpenAI org-level approval and is an owner action outside this contract."
+        "ownerDecision": "Owner decision, not provider evidence: OpenAI is the pinned transcription provider and the default API data policy is the selected retention control. Zero Data Retention is not requested and not active, so it must not be recorded as the ceiling even though this endpoint is listed as eligible. Activating ZDR needs an OpenAI org-level approval and is an owner action outside this contract. The endpoint table's None is OpenAI's published figure, not something SnapList has observed, so the row keeps provider-owned treatment and does not promise the seller that no copy exists. This row is pinned to one adapter on purpose: ADR-0011 keeps seller voice context provider-neutral and docs/contracts/voice-context-v1.json does not freeze the provider or model, so activating a non-OpenAI transcription adapter reopens this row and its retention must be re-cited before that adapter carries seller audio."
       }]
     },
     {
@@ -271,7 +277,7 @@
         "deletionTriggers": ["account-erasure"],
         "maximumRetention": "for the account lifetime; account erasure deletes the Clerk user and verifies its absence in the same operation. Clerk's public documentation states no post-deletion backup or archive window, so SnapList claims none",
         "executor": "snaplist-account-erasure-capability-calling-clerk-users-delete-user",
-        "completionProof": "after clerkClient.users.deleteUser(userId), reading that user back through the Clerk Backend API reports it absent. A user.deleted webhook is an acknowledgement that the request was accepted and is never accepted as proof on its own. Verified by src/lib/retention-contract/clerk-identity-absence.test.ts",
+        "completionProof": "after clerkClient.users.deleteUser(userId), reading that user back through the Clerk Backend API reports it absent with status 404. A user.deleted webhook is an acknowledgement that the request was accepted and is never accepted as proof on its own. The executable form of this proof is src/lib/retention-contract/clerk-identity-absence.test.ts. NOT YET OBSERVED: that test requires a Clerk development instance secret, which is an owner-held credential, so it has not run against a live instance and this row records a defined proof rather than a performed one",
         "citations": [
           {
             "url": "https://clerk.com/docs/reference/backend/user/delete-user",
@@ -286,7 +292,7 @@
             "retrieved": "2026-07-25"
           }
         ],
-        "ownerDecision": "Owner decision, not provider evidence: the verified-absence branch is selected instead of waiting on Clerk to describe its internal backup retention. Clerk's published retention clause is duration-by-purpose and states no numeric window, so a cited maximum is not available from the provider. Observed absence through Clerk's own API is what SnapList proves and all it claims."
+        "ownerDecision": "Owner decision, not provider evidence: the verified-absence branch is selected instead of waiting on Clerk to describe its internal backup retention. Clerk's published retention clause is duration-by-purpose and states no numeric window, so a cited maximum is not available from the provider. Observed absence through Clerk's own API is what SnapList proves and all it claims. One step remains for the owner: run the absence test once against a Clerk development instance with an sk_test_ secret key and record the date and result here. Until then this row's proof is defined and executable but unobserved, and the same accepted-versus-verified distinction that blocked this row applies to the claim that the proof works."
       }]
     },
     {
@@ -296,7 +302,7 @@
         "treatment": "delete",
         "owner": "seller-snaplist-tenant",
         "deletionTriggers": ["account-erasure-after-entitlement-reconciliation"],
-        "maximumRetention": "for the account lifetime, then deleted at account erasure once every open credit reservation is settled or restored. No multi-year retention applies, because SnapList holds no per-user tax record: Apple is the merchant of record, charges the customer including tax, and keeps the payout and financial reports that are the tax record",
+        "maximumRetention": "for the account lifetime, then deleted at account erasure once every open credit reservation is settled or restored. No multi-year retention applies, because SnapList holds no per-user tax record; see ownerDecision for why",
         "executor": "snaplist-account-erasure-capability-and-revenuecat-delete-customer-api",
         "completionProof": "the tenant's mapping rows are absent: public.revenuecat_customer_bindings, public.ai_item_allowance_periods, private.revenuecat_webhook_events, and private.storekit_ai_item_period_events; and reading the RevenueCat customer back after deletion reports it absent. Apple's payout and financial reports in App Store Connect and RevenueCat's own retained records are provider-owned and are never reported deleted by SnapList",
         "citations": [
@@ -308,20 +314,26 @@
           },
           {
             "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
-            "clause": "PAYMENTS, TAXES, AND REFUNDS, merchant of record",
-            "quote": "If you are a customer of Apple Distribution International Ltd. or Apple Services Pte. Ltd., then that entity is the merchant of record for some Content you acquire from Apple Books, Apple Podcasts, or App Store.",
+            "clause": "Apps and In-App Purchases, merchant of record; conditional on the contracting Apple entity",
+            "quote": "However, if you are a customer of Apple Distribution International Ltd. or Apple Services Pte. Ltd., then the merchant of record is that entity, which means that you acquire the App license from Apple Distribution International Ltd. or Apple Services Pte. Ltd., as applicable, but the App is licensed by the App Provider.",
+            "retrieved": "2026-07-25"
+          },
+          {
+            "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
+            "clause": "PAYMENTS, TAXES, AND REFUNDS, counterparty to the transaction",
+            "quote": "Each Transaction is an electronic contract between you and Apple, and/or you and the entity providing the Content on our Services.",
             "retrieved": "2026-07-25"
           },
           {
             "url": "https://developer.apple.com/help/app-store-connect/getting-paid/overview-of-receiving-payments/",
-            "clause": "Overview of receiving payments",
+            "clause": "Overview of receiving payments; Apple, not the developer, collects payment from the customer",
             "quote": "Reports only include paid transactions where we are able to collect payment from the customer (view Schedule 2 of your Apple Developer Agreement).",
             "retrieved": "2026-07-25"
           },
           {
             "url": "https://developer.apple.com/help/app-store-connect/making-payments-to-apple/understanding-taxes/",
             "clause": "Understanding taxes, alternative payment processing",
-            "quote": "For In-App Purchases made using alternative payment processing or linking out to a webpage, you're responsible for taxes, including (but not limited to): Determining if a transaction is taxable; Charging and collecting the taxes at the applicable rate; Remitting the taxes to the appropriate taxing authority.",
+            "quote": "For In-App Purchases made using alternative payment processing or linking out to a webpage, you're responsible for taxes, including (but not limited to):",
             "retrieved": "2026-07-25"
           },
           {
@@ -349,7 +361,7 @@
             "retrieved": "2026-07-25"
           }
         ],
-        "ownerDecision": "Owner decision, not provider evidence, on three points. First, SnapList's Apple and RevenueCat references are an entitlement mapping, not a tax record: the stored rows carry a Clerk user id, a RevenueCat app user id, an Apple original transaction id, and allowance state, and carry no customer identity, price, or tax amount. Apple never discloses the customer to the developer; the only per-customer link is a UUID the developer itself creates. So the row is deleted at account erasure rather than retained for a fixed number of years, and the 7-year fallback is deliberately not used. This conclusion has not been reviewed by a tax professional. Second, one RevenueCat customer is the original_app_user_id plus its aliases array, so deleting the customer deletes the whole alias set; that follows from the two cited clauses read together rather than from a single sentence stating it. Third, RevenueCat's public documentation does not state that deletion is synchronous, so completion requires reading the customer back rather than trusting the delete response. If SnapList ever adopts alternative payment processing or external purchase links, Apple stops collecting the tax and this row must be reopened."
+        "ownerDecision": "Owner decision, not provider evidence, on three points. Apple charges the customer for the transaction including any applicable taxes, never discloses the customer to the developer, and keeps the payout and financial reports in App Store Connect that are the tax record. For customers of Apple Distribution International Ltd. or Apple Services Pte. Ltd. the cited terms name that entity the merchant of record; elsewhere the terms make the transaction a contract with Apple. The conclusion rests on who charges the customer and who holds the records, which holds either way. First, SnapList's Apple and RevenueCat references are an entitlement mapping, not a tax record: the stored rows carry a Clerk user id, a RevenueCat app user id, an Apple original transaction id, and allowance state, and carry no customer identity, price, or tax amount. Apple never discloses the customer to the developer; the only per-customer link is a UUID the developer itself creates. So the row is deleted at account erasure rather than retained for a fixed number of years, and the 7-year fallback is deliberately not used. This conclusion has not been reviewed by a tax professional. Second, one RevenueCat customer is the original_app_user_id plus its aliases array, so deleting the customer deletes the whole alias set; that follows from the two cited clauses read together rather than from a single sentence stating it. Third, RevenueCat's public documentation does not state that deletion is synchronous, so completion requires reading the customer back rather than trusting the delete response. If SnapList ever adopts alternative payment processing or external purchase links, Apple stops collecting the tax and this row must be reopened."
       }]
     }
   ],

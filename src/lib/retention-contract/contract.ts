@@ -150,7 +150,18 @@ const releaseRetentionContractSchema = z
       const disposition = contract.data.find(
         (datum) => datum.id === id,
       )?.dispositions[0];
-      if (!disposition || disposition.treatment === "blocked") continue;
+      // Absence must fail rather than skip: deleting the row would otherwise be
+      // a way to shed the citation requirement without tripping anything.
+      if (!disposition) {
+        context.addIssue({
+          code: "custom",
+          message:
+            "A provider obligation cannot be dropped from the contract.",
+          path: ["data", id],
+        });
+        continue;
+      }
+      if (disposition.treatment === "blocked") continue;
       if (!disposition.citations) {
         context.addIssue({
           code: "custom",

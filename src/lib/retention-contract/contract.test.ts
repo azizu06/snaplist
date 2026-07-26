@@ -226,6 +226,15 @@ describe("lean-MVP release retention contract", () => {
     }
   });
 
+  it("rejects a contract that drops a provider obligation entirely", () => {
+    const invalid = structuredClone(contract);
+    invalid.data = invalid.data.filter(({ id }) => id !== "clerk-identity");
+
+    expect(() => parseReleaseRetentionContract(invalid)).toThrow(
+      /provider obligation cannot be dropped/i,
+    );
+  });
+
   it("rejects a resolved provider obligation with no cited authority", () => {
     const invalid = structuredClone(contract);
     const clerk = invalid.data.find(({ id }) => id === "clerk-identity");

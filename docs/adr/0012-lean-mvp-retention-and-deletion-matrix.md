@@ -75,15 +75,22 @@ reviewer can revise it without mistaking it for a vetted fact.
 
 | Obligation | Resolution |
 | --- | --- |
-| Hosted transcription retention | `provider-owned`. OpenAI is the pinned provider; the default API data policy is the selected control, so a provider-side copy may sit in abuse-monitoring logs for up to 30 days. Zero Data Retention needs OpenAI's prior approval, is not active, and must not be recorded as the ceiling until an approval receipt exists. |
+| Hosted transcription retention | `provider-owned`. OpenAI is the pinned provider and the default API data policy is the selected control. OpenAI publishes `/v1/audio/transcriptions` as retaining nothing, None for both abuse monitoring and application state; the general 30-day default bounds endpoints that do retain. That None is OpenAI's published figure rather than something SnapList observed, so the treatment stays `provider-owned`. Zero Data Retention needs OpenAI's prior approval, is not active, and must not be recorded as the ceiling until an approval receipt exists. |
 | eBay publish receipts | `delete`. The stored `listings.ebay_offer_id`, `listings.ebay_listing_id`, and `listings.ebay_status` are treated as Personal Information under the API License Agreement Section 1 definition and deleted per Section 9, and within ten days of termination per Section 16.2. The live eBay listing is an eBay-owned record and is never reported deleted by SnapList. |
-| Clerk identity | `delete`, proved by verified absence. Account erasure calls `clerkClient.users.deleteUser(userId)` and reads the user back; the API reporting it absent is the completion proof. The `user.deleted` webhook acknowledges the request and is not accepted as proof. Clerk publishes no numeric post-deletion window, so SnapList claims none. |
-| Apple/RevenueCat references | `delete` at account erasure, after credit reservations reconcile. SnapList holds no per-user tax record: Apple is the merchant of record, charges the customer including tax, and keeps the payout and financial reports. The stored rows are an entitlement mapping with no customer identity, price, or tax amount, so no multi-year retention applies. Deleting a RevenueCat customer removes its whole alias set; completion is proved by reading the customer back, because RevenueCat does not document deletion as synchronous. |
+| Clerk identity | `delete`, proved by verified absence. Account erasure calls `clerkClient.users.deleteUser(userId)` and reads the user back; the API reporting it absent with status 404 is the completion proof. The `user.deleted` webhook acknowledges the request and is not accepted as proof. Clerk publishes no numeric post-deletion window, so SnapList claims none. The proof is defined and executable in `src/lib/retention-contract/clerk-identity-absence.test.ts` but has not yet been observed: running it needs an owner-held Clerk development-instance key. |
+| Apple/RevenueCat references | `delete` at account erasure, after credit reservations reconcile. SnapList holds no per-user tax record: Apple charges the customer including any applicable taxes, never discloses the customer to the developer, and keeps the payout and financial reports. The cited terms name Apple Distribution International Ltd. or Apple Services Pte. Ltd. the merchant of record for their customers and make the transaction a contract with Apple otherwise, and the conclusion holds either way. The stored rows are an entitlement mapping with no customer identity, price, or tax amount, so no multi-year retention applies. Deleting a RevenueCat customer removes its whole alias set; completion is proved by reading the customer back, because RevenueCat does not document deletion as synchronous. |
 
-Two of these stay conditional. If SnapList adopts alternative payment processing or external purchase
-links, Apple stops collecting the tax and the Apple/RevenueCat row reopens. If OpenAI grants Zero
-Data Retention, the hosted-transcription ceiling shortens. Neither conclusion has been reviewed by a
-tax professional or by provider support, which is recorded in the rows rather than implied here.
+Three of these stay conditional. If SnapList adopts alternative payment processing or external
+purchase links, Apple stops collecting the tax and the Apple/RevenueCat row reopens. If OpenAI grants
+Zero Data Retention, the hosted-transcription ceiling shortens. If a non-OpenAI transcription adapter
+is activated — which ADR-0011 and `docs/contracts/voice-context-v1.json` deliberately leave open — the
+hosted-transcription row reopens and its retention must be re-cited before that adapter carries seller
+audio. No conclusion here has been reviewed by a tax professional or by provider support, which is
+recorded in the rows rather than implied here.
+
+One completion proof is defined but not yet performed. The Clerk absence test needs an owner-held
+development-instance key, so the `clerk-identity` row records an unobserved proof and says so. Account
+erasure cannot claim completion on that row until the test has actually run.
 
 ### 5. Keep execution separately issue-owned
 
