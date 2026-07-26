@@ -48,11 +48,15 @@ describe("runSoldCompsSmoke", () => {
   });
 
   it("reports sold-comps success, selected tier, and source URLs from an offline fixture", async () => {
+    let observedSignal: AbortSignal | undefined;
     const report = await runSoldCompsSmoke({
       mode: "live",
       signal: SIGNAL,
       env: {},
-      fetchPage: async () => FIXTURE_HTML,
+      fetchPage: async (_url, signal) => {
+        observedSignal = signal;
+        return FIXTURE_HTML;
+      },
     });
 
     expect(report.status).toBe("success");
@@ -63,6 +67,7 @@ describe("runSoldCompsSmoke", () => {
     );
     expect(report.fallbackReason).toBeUndefined();
     expect(report.externalRequests).toBe(1);
+    expect(observedSignal).toBeDefined();
   });
 
   it("uses injected enabled configuration when the ambient environment disables sold comps", async () => {

@@ -114,14 +114,14 @@ export async function runSoldCompsSmoke(
       proxyTemplate: egress.mode === "proxy" ? egress.template : "",
     });
 
-  const observedFetch: FetchPage = async (url) => {
+  const observedFetch: FetchPage = async (url, signal) => {
     if (mode === "dry-run") {
       requestBlocked = true;
       throw new Error("dry-run-no-network");
     }
     externalRequests += 1;
     try {
-      return await realFetch(url);
+      return await realFetch(url, signal);
     } catch {
       // Never pass an upstream error message into provider logs: proxy request
       // URLs can carry credentials. The report exposes only a bounded reason.
