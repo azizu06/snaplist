@@ -56,9 +56,11 @@ attribute only** — `item` still means the seller's physical object, and RUN-08
 states are untouched. New or revised copy naming this allowance uses `AI listing`.
 
 The superseded noun still ships in the working tree at `ONB-06`
-(`OnboardingDomain.swift` / `OnboardingFlowView.swift`), `HomeViews.swift`, and
-`src/lib/scout-guidance/catalog.v1.json`. Recording the supersession does not reconcile them;
-seller-facing copy changes are owned by the active design round and its implementing issue.
+(`OnboardingDomain.swift` / `OnboardingFlowView.swift`), `HomeViews.swift`,
+`src/lib/scout-guidance/catalog.v1.json`, its `approved-copy-provenance.v1.json` record, and a
+`SnapListUITests` assertion. The JSON lists all five and states what the list excludes. Recording
+the supersession does not reconcile them; seller-facing copy changes are owned by the active design
+round and its implementing issue, and the UI test is expected to fail when that happens.
 
 **Pro Gate free-publish claim.** `snaplist-pro-gate-design-package-v1-2026-07-25`'s README states
 the first item is free end to end including its first eBay publish. That is **product intent, not

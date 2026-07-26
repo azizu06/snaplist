@@ -158,6 +158,8 @@
       "live_occurrences_of_superseded_noun": {
         "note": "The superseded noun is not confined to sealed packages. It still ships in the working tree at the surfaces below. This record does not change them: seller-facing copy is owned by the active design round and its implementing issue, not by a documentation-authority change. Recorded so the supersession cannot be mistaken for already-reconciled product copy.",
         "reconciled_by_this_record": false,
+        "surfaces_are_exhaustive_as_of": "2026-07-26",
+        "surfaces_exclude": "sealed design-contract archives under ios/DesignContracts, and this inventory and its own validator",
         "surfaces": [
           {
             "state_id": "ONB-06",
@@ -179,6 +181,20 @@
             "keys": ["empty.home.body", "empty.home.accessibilityLabel"],
             "string": "Your first item is on us — no account needed to try it.",
             "has_retired_state_record": true
+          },
+          {
+            "state_id": "HOME-02",
+            "path": "src/lib/scout-guidance/approved-copy-provenance.v1.json",
+            "string": "Your first item is on us — no account needed to try it.",
+            "has_retired_state_record": true,
+            "note": "Provenance record for the catalog entry above, not a separate render site."
+          },
+          {
+            "state_id": "ONB-06",
+            "path": "ios/SnapListUITests/SnapListUITests.swift",
+            "string": "Your first item is on us",
+            "has_retired_state_record": false,
+            "note": "Test assertion pinning the current string. It fails when the copy is reconciled, which is the intended signal, not a defect."
           }
         ]
       },
