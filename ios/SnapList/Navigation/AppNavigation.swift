@@ -146,10 +146,6 @@ enum RunDeepLink: Equatable, Sendable {
         switch (components.scheme?.lowercased(), components.host?.lowercased()) {
         case ("snaplist", "runs") where path.count == 1:
             rawID = path.first
-        case ("https", let host)
-            where ["snaplist.dev", "www.snaplist.dev"].contains(host) && path.count == 2:
-            guard path.first == "runs" else { return nil }
-            rawID = path.last
         default:
             return nil
         }
