@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-07-21",
-  "purpose": "Machine-auditable supersession boundary between the retired native V1 package and the lean Scan-to-Trophy-Wall MVP.",
+  "updated_at": "2026-07-26",
+  "purpose": "Machine-auditable supersession boundary between the retired native V1 package and the lean Scan-to-Trophy-Wall MVP, plus the attribute-scoped copy supersessions and package claim overrides that govern sealed packages without modifying them.",
   "authoritative_product_contracts": [
     "PRD.md",
     "docs/adr/0008-native-launch-entitlement-credits-and-ebay-authority.md",
@@ -123,10 +123,83 @@
     }
   ],
   "implementation_states": [],
+  "seller_facing_copy_supersessions": [
+    {
+      "attribute": "seller_facing_noun_for_included_first_run_allowance",
+      "allowance_object": {
+        "table": "public.ai_item_allowance_periods",
+        "period_key": "included-first-run"
+      },
+      "governed_by": {
+        "package": "snaplist-pro-gate-design-package-v1-2026-07-25",
+        "sha256": "baafa88bb48cdd4b2f0a485b72c55724376986dc0d39f9091b0b37456c2d1670",
+        "state_id": "PAY-01",
+        "noun": "AI listing",
+        "string": "You made one AI listing for free."
+      },
+      "supersedes": [
+        {
+          "package": "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+          "sha256": "93bb1571b2926c4c79744a8fe28905f972a7fda506a81765376b704dbb964884",
+          "state_id": "RUN-08",
+          "noun": "item",
+          "strings": [
+            "Your first item is on us",
+            "Item 1 will finish free. The rest stay staged and safe — you choose whether to continue them on SnapList Pro. Nothing starts or is discarded without you."
+          ]
+        }
+      ],
+      "scope": "attribute_only",
+      "reopens_superseded_package_states": false,
+      "sealed_packages_modified": false,
+      "rule": "New or revised seller-facing copy naming this allowance uses `AI listing`. `item` remains the seller's physical object. Every other RUN-08 attribute stays approved and in force; only the allowance noun is superseded, and the sealed packages stay byte-identical.",
+      "third_noun_survey": {
+        "performed_on": "2026-07-26",
+        "scope": "every design package under the design-review outputs directory, all copy catalogs and state inventories",
+        "distinct_seller_facing_nouns_found": ["AI listing", "item"],
+        "third_noun_found": false,
+        "notes": [
+          "No other currently approved lean-MVP family names this allowance at all. Scan Camera v2, Photo Review v1.2, Voice Note + Start Listing v2, Trophy Wall Processing v2, Listing Review v2, and Assisted Export v1 contain no allowance-naming seller-facing string.",
+          "`AI item` appears only inside families ADR-0008 already retired (bulk_haul_capture, barcode_only_capture, garment_measurements) and denotes the internal accounting unit, not a competing seller-facing noun.",
+          "The retired Seller Home family already used `AI listing` (`One complete AI listing is free on this device.`), so the governing noun is continuous with prior approved copy rather than newly invented."
+        ]
+      }
+    }
+  ],
+  "package_claim_overrides": [
+    {
+      "attribute": "first_item_free_end_to_end_including_first_ebay_publish",
+      "asserted_by": {
+        "package": "snaplist-pro-gate-design-package-v1-2026-07-25",
+        "sha256": "baafa88bb48cdd4b2f0a485b72c55724376986dc0d39f9091b0b37456c2d1670",
+        "file": "README-FIRST.md",
+        "claim": "The first item is free end to end, including its first eBay publish."
+      },
+      "classification": "product_intent_not_available_behavior",
+      "product_intent_authority": "docs/adr/0008-native-launch-entitlement-credits-and-ebay-authority.md",
+      "shipped_schema_state": {
+        "publish_entitlement_object_exists": false,
+        "entitlement_objects_present": [
+          "public.ai_item_allowance_periods",
+          "public.ai_item_credit_reservations",
+          "public.revenuecat_customer_bindings"
+        ],
+        "note": "Every shipped entitlement object grants AI item runs. No object grants, reserves, or settles an eBay publish, so an implementer has nothing to read a free-first-publish state from."
+      },
+      "must_not_implement_from": true,
+      "blocked_until": "a publish entitlement object exists in the shipped schema under its own approved issue",
+      "seller_facing_strings_affected": [],
+      "cross_reference": "https://github.com/azizu06/snaplist/issues/377",
+      "sealed_packages_modified": false,
+      "rule": "Treat the README sentence as intent only. Do not build a free-first-publish entitlement, gate, or seller-facing claim from it, and do not write later copy from it. The package's own seller-facing strings promise nothing about publish and are unaffected."
+    }
+  ],
   "stop_rules": [
     "Do not implement a retired V1 frame or infer adjacent states from it.",
     "Do not begin SwiftUI composition until the redirected versioned design package and owning issue are approved.",
     "Do not treat historical code, migrations, screenshots, or closed issues as lean-MVP product authority.",
+    "Do not implement a free-first-eBay-publish entitlement, gate, or seller-facing claim from a design package README. See package_claim_overrides.",
+    "Do not name the included-first-run allowance anything other than `AI listing` in new or revised seller-facing copy. See seller_facing_copy_supersessions.",
     "Preserve the server-authoritative security, tenancy, credit, durable-run, pricing, and marketplace boundaries."
   ]
 }
