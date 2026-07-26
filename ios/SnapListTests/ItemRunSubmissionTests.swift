@@ -54,6 +54,137 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertTrue(payloads.isEmpty)
     }
 
+    // MARK: Intake that cannot be submitted
+
+    /// Submitting commits the displayed photos to the durable draft first, and the store
+    /// accepts only a reorder or a removal of photos it already holds. A rejected commit
+    /// means the screen and the draft disagree in a way this submission cannot resolve,
+    /// so the exact clear would refuse the run afterwards. Sending anyway would spend an
+    /// AI-item credit on a run the seller could never see, which is why the request has
+    /// to stop here rather than at the receipt.
+    func testAnIntakeTheDurableDraftRejectsIsNeverSubmitted() async {
+        let staged = SubmissionIntakeFixture(photoCount: 2)
+        let unstaged = SubmissionIntakeFixture(photoCount: 1, seed: "never-staged")
+        // A photo on screen that the durable draft never received.
+        let displayed = staged.photos + unstaged.photos
+        let draftStore = RecordingCaptureDraftStore(photos: staged.photos)
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let submitter = RecordingItemRunSubmitter(outcomes: [.created(Self.receipt())])
+        let coordinator = makeCoordinator(
+            intake: staged,
+            attemptStore: attemptStore,
+            submitter: submitter,
+            draftStore: draftStore,
+            keys: [Self.firstKey],
+            readData: SubmissionIntakeFixture.merging(staged, unstaged)
+        )
+
+        let outcome = await coordinator.submit(photos: displayed)
+
+        XCTAssertEqual(outcome, .retained(.intakeUnavailable))
+        // The whole point of refusing here: no request, so no AI-item credit.
+        let payloads = await submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+        // No key is minted for a submission that never happened, so the next attempt is
+        // not a replay of a run the server never made.
+        let storedAttempt = await attemptStore.attempt
+        XCTAssertNil(storedAttempt)
+        let remaining = await draftStore.photos
+        XCTAssertEqual(remaining, staged.photos)
+        let discardCount = await draftStore.discardCount
+        XCTAssertEqual(discardCount, 0)
+    }
+
+    /// The photos are gone from disk. This is what a second Start listing tap hits after
+    /// an accepted run already cleared the intake, so it has to stay a refusal rather
+    /// than becoming a second submission.
+    func testPhotosThatCannotBeReadAreNeverSubmitted() async {
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let submitter = RecordingItemRunSubmitter(outcomes: [.created(Self.receipt())])
+        let coordinator = makeCoordinator(
+            intake: intake,
+            attemptStore: attemptStore,
+            submitter: submitter,
+            draftStore: draftStore,
+            keys: [Self.firstKey],
+            readData: { (_: URL) throws -> Data in
+                throw CocoaError(.fileNoSuchFile)
+            }
+        )
+
+        let outcome = await coordinator.submit(photos: intake.photos)
+
+        XCTAssertEqual(outcome, .retained(.intakeUnavailable))
+        let payloads = await submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+        let storedAttempt = await attemptStore.attempt
+        XCTAssertNil(storedAttempt)
+        let remaining = await draftStore.photos
+        XCTAssertEqual(remaining, intake.photos)
+    }
+
+    /// An intake outside the one-to-five photo contract never becomes a request. The
+    /// server would reject it, and the seller would have paid the round trip to find out.
+    func testAnIntakeOutsideOneToFivePhotosIsNeverSubmitted() async {
+        for photoCount in [0, 6] {
+            let intake = SubmissionIntakeFixture(photoCount: photoCount)
+            let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+            let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+            let submitter = RecordingItemRunSubmitter(
+                outcomes: [.created(Self.receipt())]
+            )
+            let coordinator = makeCoordinator(
+                intake: intake,
+                attemptStore: attemptStore,
+                submitter: submitter,
+                draftStore: draftStore,
+                keys: [Self.firstKey]
+            )
+
+            let outcome = await coordinator.submit(photos: intake.photos)
+
+            XCTAssertEqual(
+                outcome,
+                .retained(.intakeUnavailable),
+                "\(photoCount) photos is outside the submittable intake"
+            )
+            let payloads = await submitter.payloads
+            XCTAssertTrue(payloads.isEmpty, "\(photoCount) photos reached the network")
+            let storedAttempt = await attemptStore.attempt
+            XCTAssertNil(storedAttempt)
+            let remaining = await draftStore.photos
+            XCTAssertEqual(remaining, intake.photos)
+        }
+    }
+
+    /// The live boundary keeps the same refusal typed rather than swallowing it, so the
+    /// seller-visible surface #503 owns has something truthful to read.
+    func testStartListingSurfacesAnUnsubmittableIntakeWithoutARun() async {
+        let staged = SubmissionIntakeFixture(photoCount: 1)
+        let unstaged = SubmissionIntakeFixture(photoCount: 1, seed: "never-staged")
+        let submitter = RecordingItemRunSubmitter(outcomes: [.created(Self.receipt())])
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: staged,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                submitter: submitter,
+                draftStore: RecordingCaptureDraftStore(photos: staged.photos),
+                keys: [Self.firstKey],
+                readData: SubmissionIntakeFixture.merging(staged, unstaged)
+            )
+        )
+
+        await host.startListing(photos: staged.photos + unstaged.photos)
+
+        XCTAssertEqual(host.retention, .intakeUnavailable)
+        XCTAssertNil(host.acceptedRun)
+        XCTAssertFalse(host.clearedIntake)
+        let payloads = await submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+    }
+
     // MARK: Ambiguous outcome and exact retry
 
     func testAmbiguousResponseRetriesTheIdenticalBytesUnderTheSameKey() async {
@@ -612,28 +743,37 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(host?.acceptedRun?.runID, Self.canonicalRunID)
     }
 
+    /// `403`, `429`, and `409` each reach the live boundary as their own typed value,
+    /// and none of them leaves anything behind that reads as acceptance.
     func testStartListingSurfacesTypedRecoveryWithoutARun() async {
-        let intake = SubmissionIntakeFixture(photoCount: 2)
-        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
-        let submitter = RecordingItemRunSubmitter(
-            outcomes: [.creditDenied(reason: "allowance_exhausted")]
-        )
-        let host = ItemRunSubmissionHost(
-            coordinator: makeCoordinator(
-                intake: intake,
-                attemptStore: attemptStore,
-                submitter: submitter,
-                keys: [Self.firstKey]
+        for transport in [
+            ItemRunSubmissionTransportOutcome.creditDenied(reason: "allowance_exhausted"),
+            .rateLimited(reason: "daily_capacity"),
+            .conflict
+        ] {
+            let intake = SubmissionIntakeFixture(photoCount: 2)
+            let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+            let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+            let submitter = RecordingItemRunSubmitter(outcomes: [transport])
+            let host = ItemRunSubmissionHost(
+                coordinator: makeCoordinator(
+                    intake: intake,
+                    attemptStore: attemptStore,
+                    submitter: submitter,
+                    draftStore: draftStore,
+                    keys: [Self.firstKey]
+                )
             )
-        )
 
-        await host.startListing(photos: intake.photos)
+            await host.startListing(photos: intake.photos)
 
-        XCTAssertNil(host.acceptedRun)
-        XCTAssertEqual(
-            host.retention,
-            .creditDenied(reason: "allowance_exhausted")
-        )
+            XCTAssertEqual(host.retention, Self.retention(for: transport))
+            XCTAssertNil(host.acceptedRun, "\(transport) left a run behind")
+            XCTAssertFalse(host.clearedIntake, "\(transport) read as acceptance")
+            XCTAssertFalse(host.isSubmitting)
+            let remaining = await draftStore.photos
+            XCTAssertEqual(remaining, intake.photos, "\(transport) lost the intake")
+        }
     }
 
     // MARK: Helpers
