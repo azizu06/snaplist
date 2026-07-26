@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// The image types `POST /v1/items/runs` accepts. The server sniffs the bytes and
@@ -42,6 +41,25 @@ struct ItemRunSubmissionPhoto: Codable, Equatable, Sendable {
     let contentSha256: String
     let byteLength: Int
     let mediaType: ItemRunSubmissionMediaType
+
+    /// Everything the server deduplicates on, and nothing else. `photoID` is a local
+    /// staging record, so a seller who removes a photo and stages the same image again
+    /// has not made a different submission.
+    struct Fingerprint: Equatable, Sendable {
+        let ordinal: Int
+        let contentSha256: String
+        let byteLength: Int
+        let mediaType: ItemRunSubmissionMediaType
+    }
+
+    var fingerprint: Fingerprint {
+        Fingerprint(
+            ordinal: ordinal,
+            contentSha256: contentSha256,
+            byteLength: byteLength,
+            mediaType: mediaType
+        )
+    }
 }
 
 /// One logical submission: the key the server deduplicates on, bound to the exact
@@ -51,8 +69,19 @@ struct ItemRunSubmissionPhoto: Codable, Equatable, Sendable {
 /// A key regenerated on retry would let the server treat an exact replay as a second
 /// submission, creating a second run and spending a second AI-item credit.
 struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
+    /// Bumped when the persisted shape changes. A record written by another version is
+    /// recognisably stale rather than corrupt, so it can be discarded instead of
+    /// blocking the seller.
+    static let currentSchemaVersion = 1
+
     let idempotencyKey: UUID
     let photos: [ItemRunSubmissionPhoto]
+    var schemaVersion = ItemRunSubmissionAttempt.currentSchemaVersion
+
+    /// True when this attempt stands for the same submission the server would see.
+    func standsFor(_ photos: [ItemRunSubmissionPhoto]) -> Bool {
+        self.photos.map(\.fingerprint) == photos.map(\.fingerprint)
+    }
 
     /// True when the receipt accounts for every submitted photo, in order, byte for
     /// byte. Anything less means the server is describing a different submission and
@@ -123,6 +152,11 @@ enum ItemRunSubmissionRetention: Equatable, Sendable {
     /// without a persisted key would let a retry mint a second key for the same photos
     /// and buy a second run.
     case attemptNotPersisted
+    /// A stored attempt exists but cannot be read, so its key is unknown. Minting a new
+    /// one would submit photos that may already have a run and charge for them twice.
+    case attemptUnreadable
+    /// The app has no API origin configured, so there is nowhere to submit.
+    case submissionUnavailable
 }
 
 struct ItemRunAcceptance: Equatable, Sendable {

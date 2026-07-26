@@ -12,15 +12,26 @@ final class ItemRunSubmissionHost {
     private(set) var retention: ItemRunSubmissionRetention?
 
     private let coordinator: ItemRunSubmissionCoordinator?
+    /// Fixture launches render approved states with no server behind them, so Start
+    /// listing is inert by design there rather than unavailable.
+    private let isInert: Bool
 
-    init(coordinator: ItemRunSubmissionCoordinator?) {
+    init(coordinator: ItemRunSubmissionCoordinator?, isInert: Bool = false) {
         self.coordinator = coordinator
+        self.isInert = isInert
     }
 
     /// One tap, one submission. A second tap while a request is open would build a
     /// second attempt from the same photos and could buy the seller a second run.
     func startListing(photos: [StagedCapturePhoto]) async {
-        guard !isSubmitting, let coordinator else {
+        guard !isSubmitting, !isInert else {
+            return
+        }
+        guard let coordinator else {
+            // A build with no API origin has nowhere to submit. Saying so beats a
+            // button that silently does nothing.
+            acceptedRun = nil
+            retention = .submissionUnavailable
             return
         }
         isSubmitting = true
@@ -46,9 +57,10 @@ enum ItemRunSubmissionHostFactory {
         session: URLSession,
         draftStore: any CaptureDraftStoring
     ) -> ItemRunSubmissionHost {
-        // Fixture launches render approved states without a server, so they get no
-        // submission path at all rather than a stubbed acceptance.
-        guard !configuration.usesZeroNetworkFixtures, let apiOrigin else {
+        guard !configuration.usesZeroNetworkFixtures else {
+            return ItemRunSubmissionHost(coordinator: nil, isInert: true)
+        }
+        guard let apiOrigin else {
             return ItemRunSubmissionHost(coordinator: nil)
         }
         return ItemRunSubmissionHost(
@@ -94,20 +106,36 @@ final class ItemRunSubmissionCoordinator {
     }
 
     func submit(photos: [StagedCapturePhoto]) async -> ItemRunSubmissionOutcome {
+        let readData = readData
         let intake: ItemRunSubmissionSnapshot.Result
         do {
-            intake = try ItemRunSubmissionSnapshot.make(for: photos, readData: readData)
+            // Up to five full-size photos get read and hashed here. Doing that on the
+            // main actor stalls the screen the seller is still looking at.
+            intake = try await Task.detached(priority: .userInitiated) {
+                try ItemRunSubmissionSnapshot.make(for: photos, readData: readData)
+            }.value
         } catch {
             return .retained(.intakeUnavailable)
         }
         let snapshot = intake.photos
 
-        // A stored attempt for these exact photos is the same logical submission, so it
-        // keeps its key. Retrying under a new key would ask the server to create a
-        // second run and spend a second AI-item credit for one item.
-        let storedAttempt = try? await attemptStore.loadAttempt()
+        // Reordering inside Photo Review only moves photos in memory. Submitting one
+        // order while the durable draft holds another would make the exact clear refuse
+        // its own validated receipt, leaving the seller looking at photos they already
+        // submitted. A refused write is safe: the clear below simply declines.
+        try? await draftStore.replacePhotos(with: photos)
+
+        // A stored attempt standing for these exact photos is the same logical
+        // submission, so it keeps its key. Retrying under a new key would ask the server
+        // to create a second run and spend a second AI-item credit for one item.
+        let storedAttempt: ItemRunSubmissionAttempt?
+        do {
+            storedAttempt = try await attemptStore.loadAttempt()
+        } catch {
+            return .retained(.attemptUnreadable)
+        }
         let attempt: ItemRunSubmissionAttempt
-        if let storedAttempt, storedAttempt.photos == snapshot {
+        if let storedAttempt, storedAttempt.standsFor(snapshot) {
             attempt = storedAttempt
         } else {
             attempt = ItemRunSubmissionAttempt(
@@ -115,10 +143,12 @@ final class ItemRunSubmissionCoordinator {
                 photos: snapshot
             )
         }
-        do {
-            try await attemptStore.saveAttempt(attempt)
-        } catch {
-            return .retained(.attemptNotPersisted)
+        if attempt != storedAttempt {
+            do {
+                try await attemptStore.saveAttempt(attempt)
+            } catch {
+                return .retained(.attemptNotPersisted)
+            }
         }
 
         let token: String
@@ -142,7 +172,13 @@ final class ItemRunSubmissionCoordinator {
                 return .retained(.receiptMismatch)
             }
             let clearedIntake = (try? await draftStore.discardExactly(photos)) ?? false
-            try? await attemptStore.clearAttempt(attempt)
+            // The key is only retired once the photos it stands for are gone. If they
+            // survived, the seller can still submit these exact bytes, and keeping the
+            // key makes that an idempotent replay of the run the server already made
+            // rather than a second run on a second AI-item credit.
+            if clearedIntake {
+                try? await attemptStore.clearAttempt(attempt)
+            }
             return .accepted(
                 ItemRunAcceptance(
                     run: AcceptedItemRun(

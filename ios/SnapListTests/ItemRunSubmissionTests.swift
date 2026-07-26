@@ -1,4 +1,3 @@
-import CryptoKit
 import XCTest
 @testable import SnapList
 
@@ -80,6 +79,10 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(payloads[0].attempt.photos, payloads[1].attempt.photos)
         XCTAssertEqual(payloads[0].photoData, payloads[1].photoData)
         XCTAssertEqual(payloads[1].photoData, intake.expectedBytes)
+        // The key is reused; the token is not. Clerk bearers are short lived, so each
+        // attempt has to ask for one rather than replay whatever the first one got.
+        let tokenLengths = await submitter.bearerTokenLengths
+        XCTAssertEqual(tokenLengths.count, 2)
         guard case .accepted(let acceptance) = second else {
             return XCTFail("Expected the exact retry to resolve to one canonical run.")
         }
@@ -293,6 +296,102 @@ final class ItemRunSubmissionTests: XCTestCase {
         }
     }
 
+    // MARK: Reorder and repeat-submission billing
+
+    func testReorderedIntakeSubmitsAndClearsInTheDisplayedOrder() async {
+        let intake = SubmissionIntakeFixture(photoCount: 3)
+        let displayed = [intake.photos[2], intake.photos[0], intake.photos[1]]
+        // Reordering inside Photo Review only moves photos in memory, so the durable
+        // draft is still holding the order the seller started with.
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let reorderedBytes = displayed.map { intake.bytes(for: $0) }
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [
+                .created(Self.receipt(photos: Self.receiptPhotos(for: reorderedBytes)))
+            ]
+        )
+        let coordinator = makeCoordinator(
+            intake: intake,
+            attemptStore: attemptStore,
+            submitter: submitter,
+            draftStore: draftStore,
+            keys: [Self.firstKey]
+        )
+
+        let outcome = await coordinator.submit(photos: displayed)
+
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.first?.photoData, reorderedBytes)
+        guard case .accepted(let acceptance) = outcome else {
+            return XCTFail("Expected the reordered submission to be accepted")
+        }
+        XCTAssertTrue(acceptance.clearedIntake)
+        let remaining = await draftStore.photos
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testARefusedClearKeepsTheKeySoRetryReplaysInsteadOfBuyingASecondRun() async {
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let added = SubmissionIntakeFixture(photoCount: 1, seed: "added")
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.created(Self.receipt(for: intake))],
+            beforeResponse: {
+                await draftStore.replacePhotosForTest(intake.photos + added.photos)
+            }
+        )
+        let coordinator = makeCoordinator(
+            intake: intake,
+            attemptStore: attemptStore,
+            submitter: submitter,
+            draftStore: draftStore,
+            keys: [Self.firstKey, Self.secondKey]
+        )
+
+        _ = await coordinator.submit(photos: intake.photos)
+
+        // Nothing was cleared, so the seller can still submit these exact bytes. Keeping
+        // the key makes that an idempotent replay of the run the server already made.
+        // Retiring it would mint a second key, and the server would build a second run
+        // and reserve a second AI-item credit for one item.
+        let storedAttempt = await attemptStore.attempt
+        XCTAssertEqual(storedAttempt?.idempotencyKey, Self.firstKey)
+    }
+
+    func testIdenticalBytesReuseTheKeyAfterAPhotoIsRemovedAndReAdded() async {
+        let first = SubmissionIntakeFixture(photoCount: 2)
+        // Same bytes in the same order, but the re-added photo is a new local staging
+        // record. Only the bytes decide whether the server treats this as the same
+        // submission, so the key has to survive the seller redoing their own photo.
+        let reAdded = SubmissionIntakeFixture(photoCount: 2)
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let merged = SubmissionIntakeFixture.merging(first, reAdded)
+
+        _ = await makeCoordinator(
+            intake: first,
+            attemptStore: attemptStore,
+            submitter: submitter,
+            draftStore: RecordingCaptureDraftStore(photos: first.photos),
+            keys: [Self.firstKey],
+            readData: merged
+        ).submit(photos: first.photos)
+
+        _ = await makeCoordinator(
+            intake: reAdded,
+            attemptStore: attemptStore,
+            submitter: RecordingItemRunSubmitter(outcomes: [.ambiguous]),
+            draftStore: RecordingCaptureDraftStore(photos: reAdded.photos),
+            keys: [Self.secondKey],
+            readData: merged
+        ).submit(photos: reAdded.photos)
+
+        let storedAttempt = await attemptStore.attempt
+        XCTAssertEqual(storedAttempt?.idempotencyKey, Self.firstKey)
+    }
+
     // MARK: Durable attempt identity
 
     func testStoredAttemptSurvivesRelaunchAndClearsOnlyItself() async throws {
@@ -328,7 +427,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertNil(cleared)
     }
 
-    func testUnreadableStoredAttemptLoadsAsNoAttempt() async throws {
+    func testUnreadableStoredAttemptFailsClosedRatherThanMintingASecondKey() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -340,6 +439,44 @@ final class ItemRunSubmissionTests: XCTestCase {
             to: root.appendingPathComponent("attempt.json")
         )
 
+        // A key may exist and is now unknown. Reading this as "no attempt" would mint a
+        // second key for photos that may already have a run and charge for them twice.
+        do {
+            _ = try await LocalItemRunSubmissionAttemptStore(
+                rootDirectory: root
+            ).loadAttempt()
+            XCTFail("Expected an unreadable attempt to fail closed")
+        } catch {
+            XCTAssertEqual(
+                error as? ItemRunSubmissionAttemptStoreError,
+                .unreadableAttempt
+            )
+        }
+    }
+
+    func testAnAttemptFromAnotherSchemaVersionIsDiscardedRatherThanBlocking() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        let intake = SubmissionIntakeFixture(photoCount: 1)
+        var stale = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: try ItemRunSubmissionSnapshot.make(
+                for: intake.photos,
+                readData: intake.read
+            ).photos
+        )
+        stale.schemaVersion = ItemRunSubmissionAttempt.currentSchemaVersion + 1
+        try Data(JSONEncoder().encode(stale)).write(
+            to: root.appendingPathComponent("attempt.json")
+        )
+
+        // Attempts only live while one submission is unresolved, so one written by
+        // another version no longer guards anything.
         let restored = try await LocalItemRunSubmissionAttemptStore(
             rootDirectory: root
         ).loadAttempt()
@@ -437,6 +574,20 @@ final class ItemRunSubmissionTests: XCTestCase {
         uuidString: "45700000-0000-4000-8000-00000000000b"
     )!
 
+    /// What a truthful server receipt looks like for exactly these ordered bytes.
+    static func receiptPhotos(
+        for bytes: [Data]
+    ) -> [MobileItemSubmissionEnvelope.PhotoReceipt] {
+        bytes.enumerated().map { ordinal, data in
+            .init(
+                ordinal: ordinal,
+                contentSha256: LocalPhotoFingerprint.digest(of: data),
+                byteLength: data.count,
+                mediaType: "image/jpeg"
+            )
+        }
+    }
+
     /// A receipt that echoes `intake` exactly, unless a field is deliberately spoiled.
     static func receipt(
         for intake: SubmissionIntakeFixture? = nil,
@@ -463,10 +614,24 @@ final class ItemRunSubmissionTests: XCTestCase {
         submitter: RecordingItemRunSubmitter,
         draftStore: RecordingCaptureDraftStore? = nil,
         keys: [UUID],
+        readData: (@Sendable (URL) throws -> Data)? = nil,
         bearerToken: @escaping @Sendable () async throws -> String = {
             "clerk-session-token"
         }
     ) -> ItemRunSubmissionCoordinator {
+        if let readData {
+            let keySequence = KeySequence(keys: keys)
+            return ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: draftStore ?? RecordingCaptureDraftStore(
+                    photos: intake.photos
+                ),
+                bearerToken: bearerToken,
+                readData: readData,
+                newIdempotencyKey: { keySequence.next() }
+            )
+        }
         let keySequence = KeySequence(keys: keys)
         return ItemRunSubmissionCoordinator(
             submitter: submitter,
@@ -518,6 +683,25 @@ struct SubmissionIntakeFixture: Sendable {
 
     var read: @Sendable (URL) throws -> Data {
         let dataByPath = dataByPath
+        return { url in
+            guard let data = dataByPath[url.path] else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return data
+        }
+    }
+
+    func bytes(for photo: StagedCapturePhoto) -> Data {
+        dataByPath[photo.photoURL.path]!
+    }
+
+    /// One reader covering both fixtures, for a seller who removed a photo and staged
+    /// the same image again under a new local record.
+    static func merging(
+        _ first: SubmissionIntakeFixture,
+        _ second: SubmissionIntakeFixture
+    ) -> @Sendable (URL) throws -> Data {
+        let dataByPath = first.dataByPath.merging(second.dataByPath) { _, new in new }
         return { url in
             guard let data = dataByPath[url.path] else {
                 throw CocoaError(.fileNoSuchFile)
@@ -678,5 +862,14 @@ actor RecordingCaptureDraftStore: CaptureDraftStoring {
     func discard() async throws {
         discardCount += 1
         photos = []
+    }
+
+    /// Mirrors `LocalCaptureDraftStore`: the comparison and the deletion happen in one
+    /// actor entry, so these tests exercise the real store's guard rather than the
+    /// protocol default.
+    func discardExactly(_ photos: [StagedCapturePhoto]) async throws -> Bool {
+        guard self.photos == photos else { return false }
+        try await discard()
+        return true
     }
 }

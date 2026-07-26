@@ -3,7 +3,7 @@ import XCTest
 @testable import SnapList
 
 final class ItemRunSubmissionClientTests: XCTestCase {
-    func testSendsOrderedPhotoPartsWithTheKeyAndAFreshBearer() async throws {
+    func testSendsTheMultipartBodyWithTheKeyAndAFreshBearer() async throws {
         let payload = Self.payload(photoCount: 3)
         var observed: URLRequest?
         let session = makeSession { request in
@@ -38,6 +38,32 @@ final class ItemRunSubmissionClientTests: XCTestCase {
             authorization.count,
             "Bearer ".count + "fresh-opaque-clerk-token".count
         )
+        // URLSession hands the body to the protocol as a stream, so this is the only
+        // place a test can prove the parts actually left the client.
+        XCTAssertEqual(
+            try Self.bodyBytes(of: request),
+            ItemRunSubmissionMultipart.body(
+                for: payload,
+                boundary: "snaplist-boundary"
+            )
+        )
+    }
+
+    private static func bodyBytes(of request: URLRequest) throws -> Data {
+        if let body = request.httpBody {
+            return body
+        }
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+        var body = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            guard read > 0 else { break }
+            body.append(contentsOf: buffer[0..<read])
+        }
+        return body
     }
 
     func testMultipartBodyRepeatsThePhotoFieldInDisplayedOrder() throws {
@@ -58,8 +84,10 @@ final class ItemRunSubmissionClientTests: XCTestCase {
             let marker = try XCTUnwrap(String(data: data, encoding: .isoLatin1))
             XCTAssertTrue(text.contains(marker), "photo \(ordinal) bytes are missing")
         }
-        let orderedMarkers = payload.photoData.compactMap {
-            text.range(of: String(data: $0, encoding: .isoLatin1)!)?.lowerBound
+        let orderedMarkers = try payload.photoData.compactMap { data in
+            try text.range(
+                of: XCTUnwrap(String(data: data, encoding: .isoLatin1))
+            )?.lowerBound
         }
         XCTAssertEqual(orderedMarkers, orderedMarkers.sorted())
         XCTAssertTrue(text.hasSuffix("--snaplist-boundary--\r\n"))

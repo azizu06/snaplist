@@ -1,5 +1,9 @@
 import Foundation
 
+enum ItemRunSubmissionAttemptStoreError: Error, Equatable {
+    case unreadableAttempt
+}
+
 /// Durable, device-local home for the one in-flight submission attempt.
 ///
 /// The attempt outlives the process on purpose: a seller who force-quits mid-request
@@ -30,12 +34,26 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         guard fileManager.fileExists(atPath: attemptURL.path) else {
             return nil
         }
-        // An unreadable record is no record. Refusing to load is recoverable; throwing
-        // would strand every later submission behind one corrupt file.
-        return try? decoder.decode(
-            ItemRunSubmissionAttempt.self,
-            from: Data(contentsOf: attemptURL)
-        )
+        let stored: ItemRunSubmissionAttempt
+        do {
+            stored = try decoder.decode(
+                ItemRunSubmissionAttempt.self,
+                from: Data(contentsOf: attemptURL)
+            )
+        } catch {
+            // Absence and unreadability are not the same answer. Absence means no key
+            // exists, so minting one is correct. Unreadability means a key may exist
+            // and is unknown, and minting one there submits photos that may already
+            // have a run and charges the seller for them twice.
+            throw ItemRunSubmissionAttemptStoreError.unreadableAttempt
+        }
+        // A record another version wrote is stale rather than unknown. Attempts only
+        // live while one submission is unresolved, so an older one no longer guards
+        // anything and discarding it cannot duplicate a run.
+        guard stored.schemaVersion == ItemRunSubmissionAttempt.currentSchemaVersion else {
+            return nil
+        }
+        return stored
     }
 
     func saveAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {
