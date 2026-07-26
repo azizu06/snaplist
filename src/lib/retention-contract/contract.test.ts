@@ -195,6 +195,21 @@ describe("lean-MVP release retention contract", () => {
     expect(() => parseReleaseRetentionContract(invalid)).toThrow();
   });
 
+  // A guest's artifacts leave by exactly two shipped paths. #175 defines both
+  // `guestRecoveryTerminalOutcomeSchema` and `guestClaimTerminalOutcomeSchema`
+  // in src/lib/guest-recovery/service.ts as two-member unions — claimed or
+  // expired — and ships no seller-initiated discard before claim. A trigger
+  // this row names that nothing can fire is a deletion promise the product
+  // cannot honour, so the row is pinned to the outcomes that exist.
+  it("names only the guest deletion triggers the shipped claim-or-expiry seam can fire", () => {
+    const guestRecovery = contract.data.find(({ id }) => id === "guest-recovery");
+
+    expect(guestRecovery?.dispositions[0].deletionTriggers).toEqual([
+      "successful-claim-transfers-ownership",
+      "guest-recovery-expires",
+    ]);
+  });
+
   it("gives every release datum a resolved disposition, with no blocked row left", () => {
     const blocked = contract.data.filter(
       ({ dispositions }) => dispositions[0].treatment === "blocked",
@@ -296,6 +311,36 @@ describe("lean-MVP release retention contract", () => {
     );
     expect(prd).toContain(contractPath);
     expect(adr).toContain(contractPath);
+  });
+
+  // The contract is normative, but ADR-0012 is what a reader reaches for
+  // first. Prose that still describes a gate as open once the row records it
+  // closed sends that reader the wrong way, so the two are held together.
+  it("describes the Clerk absence proof as observed, matching the clerk-identity row", () => {
+    const adr = readFileSync(
+      resolve("docs/adr/0012-lean-mvp-retention-and-deletion-matrix.md"),
+      "utf8",
+    );
+    const clerk = contract.data.find(({ id }) => id === "clerk-identity");
+
+    expect(clerk?.dispositions[0].completionProof).toContain("OBSERVED 2026-07-26");
+    expect(adr).not.toMatch(
+      /has not yet been observed|records an unobserved proof|until the test has actually run|defined but not yet performed/,
+    );
+    expect(adr).toMatch(
+      /observed on 2026-07-26 against a live Clerk development instance/,
+    );
+  });
+
+  // The skip warning is the sentence a developer sees most often, since the
+  // suite skips by default. It described the same closed gate as open.
+  it("does not describe the Clerk proof as unobserved where the suite skips", () => {
+    const absenceTest = readFileSync(
+      resolve("src/lib/retention-contract/clerk-identity-absence.test.ts"),
+      "utf8",
+    );
+
+    expect(absenceTest).not.toMatch(/not yet observed/);
   });
 
   it("routes lean-MVP and voice retention authority to ADR-0012", () => {

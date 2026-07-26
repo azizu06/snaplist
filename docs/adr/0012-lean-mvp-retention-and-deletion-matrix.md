@@ -77,7 +77,7 @@ reviewer can revise it without mistaking it for a vetted fact.
 | --- | --- |
 | Hosted transcription retention | `provider-owned`. OpenAI is the pinned provider and the default API data policy is the selected control. OpenAI publishes `/v1/audio/transcriptions` as retaining nothing, None for both abuse monitoring and application state; the general 30-day default bounds endpoints that do retain. That None is OpenAI's published figure rather than something SnapList observed, so the treatment stays `provider-owned`. Zero Data Retention needs OpenAI's prior approval, is not active, and must not be recorded as the ceiling until an approval receipt exists. |
 | eBay publish receipts | `delete`. The stored `listings.ebay_offer_id`, `listings.ebay_listing_id`, and `listings.ebay_status` are treated as Personal Information under the API License Agreement Section 1 definition and deleted per Section 9, and within ten days of termination per Section 16.2. The live eBay listing is an eBay-owned record and is never reported deleted by SnapList. |
-| Clerk identity | `delete`, proved by verified absence. Account erasure calls `clerkClient.users.deleteUser(userId)` and reads the user back; the API reporting it absent with status 404 is the completion proof. The `user.deleted` webhook acknowledges the request and is not accepted as proof. Clerk publishes no numeric post-deletion window, so SnapList claims none. The proof is defined and executable in `src/lib/retention-contract/clerk-identity-absence.test.ts` but has not yet been observed: running it needs an owner-held Clerk development-instance key. |
+| Clerk identity | `delete`, proved by verified absence. Account erasure calls `clerkClient.users.deleteUser(userId)` and reads the user back; the API reporting it absent with status 404 is the completion proof. The `user.deleted` webhook acknowledges the request and is not accepted as proof. Clerk publishes no numeric post-deletion window, so SnapList claims none. The proof is defined and executable in `src/lib/retention-contract/clerk-identity-absence.test.ts`, and was observed on 2026-07-26 against a live Clerk development instance: the deleted user read back as absent with status 404 and error code `resource_not_found`. Running it needs an owner-held `sk_test_` key, so it skips where none is configured. |
 | Apple/RevenueCat references | `delete` at account erasure, after credit reservations reconcile. SnapList holds no per-user tax record: Apple charges the customer including any applicable taxes, never discloses the customer to the developer, and keeps the payout and financial reports. The cited terms name Apple Distribution International Ltd. or Apple Services Pte. Ltd. the merchant of record for their customers and make the transaction a contract with Apple otherwise, and the conclusion holds either way. The stored rows are an entitlement mapping with no customer identity, price, or tax amount, so no multi-year retention applies. Deleting a RevenueCat customer removes its whole alias set; completion is proved by reading the customer back, because RevenueCat does not document deletion as synchronous. |
 
 Three of these stay conditional. If SnapList adopts alternative payment processing or external
@@ -88,9 +88,13 @@ hosted-transcription row reopens and its retention must be re-cited before that 
 audio. No conclusion here has been reviewed by a tax professional or by provider support, which is
 recorded in the rows rather than implied here.
 
-One completion proof is defined but not yet performed. The Clerk absence test needs an owner-held
-development-instance key, so the `clerk-identity` row records an unobserved proof and says so. Account
-erasure cannot claim completion on that row until the test has actually run.
+One completion proof runs from an owner-held key rather than from CI. The Clerk absence test was
+observed on 2026-07-26 against a live Clerk development instance — an `sk_test_` secret, no
+production data — and the deleted user read back as absent with status 404 and error code
+`resource_not_found`, which the `clerk-identity` row records. The test asserts the reported 404
+rather than merely that the read rejected, so a network or auth failure cannot be mistaken for
+absence. It skips where no `sk_test_` `CLERK_RETENTION_PROOF_SECRET_KEY` is configured, so CI, which
+runs without secrets, does not re-observe the proof; re-observing it is an owner-run step.
 
 ### 5. Keep execution separately issue-owned
 
