@@ -273,8 +273,53 @@ def context(event_name:)
   }
 end
 
+def resolved_group(concurrency)
+  concurrency.is_a?(Hash) ? concurrency["group"] : concurrency
+end
+
+# The workflow-level group is pinned to an exact contract, so an unrecognized context there is a
+# typo worth raising on. A job group is not pinned, and jobs legitimately interpolate `matrix.*`,
+# `inputs.*`, `needs.*`, `strategy.*`, or `github.job`. Raising on those would reject a correctly
+# isolated job, so they resolve to opaque variables and the isolation comparison still runs.
+#
+# The list is an allow-list rather than a blanket fallback. Accepting every unknown name would
+# turn `github.rev` into an opaque variable too, and that group collapses to a single value at
+# runtime, so one branch's job would cancel another's. Only interpolation is covered: branching
+# on one of these still raises, because the comparison cannot be resolved symbolically.
+OPAQUE_JOB_CONTEXT_PREFIXES = ["matrix.", "inputs.", "needs.", "strategy."].freeze
+OPAQUE_JOB_CONTEXT_NAMES = ["github.job"].freeze
+
+def opaque_job_context?(name)
+  OPAQUE_JOB_CONTEXT_NAMES.include?(name) ||
+    OPAQUE_JOB_CONTEXT_PREFIXES.any? { |prefix| name.start_with?(prefix) }
+end
+
+class OpaqueContext
+  def initialize(values)
+    @values = values
+  end
+
+  # `fetch_context` passes its own raising block. This ignores that block deliberately so the
+  # allow-list decides, and raises the same message for every name outside it.
+  def fetch(name)
+    @values.fetch(name) do
+      raise "Unsupported GitHub context value #{name}" unless opaque_job_context?(name)
+
+      SymbolicText.variable(name)
+    end
+  end
+end
+
+def job_context(event_name:)
+  OpaqueContext.new(context(event_name: event_name))
+end
+
+def scoped_by_run_id?(group)
+  group.parts.any? { |part| part.is_a?(SymbolicText::Variable) && part.name == "github.run_id" }
+end
+
 workflow = YAML.load_file(ARGV.fetch(0))
-group = workflow.dig("concurrency", "group")
+group = resolved_group(workflow["concurrency"])
 raise "concurrency.group must be an active string" unless group.is_a?(String)
 
 automatic_expected = SymbolicText.literal("ios-iOS-") + SymbolicText.variable("github.ref")
@@ -289,3 +334,35 @@ manual_context = context(event_name: "workflow_dispatch")
 manual_actual = evaluate_template(group, manual_context)
 manual_expected = SymbolicText.literal("ios-iOS-dispatch-") + SymbolicText.variable("github.run_id")
 raise "manual concurrency group must be scoped by github.run_id" unless manual_actual == manual_expected
+
+# A job's own `concurrency:` applies in addition to the workflow-level one, and it forms its own
+# independent group. So a job override can re-share a group at runtime while every check above
+# still passes. The workflow-level group is pinned to an exact contract; a job may legitimately
+# choose its own name, so the job rule is the isolation itself, and it is the same isolation the
+# workflow-level rule enforces: a manual dispatch must not land in the same group as an automatic
+# run, and two concurrent manual dispatches must not land in the same group as each other.
+jobs = workflow["jobs"]
+raise "jobs must be a mapping when present" unless jobs.nil? || jobs.is_a?(Hash)
+
+(jobs || {}).each do |job_name, job|
+  next unless job.is_a?(Hash) && job.key?("concurrency")
+
+  job_group = resolved_group(job["concurrency"])
+  raise "job #{job_name} concurrency.group must be an active string" unless job_group.is_a?(String)
+
+  job_manual = evaluate_template(job_group, job_context(event_name: "workflow_dispatch"))
+  unless scoped_by_run_id?(job_manual)
+    raise "job #{job_name} manual concurrency group must be scoped by github.run_id"
+  end
+
+  ["pull_request", "push"].each do |event_name|
+    job_automatic = evaluate_template(job_group, job_context(event_name: event_name))
+    # A group carrying `github.run_id` is unique to one run and cannot collide with anything, so
+    # a job that scopes every event that way is maximally isolated even though both events
+    # resolve to the same template. Comparing them there reports a conflict that cannot happen.
+    next if scoped_by_run_id?(job_automatic)
+    next unless job_manual == job_automatic
+
+    raise "job #{job_name} concurrency group must separate workflow_dispatch from #{event_name}"
+  end
+end

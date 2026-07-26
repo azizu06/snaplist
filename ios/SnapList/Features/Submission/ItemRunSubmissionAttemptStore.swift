@@ -27,7 +27,24 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
     }
 
     func loadAttempt() async throws -> ItemRunSubmissionAttempt? {
-        guard fileManager.fileExists(atPath: attemptURL.path) else {
+        // Existence comes from the same metadata read that fails closed. `fileExists`
+        // answers false both for a path that is absent and for one it cannot stat, and a
+        // pre-check that returns nil for the second mints a fresh key for photos the first
+        // submission may already have committed. Only a definite "no such file" is absence.
+        //
+        // The read goes through the injected `FileManager` rather than `URL.resourceValues`
+        // for two reasons. A URL caches the resource values it has already fetched, and this
+        // store holds one long-lived `attemptURL`, so a second load answers from the state
+        // before `clearAttempt` deleted the file. That is observed, not assumed:
+        // `testStoredAttemptSurvivesRelaunchAndClearsOnlyItself` failed exactly that way once the
+        // `fileExists` pre-check this replaced stopped short-circuiting the deleted path. It also
+        // gives the fail-closed and unknown-type branches a seam a test can actually reach.
+        let isRegularFile: Bool?
+        do {
+            let attributes = try fileManager.attributesOfItem(atPath: attemptURL.path)
+            isRegularFile = (attributes[.type] as? FileAttributeType)
+                .map { $0 == .typeRegular }
+        } catch where Self.describesAnAbsentPath(error) {
             return nil
         }
         // `saveAttempt` only ever writes a regular file, so anything else standing at this
@@ -36,13 +53,11 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         // nothing.
         //
         // Only a definite answer of "not a regular file" earns that removal. A metadata
-        // read that fails, or that comes back without the value, says nothing about what
-        // is here, and deleting on that would throw away a key a committed submission may
-        // still be using. Both fall through to the read and fail closed with everything
-        // else that cannot be identified.
-        if try attemptURL.resourceValues(
-            forKeys: [.isRegularFileKey]
-        ).isRegularFile == false {
+        // read that comes back without the value says nothing about what is here, and
+        // deleting on that would throw away a key a committed submission may still be
+        // using. It falls through to the read and fails closed with everything else that
+        // cannot be identified.
+        if isRegularFile == false {
             return discardUnusableAttempt()
         }
         // A regular record that exists but cannot be read is not the same as no record.
@@ -65,6 +80,21 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
             return discardUnusableAttempt()
         }
         return stored
+    }
+
+    /// Whether a failed metadata read proves there is nothing at the path.
+    ///
+    /// Every other failure leaves the question open, and an open question is treated as a
+    /// live attempt rather than as absence.
+    private static func describesAnAbsentPath(_ error: Error) -> Bool {
+        if let cocoaError = error as? CocoaError {
+            return cocoaError.code == .fileReadNoSuchFile
+                || cocoaError.code == .fileNoSuchFile
+        }
+        if let posixError = error as? POSIXError {
+            return posixError.code == .ENOENT
+        }
+        return false
     }
 
     /// A record that was read but cannot be interpreted is removed rather than kept.
