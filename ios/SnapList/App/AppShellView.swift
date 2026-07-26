@@ -8,6 +8,7 @@ struct AppShellView: View {
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
     @Bindable var runStore: RunDetailStore
+    @Bindable var submissionHost: ItemRunSubmissionHost
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -65,10 +66,21 @@ struct AppShellView: View {
                             setReturnFocus: { pendingScanReturnFocus = $0 }
                         )
                     },
-                    // Typed boundaries only. #469 owns the Voice recorder interior and
-                    // #457 owns submission, so neither destination exists in this shell
-                    // and neither event may touch the seller's photo intake.
-                    openBoundary: { _ in },
+                    // #469 still owns the Voice recorder interior, so that event stays
+                    // inert here. Start listing submits the photos in their displayed
+                    // order; only a validated receipt may clear the intake.
+                    openBoundary: { event in
+                        guard case .startListing = event else { return }
+                        Task {
+                            await AppShellPhotoReviewSubmissionTransaction.perform(
+                                session: session,
+                                captureFlow: captureFlow,
+                                host: photoReviewHost,
+                                router: router,
+                                submissionHost: submissionHost
+                            )
+                        }
+                    },
                     intake: photoReviewIntake
                 )
             } else {
@@ -313,6 +325,47 @@ enum AppShellPhotoReviewBackTransaction {
 }
 
 @MainActor
+enum AppShellPhotoReviewSubmissionTransaction {
+    static func perform(
+        session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        submissionHost: ItemRunSubmissionHost
+    ) async {
+        // Photo Review stays mounted across the request and the exact clear, exactly
+        // like the two exits. Without the lock the seller could delete or reorder in
+        // that gap: neither reaches disk, so the clear would not see the change and
+        // would remove photos the receipt never described.
+        guard host.beginCommit() else {
+            return
+        }
+        defer { host.endCommit() }
+
+        await submissionHost.startListing(photos: session.store.photos)
+
+        // A cleared intake leaves no photos to review, and Photo Review has no empty
+        // state: its thumbnails would point at deleted files and Back would refuse,
+        // because the durable draft it tries to commit is already gone. Zero photos
+        // returns to Scan, the same rule the final delete already follows.
+        //
+        // The final delete hands Scan the empty set to commit because the photo is still
+        // on disk at that point. Here the receipt already took it, so Scan is told the
+        // draft is gone rather than asked to remove it again. Start the camera before the
+        // router returns, so zero-photo Scan arrives as the approved guided camera rather
+        // than transiently as "Preparing camera", matching both existing exits.
+        //
+        // Where an accepted run should actually take the seller is #503.
+        guard submissionHost.acceptedRun != nil, submissionHost.clearedIntake else {
+            return
+        }
+        captureFlow.dropIntakeDiscardedElsewhere()
+        await captureFlow.startCamera()
+        _ = host.leaveForClearedIntake(from: session, using: router)
+    }
+}
+
+@MainActor
 enum AppShellPhotoReviewDeleteTransaction {
     static func perform(
         session: PhotoReviewLiveSession,
@@ -462,6 +515,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             service: UnavailableRunService(),
             bearerToken: { "preview-bearer" }
         ),
+        submissionHost: ItemRunSubmissionHost(coordinator: nil),
         configuration: .preview
     )
 }

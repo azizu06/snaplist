@@ -430,6 +430,131 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.photoReviewScanReturn, returned)
     }
 
+    func testAcceptedSubmissionClearsTheDraftAndLeavesPhotoReviewForScan() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-submission-exit-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let store = LocalCaptureDraftStore(rootDirectory: root)
+        let staged = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemRed,
+                rightColor: .systemOrange
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(isAvailable: true, authorization: .authorized),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: store
+        )
+        _ = await captureFlow.restore()
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try XCTUnwrap(host.session)
+
+        var lockedDuringFlight = false
+        let intake = SubmissionIntakeFixture(stagedPhotos: [staged])
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: RecordingItemRunSubmitter(
+                    outcomes: [.created(intake.receipt)],
+                    beforeResponse: { @MainActor in
+                        lockedDuringFlight = host.isCommitting
+                    }
+                ),
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: store,
+                bearerToken: { "clerk-session-token" },
+                readData: intake.read,
+                newIdempotencyKey: { UUID() }
+            )
+        )
+
+        await AppShellPhotoReviewSubmissionTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            submissionHost: submissionHost
+        )
+
+        // Photo Review stays mounted across the request, so the seller must not be able
+        // to edit an intake the clear is about to remove.
+        XCTAssertTrue(lockedDuringFlight)
+        XCTAssertFalse(host.isCommitting)
+        XCTAssertNotNil(submissionHost.acceptedRun)
+        XCTAssertTrue(submissionHost.clearedIntake)
+        // A cleared draft leaves nothing to review, so Photo Review must not stay up
+        // rendering files that no longer exist.
+        XCTAssertNil(host.session)
+        let remaining = try await store.loadPhotos()
+        XCTAssertTrue(remaining.isEmpty)
+        XCTAssertTrue(captureFlow.stagedPhotos.isEmpty)
+        XCTAssertFalse(fileManager.fileExists(atPath: staged.photoURL.path))
+    }
+
+    /// The lock, not the submitter: this proves the transaction returns early when a
+    /// commit is already held and does not release a lock it never took. The genuine
+    /// double-submit case is `ItemRunSubmissionTests.testStartListingTappedTwiceSubmitsOnce`.
+    func testStartListingKeepsTheHeldLockAndDoesNothingWhileACommitIsOpen() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-submission-lock-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let store = LocalCaptureDraftStore(rootDirectory: root)
+        _ = try await store.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemGreen,
+                rightColor: .systemBlue
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(isAvailable: true, authorization: .authorized),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: store
+        )
+        _ = await captureFlow.restore()
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try XCTUnwrap(host.session)
+        let submissionHost = ItemRunSubmissionHost(coordinator: nil, isInert: true)
+        XCTAssertTrue(host.beginCommit())
+
+        await AppShellPhotoReviewSubmissionTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            submissionHost: submissionHost
+        )
+
+        // The lock was already held, so this tap does nothing and must not release it.
+        XCTAssertTrue(host.isCommitting)
+        XCTAssertNotNil(host.session)
+    }
+
     func testLivePhotoReviewBackCommitsTheReorderedSetThroughTheProductionExit() async throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(

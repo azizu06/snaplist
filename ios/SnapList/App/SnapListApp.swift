@@ -8,6 +8,7 @@ struct SnapListApp: App {
     @State private var captureFlow: CaptureFlowModel
     @State private(set) var homeStore: HomeStore
     @State private var runStore: RunDetailStore
+    @State private var submissionHost: ItemRunSubmissionHost
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
 
@@ -87,6 +88,15 @@ struct SnapListApp: App {
                 session: homeURLSession
             )
         )
+        _submissionHost = State(
+            initialValue: ItemRunSubmissionHostFactory.make(
+                configuration: configuration,
+                apiOrigin: homeAPIOrigin,
+                authentication: homeAuthentication,
+                session: homeURLSession,
+                draftStore: dependencies.captureDraftStore
+            )
+        )
     }
 
     var body: some Scene {
@@ -97,6 +107,7 @@ struct SnapListApp: App {
                 captureFlow: captureFlow,
                 homeStore: homeStore,
                 runStore: runStore,
+                submissionHost: submissionHost,
                 configuration: configuration
             )
                 .environment(\.appDependencies, dependencies)

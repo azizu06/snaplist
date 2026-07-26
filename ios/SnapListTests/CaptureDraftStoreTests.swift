@@ -408,6 +408,49 @@ final class CaptureDraftStoreTests: XCTestCase {
         }
     }
 
+    func testDiscardExactlyRemovesTheDraftOnlyWhenItStillHoldsThoseExactPhotos() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LocalCaptureDraftStore(rootDirectory: root)
+        let first = try await store.append(
+            imageData: try makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let discarded = try await store.discardExactly([first])
+
+        XCTAssertTrue(discarded)
+        let remaining = try await store.loadPhotos()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testDiscardExactlyKeepsAPhotoAddedAfterTheSubmittedSnapshot() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LocalCaptureDraftStore(rootDirectory: root)
+        let submitted = try await store.append(
+            imageData: try makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let addedLater = try await store.append(
+            imageData: try makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        // The receipt describes only the first photo, so the second one was never
+        // submitted and deleting it would destroy work the seller can still see.
+        let discarded = try await store.discardExactly([submitted])
+
+        XCTAssertFalse(discarded)
+        let remaining = try await store.loadPhotos()
+        XCTAssertEqual(remaining, [submitted, addedLater])
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: addedLater.photoURL.path)
+        )
+    }
+
     private func makeLandscapeImageData() throws -> Data {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 400, height: 200))
         return try XCTUnwrap(renderer.jpegData(withCompressionQuality: 0.95) { context in

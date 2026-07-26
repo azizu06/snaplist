@@ -638,6 +638,29 @@ final class PhotoReviewLiveHost {
         )
     }
 
+    /// Leaves Photo Review because the intake it was editing is gone.
+    ///
+    /// Submission clears the draft on a validated receipt, and the same rule the final
+    /// delete follows applies: with no photos left there is nothing to review, and the
+    /// screen would otherwise render files that no longer exist.
+    ///
+    /// Takes the session it expects to leave, so a session replaced while the request
+    /// was open is not torn down by an older transaction's result.
+    func leaveForClearedIntake(
+        from returningSession: PhotoReviewLiveSession,
+        using router: AppRouter
+    ) -> Bool {
+        guard session === returningSession else {
+            return false
+        }
+        router.returnFromPhotoReview(
+            PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+        )
+        session = nil
+        activeRequest = nil
+        return true
+    }
+
     func consumeFinalDeleteAnnouncement() -> String? {
         defer { pendingFinalDeleteAnnouncement = nil }
         return pendingFinalDeleteAnnouncement
