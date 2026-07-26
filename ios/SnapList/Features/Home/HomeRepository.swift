@@ -11,17 +11,11 @@ protocol HomeRepository: Sendable {
     func updates() async -> AsyncThrowingStream<HomeModel, Error>
 }
 
-protocol HomeAuthenticationProviding: Sendable {
-    /// Returns a fresh opaque Clerk bearer. Authentication integrations own
-    /// refresh and storage; Home never persists or inspects the credential.
-    func bearerToken() async throws -> String
-}
-
 enum HomeRepositoryFactory {
     static func make(
         configuration: LaunchConfiguration,
         apiOrigin: URL? = defaultAPIOrigin,
-        authentication: any HomeAuthenticationProviding,
+        tokenProvider: any BearerTokenProviding,
         session: URLSession = .shared
     ) -> any HomeRepository {
 #if DEBUG
@@ -36,7 +30,7 @@ enum HomeRepositoryFactory {
         }
         return AuthenticatedServerHomeRepository(
             apiOrigin: apiOrigin,
-            authentication: authentication,
+            tokenProvider: tokenProvider,
             session: session
         )
     }
@@ -98,11 +92,11 @@ enum HomeRepositoryError: Error, Equatable {
 
 private struct AuthenticatedServerHomeRepository: HomeRepository {
     let apiOrigin: URL
-    let authentication: any HomeAuthenticationProviding
+    let tokenProvider: any BearerTokenProviding
     let session: URLSession
 
     func fetchHome() async throws -> HomeModel {
-        let token = try await authentication.bearerToken()
+        let token = try await tokenProvider.bearerToken()
         var request = URLRequest(url: apiOrigin.appending(path: "/v1/home"))
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -501,6 +495,9 @@ final class HomeStore {
     }
 
     private static func failure(for error: any Error) -> HomeLoadFailure {
+        if error as? BearerTokenProviderError == .sessionAbsent {
+            return .operationUnavailable
+        }
         if error as? HomeRepositoryError == .operationUnavailable {
             return .operationUnavailable
         }

@@ -139,11 +139,11 @@ final class HomeFeatureTests: XCTestCase {
         }
         let app = SnapListApp(
             configuration: .standard,
-            homeAuthentication: ClerkHomeAuthentication(
+            tokenProvider: ClerkBearerTokenProvider(
                 session: TestClerkSessionToken(token: "signed-jwt")
             ),
-            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
-            homeURLSession: session
+            apiOrigin: URL(string: "http://127.0.0.1:3001")!,
+            urlSession: session
         )
 
         await app.homeStore.load()
@@ -152,6 +152,27 @@ final class HomeFeatureTests: XCTestCase {
         XCTAssertEqual(app.homeStore.loadState, .loaded)
         XCTAssertEqual(app.homeStore.model?.revision, 41)
         XCTAssertEqual(app.homeStore.model?.listings.first?.title, "Canon AE-1 film camera")
+    }
+
+    func testAbsentClerkSessionPreservesTheSignedOutHomeState() async {
+        let session = makeHomeURLSession { _ in
+            XCTFail("An absent Clerk session must stop before Home transport.")
+            throw HomeRepositoryError.operationUnavailable
+        }
+        let app = SnapListApp(
+            configuration: .standard,
+            tokenProvider: ClerkBearerTokenProvider(
+                session: TestClerkSessionToken(token: nil)
+            ),
+            apiOrigin: URL(string: "http://127.0.0.1:3001")!,
+            urlSession: session
+        )
+
+        await app.homeStore.load()
+
+        XCTAssertNil(app.homeStore.model)
+        XCTAssertEqual(app.homeStore.loadState, .failed(.operationUnavailable))
+        XCTAssertEqual(app.homeStore.freshness, .unavailable)
     }
 
     func testAuthenticatedHomeDecodesActionableBuyerConversationDestination() async throws {
@@ -197,11 +218,11 @@ final class HomeFeatureTests: XCTestCase {
         }
         let app = SnapListApp(
             configuration: .standard,
-            homeAuthentication: ClerkHomeAuthentication(
+            tokenProvider: ClerkBearerTokenProvider(
                 session: TestClerkSessionToken(token: "signed-jwt")
             ),
-            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
-            homeURLSession: session
+            apiOrigin: URL(string: "http://127.0.0.1:3001")!,
+            urlSession: session
         )
 
         await app.homeStore.load()
@@ -259,11 +280,11 @@ final class HomeFeatureTests: XCTestCase {
         }
         let app = SnapListApp(
             configuration: .standard,
-            homeAuthentication: ClerkHomeAuthentication(
+            tokenProvider: ClerkBearerTokenProvider(
                 session: TestClerkSessionToken(token: "signed-jwt")
             ),
-            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
-            homeURLSession: session
+            apiOrigin: URL(string: "http://127.0.0.1:3001")!,
+            urlSession: session
         )
 
         await app.homeStore.load()
@@ -298,11 +319,11 @@ final class HomeFeatureTests: XCTestCase {
         }
         let app = SnapListApp(
             configuration: .standard,
-            homeAuthentication: ClerkHomeAuthentication(
+            tokenProvider: ClerkBearerTokenProvider(
                 session: TestClerkSessionToken(token: "signed-jwt")
             ),
-            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
-            homeURLSession: session
+            apiOrigin: URL(string: "http://127.0.0.1:3001")!,
+            urlSession: session
         )
 
         await app.homeStore.load()
@@ -326,11 +347,11 @@ final class HomeFeatureTests: XCTestCase {
         }
         let app = SnapListApp(
             configuration: .standard,
-            homeAuthentication: ClerkHomeAuthentication(
+            tokenProvider: ClerkBearerTokenProvider(
                 session: TestClerkSessionToken(token: "signed-jwt")
             ),
-            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
-            homeURLSession: session
+            apiOrigin: URL(string: "http://127.0.0.1:3001")!,
+            urlSession: session
         )
 
         await app.homeStore.load()
@@ -397,11 +418,11 @@ final class HomeFeatureTests: XCTestCase {
         }
         let app = SnapListApp(
             configuration: .standard,
-            homeAuthentication: ClerkHomeAuthentication(
+            tokenProvider: ClerkBearerTokenProvider(
                 session: TestClerkSessionToken(token: "signed-jwt")
             ),
-            homeAPIOrigin: nil,
-            homeURLSession: session
+            apiOrigin: nil,
+            urlSession: session
         )
 
         await app.homeStore.load()

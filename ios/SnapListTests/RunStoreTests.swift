@@ -2,6 +2,18 @@ import Foundation
 import XCTest
 @testable import SnapList
 
+private struct RunStoreBearerTokenProvider: BearerTokenProviding {
+    let resolve: @Sendable () async throws -> String
+
+    init(resolve: @escaping @Sendable () async throws -> String) {
+        self.resolve = resolve
+    }
+
+    func bearerToken() async throws -> String {
+        try await resolve()
+    }
+}
+
 @MainActor
 final class RunStoreTests: XCTestCase {
     func testLoaderUsesFreshBearerForTheExactRun() async {
@@ -10,7 +22,9 @@ final class RunStoreTests: XCTestCase {
         let tokens = FreshTokenSource(tokens: ["fresh-token-1"])
         let store = RunDetailStore(
             service: service,
-            bearerToken: { try await tokens.next() }
+            tokenProvider: RunStoreBearerTokenProvider {
+                try await tokens.next()
+            }
         )
 
         await store.load(runID: run.id)
@@ -25,7 +39,7 @@ final class RunStoreTests: XCTestCase {
         let service = RecordingRunService(results: [.success(Self.makeRun())])
         let store = RunDetailStore(
             service: service,
-            bearerToken: { "fresh-token" }
+            tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
         )
 
         await store.load(runID: requestedID)
@@ -44,7 +58,9 @@ final class RunStoreTests: XCTestCase {
         let tokens = FreshTokenSource(tokens: ["fresh-token-1", "fresh-token-2"])
         let store = RunDetailStore(
             service: service,
-            bearerToken: { try await tokens.next() }
+            tokenProvider: RunStoreBearerTokenProvider {
+                try await tokens.next()
+            }
         )
 
         await store.load(runID: initial.id)
@@ -69,7 +85,7 @@ final class RunStoreTests: XCTestCase {
         let service = OverlappingRunService(first: first, second: second)
         let store = RunDetailStore(
             service: service,
-            bearerToken: { "fresh-token" }
+            tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
         )
 
         let firstLoad = Task { await store.load(runID: first.id) }

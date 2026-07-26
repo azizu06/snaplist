@@ -55,19 +55,23 @@ describe("auth proxy", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
-  it("keeps only the self-authenticating Home route outside cookie middleware", () => {
-    expect(doesProxyMatch("/v1/home")).toBe(false);
-    expect(doesProxyMatch("/v1/home/")).toBe(false);
-    expect(doesProxyMatch("/v1/home-other")).toBe(true);
+  it("keeps the native bearer surface outside cookie middleware", () => {
+    for (const pathname of [
+      "/v1",
+      "/v1/home",
+      "/v1/items/runs",
+      "/v1/runs/33333333-3333-4333-8333-333333333333",
+      "/v1/ebay/oauth/sessions",
+    ]) {
+      expect(doesProxyMatch(pathname)).toBe(false);
+    }
+
+    expect(doesProxyMatch("/v1x")).toBe(true);
+    expect(doesProxyMatch("/v10/home")).toBe(true);
     expect(doesProxyMatch("/dashboard")).toBe(true);
   });
 
   it("lets only the exact eBay OAuth callback bypass cookie authentication", async () => {
-    expect(doesProxyMatch("/v1/ebay/oauth/callback")).toBe(true);
-    expect(doesProxyMatch("/v1/ebay/oauth/sessions")).toBe(true);
-    expect(doesProxyMatch("/v1/ebay/oauth/callback/")).toBe(true);
-    expect(doesProxyMatch("/v1/ebay/oauth/callback/extra")).toBe(true);
-
     const callbackResponse = await proxy(
       new NextRequest("https://snaplist.test/v1/ebay/oauth/callback"),
       {} as NextFetchEvent,
@@ -105,13 +109,7 @@ describe("auth proxy", () => {
     );
   });
 
-  it("lets the exact native item pricing route own bearer authentication without changing web login", async () => {
-    const itemId = "22222222-2222-4222-8222-222222222222";
-
-    expect(doesProxyMatch(`/v1/items/${itemId}/pricing`)).toBe(false);
-    expect(doesProxyMatch(`/v1/items/${itemId}/pricing/`)).toBe(false);
-    expect(doesProxyMatch(`/v1/items/${itemId}/pricing/history`)).toBe(true);
-
+  it("still redirects an unauthenticated web caller to login", async () => {
     const dashboardResponse = await proxy(
       new NextRequest("https://snaplist.test/dashboard"),
       {} as NextFetchEvent,

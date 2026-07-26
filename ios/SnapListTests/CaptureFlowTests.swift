@@ -475,7 +475,7 @@ final class CaptureFlowTests: XCTestCase {
                 ),
                 attemptStore: InMemoryItemRunSubmissionAttemptStore(),
                 draftStore: store,
-                bearerToken: { "clerk-session-token" },
+                tokenProvider: CaptureFlowBearerTokenProvider(),
                 readData: intake.read,
                 newIdempotencyKey: { UUID() }
             )
@@ -4396,6 +4396,12 @@ final class CaptureFlowTests: XCTestCase {
             rightColor.setFill()
             context.fill(CGRect(x: 200, y: 0, width: 200, height: 200))
         })
+    }
+}
+
+private struct CaptureFlowBearerTokenProvider: BearerTokenProviding {
+    func bearerToken() async throws -> String {
+        "clerk-session-token"
     }
 }
 
