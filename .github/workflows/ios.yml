@@ -73,9 +73,17 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         run: zsh ios/Scripts/test-contract.test.sh
 
+      - name: Validate deep-link configuration
+        if: github.event_name != 'workflow_dispatch'
+        run: zsh ios/Scripts/deep-link-contract.test.sh
+
       - name: Validate trusted reusable iOS test script
         if: github.event_name == 'workflow_dispatch'
         run: zsh workflow-tooling/ios/Scripts/test-contract.test.sh
+
+      - name: Validate exact-head deep-link configuration
+        if: github.event_name == 'workflow_dispatch'
+        run: zsh test-target/ios/Scripts/deep-link-contract.test.sh
 
       - name: Build app and run unit and UI smoke tests
         if: github.event_name != 'workflow_dispatch'

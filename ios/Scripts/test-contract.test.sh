@@ -7,9 +7,6 @@ script_directory=${0:A:h}
 test_script=${script_directory}/test.sh
 workflow_file=${script_directory:h:h}/.github/workflows/ios.yml
 workflow_contract_parser=${script_directory}/validate-workflow-concurrency.rb
-app_navigation_file=${script_directory:h}/SnapList/Navigation/AppNavigation.swift
-entitlements_file=${script_directory:h}/SnapList/SnapList.entitlements
-info_plist_file=${script_directory:h}/SnapList/Info.plist
 temporary_parent=${TMPDIR:-/tmp}
 temporary_directory=$(mktemp -d "${temporary_parent%/}/snaplist-ios-test-contract.XXXXXX")
 fake_bin=${temporary_directory}/bin
@@ -100,19 +97,6 @@ assert_focused_selector_uses_the_target_repository() {
 
   [[ $(grep -Fxc -- "-only-testing:${selector}" "$arguments_file") -eq 1 ]] &&
     [[ $(<"$working_directory_file") == "$target_repository" ]]
-}
-
-assert_run_deep_link_and_entitlement_contract() {
-  ! grep -Fq 'case ("https"' "$app_navigation_file" &&
-    ! grep -Fq 'applinks:' "$app_navigation_file" &&
-    ! grep -Fq 'snaplist.dev' "$app_navigation_file" &&
-    /usr/bin/plutil -convert json -o - "$entitlements_file" |
-      ruby -rjson -e '
-        domains = JSON.parse(STDIN.read).fetch("com.apple.developer.associated-domains")
-        expected = ["webcredentials:witty-walrus-27.clerk.accounts.dev"]
-        abort "associated domains must preserve only Clerk webcredentials" unless domains == expected
-      ' &&
-    [[ $(/usr/bin/plutil -extract CFBundleURLTypes.0.CFBundleURLSchemes.0 raw "$info_plist_file") == "snaplist" ]]
 }
 
 assert_malformed_selectors_fail_before_xcodebuild() {
@@ -339,7 +323,6 @@ failures=0
 for contract_case in \
   assert_default_runs_the_full_suite \
   assert_focused_selector_uses_the_target_repository \
-  assert_run_deep_link_and_entitlement_contract \
   assert_malformed_selectors_fail_before_xcodebuild \
   assert_manual_dispatch_cannot_cancel_automatic_runs \
   assert_stale_workflow_text_cannot_mask_broken_active_contract \

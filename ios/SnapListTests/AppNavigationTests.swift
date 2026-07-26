@@ -150,8 +150,10 @@ final class AppNavigationTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testRunDeepLinksAcceptOnlyTheCustomSchemeAndRejectWebOrMalformedURLs() {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000031")!
+        let router = AppRouter(initialTab: .listings, initialRoute: .account)
 
         XCTAssertEqual(
             RunDeepLink(
@@ -171,6 +173,10 @@ final class AppNavigationTests: XCTestCase {
         ]
         for rawURL in rejected {
             XCTAssertNil(RunDeepLink(url: URL(string: rawURL)!))
+            XCTAssertFalse(router.open(URL(string: rawURL)!))
+            XCTAssertEqual(router.selectedTab, .listings)
+            XCTAssertEqual(router.pathBinding(for: .listings).wrappedValue, [.account])
+            XCTAssertTrue(router.pathBinding(for: .home).wrappedValue.isEmpty)
         }
     }
 }
