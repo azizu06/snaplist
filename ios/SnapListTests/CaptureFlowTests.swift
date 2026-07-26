@@ -669,8 +669,12 @@ final class CaptureFlowTests: XCTestCase {
                 hand back \(result.replacementPhoto.id) as an applied replacement.
                 """
             )
+            return
         } catch CaptureDraftStoreError.invalidManifest {
-            // The refusal the seller reads as "Photo could not be replaced."
+            // The refusal Photo Review turns into its replacement failure recovery.
+        } catch {
+            XCTFail("Replace must refuse with invalidManifest, not \(error).")
+            return
         }
 
         let after = try await store.loadPhotos()
