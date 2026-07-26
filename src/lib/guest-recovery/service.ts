@@ -257,6 +257,30 @@ export class GuestClaimIdempotencyConflictError extends Error {
   }
 }
 
+/**
+ * The target account's one included item is already settled. Permanent: that
+ * credit never returns. Raised by the advisory preflight at claim start and by
+ * the authoritative check at completion (issue #504).
+ */
+export class GuestClaimAllowanceSpentError extends Error {
+  constructor() {
+    super("The account's included item credit is already spent on another run.");
+    this.name = "GuestClaimAllowanceSpentError";
+  }
+}
+
+/**
+ * The target account has a run in flight holding its included item. Transient:
+ * that reservation may still be restored, which frees the credit, so this must
+ * never be presented as permanent.
+ */
+export class GuestClaimAllowanceInFlightError extends Error {
+  constructor() {
+    super("The account's included item credit is reserved by a run in flight.");
+    this.name = "GuestClaimAllowanceInFlightError";
+  }
+}
+
 const targetUserIdSchema = z
   .string()
   .min(1)
@@ -351,7 +375,7 @@ export async function claimGuestRecovery(
         verifiedObjects,
       }),
     );
-  } catch {
+  } catch (error) {
     // Requeue this exact lease first. The database protects the winning lease,
     // while an obsolete writer can recreate only its own namespace.
     const cleanupQueued = await queueExactCopyCleanup();
@@ -368,6 +392,16 @@ export async function claimGuestRecovery(
     );
     if (resolved.outcome === "claimed" || resolved.outcome === "expired") {
       return requireQuiescedExpiry(resolved, cleanupQueued);
+    }
+    // Cleanup and release come first either way. Only the reported cause
+    // changes: a late allowance denial is a decided outcome, not a copy that
+    // might work on retry, and calling it one would send the seller back into a
+    // claim that can never complete.
+    if (
+      error instanceof GuestClaimAllowanceSpentError
+      || error instanceof GuestClaimAllowanceInFlightError
+    ) {
+      throw error;
     }
     throw new GuestClaimStorageError();
   }

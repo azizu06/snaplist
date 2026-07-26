@@ -15,6 +15,13 @@ const quiescenceMigration = readFileSync(
   ),
   "utf8",
 );
+const allowancePreflightMigration = readFileSync(
+  new URL(
+    "../../../supabase/migrations/20260726044500_guest_claim_allowance_preflight.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 function functionBody(name: string, source = migration): string {
   const match = source.match(new RegExp(
@@ -159,6 +166,118 @@ describe("guest claim-or-expire database contract", () => {
     expect(migration).toMatch(/grant execute on function public\.(?:register|begin|complete|release|resolve|expire|queue)_guest[^;]+to service_role/gi);
     expect(migration).not.toMatch(/grant execute on function public\.(?:register|begin|complete|release|resolve|expire|queue)_guest[^;]+to (?:anon|authenticated)/i);
     expect(migration).toMatch(/revoke all on table private\.guest_draft_recoveries/i);
+  });
+
+  describe("account allowance preflight at claim start (#504)", () => {
+    const preflight = functionBody(
+      "public.begin_guest_draft_claim",
+      allowancePreflightMigration,
+    );
+    const authoritative = functionBody(
+      "public.complete_guest_draft_claim",
+      allowancePreflightMigration,
+    );
+
+    it("redefines the shipped functions forward instead of editing them in place", () => {
+      expect(migration).not.toMatch(/SL00[12]/);
+      expect(allowancePreflightMigration).toMatch(
+        /create or replace function public\.begin_guest_draft_claim/i,
+      );
+      expect(allowancePreflightMigration).toMatch(
+        /create or replace function public\.complete_guest_draft_claim/i,
+      );
+      expect(allowancePreflightMigration).toMatch(
+        /grant execute on function public\.begin_guest_draft_claim\(\s*uuid, text, text, text, uuid, integer\s*\) to service_role/i,
+      );
+      expect(allowancePreflightMigration).toMatch(
+        /grant execute on function public\.complete_guest_draft_claim\(\s*uuid, text, text, uuid, jsonb\s*\) to service_role/i,
+      );
+    });
+
+    it("reads the target allowance at claim start without taking a credit lock", () => {
+      expect(preflight).toMatch(
+        /period\.user_id = p_target_user_id[\s\S]+period\.period_key = 'included-first-run'/i,
+      );
+      expect(preflight).toMatch(
+        /private\.enforce_guest_claim_account_allowance\(v_target_period_id\)/i,
+      );
+      // Match the lock call, not the prose: the comment beside the preflight
+      // names both locks in order to say it takes neither.
+      expect(preflight).not.toMatch(/hashtextextended\(\s*'ai-item-credit:/i);
+      expect(preflight).not.toMatch(
+        /hashtextextended\(\s*'snaplist:pipeline-retention/i,
+      );
+      // No row lock follows the allowance read; the only `for update` in this
+      // function is the recovery row, taken well before it.
+      expect(preflight).not.toMatch(
+        /ai_item_allowance_periods[\s\S]*?\n\s*for update/i,
+      );
+      expect(preflight.match(/pg_advisory_xact_lock/g)).toHaveLength(2);
+    });
+
+    it("denies before the idempotency bind and defers to terminal replay", () => {
+      const preflightAt = preflight.search(
+        /select period\.id into v_target_period_id/i,
+      );
+      const bindAt = preflight.search(
+        /update private\.guest_draft_recoveries recovery\s*\n\s*set claim_idempotency_user_id/i,
+      );
+      const rebindConflictAt = preflight.search(
+        /message = 'Guest claim Idempotency-Key is already bound'/i,
+      );
+      expect(rebindConflictAt).toBeGreaterThan(-1);
+      expect(preflightAt).toBeGreaterThan(rebindConflictAt);
+      expect(bindAt).toBeGreaterThan(preflightAt);
+      expect(preflight).toMatch(
+        /v_recovery\.state not in \('claimed', 'expired'\)\s*\n\s*and statement_timestamp\(\) < v_recovery\.expires_at then\s*\n\s*select period\.id into v_target_period_id/i,
+      );
+    });
+
+    it("keeps the authoritative check where it was, under the same locks", () => {
+      expect(authoritative).toMatch(
+        /pg_advisory_xact_lock\(\s*\n?\s*hashtextextended\('ai-item-credit:' \|\| v_lock_user, 0\)/i,
+      );
+      expect(authoritative).toMatch(
+        /period\.user_id = p_target_user_id[\s\S]+period_key = 'included-first-run'\s*\n\s*for update/i,
+      );
+      expect(authoritative).toMatch(
+        /private\.enforce_guest_claim_account_allowance\(v_target_period\.id\)/i,
+      );
+      expect(authoritative).toMatch(/errcode = 'P0002'/i);
+    });
+
+    it("gives both sites one vocabulary that separates permanent from transient", () => {
+      const shared = functionBody(
+        "private.enforce_guest_claim_account_allowance",
+        allowancePreflightMigration,
+      );
+      expect(shared).toMatch(
+        /state = 'settled'[\s\S]+state = 'reserved'[\s\S]+state in \('reserved', 'settled'\)/i,
+      );
+      expect(shared).toMatch(
+        /errcode = 'SL001',\s*\n\s*message = 'Account included credit is already spent on another run'/i,
+      );
+      expect(shared).toMatch(
+        /errcode = 'SL002',\s*\n\s*message = 'Account included credit is reserved by a run in flight'/i,
+      );
+      expect(preflight).not.toMatch(/SL00[12]/);
+      expect(authoritative).not.toMatch(/SL00[12]/);
+      expect(allowancePreflightMigration).toMatch(
+        /revoke all on function private\.enforce_guest_claim_account_allowance\(uuid\)\s*\n\s*from public, anon, authenticated, service_role/i,
+      );
+    });
+
+    it("leaves the recovery state machine and the credit remap alone", () => {
+      expect(allowancePreflightMigration).not.toMatch(
+        /create table|alter table|drop function/i,
+      );
+      expect(allowancePreflightMigration).not.toMatch(
+        /state in \('claimable', 'copying', 'claimed', 'expired'\)/i,
+      );
+      expect(authoritative).toMatch(
+        /update public\.ai_item_credit_reservations[\s\S]+where reservation\.id = v_recovery\.reservation_id[\s\S]+state = 'settled'/i,
+      );
+    });
   });
 
   it("upgrades databases that already applied the frozen parent migration", () => {

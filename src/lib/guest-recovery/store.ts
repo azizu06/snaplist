@@ -4,6 +4,8 @@ import {
   guestClaimTerminalOutcomeSchema,
   guestClaimVerifiedObjectSchema,
   guestRecoveryOutcomeSchema,
+  GuestClaimAllowanceInFlightError,
+  GuestClaimAllowanceSpentError,
   GuestClaimIdempotencyConflictError,
   MAX_GUEST_RECOVERY_PHOTOS,
   type GuestClaimStore,
@@ -28,11 +30,28 @@ export interface GuestClaimRpcClient {
   ): PromiseLike<GuestClaimRpcResult>;
 }
 
+// The database raises one message per outcome, so the seam that turns them into
+// typed errors is the only place a caller learns which denial it hit. Both
+// allowance messages arrive from claim start and from completion (issue #504).
+const guestClaimErrors = new Map<string, () => Error>([
+  [
+    "Guest claim Idempotency-Key is already bound",
+    () => new GuestClaimIdempotencyConflictError(),
+  ],
+  [
+    "Account included credit is already spent on another run",
+    () => new GuestClaimAllowanceSpentError(),
+  ],
+  [
+    "Account included credit is reserved by a run in flight",
+    () => new GuestClaimAllowanceInFlightError(),
+  ],
+]);
+
 function rpcData(operation: string, result: GuestClaimRpcResult): unknown {
   if (result.error) {
-    if (result.error.message === "Guest claim Idempotency-Key is already bound") {
-      throw new GuestClaimIdempotencyConflictError();
-    }
+    const known = guestClaimErrors.get(result.error.message);
+    if (known) throw known();
     throw new Error(`Guest recovery ${operation} failed: ${result.error.message}`);
   }
   return result.data;
