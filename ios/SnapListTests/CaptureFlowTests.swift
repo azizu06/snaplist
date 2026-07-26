@@ -504,7 +504,10 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertFalse(fileManager.fileExists(atPath: staged.photoURL.path))
     }
 
-    func testASecondStartListingDuringAnOpenSubmissionNeverSubmitsAgain() async throws {
+    /// The lock, not the submitter: this proves the transaction returns early when a
+    /// commit is already held and does not release a lock it never took. The genuine
+    /// double-submit case is `ItemRunSubmissionTests.testStartListingTappedTwiceSubmitsOnce`.
+    func testStartListingKeepsTheHeldLockAndDoesNothingWhileACommitIsOpen() async throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(
             "snaplist-submission-lock-\(UUID().uuidString)",

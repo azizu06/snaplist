@@ -30,9 +30,11 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         guard fileManager.fileExists(atPath: attemptURL.path) else {
             return nil
         }
-        guard let data = try? Data(contentsOf: attemptURL) else {
-            return discardUnusableAttempt()
-        }
+        // A record that exists but cannot be read is not the same as no record. Reporting
+        // it as absent mints a second key for photos the first submission may already have
+        // committed, which is the duplicate run this file exists to prevent. Fail closed
+        // and let the caller stop before the network instead.
+        let data = try Data(contentsOf: attemptURL)
         // Read the version before the body. Decoding the whole record first cannot tell
         // a renamed or removed field from genuine corruption, so every future schema
         // change would look like a broken file.
@@ -50,14 +52,16 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         return stored
     }
 
-    /// A record this build cannot use is removed rather than kept.
+    /// A record that was read but cannot be interpreted is removed rather than kept.
     ///
-    /// The tradeoff is deliberate. Keeping it would refuse every later submission,
-    /// because nothing else can clear it, so one unusable file would end the seller's
-    /// ability to list anything until they reinstalled. Discarding it risks a second run
-    /// only if a submission was genuinely unresolved at that moment, which needs a
-    /// record that survived an atomic write and then became unreadable. A permanently
-    /// dead Start listing is the worse of the two.
+    /// This is only for a file whose bytes are available and whose contents this build
+    /// cannot make sense of, either corrupt or written by another schema version. Such a
+    /// record guards nothing, so keeping it would leave an unusable file behind on every
+    /// later load for no benefit. The next submission overwrites it either way.
+    ///
+    /// A file that could not be read at all is deliberately not routed here. That case
+    /// is indistinguishable from a live attempt, and treating it as absent is what buys
+    /// the seller a second run.
     private func discardUnusableAttempt() -> ItemRunSubmissionAttempt? {
         try? fileManager.removeItem(at: attemptURL)
         return nil

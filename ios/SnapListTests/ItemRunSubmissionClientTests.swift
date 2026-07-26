@@ -29,14 +29,12 @@ final class ItemRunSubmissionClientTests: XCTestCase {
             request.value(forHTTPHeaderField: "Content-Type"),
             "multipart/form-data; boundary=snaplist-boundary"
         )
-        // Prove a bearer is attached and shaped correctly without ever recording it.
-        let authorization = try XCTUnwrap(
-            request.value(forHTTPHeaderField: "Authorization")
-        )
-        XCTAssertTrue(authorization.hasPrefix("Bearer "))
+        // The token here is a fixture literal rather than a credential, so the header is
+        // compared whole. A prefix and a length would also pass for any other token of
+        // the same size, which is not what the criterion asks for.
         XCTAssertEqual(
-            authorization.count,
-            "Bearer ".count + "fresh-opaque-clerk-token".count
+            request.value(forHTTPHeaderField: "Authorization"),
+            "Bearer fresh-opaque-clerk-token"
         )
         // URLSession hands the body to the protocol as a stream, so this is the only
         // place a test can prove the parts actually left the client.
@@ -134,22 +132,30 @@ final class ItemRunSubmissionClientTests: XCTestCase {
         }
     }
 
+    /// Offline and cancellation are both named by the criterion, and both have to leave
+    /// the submission retryable rather than looking like the server refused it.
     func testTransportFailureIsAmbiguousRatherThanARejection() async {
-        let session = makeSession { _ in
-            throw URLError(.notConnectedToInternet)
+        for failure in [
+            URLError(.notConnectedToInternet),
+            URLError(.cancelled),
+            URLError(.timedOut)
+        ] {
+            let session = makeSession { _ in
+                throw failure
+            }
+            let client = ItemRunSubmissionClient(
+                baseURL: URL(string: "https://api.snaplist.dev")!,
+                session: session,
+                boundary: { "snaplist-boundary" }
+            )
+
+            let outcome = await client.submit(
+                Self.payload(photoCount: 2),
+                bearerToken: "fresh-opaque-clerk-token"
+            )
+
+            XCTAssertEqual(outcome, .ambiguous, "\(failure.code) was not retryable")
         }
-        let client = ItemRunSubmissionClient(
-            baseURL: URL(string: "https://api.snaplist.dev")!,
-            session: session,
-            boundary: { "snaplist-boundary" }
-        )
-
-        let outcome = await client.submit(
-            Self.payload(photoCount: 2),
-            bearerToken: "fresh-opaque-clerk-token"
-        )
-
-        XCTAssertEqual(outcome, .ambiguous)
     }
 
     // MARK: Helpers

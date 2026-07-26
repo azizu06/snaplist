@@ -193,11 +193,18 @@ final class ItemRunSubmissionTests: XCTestCase {
         let submitter = RecordingItemRunSubmitter(
             outcomes: [.ambiguous, .replayed(Self.receipt(for: intake))]
         )
+        // Each call hands back a different token, and the double records only how long
+        // each one was. Distinct lengths are enough to tell a freshly fetched bearer from
+        // the first one being replayed, without a test ever holding a token value.
+        let tokens = TokenSequence(
+            tokens: ["clerk-session-token", "clerk-session-token-renewed"]
+        )
         let coordinator = makeCoordinator(
             intake: intake,
             attemptStore: attemptStore,
             submitter: submitter,
-            keys: [Self.firstKey, Self.secondKey]
+            keys: [Self.firstKey, Self.secondKey],
+            bearerToken: { tokens.next() }
         )
 
         let first = await coordinator.submit(photos: intake.photos)
@@ -214,6 +221,11 @@ final class ItemRunSubmissionTests: XCTestCase {
         // attempt has to ask for one rather than replay whatever the first one got.
         let tokenLengths = await submitter.bearerTokenLengths
         XCTAssertEqual(tokenLengths.count, 2)
+        XCTAssertNotEqual(
+            tokenLengths[0],
+            tokenLengths[1],
+            "The retry sent the first attempt's bearer instead of a fresh one"
+        )
         guard case .accepted(let acceptance) = second else {
             return XCTFail("Expected the exact retry to resolve to one canonical run.")
         }
@@ -639,6 +651,63 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
     }
 
+    /// A record whose bytes cannot be read is not a record that is absent. Reporting it
+    /// as absent would mint a second key for photos the first submission may already have
+    /// committed, and the seller would pay for a second run of one item.
+    func testAnAttemptThatCannotBeReadIsNotReportedAsAbsent() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        // The record exists, so it may well be a live attempt, but its bytes are not
+        // readable.
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("attempt.json"),
+            withIntermediateDirectories: true
+        )
+
+        let store = LocalItemRunSubmissionAttemptStore(rootDirectory: root)
+
+        do {
+            let restored = try await store.loadAttempt()
+            XCTFail("Expected an unreadable record to fail closed, got \(String(describing: restored))")
+        } catch {
+            // Failing closed is the point; the caller decides what to do about it.
+        }
+        // Unlike a record that was read and could not be interpreted, this one survives,
+        // because it may still be the only copy of a live key.
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("attempt.json").path
+            )
+        )
+    }
+
+    /// The coordinator's half of the same rule: a store that cannot answer stops the
+    /// submission instead of taking the "no stored attempt" branch.
+    func testAStoreThatCannotBeReadStopsBeforeTheNetwork() async {
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let submitter = RecordingItemRunSubmitter(outcomes: [.created(Self.receipt())])
+        let coordinator = ItemRunSubmissionCoordinator(
+            submitter: submitter,
+            attemptStore: UnreadableItemRunSubmissionAttemptStore(),
+            draftStore: draftStore,
+            bearerToken: { "clerk-session-token" },
+            readData: intake.read,
+            newIdempotencyKey: { Self.firstKey }
+        )
+
+        let outcome = await coordinator.submit(photos: intake.photos)
+
+        XCTAssertEqual(outcome, .retained(.attemptNotPersisted))
+        // Treating the unreadable store as empty would mint a fresh key here and send it,
+        // which is the second run the persisted key exists to prevent.
+        let payloads = await submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+        let remaining = await draftStore.photos
+        XCTAssertEqual(remaining, intake.photos)
+    }
+
     func testAnAttemptWrittenBeforeVersioningIsDiscardedRatherThanBlocking() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
@@ -986,6 +1055,24 @@ struct SubmissionIntakeFixture: Sendable {
     }
 }
 
+/// Bearer tokens that differ per call, so a replayed one is visible in the recorded
+/// lengths without any test holding a token value.
+final class TokenSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tokens: [String]
+
+    init(tokens: [String]) {
+        self.tokens = tokens
+    }
+
+    func next() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !tokens.isEmpty else { return "clerk-session-token" }
+        return tokens.count == 1 ? tokens[0] : tokens.removeFirst()
+    }
+}
+
 /// Deterministic idempotency keys so a retry can be told from a fresh submission.
 final class KeySequence: @unchecked Sendable {
     private let lock = NSLock()
@@ -1005,6 +1092,27 @@ final class KeySequence: @unchecked Sendable {
 
 enum SubmissionAttemptStoreError: Error {
     case unavailable
+}
+
+/// A durable store that cannot answer a read, as opposed to one that is empty.
+///
+/// Writing still works. A store that failed both would reach the same refusal through
+/// the save path, which would let a coordinator that ignores the read failure pass.
+actor UnreadableItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
+    private(set) var saved: ItemRunSubmissionAttempt?
+
+    func loadAttempt() async throws -> ItemRunSubmissionAttempt? {
+        throw SubmissionAttemptStoreError.unavailable
+    }
+
+    func saveAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {
+        saved = attempt
+    }
+
+    func clearAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {
+        guard saved == attempt else { return }
+        saved = nil
+    }
 }
 
 actor InMemoryItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {

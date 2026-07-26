@@ -151,7 +151,16 @@ final class ItemRunSubmissionCoordinator {
         // A stored attempt standing for these exact photos is the same logical
         // submission, so it keeps its key. Retrying under a new key would ask the server
         // to create a second run and spend a second AI-item credit for one item.
-        let storedAttempt = try? await attemptStore.loadAttempt()
+        //
+        // A store that cannot answer is not a store with nothing in it. Swallowing the
+        // failure here would take the same branch as "no record" and mint exactly the
+        // second key this whole path exists to avoid, so it stops before the network.
+        let storedAttempt: ItemRunSubmissionAttempt?
+        do {
+            storedAttempt = try await attemptStore.loadAttempt()
+        } catch {
+            return .retained(.attemptNotPersisted)
+        }
         let attempt: ItemRunSubmissionAttempt
         if let storedAttempt, storedAttempt.standsFor(snapshot) {
             attempt = storedAttempt
