@@ -22,6 +22,7 @@ interface AssertionFixture {
   assertionObject: string;
   challenge: string;
   clientData: string;
+  doubleHashedAssertionObject: string;
   environment: "production";
   expected: {
     bundleVersion: string;
@@ -121,6 +122,27 @@ describe("Apple App Attest cryptographic verifier", () => {
       requestHash: assertionFixture.requestHash,
       validationCategory: assertionFixture.expected.validationCategory,
     });
+  });
+
+  it("rejects a fixture signed over a prehashed assertion digest", async () => {
+    const verifier = createAppleAppAttestVerifier({
+      appleRootCertificatePem: fixture.appleRootCertificatePem,
+    });
+
+    await expect(
+      verifier.verifyAssertion({
+        appId: assertionFixture.appId,
+        assertionObject: assertionFixture.doubleHashedAssertionObject,
+        attestedBundleVersion: assertionFixture.expected.bundleVersion,
+        attestedValidationCategory: assertionFixture.expected.validationCategory,
+        challenge: Buffer.from(assertionFixture.challenge, "base64url"),
+        clientData: Buffer.from(assertionFixture.clientData, "base64"),
+        environment: assertionFixture.environment,
+        keyId: assertionFixture.keyId,
+        now: new Date("2026-07-20T20:00:00.000Z"),
+        publicKey: assertionFixture.publicKey,
+      }),
+    ).rejects.toThrow("Invalid App Attest assertion signature");
   });
 
   it("validates an assertion from supported OS versions without extensions", async () => {

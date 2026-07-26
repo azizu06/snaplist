@@ -293,6 +293,9 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
 }
 
 actor AppAttestClient {
+    private static let persistedKeyRestorationRequestBody =
+        Data(#"{"operation":"restore-app-attest-key"}"#.utf8)
+
     private let appID: String
     private let environment: AppAttestEnvironment
     private let keyStore: any AppAttestKeyIDStoring
@@ -317,7 +320,10 @@ actor AppAttestClient {
         guard service.isSupported else { return .unavailable(.unsupportedDevice) }
         do {
             if let keyID = try keyStore.load() {
-                return .verified(.init(counter: 0, environment: environment, keyID: keyID, kind: .attestation))
+                return await verifyAssertion(
+                    keyID: keyID,
+                    requestBody: Self.persistedKeyRestorationRequestBody
+                )
             }
             let challenge = try await server.issueChallenge(kind: .attestation, keyID: nil)
             let keyID = try await service.generateKey()
@@ -356,6 +362,13 @@ actor AppAttestClient {
             return .invalid(.keyPersistenceFailed)
         }
 
+        return await verifyAssertion(keyID: keyID, requestBody: requestBody)
+    }
+
+    private func verifyAssertion(
+        keyID: String,
+        requestBody: Data
+    ) async -> AppAttestTruth {
         do {
             let challenge = try await server.issueChallenge(kind: .assertion, keyID: keyID)
             let clientData = try assertionClientData(

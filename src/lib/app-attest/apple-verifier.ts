@@ -410,13 +410,11 @@ export function createAppleAppAttestVerifier(options: {
         throw new Error("Invalid App Attest assertion counter");
       }
 
-      const nonce = sha256(
-        Buffer.concat([
-          assertion.authenticatorData,
-          sha256(Buffer.from(input.clientData)),
-        ]),
-      );
-      if (!verifySignature("sha256", nonce, input.publicKey, assertion.signature)) {
+      const signedData = Buffer.concat([
+        assertion.authenticatorData,
+        sha256(Buffer.from(input.clientData)),
+      ]);
+      if (!verifySignature("sha256", signedData, input.publicKey, assertion.signature)) {
         throw new Error("Invalid App Attest assertion signature");
       }
 
