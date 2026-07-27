@@ -214,11 +214,11 @@ test("patched source rejects Docker host capabilities before side effects", () =
     [["./internal/utils/isolation"], "."],
     [
       ["./internal/utils"],
-      "^(TestDockerStartRejects(BeforeDockerAction|DeviceCgroupRulesBeforeDockerAction|SymlinkedRuntimeSocketSourcesBeforeDockerAction|HostBindFromUntrustedWritableParentBeforeDockerAction|HostBindReplacedAfterImageInspectionBeforeContainerCreate)|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
+      "^(TestDockerStartRejects(BeforeDockerAction|DeviceCgroupRulesBeforeDockerAction|SymlinkedRuntimeSocketSourcesBeforeDockerAction|DirectoryContainingRuntimeEndpointBeforeDockerAction|HostBindFromUntrustedWritableParentBeforeDockerAction|HostBindReplacedAfterImageInspectionBeforeContainerCreate)|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
     ],
     [
       ["./internal/db/start"],
-      "^(TestStartDatabase(RejectsUnsafeDerivedConfigBeforeDockerAction|FromBackupRejectsSymlinkedRuntimeSocketBeforeDockerAction|FromBackupAllowsOrdinaryRegularFileBeforeDockerAction|FromBackupReportsStagingCleanupFailure)?|TestRunFromBackupRejectsSymlinkedRuntimeSocketBeforeDockerAction)$",
+      "^(TestStartDatabase(RejectsUnsafeDerivedConfigBeforeDockerAction|FromBackupRejectsSymlinkedRuntimeSocketBeforeDockerAction|FromBackupAllowsOrdinaryRegularFileBeforeDockerAction|FromBackupUsesAbsoluteStagedBind|FromBackupReportsStagingCleanupFailure)?|TestRunFromBackupRejectsSymlinkedRuntimeSocketBeforeDockerAction)$",
     ],
     [
       ["./internal/start"],

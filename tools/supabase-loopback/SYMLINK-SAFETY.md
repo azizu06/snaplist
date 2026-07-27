@@ -24,12 +24,19 @@ effective user. A component writable by group/other is rejected unless it is a
 sticky ancestor whose next child is root/current-user owned; a final bound
 directory is never allowed to be group/other writable. These constraints
 prevent another OS user from replacing the canonical path between checks.
+Every bound directory is also walked recursively at preparation and
+revalidation. Descendant symlinks, protected endpoint names, sockets or other
+special files, untrusted owners, and group/other-writable directories are
+rejected. Because no accepted descendant directory is writable by another OS
+user, that user cannot insert or swap a runtime endpoint after the walk.
 
 The only project-owned path that binds an arbitrary caller-selected file is
 `db start --from-backup`. The public command opens and pins an ordinary regular
 backup before its running-container inspection, then copies once from that held
-handle into a newly created owner-only staging directory and binds the staged
-file. The staging path is removed when database startup returns; a removal
+handle into a newly created owner-only staging directory. The staging parent is
+made canonical and absolute before copying, so Moby parses the resulting mount
+as a host bind rather than a named volume. The staging path is removed when
+database startup returns; a removal
 failure is returned to the caller instead of being hidden. Docker therefore
 never consumes the caller-controlled symlink or its original pathname.
 
@@ -52,7 +59,8 @@ descriptor/handle retention rather than a path-string API.
 ## Cross-platform behavior
 
 Darwin and Linux are the committed artifact platforms. Both accept only trusted
-existing regular-file/directory host sources and named volumes. Other platforms
+existing regular-file/directory host sources and named volumes. A directory
+containing any descendant symlink is intentionally unsupported. Other platforms
 fail closed for host-backed sources. Windows Docker Engine named-pipe mounts
 remain rejected by parsed mount type and exact endpoint classification; no
 Windows artifact is published by this contract. Path normalization follows the

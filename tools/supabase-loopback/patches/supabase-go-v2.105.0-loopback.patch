@@ -112,14 +112,15 @@ index 6f1eeac..fea410f 100644
  		fmt.Fprintln(w, "Starting database...")
 diff --git a/apps/cli-go/internal/db/start/start_isolation_test.go b/apps/cli-go/internal/db/start/start_isolation_test.go
 new file mode 100644
-index 0000000..992157f
+index 0000000..0e408ea
 --- /dev/null
 +++ b/apps/cli-go/internal/db/start/start_isolation_test.go
-@@ -0,0 +1,301 @@
+@@ -0,0 +1,397 @@
 +package start
 +
 +import (
 +	"context"
++	"encoding/json"
 +	"io"
 +	"net/http"
 +	"os"
@@ -127,6 +128,9 @@ index 0000000..992157f
 +	"strings"
 +	"testing"
 +
++	"github.com/docker/cli/cli/compose/loader"
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
 +	"github.com/docker/docker/client"
 +	"github.com/spf13/afero"
 +	"github.com/stretchr/testify/require"
@@ -144,6 +148,54 @@ index 0000000..992157f
 +	containerCreate int
 +	other           int
 +	onVolumeInspect func()
++}
++
++type databaseBindCaptureTransport struct {
++	hostConfig     container.HostConfig
++	backupSource   string
++	backupType     string
++	backupContents []byte
++	captureErr     error
++}
++
++func (transport *databaseBindCaptureTransport) RoundTrip(request *http.Request) (*http.Response, error) {
++	status := http.StatusCreated
++	body := `{}`
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/volumes/"):
++		status = http.StatusNotFound
++		body = `{"message":"not found"}`
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		status = http.StatusOK
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		var requestBody struct {
++			HostConfig container.HostConfig
++		}
++		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
++			return nil, err
++		}
++		transport.hostConfig = requestBody.HostConfig
++		for _, bind := range transport.hostConfig.Binds {
++			parsed, err := loader.ParseVolume(bind)
++			if err != nil {
++				transport.captureErr = err
++				break
++			}
++			if parsed.Target == "/etc/backup.sql" {
++				transport.backupSource = parsed.Source
++				transport.backupType = parsed.Type
++				transport.backupContents, transport.captureErr = os.ReadFile(parsed.Source)
++				break
++			}
++		}
++		status = http.StatusInternalServerError
++		body = `{"message":"stop after capture"}`
++	}
++	return &http.Response{
++		StatusCode: status,
++		Body:       io.NopCloser(strings.NewReader(body)),
++		Header:     make(http.Header),
++	}, nil
 +}
 +
 +func (counter *databaseDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -364,6 +416,50 @@ index 0000000..992157f
 +	require.Zero(t, counter.volumeCreate)
 +	require.Zero(t, counter.containerCreate)
 +	require.Zero(t, counter.other)
++}
++
++func TestStartDatabaseFromBackupUsesAbsoluteStagedBind(t *testing.T) {
++	t.Chdir(t.TempDir())
++	transport := &databaseBindCaptureTransport{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	previousDbID := utils.DbId
++	previousTempDir := utils.TempDir
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	utils.DbId = "supabase_db_snaplist"
++	utils.TempDir = filepath.Join("supabase", ".temp")
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		utils.DbId = previousDbID
++		utils.TempDir = previousTempDir
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	backupPath := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(backupPath, []byte("select 1;"), 0o600))
++
++	err = StartDatabase(
++		context.Background(),
++		backupPath,
++		afero.NewOsFs(),
++		io.Discard,
++	)
++	require.ErrorContains(t, err, "stop after capture")
++
++	require.NoError(t, transport.captureErr)
++	require.NotEmpty(t, transport.backupSource)
++	require.Equal(t, string(mount.TypeBind), transport.backupType)
++	require.True(t, filepath.IsAbs(transport.backupSource))
++	require.Equal(t, "select 1;", string(transport.backupContents))
 +}
 +
 +func TestStartDatabaseFromBackupReportsStagingCleanupFailure(t *testing.T) {
@@ -743,15 +839,16 @@ index 9736fa6..3356205 100644
  	if err != nil {
 diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
 new file mode 100644
-index 0000000..d99a5c2
+index 0000000..c5a72eb
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_isolation_test.go
-@@ -0,0 +1,400 @@
+@@ -0,0 +1,488 @@
 +package utils
 +
 +import (
 +	"context"
 +	"io"
++	"net"
 +	"net/http"
 +	"os"
 +	"path/filepath"
@@ -1091,6 +1188,93 @@ index 0000000..d99a5c2
 +	}
 +}
 +
++func TestDockerStartRejectsDirectoryContainingRuntimeEndpointBeforeDockerAction(t *testing.T) {
++	cases := map[string]func(*testing.T, string){
++		"protected endpoint names": func(t *testing.T, root string) {
++			for index, socketName := range []string{
++				"docker.sock",
++				"containerd.sock",
++				"podman.sock",
++				"crio.sock",
++			} {
++				parent := filepath.Join(root, "nested", string(rune('a'+index)))
++				require.NoError(t, os.MkdirAll(parent, 0o700))
++				require.NoError(t, os.WriteFile(filepath.Join(parent, socketName), []byte("protected"), 0o600))
++			}
++		},
++		"symlink descendant": func(t *testing.T, root string) {
++			target := filepath.Join(t.TempDir(), "ordinary.txt")
++			require.NoError(t, os.WriteFile(target, []byte("ordinary"), 0o600))
++			require.NoError(t, os.Symlink(target, filepath.Join(root, "safe-looking.txt")))
++		},
++		"socket file type": func(t *testing.T, root string) {
++			listener, err := net.Listen("unix", filepath.Join(root, "runtime.endpoint"))
++			require.NoError(t, err)
++			t.Cleanup(func() {
++				require.NoError(t, listener.Close())
++			})
++		},
++	}
++
++	for caseName, setup := range cases {
++		caseName, setup := caseName, setup
++		t.Run(caseName, func(t *testing.T) {
++			root := t.TempDir()
++			if caseName == "socket file type" {
++				var err error
++				root, err = os.MkdirTemp("/tmp", "s526-")
++				require.NoError(t, err)
++				t.Cleanup(func() {
++					require.NoError(t, os.RemoveAll(root))
++				})
++			}
++			setup(t, root)
++
++			forms := map[string]container.HostConfig{
++				"bind": {
++					Binds: []string{root + ":/safe/tree:ro"},
++				},
++				"mount": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: root,
++						Target: "/safe/tree",
++					}},
++				},
++			}
++			for form, hostConfig := range forms {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					transport := &countingRoundTripper{}
++					fakeDocker, err := client.NewClientWithOpts(
++						client.WithHost("http://docker.invalid"),
++						client.WithVersion("1.47"),
++						client.WithHTTPClient(&http.Client{Transport: transport}),
++					)
++					require.NoError(t, err)
++
++					previousDocker := Docker
++					Docker = fakeDocker
++					t.Cleanup(func() {
++						Docker = previousDocker
++						require.NoError(t, fakeDocker.Close())
++					})
++
++					_, err = DockerStart(
++						context.Background(),
++						container.Config{Image: "example.invalid/supabase/test:latest"},
++						hostConfig,
++						network.NetworkingConfig{},
++						"unsafe-directory-test",
++					)
++					require.ErrorContains(t, err, "unsafe Docker container capability")
++					require.Zero(t, transport.calls)
++				})
++			}
++		})
++	}
++}
++
 +func TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction(t *testing.T) {
 +	transport := &countingRoundTripper{}
 +	fakeDocker, err := client.NewClientWithOpts(
@@ -1149,15 +1333,16 @@ index 0000000..d99a5c2
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig.go b/apps/cli-go/internal/utils/isolation/hostconfig.go
 new file mode 100644
-index 0000000..3488ac5
+index 0000000..6403bc9
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig.go
-@@ -0,0 +1,352 @@
+@@ -0,0 +1,397 @@
 +package isolation
 +
 +import (
 +	"fmt"
 +	"io"
++	"io/fs"
 +	"os"
 +	"path/filepath"
 +	"strings"
@@ -1318,10 +1503,18 @@ index 0000000..3488ac5
 +	if _, err := prepared.source.file.Seek(0, io.SeekStart); err != nil {
 +		return nil, fmt.Errorf("rewind host bind source: %w", err)
 +	}
-+	if err := os.MkdirAll(stagingParent, 0o700); err != nil {
++	absoluteParent, err := filepath.Abs(stagingParent)
++	if err != nil {
++		return nil, fmt.Errorf("resolve host bind staging parent: %w", err)
++	}
++	if err := os.MkdirAll(absoluteParent, 0o700); err != nil {
 +		return nil, fmt.Errorf("create host bind staging parent: %w", err)
 +	}
-+	stagingDir, err := os.MkdirTemp(stagingParent, "isolated-bind-")
++	canonicalParent, err := filepath.EvalSymlinks(absoluteParent)
++	if err != nil {
++		return nil, fmt.Errorf("canonicalize host bind staging parent: %w", err)
++	}
++	stagingDir, err := os.MkdirTemp(canonicalParent, "isolated-bind-")
 +	if err != nil {
 +		return nil, fmt.Errorf("create host bind staging directory: %w", err)
 +	}
@@ -1417,6 +1610,12 @@ index 0000000..3488ac5
 +		_ = file.Close()
 +		return nil, fmt.Errorf("host bind source changed while opening")
 +	}
++	if openedInfo.IsDir() {
++		if err := validateDirectoryTree(canonical); err != nil {
++			_ = file.Close()
++			return nil, err
++		}
++	}
 +	return &hostSourceGuard{canonical: canonical, file: file, info: openedInfo}, nil
 +}
 +
@@ -1438,6 +1637,11 @@ index 0000000..3488ac5
 +	}
 +	if !os.SameFile(source.info, current) || !os.SameFile(source.info, held) {
 +		return fmt.Errorf("host bind source identity changed after validation")
++	}
++	if held.IsDir() {
++		if err := validateDirectoryTree(source.canonical); err != nil {
++			return err
++		}
 +	}
 +	return nil
 +}
@@ -1488,6 +1692,31 @@ index 0000000..3488ac5
 +type hostComponent struct {
 +	path string
 +	info os.FileInfo
++}
++
++func validateDirectoryTree(root string) error {
++	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
++		if walkErr != nil {
++			return fmt.Errorf("inspect host bind directory tree: %w", walkErr)
++		}
++		if entry.Type()&os.ModeSymlink != 0 {
++			return fmt.Errorf("host bind directory contains a symlink: %s", path)
++		}
++		info, err := entry.Info()
++		if err != nil {
++			return fmt.Errorf("inspect host bind directory entry: %w", err)
++		}
++		if containsContainerRuntimeSocket(filepath.Base(path)) {
++			return fmt.Errorf("host bind directory contains a container runtime endpoint: %s", path)
++		}
++		if !info.IsDir() && !info.Mode().IsRegular() {
++			return fmt.Errorf("host bind directory contains a special file: %s", path)
++		}
++		if err := validateTrustedTreeEntry(path, info); err != nil {
++			return err
++		}
++		return nil
++	})
 +}
 +
 +func containsContainerRuntimeSocket(value string) bool {
@@ -1755,10 +1984,10 @@ index 0000000..1b450c3
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
 new file mode 100644
-index 0000000..da09691
+index 0000000..4d43baa
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,66 @@
 +//go:build darwin || linux
 +
 +package isolation
@@ -1810,19 +2039,41 @@ index 0000000..da09691
 +	}
 +	return stat.Uid, nil
 +}
++
++func validateTrustedTreeEntry(path string, info os.FileInfo) error {
++	owner, err := componentOwner(info)
++	if err != nil {
++		return fmt.Errorf("inspect host bind directory ownership at %s: %w", path, err)
++	}
++	effectiveUser := uint32(os.Geteuid())
++	if owner != 0 && owner != effectiveUser {
++		return fmt.Errorf("host bind directory entry is owned by an untrusted principal: %s", path)
++	}
++	if info.IsDir() && info.Mode().Perm()&0o022 != 0 {
++		return fmt.Errorf("host bind directory tree is writable by an untrusted principal: %s", path)
++	}
++	return nil
++}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go
 new file mode 100644
-index 0000000..13a2987
+index 0000000..5fd41af
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,16 @@
 +//go:build !darwin && !linux
 +
 +package isolation
 +
-+import "fmt"
++import (
++	"fmt"
++	"os"
++)
 +
 +func validateTrustedComponents([]hostComponent) error {
++	return fmt.Errorf("host bind sources are unsupported on this platform")
++}
++
++func validateTrustedTreeEntry(string, os.FileInfo) error {
 +	return fmt.Errorf("host bind sources are unsupported on this platform")
 +}
 diff --git a/apps/cli-go/internal/utils/loopback/portbindings.go b/apps/cli-go/internal/utils/loopback/portbindings.go

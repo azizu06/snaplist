@@ -52,8 +52,12 @@ Host binds are parsed separately from named volumes, resolved to existing
 trusted regular files/directories, checked for special runtime endpoints, held
 open, and rewritten to canonical sources before Docker consumption. Identity is
 revalidated after image resolution and immediately before container creation.
+Bound directories are recursively restricted to trusted regular files and
+directories: protected runtime endpoints, special files, descendant symlinks,
+untrusted owners, and group/other-writable directories fail closed.
 `db start --from-backup` opens its input before any Docker request and snapshots
-it once into private staging; cleanup failure is returned rather than hidden.
+it once into canonical absolute private staging, producing a true Docker bind;
+cleanup failure is returned rather than hidden.
 The exact TOCTOU boundary and cross-platform limits are recorded in
 [`SYMLINK-SAFETY.md`](./SYMLINK-SAFETY.md).
 
