@@ -166,7 +166,11 @@ configuration keys remain compatible because Go's decoder ignores them.
 Realistic registry, credential-store, plugin, and feature settings therefore
 remain valid, while a known field with the wrong JSON type fails before child
 spawn. Named-context metadata uses the same rule for both its typed context
-metadata and every endpoint object.
+metadata and every endpoint object. The JSON scan retains typed-field duplicate
+visibility before `JSON.parse` can collapse earlier values; duplicates of
+unknown extensions keep the pinned last-value behavior. Docker's custom
+`DockerContext` decoder treats only exact-case `Description` as typed, so
+case-varied extension keys remain opaque and compatible.
 
 ## TOCTOU model and mitigation
 

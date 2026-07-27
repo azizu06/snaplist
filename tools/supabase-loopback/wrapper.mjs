@@ -95,7 +95,207 @@ async function readRequired(filePath, label) {
   }
 }
 
-async function readOptionalJson(filePath, label) {
+const dockerConfigStringFields = new Set([
+  "psformat",
+  "imagesformat",
+  "networksformat",
+  "pluginsformat",
+  "volumesformat",
+  "statsformat",
+  "detachkeys",
+  "credsstore",
+  "serviceinspectformat",
+  "servicesformat",
+  "tasksformat",
+  "secretformat",
+  "configformat",
+  "nodesformat",
+  "currentcontext",
+  "experimental",
+]);
+const dockerConfigStringMapFields = new Set([
+  "httpheaders",
+  "credhelpers",
+  "aliases",
+  "features",
+]);
+const dockerConfigStringArrayFields = new Set([
+  "prunefilters",
+  "clipluginsextradirs",
+]);
+const dockerConfigRootFields = new Set([
+  ...dockerConfigStringFields,
+  ...dockerConfigStringMapFields,
+  ...dockerConfigStringArrayFields,
+  "auths",
+  "proxies",
+  "plugins",
+]);
+const dockerAuthFields = new Set([
+  "username",
+  "password",
+  "auth",
+  "email",
+  "serveraddress",
+  "identitytoken",
+  "registrytoken",
+]);
+const dockerProxyFields = new Set([
+  "httpproxy",
+  "httpsproxy",
+  "noproxy",
+  "ftpproxy",
+  "allproxy",
+]);
+
+function duplicateJsonFieldIdentity(kind, objectPath, key) {
+  const normalizedKey = key.toLowerCase();
+  if (kind === "docker-config") {
+    if (objectPath.length === 0) {
+      return dockerConfigRootFields.has(normalizedKey)
+        ? normalizedKey
+        : null;
+    }
+    const rootField = objectPath[0].toLowerCase();
+    if (
+      objectPath.length === 1 &&
+      (dockerConfigStringMapFields.has(rootField) ||
+        rootField === "auths" ||
+        rootField === "proxies" ||
+        rootField === "plugins")
+    ) {
+      return key;
+    }
+    if (objectPath.length === 2 && rootField === "auths") {
+      return dockerAuthFields.has(normalizedKey) ? normalizedKey : null;
+    }
+    if (objectPath.length === 2 && rootField === "proxies") {
+      return dockerProxyFields.has(normalizedKey)
+        ? normalizedKey
+        : null;
+    }
+    if (objectPath.length === 2 && rootField === "plugins") {
+      return key;
+    }
+    return null;
+  }
+
+  if (kind === "docker-context") {
+    if (objectPath.length === 0) {
+      return ["name", "metadata", "endpoints"].includes(normalizedKey)
+        ? normalizedKey
+        : null;
+    }
+    const rootField = objectPath[0].toLowerCase();
+    if (objectPath.length === 1 && rootField === "metadata") {
+      return key === "Description" ? key : null;
+    }
+    if (objectPath.length === 1 && rootField === "endpoints") {
+      return key === "docker" ? key : null;
+    }
+    if (
+      objectPath.length === 2 &&
+      rootField === "endpoints" &&
+      objectPath[1] === "docker"
+    ) {
+      return ["host", "skiptlsverify"].includes(normalizedKey)
+        ? normalizedKey
+        : null;
+    }
+  }
+  return null;
+}
+
+function rejectDuplicateTypedJsonFields(source, label, kind) {
+  let index = 0;
+  const skipWhitespace = () => {
+    while (/\s/.test(source[index] ?? "")) index += 1;
+  };
+  const scanString = () => {
+    const start = index;
+    index += 1;
+    while (index < source.length) {
+      if (source[index] === '"') {
+        index += 1;
+        return JSON.parse(source.slice(start, index));
+      }
+      if (source[index] === "\\") {
+        index += source[index + 1] === "u" ? 6 : 2;
+      } else {
+        index += 1;
+      }
+    }
+    fail(`malformed ${label}`);
+  };
+  const scanValue = (objectPath) => {
+    skipWhitespace();
+    if (source[index] === '"') {
+      scanString();
+      return;
+    }
+    if (source[index] === "{") {
+      index += 1;
+      skipWhitespace();
+      const seen = new Set();
+      if (source[index] === "}") {
+        index += 1;
+        return;
+      }
+      while (index < source.length) {
+        const key = scanString();
+        const identity = duplicateJsonFieldIdentity(
+          kind,
+          objectPath,
+          key,
+        );
+        if (identity !== null && seen.has(identity)) {
+          fail(`${label} contains duplicate typed field ${key}`);
+        }
+        if (identity !== null) seen.add(identity);
+        skipWhitespace();
+        index += 1;
+        scanValue([...objectPath, key]);
+        skipWhitespace();
+        if (source[index] === "}") {
+          index += 1;
+          return;
+        }
+        index += 1;
+        skipWhitespace();
+      }
+      return;
+    }
+    if (source[index] === "[") {
+      index += 1;
+      skipWhitespace();
+      if (source[index] === "]") {
+        index += 1;
+        return;
+      }
+      while (index < source.length) {
+        scanValue([...objectPath, "[]"]);
+        skipWhitespace();
+        if (source[index] === "]") {
+          index += 1;
+          return;
+        }
+        index += 1;
+        skipWhitespace();
+      }
+      return;
+    }
+    while (
+      index < source.length &&
+      !/[\s,\]}]/.test(source[index])
+    ) {
+      index += 1;
+    }
+  };
+
+  scanValue([]);
+}
+
+async function readOptionalJson(filePath, label, kind) {
   let contents;
   try {
     contents = await readFile(filePath, "utf8");
@@ -108,6 +308,7 @@ async function readOptionalJson(filePath, label) {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       fail(`${label} must be a JSON object`);
     }
+    rejectDuplicateTypedJsonFields(contents, label, kind);
     return parsed;
   } catch (error) {
     if (error.message?.startsWith("[supabase-loopback]")) throw error;
@@ -247,24 +448,7 @@ function validateDockerPluginMap(value, label) {
 }
 
 function validateDockerConfig(config) {
-  const stringFields = [
-    "psFormat",
-    "imagesFormat",
-    "networksFormat",
-    "pluginsFormat",
-    "volumesFormat",
-    "statsFormat",
-    "detachKeys",
-    "credsStore",
-    "serviceInspectFormat",
-    "servicesFormat",
-    "tasksFormat",
-    "secretFormat",
-    "configFormat",
-    "nodesFormat",
-    "currentContext",
-    "experimental",
-  ];
+  const stringFields = [...dockerConfigStringFields];
   for (const field of stringFields) {
     validateGoField(
       config,
@@ -273,12 +457,7 @@ function validateDockerConfig(config) {
       `Docker configuration ${field}`,
     );
   }
-  for (const field of [
-    "HttpHeaders",
-    "credHelpers",
-    "aliases",
-    "features",
-  ]) {
+  for (const field of dockerConfigStringMapFields) {
     validateGoField(
       config,
       field,
@@ -286,7 +465,7 @@ function validateDockerConfig(config) {
       `Docker configuration ${field}`,
     );
   }
-  for (const field of ["pruneFilters", "cliPluginsExtraDirs"]) {
+  for (const field of dockerConfigStringArrayFields) {
     validateGoField(
       config,
       field,
@@ -329,14 +508,15 @@ function validateDockerContextMetadata(metadata, contextName) {
   );
   const contextDetails = goFieldValue(metadata, "Metadata");
   if (contextDetails && typeof contextDetails === "object") {
-    validateGoField(
-      contextDetails,
-      "Description",
-      (value, label) => {
-        if (typeof value !== "string") fail(`${label} must be string`);
-      },
-      `Docker context ${contextName} Metadata.Description`,
-    );
+    const description = contextDetails.Description;
+    if (
+      Object.hasOwn(contextDetails, "Description") &&
+      typeof description !== "string"
+    ) {
+      fail(
+        `Docker context ${contextName} Metadata.Description must be string`,
+      );
+    }
   }
 
   validateGoField(
@@ -425,7 +605,11 @@ async function resolveLocalDockerEndpoint(processEnvironment, platform) {
     configuredRoot || path.join(home, ".docker"),
   );
   const configPath = path.join(configRoot, "config.json");
-  const config = await readOptionalJson(configPath, "Docker configuration");
+  const config = await readOptionalJson(
+    configPath,
+    "Docker configuration",
+    "docker-config",
+  );
   if (config) validateDockerConfig(config);
   const currentContext = config
     ? goFieldValue(config, "currentContext")
@@ -451,6 +635,7 @@ async function resolveLocalDockerEndpoint(processEnvironment, platform) {
   const metadata = await readOptionalJson(
     metadataPath,
     `Docker context ${currentContext}`,
+    "docker-context",
   );
   if (!metadata) {
     fail(`missing Docker context ${currentContext}: ${metadataPath}`);

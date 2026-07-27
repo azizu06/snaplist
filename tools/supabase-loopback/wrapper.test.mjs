@@ -502,6 +502,16 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
       },
       useDockerConfig: true,
     },
+    {
+      name: "duplicate metadata key hides an earlier typed error",
+      context: "duplicate-metadata",
+      metadata: `${JSON.stringify({
+        Name: "duplicate-metadata",
+        Metadata: {},
+        Endpoints: [],
+      }).slice(0, -1)},"Endpoints":{"docker":{"Host":"unix:///var/run/docker.sock","SkipTLSVerify":false}}}`,
+      useDockerConfig: true,
+    },
   ];
 
   for (const contextCase of blocked) {
@@ -567,6 +577,10 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
         auths: [],
       })}\n`,
     ],
+    [
+      "duplicate key hides an earlier typed error",
+      '{"currentContext":"default","auths":[],"auths":{}}\n',
+    ],
   ];
   for (const [name, contents] of malformedConfigs) {
     await t.test(`malformed Docker configuration: ${name}`, async (t) => {
@@ -617,17 +631,20 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
         const home = path.join(fixture.root, "home");
         const configRoot = path.join(home, ".docker");
         const contextName = "desktop-linux";
+        const metadata = dockerContextMetadata(
+          contextName,
+          "unix:///Users/test/.docker/run/docker.sock",
+        );
+        metadata.Metadata = {
+          description: null,
+          vendorExtension: { preserved: true },
+        };
         await writeDockerContext(
           configRoot,
           contextName,
-          dockerContextMetadata(
-            contextName,
-            "unix:///Users/test/.docker/run/docker.sock",
-          ),
+          metadata,
         );
-        await writeFile(
-          path.join(configRoot, "config.json"),
-          `${JSON.stringify({
+        const dockerConfig = JSON.stringify({
             auths: {
               "registry.example.test": {
                 auth: Buffer.from("user:password").toString("base64"),
@@ -639,8 +656,11 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
               debug: { hooks: "exec" },
             },
             features: { hooks: "true" },
-            vendorExtension: { preserved: true },
-          })}\n`,
+            vendorExtension: { firstUnknownValue: true },
+          });
+        await writeFile(
+          path.join(configRoot, "config.json"),
+          `${dockerConfig.slice(0, -1)},"vendorExtension":{"lastUnknownValue":true}}\n`,
         );
         return { HOME: home };
       },
