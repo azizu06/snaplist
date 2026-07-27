@@ -49,11 +49,12 @@ cached-image check. The fully derived local database container also crosses the
 guard before its backup-volume inspection.
 
 Host binds are parsed separately from named volumes, resolved to existing
-regular files/directories, checked for special runtime endpoints, and rewritten
-to canonical sources before Docker consumption. `db start --from-backup`
-snapshots its regular input into a private staging directory before the first
-Docker request, so Docker never receives the caller-controlled alias. The exact
-TOCTOU boundary and cross-platform limits are recorded in
+trusted regular files/directories, checked for special runtime endpoints, held
+open, and rewritten to canonical sources before Docker consumption. Identity is
+revalidated after image resolution and immediately before container creation.
+`db start --from-backup` opens its input before any Docker request and snapshots
+it once into private staging; cleanup failure is returned rather than hidden.
+The exact TOCTOU boundary and cross-platform limits are recorded in
 [`SYMLINK-SAFETY.md`](./SYMLINK-SAFETY.md).
 
 The generated source checkout, binary, and build receipt live under `.cache/`
