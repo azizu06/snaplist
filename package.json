@@ -23,7 +23,9 @@
     "unit-economics:check": "tsx scripts/generate-unit-economics.ts --check",
     "eval": "tsx src/lib/eval/run.ts",
     "eval:build-gold": "tsx src/lib/eval/build-gold-set.ts",
-    "supabase": "supabase"
+    "prepare:supabase-loopback": "node tools/supabase-loopback/prepare.mjs",
+    "test:supabase-loopback": "node tools/supabase-loopback/run-tests.mjs",
+    "supabase": "node tools/supabase-loopback/supabase.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.82",
@@ -64,6 +66,7 @@
     "eslint-config-next": "16.2.9",
     "jose": "^6.2.3",
     "pg": "^8.22.0",
+    "smol-toml": "1.7.0",
     "supabase": "^2.105.0",
     "tailwindcss": "^4",
     "tsx": "^4.20.6",

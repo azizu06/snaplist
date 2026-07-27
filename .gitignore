@@ -24,6 +24,7 @@ package-lock.json
 # supabase local
 /supabase/.branches
 /supabase/.temp
+/tools/supabase-loopback/.cache/
 
 # misc
 .DS_Store

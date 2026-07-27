@@ -1,0 +1,3129 @@
+diff --git a/apps/cli-go/internal/db/start/start.go b/apps/cli-go/internal/db/start/start.go
+index 6f1eeacde36237f16679c4e975ff48382285e38a..fea410f7ec0918ba85477a5893e26442599952e9 100644
+--- a/apps/cli-go/internal/db/start/start.go
++++ b/apps/cli-go/internal/db/start/start.go
+@@ -25,6 +25,7 @@ import (
+ 	"github.com/supabase/cli/internal/status"
+ 	"github.com/supabase/cli/internal/utils"
+ 	"github.com/supabase/cli/internal/utils/flags"
++	"github.com/supabase/cli/internal/utils/isolation"
+ 	"github.com/supabase/cli/pkg/config"
+ 	"github.com/supabase/cli/pkg/migration"
+ 	"github.com/supabase/cli/pkg/vault"
+@@ -41,17 +42,24 @@ var (
+ 	restoreScript string
+ )
+ 
+-func Run(ctx context.Context, fromBackup string, fsys afero.Fs) error {
++func Run(ctx context.Context, fromBackup string, fsys afero.Fs) (resultErr error) {
+ 	if err := flags.LoadConfig(fsys); err != nil {
+ 		return err
+ 	}
++	backup, err := prepareBackup(fromBackup)
++	if err != nil {
++		return errors.Errorf("unsafe Docker container capability: %w", err)
++	}
++	if backup != nil {
++		defer func() { resultErr = errors.Join(resultErr, backup.Close()) }()
++	}
+ 	if err := utils.AssertSupabaseDbIsRunning(); err == nil {
+ 		fmt.Fprintln(os.Stderr, "Postgres database is already running.")
+ 		return nil
+ 	} else if !errors.Is(err, utils.ErrNotRunning) {
+ 		return err
+ 	}
+-	err := StartDatabase(ctx, fromBackup, fsys, os.Stderr)
++	err = startDatabaseWithPreparedBackup(ctx, backup, fsys, os.Stderr)
+ 	if err != nil {
+ 		if err := utils.DockerRemoveAll(context.Background(), os.Stderr, utils.Config.ProjectId); err != nil {
+ 			fmt.Fprintln(os.Stderr, err)
+@@ -130,7 +138,47 @@ func NewHostConfig() container.HostConfig {
+ 	return hostConfig
+ }
+ 
+-func StartDatabase(ctx context.Context, fromBackup string, fsys afero.Fs, w io.Writer, options ...func(*pgx.ConnConfig)) error {
++func StartDatabase(ctx context.Context, fromBackup string, fsys afero.Fs, w io.Writer, options ...func(*pgx.ConnConfig)) (resultErr error) {
++	backup, err := prepareBackup(fromBackup)
++	if err != nil {
++		return errors.Errorf("unsafe Docker container capability: %w", err)
++	}
++	if backup != nil {
++		defer func() { resultErr = errors.Join(resultErr, backup.Close()) }()
++	}
++	return startDatabaseWithPreparedBackup(ctx, backup, fsys, w, options...)
++}
++
++func prepareBackup(fromBackup string) (*isolation.PreparedRegularFile, error) {
++	if len(fromBackup) == 0 {
++		return nil, nil
++	}
++	if !filepath.IsAbs(fromBackup) {
++		fromBackup = filepath.Join(utils.CurrentDirAbs, fromBackup)
++	}
++	return isolation.PrepareRegularFile(fromBackup)
++}
++
++func startDatabaseWithPreparedBackup(
++	ctx context.Context,
++	backup *isolation.PreparedRegularFile,
++	fsys afero.Fs,
++	w io.Writer,
++	options ...func(*pgx.ConnConfig),
++) (resultErr error) {
++	fromBackup := ""
++	if backup != nil {
++		staged, err := backup.Stage(utils.TempDir)
++		if err != nil {
++			return errors.Errorf("unsafe Docker container capability: %w", err)
++		}
++		defer func() { resultErr = errors.Join(resultErr, staged.Cleanup()) }()
++		fromBackup = staged.Path
++	}
++	return startDatabase(ctx, fromBackup, fsys, w, options...)
++}
++
++func startDatabase(ctx context.Context, fromBackup string, fsys afero.Fs, w io.Writer, options ...func(*pgx.ConnConfig)) error {
+ 	config := NewContainerConfig()
+ 	hostConfig := NewHostConfig()
+ 	networkingConfig := network.NetworkingConfig{
+@@ -157,13 +205,19 @@ EOF
+ ` + utils.Config.Db.Settings.ToPostgresConfig() + `
+ cron.launch_active_jobs = off
+ EOF`}
+-		if !filepath.IsAbs(fromBackup) {
+-			fromBackup = filepath.Join(utils.CurrentDirAbs, fromBackup)
+-		}
+ 		hostConfig.Binds = append(hostConfig.Binds, utils.ToDockerPath(fromBackup)+":/etc/backup.sql:ro")
+ 	}
++	prepared, err := isolation.PrepareContainer(config, hostConfig)
++	if err != nil {
++		return errors.Errorf("unsafe Docker container capability: %w", err)
++	}
++	defer prepared.Close()
++	hostConfig = prepared.HostConfig
++	if err := prepared.Revalidate(); err != nil {
++		return errors.Errorf("unsafe Docker container capability: %w", err)
++	}
+ 	// Creating volume will not override existing volume, so we must inspect explicitly
+-	_, err := utils.Docker.VolumeInspect(ctx, utils.DbId)
++	_, err = utils.Docker.VolumeInspect(ctx, utils.DbId)
+ 	utils.NoBackupVolume = errdefs.IsNotFound(err)
+ 	if utils.NoBackupVolume {
+ 		fmt.Fprintln(w, "Starting database...")
+diff --git a/apps/cli-go/internal/db/start/start_isolation_test.go b/apps/cli-go/internal/db/start/start_isolation_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a98fe4882a3d22aaa0013e2169a583404ac27fa
+--- /dev/null
++++ b/apps/cli-go/internal/db/start/start_isolation_test.go
+@@ -0,0 +1,456 @@
++package start
++
++import (
++	"context"
++	"encoding/json"
++	"io"
++	"net/http"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/docker/cli/cli/compose/loader"
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++	"github.com/docker/docker/client"
++	"github.com/spf13/afero"
++	"github.com/stretchr/testify/require"
++
++	"github.com/supabase/cli/internal/utils"
++	"github.com/supabase/cli/pkg/config"
++)
++
++type databaseDockerActionCounter struct {
++	volumeInspect   int
++	imageInspect    int
++	imagePull       int
++	networkCreate   int
++	volumeCreate    int
++	containerCreate int
++	other           int
++	onVolumeInspect func()
++}
++
++type databaseBindCaptureTransport struct {
++	hostConfig     container.HostConfig
++	backupSource   string
++	backupType     string
++	backupContents []byte
++	captureErr     error
++}
++
++func (transport *databaseBindCaptureTransport) RoundTrip(request *http.Request) (*http.Response, error) {
++	status := http.StatusCreated
++	body := `{}`
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/volumes/"):
++		status = http.StatusNotFound
++		body = `{"message":"not found"}`
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		status = http.StatusOK
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		var requestBody struct {
++			HostConfig container.HostConfig
++		}
++		if err := json.NewDecoder(request.Body).Decode(&requestBody); err != nil {
++			return nil, err
++		}
++		transport.hostConfig = requestBody.HostConfig
++		for _, bind := range transport.hostConfig.Binds {
++			parsed, err := loader.ParseVolume(bind)
++			if err != nil {
++				transport.captureErr = err
++				break
++			}
++			if parsed.Target == "/etc/backup.sql" {
++				transport.backupSource = parsed.Source
++				transport.backupType = parsed.Type
++				transport.backupContents, transport.captureErr = os.ReadFile(parsed.Source)
++				break
++			}
++		}
++		status = http.StatusInternalServerError
++		body = `{"message":"stop after capture"}`
++	}
++	return &http.Response{
++		StatusCode: status,
++		Body:       io.NopCloser(strings.NewReader(body)),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func (counter *databaseDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/volumes/"):
++		counter.volumeInspect++
++		if counter.onVolumeInspect != nil {
++			counter.onVolumeInspect()
++		}
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		counter.imageInspect++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		counter.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/networks/create"):
++		counter.networkCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		counter.volumeCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		counter.containerCreate++
++	default:
++		counter.other++
++	}
++	return &http.Response{
++		StatusCode: http.StatusInternalServerError,
++		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestStartDatabaseRejectsUnsafeDerivedConfigBeforeDockerAction(t *testing.T) {
++	counter := &databaseDockerActionCounter{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	previousDbID := utils.DbId
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	utils.DbId = "/var/run/docker.sock"
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		utils.DbId = previousDbID
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	err = StartDatabase(
++		context.Background(),
++		"",
++		afero.NewMemMapFs(),
++		io.Discard,
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, counter.volumeInspect)
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
++	require.Zero(t, counter.other)
++}
++
++func TestStartDatabaseFromBackupRejectsSymlinkedRuntimeSocketBeforeDockerAction(t *testing.T) {
++	socketNames := []string{
++		"docker.sock",
++		"containerd.sock",
++		"podman.sock",
++		"crio.sock",
++		"docker_engine",
++	}
++
++	for _, socketName := range socketNames {
++		socketName := socketName
++		t.Run(socketName, func(t *testing.T) {
++			counter := &databaseDockerActionCounter{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: counter}),
++			)
++			require.NoError(t, err)
++
++			previousDocker := utils.Docker
++			previousConfig := utils.Config
++			previousDbID := utils.DbId
++			utils.Docker = fakeDocker
++			utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++			utils.DbId = "supabase_db_snaplist"
++			t.Cleanup(func() {
++				utils.Docker = previousDocker
++				utils.Config = previousConfig
++				utils.DbId = previousDbID
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			tempDir := t.TempDir()
++			socketPath := filepath.Join(tempDir, socketName)
++			require.NoError(t, os.WriteFile(socketPath, []byte("protected"), 0o600))
++			safeLookingBackup := filepath.Join(tempDir, "backup.sql")
++			require.NoError(t, os.Symlink(socketPath, safeLookingBackup))
++
++			err = StartDatabase(
++				context.Background(),
++				safeLookingBackup,
++				afero.NewOsFs(),
++				io.Discard,
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, counter.volumeInspect)
++			require.Zero(t, counter.imageInspect)
++			require.Zero(t, counter.imagePull)
++			require.Zero(t, counter.networkCreate)
++			require.Zero(t, counter.volumeCreate)
++			require.Zero(t, counter.containerCreate)
++			require.Zero(t, counter.other)
++		})
++	}
++}
++
++func TestStartDatabaseFromWritableBackupRejectsBeforeCopyOrDockerAction(t *testing.T) {
++	modes := map[string]os.FileMode{
++		"group writable": 0o660,
++		"other writable": 0o602,
++	}
++	for modeName, mode := range modes {
++		modeName, mode := modeName, mode
++		t.Run(modeName, func(t *testing.T) {
++			counter := &databaseDockerActionCounter{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: counter}),
++			)
++			require.NoError(t, err)
++
++			stagingParent := t.TempDir()
++			previousDocker := utils.Docker
++			previousConfig := utils.Config
++			previousDbID := utils.DbId
++			previousTempDir := utils.TempDir
++			utils.Docker = fakeDocker
++			utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++			utils.DbId = "supabase_db_snaplist"
++			utils.TempDir = stagingParent
++			t.Cleanup(func() {
++				utils.Docker = previousDocker
++				utils.Config = previousConfig
++				utils.DbId = previousDbID
++				utils.TempDir = previousTempDir
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			backupPath := filepath.Join(t.TempDir(), "backup.sql")
++			require.NoError(t, os.WriteFile(backupPath, []byte("sensitive backup bytes"), 0o600))
++			require.NoError(t, os.Chmod(backupPath, mode))
++
++			err = StartDatabase(
++				context.Background(),
++				backupPath,
++				afero.NewOsFs(),
++				io.Discard,
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, counter.volumeInspect)
++			require.Zero(t, counter.imageInspect)
++			require.Zero(t, counter.imagePull)
++			require.Zero(t, counter.networkCreate)
++			require.Zero(t, counter.volumeCreate)
++			require.Zero(t, counter.containerCreate)
++			require.Zero(t, counter.other)
++
++			entries, readErr := os.ReadDir(stagingParent)
++			require.NoError(t, readErr)
++			require.Empty(t, entries, "backup bytes must not be staged")
++		})
++	}
++}
++
++func TestRunFromBackupRejectsSymlinkedRuntimeSocketBeforeDockerAction(t *testing.T) {
++	socketNames := []string{
++		"docker.sock",
++		"containerd.sock",
++		"podman.sock",
++		"crio.sock",
++		"docker_engine",
++	}
++
++	for _, socketName := range socketNames {
++		socketName := socketName
++		t.Run(socketName, func(t *testing.T) {
++			counter := &databaseDockerActionCounter{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: counter}),
++			)
++			require.NoError(t, err)
++
++			previousDocker := utils.Docker
++			previousConfig := utils.Config
++			previousDbID := utils.DbId
++			utils.Docker = fakeDocker
++			utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++			utils.DbId = "supabase_db_snaplist"
++			t.Cleanup(func() {
++				utils.Docker = previousDocker
++				utils.Config = previousConfig
++				utils.DbId = previousDbID
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			tempDir := t.TempDir()
++			socketPath := filepath.Join(tempDir, socketName)
++			require.NoError(t, os.WriteFile(socketPath, []byte("protected"), 0o600))
++			safeLookingBackup := filepath.Join(tempDir, "backup.sql")
++			require.NoError(t, os.Symlink(socketPath, safeLookingBackup))
++
++			err = Run(
++				context.Background(),
++				safeLookingBackup,
++				afero.NewMemMapFs(),
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, counter.volumeInspect)
++			require.Zero(t, counter.imageInspect)
++			require.Zero(t, counter.imagePull)
++			require.Zero(t, counter.networkCreate)
++			require.Zero(t, counter.volumeCreate)
++			require.Zero(t, counter.containerCreate)
++			require.Zero(t, counter.other)
++		})
++	}
++}
++
++func TestStartDatabaseFromBackupAllowsOrdinaryRegularFileBeforeDockerAction(t *testing.T) {
++	counter := &databaseDockerActionCounter{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	previousDbID := utils.DbId
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	utils.DbId = "supabase_db_snaplist"
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		utils.DbId = previousDbID
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	backupPath := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(backupPath, []byte("select 1;"), 0o600))
++
++	err = StartDatabase(
++		context.Background(),
++		backupPath,
++		afero.NewOsFs(),
++		io.Discard,
++	)
++	require.Error(t, err)
++	require.NotContains(t, err.Error(), "unsafe Docker container capability")
++	require.Equal(t, 1, counter.volumeInspect)
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
++	require.Zero(t, counter.other)
++}
++
++func TestStartDatabaseFromBackupUsesAbsoluteStagedBind(t *testing.T) {
++	t.Chdir(t.TempDir())
++	transport := &databaseBindCaptureTransport{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	previousDbID := utils.DbId
++	previousTempDir := utils.TempDir
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	utils.DbId = "supabase_db_snaplist"
++	utils.TempDir = filepath.Join("supabase", ".temp")
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		utils.DbId = previousDbID
++		utils.TempDir = previousTempDir
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	backupPath := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(backupPath, []byte("select 1;"), 0o600))
++
++	err = StartDatabase(
++		context.Background(),
++		backupPath,
++		afero.NewOsFs(),
++		io.Discard,
++	)
++	require.ErrorContains(t, err, "stop after capture")
++
++	require.NoError(t, transport.captureErr)
++	require.NotEmpty(t, transport.backupSource)
++	require.Equal(t, string(mount.TypeBind), transport.backupType)
++	require.True(t, filepath.IsAbs(transport.backupSource))
++	require.Equal(t, "select 1;", string(transport.backupContents))
++}
++
++func TestStartDatabaseFromBackupReportsStagingCleanupFailure(t *testing.T) {
++	stagingParent := filepath.Join(t.TempDir(), "staging")
++	require.NoError(t, os.Mkdir(stagingParent, 0o700))
++	counter := &databaseDockerActionCounter{
++		onVolumeInspect: func() {
++			require.NoError(t, os.Chmod(stagingParent, 0o500))
++		},
++	}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	previousDbID := utils.DbId
++	previousTempDir := utils.TempDir
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	utils.DbId = "supabase_db_snaplist"
++	utils.TempDir = stagingParent
++	t.Cleanup(func() {
++		require.NoError(t, os.Chmod(stagingParent, 0o700))
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		utils.DbId = previousDbID
++		utils.TempDir = previousTempDir
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	backupPath := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(backupPath, []byte("select 1;"), 0o600))
++
++	err = StartDatabase(
++		context.Background(),
++		backupPath,
++		afero.NewOsFs(),
++		io.Discard,
++	)
++	require.ErrorContains(t, err, "backup volume already exists")
++	require.ErrorContains(t, err, "remove staged host bind source")
++	require.Equal(t, 1, counter.volumeInspect)
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
++	require.Zero(t, counter.other)
++}
+diff --git a/apps/cli-go/internal/start/start.go b/apps/cli-go/internal/start/start.go
+index 6ce6a4434dafce83ee4db398f3b16ed04a8dae59..906b72e2ed7e94726451e15205d0fd6f22f5ab8e 100644
+--- a/apps/cli-go/internal/start/start.go
++++ b/apps/cli-go/internal/start/start.go
+@@ -6,7 +6,6 @@ import (
+ 	_ "embed"
+ 	"encoding/json"
+ 	"fmt"
+-	"io"
+ 	"net"
+ 	"net/url"
+ 	"os"
+@@ -18,14 +17,7 @@ import (
+ 	"text/template"
+ 	"time"
+ 
+-	"github.com/cenkalti/backoff/v4"
+-	"github.com/compose-spec/compose-go/v2/types"
+-	"github.com/docker/cli/cli/command"
+-	dockerFlags "github.com/docker/cli/cli/flags"
+-	"github.com/docker/compose/v2/pkg/api"
+-	"github.com/docker/compose/v2/pkg/compose"
+ 	"github.com/docker/docker/api/types/container"
+-	"github.com/docker/docker/api/types/image"
+ 	"github.com/docker/docker/api/types/network"
+ 	"github.com/docker/docker/client"
+ 	"github.com/docker/go-connections/nat"
+@@ -153,92 +145,17 @@ var (
+ 
+ var serviceTimeout = 30 * time.Second
+ 
+-// RetryClient wraps a Docker client to add retry logic for image pulls
+-type RetryClient struct {
+-	*client.Client
+-}
+-
+-func isPermanentError(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	// Rate limited errors can be recovered by retry
+-	if msg := err.Error(); strings.Contains(msg, "toomanyrequests:") {
+-		return false
+-	}
+-	return true
+-}
+-
+-// ImagePull wraps the Docker client's ImagePull with retry logic and registry auth
+-func (cli *RetryClient) ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
+-	if len(options.RegistryAuth) == 0 {
+-		options.RegistryAuth = utils.GetRegistryAuth()
+-	}
+-	pull := func() (io.ReadCloser, error) {
+-		resp, err := cli.Client.ImagePull(ctx, refStr, options)
+-		if isPermanentError(err) {
+-			return resp, &backoff.PermanentError{Err: err}
+-		}
+-		return resp, err
+-	}
+-	policy := utils.NewBackoffPolicy(ctx)
+-	return backoff.RetryWithData(pull, policy)
+-}
+-
+-// Also retry ImageInspect: https://github.com/docker/compose/blob/main/pkg/compose/pull.go#L174
+-func (cli *RetryClient) ImageInspect(ctx context.Context, refStr string, options ...client.ImageInspectOption) (image.InspectResponse, error) {
+-	pull := func() (image.InspectResponse, error) {
+-		resp, err := cli.Client.ImageInspect(ctx, refStr, options...)
+-		if isPermanentError(err) {
+-			return resp, &backoff.PermanentError{Err: err}
+-		}
+-		return resp, err
+-	}
+-	policy := utils.NewBackoffPolicy(ctx)
+-	return backoff.RetryWithData(pull, policy)
+-}
+-
+-// pullImagesUsingCompose pulls all required images using docker-compose service
+-func pullImagesUsingCompose(ctx context.Context, project types.Project) error {
+-	// Create Docker CLI
+-	cli, err := command.NewDockerCli()
+-	if err != nil {
+-		return errors.Errorf("failed to create Docker CLI: %w", err)
+-	}
+-	// Initialize Docker CLI
+-	opt := command.WithAPIClient(&RetryClient{Client: utils.Docker})
+-	if err := cli.Initialize(&dockerFlags.ClientOptions{}, opt); err != nil {
+-		return errors.Errorf("failed to initialize Docker CLI: %w", err)
+-	}
+-	service := compose.NewComposeService(cli)
+-	// Fallback to regular image pull by ignoring failures
+-	return service.Pull(ctx, &project, api.PullOptions{IgnoreFailures: true})
+-}
+-
+ func run(ctx context.Context, fsys afero.Fs, excludedContainers []string, dbConfig pgconn.Config, options ...func(*pgx.ConnConfig)) error {
+ 	excluded := make(map[string]bool)
+ 	for _, name := range excludedContainers {
+ 		excluded[name] = true
+ 	}
+-	notExcluded := func(sc types.ServiceConfig) bool {
+-		val, ok := excluded[sc.Name]
+-		return !val || !ok
+-	}
+ 
+ 	jwks, err := utils.Config.Auth.ResolveJWKS(ctx)
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+-	// TODO: start services using compose up
+-	project := types.Project{
+-		Name:     "supabase-cli",
+-		Services: utils.GetServices().Filter(notExcluded),
+-	}
+-	if err := pullImagesUsingCompose(ctx, project); err != nil {
+-		return err
+-	}
+-
+ 	// Start Postgres.
+ 	if dbConfig.Host == utils.DbId {
+ 		if err := start.StartDatabase(ctx, "", fsys, os.Stderr, options...); err != nil {
+@@ -1100,6 +1017,9 @@ EOF
+ 
+ 		// Mount snippets directory for Studio to access
+ 		hostSnippetsPath := filepath.Join(workdir, utils.SnippetsDir)
++		if err := fsys.MkdirAll(hostSnippetsPath, 0o755); err != nil {
++			return errors.Errorf("failed to create Studio snippets directory: %w", err)
++		}
+ 		containerSnippetsPath := utils.ToDockerPath(hostSnippetsPath)
+ 		binds = append(binds, fmt.Sprintf("%s:%s:rw", hostSnippetsPath, containerSnippetsPath))
+ 		binds = utils.RemoveDuplicates(binds)
+diff --git a/apps/cli-go/internal/start/start_isolation_test.go b/apps/cli-go/internal/start/start_isolation_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..2800a0e7efc6c7d2f649c2b131063526eb46d053
+--- /dev/null
++++ b/apps/cli-go/internal/start/start_isolation_test.go
+@@ -0,0 +1,206 @@
++package start
++
++import (
++	"context"
++	"io"
++	"net/http"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/network"
++	"github.com/docker/docker/client"
++	"github.com/jackc/pgconn"
++	"github.com/spf13/afero"
++	"github.com/stretchr/testify/require"
++
++	"github.com/supabase/cli/internal/functions/deploy"
++	"github.com/supabase/cli/internal/utils"
++	"github.com/supabase/cli/pkg/config"
++)
++
++type startDockerActionCounter struct {
++	imageInspect    int
++	imagePull       int
++	networkCreate   int
++	volumeCreate    int
++	containerCreate int
++	containerStart  int
++	other           int
++}
++
++type startSafeCachedTransport struct {
++	imageInspect    int
++	imagePull       int
++	volumeCreate    int
++	containerCreate int
++	containerStart  int
++	other           int
++}
++
++func (counter *startDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		counter.imageInspect++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		counter.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/networks/create"):
++		counter.networkCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		counter.volumeCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		counter.containerCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
++		counter.containerStart++
++	default:
++		counter.other++
++	}
++	return &http.Response{
++		StatusCode: http.StatusInternalServerError,
++		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func (transport *startSafeCachedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
++	status := http.StatusInternalServerError
++	body := "unexpected Docker action"
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		transport.imageInspect++
++		status = http.StatusOK
++		body = "{}"
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		transport.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		transport.volumeCreate++
++		status = http.StatusCreated
++		body = "{}"
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		transport.containerCreate++
++		status = http.StatusCreated
++		body = `{"Id":"safe-service-directory","Warnings":[]}`
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
++		transport.containerStart++
++		status = http.StatusNoContent
++		body = ""
++	default:
++		transport.other++
++	}
++	return &http.Response{
++		StatusCode: status,
++		Body:       io.NopCloser(strings.NewReader(body)),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestRunRejectsUnsafeServiceBeforeDockerAction(t *testing.T) {
++	counter := &startDockerActionCounter{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("unix:///var/run/docker.sock"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	utils.Config.Api.Enabled = false
++	utils.Config.Auth.Enabled = false
++	utils.Config.Inbucket.Enabled = false
++	utils.Config.Realtime.Enabled = false
++	utils.Config.Storage.Enabled = false
++	utils.Config.EdgeRuntime.Enabled = false
++	utils.Config.Studio.Enabled = false
++	utils.Config.Db.Pooler.Enabled = false
++	utils.Config.Analytics.Enabled = true
++	utils.Config.Analytics.Image = "example.invalid/logflare:latest"
++	utils.Config.Analytics.VectorImage = "example.invalid/vector:latest"
++
++	excluded := []string{
++		utils.ShortContainerImageName(utils.Config.Db.Image),
++		utils.ShortContainerImageName(utils.Config.Analytics.Image),
++	}
++	err = run(
++		context.Background(),
++		afero.NewMemMapFs(),
++		excluded,
++		pgconn.Config{Host: "external-db", Port: 5432},
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
++	require.Zero(t, counter.containerStart)
++	require.Zero(t, counter.other)
++}
++
++func TestDockerStartAcceptsDefaultFunctionsServiceDirectory(t *testing.T) {
++	workdir := t.TempDir()
++	functionsDir := filepath.Join(workdir, "supabase", "functions")
++	entrypoint := filepath.Join(functionsDir, "hello", "index.ts")
++	require.NoError(t, os.MkdirAll(filepath.Dir(entrypoint), 0o755))
++	require.NoError(t, os.WriteFile(entrypoint, []byte(`Deno.serve(() => new Response("ok"))`), 0o600))
++
++	previousEdgeRuntimeID := utils.EdgeRuntimeId
++	utils.EdgeRuntimeId = "supabase_edge_runtime_fixture"
++	t.Cleanup(func() { utils.EdgeRuntimeId = previousEdgeRuntimeID })
++
++	binds, err := deploy.GetBindMounts(
++		workdir,
++		functionsDir,
++		"",
++		entrypoint,
++		"",
++		afero.NewOsFs(),
++	)
++	require.NoError(t, err)
++	require.Contains(t, binds, utils.EdgeRuntimeId+":/root/.cache/deno:rw")
++	require.Contains(t, binds, functionsDir+"/:"+utils.ToDockerPath(functionsDir)+"/:ro")
++
++	transport := &startSafeCachedTransport{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	utils.Docker = fakeDocker
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	containerID, err := utils.DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/edge-runtime:latest"},
++		container.HostConfig{
++			Binds:       binds,
++			NetworkMode: container.NetworkMode("bridge"),
++		},
++		network.NetworkingConfig{},
++		"supabase_edge_runtime_fixture",
++	)
++	require.NoError(t, err)
++	require.Equal(t, "safe-service-directory", containerID)
++	require.Equal(t, 1, transport.imageInspect)
++	require.Zero(t, transport.imagePull)
++	require.Equal(t, 1, transport.volumeCreate)
++	require.Equal(t, 1, transport.containerCreate)
++	require.Equal(t, 1, transport.containerStart)
++	require.Zero(t, transport.other)
++}
+diff --git a/apps/cli-go/internal/start/start_test.go b/apps/cli-go/internal/start/start_test.go
+index afafbd815e0cff8588157d80eae9c55d457f1174..cdd2ccecc8e82b0815303565b3c7f1621fb9cee7 100644
+--- a/apps/cli-go/internal/start/start_test.go
++++ b/apps/cli-go/internal/start/start_test.go
+@@ -5,6 +5,8 @@ import (
+ 	"context"
+ 	"errors"
+ 	"net/http"
++	"os"
++	"path/filepath"
+ 	"regexp"
+ 	"strings"
+ 	"testing"
+@@ -123,6 +125,9 @@ func TestDatabaseStart(t *testing.T) {
+ 	t.Run("starts database locally", func(t *testing.T) {
+ 		// Setup in-memory fs
+ 		fsys := afero.NewMemMapFs()
++		hostSnippetsPath := filepath.Join(utils.CurrentDirAbs, utils.SnippetsDir)
++		require.NoError(t, os.MkdirAll(hostSnippetsPath, 0o755))
++		t.Cleanup(func() { require.NoError(t, os.RemoveAll(filepath.Join(utils.CurrentDirAbs, utils.SupabaseDirPath))) })
+ 		t.Setenv("SUPABASE_HOME", "/tmp/supabase-home")
+ 		analytics := &fakeAnalytics{enabled: true}
+ 		service, err := phtelemetry.NewService(fsys, phtelemetry.Options{
+diff --git a/apps/cli-go/internal/utils/docker.go b/apps/cli-go/internal/utils/docker.go
+index 9736fa651d187e4ed716b3699e01ae7ad6a4e321..33562055c1cb4147f220d124b4a5dbc26a1abd14 100644
+--- a/apps/cli-go/internal/utils/docker.go
++++ b/apps/cli-go/internal/utils/docker.go
+@@ -33,6 +33,8 @@ import (
+ 	"github.com/docker/docker/pkg/stdcopy"
+ 	"github.com/go-errors/errors"
+ 	"github.com/spf13/viper"
++	"github.com/supabase/cli/internal/utils/isolation"
++	"github.com/supabase/cli/internal/utils/loopback"
+ 	"go.opentelemetry.io/otel"
+ )
+ 
+@@ -248,13 +250,6 @@ func DockerPullImageIfNotCached(ctx context.Context, imageName string) error {
+ var suggestDockerInstall = "Docker Desktop is a prerequisite for local development. Follow the official docs to install: https://docs.docker.com/desktop"
+ 
+ func DockerStart(ctx context.Context, config container.Config, hostConfig container.HostConfig, networkingConfig network.NetworkingConfig, containerName string) (string, error) {
+-	// Pull container image
+-	if err := DockerPullImageIfNotCached(ctx, config.Image); err != nil {
+-		if client.IsErrConnectionFailed(err) {
+-			CmdSuggestion = suggestDockerInstall
+-		}
+-		return "", err
+-	}
+ 	// Setup default config
+ 	config.Image = GetRegistryImageUrl(config.Image)
+ 	if config.Labels == nil {
+@@ -269,6 +264,25 @@ func DockerStart(ctx context.Context, config container.Config, hostConfig contai
+ 	} else if len(hostConfig.NetworkMode) == 0 {
+ 		hostConfig.NetworkMode = container.NetworkMode(NetId)
+ 	}
++	prepared, err := isolation.PrepareContainer(config, hostConfig)
++	if err != nil {
++		return "", errors.Errorf("unsafe Docker container capability: %w", err)
++	}
++	defer prepared.Close()
++	hostConfig = prepared.HostConfig
++	if err := loopback.BindPublishedPorts(hostConfig.PortBindings); err != nil {
++		return "", errors.Errorf("failed to secure published Docker ports: %w", err)
++	}
++	// Pull container image
++	if err := DockerPullImageIfNotCached(ctx, config.Image); err != nil {
++		if client.IsErrConnectionFailed(err) {
++			CmdSuggestion = suggestDockerInstall
++		}
++		return "", err
++	}
++	if err := prepared.Revalidate(); err != nil {
++		return "", errors.Errorf("unsafe Docker container capability: %w", err)
++	}
+ 	if err := DockerNetworkCreateIfNotExists(ctx, hostConfig.NetworkMode, config.Labels); err != nil {
+ 		return "", err
+ 	}
+@@ -302,6 +316,9 @@ func DockerStart(ctx context.Context, config container.Config, hostConfig contai
+ 			}
+ 		}
+ 	}
++	if err := prepared.Revalidate(); err != nil {
++		return "", errors.Errorf("unsafe Docker container capability: %w", err)
++	}
+ 	// Create container from image
+ 	resp, err := Docker.ContainerCreate(ctx, &config, &hostConfig, &networkingConfig, nil, containerName)
+ 	if err != nil {
+diff --git a/apps/cli-go/internal/utils/docker_acl_darwin_test.go b/apps/cli-go/internal/utils/docker_acl_darwin_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..c3988d96bbe5455ef760bbbb4d27305f08d3eb17
+--- /dev/null
++++ b/apps/cli-go/internal/utils/docker_acl_darwin_test.go
+@@ -0,0 +1,90 @@
++//go:build darwin
++
++package utils
++
++import (
++	"context"
++	"net/http"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++	"github.com/docker/docker/api/types/network"
++	"github.com/docker/docker/client"
++	"github.com/stretchr/testify/require"
++)
++
++func TestDockerStartRejectsHostBindWithDarwinACLBeforeDockerAction(t *testing.T) {
++	cases := map[string]func(*testing.T, string) string{
++		"source directory": func(t *testing.T, root string) string {
++			return root
++		},
++		"descendant directory": func(t *testing.T, root string) string {
++			descendant := filepath.Join(root, "nested", "acl-writable")
++			require.NoError(t, os.MkdirAll(descendant, 0o700))
++			return descendant
++		},
++	}
++	for caseName, aclPath := range cases {
++		caseName, aclPath := caseName, aclPath
++		t.Run(caseName, func(t *testing.T) {
++			root := filepath.Join(t.TempDir(), "mode-safe")
++			require.NoError(t, os.Mkdir(root, 0o700))
++			protectedPath := aclPath(t, root)
++			require.NoError(t, exec.Command(
++				"/bin/chmod",
++				"+a",
++				"everyone allow add_file,delete_child,writeattr,writeextattr",
++				protectedPath,
++			).Run())
++			info, err := os.Stat(protectedPath)
++			require.NoError(t, err)
++			require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
++
++			forms := map[string]container.HostConfig{
++				"bind": {
++					Binds: []string{root + ":/safe/tree:ro"},
++				},
++				"mount": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: root,
++						Target: "/safe/tree",
++					}},
++				},
++			}
++			for form, hostConfig := range forms {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					transport := &countingRoundTripper{}
++					fakeDocker, err := client.NewClientWithOpts(
++						client.WithHost("http://docker.invalid"),
++						client.WithVersion("1.47"),
++						client.WithHTTPClient(&http.Client{Transport: transport}),
++					)
++					require.NoError(t, err)
++
++					previousDocker := Docker
++					Docker = fakeDocker
++					t.Cleanup(func() {
++						Docker = previousDocker
++						require.NoError(t, fakeDocker.Close())
++					})
++
++					_, err = DockerStart(
++						context.Background(),
++						container.Config{Image: "example.invalid/supabase/test:latest"},
++						hostConfig,
++						network.NetworkingConfig{},
++						"darwin-acl-test",
++					)
++					require.ErrorContains(t, err, "unsafe Docker container capability")
++					require.Zero(t, transport.calls)
++				})
++			}
++		})
++	}
++}
+diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c4920802ad6c74db5f7876a77687d342bb0bc75
+--- /dev/null
++++ b/apps/cli-go/internal/utils/docker_isolation_test.go
+@@ -0,0 +1,622 @@
++package utils
++
++import (
++	"context"
++	"io"
++	"net"
++	"net/http"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++	"github.com/docker/docker/api/types/network"
++	"github.com/docker/docker/client"
++	"github.com/stretchr/testify/require"
++)
++
++type countingRoundTripper struct {
++	calls int
++}
++
++func (transport *countingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
++	transport.calls++
++	return &http.Response{
++		StatusCode: http.StatusInternalServerError,
++		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++type safeCachedImageRoundTripper struct {
++	imageInspect    int
++	imagePull       int
++	volumeCreate    int
++	containerCreate int
++	containerStart  int
++	other           int
++}
++
++type replacingHostSourceRoundTripper struct {
++	t               *testing.T
++	source          string
++	replacement     string
++	imageInspect    int
++	containerCreate int
++	containerStart  int
++	other           int
++}
++
++func (transport *replacingHostSourceRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
++	status := http.StatusInternalServerError
++	body := "unexpected Docker action"
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		transport.imageInspect++
++		require.NoError(transport.t, os.RemoveAll(transport.source))
++		require.NoError(transport.t, os.Symlink(transport.replacement, transport.source))
++		status = http.StatusOK
++		body = "{}"
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		transport.containerCreate++
++		status = http.StatusCreated
++		body = `{"Id":"unsafe-container","Warnings":[]}`
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
++		transport.containerStart++
++		status = http.StatusNoContent
++		body = ""
++	default:
++		transport.other++
++	}
++	return &http.Response{
++		StatusCode: status,
++		Body:       io.NopCloser(strings.NewReader(body)),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func (transport *safeCachedImageRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
++	status := http.StatusInternalServerError
++	body := "unexpected Docker action"
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		transport.imageInspect++
++		status = http.StatusOK
++		body = "{}"
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		transport.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		transport.volumeCreate++
++		status = http.StatusCreated
++		body = `{}`
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		transport.containerCreate++
++		status = http.StatusCreated
++		body = `{"Id":"safe-container","Warnings":[]}`
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
++		transport.containerStart++
++		status = http.StatusNoContent
++		body = ""
++	default:
++		transport.other++
++	}
++	return &http.Response{
++		StatusCode: status,
++		Body:       io.NopCloser(strings.NewReader(body)),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestDockerStartUsesCachedImageAndStartsSafeContainer(t *testing.T) {
++	tempDir := t.TempDir()
++	t.Chdir(tempDir)
++	configPath := filepath.Join(tempDir, "config.json")
++	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
++
++	transport := &safeCachedImageRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	containerID, err := DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/test:latest"},
++		container.HostConfig{
++			NetworkMode: container.NetworkMode("bridge"),
++			Binds: []string{
++				configPath + ":/safe/config.json:ro",
++				"snaplist-safe-volume:/safe/data",
++			},
++			Mounts: []mount.Mount{{
++				Type:   mount.TypeBind,
++				Source: ".",
++				Target: "/safe/work",
++			}},
++		},
++		network.NetworkingConfig{},
++		"safe-cached-image-test",
++	)
++	require.NoError(t, err)
++	require.Equal(t, "safe-container", containerID)
++	require.Equal(t, 1, transport.imageInspect)
++	require.Zero(t, transport.imagePull)
++	require.Equal(t, 1, transport.volumeCreate)
++	require.Equal(t, 1, transport.containerCreate)
++	require.Equal(t, 1, transport.containerStart)
++	require.Zero(t, transport.other)
++}
++
++func TestDockerStartRejectsIncompleteStructuredBindBeforeDockerAction(t *testing.T) {
++	tempDir := t.TempDir()
++	t.Chdir(tempDir)
++	safeSource := filepath.Join(tempDir, "config.json")
++	require.NoError(t, os.WriteFile(safeSource, []byte("{}"), 0o600))
++
++	tests := map[string]mount.Mount{
++		"empty source": {
++			Type:   mount.TypeBind,
++			Source: "",
++			Target: "/safe/work",
++		},
++		"empty target": {
++			Type:   mount.TypeBind,
++			Source: safeSource,
++			Target: "",
++		},
++	}
++	for name, mounted := range tests {
++		mounted := mounted
++		t.Run(name, func(t *testing.T) {
++			transport := &countingRoundTripper{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: transport}),
++			)
++			require.NoError(t, err)
++
++			previousDocker := Docker
++			Docker = fakeDocker
++			t.Cleanup(func() {
++				Docker = previousDocker
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			_, err = DockerStart(
++				context.Background(),
++				container.Config{Image: "example.invalid/supabase/test:latest"},
++				container.HostConfig{
++					NetworkMode: container.NetworkMode("bridge"),
++					Mounts:      []mount.Mount{mounted},
++				},
++				network.NetworkingConfig{},
++				"incomplete-structured-bind-test",
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, transport.calls)
++		})
++	}
++}
++
++func TestDockerStartRejectsBeforeDockerAction(t *testing.T) {
++	transport := &countingRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	_, err = DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/test:latest"},
++		container.HostConfig{Privileged: true},
++		network.NetworkingConfig{},
++		"unsafe-test",
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, transport.calls)
++}
++
++func TestDockerStartRejectsHostBindFromUntrustedWritableParentBeforeDockerAction(t *testing.T) {
++	unsafeParent := filepath.Join(t.TempDir(), "untrusted-writable")
++	require.NoError(t, os.Mkdir(unsafeParent, 0o700))
++	require.NoError(t, os.Chmod(unsafeParent, 0o777))
++	hostFile := filepath.Join(unsafeParent, "config.json")
++	require.NoError(t, os.WriteFile(hostFile, []byte("{}"), 0o600))
++
++	transport := &countingRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	_, err = DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/test:latest"},
++		container.HostConfig{
++			Binds:       []string{hostFile + ":/safe/config.json:ro"},
++			NetworkMode: container.NetworkMode("bridge"),
++		},
++		network.NetworkingConfig{},
++		"unsafe-writable-parent-test",
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, transport.calls)
++}
++
++func TestDockerStartRejectsWritableRegularFileBeforeDockerAction(t *testing.T) {
++	modes := map[string]os.FileMode{
++		"group writable": 0o660,
++		"other writable": 0o602,
++	}
++	for modeName, mode := range modes {
++		modeName, mode := modeName, mode
++		t.Run(modeName, func(t *testing.T) {
++			source := filepath.Join(t.TempDir(), "config.json")
++			require.NoError(t, os.WriteFile(source, []byte("{}"), 0o600))
++			require.NoError(t, os.Chmod(source, mode))
++
++			forms := map[string]container.HostConfig{
++				"bind": {
++					NetworkMode: container.NetworkMode("bridge"),
++					Binds:       []string{source + ":/safe/config.json:ro"},
++				},
++				"mount": {
++					NetworkMode: container.NetworkMode("bridge"),
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: source,
++						Target: "/safe/config.json",
++					}},
++				},
++			}
++			for form, hostConfig := range forms {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					transport := &countingRoundTripper{}
++					fakeDocker, err := client.NewClientWithOpts(
++						client.WithHost("http://docker.invalid"),
++						client.WithVersion("1.47"),
++						client.WithHTTPClient(&http.Client{Transport: transport}),
++					)
++					require.NoError(t, err)
++
++					previousDocker := Docker
++					Docker = fakeDocker
++					t.Cleanup(func() {
++						Docker = previousDocker
++						require.NoError(t, fakeDocker.Close())
++					})
++
++					_, err = DockerStart(
++						context.Background(),
++						container.Config{Image: "example.invalid/supabase/test:latest"},
++						hostConfig,
++						network.NetworkingConfig{},
++						"unsafe-writable-file-test",
++					)
++					require.ErrorContains(t, err, "unsafe Docker container capability")
++					require.Zero(t, transport.calls)
++				})
++			}
++		})
++	}
++}
++
++func TestDockerStartRejectsHostBindReplacedAfterImageInspectionBeforeContainerCreate(t *testing.T) {
++	for _, form := range []string{"bind", "mount"} {
++		form := form
++		t.Run(form, func(t *testing.T) {
++			tempDir := t.TempDir()
++			source := filepath.Join(tempDir, "safe-source")
++			if form == "bind" {
++				require.NoError(t, os.WriteFile(source, []byte("{}"), 0o600))
++			} else {
++				require.NoError(t, os.Mkdir(source, 0o700))
++			}
++			runtimeSocket := filepath.Join(tempDir, "docker.sock")
++			require.NoError(t, os.WriteFile(runtimeSocket, []byte("protected"), 0o600))
++
++			transport := &replacingHostSourceRoundTripper{
++				t:           t,
++				source:      source,
++				replacement: runtimeSocket,
++			}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: transport}),
++			)
++			require.NoError(t, err)
++
++			previousDocker := Docker
++			Docker = fakeDocker
++			t.Cleanup(func() {
++				Docker = previousDocker
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			hostConfig := container.HostConfig{NetworkMode: container.NetworkMode("bridge")}
++			if form == "bind" {
++				hostConfig.Binds = []string{source + ":/safe/config.json:ro"}
++			} else {
++				hostConfig.Mounts = []mount.Mount{{
++					Type:   mount.TypeBind,
++					Source: source,
++					Target: "/safe/config",
++				}}
++			}
++			_, err = DockerStart(
++				context.Background(),
++				container.Config{Image: "example.invalid/supabase/test:latest"},
++				hostConfig,
++				network.NetworkingConfig{},
++				"replaced-host-source-test",
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Equal(t, 1, transport.imageInspect)
++			require.Zero(t, transport.containerCreate)
++			require.Zero(t, transport.containerStart)
++			require.Zero(t, transport.other)
++		})
++	}
++}
++
++func TestDockerStartRejectsSymlinkedRuntimeSocketSourcesBeforeDockerAction(t *testing.T) {
++	socketNames := []string{
++		"docker.sock",
++		"containerd.sock",
++		"podman.sock",
++		"crio.sock",
++		"docker_engine",
++	}
++
++	for _, socketName := range socketNames {
++		socketName := socketName
++		t.Run(socketName, func(t *testing.T) {
++			tempDir := t.TempDir()
++			socketPath := filepath.Join(tempDir, socketName)
++			require.NoError(t, os.WriteFile(socketPath, []byte("protected"), 0o600))
++			safeLookingPath := filepath.Join(tempDir, "backup.sql")
++			require.NoError(t, os.Symlink(socketPath, safeLookingPath))
++
++			cases := map[string]container.HostConfig{
++				"bind": {
++					Binds: []string{safeLookingPath + ":/safe/runtime:ro"},
++				},
++				"mount": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: safeLookingPath,
++						Target: "/safe/runtime",
++					}},
++				},
++			}
++
++			for form, hostConfig := range cases {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					transport := &countingRoundTripper{}
++					fakeDocker, err := client.NewClientWithOpts(
++						client.WithHost("http://docker.invalid"),
++						client.WithVersion("1.47"),
++						client.WithHTTPClient(&http.Client{Transport: transport}),
++					)
++					require.NoError(t, err)
++
++					previousDocker := Docker
++					Docker = fakeDocker
++					t.Cleanup(func() {
++						Docker = previousDocker
++						require.NoError(t, fakeDocker.Close())
++					})
++
++					_, err = DockerStart(
++						context.Background(),
++						container.Config{Image: "example.invalid/supabase/test:latest"},
++						hostConfig,
++						network.NetworkingConfig{},
++						"unsafe-symlink-test",
++					)
++					require.ErrorContains(t, err, "unsafe Docker container capability")
++					require.Zero(t, transport.calls)
++				})
++			}
++		})
++	}
++}
++
++func TestDockerStartRejectsDirectoryContainingRuntimeEndpointBeforeDockerAction(t *testing.T) {
++	cases := map[string]func(*testing.T, string){
++		"protected endpoint names": func(t *testing.T, root string) {
++			for index, socketName := range []string{
++				"docker.sock",
++				"containerd.sock",
++				"podman.sock",
++				"crio.sock",
++			} {
++				parent := filepath.Join(root, "nested", string(rune('a'+index)))
++				require.NoError(t, os.MkdirAll(parent, 0o700))
++				require.NoError(t, os.WriteFile(filepath.Join(parent, socketName), []byte("protected"), 0o600))
++			}
++		},
++		"symlink descendant": func(t *testing.T, root string) {
++			target := filepath.Join(t.TempDir(), "ordinary.txt")
++			require.NoError(t, os.WriteFile(target, []byte("ordinary"), 0o600))
++			require.NoError(t, os.Symlink(target, filepath.Join(root, "safe-looking.txt")))
++		},
++		"socket file type": func(t *testing.T, root string) {
++			listener, err := net.Listen("unix", filepath.Join(root, "runtime.endpoint"))
++			require.NoError(t, err)
++			t.Cleanup(func() {
++				require.NoError(t, listener.Close())
++			})
++		},
++		"group writable descendant directory": func(t *testing.T, root string) {
++			descendant := filepath.Join(root, "nested", "cross-user-writable")
++			require.NoError(t, os.MkdirAll(descendant, 0o700))
++			require.NoError(t, os.Chmod(descendant, 0o770))
++		},
++		"other writable descendant directory": func(t *testing.T, root string) {
++			descendant := filepath.Join(root, "nested", "cross-user-writable")
++			require.NoError(t, os.MkdirAll(descendant, 0o700))
++			require.NoError(t, os.Chmod(descendant, 0o707))
++		},
++		"group writable descendant file": func(t *testing.T, root string) {
++			descendant := filepath.Join(root, "nested", "cross-user-writable")
++			require.NoError(t, os.MkdirAll(filepath.Dir(descendant), 0o700))
++			require.NoError(t, os.WriteFile(descendant, []byte("unsafe"), 0o600))
++			require.NoError(t, os.Chmod(descendant, 0o660))
++		},
++		"other writable descendant file": func(t *testing.T, root string) {
++			descendant := filepath.Join(root, "nested", "cross-user-writable")
++			require.NoError(t, os.MkdirAll(filepath.Dir(descendant), 0o700))
++			require.NoError(t, os.WriteFile(descendant, []byte("unsafe"), 0o600))
++			require.NoError(t, os.Chmod(descendant, 0o602))
++		},
++	}
++
++	for caseName, setup := range cases {
++		caseName, setup := caseName, setup
++		t.Run(caseName, func(t *testing.T) {
++			root := t.TempDir()
++			if caseName == "socket file type" {
++				var err error
++				root, err = os.MkdirTemp("/tmp", "s526-")
++				require.NoError(t, err)
++				t.Cleanup(func() {
++					require.NoError(t, os.RemoveAll(root))
++				})
++			}
++			setup(t, root)
++
++			forms := map[string]container.HostConfig{
++				"bind": {
++					Binds: []string{root + ":/safe/tree:ro"},
++				},
++				"mount": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: root,
++						Target: "/safe/tree",
++					}},
++				},
++			}
++			for form, hostConfig := range forms {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					transport := &countingRoundTripper{}
++					fakeDocker, err := client.NewClientWithOpts(
++						client.WithHost("http://docker.invalid"),
++						client.WithVersion("1.47"),
++						client.WithHTTPClient(&http.Client{Transport: transport}),
++					)
++					require.NoError(t, err)
++
++					previousDocker := Docker
++					Docker = fakeDocker
++					t.Cleanup(func() {
++						Docker = previousDocker
++						require.NoError(t, fakeDocker.Close())
++					})
++
++					_, err = DockerStart(
++						context.Background(),
++						container.Config{Image: "example.invalid/supabase/test:latest"},
++						hostConfig,
++						network.NetworkingConfig{},
++						"unsafe-directory-test",
++					)
++					require.ErrorContains(t, err, "unsafe Docker container capability")
++					require.Zero(t, transport.calls)
++				})
++			}
++		})
++	}
++}
++
++func TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction(t *testing.T) {
++	transport := &countingRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	_, err = DockerRunOnce(
++		context.Background(),
++		"example.invalid/supabase/test:latest",
++		[]string{"DOCKER_HOST=tcp://docker:2375"},
++		[]string{"true"},
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, transport.calls)
++}
++
++func TestDockerStartRejectsDeviceCgroupRulesBeforeDockerAction(t *testing.T) {
++	transport := &countingRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	_, err = DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/test:latest"},
++		container.HostConfig{
++			Resources: container.Resources{
++				DeviceCgroupRules: []string{"c 1:3 rwm"},
++			},
++		},
++		network.NetworkingConfig{},
++		"unsafe-device-cgroup-test",
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, transport.calls)
++}
+diff --git a/apps/cli-go/internal/utils/docker_special_unix_test.go b/apps/cli-go/internal/utils/docker_special_unix_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..73017aa67247016839638856800203bf33084d8e
+--- /dev/null
++++ b/apps/cli-go/internal/utils/docker_special_unix_test.go
+@@ -0,0 +1,64 @@
++//go:build darwin || linux
++
++package utils
++
++import (
++	"context"
++	"net/http"
++	"path/filepath"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++	"github.com/docker/docker/api/types/network"
++	"github.com/docker/docker/client"
++	"github.com/stretchr/testify/require"
++	"golang.org/x/sys/unix"
++)
++
++func TestDockerStartRejectsDirectoryContainingFIFOBeforeDockerAction(t *testing.T) {
++	root := t.TempDir()
++	require.NoError(t, unix.Mkfifo(filepath.Join(root, "input.pipe"), 0o600))
++
++	forms := map[string]container.HostConfig{
++		"bind": {
++			Binds: []string{root + ":/safe/tree:ro"},
++		},
++		"mount": {
++			Mounts: []mount.Mount{{
++				Type:   mount.TypeBind,
++				Source: root,
++				Target: "/safe/tree",
++			}},
++		},
++	}
++	for form, hostConfig := range forms {
++		form, hostConfig := form, hostConfig
++		t.Run(form, func(t *testing.T) {
++			transport := &countingRoundTripper{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: transport}),
++			)
++			require.NoError(t, err)
++
++			previousDocker := Docker
++			Docker = fakeDocker
++			t.Cleanup(func() {
++				Docker = previousDocker
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			_, err = DockerStart(
++				context.Background(),
++				container.Config{Image: "example.invalid/supabase/test:latest"},
++				hostConfig,
++				network.NetworkingConfig{},
++				"unsafe-fifo-test",
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, transport.calls)
++		})
++	}
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostconfig.go b/apps/cli-go/internal/utils/isolation/hostconfig.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..79b029aabc4e68dad3dd2098f26a41bf307eb2a1
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostconfig.go
+@@ -0,0 +1,428 @@
++package isolation
++
++import (
++	"fmt"
++	"io"
++	"io/fs"
++	"os"
++	"path/filepath"
++	"strings"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++)
++
++func ValidateContainer(config container.Config, hostConfig container.HostConfig) error {
++	prepared, err := PrepareContainer(config, hostConfig)
++	if err != nil {
++		return err
++	}
++	return prepared.Close()
++}
++
++type PreparedContainer struct {
++	HostConfig container.HostConfig
++	sources    []*hostSourceGuard
++}
++
++func PrepareContainer(config container.Config, hostConfig container.HostConfig) (*PreparedContainer, error) {
++	hostConfig.Binds = append([]string(nil), hostConfig.Binds...)
++	hostConfig.Mounts = append([]mount.Mount(nil), hostConfig.Mounts...)
++	prepared := &PreparedContainer{HostConfig: hostConfig}
++	fail := func(err error) (*PreparedContainer, error) {
++		_ = prepared.Close()
++		return nil, err
++	}
++	for index, bind := range hostConfig.Binds {
++		source, destination, mode, hostPath, err := parseBind(bind)
++		if err != nil {
++			return fail(fmt.Errorf("invalid bind specification: %w", err))
++		}
++		if containsContainerRuntimeSocket(destination) {
++			return fail(fmt.Errorf("container runtime socket bind is forbidden"))
++		}
++		if containsContainerRuntimeSocket(source) {
++			return fail(fmt.Errorf("container runtime socket bind is forbidden"))
++		}
++		if hostPath {
++			guard, err := openHostSource(source)
++			if err != nil {
++				return fail(err)
++			}
++			prepared.sources = append(prepared.sources, guard)
++			hostConfig.Binds[index] = guard.canonical + ":" + destination
++			if mode != "" {
++				hostConfig.Binds[index] += ":" + mode
++			}
++		} else {
++			// Named volumes do not traverse a caller-selected host path.
++		}
++	}
++	for index, mounted := range hostConfig.Mounts {
++		if mounted.Type == mount.TypeBind && (mounted.Source == "" || mounted.Target == "") {
++			return fail(fmt.Errorf("structured bind source and target are required"))
++		}
++		if containsContainerRuntimeSocket(mounted.Target) {
++			return fail(fmt.Errorf("container runtime socket mount is forbidden"))
++		}
++		switch mounted.Type {
++		case mount.TypeBind:
++			guard, err := openHostSource(mounted.Source)
++			if err != nil {
++				return fail(err)
++			}
++			prepared.sources = append(prepared.sources, guard)
++			hostConfig.Mounts[index].Source = guard.canonical
++		case mount.TypeVolume, mount.TypeTmpfs:
++			// Named volumes and tmpfs mounts have no caller-selected host path.
++		case mount.TypeNamedPipe:
++			return fail(fmt.Errorf("container runtime named-pipe mount is forbidden"))
++		default:
++			return fail(fmt.Errorf("unsupported mount type %q", mounted.Type))
++		}
++	}
++	for _, environment := range config.Env {
++		name, _, _ := strings.Cut(environment, "=")
++		if strings.EqualFold(name, "DOCKER_HOST") {
++			return fail(fmt.Errorf("container DOCKER_HOST is forbidden"))
++		}
++	}
++	if hostConfig.Privileged {
++		return fail(fmt.Errorf("privileged mode is forbidden"))
++	}
++	if hostConfig.NetworkMode.IsHost() {
++		return fail(fmt.Errorf("host network is forbidden"))
++	}
++	if len(hostConfig.Resources.Devices) > 0 {
++		return fail(fmt.Errorf("device mappings are forbidden"))
++	}
++	if len(hostConfig.Resources.DeviceRequests) > 0 {
++		return fail(fmt.Errorf("device requests are forbidden"))
++	}
++	if len(hostConfig.Resources.DeviceCgroupRules) > 0 {
++		return fail(fmt.Errorf("device cgroup rules are forbidden"))
++	}
++	if hostConfig.PublishAllPorts {
++		return fail(fmt.Errorf("PublishAllPorts is forbidden"))
++	}
++	prepared.HostConfig = hostConfig
++	return prepared, nil
++}
++
++func (prepared *PreparedContainer) Revalidate() error {
++	for _, source := range prepared.sources {
++		if err := source.Revalidate(); err != nil {
++			return err
++		}
++	}
++	return nil
++}
++
++func (prepared *PreparedContainer) Close() error {
++	var first error
++	for _, source := range prepared.sources {
++		if err := source.Close(); err != nil && first == nil {
++			first = err
++		}
++	}
++	prepared.sources = nil
++	return first
++}
++
++func parseBind(bind string) (source, destination, mode string, hostPath bool, err error) {
++	if containsWindowsNamedPipe(bind) {
++		return "", "", "", false, fmt.Errorf("container runtime named-pipe bind is forbidden")
++	}
++	parts := strings.SplitN(bind, ":", 4)
++	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || parts[1] == "" {
++		return "", "", "", false, fmt.Errorf("expected source:destination[:mode]")
++	}
++	source, destination = parts[0], parts[1]
++	if len(parts) == 3 {
++		mode = parts[2]
++	}
++	return source, destination, mode, filepath.IsAbs(source), nil
++}
++
++type PreparedRegularFile struct {
++	source *hostSourceGuard
++}
++
++func PrepareRegularFile(source string) (*PreparedRegularFile, error) {
++	guard, err := openHostSource(source)
++	if err != nil {
++		return nil, err
++	}
++	if !guard.info.Mode().IsRegular() {
++		_ = guard.Close()
++		return nil, fmt.Errorf("host bind source must be a regular file")
++	}
++	return &PreparedRegularFile{source: guard}, nil
++}
++
++func (prepared *PreparedRegularFile) Stage(stagingParent string) (*StagedFile, error) {
++	if err := prepared.source.Revalidate(); err != nil {
++		return nil, err
++	}
++	if _, err := prepared.source.file.Seek(0, io.SeekStart); err != nil {
++		return nil, fmt.Errorf("rewind host bind source: %w", err)
++	}
++	absoluteParent, err := filepath.Abs(stagingParent)
++	if err != nil {
++		return nil, fmt.Errorf("resolve host bind staging parent: %w", err)
++	}
++	if err := os.MkdirAll(absoluteParent, 0o700); err != nil {
++		return nil, fmt.Errorf("create host bind staging parent: %w", err)
++	}
++	canonicalParent, err := filepath.EvalSymlinks(absoluteParent)
++	if err != nil {
++		return nil, fmt.Errorf("canonicalize host bind staging parent: %w", err)
++	}
++	parentInfo, err := validateCanonicalComponents(canonicalParent)
++	if err != nil {
++		return nil, fmt.Errorf("validate host bind staging parent: %w", err)
++	}
++	if !parentInfo.IsDir() {
++		return nil, fmt.Errorf("host bind staging parent must be a directory")
++	}
++	stagingDir, err := os.MkdirTemp(canonicalParent, "isolated-bind-")
++	if err != nil {
++		return nil, fmt.Errorf("create host bind staging directory: %w", err)
++	}
++	staged := &StagedFile{
++		directory: stagingDir,
++		removeAll: os.RemoveAll,
++	}
++	cleanupOnError := func(cause error) (*StagedFile, error) {
++		if cleanupErr := staged.Cleanup(); cleanupErr != nil {
++			return nil, fmt.Errorf("%w; additionally %v", cause, cleanupErr)
++		}
++		return nil, cause
++	}
++	if err := os.Chmod(stagingDir, 0o700); err != nil {
++		return cleanupOnError(fmt.Errorf("secure host bind staging directory: %w", err))
++	}
++	staged.Path = filepath.Join(stagingDir, "source")
++	output, err := os.OpenFile(staged.Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
++	if err != nil {
++		return cleanupOnError(fmt.Errorf("create staged host bind source: %w", err))
++	}
++	if _, err := io.Copy(output, prepared.source.file); err != nil {
++		_ = output.Close()
++		return cleanupOnError(fmt.Errorf("stage host bind source: %w", err))
++	}
++	if err := output.Close(); err != nil {
++		return cleanupOnError(fmt.Errorf("close staged host bind source: %w", err))
++	}
++	return staged, nil
++}
++
++func (prepared *PreparedRegularFile) Close() error {
++	if prepared == nil || prepared.source == nil {
++		return nil
++	}
++	err := prepared.source.Close()
++	prepared.source = nil
++	return err
++}
++
++type StagedFile struct {
++	Path      string
++	directory string
++	removeAll func(string) error
++}
++
++func (staged *StagedFile) Cleanup() error {
++	if staged == nil || staged.directory == "" {
++		return nil
++	}
++	directory := staged.directory
++	if err := staged.removeAll(directory); err != nil {
++		return fmt.Errorf("remove staged host bind source %s: %w", directory, err)
++	}
++	staged.directory = ""
++	staged.Path = ""
++	return nil
++}
++
++type hostSourceGuard struct {
++	canonical string
++	file      *os.File
++	info      os.FileInfo
++}
++
++func openHostSource(source string) (*hostSourceGuard, error) {
++	absolute, err := filepath.Abs(source)
++	if err != nil {
++		return nil, fmt.Errorf("resolve host bind source: %w", err)
++	}
++	canonical, err := filepath.EvalSymlinks(absolute)
++	if err != nil {
++		return nil, fmt.Errorf("resolve host bind source: %w", err)
++	}
++	canonical = filepath.Clean(canonical)
++	if containsContainerRuntimeSocket(canonical) {
++		return nil, fmt.Errorf("container runtime socket bind is forbidden")
++	}
++	info, err := validateCanonicalComponents(canonical)
++	if err != nil {
++		return nil, err
++	}
++	file, err := os.Open(canonical)
++	if err != nil {
++		return nil, fmt.Errorf("open host bind source: %w", err)
++	}
++	openedInfo, err := file.Stat()
++	if err != nil {
++		_ = file.Close()
++		return nil, fmt.Errorf("inspect opened host bind source: %w", err)
++	}
++	if !os.SameFile(info, openedInfo) {
++		_ = file.Close()
++		return nil, fmt.Errorf("host bind source changed while opening")
++	}
++	if openedInfo.IsDir() {
++		if err := validateDirectoryTree(canonical); err != nil {
++			_ = file.Close()
++			return nil, err
++		}
++	}
++	return &hostSourceGuard{canonical: canonical, file: file, info: openedInfo}, nil
++}
++
++func (source *hostSourceGuard) Revalidate() error {
++	canonical, err := filepath.EvalSymlinks(source.canonical)
++	if err != nil {
++		return fmt.Errorf("revalidate host bind source: %w", err)
++	}
++	if filepath.Clean(canonical) != source.canonical || containsContainerRuntimeSocket(canonical) {
++		return fmt.Errorf("host bind source changed after validation")
++	}
++	current, err := validateCanonicalComponents(source.canonical)
++	if err != nil {
++		return err
++	}
++	held, err := source.file.Stat()
++	if err != nil {
++		return fmt.Errorf("inspect held host bind source: %w", err)
++	}
++	if !os.SameFile(source.info, current) || !os.SameFile(source.info, held) {
++		return fmt.Errorf("host bind source identity changed after validation")
++	}
++	if held.IsDir() {
++		if err := validateDirectoryTree(source.canonical); err != nil {
++			return err
++		}
++	}
++	return nil
++}
++
++func (source *hostSourceGuard) Close() error {
++	if source.file == nil {
++		return nil
++	}
++	err := source.file.Close()
++	source.file = nil
++	return err
++}
++
++func validateCanonicalComponents(canonical string) (os.FileInfo, error) {
++	return validateCanonicalComponentsWith(canonical, os.Lstat, validateTrustedComponents)
++}
++
++func validateCanonicalComponentsWith(
++	canonical string,
++	lstat func(string) (os.FileInfo, error),
++	trust func([]hostComponent) error,
++) (os.FileInfo, error) {
++	volume := filepath.VolumeName(canonical)
++	current := volume + string(os.PathSeparator)
++	relative := strings.TrimPrefix(canonical, current)
++	components := strings.Split(relative, string(os.PathSeparator))
++	remaining := make([]string, 0, len(components))
++	for _, component := range components {
++		if component == "" {
++			continue
++		}
++		remaining = append(remaining, component)
++	}
++	info, err := lstat(current)
++	if err != nil {
++		return nil, fmt.Errorf("inspect host bind source root: %w", err)
++	}
++	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
++		return nil, fmt.Errorf("host bind source root must be a directory")
++	}
++	inspected := []hostComponent{{path: current, info: info}}
++	for index, component := range remaining {
++		current = filepath.Join(current, component)
++		info, err = lstat(current)
++		if err != nil {
++			return nil, fmt.Errorf("inspect host bind source component: %w", err)
++		}
++		if info.Mode()&os.ModeSymlink != 0 {
++			return nil, fmt.Errorf("host bind source contains a symlink component")
++		}
++		if index < len(remaining)-1 && !info.IsDir() {
++			return nil, fmt.Errorf("host bind source parent must be a directory")
++		}
++		inspected = append(inspected, hostComponent{path: current, info: info})
++	}
++	if !isSupportedHostSourceMode(info.Mode()) {
++		return nil, fmt.Errorf("host bind source must be a regular file or directory")
++	}
++	if err := trust(inspected); err != nil {
++		return nil, err
++	}
++	return info, nil
++}
++
++type hostComponent struct {
++	path string
++	info os.FileInfo
++}
++
++func validateDirectoryTree(root string) error {
++	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
++		if walkErr != nil {
++			return fmt.Errorf("inspect host bind directory tree: %w", walkErr)
++		}
++		if entry.Type()&os.ModeSymlink != 0 {
++			return fmt.Errorf("host bind directory contains a symlink: %s", path)
++		}
++		info, err := entry.Info()
++		if err != nil {
++			return fmt.Errorf("inspect host bind directory entry: %w", err)
++		}
++		if containsContainerRuntimeSocket(filepath.Base(path)) {
++			return fmt.Errorf("host bind directory contains a container runtime endpoint: %s", path)
++		}
++		if !isSupportedHostSourceMode(info.Mode()) {
++			return fmt.Errorf("host bind directory contains a special file: %s", path)
++		}
++		if err := validateTrustedTreeEntry(path, info); err != nil {
++			return err
++		}
++		return nil
++	})
++}
++
++func isSupportedHostSourceMode(mode os.FileMode) bool {
++	return mode.IsRegular() || mode.IsDir()
++}
++
++func containsContainerRuntimeSocket(value string) bool {
++	normalized := strings.ToLower(strings.ReplaceAll(value, "\\", "/"))
++	return strings.Contains(normalized, "docker.sock") ||
++		strings.Contains(normalized, "containerd.sock") ||
++		strings.Contains(normalized, "podman.sock") ||
++		strings.Contains(normalized, "crio.sock") ||
++		strings.Contains(normalized, "//./pipe/docker_engine") ||
++		normalized == "docker_engine" ||
++		strings.HasSuffix(normalized, "/docker_engine")
++}
++
++func containsWindowsNamedPipe(value string) bool {
++	normalized := strings.ToLower(strings.ReplaceAll(value, "\\", "/"))
++	return strings.Contains(normalized, "//./pipe/")
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostconfig_test.go b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e4b96d1a1907614ac5f6846214b2963f4da55790
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
+@@ -0,0 +1,265 @@
++package isolation
++
++import (
++	"errors"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++	"github.com/stretchr/testify/require"
++)
++
++func TestValidateContainerRejectsDockerHostCapabilities(t *testing.T) {
++	t.Parallel()
++
++	tests := map[string]struct {
++		config     container.Config
++		hostConfig container.HostConfig
++	}{
++		"docker socket bind": {
++			hostConfig: container.HostConfig{
++				Binds: []string{"/var/run/docker.sock:/var/run/docker.sock:ro"},
++			},
++		},
++		"rootless docker socket bind": {
++			hostConfig: container.HostConfig{
++				Binds: []string{"/home/user/.docker/run/docker.sock:/var/run/docker.sock:ro"},
++			},
++		},
++		"docker socket mount": {
++			hostConfig: container.HostConfig{
++				Mounts: []mount.Mount{{
++					Type:   mount.TypeBind,
++					Source: "/var/run/docker.sock",
++					Target: "/var/run/docker.sock",
++				}},
++			},
++		},
++		"docker host environment": {
++			config: container.Config{
++				Env: []string{"DOCKER_HOST=tcp://docker:2375"},
++			},
++		},
++		"privileged mode": {
++			hostConfig: container.HostConfig{Privileged: true},
++		},
++		"host network": {
++			hostConfig: container.HostConfig{
++				NetworkMode: container.NetworkMode("host"),
++			},
++		},
++		"device mapping": {
++			hostConfig: container.HostConfig{
++				Resources: container.Resources{
++					Devices: []container.DeviceMapping{{
++						PathOnHost:        "/dev/null",
++						PathInContainer:   "/dev/null",
++						CgroupPermissions: "r",
++					}},
++				},
++			},
++		},
++		"device request": {
++			hostConfig: container.HostConfig{
++				Resources: container.Resources{
++					DeviceRequests: []container.DeviceRequest{{Driver: "nvidia"}},
++				},
++			},
++		},
++		"device cgroup rule": {
++			hostConfig: container.HostConfig{
++				Resources: container.Resources{
++					DeviceCgroupRules: []string{"c 1:3 rwm"},
++				},
++			},
++		},
++		"publish all ports": {
++			hostConfig: container.HostConfig{PublishAllPorts: true},
++		},
++	}
++
++	for name, testCase := range tests {
++		testCase := testCase
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++			require.Error(t, ValidateContainer(testCase.config, testCase.hostConfig))
++		})
++	}
++}
++
++func TestValidateContainerRejectsContainerRuntimeSockets(t *testing.T) {
++	t.Parallel()
++
++	socketPaths := map[string]string{
++		"docker":         "/var/run/DOCKER.SOCK",
++		"docker windows": `\\.\pipe\DOCKER_ENGINE`,
++		"containerd":     `\run\CONTAINERD\containerd.sock`,
++		"podman":         "/run/user/501/PODMAN/PODMAN.SOCK",
++		"crio":           "/var/run/CRIO/CRIO.SOCK",
++	}
++
++	for name, socketPath := range socketPaths {
++		name, socketPath := name, socketPath
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++
++			cases := map[string]container.HostConfig{
++				"bind source": {
++					Binds: []string{socketPath + ":/safe/runtime:ro"},
++				},
++				"bind destination": {
++					Binds: []string{"/safe/runtime:" + socketPath + ":ro"},
++				},
++				"mount source": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: socketPath,
++						Target: "/safe/runtime",
++					}},
++				},
++				"mount destination": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: "/safe/runtime",
++						Target: socketPath,
++					}},
++				},
++			}
++
++			for form, hostConfig := range cases {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					t.Parallel()
++					require.Error(t, ValidateContainer(container.Config{}, hostConfig))
++				})
++			}
++		})
++	}
++}
++
++func TestValidateContainerRejectsSymlinkedContainerRuntimeSocketSources(t *testing.T) {
++	t.Parallel()
++
++	socketNames := []string{
++		"docker.sock",
++		"containerd.sock",
++		"podman.sock",
++		"crio.sock",
++		"docker_engine",
++	}
++
++	for _, socketName := range socketNames {
++		socketName := socketName
++		t.Run(socketName, func(t *testing.T) {
++			t.Parallel()
++
++			tempDir := t.TempDir()
++			socketPath := filepath.Join(tempDir, socketName)
++			require.NoError(t, os.WriteFile(socketPath, []byte("protected"), 0o600))
++			safeLookingPath := filepath.Join(tempDir, "backup.sql")
++			require.NoError(t, os.Symlink(socketPath, safeLookingPath))
++
++			cases := map[string]container.HostConfig{
++				"bind source": {
++					Binds: []string{safeLookingPath + ":/safe/runtime:ro"},
++				},
++				"mount source": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: safeLookingPath,
++						Target: "/safe/runtime",
++					}},
++				},
++			}
++
++			for form, hostConfig := range cases {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					t.Parallel()
++					require.Error(t, ValidateContainer(container.Config{}, hostConfig))
++				})
++			}
++		})
++	}
++}
++
++func TestValidateContainerAllowsOrdinaryBridgeAndStorage(t *testing.T) {
++	t.Parallel()
++
++	tempDir := t.TempDir()
++	configPath := filepath.Join(tempDir, "snaplist-config")
++	require.NoError(t, os.WriteFile(configPath, []byte("safe"), 0o600))
++
++	config := container.Config{Env: []string{"APP_ENV=local"}}
++	hostConfig := container.HostConfig{
++		NetworkMode: container.NetworkMode("supabase_network_snaplist"),
++		Binds: []string{
++			tempDir + ":/work:ro",
++			"snaplist-db-data:/var/lib/postgresql/data",
++		},
++		Mounts: []mount.Mount{{
++			Type:   mount.TypeBind,
++			Source: configPath,
++			Target: "/etc/snaplist",
++		}},
++	}
++
++	require.NoError(t, ValidateContainer(config, hostConfig))
++}
++
++func TestStagedRegularFileCleanupRemovesSnapshot(t *testing.T) {
++	source := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(source, []byte("select 1;"), 0o600))
++	prepared, err := PrepareRegularFile(source)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, prepared.Close()) })
++
++	staged, err := prepared.Stage(t.TempDir())
++	require.NoError(t, err)
++	stagedPath := staged.Path
++	require.FileExists(t, stagedPath)
++	require.NoError(t, staged.Cleanup())
++	require.NoFileExists(t, stagedPath)
++}
++
++func TestPreparedRegularFileStageRejectsUntrustedParentBeforeCopy(t *testing.T) {
++	source := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(source, []byte("sensitive backup bytes"), 0o600))
++	prepared, err := PrepareRegularFile(source)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, prepared.Close()) })
++
++	stagingParent := filepath.Join(t.TempDir(), "untrusted")
++	require.NoError(t, os.Mkdir(stagingParent, 0o777))
++	require.NoError(t, os.Chmod(stagingParent, 0o777))
++
++	staged, err := prepared.Stage(stagingParent)
++	if staged != nil {
++		t.Cleanup(func() { require.NoError(t, staged.Cleanup()) })
++	}
++	require.ErrorContains(t, err, "untrusted principal")
++	require.Nil(t, staged)
++
++	entries, readErr := os.ReadDir(stagingParent)
++	require.NoError(t, readErr)
++	require.Empty(t, entries, "backup bytes must not be staged beneath an untrusted parent")
++}
++
++func TestStagedRegularFileCleanupReportsRemovalFailure(t *testing.T) {
++	source := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(source, []byte("select 1;"), 0o600))
++	prepared, err := PrepareRegularFile(source)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, prepared.Close()) })
++
++	staged, err := prepared.Stage(t.TempDir())
++	require.NoError(t, err)
++	removeAll := staged.removeAll
++	staged.removeAll = func(string) error { return errors.New("cleanup denied") }
++	require.ErrorContains(t, staged.Cleanup(), "cleanup denied")
++	require.NotEmpty(t, staged.Path)
++	staged.removeAll = removeAll
++	require.NoError(t, staged.Cleanup())
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..4234b2757f60594e4acc65ac1e79cf87db8b2f7b
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go
+@@ -0,0 +1,108 @@
++//go:build darwin
++
++package isolation
++
++import (
++	"encoding/binary"
++	"fmt"
++	"os"
++	"runtime"
++	"unsafe"
++
++	"golang.org/x/sys/unix"
++)
++
++const (
++	darwinAttributeBitmapCount = 5
++	darwinAttributeHeaderSize  = 12
++	darwinAttributeBufferSize  = 8192
++	darwinFileSecurityMagic    = 0x012cc16d
++	darwinFileSecurityHeader   = 44
++	darwinACLMaxEntries        = 128
++	darwinACEBytes             = 24
++	darwinACEPermit            = 1
++	darwinACEKindMask          = 0xf
++	darwinACLWriteRights       = (1 << 2) |
++		(1 << 4) |
++		(1 << 5) |
++		(1 << 6) |
++		(1 << 8) |
++		(1 << 10) |
++		(1 << 12) |
++		(1 << 13) |
++		(1 << 21) |
++		(1 << 23) |
++		(1 << 25) |
++		(1 << 26)
++)
++
++// validatePlatformTrust rejects Darwin ACL entries that permit mutation. ACLs
++// supplement BSD mode permissions, so mode and owner checks alone cannot prove
++// cross-user safety. fgetattrlist inspects the already-open object and does not
++// depend on xattrs. Deny-only and read-only ACLs preserve the mode-based proof.
++func validatePlatformTrust(path string, expected os.FileInfo) error {
++	file, err := os.Open(path)
++	if err != nil {
++		return fmt.Errorf("open host bind source for ACL inspection at %s: %w", path, err)
++	}
++	defer file.Close()
++
++	opened, err := file.Stat()
++	if err != nil {
++		return fmt.Errorf("inspect host bind source for ACL inspection at %s: %w", path, err)
++	}
++	if !os.SameFile(expected, opened) {
++		return fmt.Errorf("host bind source changed during ACL inspection: %s", path)
++	}
++
++	attributes := unix.Attrlist{
++		Bitmapcount: darwinAttributeBitmapCount,
++		Commonattr:  unix.ATTR_CMN_EXTENDED_SECURITY,
++	}
++	buffer := make([]byte, darwinAttributeBufferSize)
++	_, _, errno := unix.Syscall6(
++		unix.SYS_FGETATTRLIST,
++		file.Fd(),
++		uintptr(unsafe.Pointer(&attributes)),
++		uintptr(unsafe.Pointer(&buffer[0])),
++		uintptr(len(buffer)),
++		0,
++		0,
++	)
++	runtime.KeepAlive(file)
++	if errno != 0 {
++		return fmt.Errorf("inspect host bind source ACL at %s: %w", path, errno)
++	}
++
++	total := int(binary.LittleEndian.Uint32(buffer[0:4]))
++	if total < darwinAttributeHeaderSize || total > len(buffer) {
++		return fmt.Errorf("inspect host bind source ACL at %s: malformed attribute response", path)
++	}
++	offset := int(int32(binary.LittleEndian.Uint32(buffer[4:8])))
++	length := int(binary.LittleEndian.Uint32(buffer[8:12]))
++	start := 4 + offset
++	if offset < 0 || start < darwinAttributeHeaderSize || start > total || length > total-start {
++		return fmt.Errorf("inspect host bind source ACL at %s: malformed ACL reference", path)
++	}
++	if length != 0 {
++		acl := buffer[start : start+length]
++		if len(acl) < darwinFileSecurityHeader ||
++			binary.LittleEndian.Uint32(acl[0:4]) != darwinFileSecurityMagic {
++			return fmt.Errorf("inspect host bind source ACL at %s: malformed file-security record", path)
++		}
++		entryCount := int(binary.LittleEndian.Uint32(acl[36:40]))
++		if entryCount > darwinACLMaxEntries ||
++			len(acl) != darwinFileSecurityHeader+entryCount*darwinACEBytes {
++			return fmt.Errorf("inspect host bind source ACL at %s: malformed ACL entries", path)
++		}
++		for index := 0; index < entryCount; index++ {
++			aceStart := darwinFileSecurityHeader + index*darwinACEBytes
++			flags := binary.LittleEndian.Uint32(acl[aceStart+16 : aceStart+20])
++			rights := binary.LittleEndian.Uint32(acl[aceStart+20 : aceStart+24])
++			if flags&darwinACEKindMask == darwinACEPermit && rights&darwinACLWriteRights != 0 {
++				return fmt.Errorf("host bind source has a write-capable Darwin ACL and cannot be proven cross-user safe: %s", path)
++			}
++		}
++	}
++	return nil
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e3083aebccae210ab255f4333123696d7be6c133
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go
+@@ -0,0 +1,60 @@
++//go:build darwin
++
++package isolation
++
++import (
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/stretchr/testify/require"
++)
++
++func TestValidateContainerAllowsNonWriteDarwinACL(t *testing.T) {
++	root := filepath.Join(t.TempDir(), "deny-only-acl")
++	require.NoError(t, os.Mkdir(root, 0o700))
++	require.NoError(t, exec.Command(
++		"/bin/chmod",
++		"+a",
++		"everyone deny delete",
++		root,
++	).Run())
++	t.Cleanup(func() {
++		require.NoError(t, exec.Command("/bin/chmod", "-N", root).Run())
++	})
++
++	require.NoError(t, ValidateContainer(
++		container.Config{},
++		container.HostConfig{Binds: []string{root + ":/safe/tree:ro"}},
++	))
++}
++
++func TestPreparedRegularFileStageRejectsACLWritableParentBeforeCopy(t *testing.T) {
++	source := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(source, []byte("sensitive backup bytes"), 0o600))
++	prepared, err := PrepareRegularFile(source)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, prepared.Close()) })
++
++	stagingParent := filepath.Join(t.TempDir(), "mode-safe-but-acl-writable")
++	require.NoError(t, os.Mkdir(stagingParent, 0o700))
++	require.NoError(t, exec.Command(
++		"/bin/chmod",
++		"+a",
++		"everyone allow add_file,delete_child,writeattr,writeextattr",
++		stagingParent,
++	).Run())
++
++	staged, err := prepared.Stage(stagingParent)
++	if staged != nil {
++		t.Cleanup(func() { require.NoError(t, staged.Cleanup()) })
++	}
++	require.ErrorContains(t, err, "write-capable Darwin ACL")
++	require.Nil(t, staged)
++
++	entries, readErr := os.ReadDir(stagingParent)
++	require.NoError(t, readErr)
++	require.Empty(t, entries, "backup bytes must not be staged beneath an ACL-writable parent")
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..3a857f35af4ba05bcc86f742e3d102148766dce0
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go
+@@ -0,0 +1,12 @@
++//go:build linux
++
++package isolation
++
++import "os"
++
++// Linux access ACL masks are reflected in the group class mode bits. The
++// shared group/other-writable check therefore rejects ACLs that grant write
++// access to another principal without requiring a platform ACL parser.
++func validatePlatformTrust(_ string, _ os.FileInfo) error {
++	return nil
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f4d63886adc13d801619a05092b8be550be9c546
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
+@@ -0,0 +1,83 @@
++//go:build darwin || linux
++
++package isolation
++
++import (
++	"fmt"
++	"os"
++	"syscall"
++)
++
++func validateTrustedComponents(components []hostComponent) error {
++	return validateTrustedComponentsWith(components, validatePlatformTrust)
++}
++
++func validateTrustedComponentsWith(
++	components []hostComponent,
++	platformTrust func(string, os.FileInfo) error,
++) error {
++	effectiveUser := uint32(os.Geteuid())
++	for index, component := range components {
++		if err := platformTrust(component.path, component.info); err != nil {
++			return err
++		}
++		owner, err := componentOwner(component.info)
++		if err != nil {
++			return fmt.Errorf("inspect host bind source ownership at %s: %w", component.path, err)
++		}
++		if !isTrustedOwner(owner, effectiveUser) {
++			return fmt.Errorf("host bind source component is owned by an untrusted principal: %s", component.path)
++		}
++		untrustedWrite := component.info.Mode().Perm() & 0o022
++		if untrustedWrite == 0 {
++			continue
++		}
++		if !component.info.IsDir() {
++			return fmt.Errorf("host bind file is writable by an untrusted principal: %s", component.path)
++		}
++		if index == len(components)-1 {
++			return fmt.Errorf("host bind directory is writable by an untrusted principal: %s", component.path)
++		}
++		if component.info.Mode()&os.ModeSticky == 0 {
++			return fmt.Errorf("host bind parent is replaceable by an untrusted principal: %s", component.path)
++		}
++		nextOwner, err := componentOwner(components[index+1].info)
++		if err != nil {
++			return fmt.Errorf("inspect host bind child ownership at %s: %w", components[index+1].path, err)
++		}
++		if nextOwner != 0 && nextOwner != effectiveUser {
++			return fmt.Errorf("host bind child in sticky parent is owned by an untrusted principal: %s", components[index+1].path)
++		}
++	}
++	return nil
++}
++
++func componentOwner(info os.FileInfo) (uint32, error) {
++	stat, ok := info.Sys().(*syscall.Stat_t)
++	if !ok {
++		return 0, fmt.Errorf("unsupported file ownership metadata")
++	}
++	return stat.Uid, nil
++}
++
++func validateTrustedTreeEntry(path string, info os.FileInfo) error {
++	if err := validatePlatformTrust(path, info); err != nil {
++		return err
++	}
++	owner, err := componentOwner(info)
++	if err != nil {
++		return fmt.Errorf("inspect host bind directory ownership at %s: %w", path, err)
++	}
++	effectiveUser := uint32(os.Geteuid())
++	if !isTrustedOwner(owner, effectiveUser) {
++		return fmt.Errorf("host bind directory entry is owned by an untrusted principal: %s", path)
++	}
++	if info.Mode().Perm()&0o022 != 0 {
++		return fmt.Errorf("host bind directory entry is writable by an untrusted principal: %s", path)
++	}
++	return nil
++}
++
++func isTrustedOwner(owner, effectiveUser uint32) bool {
++	return owner == 0 || owner == effectiveUser
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..4d6b307c86f026cb8b9baae38edc23574fa5cc3a
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go
+@@ -0,0 +1,135 @@
++//go:build darwin || linux
++
++package isolation
++
++import (
++	"errors"
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/stretchr/testify/require"
++)
++
++type modeOverrideFileInfo struct {
++	os.FileInfo
++	mode os.FileMode
++}
++
++func (info modeOverrideFileInfo) Mode() os.FileMode {
++	return info.mode
++}
++
++func TestValidateCanonicalComponentsIncludesRootInTrustedChain(t *testing.T) {
++	source := filepath.Join(t.TempDir(), "source")
++	require.NoError(t, os.WriteFile(source, []byte("safe"), 0o600))
++	canonical, err := filepath.EvalSymlinks(source)
++	require.NoError(t, err)
++	root := filepath.VolumeName(canonical) + string(os.PathSeparator)
++
++	t.Run("root inspection failure", func(t *testing.T) {
++		sentinel := errors.New("root inspection rejected")
++		var inspected []string
++		lstat := func(path string) (os.FileInfo, error) {
++			inspected = append(inspected, path)
++			if path == root {
++				return nil, sentinel
++			}
++			return os.Lstat(path)
++		}
++		trustCalled := false
++		trust := func([]hostComponent) error {
++			trustCalled = true
++			return nil
++		}
++
++		_, err := validateCanonicalComponentsWith(canonical, lstat, trust)
++		require.ErrorIs(t, err, sentinel)
++		require.Equal(t, []string{root}, inspected)
++		require.False(t, trustCalled)
++	})
++
++	t.Run("untrusted root metadata", func(t *testing.T) {
++		var inspected []string
++		lstat := func(path string) (os.FileInfo, error) {
++			inspected = append(inspected, path)
++			info, err := os.Lstat(path)
++			if err != nil || path != root {
++				return info, err
++			}
++			return modeOverrideFileInfo{
++				FileInfo: info,
++				mode:     info.Mode() | 0o022,
++			}, nil
++		}
++		trust := func(components []hostComponent) error {
++			return validateTrustedComponentsWith(
++				components,
++				func(string, os.FileInfo) error { return nil },
++			)
++		}
++
++		_, err := validateCanonicalComponentsWith(canonical, lstat, trust)
++		require.ErrorContains(t, err, "host bind parent is replaceable by an untrusted principal")
++		require.Equal(t, root, inspected[0])
++		require.Equal(t, 1, countPath(inspected, root))
++	})
++
++	t.Run("root platform trust failure", func(t *testing.T) {
++		sentinel := errors.New("root platform trust rejected")
++		var inspected []hostComponent
++		trust := func(components []hostComponent) error {
++			inspected = append(inspected, components...)
++			return validateTrustedComponentsWith(
++				components,
++				func(path string, _ os.FileInfo) error {
++					if path == root {
++						return sentinel
++					}
++					return nil
++				},
++			)
++		}
++
++		_, err := validateCanonicalComponentsWith(canonical, os.Lstat, trust)
++		require.ErrorIs(t, err, sentinel)
++		require.Equal(t, root, inspected[0].path)
++		require.Equal(t, 1, countComponent(inspected, root))
++	})
++}
++
++func countPath(paths []string, target string) int {
++	count := 0
++	for _, path := range paths {
++		if path == target {
++			count++
++		}
++	}
++	return count
++}
++
++func countComponent(components []hostComponent, target string) int {
++	count := 0
++	for _, component := range components {
++		if component.path == target {
++			count++
++		}
++	}
++	return count
++}
++
++func TestHostSourceTrustPredicatesRejectUnprivilegedFixtureCases(t *testing.T) {
++	effectiveUser := uint32(os.Geteuid())
++	require.False(t, isTrustedOwner(effectiveUser+1, effectiveUser))
++
++	for name, mode := range map[string]os.FileMode{
++		"block device":     os.ModeDevice,
++		"character device": os.ModeDevice | os.ModeCharDevice,
++		"named pipe":       os.ModeNamedPipe,
++		"socket":           os.ModeSocket,
++	} {
++		t.Run(name, func(t *testing.T) {
++			require.False(t, isSupportedHostSourceMode(mode))
++		})
++	}
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..5fd41af1db3d714a66f33adcbf06394eb071b441
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go
+@@ -0,0 +1,16 @@
++//go:build !darwin && !linux
++
++package isolation
++
++import (
++	"fmt"
++	"os"
++)
++
++func validateTrustedComponents([]hostComponent) error {
++	return fmt.Errorf("host bind sources are unsupported on this platform")
++}
++
++func validateTrustedTreeEntry(string, os.FileInfo) error {
++	return fmt.Errorf("host bind sources are unsupported on this platform")
++}
+diff --git a/apps/cli-go/internal/utils/loopback/portbindings.go b/apps/cli-go/internal/utils/loopback/portbindings.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..0df0346bb9e56425a48edcf0121468f40b0fd3b3
+--- /dev/null
++++ b/apps/cli-go/internal/utils/loopback/portbindings.go
+@@ -0,0 +1,96 @@
++package loopback
++
++import (
++	"fmt"
++	"sort"
++
++	"github.com/docker/go-connections/nat"
++)
++
++const (
++	ipv4 = "127.0.0.1"
++	ipv6 = "::1"
++)
++
++func BindPublishedPorts(portBindings nat.PortMap) error {
++	for port, bindings := range portBindings {
++		if len(bindings) == 0 {
++			return fmt.Errorf("published port %s has no host bindings", port)
++		}
++
++		hostPorts := make(map[string]struct{}, len(bindings))
++		hasOmittedHostIP := false
++		hasExplicitHostIP := false
++		for _, binding := range bindings {
++			if binding.HostPort == "" {
++				return fmt.Errorf("published port %s has an empty host port", port)
++			}
++			hostPorts[binding.HostPort] = struct{}{}
++			if binding.HostIP == "" {
++				hasOmittedHostIP = true
++			} else {
++				hasExplicitHostIP = true
++			}
++		}
++		if hasOmittedHostIP && hasExplicitHostIP {
++			return fmt.Errorf("published port %s mixes omitted and explicit host IPs", port)
++		}
++		if hasExplicitHostIP {
++			if err := ValidatePublishedPorts(nat.PortMap{port: bindings}); err != nil {
++				return err
++			}
++			continue
++		}
++
++		sortedHostPorts := make([]string, 0, len(hostPorts))
++		for hostPort := range hostPorts {
++			sortedHostPorts = append(sortedHostPorts, hostPort)
++		}
++		sort.Strings(sortedHostPorts)
++
++		normalized := make([]nat.PortBinding, 0, len(sortedHostPorts)*2)
++		for _, hostPort := range sortedHostPorts {
++			normalized = append(normalized,
++				nat.PortBinding{HostIP: ipv4, HostPort: hostPort},
++				nat.PortBinding{HostIP: ipv6, HostPort: hostPort},
++			)
++		}
++		portBindings[port] = normalized
++	}
++	return ValidatePublishedPorts(portBindings)
++}
++
++func ValidatePublishedPorts(portBindings nat.PortMap) error {
++	for port, bindings := range portBindings {
++		if len(bindings) == 0 {
++			return fmt.Errorf("published port %s has no host bindings", port)
++		}
++
++		hostIPsByPort := map[string]map[string]int{}
++		for _, binding := range bindings {
++			if binding.HostPort == "" {
++				return fmt.Errorf("published port %s has an empty host port", port)
++			}
++			if binding.HostIP != ipv4 && binding.HostIP != ipv6 {
++				return fmt.Errorf("published port %s has unsafe host IP %q", port, binding.HostIP)
++			}
++			if hostIPsByPort[binding.HostPort] == nil {
++				hostIPsByPort[binding.HostPort] = map[string]int{}
++			}
++			hostIPsByPort[binding.HostPort][binding.HostIP]++
++		}
++
++		for hostPort, hostIPs := range hostIPsByPort {
++			if hostIPs[ipv4] != 1 || hostIPs[ipv6] != 1 || len(hostIPs) != 2 {
++				return fmt.Errorf(
++					"published port %s:%s must bind exactly once to %s and %s",
++					port,
++					hostPort,
++					ipv4,
++					ipv6,
++				)
++			}
++		}
++	}
++	return nil
++}
+diff --git a/apps/cli-go/internal/utils/loopback/portbindings_test.go b/apps/cli-go/internal/utils/loopback/portbindings_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6436fab4ef13e707125f0e727b1fc024ed5449b
+--- /dev/null
++++ b/apps/cli-go/internal/utils/loopback/portbindings_test.go
+@@ -0,0 +1,70 @@
++package loopback
++
++import (
++	"testing"
++
++	"github.com/docker/go-connections/nat"
++	"github.com/stretchr/testify/require"
++)
++
++func TestBindPublishedPortsNormalizesEveryPort(t *testing.T) {
++	t.Parallel()
++
++	bindings := nat.PortMap{
++		"5432/tcp": {{HostPort: "41234"}},
++		"6543/tcp": {{HostPort: "51234"}},
++	}
++
++	require.NoError(t, BindPublishedPorts(bindings))
++	require.Equal(t, []nat.PortBinding{
++		{HostIP: "127.0.0.1", HostPort: "41234"},
++		{HostIP: "::1", HostPort: "41234"},
++	}, bindings["5432/tcp"])
++	require.Equal(t, []nat.PortBinding{
++		{HostIP: "127.0.0.1", HostPort: "51234"},
++		{HostIP: "::1", HostPort: "51234"},
++	}, bindings["6543/tcp"])
++}
++
++func TestValidatePublishedPortsRejectsUnsafeBindings(t *testing.T) {
++	t.Parallel()
++
++	tests := map[string]nat.PortMap{
++		"empty host IP": {
++			"5432/tcp": {{HostIP: "", HostPort: "41234"}},
++		},
++		"wildcard IPv4": {
++			"5432/tcp": {{HostIP: "0.0.0.0", HostPort: "41234"}},
++		},
++		"wildcard IPv6": {
++			"5432/tcp": {{HostIP: "::", HostPort: "41234"}},
++		},
++		"missing IPv6 family": {
++			"5432/tcp": {{HostIP: "127.0.0.1", HostPort: "41234"}},
++		},
++		"empty host port": {
++			"5432/tcp": {
++				{HostIP: "127.0.0.1", HostPort: ""},
++				{HostIP: "::1", HostPort: ""},
++			},
++		},
++	}
++
++	for name, bindings := range tests {
++		bindings := bindings
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++			require.Error(t, ValidatePublishedPorts(bindings))
++		})
++	}
++}
++
++func TestBindPublishedPortsRejectsUnsafeExplicitBindings(t *testing.T) {
++	t.Parallel()
++
++	bindings := nat.PortMap{
++		"5432/tcp": {{HostIP: "0.0.0.0", HostPort: "41234"}},
++	}
++
++	require.Error(t, BindPublishedPorts(bindings))
++}

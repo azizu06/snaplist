@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/supabase/cli.git",
+  "tag": "v2.105.0",
+  "tagObject": "6b84c68f097184b3221dc44c8cee45d3ccb0d7c1",
+  "commit": "b749d52b8e86813dfbcef4b34d0f038b78695131",
+  "upstreamPath": "apps/cli-go/internal/start/start.go",
+  "upstreamFileSha256": "15279d4e6f45e3edc25ccb13cb3c23ff6cd5b9bc9c134baac7291024a7d56ac2",
+  "excerptLines": [548, 559],
+  "excerptSha256": "091e9d79f9c5e75e78c094e09fe6e91689d630f1506366c48e510bb04700ff0a"
+}
