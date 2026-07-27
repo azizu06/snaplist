@@ -217,17 +217,21 @@ struct TrophyWallCard: Hashable, Sendable {
     let principalScope: TrophyWallPrincipalScope
     let identity: TrophyWallCardIdentity
     let state: TrophyWallCardState
+    fileprivate let itemName: String?
     let orderKey: TrophyWallOrderKey
 
     static func pending(
         principalScope: TrophyWallPrincipalScope,
         logicalIdentity: TrophyWallLogicalIdentity,
+        itemName: String,
         lastMeaningfulUpdateAt: Date
     ) -> TrophyWallCard {
-        TrophyWallCard(
+        precondition(!itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        return TrophyWallCard(
             principalScope: principalScope,
             identity: .local(logicalIdentity),
             state: .pendingUpload,
+            itemName: itemName,
             orderKey: TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: logicalIdentity.idempotencyKey
@@ -238,17 +242,65 @@ struct TrophyWallCard: Hashable, Sendable {
     static func accepted(
         principalScope: TrophyWallPrincipalScope,
         runID: UUID,
+        itemName: String? = nil,
         lastMeaningfulUpdateAt: Date
     ) -> TrophyWallCard {
-        TrophyWallCard(
+        if let itemName {
+            precondition(!itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        return TrophyWallCard(
             principalScope: principalScope,
             identity: .run(runID),
             state: .accepted,
+            itemName: itemName,
             orderKey: TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: runID
             )
         )
+    }
+}
+
+struct TrophyWallProcessingRow: Identifiable, Hashable {
+    let id: TrophyWallCardIdentity
+    let itemName: String
+    let stateLabel: String
+    let destination: HomeRoute?
+    let accessibilityLabel: String
+    let accessibilityIdentifier: String
+
+    fileprivate init?(card: TrophyWallCard) {
+        guard let itemName = card.itemName else {
+            return nil
+        }
+
+        id = card.identity
+        self.itemName = itemName
+
+        switch card.state {
+        case .pendingUpload:
+            stateLabel = "Pending upload"
+            destination = nil
+            if case .local(let logicalIdentity) = card.identity {
+                accessibilityIdentifier =
+                    "trophy.processing.row.local."
+                    + logicalIdentity.idempotencyKey.uuidString.lowercased()
+            } else {
+                return nil
+            }
+            accessibilityLabel =
+                "\(itemName), pending upload. Local item, not sent yet."
+        case .accepted:
+            stateLabel = "Accepted"
+            if case .run(let runID) = card.identity {
+                destination = .run(runID)
+                accessibilityIdentifier =
+                    "trophy.processing.row.run.\(runID.uuidString.lowercased())"
+            } else {
+                return nil
+            }
+            accessibilityLabel = "\(itemName), accepted."
+        }
     }
 }
 
@@ -268,6 +320,10 @@ final class TrophyWallStore {
     let principalScope: TrophyWallPrincipalScope
     private(set) var cards: [TrophyWallCard]
 
+    var processingRows: [TrophyWallProcessingRow] {
+        cards.compactMap(TrophyWallProcessingRow.init(card:))
+    }
+
     init(
         principalScope: TrophyWallPrincipalScope,
         repository: any TrophyWallRepository
@@ -283,6 +339,16 @@ final class TrophyWallStore {
             return
         }
 
+        let linkedItemName = acceptedRun.linkedLogicalIdentity.flatMap {
+            linkedLogicalIdentity in
+            cards.first {
+                $0.identity == .local(linkedLogicalIdentity)
+            }?.itemName
+        }
+        let existingCanonicalItemName = cards.first {
+            $0.identity == .run(acceptedRun.runID)
+        }?.itemName
+
         if let linkedLogicalIdentity = acceptedRun.linkedLogicalIdentity {
             cards.removeAll {
                 $0.identity == .local(linkedLogicalIdentity)
@@ -292,6 +358,7 @@ final class TrophyWallStore {
         let canonicalCard = TrophyWallCard.accepted(
             principalScope: principalScope,
             runID: acceptedRun.runID,
+            itemName: linkedItemName ?? existingCanonicalItemName,
             lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt
         )
         cards.removeAll { $0.identity == canonicalCard.identity }

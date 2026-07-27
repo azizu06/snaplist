@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import UIKit
 import XCTest
 @testable import SnapList
 
@@ -608,92 +610,311 @@ private actor RecordingHomeReconnectSleeper {
 @MainActor
 final class TrophyWallDomainTests: XCTestCase {
     func testStoreConvergesOnlyExactPrincipalScopedLogicalIdentity() {
-        let principal = TrophyWallPrincipalScope(opaqueValue: "principal-a")
-        let otherPrincipal = TrophyWallPrincipalScope(opaqueValue: "principal-b")
-        let logicalID = TrophyWallLogicalIdentity(
-            idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000001")!
-        )
-        let unrelatedLogicalID = TrophyWallLogicalIdentity(
-            idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000002")!
-        )
-        let runID = UUID(uuidString: "37500000-0000-4000-8000-000000000003")!
-        let pendingUpdate = Date(timeIntervalSince1970: 20)
-        let unrelatedUpdate = Date(timeIntervalSince1970: 10)
-        let acceptedUpdate = Date(timeIntervalSince1970: 30)
-        let initialCards: [TrophyWallCard] = [
-            .pending(
-                principalScope: principal,
-                logicalIdentity: logicalID,
-                lastMeaningfulUpdateAt: pendingUpdate
-            ),
-            .pending(
-                principalScope: principal,
-                logicalIdentity: unrelatedLogicalID,
-                lastMeaningfulUpdateAt: unrelatedUpdate
-            ),
-        ]
+        let fixture = TrophyWallTestFixture()
         let cases = [
             TrophyWallConvergenceCase(
                 name: "exact principal and logical identity",
                 acceptedRun: TrophyWallCanonicalAcceptedRun(
-                    principalScope: principal,
-                    runID: runID,
-                    linkedLogicalIdentity: logicalID,
-                    lastMeaningfulUpdateAt: acceptedUpdate
+                    principalScope: fixture.principal,
+                    runID: fixture.runID,
+                    linkedLogicalIdentity: fixture.logicalID,
+                    lastMeaningfulUpdateAt: fixture.acceptedUpdate
                 ),
                 expectedCards: [
                     .accepted(
-                        principalScope: principal,
-                        runID: runID,
-                        lastMeaningfulUpdateAt: acceptedUpdate
+                        principalScope: fixture.principal,
+                        runID: fixture.runID,
+                        itemName: fixture.matchedItemName,
+                        lastMeaningfulUpdateAt: fixture.acceptedUpdate
                     ),
                     .pending(
-                        principalScope: principal,
-                        logicalIdentity: unrelatedLogicalID,
-                        lastMeaningfulUpdateAt: unrelatedUpdate
+                        principalScope: fixture.principal,
+                        logicalIdentity: fixture.unrelatedLogicalID,
+                        itemName: fixture.unrelatedItemName,
+                        lastMeaningfulUpdateAt: fixture.unrelatedUpdate
                     ),
                 ]
             ),
             TrophyWallConvergenceCase(
                 name: "wrong principal",
                 acceptedRun: TrophyWallCanonicalAcceptedRun(
-                    principalScope: otherPrincipal,
-                    runID: runID,
-                    linkedLogicalIdentity: logicalID,
-                    lastMeaningfulUpdateAt: acceptedUpdate
+                    principalScope: fixture.otherPrincipal,
+                    runID: fixture.runID,
+                    linkedLogicalIdentity: fixture.logicalID,
+                    lastMeaningfulUpdateAt: fixture.acceptedUpdate
                 ),
-                expectedCards: initialCards
+                expectedCards: fixture.initialCards
             ),
             TrophyWallConvergenceCase(
                 name: "missing logical link",
                 acceptedRun: TrophyWallCanonicalAcceptedRun(
-                    principalScope: principal,
-                    runID: runID,
+                    principalScope: fixture.principal,
+                    runID: fixture.runID,
                     linkedLogicalIdentity: nil,
-                    lastMeaningfulUpdateAt: acceptedUpdate
+                    lastMeaningfulUpdateAt: fixture.acceptedUpdate
                 ),
                 expectedCards: [
                     .accepted(
-                        principalScope: principal,
-                        runID: runID,
-                        lastMeaningfulUpdateAt: acceptedUpdate
+                        principalScope: fixture.principal,
+                        runID: fixture.runID,
+                        lastMeaningfulUpdateAt: fixture.acceptedUpdate
                     ),
-                    initialCards[0],
-                    initialCards[1],
+                    fixture.initialCards[0],
+                    fixture.initialCards[1],
                 ]
             ),
         ]
 
         for testCase in cases {
             let store = TrophyWallStore(
-                principalScope: principal,
-                repository: StaticTrophyWallRepository(cards: initialCards)
+                principalScope: fixture.principal,
+                repository: StaticTrophyWallRepository(cards: fixture.initialCards)
             )
 
             store.ingest(testCase.acceptedRun)
 
-            XCTAssertEqual(store.principalScope, principal, testCase.name)
+            XCTAssertEqual(store.principalScope, fixture.principal, testCase.name)
             XCTAssertEqual(store.cards, testCase.expectedCards, testCase.name)
+        }
+    }
+
+    func testProcessingProjectionPreservesExactMergeTruthAndRunDestination() {
+        let fixture = TrophyWallTestFixture()
+        let acceptedRun = TrophyWallCanonicalAcceptedRun(
+            principalScope: fixture.principal,
+            runID: fixture.runID,
+            linkedLogicalIdentity: fixture.logicalID,
+            lastMeaningfulUpdateAt: fixture.acceptedUpdate
+        )
+        let store = TrophyWallStore(
+            principalScope: fixture.principal,
+            repository: StaticTrophyWallRepository(cards: fixture.initialCards)
+        )
+
+        store.ingest(acceptedRun)
+
+        XCTAssertEqual(
+            store.processingRows.map(\.id),
+            [.run(fixture.runID), .local(fixture.unrelatedLogicalID)]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.itemName),
+            [fixture.matchedItemName, fixture.unrelatedItemName]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.stateLabel),
+            ["Accepted", "Pending upload"]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.destination),
+            [.run(fixture.runID), nil]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.accessibilityLabel),
+            [
+                "\(fixture.matchedItemName), accepted.",
+                "\(fixture.unrelatedItemName), pending upload. Local item, not sent yet.",
+            ]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.accessibilityIdentifier),
+            [
+                "trophy.processing.row.run.\(fixture.runID.uuidString.lowercased())",
+                "trophy.processing.row.local."
+                    + "37500000-0000-4000-8000-000000000002",
+            ]
+        )
+
+        let firstProjection = store.processingRows
+        store.ingest(acceptedRun)
+        XCTAssertEqual(store.processingRows, firstProjection)
+    }
+
+    func testProcessingViewRendersApprovedMergedRowsAtPhoneWidth() async {
+        let fixture = TrophyWallTestFixture()
+        let store = TrophyWallStore(
+            principalScope: fixture.principal,
+            repository: StaticTrophyWallRepository(cards: fixture.initialCards)
+        )
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate
+            )
+        )
+        var openedRoutes: [HomeRoute] = []
+        XCTAssertEqual(store.processingRows.count, 2)
+        XCTAssertLessThanOrEqual(
+            store.processingRows.count,
+            3,
+            "The approved compact Processing surface renders at most three eager rows."
+        )
+        let standardImage = await captureHostedTrophyWallProcessingView(
+            rows: store.processingRows,
+            size: CGSize(width: 390, height: 844),
+            dynamicTypeSize: .large,
+            openRoute: { openedRoutes.append($0) }
+        )
+        let accessibilityImage = await captureHostedTrophyWallProcessingView(
+            rows: store.processingRows,
+            size: CGSize(width: 375, height: 667),
+            dynamicTypeSize: .accessibility2,
+            openRoute: { openedRoutes.append($0) }
+        )
+
+        XCTAssertEqual(standardImage.size, CGSize(width: 390, height: 844))
+        XCTAssertEqual(accessibilityImage.size, CGSize(width: 375, height: 667))
+        for image in [standardImage, accessibilityImage] {
+            XCTAssertGreaterThan(
+                image.opaqueDarkPixelCount(
+                    in: CGRect(x: 0, y: 80, width: image.size.width, height: 160)
+                ),
+                100,
+                "A header-only blank render must not satisfy MERGE-01 visual proof."
+            )
+        }
+        XCTAssertTrue(openedRoutes.isEmpty)
+        for (name, image) in [
+            ("MERGE-01 Processing exact K-to-R convergence", standardImage),
+            ("MERGE-01 Processing accessibility type", accessibilityImage),
+        ] {
+            let attachment = XCTAttachment(image: image)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+}
+
+@MainActor
+private func captureHostedTrophyWallProcessingView(
+    rows: [TrophyWallProcessingRow],
+    size: CGSize,
+    dynamicTypeSize: DynamicTypeSize,
+    openRoute: @escaping (HomeRoute) -> Void
+) async -> UIImage {
+    let hostingController = UIHostingController(
+        rootView: TrophyWallProcessingView(
+            rows: rows,
+            onBack: {},
+            openCapture: {},
+            openRoute: openRoute
+        )
+        .dynamicTypeSize(dynamicTypeSize)
+        .background(Color.white)
+    )
+    let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+    window.backgroundColor = .white
+    window.isOpaque = true
+    window.rootViewController = hostingController
+    hostingController.loadViewIfNeeded()
+    hostingController.view.frame = window.bounds
+    hostingController.view.backgroundColor = .white
+    hostingController.view.isOpaque = true
+    window.makeKeyAndVisible()
+
+    await Task.yield()
+    window.setNeedsLayout()
+    window.layoutIfNeeded()
+    hostingController.view.setNeedsLayout()
+    hostingController.view.layoutIfNeeded()
+    hostingController.view.setNeedsDisplay()
+    hostingController.view.layer.displayIfNeeded()
+
+    let image = renderOpaqueRGBA8(view: hostingController.view, size: size)
+
+    window.isHidden = true
+    withExtendedLifetime(window) {}
+    return image
+}
+
+private func renderOpaqueRGBA8(view: UIView, size: CGSize) -> UIImage {
+    let width = Int(size.width.rounded(.toNearestOrAwayFromZero))
+    let height = Int(size.height.rounded(.toNearestOrAwayFromZero))
+    let bytesPerRow = width * 4
+    let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue
+        | CGImageAlphaInfo.premultipliedLast.rawValue
+    guard let context = CGContext(
+        data: nil,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: bitmapInfo
+    ) else {
+        preconditionFailure("Unable to create an RGBA8 Trophy Wall render context.")
+    }
+
+    context.setFillColor(UIColor.white.cgColor)
+    context.fill(CGRect(origin: .zero, size: size))
+    context.translateBy(x: 0, y: CGFloat(height))
+    context.scaleBy(x: 1, y: -1)
+    view.layer.render(in: context)
+
+    guard let image = context.makeImage() else {
+        preconditionFailure("Unable to make the Trophy Wall render image.")
+    }
+    return UIImage(cgImage: image, scale: 1, orientation: .up)
+}
+
+private extension UIImage {
+    func opaqueDarkPixelCount(in pointRect: CGRect) -> Int {
+        guard let cgImage else {
+            return 0
+        }
+
+        let bytesPerPixel = 4
+        let bytesPerRow = cgImage.width * bytesPerPixel
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue
+            | CGImageAlphaInfo.premultipliedLast.rawValue
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * cgImage.height)
+        let minX = max(0, Int(pointRect.minX * scale))
+        let maxX = min(cgImage.width, Int(pointRect.maxX * scale))
+        let minY = max(0, Int(pointRect.minY * scale))
+        let maxY = min(cgImage.height, Int(pointRect.maxY * scale))
+
+        return pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: cgImage.width,
+                height: cgImage.height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: bitmapInfo
+            ) else {
+                return 0
+            }
+            context.translateBy(x: 0, y: CGFloat(cgImage.height))
+            context.scaleBy(x: 1, y: -1)
+            context.draw(
+                cgImage,
+                in: CGRect(
+                    x: 0,
+                    y: 0,
+                    width: CGFloat(cgImage.width),
+                    height: CGFloat(cgImage.height)
+                )
+            )
+
+            var count = 0
+            for y in minY..<maxY {
+                for x in minX..<maxX {
+                    let bufferY = cgImage.height - 1 - y
+                    let offset = bufferY * bytesPerRow + x * bytesPerPixel
+                    let red = buffer[offset]
+                    let green = buffer[offset + 1]
+                    let blue = buffer[offset + 2]
+                    let alpha = buffer[offset + 3]
+                    if alpha > 200, red < 180, green < 180, blue < 180 {
+                        count += 1
+                    }
+                }
+            }
+            return count
         }
     }
 }
@@ -702,6 +923,40 @@ private struct TrophyWallConvergenceCase {
     let name: String
     let acceptedRun: TrophyWallCanonicalAcceptedRun
     let expectedCards: [TrophyWallCard]
+}
+
+private struct TrophyWallTestFixture {
+    let principal = TrophyWallPrincipalScope(opaqueValue: "principal-a")
+    let otherPrincipal = TrophyWallPrincipalScope(opaqueValue: "principal-b")
+    let logicalID = TrophyWallLogicalIdentity(
+        idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000001")!
+    )
+    let unrelatedLogicalID = TrophyWallLogicalIdentity(
+        idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000002")!
+    )
+    let runID = UUID(uuidString: "37500000-0000-4000-8000-000000000003")!
+    let matchedItemName = "Vintage Pyrex bowl set"
+    let unrelatedItemName = "Nintendo Game Boy"
+    let pendingUpdate = Date(timeIntervalSince1970: 20)
+    let unrelatedUpdate = Date(timeIntervalSince1970: 10)
+    let acceptedUpdate = Date(timeIntervalSince1970: 30)
+
+    var initialCards: [TrophyWallCard] {
+        [
+            .pending(
+                principalScope: principal,
+                logicalIdentity: logicalID,
+                itemName: matchedItemName,
+                lastMeaningfulUpdateAt: pendingUpdate
+            ),
+            .pending(
+                principalScope: principal,
+                logicalIdentity: unrelatedLogicalID,
+                itemName: unrelatedItemName,
+                lastMeaningfulUpdateAt: unrelatedUpdate
+            ),
+        ]
+    }
 }
 
 private struct StaticTrophyWallRepository: TrophyWallRepository {
