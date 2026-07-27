@@ -24,10 +24,10 @@ export const DEFAULT_CONTRACT = Object.freeze({
   sourceTagObject: "6b84c68f097184b3221dc44c8cee45d3ccb0d7c1",
   sourceCommit: "b749d52b8e86813dfbcef4b34d0f038b78695131",
   sourceTree: "b98153e6684637de7da209e511614bd36c7a5f01",
-  patchedTree: "120755cd50bc0bad3e3434093ff6bf5023cba21c",
+  patchedTree: "b250891d4be9ea4637cca06c892d05073923df34",
   patchPath: "patches/supabase-go-v2.105.0-loopback.patch",
   patchSha256:
-    "c386ca3fd743fd7259d90937a4fa0b1b58dd87aaab0b695eca46c777f2d1ea4e",
+    "db0c69a1e2f987cc9db1526b88c8f4d3fa944bbde1b23ca7375285ae1c21c202",
   overrideVariable: "SUPABASE_GO_BINARY",
   overrideSourcePath: "apps/cli/src/shared/legacy/go-proxy.layer.ts",
   overrideSourceSha256:
@@ -52,7 +52,7 @@ export const DEFAULT_CONTRACT = Object.freeze({
         "635c7f8360df5f098628a0ee1c1d489fb8e45e0a7ca7d1b1299cce51c1e1e184",
       binaryPath: ".cache/v2.105.0/darwin-arm64/supabase-go",
       binarySha256:
-        "b7a3707df70869e017cf7676c929fd0cb1387dd50dcf4c17f5c84e6c677daf5b",
+        "8f5b652ec9cfb8c221f433a1a8ba4cbec9ebcc66c4056672e3d03d0328b6864f",
       binarySize: 47613490,
       receiptPath:
         ".cache/v2.105.0/darwin-arm64/build-receipt.json",
@@ -68,7 +68,7 @@ export const DEFAULT_CONTRACT = Object.freeze({
         "039206687deb55706063371d7452c0d2b18de1e530dbc783f10b39f5589c3414",
       binaryPath: ".cache/v2.105.0/linux-x64/supabase-go",
       binarySha256:
-        "19964f9419554cea16cdc71e46c7a846f59810cddb89cce87a6ccbd90f0da11c",
+        "ee83094a7a619fd3fedc46f4eaca08d33629e6752b3ec99a9ad93269501b9974",
       binarySize: 49586360,
       receiptPath:
         ".cache/v2.105.0/linux-x64/build-receipt.json",

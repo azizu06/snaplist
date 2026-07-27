@@ -112,10 +112,10 @@ index 6f1eeac..fea410f 100644
  		fmt.Fprintln(w, "Starting database...")
 diff --git a/apps/cli-go/internal/db/start/start_isolation_test.go b/apps/cli-go/internal/db/start/start_isolation_test.go
 new file mode 100644
-index 0000000..0e408ea
+index 0000000..6a98fe4
 --- /dev/null
 +++ b/apps/cli-go/internal/db/start/start_isolation_test.go
-@@ -0,0 +1,397 @@
+@@ -0,0 +1,456 @@
 +package start
 +
 +import (
@@ -316,6 +316,65 @@ index 0000000..0e408ea
 +			require.Zero(t, counter.volumeCreate)
 +			require.Zero(t, counter.containerCreate)
 +			require.Zero(t, counter.other)
++		})
++	}
++}
++
++func TestStartDatabaseFromWritableBackupRejectsBeforeCopyOrDockerAction(t *testing.T) {
++	modes := map[string]os.FileMode{
++		"group writable": 0o660,
++		"other writable": 0o602,
++	}
++	for modeName, mode := range modes {
++		modeName, mode := modeName, mode
++		t.Run(modeName, func(t *testing.T) {
++			counter := &databaseDockerActionCounter{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: counter}),
++			)
++			require.NoError(t, err)
++
++			stagingParent := t.TempDir()
++			previousDocker := utils.Docker
++			previousConfig := utils.Config
++			previousDbID := utils.DbId
++			previousTempDir := utils.TempDir
++			utils.Docker = fakeDocker
++			utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++			utils.DbId = "supabase_db_snaplist"
++			utils.TempDir = stagingParent
++			t.Cleanup(func() {
++				utils.Docker = previousDocker
++				utils.Config = previousConfig
++				utils.DbId = previousDbID
++				utils.TempDir = previousTempDir
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			backupPath := filepath.Join(t.TempDir(), "backup.sql")
++			require.NoError(t, os.WriteFile(backupPath, []byte("sensitive backup bytes"), 0o600))
++			require.NoError(t, os.Chmod(backupPath, mode))
++
++			err = StartDatabase(
++				context.Background(),
++				backupPath,
++				afero.NewOsFs(),
++				io.Discard,
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, counter.volumeInspect)
++			require.Zero(t, counter.imageInspect)
++			require.Zero(t, counter.imagePull)
++			require.Zero(t, counter.networkCreate)
++			require.Zero(t, counter.volumeCreate)
++			require.Zero(t, counter.containerCreate)
++			require.Zero(t, counter.other)
++
++			entries, readErr := os.ReadDir(stagingParent)
++			require.NoError(t, readErr)
++			require.Empty(t, entries, "backup bytes must not be staged")
 +		})
 +	}
 +}
@@ -1039,10 +1098,10 @@ index 0000000..c3988d9
 +}
 diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
 new file mode 100644
-index 0000000..6ade339
+index 0000000..91f617c
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_isolation_test.go
-@@ -0,0 +1,498 @@
+@@ -0,0 +1,569 @@
 +package utils
 +
 +import (
@@ -1265,6 +1324,65 @@ index 0000000..6ade339
 +	require.Zero(t, transport.calls)
 +}
 +
++func TestDockerStartRejectsWritableRegularFileBeforeDockerAction(t *testing.T) {
++	modes := map[string]os.FileMode{
++		"group writable": 0o660,
++		"other writable": 0o602,
++	}
++	for modeName, mode := range modes {
++		modeName, mode := modeName, mode
++		t.Run(modeName, func(t *testing.T) {
++			source := filepath.Join(t.TempDir(), "config.json")
++			require.NoError(t, os.WriteFile(source, []byte("{}"), 0o600))
++			require.NoError(t, os.Chmod(source, mode))
++
++			forms := map[string]container.HostConfig{
++				"bind": {
++					NetworkMode: container.NetworkMode("bridge"),
++					Binds:       []string{source + ":/safe/config.json:ro"},
++				},
++				"mount": {
++					NetworkMode: container.NetworkMode("bridge"),
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: source,
++						Target: "/safe/config.json",
++					}},
++				},
++			}
++			for form, hostConfig := range forms {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					transport := &countingRoundTripper{}
++					fakeDocker, err := client.NewClientWithOpts(
++						client.WithHost("http://docker.invalid"),
++						client.WithVersion("1.47"),
++						client.WithHTTPClient(&http.Client{Transport: transport}),
++					)
++					require.NoError(t, err)
++
++					previousDocker := Docker
++					Docker = fakeDocker
++					t.Cleanup(func() {
++						Docker = previousDocker
++						require.NoError(t, fakeDocker.Close())
++					})
++
++					_, err = DockerStart(
++						context.Background(),
++						container.Config{Image: "example.invalid/supabase/test:latest"},
++						hostConfig,
++						network.NetworkingConfig{},
++						"unsafe-writable-file-test",
++					)
++					require.ErrorContains(t, err, "unsafe Docker container capability")
++					require.Zero(t, transport.calls)
++				})
++			}
++		})
++	}
++}
++
 +func TestDockerStartRejectsHostBindReplacedAfterImageInspectionBeforeContainerCreate(t *testing.T) {
 +	for _, form := range []string{"bind", "mount"} {
 +		form := form
@@ -1423,6 +1541,18 @@ index 0000000..6ade339
 +			descendant := filepath.Join(root, "nested", "cross-user-writable")
 +			require.NoError(t, os.MkdirAll(descendant, 0o700))
 +			require.NoError(t, os.Chmod(descendant, 0o707))
++		},
++		"group writable descendant file": func(t *testing.T, root string) {
++			descendant := filepath.Join(root, "nested", "cross-user-writable")
++			require.NoError(t, os.MkdirAll(filepath.Dir(descendant), 0o700))
++			require.NoError(t, os.WriteFile(descendant, []byte("unsafe"), 0o600))
++			require.NoError(t, os.Chmod(descendant, 0o660))
++		},
++		"other writable descendant file": func(t *testing.T, root string) {
++			descendant := filepath.Join(root, "nested", "cross-user-writable")
++			require.NoError(t, os.MkdirAll(filepath.Dir(descendant), 0o700))
++			require.NoError(t, os.WriteFile(descendant, []byte("unsafe"), 0o600))
++			require.NoError(t, os.Chmod(descendant, 0o602))
 +		},
 +	}
 +
@@ -2513,7 +2643,7 @@ index 0000000..3a857f3
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
 new file mode 100644
-index 0000000..28dd777
+index 0000000..f4d6388
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
 @@ -0,0 +1,83 @@
@@ -2547,12 +2677,12 @@ index 0000000..28dd777
 +		if !isTrustedOwner(owner, effectiveUser) {
 +			return fmt.Errorf("host bind source component is owned by an untrusted principal: %s", component.path)
 +		}
-+		if !component.info.IsDir() {
-+			continue
-+		}
 +		untrustedWrite := component.info.Mode().Perm() & 0o022
 +		if untrustedWrite == 0 {
 +			continue
++		}
++		if !component.info.IsDir() {
++			return fmt.Errorf("host bind file is writable by an untrusted principal: %s", component.path)
 +		}
 +		if index == len(components)-1 {
 +			return fmt.Errorf("host bind directory is writable by an untrusted principal: %s", component.path)
@@ -2591,8 +2721,8 @@ index 0000000..28dd777
 +	if !isTrustedOwner(owner, effectiveUser) {
 +		return fmt.Errorf("host bind directory entry is owned by an untrusted principal: %s", path)
 +	}
-+	if info.IsDir() && info.Mode().Perm()&0o022 != 0 {
-+		return fmt.Errorf("host bind directory tree is writable by an untrusted principal: %s", path)
++	if info.Mode().Perm()&0o022 != 0 {
++		return fmt.Errorf("host bind directory entry is writable by an untrusted principal: %s", path)
 +	}
 +	return nil
 +}

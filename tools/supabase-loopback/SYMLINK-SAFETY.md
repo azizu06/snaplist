@@ -20,10 +20,11 @@ Each source remains open so its identity can be compared again after image
 resolution and immediately before `ContainerCreate`.
 
 On Darwin and Linux, every path component must be owned by root or the current
-effective user. A component writable by group/other is rejected unless it is a
+effective user. A directory writable by group/other is rejected unless it is a
 sticky ancestor whose next child is root/current-user owned; a final bound
-directory is never allowed to be group/other writable. These constraints
-prevent another OS user from replacing the canonical path between checks.
+directory and every regular file are never allowed to be group/other writable.
+These constraints prevent another OS user from replacing or mutating the
+canonical source between checks.
 Darwin additionally queries `ATTR_CMN_EXTENDED_SECURITY` from each already-open
 component with the documented `fgetattrlist(2)` ABI and decodes the kernel
 `kauth_filesec` record fail-closed. Any permit ACE carrying data, append,
@@ -35,10 +36,12 @@ grants another principal write access is rejected by the same group-writable
 rule.
 Every bound directory is also walked recursively at preparation and
 revalidation. Descendant symlinks, protected endpoint names, sockets or other
-special files, untrusted owners, group/other-writable directories, and Darwin
-write-capable ACL entries are rejected. Because no accepted descendant
-directory is writable by another OS user, that user cannot insert or swap a
-runtime endpoint after the walk.
+special files, untrusted owners, group/other-writable directories or regular
+files, and Darwin write-capable ACL entries are rejected. Because no accepted
+descendant directory is writable by another OS user, that user cannot insert
+or swap a runtime endpoint after the walk; because no accepted regular file is
+writable by another OS user, that user cannot mutate its contents after the
+walk.
 
 The only project-owned path that binds an arbitrary caller-selected file is
 `db start --from-backup`. The public command opens and pins an ordinary regular
