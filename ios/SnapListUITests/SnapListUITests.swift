@@ -788,6 +788,85 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(firstPhoto.isSelected)
     }
 
+    func testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion() {
+        let app = launch(extraArguments: [
+            "--photo-review-state=REV-02",
+            "--reduced-motion"
+        ])
+        let screen = app.scrollViews["photo-review.screen"]
+
+        XCTAssertTrue(
+            screen.waitForExistence(timeout: 3),
+            "The approved Photo Review fixture must render the public drag surface."
+        )
+
+        let order = app.staticTexts["photo-review.fixture-order"]
+        XCTAssertTrue(
+            order.waitForExistence(timeout: 2),
+            "The fixture must expose stable identities without changing seller UI."
+        )
+        let initialOrder = [
+            "45500000-0000-4000-8000-000000000001",
+            "45500000-0000-4000-8000-000000000002",
+            "45500000-0000-4000-8000-000000000003"
+        ].joined(separator: "|")
+        let reordered = [
+            "45500000-0000-4000-8000-000000000003",
+            "45500000-0000-4000-8000-000000000001",
+            "45500000-0000-4000-8000-000000000002"
+        ].joined(separator: "|")
+        XCTAssertEqual(order.label, initialOrder)
+        XCTAssertTrue(
+            app.otherElements["photo-review.motion-reduced"].exists,
+            "The fixture must drive Photo Review through its Reduced Motion path."
+        )
+
+        let firstPhoto = app.buttons["photo-review.thumbnail.1"]
+        let thirdPhoto = app.buttons["photo-review.thumbnail.3"]
+        thirdPhoto.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).press(
+            forDuration: 0.8,
+            thenDragTo: firstPhoto.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+            )
+        )
+
+        let reorderedExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", reordered),
+            object: order
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [reorderedExpectation], timeout: 3),
+            .completed
+        )
+        XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
+        XCTAssertTrue(firstPhoto.label.contains("Cover"))
+        XCTAssertTrue(firstPhoto.isSelected)
+
+        let outside = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)
+        )
+        firstPhoto.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).press(
+            forDuration: 0.8,
+            thenDragTo: outside
+        )
+
+        let dragEndedExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.otherElements["photo-review.drag-active"]
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [dragEndedExpectation], timeout: 2),
+            .completed
+        )
+        XCTAssertEqual(order.label, reordered)
+        XCTAssertTrue(firstPhoto.label.contains("Cover"))
+        XCTAssertTrue(firstPhoto.isSelected)
+    }
+
     func testPhotoReviewAtFivePhotosShowsAddDimmedDisabledAndInert() {
         let app = launch(extraArguments: ["--photo-review-state=REV-03"])
         let screen = app.scrollViews["photo-review.screen"]
