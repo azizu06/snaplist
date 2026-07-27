@@ -962,7 +962,11 @@ final class CaptureFlowTests: XCTestCase {
         )
         let responseGate = SubmissionResponseGate()
         let submitter = RecordingItemRunSubmitter(
-            outcomes: [.ambiguous, .ambiguous],
+            outcomes: [
+                .ambiguous,
+                .ambiguous,
+                .replayed(intake.receipt),
+            ],
             beforeResponse: {
                 await responseGate.hold(onCall: 2)
             }
@@ -1158,6 +1162,86 @@ final class CaptureFlowTests: XCTestCase {
             scenario.session.store.actionsPhotoID,
             actionsPhotoAfterEdit
         )
+        XCTAssertTrue(
+            scenario.photoReviewHost.session === scenario.session
+        )
+        XCTAssertEqual(
+            scenario.router.captureBoundaryRequest,
+            routeAfterEdit
+        )
+        XCTAssertEqual(
+            scenario.router.presentedFullScreen,
+            fullScreenAfterEdit
+        )
+        XCTAssertEqual(
+            scenario.router.photoReviewScanReturn,
+            scanReturnAfterEdit
+        )
+        XCTAssertNil(scenario.pendingScanFocus)
+        XCTAssertEqual(scenario.camera.startCount, 0)
+        XCTAssertEqual(scenario.camera.captureCount, 0)
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
+
+        let acceptedRetryObserved = expectation(
+            description: "Exact retry resolves without dropping edited intake"
+        )
+        withObservationTracking {
+            _ = submissionHost.acceptedRun
+        } onChange: {
+            acceptedRetryObserved.fulfill()
+        }
+        let acceptedRetry = Task {
+            await scenario.perform(
+                primaryAction: secondEvent.presentation.primaryActionEvent,
+                submissionHost: submissionHost
+            )
+        }
+        defer { acceptedRetry.cancel() }
+
+        await fulfillment(of: [acceptedRetryObserved], timeout: 3)
+        guard case .itemSaved(_, _)? =
+            submissionHost.pendingPresentationEvent else {
+            return XCTFail(
+                "Expected the accepted exact retry to present Item saved."
+            )
+        }
+        var savedEffectConsumer = PhotoReviewSubmissionEffectConsumer()
+        savedEffectConsumer.consume(
+            PhotoReviewSubmissionPresentation(host: submissionHost),
+            postAnnouncement: { _ in },
+            acknowledgePresentation: {
+                submissionHost.acknowledgePresentation(eventID: $0)
+            }
+        )
+        await acceptedRetry.value
+
+        payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 3)
+        XCTAssertEqual(
+            payloads.map(\.attempt.idempotencyKey),
+            [persistedKey, persistedKey, persistedKey]
+        )
+        XCTAssertEqual(payloads[2].attempt, retainedAttempt)
+        XCTAssertEqual(payloads[2].photoData, intake.expectedBytes)
+        let acceptedRetryTokenCallCount = await tokenProvider.callCount
+        let acceptedRetryAttemptSaveCount =
+            await attemptStore.successfulSaveCount
+        let acceptedRetryAttemptClearCount = await attemptStore.clearCount
+        let acceptedRetryStoredAttempt =
+            try await attemptStore.loadAttempt()
+        XCTAssertEqual(acceptedRetryTokenCallCount, 3)
+        XCTAssertEqual(acceptedRetryAttemptSaveCount, 1)
+        XCTAssertEqual(acceptedRetryAttemptClearCount, 0)
+        XCTAssertEqual(acceptedRetryStoredAttempt, retainedAttempt)
+        XCTAssertFalse(submissionHost.clearedIntake)
+        XCTAssertNil(submissionHost.pendingPresentationEvent)
+        let durablePhotosAfterAcceptedRetry =
+            try await scenario.draftStore.loadPhotos()
+        XCTAssertEqual(
+            durablePhotosAfterAcceptedRetry,
+            submittedPhotos
+        )
+        XCTAssertEqual(scenario.session.store.photos, editedPhotos)
         XCTAssertTrue(
             scenario.photoReviewHost.session === scenario.session
         )

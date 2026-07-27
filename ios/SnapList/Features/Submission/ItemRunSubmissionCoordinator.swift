@@ -284,7 +284,10 @@ final class ItemRunSubmissionHost {
         let preparation: ItemRunSubmissionCoordinator.Preparation
         if let retry = admittedAmbiguousRetry {
             admittedAmbiguousRetry = nil
-            preparation = await coordinator.retryAmbiguousSubmission(retry)
+            preparation = await coordinator.retryAmbiguousSubmission(
+                retry,
+                currentPhotos: photos
+            )
         } else {
             preparation = await coordinator.prepareSubmission(photos: photos)
         }
@@ -651,6 +654,7 @@ final class ItemRunSubmissionCoordinator {
         fileprivate let acceptedRun: AcceptedItemRun
         fileprivate let submittedPhotos: [StagedCapturePhoto]
         fileprivate let attempt: ItemRunSubmissionAttempt
+        fileprivate let canClearSubmittedIntake: Bool
     }
 
     fileprivate enum Preparation {
@@ -792,7 +796,8 @@ final class ItemRunSubmissionCoordinator {
     }
 
     fileprivate func retryAmbiguousSubmission(
-        _ retry: AmbiguousRetry
+        _ retry: AmbiguousRetry,
+        currentPhotos: [StagedCapturePhoto]
     ) async -> Preparation {
         let storedAttempt: ItemRunSubmissionAttempt?
         do {
@@ -821,14 +826,17 @@ final class ItemRunSubmissionCoordinator {
         return await resolve(
             outcome,
             payload: retry.payload,
-            submittedPhotos: retry.submittedPhotos
+            submittedPhotos: retry.submittedPhotos,
+            canClearSubmittedIntake:
+                currentPhotos == retry.submittedPhotos
         )
     }
 
     private func resolve(
         _ outcome: ItemRunSubmissionTransportOutcome,
         payload: ItemRunSubmissionPayload,
-        submittedPhotos: [StagedCapturePhoto]
+        submittedPhotos: [StagedCapturePhoto],
+        canClearSubmittedIntake: Bool = true
     ) async -> Preparation {
         let attempt = payload.attempt
         switch outcome {
@@ -848,7 +856,8 @@ final class ItemRunSubmissionCoordinator {
                         stage: receipt.stage
                     ),
                     submittedPhotos: submittedPhotos,
-                    attempt: attempt
+                    attempt: attempt,
+                    canClearSubmittedIntake: canClearSubmittedIntake
                 )
             )
         case .rejected:
@@ -877,6 +886,12 @@ final class ItemRunSubmissionCoordinator {
     fileprivate func finalize(
         _ submission: Submission
     ) async -> ItemRunAcceptance {
+        guard submission.canClearSubmittedIntake else {
+            return ItemRunAcceptance(
+                run: submission.acceptedRun,
+                clearedIntake: false
+            )
+        }
         let clearedIntake = (
             try? await draftStore.discardExactly(submission.submittedPhotos)
         ) ?? false
