@@ -54,6 +54,12 @@ struct AppShellView: View {
                 PhotoReviewView(
                     store: session.store,
                     isCommitting: photoReviewHost.isCommitting,
+                    submissionPresentation: PhotoReviewSubmissionPresentation(
+                        host: submissionHost
+                    ),
+                    acknowledgeSubmissionPresentation: { eventID in
+                        submissionHost.acknowledgePresentation(eventID: eventID)
+                    },
                     backToCamera: {
                         returnFromPhotoReview(session)
                     },
@@ -70,14 +76,29 @@ struct AppShellView: View {
                     // inert here. Start listing submits the photos in their displayed
                     // order; only a validated receipt may clear the intake.
                     openBoundary: { event in
-                        guard case .startListing = event else { return }
+                        if PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                            event,
+                            submissionHost: submissionHost
+                        ) {
+                            return
+                        }
+                        switch event {
+                        case .startListing, .retryAmbiguousSubmission:
+                            break
+                        case .openVoiceNote,
+                             .reviewSubmission,
+                             .reviewConflictedSubmission:
+                            return
+                        }
                         Task {
                             await AppShellPhotoReviewSubmissionTransaction.perform(
+                                primaryAction: event,
                                 session: session,
                                 captureFlow: captureFlow,
                                 host: photoReviewHost,
                                 router: router,
-                                submissionHost: submissionHost
+                                submissionHost: submissionHost,
+                                setReturnFocus: { pendingScanReturnFocus = $0 }
                             )
                         }
                     },
@@ -331,8 +352,50 @@ enum AppShellPhotoReviewSubmissionTransaction {
         captureFlow: CaptureFlowModel,
         host: PhotoReviewLiveHost,
         router: AppRouter,
-        submissionHost: ItemRunSubmissionHost
+        submissionHost: ItemRunSubmissionHost,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
     ) async {
+        await perform(
+            primaryAction: .startListing,
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            submissionHost: submissionHost,
+            setReturnFocus: setReturnFocus
+        )
+    }
+
+    static func perform(
+        primaryAction: PhotoReviewBoundaryEvent,
+        session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        submissionHost: ItemRunSubmissionHost,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
+    ) async {
+        let ambiguousRetryEventID: UUID?
+        switch primaryAction {
+        case .startListing:
+            ambiguousRetryEventID = nil
+        case .retryAmbiguousSubmission(let eventID):
+            guard submissionHost.canRetryAmbiguousSubmission(
+                eventID: eventID
+            ) else {
+                return
+            }
+            ambiguousRetryEventID = eventID
+        case .reviewConflictedSubmission:
+            _ = PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                primaryAction,
+                submissionHost: submissionHost
+            )
+            return
+        case .openVoiceNote, .reviewSubmission:
+            return
+        }
+
         // Photo Review stays mounted across the request and the exact clear, exactly
         // like the two exits. Without the lock the seller could delete or reorder in
         // that gap: neither reaches disk, so the clear would not see the change and
@@ -341,6 +404,14 @@ enum AppShellPhotoReviewSubmissionTransaction {
             return
         }
         defer { host.endCommit() }
+
+        if let ambiguousRetryEventID {
+            guard submissionHost.retryAmbiguousSubmission(
+                eventID: ambiguousRetryEventID
+            ) else {
+                return
+            }
+        }
 
         await submissionHost.startListing(photos: session.store.photos)
 
@@ -361,7 +432,14 @@ enum AppShellPhotoReviewSubmissionTransaction {
         }
         captureFlow.dropIntakeDiscardedElsewhere()
         await captureFlow.startCamera()
-        _ = host.leaveForClearedIntake(from: session, using: router)
+        guard host.session === session else {
+            return
+        }
+        setReturnFocus(.addPhotoButton)
+        guard host.leaveForClearedIntake(from: session, using: router) else {
+            return
+        }
+        submissionHost.completeClearedIntakePresentation()
     }
 }
 

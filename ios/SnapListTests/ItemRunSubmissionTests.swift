@@ -1,8 +1,257 @@
+import Observation
+import UIKit
 import XCTest
 @testable import SnapList
 
 @MainActor
 final class ItemRunSubmissionTests: XCTestCase {
+    func testTypedRejectionOutcomesMapToTheirPresentationFamilies() {
+        let eventID = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000071"
+        )!
+        let cases: [(
+            retention: ItemRunSubmissionRetention,
+            family: PhotoReviewSubmissionRejectionFamily,
+            label: String,
+            message: String,
+            action: PhotoReviewBoundaryEvent
+        )] = [
+            (
+                .rateLimited(reason: "opaque"),
+                .tryAgain,
+                "Try again",
+                "This didn't go through. Your item is still saved on this phone.",
+                .startListing
+            ),
+            (
+                .attemptNotPersisted,
+                .tryAgain,
+                "Try again",
+                "This didn't go through. Your item is still saved on this phone.",
+                .startListing
+            ),
+            (
+                .submissionUnavailable,
+                .tryAgain,
+                "Try again",
+                "This didn't go through. Your item is still saved on this phone.",
+                .startListing
+            ),
+            (
+                .rejected,
+                .review,
+                "Review",
+                "This item can't be sent as it is.",
+                .reviewSubmission(eventID: eventID)
+            ),
+            (
+                .intakeUnavailable,
+                .review,
+                "Review",
+                "This item can't be sent as it is.",
+                .reviewSubmission(eventID: eventID)
+            ),
+        ]
+
+        for testCase in cases {
+            let family = PhotoReviewSubmissionRejectionFamily(
+                retention: testCase.retention
+            )
+            XCTAssertEqual(family, testCase.family)
+            XCTAssertEqual(family?.primaryActionLabel, testCase.label)
+            XCTAssertEqual(family?.message, testCase.message)
+            XCTAssertEqual(
+                family?.primaryActionEvent(eventID: eventID),
+                testCase.action
+            )
+        }
+    }
+
+    func testEveryRetentionProducesOneExhaustiveTypedDestinationDecision() {
+        let cases: [(
+            retention: ItemRunSubmissionRetention,
+            decision: ItemRunSubmissionDestinationDecision
+        )] = [
+            (.ambiguous, .photoReview(.sub03)),
+            (.conflict, .photoReview(.sub04)),
+            (.rateLimited(reason: "opaque"), .photoReview(.sub06)),
+            (.submissionUnavailable, .photoReview(.sub06)),
+            (.attemptNotPersisted, .photoReview(.sub06)),
+            (.rejected, .photoReview(.sub07)),
+            (.intakeUnavailable, .photoReview(.sub07)),
+            (.creditDenied(reason: "opaque"), .handoff(.pay01)),
+            (.receiptMismatch, .handoff(.pay08)),
+            (.authenticationRequired, .handoff(.accountClaim12aThrough12c)),
+        ]
+
+        XCTAssertEqual(cases.count, 10)
+
+        for testCase in cases {
+            XCTAssertEqual(
+                ItemRunSubmissionDestinationDecision(
+                    retention: testCase.retention
+                ),
+                testCase.decision,
+                "Unexpected destination for \(testCase.retention)"
+            )
+        }
+
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .rateLimited(reason: nil)
+            ),
+            .photoReview(.sub06)
+        )
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(reason: nil)
+            ),
+            .handoff(.pay01)
+        )
+
+        let handoffs = cases.compactMap {
+            testCase -> ItemRunSubmissionDestinationDecision.Handoff? in
+            guard case let .handoff(handoff) = testCase.decision else {
+                return nil
+            }
+            return handoff
+        }
+        XCTAssertEqual(
+            handoffs,
+            [.pay01, .pay08, .accountClaim12aThrough12c]
+        )
+    }
+
+    func testExternalRetentionsPublishOneTypedHandoffAndConsumeOnlyMatchingEvent() async throws {
+        let cases: [(
+            seed: String,
+            retention: ItemRunSubmissionRetention,
+            handoff: ItemRunSubmissionDestinationDecision.Handoff,
+            outcome: (SubmissionIntakeFixture) -> ItemRunSubmissionTransportOutcome
+        )] = [
+            (
+                "pay-01",
+                .creditDenied(reason: "opaque-not-presentation-authority"),
+                .pay01,
+                { _ in .creditDenied(reason: "opaque-not-presentation-authority") }
+            ),
+            (
+                "pay-08",
+                .receiptMismatch,
+                .pay08,
+                { intake in
+                    var mismatchedPhotos = intake.expectedReceiptPhotos
+                    mismatchedPhotos[0] = .init(
+                        ordinal: 0,
+                        contentSha256: String(repeating: "f", count: 64),
+                        byteLength: mismatchedPhotos[0].byteLength,
+                        mediaType: mismatchedPhotos[0].mediaType
+                    )
+                    return .created(Self.receipt(photos: mismatchedPhotos))
+                }
+            ),
+            (
+                "account-claim",
+                .authenticationRequired,
+                .accountClaim12aThrough12c,
+                { _ in .authenticationRequired }
+            ),
+        ]
+        let staleEventID = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000081"
+        )!
+        var observedEventIDs: [UUID] = []
+
+        for testCase in cases {
+            let intake = SubmissionIntakeFixture(
+                photoCount: 2,
+                seed: testCase.seed
+            )
+            let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+            let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+            let submitter = RecordingItemRunSubmitter(
+                outcomes: [testCase.outcome(intake)]
+            )
+            let host = ItemRunSubmissionHost(
+                coordinator: makeCoordinator(
+                    intake: intake,
+                    attemptStore: attemptStore,
+                    submitter: submitter,
+                    draftStore: draftStore,
+                    keys: [Self.firstKey]
+                )
+            )
+
+            await host.startListing(photos: intake.photos)
+
+            XCTAssertEqual(host.retention, testCase.retention)
+            XCTAssertNil(host.acceptedRun)
+            XCTAssertFalse(host.clearedIntake)
+            XCTAssertFalse(host.isSubmitting)
+            guard case .destinationHandoff(
+                eventID: let eventID,
+                handoff: let handoff
+            )? = host.pendingPresentationEvent else {
+                XCTFail("Expected one typed destination handoff.")
+                continue
+            }
+            observedEventIDs.append(eventID)
+            XCTAssertEqual(handoff, testCase.handoff)
+            XCTAssertEqual(
+                ItemRunSubmissionDestinationDecision(
+                    retention: testCase.retention
+                ),
+                .handoff(testCase.handoff)
+            )
+
+            let attemptBeforeConsumption = try await attemptStore.loadAttempt()
+            let photosBeforeConsumption = try await draftStore.loadPhotos()
+            let payloadsBeforeConsumption = await submitter.payloads
+            let discardCountBeforeConsumption = await draftStore.discardCount
+            XCTAssertEqual(
+                attemptBeforeConsumption?.idempotencyKey,
+                Self.firstKey
+            )
+            XCTAssertEqual(photosBeforeConsumption, intake.photos)
+            XCTAssertEqual(payloadsBeforeConsumption.count, 1)
+            XCTAssertEqual(discardCountBeforeConsumption, 0)
+
+            XCTAssertNil(
+                host.consumeDestinationHandoff(eventID: staleEventID)
+            )
+            XCTAssertEqual(
+                host.pendingPresentationEvent,
+                .destinationHandoff(
+                    eventID: eventID,
+                    handoff: testCase.handoff
+                )
+            )
+            XCTAssertEqual(
+                host.consumeDestinationHandoff(eventID: eventID),
+                testCase.handoff
+            )
+            XCTAssertNil(host.pendingPresentationEvent)
+            XCTAssertNil(
+                host.consumeDestinationHandoff(eventID: eventID),
+                "A consumed handoff cannot navigate or fire twice."
+            )
+
+            let attemptAfterConsumption = try await attemptStore.loadAttempt()
+            let photosAfterConsumption = try await draftStore.loadPhotos()
+            let payloadsAfterConsumption = await submitter.payloads
+            let discardCountAfterConsumption = await draftStore.discardCount
+            XCTAssertEqual(attemptAfterConsumption, attemptBeforeConsumption)
+            XCTAssertEqual(photosAfterConsumption, photosBeforeConsumption)
+            XCTAssertEqual(payloadsAfterConsumption, payloadsBeforeConsumption)
+            XCTAssertEqual(
+                discardCountAfterConsumption,
+                discardCountBeforeConsumption
+            )
+        }
+
+        XCTAssertEqual(Set(observedEventIDs).count, cases.count)
+    }
+
     // MARK: Persisted attempt identity
 
     func testPersistsOneKeyAndTheOrderedSnapshotBeforeAnyNetworkActivity() async {
@@ -874,13 +1123,14 @@ final class ItemRunSubmissionTests: XCTestCase {
         let intake = SubmissionIntakeFixture(photoCount: 2)
         let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
         let submitter = RecordingItemRunSubmitter(outcomes: [.created(Self.receipt())])
+        let firstKey = Self.firstKey
         let coordinator = ItemRunSubmissionCoordinator(
             submitter: submitter,
             attemptStore: UnreadableItemRunSubmissionAttemptStore(),
             draftStore: draftStore,
             tokenProvider: TestBearerTokenProvider { "clerk-session-token" },
             readData: intake.read,
-            newIdempotencyKey: { Self.firstKey }
+            newIdempotencyKey: { firstKey }
         )
 
         let outcome = await coordinator.submit(photos: intake.photos)
@@ -949,6 +1199,721 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Live Start listing boundary
 
+    func testValidatedAcceptanceWaitsForMatchingSavedPresentationAcknowledgmentBeforeExactClear() async {
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let eventRecorder = AcceptedPathEventRecorder()
+        let attemptStore = AcknowledgedAcceptanceAttemptStore(
+            eventRecorder: eventRecorder
+        )
+        let draftStore = AcknowledgedAcceptanceDraftStore(
+            photos: intake.photos,
+            eventRecorder: eventRecorder
+        )
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.created(Self.receipt(for: intake))],
+            beforeResponse: {
+                await eventRecorder.record(.canonicalReceiptReturned)
+            }
+        )
+        let keySequence = KeySequence(keys: [Self.firstKey])
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: draftStore,
+                tokenProvider: TestBearerTokenProvider {
+                    "clerk-session-token"
+                },
+                readData: intake.read,
+                newIdempotencyKey: { keySequence.next() }
+            )
+        )
+        let transactionHost = PhotoReviewLiveHost()
+
+        let submission = Task {
+            guard transactionHost.beginCommit() else {
+                return false
+            }
+            defer { transactionHost.endCommit() }
+            await submissionHost.startListing(photos: intake.photos)
+            return true
+        }
+        defer { submission.cancel() }
+        guard let savedEvent = await waitForPendingItemSavedEvent(
+            on: submissionHost
+        ) else {
+            return
+        }
+        let eventID = savedEvent.eventID
+
+        XCTAssertEqual(
+            savedEvent.acceptedRun,
+            AcceptedItemRun(
+                runID: Self.canonicalRunID,
+                itemID: Self.canonicalItemID,
+                status: "queued",
+                stage: "queued"
+            )
+        )
+        XCTAssertEqual(submissionHost.acceptedRun, savedEvent.acceptedRun)
+        await eventRecorder.record(.itemSavedObserved(eventID))
+
+        var discardExactlyCount = await draftStore.discardExactlyCount
+        var matchingClearCount = await attemptStore.matchingClearCount
+        var durablePhotos = await draftStore.photos
+        var persistedAttempt = await attemptStore.attempt
+        XCTAssertEqual(discardExactlyCount, 0)
+        XCTAssertEqual(matchingClearCount, 0)
+        XCTAssertEqual(durablePhotos, intake.photos)
+        XCTAssertEqual(persistedAttempt?.idempotencyKey, Self.firstKey)
+        XCTAssertEqual(
+            persistedAttempt?.photos.map(\.photoID),
+            intake.photos.map(\.id)
+        )
+        let persistedAttemptBeforeAcknowledgment = persistedAttempt
+        XCTAssertTrue(transactionHost.isCommitting)
+
+        let staleEventID = UUID(
+            uuidString: "50300000-0000-4000-8000-0000000000ff"
+        )!
+        submissionHost.acknowledgePresentation(eventID: staleEventID)
+
+        discardExactlyCount = await draftStore.discardExactlyCount
+        matchingClearCount = await attemptStore.matchingClearCount
+        durablePhotos = await draftStore.photos
+        persistedAttempt = await attemptStore.attempt
+        XCTAssertEqual(discardExactlyCount, 0)
+        XCTAssertEqual(matchingClearCount, 0)
+        XCTAssertEqual(durablePhotos, intake.photos)
+        XCTAssertEqual(persistedAttempt?.idempotencyKey, Self.firstKey)
+        XCTAssertEqual(
+            persistedAttempt?.photos.map(\.photoID),
+            intake.photos.map(\.id)
+        )
+        XCTAssertEqual(persistedAttempt, persistedAttemptBeforeAcknowledgment)
+        if case .itemSaved(
+            let stillPendingEventID,
+            let stillPendingAcceptedRun
+        )? =
+            submissionHost.pendingPresentationEvent {
+            XCTAssertEqual(stillPendingEventID, eventID)
+            XCTAssertEqual(stillPendingAcceptedRun, savedEvent.acceptedRun)
+        } else {
+            XCTFail("A stale acknowledgment removed the pending saved event.")
+        }
+        XCTAssertEqual(submissionHost.acceptedRun?.runID, Self.canonicalRunID)
+        XCTAssertTrue(transactionHost.isCommitting)
+
+        await eventRecorder.record(.matchingAcknowledgment(eventID))
+        submissionHost.acknowledgePresentation(eventID: eventID)
+        let transactionLockAcquired = await submission.value
+
+        discardExactlyCount = await draftStore.discardExactlyCount
+        matchingClearCount = await attemptStore.matchingClearCount
+        durablePhotos = await draftStore.photos
+        persistedAttempt = await attemptStore.attempt
+        XCTAssertEqual(discardExactlyCount, 1)
+        XCTAssertEqual(matchingClearCount, 1)
+        XCTAssertTrue(durablePhotos.isEmpty)
+        XCTAssertNil(persistedAttempt)
+        XCTAssertTrue(transactionLockAcquired)
+        XCTAssertFalse(transactionHost.isCommitting)
+
+        submissionHost.acknowledgePresentation(eventID: eventID)
+
+        discardExactlyCount = await draftStore.discardExactlyCount
+        matchingClearCount = await attemptStore.matchingClearCount
+        XCTAssertEqual(discardExactlyCount, 1)
+        XCTAssertEqual(matchingClearCount, 1)
+
+        let events = await eventRecorder.events
+        XCTAssertEqual(
+            events,
+            [
+                .canonicalReceiptReturned,
+                .itemSavedObserved(eventID),
+                .matchingAcknowledgment(eventID),
+                .durableExactClearCompleted,
+                .conditionalAttemptRetirement,
+            ]
+        )
+    }
+
+    func testCancelledAcceptedPresentationReusesExactAttemptOnlyOnExplicitReplay() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-cancelled-accepted-replay-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let draftRoot = root.appendingPathComponent(
+            "draft",
+            isDirectory: true
+        )
+        let attemptRoot = root.appendingPathComponent(
+            "attempt",
+            isDirectory: true
+        )
+        let attemptURL = attemptRoot.appendingPathComponent("attempt.json")
+        defer { try? fileManager.removeItem(at: root) }
+
+        let renderer = UIGraphicsImageRenderer(
+            size: CGSize(width: 400, height: 200)
+        )
+        let imageData = renderer.jpegData(
+            withCompressionQuality: 0.95
+        ) { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(x: 200, y: 0, width: 200, height: 200))
+        }
+        let localDraftStore = LocalCaptureDraftStore(
+            rootDirectory: draftRoot
+        )
+        let staged = try await localDraftStore.append(
+            imageData: imageData,
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let draftStore = CancellationReplayDraftStore(
+            base: localDraftStore
+        )
+        let attemptStore = CancellationReplayAttemptStore(
+            base: LocalItemRunSubmissionAttemptStore(
+                rootDirectory: attemptRoot
+            )
+        )
+        let intake = SubmissionIntakeFixture(stagedPhotos: [staged])
+        let receipt = Self.receipt(for: intake)
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [
+                .created(receipt),
+                .replayed(receipt),
+            ]
+        )
+        let keySequence = KeySequence(
+            keys: [Self.firstKey, Self.secondKey]
+        )
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: draftStore,
+                tokenProvider: TestBearerTokenProvider {
+                    "clerk-session-token"
+                },
+                readData: intake.read,
+                newIdempotencyKey: { keySequence.next() }
+            )
+        )
+        let transactionHost = PhotoReviewLiveHost()
+
+        let firstSubmission = Task {
+            guard transactionHost.beginCommit() else {
+                return false
+            }
+            defer { transactionHost.endCommit() }
+            await submissionHost.startListing(photos: intake.photos)
+            return true
+        }
+        defer { firstSubmission.cancel() }
+        guard let firstSavedEvent = await waitForPendingItemSavedEvent(
+            on: submissionHost
+        ) else {
+            return
+        }
+        let expectedRun = AcceptedItemRun(
+            runID: receipt.runId,
+            itemID: receipt.itemId,
+            status: receipt.status,
+            stage: receipt.stage
+        )
+        XCTAssertEqual(firstSavedEvent.acceptedRun, expectedRun)
+        XCTAssertEqual(submissionHost.acceptedRun, expectedRun)
+        XCTAssertTrue(submissionHost.isSubmitting)
+        XCTAssertTrue(transactionHost.isCommitting)
+        let discardCountWhilePending =
+            await draftStore.discardExactlyCount
+        let clearCountWhilePending =
+            await attemptStore.matchingClearCount
+        let payloadsWhilePending = await submitter.payloads
+        XCTAssertEqual(discardCountWhilePending, 0)
+        XCTAssertEqual(clearCountWhilePending, 0)
+        XCTAssertEqual(payloadsWhilePending.count, 1)
+
+        firstSubmission.cancel()
+        let firstLockAcquired = await firstSubmission.value
+
+        XCTAssertTrue(firstLockAcquired)
+        XCTAssertFalse(submissionHost.isSubmitting)
+        XCTAssertFalse(transactionHost.isCommitting)
+        XCTAssertNil(submissionHost.pendingPresentationEvent)
+        XCTAssertFalse(submissionHost.clearedIntake)
+        XCTAssertNil(submissionHost.retention)
+
+        let storedAttemptAfterCancellation =
+            try await attemptStore.loadAttempt()
+        let attemptAfterCancellation = try XCTUnwrap(
+            storedAttemptAfterCancellation
+        )
+        let draftAfterCancellation = try await draftStore.loadPhotos()
+        let firstDiscardCount = await draftStore.discardExactlyCount
+        let firstAttemptClearCount = await attemptStore.matchingClearCount
+        let firstPayloads = await submitter.payloads
+
+        XCTAssertEqual(firstPayloads.count, 1)
+        let firstPayload = try XCTUnwrap(firstPayloads.first)
+        XCTAssertEqual(attemptAfterCancellation.idempotencyKey, Self.firstKey)
+        XCTAssertEqual(
+            attemptAfterCancellation.photos,
+            firstPayload.attempt.photos
+        )
+        XCTAssertEqual(draftAfterCancellation, intake.photos)
+        XCTAssertEqual(firstDiscardCount, 0)
+        XCTAssertEqual(firstAttemptClearCount, 0)
+        XCTAssertEqual(firstPayload.photoData, intake.expectedBytes)
+        XCTAssertTrue(fileManager.fileExists(atPath: attemptURL.path))
+        XCTAssertTrue(fileManager.fileExists(atPath: staged.photoURL.path))
+        XCTAssertTrue(
+            fileManager.fileExists(atPath: staged.thumbnailURL.path)
+        )
+
+        submissionHost.acknowledgePresentation(
+            eventID: firstSavedEvent.eventID
+        )
+        let discardCountAfterStaleAcknowledgment =
+            await draftStore.discardExactlyCount
+        let clearCountAfterStaleAcknowledgment =
+            await attemptStore.matchingClearCount
+        let payloadsAfterStaleAcknowledgment = await submitter.payloads
+        XCTAssertEqual(discardCountAfterStaleAcknowledgment, 0)
+        XCTAssertEqual(clearCountAfterStaleAcknowledgment, 0)
+        XCTAssertEqual(payloadsAfterStaleAcknowledgment.count, 1)
+
+        let secondSubmission = Task {
+            guard transactionHost.beginCommit() else {
+                return false
+            }
+            defer { transactionHost.endCommit() }
+            await submissionHost.startListing(photos: intake.photos)
+            return true
+        }
+        defer { secondSubmission.cancel() }
+        guard let secondSavedEvent = await waitForPendingItemSavedEvent(
+            on: submissionHost
+        ) else {
+            return
+        }
+
+        XCTAssertNotEqual(
+            secondSavedEvent.eventID,
+            firstSavedEvent.eventID
+        )
+        XCTAssertEqual(secondSavedEvent.acceptedRun, expectedRun)
+        XCTAssertTrue(submissionHost.isSubmitting)
+        XCTAssertTrue(transactionHost.isCommitting)
+
+        let replayPresentation = PhotoReviewSubmissionPresentation(
+            host: submissionHost
+        )
+        var announcements: [String] = []
+        var acknowledgedEventIDs: [UUID] = []
+        var effectConsumer = PhotoReviewSubmissionEffectConsumer()
+        effectConsumer.consume(
+            replayPresentation,
+            postAnnouncement: { announcements.append($0) },
+            acknowledgePresentation: { eventID in
+                acknowledgedEventIDs.append(eventID)
+                submissionHost.acknowledgePresentation(eventID: eventID)
+            }
+        )
+        effectConsumer.consume(
+            PhotoReviewSubmissionPresentation(host: submissionHost),
+            postAnnouncement: { announcements.append($0) },
+            acknowledgePresentation: { eventID in
+                acknowledgedEventIDs.append(eventID)
+                submissionHost.acknowledgePresentation(eventID: eventID)
+            }
+        )
+        let secondLockAcquired = await secondSubmission.value
+
+        XCTAssertTrue(secondLockAcquired)
+        XCTAssertFalse(submissionHost.isSubmitting)
+        XCTAssertFalse(transactionHost.isCommitting)
+        XCTAssertEqual(announcements, ["Item saved."])
+        XCTAssertEqual(
+            acknowledgedEventIDs,
+            [secondSavedEvent.eventID]
+        )
+        XCTAssertTrue(submissionHost.clearedIntake)
+        if case .itemSaved(
+            let pendingEventID,
+            let pendingAcceptedRun
+        )? = submissionHost.pendingPresentationEvent {
+            XCTAssertEqual(pendingEventID, secondSavedEvent.eventID)
+            XCTAssertEqual(pendingAcceptedRun, expectedRun)
+        } else {
+            XCTFail("The shell-owned saved presentation retired before routing.")
+        }
+
+        let finalPayloads = await submitter.payloads
+        XCTAssertEqual(finalPayloads.count, 2)
+        XCTAssertEqual(
+            finalPayloads.map(\.attempt.idempotencyKey),
+            [Self.firstKey, Self.firstKey]
+        )
+        XCTAssertEqual(
+            finalPayloads[0].attempt.photos,
+            finalPayloads[1].attempt.photos
+        )
+        XCTAssertEqual(finalPayloads[0].photoData, finalPayloads[1].photoData)
+        XCTAssertEqual(finalPayloads[1].photoData, intake.expectedBytes)
+        let finalDiscardCount = await draftStore.discardExactlyCount
+        let finalAttemptClearCount = await attemptStore.matchingClearCount
+        let finalAttempt = try await attemptStore.loadAttempt()
+        let finalDraftPhotos = try await draftStore.loadPhotos()
+        XCTAssertEqual(finalDiscardCount, 1)
+        XCTAssertEqual(finalAttemptClearCount, 1)
+        XCTAssertNil(finalAttempt)
+        XCTAssertTrue(finalDraftPhotos.isEmpty)
+        XCTAssertFalse(fileManager.fileExists(atPath: attemptURL.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: staged.photoURL.path))
+        XCTAssertFalse(
+            fileManager.fileExists(atPath: staged.thumbnailURL.path)
+        )
+
+        submissionHost.acknowledgePresentation(
+            eventID: secondSavedEvent.eventID
+        )
+        let discardCountAfterDuplicate =
+            await draftStore.discardExactlyCount
+        let clearCountAfterDuplicate =
+            await attemptStore.matchingClearCount
+        let payloadsAfterDuplicate = await submitter.payloads
+        XCTAssertEqual(discardCountAfterDuplicate, 1)
+        XCTAssertEqual(clearCountAfterDuplicate, 1)
+        XCTAssertEqual(payloadsAfterDuplicate.count, 2)
+    }
+
+    func testSavedPresentationEffectsAndFinalizationOccurExactlyOncePerEvent() async {
+        let firstIntake = SubmissionIntakeFixture(photoCount: 2)
+        let firstEventRecorder = AcceptedPathEventRecorder()
+        let firstAttemptStore = AcknowledgedAcceptanceAttemptStore(
+            eventRecorder: firstEventRecorder
+        )
+        let firstDraftStore = AcknowledgedAcceptanceDraftStore(
+            photos: firstIntake.photos,
+            eventRecorder: firstEventRecorder
+        )
+        let firstSubmitter = RecordingItemRunSubmitter(
+            outcomes: [.created(Self.receipt(for: firstIntake))]
+        )
+        let firstKey = Self.firstKey
+        let firstHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: firstSubmitter,
+                attemptStore: firstAttemptStore,
+                draftStore: firstDraftStore,
+                tokenProvider: TestBearerTokenProvider {
+                    "clerk-session-token"
+                },
+                readData: firstIntake.read,
+                newIdempotencyKey: { firstKey }
+            )
+        )
+
+        let firstSubmission = Task {
+            await firstHost.startListing(photos: firstIntake.photos)
+        }
+        defer { firstSubmission.cancel() }
+        guard let firstSavedEvent = await waitForPendingItemSavedEvent(
+            on: firstHost
+        ) else {
+            return
+        }
+        let firstPresentation = PhotoReviewSubmissionPresentation(
+            host: firstHost
+        )
+
+        XCTAssertEqual(firstPresentation.primaryActionLabel, "Item saved")
+        XCTAssertEqual(
+            firstPresentation.announcementEvent,
+            .itemSaved(eventID: firstSavedEvent.eventID)
+        )
+        XCTAssertEqual(
+            firstPresentation.accessibilityAnnouncement,
+            "Item saved."
+        )
+        XCTAssertFalse(firstPresentation.rendersSubmittedMedia)
+        XCTAssertEqual(firstHost.acceptedRun, firstSavedEvent.acceptedRun)
+
+        let wrongEventID = UUID(
+            uuidString: "50300000-0000-4000-8000-0000000000ef"
+        )!
+        firstHost.acknowledgePresentation(eventID: wrongEventID)
+
+        var firstDiscardCount = await firstDraftStore.discardExactlyCount
+        var firstAttemptClearCount =
+            await firstAttemptStore.matchingClearCount
+        var firstPayloads = await firstSubmitter.payloads
+        XCTAssertEqual(firstDiscardCount, 0)
+        XCTAssertEqual(firstAttemptClearCount, 0)
+        XCTAssertEqual(firstPayloads.count, 1)
+        XCTAssertTrue(firstHost.isSubmitting)
+        if case .itemSaved(let eventID, let acceptedRun)? =
+            firstHost.pendingPresentationEvent {
+            XCTAssertEqual(eventID, firstSavedEvent.eventID)
+            XCTAssertEqual(acceptedRun, firstSavedEvent.acceptedRun)
+        } else {
+            XCTFail("A wrong acknowledgment consumed the saved event.")
+        }
+
+        var observedEffects: [SavedPresentationEffectObservation] = []
+        var effectConsumer = PhotoReviewSubmissionEffectConsumer()
+        let consumeFirstPresentation = {
+            effectConsumer.consume(
+                PhotoReviewSubmissionPresentation(host: firstHost),
+                postAnnouncement: { announcement in
+                    observedEffects.append(
+                        .announcement(
+                            announcement,
+                            eventID: firstSavedEvent.eventID
+                        )
+                    )
+                },
+                acknowledgePresentation: { eventID in
+                    observedEffects.append(.acknowledgment(eventID))
+                    firstHost.acknowledgePresentation(eventID: eventID)
+                }
+            )
+        }
+
+        consumeFirstPresentation()
+        consumeFirstPresentation()
+        consumeFirstPresentation()
+        firstHost.acknowledgePresentation(
+            eventID: firstSavedEvent.eventID
+        )
+        firstHost.acknowledgePresentation(eventID: wrongEventID)
+        await firstSubmission.value
+
+        XCTAssertEqual(
+            observedEffects,
+            [
+                .announcement(
+                    "Item saved.",
+                    eventID: firstSavedEvent.eventID
+                ),
+                .acknowledgment(firstSavedEvent.eventID),
+            ]
+        )
+        firstDiscardCount = await firstDraftStore.discardExactlyCount
+        firstAttemptClearCount =
+            await firstAttemptStore.matchingClearCount
+        firstPayloads = await firstSubmitter.payloads
+        let firstFinalizationEvents = await firstEventRecorder.events
+        XCTAssertEqual(firstDiscardCount, 1)
+        XCTAssertEqual(firstAttemptClearCount, 1)
+        XCTAssertEqual(firstPayloads.count, 1)
+        XCTAssertEqual(
+            firstFinalizationEvents,
+            [
+                .durableExactClearCompleted,
+                .conditionalAttemptRetirement,
+            ]
+        )
+
+        consumeFirstPresentation()
+        firstHost.acknowledgePresentation(
+            eventID: firstSavedEvent.eventID
+        )
+        firstHost.acknowledgePresentation(eventID: wrongEventID)
+
+        firstDiscardCount = await firstDraftStore.discardExactlyCount
+        firstAttemptClearCount =
+            await firstAttemptStore.matchingClearCount
+        firstPayloads = await firstSubmitter.payloads
+        XCTAssertEqual(
+            observedEffects,
+            [
+                .announcement(
+                    "Item saved.",
+                    eventID: firstSavedEvent.eventID
+                ),
+                .acknowledgment(firstSavedEvent.eventID),
+            ]
+        )
+        XCTAssertEqual(firstDiscardCount, 1)
+        XCTAssertEqual(firstAttemptClearCount, 1)
+        XCTAssertEqual(firstPayloads.count, 1)
+        firstHost.completeClearedIntakePresentation()
+        XCTAssertNil(firstHost.pendingPresentationEvent)
+
+        let secondIntake = SubmissionIntakeFixture(
+            photoCount: 1,
+            seed: "genuinely-new-event"
+        )
+        let secondEventRecorder = AcceptedPathEventRecorder()
+        let secondAttemptStore = AcknowledgedAcceptanceAttemptStore(
+            eventRecorder: secondEventRecorder
+        )
+        let secondDraftStore = AcknowledgedAcceptanceDraftStore(
+            photos: secondIntake.photos,
+            eventRecorder: secondEventRecorder
+        )
+        let secondSubmitter = RecordingItemRunSubmitter(
+            outcomes: [.created(Self.receipt(for: secondIntake))]
+        )
+        let secondKey = Self.secondKey
+        let secondHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: secondSubmitter,
+                attemptStore: secondAttemptStore,
+                draftStore: secondDraftStore,
+                tokenProvider: TestBearerTokenProvider {
+                    "clerk-session-token"
+                },
+                readData: secondIntake.read,
+                newIdempotencyKey: { secondKey }
+            )
+        )
+
+        let secondSubmission = Task {
+            await secondHost.startListing(photos: secondIntake.photos)
+        }
+        defer { secondSubmission.cancel() }
+        guard let secondSavedEvent = await waitForPendingItemSavedEvent(
+            on: secondHost
+        ) else {
+            return
+        }
+        XCTAssertNotEqual(
+            secondSavedEvent.eventID,
+            firstSavedEvent.eventID
+        )
+
+        let consumeSecondPresentation = {
+            effectConsumer.consume(
+                PhotoReviewSubmissionPresentation(host: secondHost),
+                postAnnouncement: { announcement in
+                    observedEffects.append(
+                        .announcement(
+                            announcement,
+                            eventID: secondSavedEvent.eventID
+                        )
+                    )
+                },
+                acknowledgePresentation: { eventID in
+                    observedEffects.append(.acknowledgment(eventID))
+                    secondHost.acknowledgePresentation(eventID: eventID)
+                }
+            )
+        }
+        consumeSecondPresentation()
+        consumeSecondPresentation()
+        await secondSubmission.value
+        let secondDiscardCount =
+            await secondDraftStore.discardExactlyCount
+        let secondAttemptClearCount =
+            await secondAttemptStore.matchingClearCount
+        let secondPayloads = await secondSubmitter.payloads
+        let secondFinalizationEvents = await secondEventRecorder.events
+
+        XCTAssertEqual(
+            observedEffects,
+            [
+                .announcement(
+                    "Item saved.",
+                    eventID: firstSavedEvent.eventID
+                ),
+                .acknowledgment(firstSavedEvent.eventID),
+                .announcement(
+                    "Item saved.",
+                    eventID: secondSavedEvent.eventID
+                ),
+                .acknowledgment(secondSavedEvent.eventID),
+            ]
+        )
+        XCTAssertEqual(secondDiscardCount, 1)
+        XCTAssertEqual(secondAttemptClearCount, 1)
+        XCTAssertEqual(secondPayloads.count, 1)
+        XCTAssertEqual(
+            secondFinalizationEvents,
+            [
+                .durableExactClearCompleted,
+                .conditionalAttemptRetirement,
+            ]
+        )
+    }
+
+    func testLivePhotoReviewPresentationShowsSavingStateOnceDuringOneRequest() async {
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let responseGate = SubmissionResponseGate()
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.created(Self.receipt(for: intake))],
+            beforeResponse: {
+                await responseGate.hold()
+            }
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                submitter: submitter,
+                keys: [Self.firstKey]
+            )
+        )
+        var announcementTracker = PhotoReviewSubmissionAnnouncementTracker()
+
+        let idle = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(idle.primaryActionLabel, "Start listing")
+        XCTAssertFalse(idle.mutationControlsLocked)
+        XCTAssertNil(announcementTracker.consume(idle))
+
+        let submission = Task {
+            await host.startListing(photos: intake.photos)
+        }
+        await responseGate.waitUntilHeld()
+
+        let saving = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(saving.primaryActionLabel, "Saving your item")
+        XCTAssertTrue(saving.mutationControlsLocked)
+        XCTAssertEqual(
+            announcementTracker.consume(saving),
+            "Saving your item."
+        )
+        XCTAssertNil(
+            announcementTracker.consume(
+                PhotoReviewSubmissionPresentation(host: host)
+            ),
+            "Re-rendering the same in-flight state must not announce it twice."
+        )
+
+        let savedStateObserved = expectation(
+            description: "Accepted submission publishes its pending saved event"
+        )
+        withObservationTracking {
+            _ = host.pendingPresentationEvent
+        } onChange: {
+            savedStateObserved.fulfill()
+        }
+
+        await responseGate.release()
+        await fulfillment(of: [savedStateObserved], timeout: 3)
+        guard case .itemSaved(let eventID, _)? =
+            host.pendingPresentationEvent else {
+            return XCTFail("Expected the pending saved presentation event.")
+        }
+        host.acknowledgePresentation(eventID: eventID)
+        await submission.value
+        host.completeClearedIntakePresentation()
+
+        let completed = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(completed.primaryActionLabel, "Start listing")
+        XCTAssertFalse(completed.mutationControlsLocked)
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+    }
+
     func testStartListingEmitsTheReceiptRunAsTheCanonicalHandoff() async {
         let intake = SubmissionIntakeFixture(photoCount: 5)
         let attemptStore = InMemoryItemRunSubmissionAttemptStore()
@@ -964,25 +1929,43 @@ final class ItemRunSubmissionTests: XCTestCase {
             )
         )
 
-        await host.startListing(photos: intake.photos)
+        let submission = Task {
+            await host.startListing(photos: intake.photos)
+        }
+        defer { submission.cancel() }
+        guard let savedEvent = await waitForPendingItemSavedEvent(
+            on: host
+        ) else {
+            return
+        }
+
+        XCTAssertEqual(savedEvent.acceptedRun.runID, Self.canonicalRunID)
+        XCTAssertEqual(
+            host.pendingPresentationEvent,
+            .itemSaved(
+                eventID: savedEvent.eventID,
+                acceptedRun: savedEvent.acceptedRun
+            )
+        )
+        XCTAssertTrue(host.isSubmitting)
+        XCTAssertFalse(host.clearedIntake)
+        host.acknowledgePresentation(eventID: savedEvent.eventID)
+        await submission.value
+        host.completeClearedIntakePresentation()
 
         XCTAssertEqual(host.acceptedRun?.runID, Self.canonicalRunID)
         XCTAssertNil(host.retention)
         XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.pendingPresentationEvent)
     }
 
     func testStartListingTappedTwiceSubmitsOnce() async {
         let intake = SubmissionIntakeFixture(photoCount: 2)
         let attemptStore = InMemoryItemRunSubmissionAttemptStore()
-        var host: ItemRunSubmissionHost?
-        // The second tap lands while the first request is still open.
         let inFlight = RecordingItemRunSubmitter(
-            outcomes: [.created(Self.receipt(for: intake))],
-            beforeResponse: { [intake] in
-                await host?.startListing(photos: intake.photos)
-            }
+            outcomes: [.created(Self.receipt(for: intake))]
         )
-        host = ItemRunSubmissionHost(
+        let host = ItemRunSubmissionHost(
             coordinator: makeCoordinator(
                 intake: intake,
                 attemptStore: attemptStore,
@@ -991,11 +1974,51 @@ final class ItemRunSubmissionTests: XCTestCase {
             )
         )
 
-        await host?.startListing(photos: intake.photos)
+        let firstSubmission = Task {
+            await host.startListing(photos: intake.photos)
+        }
+        defer { firstSubmission.cancel() }
+        guard let savedEvent = await waitForPendingItemSavedEvent(
+            on: host
+        ) else {
+            return
+        }
 
-        let payloads = await inFlight.payloads
+        XCTAssertTrue(host.isSubmitting)
+        XCTAssertFalse(host.clearedIntake)
+        XCTAssertEqual(
+            host.pendingPresentationEvent,
+            .itemSaved(
+                eventID: savedEvent.eventID,
+                acceptedRun: savedEvent.acceptedRun
+            )
+        )
+
+        // The second tap lands while the first request is still open.
+        await host.startListing(photos: intake.photos)
+
+        var payloads = await inFlight.payloads
         XCTAssertEqual(payloads.count, 1)
-        XCTAssertEqual(host?.acceptedRun?.runID, Self.canonicalRunID)
+        XCTAssertEqual(
+            host.pendingPresentationEvent,
+            .itemSaved(
+                eventID: savedEvent.eventID,
+                acceptedRun: savedEvent.acceptedRun
+            )
+        )
+
+        host.acknowledgePresentation(eventID: savedEvent.eventID)
+        await firstSubmission.value
+        host.completeClearedIntakePresentation()
+
+        payloads = await inFlight.payloads
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(
+            host.acceptedRun?.runID,
+            Self.canonicalRunID
+        )
+        XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.pendingPresentationEvent)
     }
 
     /// `403`, `429`, and `409` each reach the live boundary as their own typed value,
@@ -1063,13 +2086,13 @@ final class ItemRunSubmissionTests: XCTestCase {
     /// A receipt that echoes `intake` exactly, unless a field is deliberately spoiled.
     static func receipt(
         for intake: SubmissionIntakeFixture? = nil,
-        runID: UUID = canonicalRunID,
+        runID: UUID? = nil,
         photos: [MobileItemSubmissionEnvelope.PhotoReceipt]? = nil
     ) -> MobileItemSubmissionEnvelope.DataPayload {
         let echoed = photos ?? (intake?.expectedReceiptPhotos ?? [])
         return MobileItemSubmissionEnvelope.DataPayload(
             itemId: canonicalItemID,
-            runId: runID,
+            runId: runID ?? canonicalRunID,
             status: "queued",
             stage: "queued",
             photoIdentity: .init(
@@ -1116,9 +2139,38 @@ final class ItemRunSubmissionTests: XCTestCase {
             newIdempotencyKey: { keySequence.next() }
         )
     }
+
+    private func waitForPendingItemSavedEvent(
+        on host: ItemRunSubmissionHost
+    ) async -> (eventID: UUID, acceptedRun: AcceptedItemRun)? {
+        if case .itemSaved(let eventID, let acceptedRun)? =
+            host.pendingPresentationEvent {
+            return (eventID, acceptedRun)
+        }
+        let itemSavedPublished = expectation(
+            description: "Item saved presentation event published"
+        )
+        withObservationTracking {
+            _ = host.pendingPresentationEvent
+        } onChange: {
+            itemSavedPublished.fulfill()
+        }
+        await fulfillment(of: [itemSavedPublished], timeout: 3)
+        guard case .itemSaved(let eventID, let acceptedRun)? =
+            host.pendingPresentationEvent else {
+            XCTFail("Expected one pending item-saved presentation event.")
+            return nil
+        }
+        return (eventID, acceptedRun)
+    }
 }
 
 // MARK: - Fixtures
+
+private enum SavedPresentationEffectObservation: Equatable {
+    case announcement(String, eventID: UUID)
+    case acknowledgment(UUID)
+}
 
 private struct TestBearerTokenProvider: BearerTokenProviding {
     let resolve: @Sendable () async throws -> String
@@ -1401,6 +2453,245 @@ actor RecordingItemRunSubmitter: ItemRunSubmitting {
         bearerTokenLengths.append(bearerToken.count)
         guard !outcomes.isEmpty else { return .ambiguous }
         return outcomes.count == 1 ? outcomes[0] : outcomes.removeFirst()
+    }
+}
+
+actor SubmissionResponseGate {
+    private var isHeld = false
+    private var observedCallCount = 0
+    private var releasePending = false
+    private var heldWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func hold(onCall targetCall: Int) async {
+        observedCallCount += 1
+        guard observedCallCount == targetCall else {
+            return
+        }
+        await hold()
+    }
+
+    func hold() async {
+        guard !releasePending else {
+            releasePending = false
+            return
+        }
+        isHeld = true
+        let waiters = heldWaiters
+        heldWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    func waitUntilHeld() async {
+        guard !isHeld else { return }
+        await withCheckedContinuation { continuation in
+            heldWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard let releaseContinuation else {
+            releasePending = true
+            return
+        }
+        releaseContinuation.resume()
+        self.releaseContinuation = nil
+    }
+}
+
+private actor AcceptedPathEventRecorder {
+    enum Event: Equatable {
+        case canonicalReceiptReturned
+        case itemSavedObserved(UUID)
+        case matchingAcknowledgment(UUID)
+        case durableExactClearCompleted
+        case conditionalAttemptRetirement
+    }
+
+    private(set) var events: [Event] = []
+
+    func record(_ event: Event) {
+        events.append(event)
+    }
+}
+
+private actor AcknowledgedAcceptanceAttemptStore: ItemRunSubmissionAttemptStoring {
+    private(set) var attempt: ItemRunSubmissionAttempt?
+    private(set) var matchingClearCount = 0
+    private let eventRecorder: AcceptedPathEventRecorder
+
+    init(eventRecorder: AcceptedPathEventRecorder) {
+        self.eventRecorder = eventRecorder
+    }
+
+    func loadAttempt() async throws -> ItemRunSubmissionAttempt? {
+        attempt
+    }
+
+    func saveAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {
+        self.attempt = attempt
+    }
+
+    func clearAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {
+        guard self.attempt == attempt else {
+            return
+        }
+        matchingClearCount += 1
+        self.attempt = nil
+        await eventRecorder.record(.conditionalAttemptRetirement)
+    }
+}
+
+private actor AcknowledgedAcceptanceDraftStore: CaptureDraftStoring {
+    private(set) var photos: [StagedCapturePhoto]
+    private(set) var discardExactlyCount = 0
+    private let eventRecorder: AcceptedPathEventRecorder
+
+    init(
+        photos: [StagedCapturePhoto],
+        eventRecorder: AcceptedPathEventRecorder
+    ) {
+        self.photos = photos
+        self.eventRecorder = eventRecorder
+    }
+
+    func load() async throws -> StagedCapturePhoto? {
+        photos.first
+    }
+
+    func loadPhotos() async throws -> [StagedCapturePhoto] {
+        photos
+    }
+
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto {
+        throw CaptureDraftStoreError.stagingUnsupported
+    }
+
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        throw CaptureDraftStoreError.photoNotStaged
+    }
+
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        let existingByID = Dictionary(
+            uniqueKeysWithValues: self.photos.map { ($0.id, $0) }
+        )
+        guard photos.count <= 5,
+              Set(photos.map(\.id)).count == photos.count,
+              photos.allSatisfy({ existingByID[$0.id] == $0 }) else {
+            throw CaptureDraftStoreError.invalidManifest
+        }
+        self.photos = photos
+    }
+
+    func discard() async throws {
+        photos = []
+    }
+
+    func discardExactly(_ photos: [StagedCapturePhoto]) async throws -> Bool {
+        discardExactlyCount += 1
+        guard self.photos == photos else {
+            return false
+        }
+        self.photos = []
+        await eventRecorder.record(.durableExactClearCompleted)
+        return true
+    }
+}
+
+private actor CancellationReplayAttemptStore: ItemRunSubmissionAttemptStoring {
+    private let base: LocalItemRunSubmissionAttemptStore
+    private(set) var matchingClearCount = 0
+
+    init(base: LocalItemRunSubmissionAttemptStore) {
+        self.base = base
+    }
+
+    func loadAttempt() async throws -> ItemRunSubmissionAttempt? {
+        try await base.loadAttempt()
+    }
+
+    func saveAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {
+        try await base.saveAttempt(attempt)
+    }
+
+    func clearAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {
+        guard try await base.loadAttempt() == attempt else {
+            return
+        }
+        try await base.clearAttempt(attempt)
+        matchingClearCount += 1
+    }
+}
+
+private actor CancellationReplayDraftStore: CaptureDraftStoring {
+    private let base: LocalCaptureDraftStore
+    private(set) var discardExactlyCount = 0
+
+    init(base: LocalCaptureDraftStore) {
+        self.base = base
+    }
+
+    func load() async throws -> StagedCapturePhoto? {
+        try await base.load()
+    }
+
+    func loadPhotos() async throws -> [StagedCapturePhoto] {
+        try await base.loadPhotos()
+    }
+
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto {
+        try await base.stage(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+    }
+
+    func append(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftAppendResult {
+        try await base.append(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+    }
+
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        try await base.replace(
+            photoID: photoID,
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+    }
+
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        try await base.replacePhotos(with: photos)
+    }
+
+    func discard() async throws {
+        try await base.discard()
+    }
+
+    func discardExactly(_ photos: [StagedCapturePhoto]) async throws -> Bool {
+        discardExactlyCount += 1
+        return try await base.discardExactly(photos)
     }
 }
 

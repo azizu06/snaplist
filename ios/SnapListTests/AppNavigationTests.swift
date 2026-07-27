@@ -107,6 +107,48 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertTrue(configuration.usesZeroNetworkFixtures)
     }
 
+    func testDelayedSubmissionFixtureIsTypedAndUnknownValuesStayInert() {
+        let delayed = LaunchConfiguration.parse(
+            arguments: ["--submission-fixture=delayed"]
+        )
+        let rateLimited = LaunchConfiguration.parse(
+            arguments: ["--submission-fixture=rate-limited"]
+        )
+        let acknowledgmentNotification =
+            "dev.snaplist.ios.test.submission-ack.\(UUID().uuidString)"
+        let accepted = LaunchConfiguration.parse(
+            arguments: [
+                "--submission-fixture=accepted-presentation-gated",
+                "--submission-acknowledgment-notification=\(acknowledgmentNotification)"
+            ]
+        )
+        let unknown = LaunchConfiguration.parse(
+            arguments: ["--submission-fixture=unknown"]
+        )
+        let invalidNotification = LaunchConfiguration.parse(
+            arguments: [
+                "--submission-acknowledgment-notification=not-a-snaplist-test-signal"
+            ]
+        )
+
+        XCTAssertEqual(delayed.submissionFixture, .delayed)
+        XCTAssertTrue(delayed.usesZeroNetworkFixtures)
+        XCTAssertEqual(rateLimited.submissionFixture, .rateLimited)
+        XCTAssertTrue(rateLimited.usesZeroNetworkFixtures)
+        XCTAssertEqual(
+            accepted.submissionFixture,
+            .acceptedPresentationGated
+        )
+        XCTAssertEqual(
+            accepted.submissionAcknowledgmentNotification?.rawValue,
+            acknowledgmentNotification
+        )
+        XCTAssertTrue(accepted.usesZeroNetworkFixtures)
+        XCTAssertNil(unknown.submissionFixture)
+        XCTAssertFalse(unknown.usesZeroNetworkFixtures)
+        XCTAssertNil(invalidNotification.submissionAcknowledgmentNotification)
+    }
+
     func testExplicitVisualStateUsesItsOwningFamilyOverTheDefaultOnboardingFixture() {
         let onboarding = LaunchConfiguration.parse(arguments: ["--visual-state=ONB-01"])
         let capture = LaunchConfiguration.parse(arguments: ["--visual-state=CAP-01"])

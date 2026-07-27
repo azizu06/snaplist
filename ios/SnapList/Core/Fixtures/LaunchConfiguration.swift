@@ -122,6 +122,26 @@ enum RunDetailFixture: String, Equatable {
     case reviewable
 }
 
+enum SubmissionFixture: String, Equatable {
+    case delayed
+    case acceptedPresentationGated = "accepted-presentation-gated"
+    case rateLimited = "rate-limited"
+}
+
+struct SubmissionAcknowledgmentNotificationName: Equatable {
+    static let prefix = "dev.snaplist.ios.test.submission-ack."
+
+    let rawValue: String
+
+    init?(rawValue: String) {
+        guard rawValue.hasPrefix(Self.prefix),
+              rawValue.count > Self.prefix.count else {
+            return nil
+        }
+        self.rawValue = rawValue
+    }
+}
+
 enum PhotoReviewVisualStateID: String, Equatable {
     case resting = "REV-02"
     case fivePhotos = "REV-03"
@@ -152,6 +172,9 @@ struct LaunchConfiguration: Equatable {
     var resetOnboardingProgress: Bool
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
+    var submissionFixture: SubmissionFixture?
+    var submissionAcknowledgmentNotification:
+        SubmissionAcknowledgmentNotificationName?
     var runDetailFixture: RunDetailFixture?
 
     static let standard = LaunchConfiguration(
@@ -166,6 +189,8 @@ struct LaunchConfiguration: Equatable {
         resetOnboardingProgress: false,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
+        submissionFixture: nil,
+        submissionAcknowledgmentNotification: nil,
         runDetailFixture: nil
     )
 
@@ -181,6 +206,8 @@ struct LaunchConfiguration: Equatable {
         resetOnboardingProgress: false,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
+        submissionFixture: nil,
+        submissionAcknowledgmentNotification: nil,
         runDetailFixture: .loaded
     )
 
@@ -204,6 +231,26 @@ struct LaunchConfiguration: Equatable {
             } else if argument == "--restored-capture-fixture" {
                 configuration.usesRestoredCaptureFixture = true
                 configuration.usesZeroNetworkFixtures = true
+            } else if argument.hasPrefix("--submission-fixture=") {
+                let value = String(
+                    argument.dropFirst("--submission-fixture=".count)
+                )
+                configuration.submissionFixture = SubmissionFixture(rawValue: value)
+#if DEBUG
+                if configuration.submissionFixture != nil {
+                    configuration.usesZeroNetworkFixtures = true
+                }
+#endif
+            } else if argument.hasPrefix(
+                "--submission-acknowledgment-notification="
+            ) {
+                let value = String(
+                    argument.dropFirst(
+                        "--submission-acknowledgment-notification=".count
+                    )
+                )
+                configuration.submissionAcknowledgmentNotification =
+                    SubmissionAcknowledgmentNotificationName(rawValue: value)
             } else if argument.hasPrefix("--fixture=") {
                 let value = String(argument.dropFirst("--fixture=".count))
                 configuration.fixture = FoundationFixture(rawValue: value) ?? .home

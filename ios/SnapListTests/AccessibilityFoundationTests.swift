@@ -112,4 +112,88 @@ final class AccessibilityFoundationTests: XCTestCase {
             "An Add-photo return is not the Review opener contract."
         )
     }
+
+    func testMountedLibraryConsumesPendingAddPhotoFocusExactlyOnceAcrossLiveAndRecoverySurfaces() {
+        enum Effect: Equatable {
+            case focused(ScanLibraryFocusConsumer.MountedLibraryControl)
+            case consumedPendingFocus
+        }
+
+        var consumer = ScanLibraryFocusConsumer()
+        var pendingFocus: PhotoReviewScanFocus? = .addPhotoButton
+        var effects: [Effect] = []
+
+        func present(
+            _ mountedControl: ScanLibraryFocusConsumer.MountedLibraryControl?
+        ) {
+            consumer.consume(
+                pendingFocus: pendingFocus,
+                mountedControl: mountedControl,
+                applyAccessibilityFocus: { control in
+                    effects.append(.focused(control))
+                },
+                consumePendingFocus: {
+                    pendingFocus = nil
+                    effects.append(.consumedPendingFocus)
+                }
+            )
+        }
+
+        present(nil)
+        present(nil)
+        XCTAssertEqual(
+            pendingFocus,
+            .addPhotoButton,
+            "Preparing-camera phases have no matching mounted target."
+        )
+        XCTAssertTrue(effects.isEmpty)
+
+        present(.liveLibrary)
+        XCTAssertNil(pendingFocus)
+        XCTAssertEqual(
+            effects,
+            [
+                .focused(.liveLibrary),
+                .consumedPendingFocus,
+            ],
+            "The mounted Library control receives focus before the request is consumed."
+        )
+
+        present(.liveLibrary)
+        XCTAssertEqual(
+            effects.count,
+            2,
+            "A same-mount rerender cannot focus or consume twice."
+        )
+
+        pendingFocus = .addPhotoButton
+        present(.recoveryLibrary)
+        XCTAssertNil(pendingFocus)
+        XCTAssertEqual(
+            effects,
+            [
+                .focused(.liveLibrary),
+                .consumedPendingFocus,
+                .focused(.recoveryLibrary),
+                .consumedPendingFocus,
+            ],
+            "Choose from library is the recovery mount for the same pending focus."
+        )
+
+        present(.recoveryLibrary)
+        XCTAssertEqual(effects.count, 4)
+
+        pendingFocus = .reviewButton
+        present(.liveLibrary)
+        XCTAssertEqual(pendingFocus, .reviewButton)
+        XCTAssertEqual(
+            effects.count,
+            4,
+            "The Library mount cannot consume a Review return."
+        )
+
+        // Review, shutter, and picker actions are structurally unable to call this
+        // Library-only seam: neither their identities nor an action capability is part
+        // of MountedLibraryControl or the consumer interface.
+    }
 }

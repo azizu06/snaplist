@@ -1,6 +1,196 @@
 import Foundation
 import Observation
 
+enum ItemRunSubmissionPresentationEvent: Equatable, Sendable {
+    case itemSaved(eventID: UUID, acceptedRun: AcceptedItemRun)
+    case submissionRejected(
+        eventID: UUID,
+        retention: ItemRunSubmissionRetention
+    )
+    case destinationHandoff(
+        eventID: UUID,
+        handoff: ItemRunSubmissionDestinationDecision.Handoff
+    )
+}
+
+enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
+    enum PhotoReview: Equatable, Sendable {
+        case sub03
+        case sub04
+        case sub06
+        case sub07
+    }
+
+    enum Handoff: Equatable, Sendable {
+        case pay01
+        case pay08
+        case accountClaim12aThrough12c
+    }
+
+    case photoReview(PhotoReview)
+    case handoff(Handoff)
+
+    init(retention: ItemRunSubmissionRetention) {
+        switch retention {
+        case .ambiguous:
+            self = .photoReview(.sub03)
+        case .conflict:
+            self = .photoReview(.sub04)
+        case .creditDenied(reason: _):
+            self = .handoff(.pay01)
+        case .rateLimited(reason: _):
+            self = .photoReview(.sub06)
+        case .rejected:
+            self = .photoReview(.sub07)
+        case .authenticationRequired:
+            self = .handoff(.accountClaim12aThrough12c)
+        case .receiptMismatch:
+            self = .handoff(.pay08)
+        case .intakeUnavailable:
+            self = .photoReview(.sub07)
+        case .attemptNotPersisted:
+            self = .photoReview(.sub06)
+        case .submissionUnavailable:
+            self = .photoReview(.sub06)
+        }
+    }
+}
+
+enum PhotoReviewSubmissionRejectionFamily: Equatable {
+    case ambiguity
+    case conflict
+    case tryAgain
+    case review
+
+    init?(retention: ItemRunSubmissionRetention) {
+        switch ItemRunSubmissionDestinationDecision(retention: retention) {
+        case .photoReview(.sub03):
+            self = .ambiguity
+        case .photoReview(.sub04):
+            self = .conflict
+        case .photoReview(.sub06):
+            self = .tryAgain
+        case .photoReview(.sub07):
+            self = .review
+        case .handoff(_):
+            return nil
+        }
+    }
+
+    var primaryActionLabel: String {
+        switch self {
+        case .ambiguity, .tryAgain:
+            "Try again"
+        case .conflict, .review:
+            "Review"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .ambiguity:
+            "We couldn't confirm this went through. Your item is still saved on this phone."
+        case .conflict:
+            "Something changed since your last try. Review your item, then start again."
+        case .tryAgain:
+            "This didn't go through. Your item is still saved on this phone."
+        case .review:
+            "This item can't be sent as it is."
+        }
+    }
+
+    var accessibilityAnnouncement: String {
+        switch self {
+        case .conflict:
+            "Something changed since your last try."
+        case .ambiguity, .tryAgain, .review:
+            message
+        }
+    }
+
+    func primaryActionEvent(eventID: UUID) -> PhotoReviewBoundaryEvent {
+        switch self {
+        case .ambiguity:
+            .retryAmbiguousSubmission(eventID: eventID)
+        case .conflict:
+            .reviewConflictedSubmission(eventID: eventID)
+        case .tryAgain:
+            .startListing
+        case .review:
+            .reviewSubmission(eventID: eventID)
+        }
+    }
+}
+
+/// One presentation event owns one acknowledgment. The lock lets cancellation close
+/// the gate without scheduling work back onto the main actor, while the host keeps the
+/// public acknowledgment itself synchronous.
+private final class ItemRunSubmissionPresentationAcknowledgmentGate:
+    @unchecked Sendable {
+    private enum State {
+        case pending
+        case waiting(CheckedContinuation<Bool, Never>)
+        case resolved(Bool)
+    }
+
+    let eventID: UUID
+
+    private let lock = NSLock()
+    private var state: State = .pending
+
+    init(eventID: UUID) {
+        self.eventID = eventID
+    }
+
+    func wait() async -> Bool {
+        await withTaskCancellationHandler {
+            if Task.isCancelled {
+                resolve(false)
+            }
+            return await withCheckedContinuation { continuation in
+                lock.lock()
+                switch state {
+                case .pending:
+                    state = .waiting(continuation)
+                    lock.unlock()
+                case .resolved(let acknowledged):
+                    lock.unlock()
+                    continuation.resume(returning: acknowledged)
+                case .waiting:
+                    lock.unlock()
+                    continuation.resume(returning: false)
+                }
+            }
+        } onCancel: {
+            self.resolve(false)
+        }
+    }
+
+    func acknowledge(eventID: UUID) {
+        guard eventID == self.eventID else {
+            return
+        }
+        resolve(true)
+    }
+
+    private func resolve(_ acknowledged: Bool) {
+        let continuation: CheckedContinuation<Bool, Never>?
+        lock.lock()
+        switch state {
+        case .pending:
+            state = .resolved(acknowledged)
+            continuation = nil
+        case .waiting(let waiting):
+            state = .resolved(acknowledged)
+            continuation = waiting
+        case .resolved:
+            continuation = nil
+        }
+        lock.unlock()
+        continuation?.resume(returning: acknowledged)
+    }
+}
+
 /// What the live Photo Review Start listing boundary resolves to. It holds the last
 /// canonical run for #375 to consume and the last typed recovery, and it makes no
 /// claim about analysis, pricing, review, or delivery.
@@ -13,16 +203,55 @@ final class ItemRunSubmissionHost {
     /// intake changed while the request was open and those photos are still theirs.
     private(set) var clearedIntake = false
     private(set) var retention: ItemRunSubmissionRetention?
+    private(set) var pendingPresentationEvent: ItemRunSubmissionPresentationEvent?
 
     private let coordinator: ItemRunSubmissionCoordinator?
+    private var presentationAcknowledgmentGate:
+        ItemRunSubmissionPresentationAcknowledgmentGate?
+    private var pendingAmbiguousRetry:
+        ItemRunSubmissionCoordinator.AmbiguousRetry?
+    private var admittedAmbiguousRetry:
+        ItemRunSubmissionCoordinator.AmbiguousRetry?
     /// Fixture launches render approved states with no server behind them, so Start
     /// listing is inert by design there rather than unavailable.
     private let isInert: Bool
+#if DEBUG
+    private let delayedFixture: DelayedItemRunSubmissionFixture?
+    private let acknowledgmentNotificationGate:
+        ItemRunSubmissionAcknowledgmentNotificationGate?
+#endif
 
     init(coordinator: ItemRunSubmissionCoordinator?, isInert: Bool = false) {
         self.coordinator = coordinator
         self.isInert = isInert
+#if DEBUG
+        delayedFixture = nil
+        acknowledgmentNotificationGate = nil
+#endif
     }
+
+#if DEBUG
+    init(delayedFixture: DelayedItemRunSubmissionFixture) {
+        coordinator = nil
+        isInert = false
+        self.delayedFixture = delayedFixture
+        acknowledgmentNotificationGate = nil
+    }
+
+    init(
+        coordinator: ItemRunSubmissionCoordinator,
+        acknowledgmentNotification:
+            SubmissionAcknowledgmentNotificationName
+    ) {
+        self.coordinator = coordinator
+        isInert = false
+        delayedFixture = nil
+        acknowledgmentNotificationGate =
+            ItemRunSubmissionAcknowledgmentNotificationGate(
+                notificationName: acknowledgmentNotification
+            )
+    }
+#endif
 
     /// One tap, one submission. A second tap while a request is open would build a
     /// second attempt from the same photos and could buy the seller a second run.
@@ -30,6 +259,14 @@ final class ItemRunSubmissionHost {
         guard !isSubmitting, !isInert else {
             return
         }
+#if DEBUG
+        if let delayedFixture {
+            isSubmitting = true
+            defer { isSubmitting = false }
+            await delayedFixture.complete()
+            return
+        }
+#endif
         guard let coordinator else {
             // A build with no API origin has nowhere to submit. Saying so beats a
             // button that silently does nothing.
@@ -38,18 +275,335 @@ final class ItemRunSubmissionHost {
             retention = .submissionUnavailable
             return
         }
+        if case .submissionRejected(_, _)? = pendingPresentationEvent {
+            pendingPresentationEvent = nil
+        }
         isSubmitting = true
         defer { isSubmitting = false }
 
-        switch await coordinator.submit(photos: photos) {
-        case .accepted(let acceptance):
+        let preparation: ItemRunSubmissionCoordinator.Preparation
+        if let retry = admittedAmbiguousRetry {
+            admittedAmbiguousRetry = nil
+            preparation = await coordinator.retryAmbiguousSubmission(
+                retry,
+                currentPhotos: photos
+            )
+        } else {
+            preparation = await coordinator.prepareSubmission(photos: photos)
+        }
+
+        switch preparation {
+        case .accepted(let submission):
+            pendingAmbiguousRetry = nil
             retention = nil
-            acceptedRun = acceptance.run
-            clearedIntake = acceptance.clearedIntake
-        case .retained(let retention):
-            acceptedRun = nil
+            acceptedRun = submission.acceptedRun
             clearedIntake = false
-            self.retention = retention
+
+            let eventID = UUID()
+            let gate = ItemRunSubmissionPresentationAcknowledgmentGate(
+                eventID: eventID
+            )
+            presentationAcknowledgmentGate = gate
+            pendingPresentationEvent = .itemSaved(
+                eventID: eventID,
+                acceptedRun: submission.acceptedRun
+            )
+
+            let acknowledged = await gate.wait()
+            if presentationAcknowledgmentGate === gate {
+                presentationAcknowledgmentGate = nil
+            }
+            guard acknowledged, !Task.isCancelled else {
+                if pendingPresentationEvent == .itemSaved(
+                    eventID: eventID,
+                    acceptedRun: submission.acceptedRun
+                ) {
+                    pendingPresentationEvent = nil
+                }
+                return
+            }
+
+            let acceptance = await coordinator.finalize(submission)
+            clearedIntake = acceptance.clearedIntake
+            if !acceptance.clearedIntake,
+               pendingPresentationEvent == .itemSaved(
+                   eventID: eventID,
+                   acceptedRun: submission.acceptedRun
+               ) {
+                pendingPresentationEvent = nil
+            }
+        case .ambiguous(let retry):
+            pendingAmbiguousRetry = retry
+            publish(retention: .ambiguous)
+        case .retained(let retention):
+            pendingAmbiguousRetry = nil
+            publish(retention: retention)
+        }
+    }
+
+    private func publish(retention: ItemRunSubmissionRetention) {
+        acceptedRun = nil
+        clearedIntake = false
+        self.retention = retention
+        switch ItemRunSubmissionDestinationDecision(
+            retention: retention
+        ) {
+        case .photoReview:
+            if PhotoReviewSubmissionRejectionFamily(
+                retention: retention
+            ) != nil {
+                pendingPresentationEvent = .submissionRejected(
+                    eventID: UUID(),
+                    retention: retention
+                )
+            }
+        case .handoff(let handoff):
+            pendingPresentationEvent = .destinationHandoff(
+                eventID: UUID(),
+                handoff: handoff
+            )
+        }
+    }
+
+    func acknowledgePresentation(eventID: UUID) {
+#if DEBUG
+        if presentationAcknowledgmentGate?.eventID == eventID,
+           let acknowledgmentNotificationGate {
+            acknowledgmentNotificationGate.withhold(
+                eventID: eventID
+            ) { [weak self] acknowledgedEventID in
+                self?.presentationAcknowledgmentGate?.acknowledge(
+                    eventID: acknowledgedEventID
+                )
+            }
+            return
+        }
+#endif
+        presentationAcknowledgmentGate?.acknowledge(eventID: eventID)
+    }
+
+    func canRetryAmbiguousSubmission(eventID: UUID) -> Bool {
+        guard !isSubmitting,
+              case .submissionRejected(
+                  eventID: let pendingEventID,
+                  retention: .ambiguous
+              )? = pendingPresentationEvent else {
+            return false
+        }
+        return pendingEventID == eventID
+    }
+
+    @discardableResult
+    func retryAmbiguousSubmission(eventID: UUID) -> Bool {
+        guard canRetryAmbiguousSubmission(eventID: eventID),
+              let pendingAmbiguousRetry else {
+            return false
+        }
+        admittedAmbiguousRetry = pendingAmbiguousRetry
+        self.pendingAmbiguousRetry = nil
+        pendingPresentationEvent = nil
+        return true
+    }
+
+    @discardableResult
+    func reviewRejectedSubmission(eventID: UUID) -> Bool {
+        guard case .submissionRejected(
+            eventID: let pendingEventID,
+            retention: let retention
+        )? = pendingPresentationEvent,
+              PhotoReviewSubmissionRejectionFamily(
+                  retention: retention
+              ) == .review,
+              pendingEventID == eventID else {
+            return false
+        }
+        pendingPresentationEvent = nil
+        return true
+    }
+
+    @discardableResult
+    func reviewConflictedSubmission(eventID: UUID) -> Bool {
+        guard case .submissionRejected(
+            eventID: let pendingEventID,
+            retention: .conflict
+        )? = pendingPresentationEvent,
+              pendingEventID == eventID else {
+            return false
+        }
+        pendingPresentationEvent = nil
+        return true
+    }
+
+    func consumeDestinationHandoff(
+        eventID: UUID
+    ) -> ItemRunSubmissionDestinationDecision.Handoff? {
+        guard case .destinationHandoff(
+            eventID: let pendingEventID,
+            handoff: let handoff
+        )? = pendingPresentationEvent,
+              pendingEventID == eventID else {
+            return nil
+        }
+        pendingPresentationEvent = nil
+        return handoff
+    }
+
+    func completeClearedIntakePresentation() {
+        guard clearedIntake,
+              case .itemSaved(_, _)? = pendingPresentationEvent else {
+            return
+        }
+        pendingPresentationEvent = nil
+    }
+}
+
+/// Seller-facing Photo Review state derived from the live submission boundary.
+///
+/// Keep this value type-driven: transport reason strings are server diagnostics,
+/// never presentation authority.
+struct PhotoReviewSubmissionPresentation: Equatable {
+    enum AnnouncementEvent: Equatable {
+        case saving
+        case itemSaved(eventID: UUID)
+        case submissionRejected(eventID: UUID)
+    }
+
+    let primaryActionLabel: String
+    let primaryActionEvent: PhotoReviewBoundaryEvent
+    let mutationControlsLocked: Bool
+    let announcementEvent: AnnouncementEvent?
+    let accessibilityAnnouncement: String?
+    let visibleMessage: String?
+    let rendersSubmittedMedia: Bool
+
+    static let idle = PhotoReviewSubmissionPresentation(
+        primaryActionLabel: "Start listing",
+        primaryActionEvent: .startListing,
+        mutationControlsLocked: false,
+        announcementEvent: nil,
+        accessibilityAnnouncement: nil,
+        visibleMessage: nil,
+        rendersSubmittedMedia: true
+    )
+
+    private init(
+        primaryActionLabel: String,
+        primaryActionEvent: PhotoReviewBoundaryEvent,
+        mutationControlsLocked: Bool,
+        announcementEvent: AnnouncementEvent?,
+        accessibilityAnnouncement: String?,
+        visibleMessage: String?,
+        rendersSubmittedMedia: Bool
+    ) {
+        self.primaryActionLabel = primaryActionLabel
+        self.primaryActionEvent = primaryActionEvent
+        self.mutationControlsLocked = mutationControlsLocked
+        self.announcementEvent = announcementEvent
+        self.accessibilityAnnouncement = accessibilityAnnouncement
+        self.visibleMessage = visibleMessage
+        self.rendersSubmittedMedia = rendersSubmittedMedia
+    }
+
+    @MainActor
+    init(host: ItemRunSubmissionHost) {
+        if case .itemSaved(let eventID, _)? = host.pendingPresentationEvent {
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Item saved",
+                primaryActionEvent: .startListing,
+                mutationControlsLocked: true,
+                announcementEvent: .itemSaved(eventID: eventID),
+                accessibilityAnnouncement: "Item saved.",
+                visibleMessage: nil,
+                rendersSubmittedMedia: false
+            )
+        } else if host.isSubmitting {
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Saving your item",
+                primaryActionEvent: .startListing,
+                mutationControlsLocked: true,
+                announcementEvent: .saving,
+                accessibilityAnnouncement: "Saving your item.",
+                visibleMessage: nil,
+                rendersSubmittedMedia: true
+            )
+        } else if case .submissionRejected(
+            eventID: let eventID,
+            retention: let retention
+        )? = host.pendingPresentationEvent,
+                  let family = PhotoReviewSubmissionRejectionFamily(
+                      retention: retention
+                  ) {
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: family.primaryActionLabel,
+                primaryActionEvent: family.primaryActionEvent(eventID: eventID),
+                mutationControlsLocked: false,
+                announcementEvent: .submissionRejected(eventID: eventID),
+                accessibilityAnnouncement: family.accessibilityAnnouncement,
+                visibleMessage: family.message,
+                rendersSubmittedMedia: true
+            )
+        } else {
+            self = .idle
+        }
+    }
+}
+
+/// Consumes one announcement when Photo Review enters a new visible submission state.
+/// Re-reading the same still-visible presentation is a render, not a new event.
+struct PhotoReviewSubmissionAnnouncementTracker {
+    private var lastEvent: PhotoReviewSubmissionPresentation.AnnouncementEvent?
+
+    mutating func consume(
+        _ presentation: PhotoReviewSubmissionPresentation
+    ) -> String? {
+        guard let event = presentation.announcementEvent else {
+            lastEvent = nil
+            return nil
+        }
+        guard event != lastEvent else {
+            return nil
+        }
+        lastEvent = event
+        return presentation.accessibilityAnnouncement
+    }
+}
+
+/// Delivers the side effects for a newly visible submission state in presentation
+/// order. The announcement tracker owns once-only identity, and saved presentation
+/// acknowledgment follows its announcement rather than creating a second event path.
+struct PhotoReviewSubmissionEffectConsumer {
+    private var announcementTracker = PhotoReviewSubmissionAnnouncementTracker()
+
+    mutating func consume(
+        _ presentation: PhotoReviewSubmissionPresentation,
+        postAnnouncement: (String) -> Void,
+        acknowledgePresentation: (UUID) -> Void
+    ) {
+        guard let announcement = announcementTracker.consume(presentation) else {
+            return
+        }
+
+        postAnnouncement(announcement)
+        if case .itemSaved(let eventID)? = presentation.announcementEvent {
+            acknowledgePresentation(eventID)
+        }
+    }
+}
+
+@MainActor
+enum PhotoReviewSubmissionPrimaryActionConsumer {
+    @discardableResult
+    static func consume(
+        _ event: PhotoReviewBoundaryEvent,
+        submissionHost: ItemRunSubmissionHost
+    ) -> Bool {
+        switch event {
+        case .reviewSubmission(let eventID):
+            return submissionHost.reviewRejectedSubmission(eventID: eventID)
+        case .reviewConflictedSubmission(let eventID):
+            return submissionHost.reviewConflictedSubmission(eventID: eventID)
+        case .openVoiceNote, .startListing, .retryAmbiguousSubmission:
+            return false
         }
     }
 }
@@ -63,18 +617,23 @@ enum ItemRunSubmissionHostFactory {
         session: URLSession,
         draftStore: any CaptureDraftStoring
     ) -> ItemRunSubmissionHost {
+#if DEBUG
+        if let fixtureHost = ItemRunSubmissionDebugFixtureFactory.make(
+            configuration: configuration,
+            draftStore: draftStore
+        ) {
+            return fixtureHost
+        }
+#endif
         guard !configuration.usesZeroNetworkFixtures else {
             return ItemRunSubmissionHost(coordinator: nil, isInert: true)
         }
-        guard let apiOrigin else {
-            return ItemRunSubmissionHost(coordinator: nil)
+        let submitter: (any ItemRunSubmitting)? = apiOrigin.map {
+            ItemRunSubmissionClient(baseURL: $0, session: session)
         }
         return ItemRunSubmissionHost(
             coordinator: ItemRunSubmissionCoordinator(
-                submitter: ItemRunSubmissionClient(
-                    baseURL: apiOrigin,
-                    session: session
-                ),
+                submitter: submitter,
                 attemptStore: LocalItemRunSubmissionAttemptStore(),
                 draftStore: draftStore,
                 tokenProvider: tokenProvider
@@ -86,7 +645,25 @@ enum ItemRunSubmissionHostFactory {
 /// Turns the seller's ordered Photo Review intake into one canonical durable run.
 @MainActor
 final class ItemRunSubmissionCoordinator {
-    private let submitter: any ItemRunSubmitting
+    fileprivate struct AmbiguousRetry {
+        fileprivate let submittedPhotos: [StagedCapturePhoto]
+        fileprivate let payload: ItemRunSubmissionPayload
+    }
+
+    fileprivate struct Submission {
+        fileprivate let acceptedRun: AcceptedItemRun
+        fileprivate let submittedPhotos: [StagedCapturePhoto]
+        fileprivate let attempt: ItemRunSubmissionAttempt
+        fileprivate let canClearSubmittedIntake: Bool
+    }
+
+    fileprivate enum Preparation {
+        case accepted(Submission)
+        case ambiguous(AmbiguousRetry)
+        case retained(ItemRunSubmissionRetention)
+    }
+
+    private let submitter: (any ItemRunSubmitting)?
     private let attemptStore: any ItemRunSubmissionAttemptStoring
     private let draftStore: any CaptureDraftStoring
     private let tokenProvider: any BearerTokenProviding
@@ -94,7 +671,7 @@ final class ItemRunSubmissionCoordinator {
     private let newIdempotencyKey: @Sendable () -> UUID
 
     init(
-        submitter: any ItemRunSubmitting,
+        submitter: (any ItemRunSubmitting)?,
         attemptStore: any ItemRunSubmissionAttemptStoring,
         draftStore: any CaptureDraftStoring,
         tokenProvider: any BearerTokenProviding,
@@ -112,6 +689,19 @@ final class ItemRunSubmissionCoordinator {
     }
 
     func submit(photos: [StagedCapturePhoto]) async -> ItemRunSubmissionOutcome {
+        switch await prepareSubmission(photos: photos) {
+        case .accepted(let submission):
+            return .accepted(await finalize(submission))
+        case .ambiguous:
+            return .retained(.ambiguous)
+        case .retained(let retention):
+            return .retained(retention)
+        }
+    }
+
+    fileprivate func prepareSubmission(
+        photos: [StagedCapturePhoto]
+    ) async -> Preparation {
         let readData = readData
         let intake: ItemRunSubmissionSnapshot.Result
         do {
@@ -178,6 +768,50 @@ final class ItemRunSubmissionCoordinator {
             }
         }
 
+        guard let submitter else {
+            return .retained(.submissionUnavailable)
+        }
+
+        let token: String
+        do {
+            token = try await tokenProvider.bearerToken()
+        } catch {
+            return .retained(.authenticationRequired)
+        }
+
+        let payload = ItemRunSubmissionPayload(
+            attempt: attempt,
+            photoData: intake.photoData
+        )
+        let outcome = await submitter.submit(
+            payload,
+            bearerToken: token
+        )
+
+        return await resolve(
+            outcome,
+            payload: payload,
+            submittedPhotos: photos
+        )
+    }
+
+    fileprivate func retryAmbiguousSubmission(
+        _ retry: AmbiguousRetry,
+        currentPhotos: [StagedCapturePhoto]
+    ) async -> Preparation {
+        let storedAttempt: ItemRunSubmissionAttempt?
+        do {
+            storedAttempt = try await attemptStore.loadAttempt()
+        } catch {
+            return .retained(.attemptNotPersisted)
+        }
+        guard storedAttempt == retry.payload.attempt else {
+            return .retained(.attemptNotPersisted)
+        }
+        guard let submitter else {
+            return .retained(.submissionUnavailable)
+        }
+
         let token: String
         do {
             token = try await tokenProvider.bearerToken()
@@ -186,10 +820,25 @@ final class ItemRunSubmissionCoordinator {
         }
 
         let outcome = await submitter.submit(
-            ItemRunSubmissionPayload(attempt: attempt, photoData: intake.photoData),
+            retry.payload,
             bearerToken: token
         )
+        return await resolve(
+            outcome,
+            payload: retry.payload,
+            submittedPhotos: retry.submittedPhotos,
+            canClearSubmittedIntake:
+                currentPhotos == retry.submittedPhotos
+        )
+    }
 
+    private func resolve(
+        _ outcome: ItemRunSubmissionTransportOutcome,
+        payload: ItemRunSubmissionPayload,
+        submittedPhotos: [StagedCapturePhoto],
+        canClearSubmittedIntake: Bool = true
+    ) async -> Preparation {
+        let attempt = payload.attempt
         switch outcome {
         case .created(let receipt), .replayed(let receipt):
             // The receipt has to account for what was actually sent before any photo is
@@ -198,23 +847,17 @@ final class ItemRunSubmissionCoordinator {
             guard attempt.matches(receipt: receipt) else {
                 return .retained(.receiptMismatch)
             }
-            let clearedIntake = (try? await draftStore.discardExactly(photos)) ?? false
-            // The key is only retired once the photos it stands for are gone. If they
-            // survived, the seller can still submit these exact bytes, and keeping the
-            // key makes that an idempotent replay of the run the server already made
-            // rather than a second run on a second AI-item credit.
-            if clearedIntake {
-                try? await attemptStore.clearAttempt(attempt)
-            }
             return .accepted(
-                ItemRunAcceptance(
-                    run: AcceptedItemRun(
+                Submission(
+                    acceptedRun: AcceptedItemRun(
                         runID: receipt.runId,
                         itemID: receipt.itemId,
                         status: receipt.status,
                         stage: receipt.stage
                     ),
-                    clearedIntake: clearedIntake
+                    submittedPhotos: submittedPhotos,
+                    attempt: attempt,
+                    canClearSubmittedIntake: canClearSubmittedIntake
                 )
             )
         case .rejected:
@@ -231,7 +874,37 @@ final class ItemRunSubmissionCoordinator {
         case .rateLimited(let reason):
             return .retained(.rateLimited(reason: reason))
         case .ambiguous:
-            return .retained(.ambiguous)
+            return .ambiguous(
+                AmbiguousRetry(
+                    submittedPhotos: submittedPhotos,
+                    payload: payload
+                )
+            )
         }
+    }
+
+    fileprivate func finalize(
+        _ submission: Submission
+    ) async -> ItemRunAcceptance {
+        guard submission.canClearSubmittedIntake else {
+            return ItemRunAcceptance(
+                run: submission.acceptedRun,
+                clearedIntake: false
+            )
+        }
+        let clearedIntake = (
+            try? await draftStore.discardExactly(submission.submittedPhotos)
+        ) ?? false
+        // The key is only retired once the photos it stands for are gone. If they
+        // survived, the seller can still submit these exact bytes, and keeping the
+        // key makes that an idempotent replay of the run the server already made
+        // rather than a second run on a second AI-item credit.
+        if clearedIntake {
+            try? await attemptStore.clearAttempt(submission.attempt)
+        }
+        return ItemRunAcceptance(
+            run: submission.acceptedRun,
+            clearedIntake: clearedIntake
+        )
     }
 }
