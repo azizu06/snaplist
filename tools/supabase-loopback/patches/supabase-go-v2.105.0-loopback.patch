@@ -1613,10 +1613,10 @@ index 0000000..73017aa
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig.go b/apps/cli-go/internal/utils/isolation/hostconfig.go
 new file mode 100644
-index 0000000..da16bd2
+index 0000000..8be6ea2
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig.go
-@@ -0,0 +1,408 @@
+@@ -0,0 +1,425 @@
 +package isolation
 +
 +import (
@@ -1943,34 +1943,51 @@ index 0000000..da16bd2
 +}
 +
 +func validateCanonicalComponents(canonical string) (os.FileInfo, error) {
++	return validateCanonicalComponentsWith(canonical, os.Lstat, validateTrustedComponents)
++}
++
++func validateCanonicalComponentsWith(
++	canonical string,
++	lstat func(string) (os.FileInfo, error),
++	trust func([]hostComponent) error,
++) (os.FileInfo, error) {
 +	volume := filepath.VolumeName(canonical)
 +	current := volume + string(os.PathSeparator)
 +	relative := strings.TrimPrefix(canonical, current)
 +	components := strings.Split(relative, string(os.PathSeparator))
-+	inspected := make([]hostComponent, 0, len(components))
-+	var info os.FileInfo
-+	for index, component := range components {
++	remaining := make([]string, 0, len(components))
++	for _, component := range components {
 +		if component == "" {
 +			continue
 +		}
++		remaining = append(remaining, component)
++	}
++	info, err := lstat(current)
++	if err != nil {
++		return nil, fmt.Errorf("inspect host bind source root: %w", err)
++	}
++	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
++		return nil, fmt.Errorf("host bind source root must be a directory")
++	}
++	inspected := []hostComponent{{path: current, info: info}}
++	for index, component := range remaining {
 +		current = filepath.Join(current, component)
-+		var err error
-+		info, err = os.Lstat(current)
++		info, err = lstat(current)
 +		if err != nil {
 +			return nil, fmt.Errorf("inspect host bind source component: %w", err)
 +		}
 +		if info.Mode()&os.ModeSymlink != 0 {
 +			return nil, fmt.Errorf("host bind source contains a symlink component")
 +		}
-+		if index < len(components)-1 && !info.IsDir() {
++		if index < len(remaining)-1 && !info.IsDir() {
 +			return nil, fmt.Errorf("host bind source parent must be a directory")
 +		}
 +		inspected = append(inspected, hostComponent{path: current, info: info})
 +	}
-+	if info == nil || !isSupportedHostSourceMode(info.Mode()) {
++	if !isSupportedHostSourceMode(info.Mode()) {
 +		return nil, fmt.Errorf("host bind source must be a regular file or directory")
 +	}
-+	if err := validateTrustedComponents(inspected); err != nil {
++	if err := trust(inspected); err != nil {
 +		return nil, err
 +	}
 +	return info, nil
@@ -2496,10 +2513,10 @@ index 0000000..3a857f3
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
 new file mode 100644
-index 0000000..03db2c4
+index 0000000..28dd777
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,83 @@
 +//go:build darwin || linux
 +
 +package isolation
@@ -2511,9 +2528,16 @@ index 0000000..03db2c4
 +)
 +
 +func validateTrustedComponents(components []hostComponent) error {
++	return validateTrustedComponentsWith(components, validatePlatformTrust)
++}
++
++func validateTrustedComponentsWith(
++	components []hostComponent,
++	platformTrust func(string, os.FileInfo) error,
++) error {
 +	effectiveUser := uint32(os.Geteuid())
 +	for index, component := range components {
-+		if err := validatePlatformTrust(component.path, component.info); err != nil {
++		if err := platformTrust(component.path, component.info); err != nil {
 +			return err
 +		}
 +		owner, err := componentOwner(component.info)
@@ -2578,20 +2602,129 @@ index 0000000..03db2c4
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go
 new file mode 100644
-index 0000000..0bcee6b
+index 0000000..4d6b307
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,135 @@
 +//go:build darwin || linux
 +
 +package isolation
 +
 +import (
++	"errors"
 +	"os"
++	"path/filepath"
 +	"testing"
 +
 +	"github.com/stretchr/testify/require"
 +)
++
++type modeOverrideFileInfo struct {
++	os.FileInfo
++	mode os.FileMode
++}
++
++func (info modeOverrideFileInfo) Mode() os.FileMode {
++	return info.mode
++}
++
++func TestValidateCanonicalComponentsIncludesRootInTrustedChain(t *testing.T) {
++	source := filepath.Join(t.TempDir(), "source")
++	require.NoError(t, os.WriteFile(source, []byte("safe"), 0o600))
++	canonical, err := filepath.EvalSymlinks(source)
++	require.NoError(t, err)
++	root := filepath.VolumeName(canonical) + string(os.PathSeparator)
++
++	t.Run("root inspection failure", func(t *testing.T) {
++		sentinel := errors.New("root inspection rejected")
++		var inspected []string
++		lstat := func(path string) (os.FileInfo, error) {
++			inspected = append(inspected, path)
++			if path == root {
++				return nil, sentinel
++			}
++			return os.Lstat(path)
++		}
++		trustCalled := false
++		trust := func([]hostComponent) error {
++			trustCalled = true
++			return nil
++		}
++
++		_, err := validateCanonicalComponentsWith(canonical, lstat, trust)
++		require.ErrorIs(t, err, sentinel)
++		require.Equal(t, []string{root}, inspected)
++		require.False(t, trustCalled)
++	})
++
++	t.Run("untrusted root metadata", func(t *testing.T) {
++		var inspected []string
++		lstat := func(path string) (os.FileInfo, error) {
++			inspected = append(inspected, path)
++			info, err := os.Lstat(path)
++			if err != nil || path != root {
++				return info, err
++			}
++			return modeOverrideFileInfo{
++				FileInfo: info,
++				mode:     info.Mode() | 0o022,
++			}, nil
++		}
++		trust := func(components []hostComponent) error {
++			return validateTrustedComponentsWith(
++				components,
++				func(string, os.FileInfo) error { return nil },
++			)
++		}
++
++		_, err := validateCanonicalComponentsWith(canonical, lstat, trust)
++		require.ErrorContains(t, err, "host bind parent is replaceable by an untrusted principal")
++		require.Equal(t, root, inspected[0])
++		require.Equal(t, 1, countPath(inspected, root))
++	})
++
++	t.Run("root platform trust failure", func(t *testing.T) {
++		sentinel := errors.New("root platform trust rejected")
++		var inspected []hostComponent
++		trust := func(components []hostComponent) error {
++			inspected = append(inspected, components...)
++			return validateTrustedComponentsWith(
++				components,
++				func(path string, _ os.FileInfo) error {
++					if path == root {
++						return sentinel
++					}
++					return nil
++				},
++			)
++		}
++
++		_, err := validateCanonicalComponentsWith(canonical, os.Lstat, trust)
++		require.ErrorIs(t, err, sentinel)
++		require.Equal(t, root, inspected[0].path)
++		require.Equal(t, 1, countComponent(inspected, root))
++	})
++}
++
++func countPath(paths []string, target string) int {
++	count := 0
++	for _, path := range paths {
++		if path == target {
++			count++
++		}
++	}
++	return count
++}
++
++func countComponent(components []hostComponent, target string) int {
++	count := 0
++	for _, component := range components {
++		if component.path == target {
++			count++
++		}
++	}
++	return count
++}
 +
 +func TestHostSourceTrustPredicatesRejectUnprivilegedFixtureCases(t *testing.T) {
 +	effectiveUser := uint32(os.Geteuid())
