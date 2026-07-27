@@ -24,21 +24,32 @@ effective user. A component writable by group/other is rejected unless it is a
 sticky ancestor whose next child is root/current-user owned; a final bound
 directory is never allowed to be group/other writable. These constraints
 prevent another OS user from replacing the canonical path between checks.
+Darwin additionally queries `ATTR_CMN_EXTENDED_SECURITY` from each already-open
+component with the documented `fgetattrlist(2)` ABI and decodes the kernel
+`kauth_filesec` record fail-closed. Any permit ACE carrying data, append,
+delete, attribute, security, ownership, link, or generic write rights is
+rejected; deny-only and read-only ACLs remain supported. This is CGO-free and
+intentionally does not infer ACL absence from extended attributes. On Linux,
+access-ACL masks are reflected in the group class mode bits, so an ACL that
+grants another principal write access is rejected by the same group-writable
+rule.
 Every bound directory is also walked recursively at preparation and
 revalidation. Descendant symlinks, protected endpoint names, sockets or other
-special files, untrusted owners, and group/other-writable directories are
-rejected. Because no accepted descendant directory is writable by another OS
-user, that user cannot insert or swap a runtime endpoint after the walk.
+special files, untrusted owners, group/other-writable directories, and Darwin
+write-capable ACL entries are rejected. Because no accepted descendant
+directory is writable by another OS user, that user cannot insert or swap a
+runtime endpoint after the walk.
 
 The only project-owned path that binds an arbitrary caller-selected file is
 `db start --from-backup`. The public command opens and pins an ordinary regular
 backup before its running-container inspection, then copies once from that held
 handle into a newly created owner-only staging directory. The staging parent is
-made canonical and absolute before copying, so Moby parses the resulting mount
-as a host bind rather than a named volume. The staging path is removed when
-database startup returns; a removal
-failure is returned to the caller instead of being hidden. Docker therefore
-never consumes the caller-controlled symlink or its original pathname.
+made canonical, absolute, and cross-user non-replaceable before `MkdirTemp` or
+the first copied byte, so Moby parses the resulting mount as a host bind rather
+than a named volume. The staging path is removed when database startup returns;
+a removal failure is returned to the caller instead of being hidden. Docker
+therefore never consumes the caller-controlled symlink or its original
+pathname.
 
 ## TOCTOU boundary
 
@@ -86,6 +97,14 @@ volume inspection/creation, container creation, or any other Docker request.
 - Go's `filepath.EvalSymlinks` only returns a resolved path. It does not retain
   the resolved object:
   [`filepath.EvalSymlinks`](https://pkg.go.dev/path/filepath#EvalSymlinks).
+- Apple documents that ACLs supplement BSD permissions and exposes extended
+  security metadata through the `getattrlist(2)` family:
+  [File System Programming Guide](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/FileSystemProgrammingGuide/FileSystemDetails/FileSystemDetails.html)
+  and
+  [`getattrlist(2)`](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/getattrlist.2.html).
+- Linux access-ACL masks correspond to and update the file group-class mode
+  bits:
+  [`acl(5)`](https://man7.org/linux/man-pages/man5/acl.5.html).
 
 This is a truthful minimal GREEN because Docker receives a canonical source
 whose component permissions exclude untrusted replacement, its held identity

@@ -645,24 +645,29 @@ index 6ce6a44..906b72e 100644
  		binds = utils.RemoveDuplicates(binds)
 diff --git a/apps/cli-go/internal/start/start_isolation_test.go b/apps/cli-go/internal/start/start_isolation_test.go
 new file mode 100644
-index 0000000..d1483e6
+index 0000000..2800a0e
 --- /dev/null
 +++ b/apps/cli-go/internal/start/start_isolation_test.go
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,206 @@
 +package start
 +
 +import (
 +	"context"
 +	"io"
 +	"net/http"
++	"os"
++	"path/filepath"
 +	"strings"
 +	"testing"
 +
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/network"
 +	"github.com/docker/docker/client"
 +	"github.com/jackc/pgconn"
 +	"github.com/spf13/afero"
 +	"github.com/stretchr/testify/require"
 +
++	"github.com/supabase/cli/internal/functions/deploy"
 +	"github.com/supabase/cli/internal/utils"
 +	"github.com/supabase/cli/pkg/config"
 +)
@@ -671,6 +676,15 @@ index 0000000..d1483e6
 +	imageInspect    int
 +	imagePull       int
 +	networkCreate   int
++	volumeCreate    int
++	containerCreate int
++	containerStart  int
++	other           int
++}
++
++type startSafeCachedTransport struct {
++	imageInspect    int
++	imagePull       int
 +	volumeCreate    int
 +	containerCreate int
 +	containerStart  int
@@ -697,6 +711,38 @@ index 0000000..d1483e6
 +	return &http.Response{
 +		StatusCode: http.StatusInternalServerError,
 +		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func (transport *startSafeCachedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
++	status := http.StatusInternalServerError
++	body := "unexpected Docker action"
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		transport.imageInspect++
++		status = http.StatusOK
++		body = "{}"
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		transport.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		transport.volumeCreate++
++		status = http.StatusCreated
++		body = "{}"
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		transport.containerCreate++
++		status = http.StatusCreated
++		body = `{"Id":"safe-service-directory","Warnings":[]}`
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
++		transport.containerStart++
++		status = http.StatusNoContent
++		body = ""
++	default:
++		transport.other++
++	}
++	return &http.Response{
++		StatusCode: status,
++		Body:       io.NopCloser(strings.NewReader(body)),
 +		Header:     make(http.Header),
 +	}, nil
 +}
@@ -750,6 +796,64 @@ index 0000000..d1483e6
 +	require.Zero(t, counter.containerCreate)
 +	require.Zero(t, counter.containerStart)
 +	require.Zero(t, counter.other)
++}
++
++func TestDockerStartAcceptsDefaultFunctionsServiceDirectory(t *testing.T) {
++	workdir := t.TempDir()
++	functionsDir := filepath.Join(workdir, "supabase", "functions")
++	entrypoint := filepath.Join(functionsDir, "hello", "index.ts")
++	require.NoError(t, os.MkdirAll(filepath.Dir(entrypoint), 0o755))
++	require.NoError(t, os.WriteFile(entrypoint, []byte(`Deno.serve(() => new Response("ok"))`), 0o600))
++
++	previousEdgeRuntimeID := utils.EdgeRuntimeId
++	utils.EdgeRuntimeId = "supabase_edge_runtime_fixture"
++	t.Cleanup(func() { utils.EdgeRuntimeId = previousEdgeRuntimeID })
++
++	binds, err := deploy.GetBindMounts(
++		workdir,
++		functionsDir,
++		"",
++		entrypoint,
++		"",
++		afero.NewOsFs(),
++	)
++	require.NoError(t, err)
++	require.Contains(t, binds, utils.EdgeRuntimeId+":/root/.cache/deno:rw")
++	require.Contains(t, binds, functionsDir+"/:"+utils.ToDockerPath(functionsDir)+"/:ro")
++
++	transport := &startSafeCachedTransport{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	utils.Docker = fakeDocker
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	containerID, err := utils.DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/edge-runtime:latest"},
++		container.HostConfig{
++			Binds:       binds,
++			NetworkMode: container.NetworkMode("bridge"),
++		},
++		network.NetworkingConfig{},
++		"supabase_edge_runtime_fixture",
++	)
++	require.NoError(t, err)
++	require.Equal(t, "safe-service-directory", containerID)
++	require.Equal(t, 1, transport.imageInspect)
++	require.Zero(t, transport.imagePull)
++	require.Equal(t, 1, transport.volumeCreate)
++	require.Equal(t, 1, transport.containerCreate)
++	require.Equal(t, 1, transport.containerStart)
++	require.Zero(t, transport.other)
 +}
 diff --git a/apps/cli-go/internal/start/start_test.go b/apps/cli-go/internal/start/start_test.go
 index afafbd8..cdd2cce 100644
@@ -837,12 +941,108 @@ index 9736fa6..3356205 100644
  	// Create container from image
  	resp, err := Docker.ContainerCreate(ctx, &config, &hostConfig, &networkingConfig, nil, containerName)
  	if err != nil {
+diff --git a/apps/cli-go/internal/utils/docker_acl_darwin_test.go b/apps/cli-go/internal/utils/docker_acl_darwin_test.go
+new file mode 100644
+index 0000000..c3988d9
+--- /dev/null
++++ b/apps/cli-go/internal/utils/docker_acl_darwin_test.go
+@@ -0,0 +1,90 @@
++//go:build darwin
++
++package utils
++
++import (
++	"context"
++	"net/http"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++	"github.com/docker/docker/api/types/network"
++	"github.com/docker/docker/client"
++	"github.com/stretchr/testify/require"
++)
++
++func TestDockerStartRejectsHostBindWithDarwinACLBeforeDockerAction(t *testing.T) {
++	cases := map[string]func(*testing.T, string) string{
++		"source directory": func(t *testing.T, root string) string {
++			return root
++		},
++		"descendant directory": func(t *testing.T, root string) string {
++			descendant := filepath.Join(root, "nested", "acl-writable")
++			require.NoError(t, os.MkdirAll(descendant, 0o700))
++			return descendant
++		},
++	}
++	for caseName, aclPath := range cases {
++		caseName, aclPath := caseName, aclPath
++		t.Run(caseName, func(t *testing.T) {
++			root := filepath.Join(t.TempDir(), "mode-safe")
++			require.NoError(t, os.Mkdir(root, 0o700))
++			protectedPath := aclPath(t, root)
++			require.NoError(t, exec.Command(
++				"/bin/chmod",
++				"+a",
++				"everyone allow add_file,delete_child,writeattr,writeextattr",
++				protectedPath,
++			).Run())
++			info, err := os.Stat(protectedPath)
++			require.NoError(t, err)
++			require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
++
++			forms := map[string]container.HostConfig{
++				"bind": {
++					Binds: []string{root + ":/safe/tree:ro"},
++				},
++				"mount": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: root,
++						Target: "/safe/tree",
++					}},
++				},
++			}
++			for form, hostConfig := range forms {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					transport := &countingRoundTripper{}
++					fakeDocker, err := client.NewClientWithOpts(
++						client.WithHost("http://docker.invalid"),
++						client.WithVersion("1.47"),
++						client.WithHTTPClient(&http.Client{Transport: transport}),
++					)
++					require.NoError(t, err)
++
++					previousDocker := Docker
++					Docker = fakeDocker
++					t.Cleanup(func() {
++						Docker = previousDocker
++						require.NoError(t, fakeDocker.Close())
++					})
++
++					_, err = DockerStart(
++						context.Background(),
++						container.Config{Image: "example.invalid/supabase/test:latest"},
++						hostConfig,
++						network.NetworkingConfig{},
++						"darwin-acl-test",
++					)
++					require.ErrorContains(t, err, "unsafe Docker container capability")
++					require.Zero(t, transport.calls)
++				})
++			}
++		})
++	}
++}
 diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
 new file mode 100644
-index 0000000..c5a72eb
+index 0000000..6ade339
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_isolation_test.go
-@@ -0,0 +1,488 @@
+@@ -0,0 +1,498 @@
 +package utils
 +
 +import (
@@ -1214,6 +1414,16 @@ index 0000000..c5a72eb
 +				require.NoError(t, listener.Close())
 +			})
 +		},
++		"group writable descendant directory": func(t *testing.T, root string) {
++			descendant := filepath.Join(root, "nested", "cross-user-writable")
++			require.NoError(t, os.MkdirAll(descendant, 0o700))
++			require.NoError(t, os.Chmod(descendant, 0o770))
++		},
++		"other writable descendant directory": func(t *testing.T, root string) {
++			descendant := filepath.Join(root, "nested", "cross-user-writable")
++			require.NoError(t, os.MkdirAll(descendant, 0o700))
++			require.NoError(t, os.Chmod(descendant, 0o707))
++		},
 +	}
 +
 +	for caseName, setup := range cases {
@@ -1331,12 +1541,82 @@ index 0000000..c5a72eb
 +	require.ErrorContains(t, err, "unsafe Docker container capability")
 +	require.Zero(t, transport.calls)
 +}
+diff --git a/apps/cli-go/internal/utils/docker_special_unix_test.go b/apps/cli-go/internal/utils/docker_special_unix_test.go
+new file mode 100644
+index 0000000..73017aa
+--- /dev/null
++++ b/apps/cli-go/internal/utils/docker_special_unix_test.go
+@@ -0,0 +1,64 @@
++//go:build darwin || linux
++
++package utils
++
++import (
++	"context"
++	"net/http"
++	"path/filepath"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
++	"github.com/docker/docker/api/types/network"
++	"github.com/docker/docker/client"
++	"github.com/stretchr/testify/require"
++	"golang.org/x/sys/unix"
++)
++
++func TestDockerStartRejectsDirectoryContainingFIFOBeforeDockerAction(t *testing.T) {
++	root := t.TempDir()
++	require.NoError(t, unix.Mkfifo(filepath.Join(root, "input.pipe"), 0o600))
++
++	forms := map[string]container.HostConfig{
++		"bind": {
++			Binds: []string{root + ":/safe/tree:ro"},
++		},
++		"mount": {
++			Mounts: []mount.Mount{{
++				Type:   mount.TypeBind,
++				Source: root,
++				Target: "/safe/tree",
++			}},
++		},
++	}
++	for form, hostConfig := range forms {
++		form, hostConfig := form, hostConfig
++		t.Run(form, func(t *testing.T) {
++			transport := &countingRoundTripper{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: transport}),
++			)
++			require.NoError(t, err)
++
++			previousDocker := Docker
++			Docker = fakeDocker
++			t.Cleanup(func() {
++				Docker = previousDocker
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			_, err = DockerStart(
++				context.Background(),
++				container.Config{Image: "example.invalid/supabase/test:latest"},
++				hostConfig,
++				network.NetworkingConfig{},
++				"unsafe-fifo-test",
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, transport.calls)
++		})
++	}
++}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig.go b/apps/cli-go/internal/utils/isolation/hostconfig.go
 new file mode 100644
-index 0000000..6403bc9
+index 0000000..da16bd2
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig.go
-@@ -0,0 +1,397 @@
+@@ -0,0 +1,408 @@
 +package isolation
 +
 +import (
@@ -1514,6 +1794,13 @@ index 0000000..6403bc9
 +	if err != nil {
 +		return nil, fmt.Errorf("canonicalize host bind staging parent: %w", err)
 +	}
++	parentInfo, err := validateCanonicalComponents(canonicalParent)
++	if err != nil {
++		return nil, fmt.Errorf("validate host bind staging parent: %w", err)
++	}
++	if !parentInfo.IsDir() {
++		return nil, fmt.Errorf("host bind staging parent must be a directory")
++	}
 +	stagingDir, err := os.MkdirTemp(canonicalParent, "isolated-bind-")
 +	if err != nil {
 +		return nil, fmt.Errorf("create host bind staging directory: %w", err)
@@ -1680,7 +1967,7 @@ index 0000000..6403bc9
 +		}
 +		inspected = append(inspected, hostComponent{path: current, info: info})
 +	}
-+	if info == nil || (!info.Mode().IsRegular() && !info.IsDir()) {
++	if info == nil || !isSupportedHostSourceMode(info.Mode()) {
 +		return nil, fmt.Errorf("host bind source must be a regular file or directory")
 +	}
 +	if err := validateTrustedComponents(inspected); err != nil {
@@ -1709,7 +1996,7 @@ index 0000000..6403bc9
 +		if containsContainerRuntimeSocket(filepath.Base(path)) {
 +			return fmt.Errorf("host bind directory contains a container runtime endpoint: %s", path)
 +		}
-+		if !info.IsDir() && !info.Mode().IsRegular() {
++		if !isSupportedHostSourceMode(info.Mode()) {
 +			return fmt.Errorf("host bind directory contains a special file: %s", path)
 +		}
 +		if err := validateTrustedTreeEntry(path, info); err != nil {
@@ -1717,6 +2004,10 @@ index 0000000..6403bc9
 +		}
 +		return nil
 +	})
++}
++
++func isSupportedHostSourceMode(mode os.FileMode) bool {
++	return mode.IsRegular() || mode.IsDir()
 +}
 +
 +func containsContainerRuntimeSocket(value string) bool {
@@ -1736,10 +2027,10 @@ index 0000000..6403bc9
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig_test.go b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
 new file mode 100644
-index 0000000..1b450c3
+index 0000000..e4b96d1
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
-@@ -0,0 +1,242 @@
+@@ -0,0 +1,265 @@
 +package isolation
 +
 +import (
@@ -1966,6 +2257,29 @@ index 0000000..1b450c3
 +	require.NoFileExists(t, stagedPath)
 +}
 +
++func TestPreparedRegularFileStageRejectsUntrustedParentBeforeCopy(t *testing.T) {
++	source := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(source, []byte("sensitive backup bytes"), 0o600))
++	prepared, err := PrepareRegularFile(source)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, prepared.Close()) })
++
++	stagingParent := filepath.Join(t.TempDir(), "untrusted")
++	require.NoError(t, os.Mkdir(stagingParent, 0o777))
++	require.NoError(t, os.Chmod(stagingParent, 0o777))
++
++	staged, err := prepared.Stage(stagingParent)
++	if staged != nil {
++		t.Cleanup(func() { require.NoError(t, staged.Cleanup()) })
++	}
++	require.ErrorContains(t, err, "untrusted principal")
++	require.Nil(t, staged)
++
++	entries, readErr := os.ReadDir(stagingParent)
++	require.NoError(t, readErr)
++	require.Empty(t, entries, "backup bytes must not be staged beneath an untrusted parent")
++}
++
 +func TestStagedRegularFileCleanupReportsRemovalFailure(t *testing.T) {
 +	source := filepath.Join(t.TempDir(), "backup.sql")
 +	require.NoError(t, os.WriteFile(source, []byte("select 1;"), 0o600))
@@ -1982,12 +2296,210 @@ index 0000000..1b450c3
 +	staged.removeAll = removeAll
 +	require.NoError(t, staged.Cleanup())
 +}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go
+new file mode 100644
+index 0000000..4234b27
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go
+@@ -0,0 +1,108 @@
++//go:build darwin
++
++package isolation
++
++import (
++	"encoding/binary"
++	"fmt"
++	"os"
++	"runtime"
++	"unsafe"
++
++	"golang.org/x/sys/unix"
++)
++
++const (
++	darwinAttributeBitmapCount = 5
++	darwinAttributeHeaderSize  = 12
++	darwinAttributeBufferSize  = 8192
++	darwinFileSecurityMagic    = 0x012cc16d
++	darwinFileSecurityHeader   = 44
++	darwinACLMaxEntries        = 128
++	darwinACEBytes             = 24
++	darwinACEPermit            = 1
++	darwinACEKindMask          = 0xf
++	darwinACLWriteRights       = (1 << 2) |
++		(1 << 4) |
++		(1 << 5) |
++		(1 << 6) |
++		(1 << 8) |
++		(1 << 10) |
++		(1 << 12) |
++		(1 << 13) |
++		(1 << 21) |
++		(1 << 23) |
++		(1 << 25) |
++		(1 << 26)
++)
++
++// validatePlatformTrust rejects Darwin ACL entries that permit mutation. ACLs
++// supplement BSD mode permissions, so mode and owner checks alone cannot prove
++// cross-user safety. fgetattrlist inspects the already-open object and does not
++// depend on xattrs. Deny-only and read-only ACLs preserve the mode-based proof.
++func validatePlatformTrust(path string, expected os.FileInfo) error {
++	file, err := os.Open(path)
++	if err != nil {
++		return fmt.Errorf("open host bind source for ACL inspection at %s: %w", path, err)
++	}
++	defer file.Close()
++
++	opened, err := file.Stat()
++	if err != nil {
++		return fmt.Errorf("inspect host bind source for ACL inspection at %s: %w", path, err)
++	}
++	if !os.SameFile(expected, opened) {
++		return fmt.Errorf("host bind source changed during ACL inspection: %s", path)
++	}
++
++	attributes := unix.Attrlist{
++		Bitmapcount: darwinAttributeBitmapCount,
++		Commonattr:  unix.ATTR_CMN_EXTENDED_SECURITY,
++	}
++	buffer := make([]byte, darwinAttributeBufferSize)
++	_, _, errno := unix.Syscall6(
++		unix.SYS_FGETATTRLIST,
++		file.Fd(),
++		uintptr(unsafe.Pointer(&attributes)),
++		uintptr(unsafe.Pointer(&buffer[0])),
++		uintptr(len(buffer)),
++		0,
++		0,
++	)
++	runtime.KeepAlive(file)
++	if errno != 0 {
++		return fmt.Errorf("inspect host bind source ACL at %s: %w", path, errno)
++	}
++
++	total := int(binary.LittleEndian.Uint32(buffer[0:4]))
++	if total < darwinAttributeHeaderSize || total > len(buffer) {
++		return fmt.Errorf("inspect host bind source ACL at %s: malformed attribute response", path)
++	}
++	offset := int(int32(binary.LittleEndian.Uint32(buffer[4:8])))
++	length := int(binary.LittleEndian.Uint32(buffer[8:12]))
++	start := 4 + offset
++	if offset < 0 || start < darwinAttributeHeaderSize || start > total || length > total-start {
++		return fmt.Errorf("inspect host bind source ACL at %s: malformed ACL reference", path)
++	}
++	if length != 0 {
++		acl := buffer[start : start+length]
++		if len(acl) < darwinFileSecurityHeader ||
++			binary.LittleEndian.Uint32(acl[0:4]) != darwinFileSecurityMagic {
++			return fmt.Errorf("inspect host bind source ACL at %s: malformed file-security record", path)
++		}
++		entryCount := int(binary.LittleEndian.Uint32(acl[36:40]))
++		if entryCount > darwinACLMaxEntries ||
++			len(acl) != darwinFileSecurityHeader+entryCount*darwinACEBytes {
++			return fmt.Errorf("inspect host bind source ACL at %s: malformed ACL entries", path)
++		}
++		for index := 0; index < entryCount; index++ {
++			aceStart := darwinFileSecurityHeader + index*darwinACEBytes
++			flags := binary.LittleEndian.Uint32(acl[aceStart+16 : aceStart+20])
++			rights := binary.LittleEndian.Uint32(acl[aceStart+20 : aceStart+24])
++			if flags&darwinACEKindMask == darwinACEPermit && rights&darwinACLWriteRights != 0 {
++				return fmt.Errorf("host bind source has a write-capable Darwin ACL and cannot be proven cross-user safe: %s", path)
++			}
++		}
++	}
++	return nil
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go
+new file mode 100644
+index 0000000..e3083ae
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go
+@@ -0,0 +1,60 @@
++//go:build darwin
++
++package isolation
++
++import (
++	"os"
++	"os/exec"
++	"path/filepath"
++	"testing"
++
++	"github.com/docker/docker/api/types/container"
++	"github.com/stretchr/testify/require"
++)
++
++func TestValidateContainerAllowsNonWriteDarwinACL(t *testing.T) {
++	root := filepath.Join(t.TempDir(), "deny-only-acl")
++	require.NoError(t, os.Mkdir(root, 0o700))
++	require.NoError(t, exec.Command(
++		"/bin/chmod",
++		"+a",
++		"everyone deny delete",
++		root,
++	).Run())
++	t.Cleanup(func() {
++		require.NoError(t, exec.Command("/bin/chmod", "-N", root).Run())
++	})
++
++	require.NoError(t, ValidateContainer(
++		container.Config{},
++		container.HostConfig{Binds: []string{root + ":/safe/tree:ro"}},
++	))
++}
++
++func TestPreparedRegularFileStageRejectsACLWritableParentBeforeCopy(t *testing.T) {
++	source := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(source, []byte("sensitive backup bytes"), 0o600))
++	prepared, err := PrepareRegularFile(source)
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, prepared.Close()) })
++
++	stagingParent := filepath.Join(t.TempDir(), "mode-safe-but-acl-writable")
++	require.NoError(t, os.Mkdir(stagingParent, 0o700))
++	require.NoError(t, exec.Command(
++		"/bin/chmod",
++		"+a",
++		"everyone allow add_file,delete_child,writeattr,writeextattr",
++		stagingParent,
++	).Run())
++
++	staged, err := prepared.Stage(stagingParent)
++	if staged != nil {
++		t.Cleanup(func() { require.NoError(t, staged.Cleanup()) })
++	}
++	require.ErrorContains(t, err, "write-capable Darwin ACL")
++	require.Nil(t, staged)
++
++	entries, readErr := os.ReadDir(stagingParent)
++	require.NoError(t, readErr)
++	require.Empty(t, entries, "backup bytes must not be staged beneath an ACL-writable parent")
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go
+new file mode 100644
+index 0000000..3a857f3
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go
+@@ -0,0 +1,12 @@
++//go:build linux
++
++package isolation
++
++import "os"
++
++// Linux access ACL masks are reflected in the group class mode bits. The
++// shared group/other-writable check therefore rejects ACLs that grant write
++// access to another principal without requiring a platform ACL parser.
++func validatePlatformTrust(_ string, _ os.FileInfo) error {
++	return nil
++}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
 new file mode 100644
-index 0000000..4d43baa
+index 0000000..03db2c4
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,76 @@
 +//go:build darwin || linux
 +
 +package isolation
@@ -2001,11 +2513,14 @@ index 0000000..4d43baa
 +func validateTrustedComponents(components []hostComponent) error {
 +	effectiveUser := uint32(os.Geteuid())
 +	for index, component := range components {
++		if err := validatePlatformTrust(component.path, component.info); err != nil {
++			return err
++		}
 +		owner, err := componentOwner(component.info)
 +		if err != nil {
 +			return fmt.Errorf("inspect host bind source ownership at %s: %w", component.path, err)
 +		}
-+		if owner != 0 && owner != effectiveUser {
++		if !isTrustedOwner(owner, effectiveUser) {
 +			return fmt.Errorf("host bind source component is owned by an untrusted principal: %s", component.path)
 +		}
 +		if !component.info.IsDir() {
@@ -2041,18 +2556,57 @@ index 0000000..4d43baa
 +}
 +
 +func validateTrustedTreeEntry(path string, info os.FileInfo) error {
++	if err := validatePlatformTrust(path, info); err != nil {
++		return err
++	}
 +	owner, err := componentOwner(info)
 +	if err != nil {
 +		return fmt.Errorf("inspect host bind directory ownership at %s: %w", path, err)
 +	}
 +	effectiveUser := uint32(os.Geteuid())
-+	if owner != 0 && owner != effectiveUser {
++	if !isTrustedOwner(owner, effectiveUser) {
 +		return fmt.Errorf("host bind directory entry is owned by an untrusted principal: %s", path)
 +	}
 +	if info.IsDir() && info.Mode().Perm()&0o022 != 0 {
 +		return fmt.Errorf("host bind directory tree is writable by an untrusted principal: %s", path)
 +	}
 +	return nil
++}
++
++func isTrustedOwner(owner, effectiveUser uint32) bool {
++	return owner == 0 || owner == effectiveUser
++}
+diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go
+new file mode 100644
+index 0000000..0bcee6b
+--- /dev/null
++++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go
+@@ -0,0 +1,26 @@
++//go:build darwin || linux
++
++package isolation
++
++import (
++	"os"
++	"testing"
++
++	"github.com/stretchr/testify/require"
++)
++
++func TestHostSourceTrustPredicatesRejectUnprivilegedFixtureCases(t *testing.T) {
++	effectiveUser := uint32(os.Geteuid())
++	require.False(t, isTrustedOwner(effectiveUser+1, effectiveUser))
++
++	for name, mode := range map[string]os.FileMode{
++		"block device":     os.ModeDevice,
++		"character device": os.ModeDevice | os.ModeCharDevice,
++		"named pipe":       os.ModeNamedPipe,
++		"socket":           os.ModeSocket,
++	} {
++		t.Run(name, func(t *testing.T) {
++			require.False(t, isSupportedHostSourceMode(mode))
++		})
++	}
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go
 new file mode 100644

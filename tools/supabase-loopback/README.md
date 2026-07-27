@@ -54,10 +54,14 @@ open, and rewritten to canonical sources before Docker consumption. Identity is
 revalidated after image resolution and immediately before container creation.
 Bound directories are recursively restricted to trusted regular files and
 directories: protected runtime endpoints, special files, descendant symlinks,
-untrusted owners, and group/other-writable directories fail closed.
+untrusted owners, group/other-writable directories, and Darwin ACL entries
+that permit mutation on components or descendants fail closed. Linux
+access-ACL write grants remain covered by their corresponding group-class mode
+bits.
 `db start --from-backup` opens its input before any Docker request and snapshots
-it once into canonical absolute private staging, producing a true Docker bind;
-cleanup failure is returned rather than hidden.
+it once into canonical absolute private staging whose parent is proven trusted
+before any bytes are copied, producing a true Docker bind; cleanup failure is
+returned rather than hidden.
 The exact TOCTOU boundary and cross-platform limits are recorded in
 [`SYMLINK-SAFETY.md`](./SYMLINK-SAFETY.md).
 

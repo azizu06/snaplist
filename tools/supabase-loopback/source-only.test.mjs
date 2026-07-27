@@ -214,7 +214,7 @@ test("patched source rejects Docker host capabilities before side effects", () =
     [["./internal/utils/isolation"], "."],
     [
       ["./internal/utils"],
-      "^(TestDockerStartRejects(BeforeDockerAction|DeviceCgroupRulesBeforeDockerAction|SymlinkedRuntimeSocketSourcesBeforeDockerAction|DirectoryContainingRuntimeEndpointBeforeDockerAction|HostBindFromUntrustedWritableParentBeforeDockerAction|HostBindReplacedAfterImageInspectionBeforeContainerCreate)|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
+      "^(TestDockerStartRejects(BeforeDockerAction|DeviceCgroupRulesBeforeDockerAction|SymlinkedRuntimeSocketSourcesBeforeDockerAction|DirectoryContainingRuntimeEndpointBeforeDockerAction|DirectoryContainingFIFOBeforeDockerAction|HostBindFromUntrustedWritableParentBeforeDockerAction|HostBindReplacedAfterImageInspectionBeforeContainerCreate|HostBindWithDarwinACLBeforeDockerAction)|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
     ],
     [
       ["./internal/db/start"],
@@ -222,7 +222,7 @@ test("patched source rejects Docker host capabilities before side effects", () =
     ],
     [
       ["./internal/start"],
-      "^TestRunRejectsUnsafeServiceBeforeDockerAction$",
+      "^(TestRunRejectsUnsafeServiceBeforeDockerAction|TestDockerStartAcceptsDefaultFunctionsServiceDirectory)$",
     ],
   ]) {
     const result = spawnSync(
