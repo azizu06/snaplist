@@ -1682,27 +1682,43 @@ final class ItemRunSubmissionTests: XCTestCase {
             )
         )
 
-        await host.startListing(photos: intake.photos)
+        let submission = Task {
+            await host.startListing(photos: intake.photos)
+        }
+        defer { submission.cancel() }
+        guard let savedEvent = await waitForPendingItemSavedEvent(
+            on: host
+        ) else {
+            return
+        }
+
+        XCTAssertEqual(savedEvent.acceptedRun.runID, Self.canonicalRunID)
+        XCTAssertEqual(
+            host.pendingPresentationEvent,
+            .itemSaved(
+                eventID: savedEvent.eventID,
+                acceptedRun: savedEvent.acceptedRun
+            )
+        )
+        XCTAssertTrue(host.isSubmitting)
+        XCTAssertFalse(host.clearedIntake)
+        host.acknowledgePresentation(eventID: savedEvent.eventID)
+        await submission.value
+        host.completeClearedIntakePresentation()
 
         XCTAssertEqual(host.acceptedRun?.runID, Self.canonicalRunID)
         XCTAssertNil(host.retention)
         XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.pendingPresentationEvent)
     }
 
     func testStartListingTappedTwiceSubmitsOnce() async {
         let intake = SubmissionIntakeFixture(photoCount: 2)
         let attemptStore = InMemoryItemRunSubmissionAttemptStore()
-        let hostReference = ItemRunSubmissionHostReference()
-        // The second tap lands while the first request is still open.
         let inFlight = RecordingItemRunSubmitter(
-            outcomes: [.created(Self.receipt(for: intake))],
-            beforeResponse: { [intake, hostReference] in
-                await hostReference.host?.startListing(
-                    photos: intake.photos
-                )
-            }
+            outcomes: [.created(Self.receipt(for: intake))]
         )
-        hostReference.host = ItemRunSubmissionHost(
+        let host = ItemRunSubmissionHost(
             coordinator: makeCoordinator(
                 intake: intake,
                 attemptStore: attemptStore,
@@ -1711,14 +1727,51 @@ final class ItemRunSubmissionTests: XCTestCase {
             )
         )
 
-        await hostReference.host?.startListing(photos: intake.photos)
+        let firstSubmission = Task {
+            await host.startListing(photos: intake.photos)
+        }
+        defer { firstSubmission.cancel() }
+        guard let savedEvent = await waitForPendingItemSavedEvent(
+            on: host
+        ) else {
+            return
+        }
 
-        let payloads = await inFlight.payloads
+        XCTAssertTrue(host.isSubmitting)
+        XCTAssertFalse(host.clearedIntake)
+        XCTAssertEqual(
+            host.pendingPresentationEvent,
+            .itemSaved(
+                eventID: savedEvent.eventID,
+                acceptedRun: savedEvent.acceptedRun
+            )
+        )
+
+        // The second tap lands while the first request is still open.
+        await host.startListing(photos: intake.photos)
+
+        var payloads = await inFlight.payloads
         XCTAssertEqual(payloads.count, 1)
         XCTAssertEqual(
-            hostReference.host?.acceptedRun?.runID,
+            host.pendingPresentationEvent,
+            .itemSaved(
+                eventID: savedEvent.eventID,
+                acceptedRun: savedEvent.acceptedRun
+            )
+        )
+
+        host.acknowledgePresentation(eventID: savedEvent.eventID)
+        await firstSubmission.value
+        host.completeClearedIntakePresentation()
+
+        payloads = await inFlight.payloads
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(
+            host.acceptedRun?.runID,
             Self.canonicalRunID
         )
+        XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.pendingPresentationEvent)
     }
 
     /// `403`, `429`, and `409` each reach the live boundary as their own typed value,
@@ -1870,11 +1923,6 @@ final class ItemRunSubmissionTests: XCTestCase {
 private enum SavedPresentationEffectObservation: Equatable {
     case announcement(String, eventID: UUID)
     case acknowledgment(UUID)
-}
-
-@MainActor
-private final class ItemRunSubmissionHostReference {
-    var host: ItemRunSubmissionHost?
 }
 
 private struct TestBearerTokenProvider: BearerTokenProviding {
