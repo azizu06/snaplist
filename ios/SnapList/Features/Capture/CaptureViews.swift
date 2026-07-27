@@ -381,7 +381,7 @@ struct ScanCameraView: View {
             ScanLibraryLabel(style: labelStyle)
         }
         .disabled(flow.isAddingPhotos)
-        .accessibilityLabel("Library")
+        .accessibilityLabel(labelStyle == .icon ? "Library" : "Choose from library")
         .accessibilityIdentifier(
             labelStyle == .icon ? "scan.library" : "scan.choose-library"
         )

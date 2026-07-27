@@ -68,6 +68,7 @@ final class SnapListUITests: XCTestCase {
         addScreenshot(named: "CAPTURE-CAMERA-UNAVAILABLE.png")
         let library = app.buttons["scan.choose-library"]
         XCTAssertTrue(library.exists)
+        XCTAssertEqual(library.label, "Choose from library")
         XCTAssertGreaterThanOrEqual(library.frame.width, 44)
         XCTAssertGreaterThanOrEqual(library.frame.height, 44)
 
