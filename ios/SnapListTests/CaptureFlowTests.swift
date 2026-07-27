@@ -932,81 +932,22 @@ final class CaptureFlowTests: XCTestCase {
     }
 
     func testRateLimitedSubmissionPresentsTryAgainOnceAndPreservesPhotoReviewForExplicitRetry() async throws {
-        let fileManager = FileManager.default
-        let root = fileManager.temporaryDirectory.appendingPathComponent(
-            "snaplist-rate-limited-submission-\(UUID().uuidString)",
-            isDirectory: true
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-rate-limited-submission",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemIndigo,
+                    rightColor: .systemMint
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemOrange,
+                    rightColor: .systemBlue
+                ),
+            ]
         )
-        let draftRoot = root.appendingPathComponent(
-            "draft",
-            isDirectory: true
-        )
-        let attemptRoot = root.appendingPathComponent(
-            "attempt",
-            isDirectory: true
-        )
-        defer { try? fileManager.removeItem(at: root) }
-
-        let draftStore = LocalCaptureDraftStore(rootDirectory: draftRoot)
-        let firstPhoto = try await draftStore.append(
-            imageData: makeLandscapeImageData(
-                leftColor: .systemIndigo,
-                rightColor: .systemMint
-            ),
-            libraryTransferReceipt: nil
-        ).appendedPhoto
-        let secondPhoto = try await draftStore.append(
-            imageData: makeLandscapeImageData(
-                leftColor: .systemOrange,
-                rightColor: .systemBlue
-            ),
-            libraryTransferReceipt: nil
-        ).appendedPhoto
-        let submittedPhotos = [firstPhoto, secondPhoto]
-        let camera = TestCaptureCamera(
-            isAvailable: true,
-            authorization: .authorized
-        )
-        let captureFlow = CaptureFlowModel(
-            camera: camera,
-            evaluator: TestFramingEvaluator(observations: []),
-            store: draftStore
-        )
-        let restoration = await captureFlow.restore()
-        XCTAssertEqual(restoration, .stagedPhoto)
-
-        let router = AppRouter(initialFullScreen: .guidedCamera)
-        router.openCaptureBoundary(
-            destination: .photoReview,
-            photos: captureFlow.stagedPhotos,
-            opener: .reviewButton
-        )
-        let routeBeforeSubmission = router.captureBoundaryRequest
-        let fullScreenBeforeSubmission = router.presentedFullScreen
-        let scanReturnBeforeSubmission = router.photoReviewScanReturn
-        let selectedTabBeforeSubmission = router.selectedTab
-        let homePathBeforeSubmission =
-            router.pathBinding(for: .home).wrappedValue
-        let listingsPathBeforeSubmission =
-            router.pathBinding(for: .listings).wrappedValue
-
-        let photoReviewHost = PhotoReviewLiveHost()
-        XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
-        let session = try XCTUnwrap(photoReviewHost.session)
-        XCTAssertTrue(
-            session.store.selectPhotoForActions(id: secondPhoto.id)
-        )
-        let sessionPhotosBeforeSubmission = session.store.photos
-        let selectedPhotoBeforeSubmission = session.store.selectedPhotoID
-        let actionsPhotoBeforeSubmission = session.store.actionsPhotoID
-        let pickerRequestBeforeSubmission =
-            session.store.activePickerRequest
-        let stagedPhotosBeforeSubmission = captureFlow.stagedPhotos
-        let capturePhaseBeforeSubmission = captureFlow.phase
-
-        let intake = SubmissionIntakeFixture(
-            stagedPhotos: submittedPhotos
-        )
+        defer { scenario.cleanUp() }
+        let submittedPhotos = scenario.displayedPhotos
+        let intake = SubmissionIntakeFixture(stagedPhotos: submittedPhotos)
         let rateLimitReason = "opaque-server-diagnostic"
         let submitter = RecordingItemRunSubmitter(
             outcomes: [
@@ -1015,7 +956,7 @@ final class CaptureFlowTests: XCTestCase {
             ]
         )
         let attemptStore = LocalItemRunSubmissionAttemptStore(
-            rootDirectory: attemptRoot
+            rootDirectory: scenario.attemptRoot
         )
         let persistedKey = UUID(
             uuidString: "50300000-0000-4000-8000-000000000061"
@@ -1030,22 +971,13 @@ final class CaptureFlowTests: XCTestCase {
             coordinator: ItemRunSubmissionCoordinator(
                 submitter: submitter,
                 attemptStore: attemptStore,
-                draftStore: draftStore,
+                draftStore: scenario.draftStore,
                 tokenProvider: CaptureFlowBearerTokenProvider(),
                 readData: intake.read,
                 newIdempotencyKey: { keySequence.next() }
             )
         )
-        var pendingScanFocus: PhotoReviewScanFocus?
-
-        await AppShellPhotoReviewSubmissionTransaction.perform(
-            session: session,
-            captureFlow: captureFlow,
-            host: photoReviewHost,
-            router: router,
-            submissionHost: submissionHost,
-            setReturnFocus: { pendingScanFocus = $0 }
-        )
+        await scenario.perform(submissionHost: submissionHost)
 
         XCTAssertEqual(
             submissionHost.retention,
@@ -1054,58 +986,14 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(submissionHost.acceptedRun)
         XCTAssertFalse(submissionHost.clearedIntake)
         XCTAssertFalse(submissionHost.isSubmitting)
-        XCTAssertFalse(photoReviewHost.isCommitting)
-        guard case .submissionRejected(
-            eventID: let firstEventID,
-            retention: let firstEventRetention
-        )? = submissionHost.pendingPresentationEvent else {
-            return XCTFail(
-                "Expected a typed rate-limited presentation event."
-            )
-        }
-        XCTAssertEqual(
-            firstEventRetention,
-            .rateLimited(reason: rateLimitReason)
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
+        var presentationProbe = RetainedSubmissionPresentationProbe()
+        let firstEvent = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .rateLimited(reason: rateLimitReason),
+            family: .tryAgain
         )
-
-        let firstPresentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
-        )
-        XCTAssertEqual(firstPresentation.primaryActionLabel, "Try again")
-        XCTAssertFalse(firstPresentation.mutationControlsLocked)
-        XCTAssertTrue(firstPresentation.rendersSubmittedMedia)
-        XCTAssertEqual(
-            firstPresentation.announcementEvent,
-            .submissionRejected(eventID: firstEventID)
-        )
-        XCTAssertEqual(
-            firstPresentation.accessibilityAnnouncement,
-            "This didn't go through. Your item is still saved on this phone."
-        )
-
-        var announcements: [String] = []
-        var acknowledgedEventIDs: [UUID] = []
-        var effectConsumer = PhotoReviewSubmissionEffectConsumer()
-        let consumeFirstRejection = {
-            effectConsumer.consume(
-                PhotoReviewSubmissionPresentation(host: submissionHost),
-                postAnnouncement: { announcements.append($0) },
-                acknowledgePresentation: {
-                    acknowledgedEventIDs.append($0)
-                }
-            )
-        }
-        consumeFirstRejection()
-        consumeFirstRejection()
-        consumeFirstRejection()
-
-        XCTAssertEqual(
-            announcements,
-            [
-                "This didn't go through. Your item is still saved on this phone.",
-            ]
-        )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
+        let firstEventID = firstEvent.eventID
 
         var payloads = await submitter.payloads
         XCTAssertEqual(payloads.count, 1)
@@ -1119,116 +1007,30 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(firstPayload.attempt, firstAttempt)
         XCTAssertEqual(firstPayload.photoData, intake.expectedBytes)
 
-        let durablePhotosAfterFirst = try await draftStore.loadPhotos()
-        XCTAssertEqual(durablePhotosAfterFirst, submittedPhotos)
-        XCTAssertEqual(captureFlow.stagedPhotos, stagedPhotosBeforeSubmission)
-        XCTAssertEqual(captureFlow.phase, capturePhaseBeforeSubmission)
-        XCTAssertTrue(photoReviewHost.session === session)
-        XCTAssertEqual(session.store.photos, sessionPhotosBeforeSubmission)
-        XCTAssertEqual(
-            session.store.selectedPhotoID,
-            selectedPhotoBeforeSubmission
-        )
-        XCTAssertEqual(
-            session.store.actionsPhotoID,
-            actionsPhotoBeforeSubmission
-        )
-        XCTAssertEqual(
-            session.store.activePickerRequest,
-            pickerRequestBeforeSubmission
-        )
-        XCTAssertEqual(router.captureBoundaryRequest, routeBeforeSubmission)
-        XCTAssertEqual(
-            router.presentedFullScreen,
-            fullScreenBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.photoReviewScanReturn,
-            scanReturnBeforeSubmission
-        )
-        XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
-        XCTAssertEqual(
-            router.pathBinding(for: .home).wrappedValue,
-            homePathBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.pathBinding(for: .listings).wrappedValue,
-            listingsPathBeforeSubmission
-        )
-        XCTAssertNil(pendingScanFocus)
-        XCTAssertEqual(camera.startCount, 0)
-        XCTAssertEqual(camera.captureCount, 0)
-        for photo in submittedPhotos {
-            XCTAssertTrue(
-                fileManager.fileExists(atPath: photo.photoURL.path)
-            )
-            XCTAssertTrue(
-                fileManager.fileExists(atPath: photo.thumbnailURL.path)
-            )
-        }
+        try await scenario.assertPreserved()
 
         // Nothing after the retained response schedules payload two. Only the seller's
         // explicit second Start listing transaction below is the retry.
         let payloadsBeforeExplicitRetry = await submitter.payloads
         XCTAssertEqual(payloadsBeforeExplicitRetry.count, 1)
 
-        await AppShellPhotoReviewSubmissionTransaction.perform(
-            session: session,
-            captureFlow: captureFlow,
-            host: photoReviewHost,
-            router: router,
-            submissionHost: submissionHost,
-            setReturnFocus: { pendingScanFocus = $0 }
-        )
+        await scenario.perform(submissionHost: submissionHost)
 
-        guard case .submissionRejected(
-            eventID: let secondEventID,
-            retention: let secondEventRetention
-        )? = submissionHost.pendingPresentationEvent else {
-            return XCTFail(
-                "Expected a new typed event for the explicit retry."
-            )
-        }
+        let secondEvent = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .rateLimited(reason: rateLimitReason),
+            family: .tryAgain
+        )
+        let secondEventID = secondEvent.eventID
         XCTAssertNotEqual(secondEventID, firstEventID)
         XCTAssertEqual(
-            secondEventRetention,
-            .rateLimited(reason: rateLimitReason)
-        )
-        let secondPresentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
-        )
-        XCTAssertEqual(secondPresentation.primaryActionLabel, "Try again")
-        XCTAssertEqual(
-            secondPresentation.announcementEvent,
-            .submissionRejected(eventID: secondEventID)
-        )
-        XCTAssertEqual(
-            secondPresentation.accessibilityAnnouncement,
-            "This didn't go through. Your item is still saved on this phone."
-        )
-        XCTAssertTrue(secondPresentation.rendersSubmittedMedia)
-        XCTAssertFalse(secondPresentation.mutationControlsLocked)
-
-        let consumeSecondRejection = {
-            effectConsumer.consume(
-                PhotoReviewSubmissionPresentation(host: submissionHost),
-                postAnnouncement: { announcements.append($0) },
-                acknowledgePresentation: {
-                    acknowledgedEventIDs.append($0)
-                }
-            )
-        }
-        consumeSecondRejection()
-        consumeSecondRejection()
-
-        XCTAssertEqual(
-            announcements,
+            presentationProbe.announcements,
             [
                 "This didn't go through. Your item is still saved on this phone.",
                 "This didn't go through. Your item is still saved on this phone.",
             ]
         )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
 
         payloads = await submitter.payloads
         XCTAssertEqual(payloads.count, 2)
@@ -1243,118 +1045,29 @@ final class CaptureFlowTests: XCTestCase {
             try await attemptStore.loadAttempt()
         XCTAssertEqual(persistedAttemptAfterRetry, firstAttempt)
 
-        let durablePhotosAfterRetry = try await draftStore.loadPhotos()
-        XCTAssertEqual(durablePhotosAfterRetry, submittedPhotos)
-        XCTAssertEqual(captureFlow.stagedPhotos, stagedPhotosBeforeSubmission)
-        XCTAssertEqual(captureFlow.phase, capturePhaseBeforeSubmission)
-        XCTAssertTrue(photoReviewHost.session === session)
-        XCTAssertEqual(session.store.photos, sessionPhotosBeforeSubmission)
-        XCTAssertEqual(
-            session.store.selectedPhotoID,
-            selectedPhotoBeforeSubmission
-        )
-        XCTAssertEqual(
-            session.store.actionsPhotoID,
-            actionsPhotoBeforeSubmission
-        )
-        XCTAssertEqual(
-            session.store.activePickerRequest,
-            pickerRequestBeforeSubmission
-        )
-        XCTAssertEqual(router.captureBoundaryRequest, routeBeforeSubmission)
-        XCTAssertEqual(
-            router.presentedFullScreen,
-            fullScreenBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.photoReviewScanReturn,
-            scanReturnBeforeSubmission
-        )
-        XCTAssertNil(pendingScanFocus)
-        XCTAssertEqual(camera.startCount, 0)
-        XCTAssertEqual(camera.captureCount, 0)
-        XCTAssertFalse(photoReviewHost.isCommitting)
+        try await scenario.assertPreserved()
     }
 
     func testSubmissionUnavailablePersistsIdentityBeforeTryAgainAndNeverStartsTransport() async throws {
-        let fileManager = FileManager.default
-        let root = fileManager.temporaryDirectory.appendingPathComponent(
-            "snaplist-submission-unavailable-\(UUID().uuidString)",
-            isDirectory: true
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-submission-unavailable",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemPurple,
+                    rightColor: .systemYellow
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemTeal,
+                    rightColor: .systemPink
+                ),
+            ]
         )
-        let draftRoot = root.appendingPathComponent(
-            "draft",
-            isDirectory: true
-        )
-        let attemptRoot = root.appendingPathComponent(
-            "attempt",
-            isDirectory: true
-        )
-        defer { try? fileManager.removeItem(at: root) }
-
-        let draftStore = LocalCaptureDraftStore(rootDirectory: draftRoot)
-        let firstPhoto = try await draftStore.append(
-            imageData: makeLandscapeImageData(
-                leftColor: .systemPurple,
-                rightColor: .systemYellow
-            ),
-            libraryTransferReceipt: nil
-        ).appendedPhoto
-        let secondPhoto = try await draftStore.append(
-            imageData: makeLandscapeImageData(
-                leftColor: .systemTeal,
-                rightColor: .systemPink
-            ),
-            libraryTransferReceipt: nil
-        ).appendedPhoto
-        let submittedPhotos = [firstPhoto, secondPhoto]
-        let camera = TestCaptureCamera(
-            isAvailable: true,
-            authorization: .authorized
-        )
-        let captureFlow = CaptureFlowModel(
-            camera: camera,
-            evaluator: TestFramingEvaluator(observations: []),
-            store: draftStore
-        )
-        let restoration = await captureFlow.restore()
-        XCTAssertEqual(restoration, .stagedPhoto)
-
-        let router = AppRouter(initialFullScreen: .guidedCamera)
-        router.openCaptureBoundary(
-            destination: .photoReview,
-            photos: captureFlow.stagedPhotos,
-            opener: .reviewButton
-        )
-        let routeBeforeSubmission = router.captureBoundaryRequest
-        let fullScreenBeforeSubmission = router.presentedFullScreen
-        let scanReturnBeforeSubmission = router.photoReviewScanReturn
-        let selectedTabBeforeSubmission = router.selectedTab
-        let homePathBeforeSubmission =
-            router.pathBinding(for: .home).wrappedValue
-        let listingsPathBeforeSubmission =
-            router.pathBinding(for: .listings).wrappedValue
-
-        let photoReviewHost = PhotoReviewLiveHost()
-        XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
-        let session = try XCTUnwrap(photoReviewHost.session)
-        XCTAssertTrue(
-            session.store.selectPhotoForActions(id: secondPhoto.id)
-        )
-        let sessionPhotosBeforeSubmission = session.store.photos
-        let selectedPhotoBeforeSubmission = session.store.selectedPhotoID
-        let actionsPhotoBeforeSubmission = session.store.actionsPhotoID
-        let pickerRequestBeforeSubmission =
-            session.store.activePickerRequest
-        let stagedPhotosBeforeSubmission = captureFlow.stagedPhotos
-        let capturePhaseBeforeSubmission = captureFlow.phase
-
-        let intake = SubmissionIntakeFixture(
-            stagedPhotos: submittedPhotos
-        )
+        defer { scenario.cleanUp() }
+        let submittedPhotos = scenario.displayedPhotos
+        let intake = SubmissionIntakeFixture(stagedPhotos: submittedPhotos)
         let attemptStore = SubmissionUnavailableRecordingAttemptStore(
             base: LocalItemRunSubmissionAttemptStore(
-                rootDirectory: attemptRoot
+                rootDirectory: scenario.attemptRoot
             )
         )
         let tokenProvider = SubmissionUnavailableBearerTokenProvider()
@@ -1371,22 +1084,13 @@ final class CaptureFlowTests: XCTestCase {
             coordinator: ItemRunSubmissionCoordinator(
                 submitter: nil,
                 attemptStore: attemptStore,
-                draftStore: draftStore,
+                draftStore: scenario.draftStore,
                 tokenProvider: tokenProvider,
                 readData: intake.read,
                 newIdempotencyKey: { keySequence.next() }
             )
         )
-        var pendingScanFocus: PhotoReviewScanFocus?
-
-        await AppShellPhotoReviewSubmissionTransaction.perform(
-            session: session,
-            captureFlow: captureFlow,
-            host: photoReviewHost,
-            router: router,
-            submissionHost: submissionHost,
-            setReturnFocus: { pendingScanFocus = $0 }
-        )
+        await scenario.perform(submissionHost: submissionHost)
 
         XCTAssertEqual(
             submissionHost.retention,
@@ -1395,55 +1099,14 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(submissionHost.acceptedRun)
         XCTAssertFalse(submissionHost.clearedIntake)
         XCTAssertFalse(submissionHost.isSubmitting)
-        XCTAssertFalse(photoReviewHost.isCommitting)
-        guard case .submissionRejected(
-            eventID: let firstEventID,
-            retention: let firstEventRetention
-        )? = submissionHost.pendingPresentationEvent else {
-            return XCTFail(
-                "Expected a typed submission-unavailable presentation event."
-            )
-        }
-        XCTAssertEqual(firstEventRetention, .submissionUnavailable)
-
-        let firstPresentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
+        var presentationProbe = RetainedSubmissionPresentationProbe()
+        let firstEvent = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .submissionUnavailable,
+            family: .tryAgain
         )
-        XCTAssertEqual(firstPresentation.primaryActionLabel, "Try again")
-        XCTAssertFalse(firstPresentation.mutationControlsLocked)
-        XCTAssertTrue(firstPresentation.rendersSubmittedMedia)
-        XCTAssertEqual(
-            firstPresentation.announcementEvent,
-            .submissionRejected(eventID: firstEventID)
-        )
-        XCTAssertEqual(
-            firstPresentation.accessibilityAnnouncement,
-            "This didn't go through. Your item is still saved on this phone."
-        )
-
-        var announcements: [String] = []
-        var acknowledgedEventIDs: [UUID] = []
-        var effectConsumer = PhotoReviewSubmissionEffectConsumer()
-        let consumeFirstRejection = {
-            effectConsumer.consume(
-                PhotoReviewSubmissionPresentation(host: submissionHost),
-                postAnnouncement: { announcements.append($0) },
-                acknowledgePresentation: {
-                    acknowledgedEventIDs.append($0)
-                }
-            )
-        }
-        consumeFirstRejection()
-        consumeFirstRejection()
-        consumeFirstRejection()
-
-        XCTAssertEqual(
-            announcements,
-            [
-                "This didn't go through. Your item is still saved on this phone.",
-            ]
-        )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
+        let firstEventID = firstEvent.eventID
 
         let persistedAttemptAfterFirst =
             try await attemptStore.loadAttempt()
@@ -1482,53 +1145,7 @@ final class CaptureFlowTests: XCTestCase {
             intake.expectedBytes
         )
 
-        let durablePhotosAfterFirst = try await draftStore.loadPhotos()
-        XCTAssertEqual(durablePhotosAfterFirst, submittedPhotos)
-        XCTAssertEqual(captureFlow.stagedPhotos, stagedPhotosBeforeSubmission)
-        XCTAssertEqual(captureFlow.phase, capturePhaseBeforeSubmission)
-        XCTAssertTrue(photoReviewHost.session === session)
-        XCTAssertEqual(session.store.photos, sessionPhotosBeforeSubmission)
-        XCTAssertEqual(
-            session.store.selectedPhotoID,
-            selectedPhotoBeforeSubmission
-        )
-        XCTAssertEqual(
-            session.store.actionsPhotoID,
-            actionsPhotoBeforeSubmission
-        )
-        XCTAssertEqual(
-            session.store.activePickerRequest,
-            pickerRequestBeforeSubmission
-        )
-        XCTAssertEqual(router.captureBoundaryRequest, routeBeforeSubmission)
-        XCTAssertEqual(
-            router.presentedFullScreen,
-            fullScreenBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.photoReviewScanReturn,
-            scanReturnBeforeSubmission
-        )
-        XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
-        XCTAssertEqual(
-            router.pathBinding(for: .home).wrappedValue,
-            homePathBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.pathBinding(for: .listings).wrappedValue,
-            listingsPathBeforeSubmission
-        )
-        XCTAssertNil(pendingScanFocus)
-        XCTAssertEqual(camera.startCount, 0)
-        XCTAssertEqual(camera.captureCount, 0)
-        for photo in submittedPhotos {
-            XCTAssertTrue(
-                fileManager.fileExists(atPath: photo.photoURL.path)
-            )
-            XCTAssertTrue(
-                fileManager.fileExists(atPath: photo.thumbnailURL.path)
-            )
-        }
+        try await scenario.assertPreserved()
 
         // The first unavailable response stays put. It neither creates another event
         // nor touches the persisted identity until the seller explicitly tries again.
@@ -1550,63 +1167,23 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(saveCountBeforeExplicitRetry, 1)
         XCTAssertEqual(tokenCallCountBeforeExplicitRetry, 0)
 
-        await AppShellPhotoReviewSubmissionTransaction.perform(
-            session: session,
-            captureFlow: captureFlow,
-            host: photoReviewHost,
-            router: router,
-            submissionHost: submissionHost,
-            setReturnFocus: { pendingScanFocus = $0 }
-        )
+        await scenario.perform(submissionHost: submissionHost)
 
-        guard case .submissionRejected(
-            eventID: let secondEventID,
-            retention: let secondEventRetention
-        )? = submissionHost.pendingPresentationEvent else {
-            return XCTFail(
-                "Expected a new event for the explicit unavailable retry."
-            )
-        }
+        let secondEvent = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .submissionUnavailable,
+            family: .tryAgain
+        )
+        let secondEventID = secondEvent.eventID
         XCTAssertNotEqual(secondEventID, firstEventID)
         XCTAssertEqual(
-            secondEventRetention,
-            .submissionUnavailable
-        )
-        let secondPresentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
-        )
-        XCTAssertEqual(secondPresentation.primaryActionLabel, "Try again")
-        XCTAssertEqual(
-            secondPresentation.announcementEvent,
-            .submissionRejected(eventID: secondEventID)
-        )
-        XCTAssertEqual(
-            secondPresentation.accessibilityAnnouncement,
-            "This didn't go through. Your item is still saved on this phone."
-        )
-        XCTAssertTrue(secondPresentation.rendersSubmittedMedia)
-        XCTAssertFalse(secondPresentation.mutationControlsLocked)
-
-        let consumeSecondRejection = {
-            effectConsumer.consume(
-                PhotoReviewSubmissionPresentation(host: submissionHost),
-                postAnnouncement: { announcements.append($0) },
-                acknowledgePresentation: {
-                    acknowledgedEventIDs.append($0)
-                }
-            )
-        }
-        consumeSecondRejection()
-        consumeSecondRejection()
-
-        XCTAssertEqual(
-            announcements,
+            presentationProbe.announcements,
             [
                 "This didn't go through. Your item is still saved on this phone.",
                 "This didn't go through. Your item is still saved on this phone.",
             ]
         )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
 
         let persistedAttemptAfterSecond =
             try await attemptStore.loadAttempt()
@@ -1618,128 +1195,30 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(finalClearCount, 0)
         XCTAssertEqual(finalTokenCallCount, 0)
 
-        let durablePhotosAfterSecond = try await draftStore.loadPhotos()
-        XCTAssertEqual(durablePhotosAfterSecond, submittedPhotos)
-        XCTAssertEqual(captureFlow.stagedPhotos, stagedPhotosBeforeSubmission)
-        XCTAssertEqual(captureFlow.phase, capturePhaseBeforeSubmission)
-        XCTAssertTrue(photoReviewHost.session === session)
-        XCTAssertEqual(session.store.photos, sessionPhotosBeforeSubmission)
-        XCTAssertEqual(
-            session.store.selectedPhotoID,
-            selectedPhotoBeforeSubmission
-        )
-        XCTAssertEqual(
-            session.store.actionsPhotoID,
-            actionsPhotoBeforeSubmission
-        )
-        XCTAssertEqual(
-            session.store.activePickerRequest,
-            pickerRequestBeforeSubmission
-        )
-        XCTAssertEqual(router.captureBoundaryRequest, routeBeforeSubmission)
-        XCTAssertEqual(
-            router.presentedFullScreen,
-            fullScreenBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.photoReviewScanReturn,
-            scanReturnBeforeSubmission
-        )
-        XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
-        XCTAssertEqual(
-            router.pathBinding(for: .home).wrappedValue,
-            homePathBeforeSubmission
-        )
-        XCTAssertEqual(
-            router.pathBinding(for: .listings).wrappedValue,
-            listingsPathBeforeSubmission
-        )
-        XCTAssertNil(pendingScanFocus)
-        XCTAssertEqual(camera.startCount, 0)
-        XCTAssertEqual(camera.captureCount, 0)
-        XCTAssertFalse(photoReviewHost.isCommitting)
+        try await scenario.assertPreserved()
     }
 
     func testAttemptPersistenceFailurePresentsTryAgainAndOnlyExplicitRetryCanSendPersistedIdentity() async throws {
-        let fileManager = FileManager.default
-        let root = fileManager.temporaryDirectory.appendingPathComponent(
-            "snaplist-attempt-persistence-recovery-\(UUID().uuidString)",
-            isDirectory: true
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-attempt-persistence-recovery",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemGreen,
+                    rightColor: .systemPurple
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemYellow,
+                    rightColor: .systemCyan
+                ),
+            ]
         )
-        let draftRoot = root.appendingPathComponent(
-            "draft",
-            isDirectory: true
-        )
-        let attemptRoot = root.appendingPathComponent(
-            "attempt",
-            isDirectory: true
-        )
-        defer { try? fileManager.removeItem(at: root) }
-
-        let draftStore = LocalCaptureDraftStore(rootDirectory: draftRoot)
-        let firstPhoto = try await draftStore.append(
-            imageData: makeLandscapeImageData(
-                leftColor: .systemGreen,
-                rightColor: .systemPurple
-            ),
-            libraryTransferReceipt: nil
-        ).appendedPhoto
-        let secondPhoto = try await draftStore.append(
-            imageData: makeLandscapeImageData(
-                leftColor: .systemYellow,
-                rightColor: .systemCyan
-            ),
-            libraryTransferReceipt: nil
-        ).appendedPhoto
-        let submittedPhotos = [firstPhoto, secondPhoto]
-        let camera = TestCaptureCamera(
-            isAvailable: true,
-            authorization: .authorized
-        )
-        let captureFlow = CaptureFlowModel(
-            camera: camera,
-            evaluator: TestFramingEvaluator(observations: []),
-            store: draftStore
-        )
-        let restoration = await captureFlow.restore()
-        XCTAssertEqual(restoration, .stagedPhoto)
-
-        let router = AppRouter(initialFullScreen: .guidedCamera)
-        router.openCaptureBoundary(
-            destination: .photoReview,
-            photos: captureFlow.stagedPhotos,
-            opener: .reviewButton
-        )
-        let routeBeforeSubmission = router.captureBoundaryRequest
-        let fullScreenBeforeSubmission = router.presentedFullScreen
-        let scanReturnBeforeSubmission = router.photoReviewScanReturn
-        let selectedTabBeforeSubmission = router.selectedTab
-        let homePathBeforeSubmission =
-            router.pathBinding(for: .home).wrappedValue
-        let listingsPathBeforeSubmission =
-            router.pathBinding(for: .listings).wrappedValue
-
-        let photoReviewHost = PhotoReviewLiveHost()
-        XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
-        let session = try XCTUnwrap(photoReviewHost.session)
-        XCTAssertTrue(
-            session.store.selectPhotoForActions(id: secondPhoto.id)
-        )
-        let sessionPhotosBeforeSubmission = session.store.photos
-        let selectedPhotoBeforeSubmission = session.store.selectedPhotoID
-        let actionsPhotoBeforeSubmission = session.store.actionsPhotoID
-        let pickerRequestBeforeSubmission =
-            session.store.activePickerRequest
-        let stagedPhotosBeforeSubmission = captureFlow.stagedPhotos
-        let capturePhaseBeforeSubmission = captureFlow.phase
-
-        let intake = SubmissionIntakeFixture(
-            stagedPhotos: submittedPhotos
-        )
+        defer { scenario.cleanUp() }
+        let submittedPhotos = scenario.displayedPhotos
+        let intake = SubmissionIntakeFixture(stagedPhotos: submittedPhotos)
         let events = AttemptPersistenceRecoveryEventRecorder()
         let attemptStore = RecoveringItemRunSubmissionAttemptStore(
             base: LocalItemRunSubmissionAttemptStore(
-                rootDirectory: attemptRoot
+                rootDirectory: scenario.attemptRoot
             ),
             events: events
         )
@@ -1768,82 +1247,13 @@ final class CaptureFlowTests: XCTestCase {
             coordinator: ItemRunSubmissionCoordinator(
                 submitter: submitter,
                 attemptStore: attemptStore,
-                draftStore: draftStore,
+                draftStore: scenario.draftStore,
                 tokenProvider: tokenProvider,
                 readData: intake.read,
                 newIdempotencyKey: { keySequence.next() }
             )
         )
-        var pendingScanFocus: PhotoReviewScanFocus?
-
-        func assertPhotoReviewIntakeAndRoutePreserved() async throws {
-            let durablePhotos = try await draftStore.loadPhotos()
-            XCTAssertEqual(durablePhotos, submittedPhotos)
-            XCTAssertEqual(
-                captureFlow.stagedPhotos,
-                stagedPhotosBeforeSubmission
-            )
-            XCTAssertEqual(captureFlow.phase, capturePhaseBeforeSubmission)
-            XCTAssertTrue(photoReviewHost.session === session)
-            XCTAssertEqual(
-                session.store.photos,
-                sessionPhotosBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.selectedPhotoID,
-                selectedPhotoBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.actionsPhotoID,
-                actionsPhotoBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.activePickerRequest,
-                pickerRequestBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.captureBoundaryRequest,
-                routeBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.presentedFullScreen,
-                fullScreenBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.photoReviewScanReturn,
-                scanReturnBeforeSubmission
-            )
-            XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
-            XCTAssertEqual(
-                router.pathBinding(for: .home).wrappedValue,
-                homePathBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.pathBinding(for: .listings).wrappedValue,
-                listingsPathBeforeSubmission
-            )
-            XCTAssertNil(pendingScanFocus)
-            XCTAssertEqual(camera.startCount, 0)
-            XCTAssertEqual(camera.captureCount, 0)
-            XCTAssertFalse(photoReviewHost.isCommitting)
-            for photo in submittedPhotos {
-                XCTAssertTrue(
-                    fileManager.fileExists(atPath: photo.photoURL.path)
-                )
-                XCTAssertTrue(
-                    fileManager.fileExists(atPath: photo.thumbnailURL.path)
-                )
-            }
-        }
-
-        await AppShellPhotoReviewSubmissionTransaction.perform(
-            session: session,
-            captureFlow: captureFlow,
-            host: photoReviewHost,
-            router: router,
-            submissionHost: submissionHost,
-            setReturnFocus: { pendingScanFocus = $0 }
-        )
+        await scenario.perform(submissionHost: submissionHost)
 
         XCTAssertEqual(
             submissionHost.retention,
@@ -1852,55 +1262,14 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(submissionHost.acceptedRun)
         XCTAssertFalse(submissionHost.clearedIntake)
         XCTAssertFalse(submissionHost.isSubmitting)
-        XCTAssertFalse(photoReviewHost.isCommitting)
-        guard case .submissionRejected(
-            eventID: let firstEventID,
-            retention: let firstEventRetention
-        )? = submissionHost.pendingPresentationEvent else {
-            return XCTFail(
-                "Expected a typed attempt-persistence rejection event."
-            )
-        }
-        XCTAssertEqual(firstEventRetention, .attemptNotPersisted)
-
-        let firstPresentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
+        var presentationProbe = RetainedSubmissionPresentationProbe()
+        let firstEvent = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .attemptNotPersisted,
+            family: .tryAgain
         )
-        XCTAssertEqual(firstPresentation.primaryActionLabel, "Try again")
-        XCTAssertFalse(firstPresentation.mutationControlsLocked)
-        XCTAssertTrue(firstPresentation.rendersSubmittedMedia)
-        XCTAssertEqual(
-            firstPresentation.announcementEvent,
-            .submissionRejected(eventID: firstEventID)
-        )
-        XCTAssertEqual(
-            firstPresentation.accessibilityAnnouncement,
-            "This didn't go through. Your item is still saved on this phone."
-        )
-
-        var announcements: [String] = []
-        var acknowledgedEventIDs: [UUID] = []
-        var effectConsumer = PhotoReviewSubmissionEffectConsumer()
-        let consumeFirstRejection = {
-            effectConsumer.consume(
-                PhotoReviewSubmissionPresentation(host: submissionHost),
-                postAnnouncement: { announcements.append($0) },
-                acknowledgePresentation: {
-                    acknowledgedEventIDs.append($0)
-                }
-            )
-        }
-        consumeFirstRejection()
-        consumeFirstRejection()
-        consumeFirstRejection()
-
-        XCTAssertEqual(
-            announcements,
-            [
-                "This didn't go through. Your item is still saved on this phone.",
-            ]
-        )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
+        let firstEventID = firstEvent.eventID
 
         let attemptAfterFailedSave = try await attemptStore.loadAttempt()
         let firstSaveAttempts = await attemptStore.saveAttempts
@@ -1919,7 +1288,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(firstTokenCallCount, 0)
         XCTAssertTrue(firstPayloads.isEmpty)
         XCTAssertEqual(events.events, [.attemptSaveFailed(failedKey)])
-        try await assertPhotoReviewIntakeAndRoutePreserved()
+        try await scenario.assertPreserved()
 
         // A retained presentation is not a retry scheduler. The failed key was never
         // durable, and no second identity, token, or payload exists before the seller
@@ -1947,63 +1316,23 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(payloadsBeforeExplicitRetry.isEmpty)
 
         await attemptStore.recover()
-        await AppShellPhotoReviewSubmissionTransaction.perform(
-            session: session,
-            captureFlow: captureFlow,
-            host: photoReviewHost,
-            router: router,
-            submissionHost: submissionHost,
-            setReturnFocus: { pendingScanFocus = $0 }
-        )
+        await scenario.perform(submissionHost: submissionHost)
 
-        guard case .submissionRejected(
-            eventID: let secondEventID,
-            retention: let secondEventRetention
-        )? = submissionHost.pendingPresentationEvent else {
-            return XCTFail(
-                "Expected the explicit retry's typed retained event."
-            )
-        }
+        let secondEvent = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .rateLimited(reason: rateLimitReason),
+            family: .tryAgain
+        )
+        let secondEventID = secondEvent.eventID
         XCTAssertNotEqual(secondEventID, firstEventID)
         XCTAssertEqual(
-            secondEventRetention,
-            .rateLimited(reason: rateLimitReason)
-        )
-        let secondPresentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
-        )
-        XCTAssertEqual(secondPresentation.primaryActionLabel, "Try again")
-        XCTAssertFalse(secondPresentation.mutationControlsLocked)
-        XCTAssertTrue(secondPresentation.rendersSubmittedMedia)
-        XCTAssertEqual(
-            secondPresentation.announcementEvent,
-            .submissionRejected(eventID: secondEventID)
-        )
-        XCTAssertEqual(
-            secondPresentation.accessibilityAnnouncement,
-            "This didn't go through. Your item is still saved on this phone."
-        )
-
-        let consumeSecondRejection = {
-            effectConsumer.consume(
-                PhotoReviewSubmissionPresentation(host: submissionHost),
-                postAnnouncement: { announcements.append($0) },
-                acknowledgePresentation: {
-                    acknowledgedEventIDs.append($0)
-                }
-            )
-        }
-        consumeSecondRejection()
-        consumeSecondRejection()
-
-        XCTAssertEqual(
-            announcements,
+            presentationProbe.announcements,
             [
                 "This didn't go through. Your item is still saved on this phone.",
                 "This didn't go through. Your item is still saved on this phone.",
             ]
         )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
 
         let loadedPersistedAttempt = try await attemptStore.loadAttempt()
         let persistedAttempt = try XCTUnwrap(loadedPersistedAttempt)
@@ -2053,90 +1382,31 @@ final class CaptureFlowTests: XCTestCase {
                 .transportStarted(persistedKey),
             ]
         )
-        try await assertPhotoReviewIntakeAndRoutePreserved()
+        try await scenario.assertPreserved()
     }
 
     func testRejectedSubmissionPresentsReviewAndReviewDoesNotResubmitUnchangedIntake() async throws {
-        let fileManager = FileManager.default
-        let root = fileManager.temporaryDirectory.appendingPathComponent(
-            "snaplist-rejected-submission-review-\(UUID().uuidString)",
-            isDirectory: true
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-rejected-submission-review",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemBrown,
+                    rightColor: .systemTeal
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemPink,
+                    rightColor: .systemIndigo
+                ),
+            ]
         )
-        let draftRoot = root.appendingPathComponent(
-            "draft",
-            isDirectory: true
-        )
-        let attemptRoot = root.appendingPathComponent(
-            "attempt",
-            isDirectory: true
-        )
-        defer { try? fileManager.removeItem(at: root) }
-
-        let draftStore = LocalCaptureDraftStore(rootDirectory: draftRoot)
-        let firstPhoto = try await draftStore.append(
-            imageData: makeLandscapeImageData(
-                leftColor: .systemBrown,
-                rightColor: .systemTeal
-            ),
-            libraryTransferReceipt: nil
-        ).appendedPhoto
-        let secondPhoto = try await draftStore.append(
-            imageData: makeLandscapeImageData(
-                leftColor: .systemPink,
-                rightColor: .systemIndigo
-            ),
-            libraryTransferReceipt: nil
-        ).appendedPhoto
-        let submittedPhotos = [firstPhoto, secondPhoto]
-        let camera = TestCaptureCamera(
-            isAvailable: true,
-            authorization: .authorized
-        )
-        let captureFlow = CaptureFlowModel(
-            camera: camera,
-            evaluator: TestFramingEvaluator(observations: []),
-            store: draftStore
-        )
-        let restoration = await captureFlow.restore()
-        XCTAssertEqual(restoration, .stagedPhoto)
-
-        let router = AppRouter(initialFullScreen: .guidedCamera)
-        router.openCaptureBoundary(
-            destination: .photoReview,
-            photos: captureFlow.stagedPhotos,
-            opener: .reviewButton
-        )
-        let routeBeforeSubmission = router.captureBoundaryRequest
-        let fullScreenBeforeSubmission = router.presentedFullScreen
-        let scanReturnBeforeSubmission = router.photoReviewScanReturn
-        let selectedTabBeforeSubmission = router.selectedTab
-        let homePathBeforeSubmission =
-            router.pathBinding(for: .home).wrappedValue
-        let listingsPathBeforeSubmission =
-            router.pathBinding(for: .listings).wrappedValue
-
-        let photoReviewHost = PhotoReviewLiveHost()
-        XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
-        let session = try XCTUnwrap(photoReviewHost.session)
-        XCTAssertTrue(
-            session.store.selectPhotoForActions(id: secondPhoto.id)
-        )
-        let sessionPhotosBeforeSubmission = session.store.photos
-        let selectedPhotoBeforeSubmission = session.store.selectedPhotoID
-        let actionsPhotoBeforeSubmission = session.store.actionsPhotoID
-        let pickerRequestBeforeSubmission =
-            session.store.activePickerRequest
-        let stagedPhotosBeforeSubmission = captureFlow.stagedPhotos
-        let capturePhaseBeforeSubmission = captureFlow.phase
-
-        let intake = SubmissionIntakeFixture(
-            stagedPhotos: submittedPhotos
-        )
+        defer { scenario.cleanUp() }
+        let submittedPhotos = scenario.displayedPhotos
+        let intake = SubmissionIntakeFixture(stagedPhotos: submittedPhotos)
         let submitter = RecordingItemRunSubmitter(
             outcomes: [.rejected]
         )
         let attemptStore = LocalItemRunSubmissionAttemptStore(
-            rootDirectory: attemptRoot
+            rootDirectory: scenario.attemptRoot
         )
         let persistedKey = UUID(
             uuidString: "50300000-0000-4000-8000-000000000068"
@@ -2151,149 +1421,37 @@ final class CaptureFlowTests: XCTestCase {
             coordinator: ItemRunSubmissionCoordinator(
                 submitter: submitter,
                 attemptStore: attemptStore,
-                draftStore: draftStore,
+                draftStore: scenario.draftStore,
                 tokenProvider: CaptureFlowBearerTokenProvider(),
                 readData: intake.read,
                 newIdempotencyKey: { keySequence.next() }
             )
         )
-        var pendingScanFocus: PhotoReviewScanFocus?
-
-        func assertPhotoReviewStatePreserved() async throws {
-            let durablePhotos = try await draftStore.loadPhotos()
-            XCTAssertEqual(durablePhotos, submittedPhotos)
-            XCTAssertEqual(
-                captureFlow.stagedPhotos,
-                stagedPhotosBeforeSubmission
-            )
-            XCTAssertEqual(captureFlow.phase, capturePhaseBeforeSubmission)
-            XCTAssertTrue(photoReviewHost.session === session)
-            XCTAssertEqual(
-                session.store.photos,
-                sessionPhotosBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.selectedPhotoID,
-                selectedPhotoBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.actionsPhotoID,
-                actionsPhotoBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.activePickerRequest,
-                pickerRequestBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.captureBoundaryRequest,
-                routeBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.presentedFullScreen,
-                fullScreenBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.photoReviewScanReturn,
-                scanReturnBeforeSubmission
-            )
-            XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
-            XCTAssertEqual(
-                router.pathBinding(for: .home).wrappedValue,
-                homePathBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.pathBinding(for: .listings).wrappedValue,
-                listingsPathBeforeSubmission
-            )
-            XCTAssertNil(pendingScanFocus)
-            XCTAssertEqual(camera.startCount, 0)
-            XCTAssertEqual(camera.captureCount, 0)
-            XCTAssertFalse(photoReviewHost.isCommitting)
-            for photo in submittedPhotos {
-                XCTAssertTrue(
-                    fileManager.fileExists(atPath: photo.photoURL.path)
-                )
-                XCTAssertTrue(
-                    fileManager.fileExists(atPath: photo.thumbnailURL.path)
-                )
-            }
-        }
-
-        await AppShellPhotoReviewSubmissionTransaction.perform(
-            session: session,
-            captureFlow: captureFlow,
-            host: photoReviewHost,
-            router: router,
-            submissionHost: submissionHost,
-            setReturnFocus: { pendingScanFocus = $0 }
-        )
+        await scenario.perform(submissionHost: submissionHost)
 
         XCTAssertEqual(submissionHost.retention, .rejected)
         XCTAssertNil(submissionHost.acceptedRun)
         XCTAssertFalse(submissionHost.clearedIntake)
         XCTAssertFalse(submissionHost.isSubmitting)
-        XCTAssertFalse(photoReviewHost.isCommitting)
-        guard case .submissionRejected(
-            eventID: let rejectionEventID,
-            retention: let eventRetention
-        )? = submissionHost.pendingPresentationEvent else {
-            return XCTFail(
-                "Expected a typed rejected-submission presentation event."
-            )
-        }
-        XCTAssertEqual(eventRetention, .rejected)
-
-        let rejectionPresentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
+        var presentationProbe = RetainedSubmissionPresentationProbe()
+        let rejection = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .rejected,
+            family: .review
         )
-        XCTAssertEqual(rejectionPresentation.primaryActionLabel, "Review")
-        XCTAssertNotEqual(
-            rejectionPresentation.primaryActionLabel,
-            "Try again"
-        )
-        XCTAssertEqual(
-            rejectionPresentation.visibleMessage,
-            "This item can't be sent as it is."
-        )
-        XCTAssertEqual(
-            rejectionPresentation.accessibilityAnnouncement,
-            "This item can't be sent as it is."
-        )
+        let rejectionEventID = rejection.eventID
+        let rejectionPresentation = rejection.presentation
+        XCTAssertNotEqual(rejectionPresentation.primaryActionLabel, "Try again")
         XCTAssertNotEqual(
             rejectionPresentation.visibleMessage,
             "This didn't go through. Your item is still saved on this phone."
         )
-        XCTAssertFalse(rejectionPresentation.mutationControlsLocked)
-        XCTAssertTrue(rejectionPresentation.rendersSubmittedMedia)
         XCTAssertEqual(
-            rejectionPresentation.announcementEvent,
-            .submissionRejected(eventID: rejectionEventID)
-        )
-        XCTAssertEqual(
-            rejectionPresentation.primaryActionEvent,
-            .reviewSubmission(eventID: rejectionEventID)
-        )
-
-        var announcements: [String] = []
-        var acknowledgedEventIDs: [UUID] = []
-        var effectConsumer = PhotoReviewSubmissionEffectConsumer()
-        let consumeRejection = {
-            effectConsumer.consume(
-                PhotoReviewSubmissionPresentation(host: submissionHost),
-                postAnnouncement: { announcements.append($0) },
-                acknowledgePresentation: {
-                    acknowledgedEventIDs.append($0)
-                }
-            )
-        }
-        consumeRejection()
-        consumeRejection()
-        consumeRejection()
-        XCTAssertEqual(
-            announcements,
+            presentationProbe.announcements,
             ["This item can't be sent as it is."]
         )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
 
         let payloadsAfterRejection = await submitter.payloads
         XCTAssertEqual(payloadsAfterRejection.count, 1)
@@ -2323,7 +1481,7 @@ final class CaptureFlowTests: XCTestCase {
             persistedAttempt.photos.map(\.mediaType),
             [.jpeg, .jpeg]
         )
-        try await assertPhotoReviewStatePreserved()
+        try await scenario.assertPreserved()
 
         // Re-reading the rejected state is not a retry scheduler, and Review is a
         // distinct typed action rather than Start listing under a different label.
@@ -2385,19 +1543,13 @@ final class CaptureFlowTests: XCTestCase {
             returnedPresentation.primaryActionEvent,
             .startListing
         )
-        effectConsumer.consume(
-            returnedPresentation,
-            postAnnouncement: { announcements.append($0) },
-            acknowledgePresentation: {
-                acknowledgedEventIDs.append($0)
-            }
-        )
+        presentationProbe.consumeIdle(host: submissionHost)
         XCTAssertEqual(
-            announcements,
+            presentationProbe.announcements,
             ["This item can't be sent as it is."]
         )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
-        try await assertPhotoReviewStatePreserved()
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
+        try await scenario.assertPreserved()
     }
 
     func testIntakeUnavailableSubmissionPresentsReviewWithoutStartingTransport() async throws {
@@ -2412,10 +1564,6 @@ final class CaptureFlowTests: XCTestCase {
         )
         let extraPhotoRoot = root.appendingPathComponent(
             "extra-photo",
-            isDirectory: true
-        )
-        let attemptRoot = root.appendingPathComponent(
-            "attempt",
             isDirectory: true
         )
         defer { try? fileManager.removeItem(at: root) }
@@ -2442,46 +1590,13 @@ final class CaptureFlowTests: XCTestCase {
         let draftStore = IntakeUnavailableRecordingDraftStore(
             base: durableBase
         )
-        let camera = TestCaptureCamera(
-            isAvailable: true,
-            authorization: .authorized
+        let scenario = try await RetainedSubmissionPhotoReviewScenario(
+            fileManager: fileManager,
+            root: root,
+            draftStore: draftStore,
+            displayedPhotos: displayedPhotos,
+            expectedDurablePhotos: [durablePhoto]
         )
-        let captureFlow = CaptureFlowModel(
-            camera: camera,
-            evaluator: TestFramingEvaluator(observations: []),
-            store: draftStore
-        )
-        let restoration = await captureFlow.restore()
-        XCTAssertEqual(restoration, .stagedPhoto)
-
-        let router = AppRouter(initialFullScreen: .guidedCamera)
-        router.openCaptureBoundary(
-            destination: .photoReview,
-            photos: displayedPhotos,
-            opener: .reviewButton
-        )
-        let routeBeforeSubmission = router.captureBoundaryRequest
-        let fullScreenBeforeSubmission = router.presentedFullScreen
-        let scanReturnBeforeSubmission = router.photoReviewScanReturn
-        let selectedTabBeforeSubmission = router.selectedTab
-        let homePathBeforeSubmission =
-            router.pathBinding(for: .home).wrappedValue
-        let listingsPathBeforeSubmission =
-            router.pathBinding(for: .listings).wrappedValue
-
-        let photoReviewHost = PhotoReviewLiveHost()
-        XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
-        let session = try XCTUnwrap(photoReviewHost.session)
-        XCTAssertTrue(
-            session.store.selectPhotoForActions(id: displayedOnlyPhoto.id)
-        )
-        let sessionPhotosBeforeSubmission = session.store.photos
-        let selectedPhotoBeforeSubmission = session.store.selectedPhotoID
-        let actionsPhotoBeforeSubmission = session.store.actionsPhotoID
-        let pickerRequestBeforeSubmission =
-            session.store.activePickerRequest
-        let stagedPhotosBeforeSubmission = captureFlow.stagedPhotos
-        let capturePhaseBeforeSubmission = captureFlow.phase
 
         let intake = SubmissionIntakeFixture(
             stagedPhotos: displayedPhotos
@@ -2491,7 +1606,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         let attemptStore = SubmissionUnavailableRecordingAttemptStore(
             base: LocalItemRunSubmissionAttemptStore(
-                rootDirectory: attemptRoot
+                rootDirectory: scenario.attemptRoot
             )
         )
         let tokenProvider = SubmissionUnavailableBearerTokenProvider()
@@ -2499,7 +1614,7 @@ final class CaptureFlowTests: XCTestCase {
             coordinator: ItemRunSubmissionCoordinator(
                 submitter: submitter,
                 attemptStore: attemptStore,
-                draftStore: draftStore,
+                draftStore: scenario.draftStore,
                 tokenProvider: tokenProvider,
                 readData: intake.read,
                 newIdempotencyKey: {
@@ -2510,82 +1625,13 @@ final class CaptureFlowTests: XCTestCase {
                 }
             )
         )
-        var pendingScanFocus: PhotoReviewScanFocus?
-
-        func assertPhotoReviewStatePreserved() async throws {
-            let durablePhotos = try await draftStore.loadPhotos()
-            XCTAssertEqual(durablePhotos, [durablePhoto])
-            XCTAssertEqual(
-                captureFlow.stagedPhotos,
-                stagedPhotosBeforeSubmission
-            )
-            XCTAssertEqual(captureFlow.phase, capturePhaseBeforeSubmission)
-            XCTAssertTrue(photoReviewHost.session === session)
-            XCTAssertEqual(
-                session.store.photos,
-                sessionPhotosBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.selectedPhotoID,
-                selectedPhotoBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.actionsPhotoID,
-                actionsPhotoBeforeSubmission
-            )
-            XCTAssertEqual(
-                session.store.activePickerRequest,
-                pickerRequestBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.captureBoundaryRequest,
-                routeBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.presentedFullScreen,
-                fullScreenBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.photoReviewScanReturn,
-                scanReturnBeforeSubmission
-            )
-            XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
-            XCTAssertEqual(
-                router.pathBinding(for: .home).wrappedValue,
-                homePathBeforeSubmission
-            )
-            XCTAssertEqual(
-                router.pathBinding(for: .listings).wrappedValue,
-                listingsPathBeforeSubmission
-            )
-            XCTAssertNil(pendingScanFocus)
-            XCTAssertEqual(camera.startCount, 0)
-            XCTAssertEqual(camera.captureCount, 0)
-            XCTAssertFalse(photoReviewHost.isCommitting)
-            for photo in displayedPhotos {
-                XCTAssertTrue(
-                    fileManager.fileExists(atPath: photo.photoURL.path)
-                )
-                XCTAssertTrue(
-                    fileManager.fileExists(atPath: photo.thumbnailURL.path)
-                )
-            }
-        }
-
-        await AppShellPhotoReviewSubmissionTransaction.perform(
-            session: session,
-            captureFlow: captureFlow,
-            host: photoReviewHost,
-            router: router,
-            submissionHost: submissionHost,
-            setReturnFocus: { pendingScanFocus = $0 }
-        )
+        await scenario.perform(submissionHost: submissionHost)
 
         XCTAssertEqual(submissionHost.retention, .intakeUnavailable)
         XCTAssertNil(submissionHost.acceptedRun)
         XCTAssertFalse(submissionHost.clearedIntake)
         XCTAssertFalse(submissionHost.isSubmitting)
-        XCTAssertFalse(photoReviewHost.isCommitting)
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
         let replaceCount = await draftStore.replacePhotosCount
         let discardCount = await draftStore.discardCount
         let discardExactlyCount = await draftStore.discardExactlyCount
@@ -2602,69 +1648,29 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(attemptClearCount, 0)
         XCTAssertEqual(tokenCallCount, 0)
         XCTAssertTrue(payloadsAfterRefusal.isEmpty)
-        try await assertPhotoReviewStatePreserved()
+        try await scenario.assertPreserved()
 
-        guard case .submissionRejected(
-            eventID: let rejectionEventID,
-            retention: let eventRetention
-        )? = submissionHost.pendingPresentationEvent else {
-            return XCTFail(
-                "Expected a typed intake-unavailable presentation event."
-            )
-        }
-        XCTAssertEqual(eventRetention, .intakeUnavailable)
-
-        let rejectionPresentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
+        var presentationProbe = RetainedSubmissionPresentationProbe()
+        let rejection = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .intakeUnavailable,
+            family: .review
         )
-        XCTAssertEqual(rejectionPresentation.primaryActionLabel, "Review")
+        let rejectionEventID = rejection.eventID
+        let rejectionPresentation = rejection.presentation
         XCTAssertNotEqual(
             rejectionPresentation.primaryActionLabel,
             "Try again"
-        )
-        XCTAssertEqual(
-            rejectionPresentation.visibleMessage,
-            "This item can't be sent as it is."
-        )
-        XCTAssertEqual(
-            rejectionPresentation.accessibilityAnnouncement,
-            "This item can't be sent as it is."
         )
         XCTAssertNotEqual(
             rejectionPresentation.visibleMessage,
             "This didn't go through. Your item is still saved on this phone."
         )
-        XCTAssertFalse(rejectionPresentation.mutationControlsLocked)
-        XCTAssertTrue(rejectionPresentation.rendersSubmittedMedia)
         XCTAssertEqual(
-            rejectionPresentation.announcementEvent,
-            .submissionRejected(eventID: rejectionEventID)
-        )
-        XCTAssertEqual(
-            rejectionPresentation.primaryActionEvent,
-            .reviewSubmission(eventID: rejectionEventID)
-        )
-
-        var announcements: [String] = []
-        var acknowledgedEventIDs: [UUID] = []
-        var effectConsumer = PhotoReviewSubmissionEffectConsumer()
-        let consumeRejection = {
-            effectConsumer.consume(
-                PhotoReviewSubmissionPresentation(host: submissionHost),
-                postAnnouncement: { announcements.append($0) },
-                acknowledgePresentation: {
-                    acknowledgedEventIDs.append($0)
-                }
-            )
-        }
-        consumeRejection()
-        consumeRejection()
-        consumeRejection()
-        XCTAssertEqual(
-            announcements,
+            presentationProbe.announcements,
             ["This item can't be sent as it is."]
         )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
 
         if case .submissionRejected(
             eventID: let stillPendingEventID,
@@ -2729,19 +1735,13 @@ final class CaptureFlowTests: XCTestCase {
             returnedPresentation.primaryActionEvent,
             .startListing
         )
-        effectConsumer.consume(
-            returnedPresentation,
-            postAnnouncement: { announcements.append($0) },
-            acknowledgePresentation: {
-                acknowledgedEventIDs.append($0)
-            }
-        )
+        presentationProbe.consumeIdle(host: submissionHost)
         XCTAssertEqual(
-            announcements,
+            presentationProbe.announcements,
             ["This item can't be sent as it is."]
         )
-        XCTAssertTrue(acknowledgedEventIDs.isEmpty)
-        try await assertPhotoReviewStatePreserved()
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
+        try await scenario.assertPreserved()
     }
 
     func testAcceptedSubmissionClearsTheDraftAndLeavesPhotoReviewForScan() async throws {
@@ -6751,6 +5751,316 @@ final class CaptureFlowTests: XCTestCase {
             context.fill(CGRect(x: 200, y: 0, width: 200, height: 200))
         })
     }
+}
+
+@MainActor
+private final class RetainedSubmissionPhotoReviewScenario {
+    let fileManager: FileManager
+    let root: URL
+    let draftStore: any CaptureDraftStoring
+    let displayedPhotos: [StagedCapturePhoto]
+    let expectedDurablePhotos: [StagedCapturePhoto]
+    let camera: TestCaptureCamera
+    let captureFlow: CaptureFlowModel
+    let router: AppRouter
+    let photoReviewHost: PhotoReviewLiveHost
+    let session: PhotoReviewLiveSession
+    private(set) var pendingScanFocus: PhotoReviewScanFocus?
+
+    private let routeBeforeSubmission: CaptureBoundaryRequest?
+    private let fullScreenBeforeSubmission: AppFullScreen?
+    private let scanReturnBeforeSubmission: PhotoReviewScanReturn?
+    private let selectedTabBeforeSubmission: PrimaryTab
+    private let homePathBeforeSubmission: [AppRoute]
+    private let listingsPathBeforeSubmission: [AppRoute]
+    private let sessionPhotosBeforeSubmission: [StagedCapturePhoto]
+    private let selectedPhotoBeforeSubmission: StagedCapturePhoto.ID?
+    private let actionsPhotoBeforeSubmission: StagedCapturePhoto.ID?
+    private let pickerRequestBeforeSubmission: PhotoReviewPickerRequest?
+    private let stagedPhotosBeforeSubmission: [StagedCapturePhoto]
+    private let capturePhaseBeforeSubmission: CapturePhase
+
+    var attemptRoot: URL {
+        root.appendingPathComponent("attempt", isDirectory: true)
+    }
+
+    static func standard(
+        name: String,
+        photoData: [Data]
+    ) async throws -> RetainedSubmissionPhotoReviewScenario {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "\(name)-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let draftStore = LocalCaptureDraftStore(
+            rootDirectory: root.appendingPathComponent(
+                "draft",
+                isDirectory: true
+            )
+        )
+        var photos: [StagedCapturePhoto] = []
+        for data in photoData {
+            photos.append(
+                try await draftStore.append(
+                    imageData: data,
+                    libraryTransferReceipt: nil
+                ).appendedPhoto
+            )
+        }
+        return try await RetainedSubmissionPhotoReviewScenario(
+            fileManager: fileManager,
+            root: root,
+            draftStore: draftStore,
+            displayedPhotos: photos,
+            expectedDurablePhotos: photos
+        )
+    }
+
+    init(
+        fileManager: FileManager = .default,
+        root: URL,
+        draftStore: any CaptureDraftStoring,
+        displayedPhotos: [StagedCapturePhoto],
+        expectedDurablePhotos: [StagedCapturePhoto]
+    ) async throws {
+        self.fileManager = fileManager
+        self.root = root
+        self.draftStore = draftStore
+        self.displayedPhotos = displayedPhotos
+        self.expectedDurablePhotos = expectedDurablePhotos
+
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized
+        )
+        self.camera = camera
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: draftStore
+        )
+        self.captureFlow = captureFlow
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        self.router = router
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: displayedPhotos,
+            opener: .reviewButton
+        )
+        routeBeforeSubmission = router.captureBoundaryRequest
+        fullScreenBeforeSubmission = router.presentedFullScreen
+        scanReturnBeforeSubmission = router.photoReviewScanReturn
+        selectedTabBeforeSubmission = router.selectedTab
+        homePathBeforeSubmission =
+            router.pathBinding(for: .home).wrappedValue
+        listingsPathBeforeSubmission =
+            router.pathBinding(for: .listings).wrappedValue
+
+        let photoReviewHost = PhotoReviewLiveHost()
+        self.photoReviewHost = photoReviewHost
+        XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
+        let session = try XCTUnwrap(photoReviewHost.session)
+        self.session = session
+        let selectedPhoto = try XCTUnwrap(displayedPhotos.last)
+        XCTAssertTrue(
+            session.store.selectPhotoForActions(id: selectedPhoto.id)
+        )
+        sessionPhotosBeforeSubmission = session.store.photos
+        selectedPhotoBeforeSubmission = session.store.selectedPhotoID
+        actionsPhotoBeforeSubmission = session.store.actionsPhotoID
+        pickerRequestBeforeSubmission = session.store.activePickerRequest
+        stagedPhotosBeforeSubmission = captureFlow.stagedPhotos
+        capturePhaseBeforeSubmission = captureFlow.phase
+    }
+
+    func perform(submissionHost: ItemRunSubmissionHost) async {
+        await AppShellPhotoReviewSubmissionTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: photoReviewHost,
+            router: router,
+            submissionHost: submissionHost,
+            setReturnFocus: { self.pendingScanFocus = $0 }
+        )
+    }
+
+    func assertPreserved() async throws {
+        let durablePhotos = try await draftStore.loadPhotos()
+        XCTAssertEqual(
+            durablePhotos,
+            expectedDurablePhotos
+        )
+        XCTAssertEqual(captureFlow.stagedPhotos, stagedPhotosBeforeSubmission)
+        XCTAssertEqual(captureFlow.phase, capturePhaseBeforeSubmission)
+        XCTAssertTrue(photoReviewHost.session === session)
+        XCTAssertEqual(session.store.photos, sessionPhotosBeforeSubmission)
+        XCTAssertEqual(
+            session.store.selectedPhotoID,
+            selectedPhotoBeforeSubmission
+        )
+        XCTAssertEqual(
+            session.store.actionsPhotoID,
+            actionsPhotoBeforeSubmission
+        )
+        XCTAssertEqual(
+            session.store.activePickerRequest,
+            pickerRequestBeforeSubmission
+        )
+        XCTAssertEqual(router.captureBoundaryRequest, routeBeforeSubmission)
+        XCTAssertEqual(
+            router.presentedFullScreen,
+            fullScreenBeforeSubmission
+        )
+        XCTAssertEqual(
+            router.photoReviewScanReturn,
+            scanReturnBeforeSubmission
+        )
+        XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
+        XCTAssertEqual(
+            router.pathBinding(for: .home).wrappedValue,
+            homePathBeforeSubmission
+        )
+        XCTAssertEqual(
+            router.pathBinding(for: .listings).wrappedValue,
+            listingsPathBeforeSubmission
+        )
+        XCTAssertNil(pendingScanFocus)
+        XCTAssertEqual(camera.startCount, 0)
+        XCTAssertEqual(camera.captureCount, 0)
+        XCTAssertFalse(photoReviewHost.isCommitting)
+        for photo in displayedPhotos {
+            XCTAssertTrue(
+                fileManager.fileExists(atPath: photo.photoURL.path)
+            )
+            XCTAssertTrue(
+                fileManager.fileExists(atPath: photo.thumbnailURL.path)
+            )
+        }
+    }
+
+    func cleanUp() {
+        try? fileManager.removeItem(at: root)
+    }
+}
+
+@MainActor
+private struct RetainedSubmissionPresentationProbe {
+    private(set) var announcements: [String] = []
+    private(set) var acknowledgedEventIDs: [UUID] = []
+    private var effectConsumer = PhotoReviewSubmissionEffectConsumer()
+
+    mutating func assertNewEvent(
+        host: ItemRunSubmissionHost,
+        retention: ItemRunSubmissionRetention,
+        family: PhotoReviewSubmissionRejectionFamily,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> (
+        eventID: UUID,
+        presentation: PhotoReviewSubmissionPresentation
+    ) {
+        guard case .submissionRejected(
+            eventID: let eventID,
+            retention: let eventRetention
+        )? = host.pendingPresentationEvent else {
+            XCTFail(
+                "Expected a typed retained-submission presentation event.",
+                file: file,
+                line: line
+            )
+            throw RetainedSubmissionProbeError.missingEvent
+        }
+        XCTAssertEqual(eventRetention, retention, file: file, line: line)
+
+        let presentation = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(
+            presentation.primaryActionLabel,
+            family.primaryActionLabel,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            presentation.primaryActionEvent,
+            family.primaryActionEvent(eventID: eventID),
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            presentation.visibleMessage,
+            family.message,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            presentation.accessibilityAnnouncement,
+            family.message,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            presentation.announcementEvent,
+            .submissionRejected(eventID: eventID),
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            presentation.mutationControlsLocked,
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            presentation.rendersSubmittedMedia,
+            file: file,
+            line: line
+        )
+
+        let priorAnnouncements = announcements.count
+        for _ in 0..<3 {
+            effectConsumer.consume(
+                PhotoReviewSubmissionPresentation(host: host),
+                postAnnouncement: { announcements.append($0) },
+                acknowledgePresentation: {
+                    acknowledgedEventIDs.append($0)
+                }
+            )
+        }
+        XCTAssertEqual(
+            announcements.count,
+            priorAnnouncements + 1,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            announcements.last,
+            family.message,
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            acknowledgedEventIDs.isEmpty,
+            file: file,
+            line: line
+        )
+        return (eventID, presentation)
+    }
+
+    mutating func consumeIdle(host: ItemRunSubmissionHost) {
+        effectConsumer.consume(
+            PhotoReviewSubmissionPresentation(host: host),
+            postAnnouncement: { announcements.append($0) },
+            acknowledgePresentation: {
+                acknowledgedEventIDs.append($0)
+            }
+        )
+    }
+}
+
+private enum RetainedSubmissionProbeError: Error {
+    case missingEvent
 }
 
 private struct CaptureFlowBearerTokenProvider: BearerTokenProviding {

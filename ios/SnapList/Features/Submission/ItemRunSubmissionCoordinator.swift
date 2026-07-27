@@ -1,161 +1,5 @@
 import Foundation
 import Observation
-#if DEBUG
-import CoreFoundation
-#endif
-
-#if DEBUG
-struct DelayedItemRunSubmissionFixture {
-    func complete() async {
-        try? await Task.sleep(for: .seconds(2))
-    }
-}
-
-private struct AcceptedPresentationGatedItemRunSubmitter: ItemRunSubmitting {
-    private static let restoredPhotoPath = "/fixture/capture-photo.jpg"
-    private static let restoredPhotoData = Data([
-        0xFF, 0xD8, 0xFF, 0xD9,
-    ])
-
-    static func readRestoredPhoto(at url: URL) throws -> Data {
-        guard url.isFileURL, url.path == restoredPhotoPath else {
-            throw CocoaError(.fileReadNoSuchFile)
-        }
-        return restoredPhotoData
-    }
-
-    func submit(
-        _ payload: ItemRunSubmissionPayload,
-        bearerToken: String
-    ) async -> ItemRunSubmissionTransportOutcome {
-        guard let firstPhoto = payload.attempt.photos.first,
-              payload.attempt.photos.count == payload.photoData.count else {
-            return .rejected
-        }
-        let fingerprintBytes = Data(
-            payload.attempt.photos
-                .map(\.contentSha256)
-                .joined(separator: ":")
-                .utf8
-        )
-        return .created(
-            MobileItemSubmissionEnvelope.DataPayload(
-                itemId: firstPhoto.photoID,
-                runId: payload.attempt.idempotencyKey,
-                status: "queued",
-                stage: "queued",
-                photoIdentity: .init(
-                    kind: "content_sha256_set_v1",
-                    fingerprint: LocalPhotoFingerprint.digest(
-                        of: fingerprintBytes
-                    )
-                ),
-                photos: payload.attempt.photos.map { photo in
-                    MobileItemSubmissionEnvelope.PhotoReceipt(
-                        ordinal: photo.ordinal,
-                        contentSha256: photo.contentSha256,
-                        byteLength: photo.byteLength,
-                        mediaType: photo.mediaType.rawValue
-                    )
-                }
-            )
-        )
-    }
-}
-
-private struct AcceptedPresentationGatedBearerTokenProvider:
-    BearerTokenProviding {
-    func bearerToken() async throws -> String {
-        "accepted-presentation-gated-fixture"
-    }
-}
-
-private struct RateLimitedItemRunSubmitter: ItemRunSubmitting {
-    func submit(
-        _ payload: ItemRunSubmissionPayload,
-        bearerToken: String
-    ) async -> ItemRunSubmissionTransportOutcome {
-        .rateLimited(reason: nil)
-    }
-}
-
-@MainActor
-private final class ItemRunSubmissionAcknowledgmentNotificationGate {
-    private typealias PendingAcknowledgment = (
-        eventID: UUID,
-        forward: (UUID) -> Void
-    )
-
-    private let notificationName: CFNotificationName
-    private var pendingAcknowledgment: PendingAcknowledgment?
-    private var didReceiveSignal = false
-    private var didForwardAcknowledgment = false
-
-    init(notificationName: SubmissionAcknowledgmentNotificationName) {
-        self.notificationName = CFNotificationName(
-            rawValue: notificationName.rawValue as CFString
-        )
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let gate = Unmanaged<
-                    ItemRunSubmissionAcknowledgmentNotificationGate
-                >
-                    .fromOpaque(observer)
-                    .takeUnretainedValue()
-                Task { @MainActor in
-                    gate.receiveSignal()
-                }
-            },
-            self.notificationName.rawValue,
-            nil,
-            .deliverImmediately
-        )
-    }
-
-    deinit {
-        CFNotificationCenterRemoveObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            notificationName,
-            nil
-        )
-    }
-
-    func withhold(
-        eventID: UUID,
-        forward: @escaping (UUID) -> Void
-    ) {
-        guard !didForwardAcknowledgment else {
-            return
-        }
-        if didReceiveSignal {
-            didForwardAcknowledgment = true
-            forward(eventID)
-            return
-        }
-        guard pendingAcknowledgment == nil else {
-            return
-        }
-        pendingAcknowledgment = (eventID, forward)
-    }
-
-    private func receiveSignal() {
-        guard !didForwardAcknowledgment else {
-            return
-        }
-        didReceiveSignal = true
-        guard let pendingAcknowledgment else {
-            return
-        }
-        self.pendingAcknowledgment = nil
-        didForwardAcknowledgment = true
-        pendingAcknowledgment.forward(pendingAcknowledgment.eventID)
-    }
-}
-#endif
 
 enum ItemRunSubmissionPresentationEvent: Equatable, Sendable {
     case itemSaved(eventID: UUID, acceptedRun: AcceptedItemRun)
@@ -163,6 +7,52 @@ enum ItemRunSubmissionPresentationEvent: Equatable, Sendable {
         eventID: UUID,
         retention: ItemRunSubmissionRetention
     )
+}
+
+enum PhotoReviewSubmissionRejectionFamily: Equatable {
+    case tryAgain
+    case review
+
+    init?(retention: ItemRunSubmissionRetention) {
+        switch retention {
+        case .rateLimited(reason: _),
+             .attemptNotPersisted,
+             .submissionUnavailable:
+            self = .tryAgain
+        case .rejected,
+             .intakeUnavailable:
+            self = .review
+        default:
+            return nil
+        }
+    }
+
+    var primaryActionLabel: String {
+        switch self {
+        case .tryAgain:
+            "Try again"
+        case .review:
+            "Review"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .tryAgain:
+            "This didn't go through. Your item is still saved on this phone."
+        case .review:
+            "This item can't be sent as it is."
+        }
+    }
+
+    func primaryActionEvent(eventID: UUID) -> PhotoReviewBoundaryEvent {
+        switch self {
+        case .tryAgain:
+            .startListing
+        case .review:
+            .reviewSubmission(eventID: eventID)
+        }
+    }
 }
 
 /// One presentation event owns one acknowledgment. The lock lets cancellation close
@@ -363,18 +253,13 @@ final class ItemRunSubmissionHost {
             acceptedRun = nil
             clearedIntake = false
             self.retention = retention
-            switch retention {
-            case .rateLimited(reason: _),
-                 .attemptNotPersisted,
-                 .submissionUnavailable,
-                 .rejected,
-                 .intakeUnavailable:
+            if PhotoReviewSubmissionRejectionFamily(
+                retention: retention
+            ) != nil {
                 pendingPresentationEvent = .submissionRejected(
                     eventID: UUID(),
                     retention: retention
                 )
-            default:
-                break
             }
         }
     }
@@ -402,7 +287,9 @@ final class ItemRunSubmissionHost {
             eventID: let pendingEventID,
             retention: let retention
         )? = pendingPresentationEvent,
-              retention == .rejected || retention == .intakeUnavailable,
+              PhotoReviewSubmissionRejectionFamily(
+                  retention: retention
+              ) == .review,
               pendingEventID == eventID else {
             return false
         }
@@ -424,11 +311,6 @@ final class ItemRunSubmissionHost {
 /// Keep this value type-driven: transport reason strings are server diagnostics,
 /// never presentation authority.
 struct PhotoReviewSubmissionPresentation: Equatable {
-    private static let retainedMessage =
-        "This didn't go through. Your item is still saved on this phone."
-    private static let reviewMessage =
-        "This item can't be sent as it is."
-
     enum AnnouncementEvent: Equatable {
         case saving
         case itemSaved(eventID: UUID)
@@ -495,67 +377,18 @@ struct PhotoReviewSubmissionPresentation: Equatable {
             )
         } else if case .submissionRejected(
             eventID: let eventID,
-            retention: .rateLimited(reason: _)
-        )? = host.pendingPresentationEvent {
+            retention: let retention
+        )? = host.pendingPresentationEvent,
+                  let family = PhotoReviewSubmissionRejectionFamily(
+                      retention: retention
+                  ) {
             self = PhotoReviewSubmissionPresentation(
-                primaryActionLabel: "Try again",
-                primaryActionEvent: .startListing,
+                primaryActionLabel: family.primaryActionLabel,
+                primaryActionEvent: family.primaryActionEvent(eventID: eventID),
                 mutationControlsLocked: false,
                 announcementEvent: .submissionRejected(eventID: eventID),
-                accessibilityAnnouncement: Self.retainedMessage,
-                visibleMessage: Self.retainedMessage,
-                rendersSubmittedMedia: true
-            )
-        } else if case .submissionRejected(
-            eventID: let eventID,
-            retention: .attemptNotPersisted
-        )? = host.pendingPresentationEvent {
-            self = PhotoReviewSubmissionPresentation(
-                primaryActionLabel: "Try again",
-                primaryActionEvent: .startListing,
-                mutationControlsLocked: false,
-                announcementEvent: .submissionRejected(eventID: eventID),
-                accessibilityAnnouncement: Self.retainedMessage,
-                visibleMessage: Self.retainedMessage,
-                rendersSubmittedMedia: true
-            )
-        } else if case .submissionRejected(
-            eventID: let eventID,
-            retention: .submissionUnavailable
-        )? = host.pendingPresentationEvent {
-            self = PhotoReviewSubmissionPresentation(
-                primaryActionLabel: "Try again",
-                primaryActionEvent: .startListing,
-                mutationControlsLocked: false,
-                announcementEvent: .submissionRejected(eventID: eventID),
-                accessibilityAnnouncement: Self.retainedMessage,
-                visibleMessage: Self.retainedMessage,
-                rendersSubmittedMedia: true
-            )
-        } else if case .submissionRejected(
-            eventID: let eventID,
-            retention: .rejected
-        )? = host.pendingPresentationEvent {
-            self = PhotoReviewSubmissionPresentation(
-                primaryActionLabel: "Review",
-                primaryActionEvent: .reviewSubmission(eventID: eventID),
-                mutationControlsLocked: false,
-                announcementEvent: .submissionRejected(eventID: eventID),
-                accessibilityAnnouncement: Self.reviewMessage,
-                visibleMessage: Self.reviewMessage,
-                rendersSubmittedMedia: true
-            )
-        } else if case .submissionRejected(
-            eventID: let eventID,
-            retention: .intakeUnavailable
-        )? = host.pendingPresentationEvent {
-            self = PhotoReviewSubmissionPresentation(
-                primaryActionLabel: "Review",
-                primaryActionEvent: .reviewSubmission(eventID: eventID),
-                mutationControlsLocked: false,
-                announcementEvent: .submissionRejected(eventID: eventID),
-                accessibilityAnnouncement: Self.reviewMessage,
-                visibleMessage: Self.reviewMessage,
+                accessibilityAnnouncement: family.message,
+                visibleMessage: family.message,
                 rendersSubmittedMedia: true
             )
         } else {
@@ -630,46 +463,11 @@ enum ItemRunSubmissionHostFactory {
         draftStore: any CaptureDraftStoring
     ) -> ItemRunSubmissionHost {
 #if DEBUG
-        if configuration.usesZeroNetworkFixtures,
-           configuration.submissionFixture == .acceptedPresentationGated,
-           let acknowledgmentNotification =
-               configuration.submissionAcknowledgmentNotification {
-            return ItemRunSubmissionHost(
-                coordinator: ItemRunSubmissionCoordinator(
-                    submitter: AcceptedPresentationGatedItemRunSubmitter(),
-                    attemptStore: LocalItemRunSubmissionAttemptStore(),
-                    draftStore: draftStore,
-                    tokenProvider:
-                        AcceptedPresentationGatedBearerTokenProvider(),
-                    readData: { @Sendable url in
-                        try AcceptedPresentationGatedItemRunSubmitter
-                            .readRestoredPhoto(at: url)
-                    }
-                ),
-                acknowledgmentNotification: acknowledgmentNotification
-            )
-        }
-        if configuration.usesZeroNetworkFixtures,
-           configuration.submissionFixture == .delayed {
-            return ItemRunSubmissionHost(
-                delayedFixture: DelayedItemRunSubmissionFixture()
-            )
-        }
-        if configuration.usesZeroNetworkFixtures,
-           configuration.submissionFixture == .rateLimited {
-            return ItemRunSubmissionHost(
-                coordinator: ItemRunSubmissionCoordinator(
-                    submitter: RateLimitedItemRunSubmitter(),
-                    attemptStore: LocalItemRunSubmissionAttemptStore(),
-                    draftStore: draftStore,
-                    tokenProvider:
-                        AcceptedPresentationGatedBearerTokenProvider(),
-                    readData: { @Sendable url in
-                        try AcceptedPresentationGatedItemRunSubmitter
-                            .readRestoredPhoto(at: url)
-                    }
-                )
-            )
+        if let fixtureHost = ItemRunSubmissionDebugFixtureFactory.make(
+            configuration: configuration,
+            draftStore: draftStore
+        ) {
+            return fixtureHost
         }
 #endif
         guard !configuration.usesZeroNetworkFixtures else {

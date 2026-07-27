@@ -5,6 +5,68 @@ import XCTest
 
 @MainActor
 final class ItemRunSubmissionTests: XCTestCase {
+    func testTypedRejectionOutcomesMapToTheirPresentationFamilies() {
+        let eventID = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000071"
+        )!
+        let cases: [(
+            retention: ItemRunSubmissionRetention,
+            family: PhotoReviewSubmissionRejectionFamily,
+            label: String,
+            message: String,
+            action: PhotoReviewBoundaryEvent
+        )] = [
+            (
+                .rateLimited(reason: "opaque"),
+                .tryAgain,
+                "Try again",
+                "This didn't go through. Your item is still saved on this phone.",
+                .startListing
+            ),
+            (
+                .attemptNotPersisted,
+                .tryAgain,
+                "Try again",
+                "This didn't go through. Your item is still saved on this phone.",
+                .startListing
+            ),
+            (
+                .submissionUnavailable,
+                .tryAgain,
+                "Try again",
+                "This didn't go through. Your item is still saved on this phone.",
+                .startListing
+            ),
+            (
+                .rejected,
+                .review,
+                "Review",
+                "This item can't be sent as it is.",
+                .reviewSubmission(eventID: eventID)
+            ),
+            (
+                .intakeUnavailable,
+                .review,
+                "Review",
+                "This item can't be sent as it is.",
+                .reviewSubmission(eventID: eventID)
+            ),
+        ]
+
+        for testCase in cases {
+            let family = PhotoReviewSubmissionRejectionFamily(
+                retention: testCase.retention
+            )
+            XCTAssertEqual(family, testCase.family)
+            XCTAssertEqual(family?.primaryActionLabel, testCase.label)
+            XCTAssertEqual(family?.message, testCase.message)
+            XCTAssertEqual(
+                family?.primaryActionEvent(eventID: eventID),
+                testCase.action
+            )
+        }
+    }
+
     // MARK: Persisted attempt identity
 
     func testPersistsOneKeyAndTheOrderedSnapshotBeforeAnyNetworkActivity() async {
