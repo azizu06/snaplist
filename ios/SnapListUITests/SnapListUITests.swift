@@ -727,6 +727,21 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(denied.buttons["scan.flash"].exists)
     }
 
+    func testScanLibraryUsesExactLiveAndRecoveryLabels() {
+        let live = launch(extraArguments: ["--visual-state=CAM-01"])
+        let liveLibrary = live.buttons["scan.library"]
+
+        XCTAssertTrue(liveLibrary.waitForExistence(timeout: 2))
+        XCTAssertEqual(liveLibrary.label, "Library")
+        live.terminate()
+
+        let recovery = launch(extraArguments: ["--visual-state=CAM-V1"])
+        let recoveryLibrary = recovery.buttons["scan.choose-library"]
+
+        XCTAssertTrue(recoveryLibrary.waitForExistence(timeout: 2))
+        XCTAssertEqual(recoveryLibrary.label, "Choose from library")
+    }
+
     func testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionCoverAndProgressiveActions() {
         let app = launch(extraArguments: ["--photo-review-state=REV-02"])
         let screen = app.scrollViews["photo-review.screen"]
