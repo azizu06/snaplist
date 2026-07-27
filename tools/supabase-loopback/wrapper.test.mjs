@@ -513,17 +513,21 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
       useDockerConfig: true,
     },
     {
-      name: "Go EqualFold long-s alias hides an earlier typed error",
+      name: "Go EqualFold long-s alias duplicates a valid typed field",
       context: "unicode-long-s",
       metadata:
-        '{"Name":"unicode-long-s","Metadata":{},"Endpointſ":[],"Endpoints":{"docker":{"Host":"unix:///var/run/docker.sock","SkipTLSVerify":false}}}',
+        '{"Name":"unicode-long-s","Metadata":{},"Endpointſ":{"docker":{"Host":"unix:///var/run/docker.sock","SkipTLSVerify":false}},"Endpoints":{"docker":{"Host":"unix:///var/run/docker.sock","SkipTLSVerify":false}}}',
+      expectedError:
+        /Docker context unicode-long-s contains duplicate typed field Endpoints/,
       useDockerConfig: true,
     },
     {
-      name: "Go EqualFold Kelvin alias hides an earlier typed error",
+      name: "Go EqualFold Kelvin alias duplicates a valid typed field",
       context: "unicode-kelvin",
       metadata:
-        '{"Name":"unicode-kelvin","Metadata":{},"Endpoints":{"docker":{"Host":"unix:///var/run/docker.sock","SKipTLSVerify":"false","SkipTLSVerify":false}}}',
+        '{"Name":"unicode-kelvin","Metadata":{},"Endpoints":{"docker":{"Host":"unix:///var/run/docker.sock","SKipTLSVerify":false,"SkipTLSVerify":false}}}',
+      expectedError:
+        /Docker context unicode-kelvin contains duplicate typed field SkipTLSVerify/,
       useDockerConfig: true,
     },
   ];
@@ -576,7 +580,8 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
             return { status: 0 };
           },
         }),
-        /Docker (?:configuration|context|endpoint)/i,
+        contextCase.expectedError ??
+          /Docker (?:configuration|context|endpoint)/i,
       );
       assert.equal(childSpawned, false);
     });
@@ -691,6 +696,29 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
         await configureFixturePlatform(fixture, "linux", "x64");
         const home = path.join(fixture.root, "home");
         await mkdir(path.join(home, ".docker"), { recursive: true });
+        return { HOME: home };
+      },
+    },
+    {
+      name: "Go EqualFold aliases remain valid without duplicates",
+      expectedHost: "unix:///var/run/docker.sock",
+      configure: async (fixture) => {
+        const home = path.join(fixture.root, "home");
+        const contextName = "unicode-simple-fold";
+        await writeDockerContext(
+          path.join(home, ".docker"),
+          contextName,
+          {
+            Name: contextName,
+            Metadata: {},
+            "Endpointſ": {
+              docker: {
+                Host: "unix:///var/run/docker.sock",
+                "SKipTLSVerify": false,
+              },
+            },
+          },
+        );
         return { HOME: home };
       },
     },
