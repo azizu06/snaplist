@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseToml } from "smol-toml";
 
 const toolRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(toolRoot, "..", "..");
@@ -735,33 +736,22 @@ function rejectUnsafeNetworkOverride(args) {
 }
 
 function parseAnalyticsDisabled(config) {
-  let inAnalytics = false;
-  let analyticsSections = 0;
-  let enabledValues = 0;
-
-  for (const line of config.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
-
-    const section = trimmed.match(/^\[([^\]]+)\]\s*(?:#.*)?$/);
-    if (section) {
-      inAnalytics = section[1].trim() === "analytics";
-      if (inAnalytics) analyticsSections += 1;
-      continue;
-    }
-    if (!inAnalytics) continue;
-
-    const enabled = trimmed.match(/^enabled\s*=\s*(\S+)(?:\s+#.*)?$/);
-    if (!enabled) continue;
-    enabledValues += 1;
-    if (enabled[1] !== "false") {
-      fail('effective [analytics] enabled must be the boolean literal false');
-    }
+  let parsed;
+  try {
+    parsed = parseToml(config);
+  } catch {
+    fail("effective Supabase analytics config is invalid TOML");
   }
 
-  if (analyticsSections !== 1 || enabledValues !== 1) {
+  const analytics = parsed.analytics;
+  if (
+    analytics === null ||
+    typeof analytics !== "object" ||
+    Array.isArray(analytics) ||
+    analytics.enabled !== false
+  ) {
     fail(
-      "effective Supabase config must contain exactly one [analytics] block with enabled = false",
+      "effective Supabase config must define analytics.enabled as the boolean false",
     );
   }
 }

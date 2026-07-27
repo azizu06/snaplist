@@ -762,6 +762,27 @@ test("wrapper rejects unsafe effective Analytics config before child spawn", asy
     ["missing analytics block", "[api]\nport = 54321\n"],
     ["analytics enabled", "[analytics]\nenabled = true\n"],
     ["malformed analytics flag", '[analytics]\nenabled = "false"\n'],
+    [
+      "multiline string cannot impersonate disabled analytics",
+      [
+        "[studio]",
+        'api_url = """',
+        "[analytics]",
+        "enabled = false",
+        '"""',
+        '["analytics"]',
+        "enabled = true",
+        "",
+      ].join("\n"),
+    ],
+    [
+      "duplicate analytics definitions",
+      "analytics.enabled = false\n[analytics]\nenabled = false\n",
+    ],
+    [
+      "malformed analytics table",
+      "[analytics\nenabled = false\n",
+    ],
   ];
 
   for (const [name, config] of cases) {
@@ -787,27 +808,32 @@ test("wrapper rejects unsafe effective Analytics config before child spawn", asy
     });
   }
 
-  const fixture = await makeFixture(t);
-  const supabaseRoot = path.join(fixture.root, "supabase");
-  await mkdir(supabaseRoot);
-  await writeFile(
-    path.join(supabaseRoot, "config.toml"),
-    "[analytics]\nenabled = false\n",
-  );
-  const calls = [];
-  await runSupabase(["start", "--workdir", fixture.root], {
-    ...fixture.options,
-    processEnvironment: await defaultDockerEnvironment(fixture),
-    invokeCli: async (command, args, options) => {
-      calls.push({ command, args, options });
-      return { status: 0 };
-    },
-  });
-  assert.equal(calls.length, 1);
-  assert.equal(
-    calls[0].options.env.SUPABASE_GO_BINARY,
-    fixture.paths.binaryPath,
-  );
+  for (const [name, config] of [
+    ["canonical table", "[analytics]\nenabled = false\n"],
+    ["quoted table", '["analytics"]\nenabled = false\n'],
+    ["dotted key", "analytics.enabled = false\n"],
+  ]) {
+    await t.test(`${name} is accepted`, async (t) => {
+      const fixture = await makeFixture(t);
+      const supabaseRoot = path.join(fixture.root, "supabase");
+      await mkdir(supabaseRoot);
+      await writeFile(path.join(supabaseRoot, "config.toml"), config);
+      const calls = [];
+      await runSupabase(["start", "--workdir", fixture.root], {
+        ...fixture.options,
+        processEnvironment: await defaultDockerEnvironment(fixture),
+        invokeCli: async (command, args, options) => {
+          calls.push({ command, args, options });
+          return { status: 0 };
+        },
+      });
+      assert.equal(calls.length, 1);
+      assert.equal(
+        calls[0].options.env.SUPABASE_GO_BINARY,
+        fixture.paths.binaryPath,
+      );
+    });
+  }
 });
 
 test("every wrapper command rejects unsafe effective Analytics config before child spawn", async (t) => {

@@ -66,6 +66,7 @@
     "eslint-config-next": "16.2.9",
     "jose": "^6.2.3",
     "pg": "^8.22.0",
+    "smol-toml": "1.7.0",
     "supabase": "^2.105.0",
     "tailwindcss": "^4",
     "tsx": "^4.20.6",
