@@ -924,7 +924,6 @@ struct PhotoReviewView: View {
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @GestureState private var nativeDragGestureIsActive = false
 
     private enum PickerFocusTarget: Hashable {
         case addButton
@@ -1000,17 +999,6 @@ struct PhotoReviewView: View {
                 notification: .announcement,
                 argument: announcement
             )
-        }
-        .onChange(
-            of: nativeDragGestureIsActive
-        ) { wasActive, isActive in
-            guard wasActive, !isActive else {
-                return
-            }
-            // SwiftUI's DropDelegate has no general session-ended callback. This
-            // simultaneous observer resets automatically for release and system
-            // cancellation; the short delay lets a valid performDrop win first.
-            dragPresentation.scheduleCancellation(reduceMotion: reduceMotion)
         }
         .overlay(alignment: .topLeading) {
 #if DEBUG
@@ -1276,8 +1264,15 @@ struct PhotoReviewView: View {
             .frame(width: 76, height: 76)
             .clipped()
             .clipShape(.rect(cornerRadius: 12))
+            .onDisappear {
+                // The native preview owns the drag-session lifetime. Its disappearance
+                // covers release and system cancellation even when no drop target
+                // receives dropExited or performDrop.
+                dragPresentation.scheduleCancellation(
+                    reduceMotion: reduceMotion
+                )
+            }
         }
-        .simultaneousGesture(nativeDragLifecycleObserver)
         .onDrop(
             of: [UTType.plainText],
             delegate: PhotoReviewThumbnailDropDelegate(
@@ -1287,19 +1282,6 @@ struct PhotoReviewView: View {
                 reduceMotion: reduceMotion
             )
         )
-    }
-
-    private var nativeDragLifecycleObserver: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(before: DragGesture(minimumDistance: 0))
-            .updating($nativeDragGestureIsActive) { value, isActive, _ in
-                switch value {
-                case .first(true), .second(true, _):
-                    isActive = true
-                default:
-                    break
-                }
-            }
     }
 
     private func edgeAutoScrollDropZone(
