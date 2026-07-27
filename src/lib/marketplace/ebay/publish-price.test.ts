@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MockEbayAdapter } from "./mock";
 import { publishListingToEbayAndNotify } from "./publish";
+import type { EbayPublishFallbackBinding } from "./types";
 
 /**
  * Fully offline contract tests for the shared publish service used by BOTH
@@ -29,13 +30,75 @@ interface FakeListing {
   last_priced_at?: string;
 }
 
-function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
+function fakePublishClient(
+  priceOverride: unknown,
+  suggestedPrice = 44.44,
+  connected = true,
+): {
   client: SupabaseClient;
   listing: FakeListing;
+  connection: {
+    connection_generation: string;
+    policy_location_bindings: Record<string, unknown>;
+  };
+  connectionState: {
+    current: {
+      connection_generation: string;
+      policy_location_bindings: Record<string, unknown>;
+    } | null;
+  };
 } {
   const reviewRevision = "review-revision-1";
   const claimId = "publish-claim-1";
   const connectionGeneration = "11111111-1111-4111-8111-111111111111";
+  const connection = {
+    connection_generation: connectionGeneration,
+    policy_location_bindings: {
+      EBAY_US: {
+        state: "ready",
+        marketplaceId: "EBAY_US",
+        connectionGeneration,
+        fulfillmentPolicy: {
+          state: "bound",
+          selectedId: "fulfillment-1",
+          candidates: [{
+            id: "fulfillment-1",
+            label: "Fulfillment",
+            providerDefault: false,
+          }],
+        },
+        paymentPolicy: {
+          state: "bound",
+          selectedId: "payment-1",
+          candidates: [{
+            id: "payment-1",
+            label: "Payment",
+            providerDefault: false,
+          }],
+        },
+        returnPolicy: {
+          state: "bound",
+          selectedId: "return-1",
+          candidates: [{
+            id: "return-1",
+            label: "Return",
+            providerDefault: false,
+          }],
+        },
+        inventoryLocation: {
+          state: "bound",
+          selectedId: "location-1",
+          candidates: [{
+            id: "location-1",
+            label: "Location",
+            providerDefault: false,
+          }],
+        },
+        discoveredAt: "2026-07-27T12:00:00.000Z",
+      },
+    },
+  };
+  const connectionState = { current: connected ? connection : null };
   const listing: FakeListing = {
     id: "listing-1",
     item_id: "item-1",
@@ -65,6 +128,10 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
             const filters: Array<[keyof FakeListing, unknown]> = [];
             const builder = {
               eq(column: keyof FakeListing, value: unknown) {
+                filters.push([column, value]);
+                return builder;
+              },
+              is(column: keyof FakeListing, value: null) {
                 filters.push([column, value]);
                 return builder;
               },
@@ -99,53 +166,7 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
         return {
           select: () => ({
             maybeSingle: async () => ({
-              data: {
-                connection_generation: connectionGeneration,
-                policy_location_bindings: {
-                  EBAY_US: {
-                    state: "ready",
-                    marketplaceId: "EBAY_US",
-                    connectionGeneration,
-                    fulfillmentPolicy: {
-                      state: "bound",
-                      selectedId: "fulfillment-1",
-                      candidates: [{
-                        id: "fulfillment-1",
-                        label: "Fulfillment",
-                        providerDefault: false,
-                      }],
-                    },
-                    paymentPolicy: {
-                      state: "bound",
-                      selectedId: "payment-1",
-                      candidates: [{
-                        id: "payment-1",
-                        label: "Payment",
-                        providerDefault: false,
-                      }],
-                    },
-                    returnPolicy: {
-                      state: "bound",
-                      selectedId: "return-1",
-                      candidates: [{
-                        id: "return-1",
-                        label: "Return",
-                        providerDefault: false,
-                      }],
-                    },
-                    inventoryLocation: {
-                      state: "bound",
-                      selectedId: "location-1",
-                      candidates: [{
-                        id: "location-1",
-                        label: "Location",
-                        providerDefault: false,
-                      }],
-                    },
-                    discoveredAt: "2026-07-27T12:00:00.000Z",
-                  },
-                },
-              },
+              data: connectionState.current,
               error: null,
             }),
           }),
@@ -228,10 +249,141 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
     },
   } as unknown as SupabaseClient;
 
-  return { client, listing };
+  return { client, listing, connection, connectionState };
 }
 
 describe("publishListingToEbayAndNotify effective-price contract", () => {
+  it("returns a durable same-generation replay before requiring a ready binding", async () => {
+    const { client, listing, connection } = fakePublishClient(177.77);
+    const adapter = new MockEbayAdapter();
+
+    const first = await publishListingToEbayAndNotify(
+      client,
+      "user-1",
+      listing.id,
+      adapter,
+    );
+
+    expect(first.alreadyPublished).toBe(false);
+    for (const policy_location_bindings of [
+      {},
+      {
+        EBAY_US: {
+          state: "setupRequired",
+          marketplaceId: "EBAY_US",
+          connectionGeneration: connection.connection_generation,
+          fulfillmentPolicy: {
+            state: "setupRequired",
+            selectedId: null,
+            candidates: [],
+          },
+          paymentPolicy: {
+            state: "setupRequired",
+            selectedId: null,
+            candidates: [],
+          },
+          returnPolicy: {
+            state: "setupRequired",
+            selectedId: null,
+            candidates: [],
+          },
+          inventoryLocation: {
+            state: "setupRequired",
+            selectedId: null,
+            candidates: [],
+          },
+          discoveredAt: "2026-07-27T12:00:00.000Z",
+        },
+      },
+      {
+        EBAY_US: {
+          state: "selectionRequired",
+          marketplaceId: "EBAY_US",
+          connectionGeneration: connection.connection_generation,
+          fulfillmentPolicy: {
+            state: "selectionRequired",
+            selectedId: null,
+            candidates: [
+              { id: "fulfillment-a", label: "First", providerDefault: false },
+              { id: "fulfillment-b", label: "Second", providerDefault: false },
+            ],
+          },
+          paymentPolicy: {
+            state: "bound",
+            selectedId: "payment-1",
+            candidates: [{
+              id: "payment-1",
+              label: "Payment",
+              providerDefault: false,
+            }],
+          },
+          returnPolicy: {
+            state: "bound",
+            selectedId: "return-1",
+            candidates: [{
+              id: "return-1",
+              label: "Return",
+              providerDefault: false,
+            }],
+          },
+          inventoryLocation: {
+            state: "bound",
+            selectedId: "location-1",
+            candidates: [{
+              id: "location-1",
+              label: "Location",
+              providerDefault: false,
+            }],
+          },
+          discoveredAt: "2026-07-27T12:00:00.000Z",
+        },
+      },
+    ]) {
+      connection.policy_location_bindings = policy_location_bindings;
+      const replay = await publishListingToEbayAndNotify(
+        client,
+        "user-1",
+        listing.id,
+        adapter,
+      );
+      expect(replay.alreadyPublished).toBe(true);
+      expect(adapter.requests).toHaveLength(1);
+    }
+
+    connection.connection_generation = "22222222-2222-4222-8222-222222222222";
+    await expect(
+      publishListingToEbayAndNotify(client, "user-1", listing.id, adapter),
+    ).rejects.toThrow(/connection changed/i);
+    expect(adapter.requests).toHaveLength(1);
+
+    const operator = fakePublishClient(177.77, 44.44, false);
+    const operatorAdapter = Object.assign(new MockEbayAdapter(), {
+      getPublishFallbackBinding: (): EbayPublishFallbackBinding => ({
+        marketplaceId: "EBAY_US",
+        connectionGeneration: null,
+        fulfillmentPolicyId: "operator-fulfillment",
+        paymentPolicyId: "operator-payment",
+        returnPolicyId: "operator-return",
+        merchantLocationKey: "operator-location",
+      }),
+    });
+    const operatorFirst = await publishListingToEbayAndNotify(
+      operator.client,
+      "operator-user",
+      operator.listing.id,
+      operatorAdapter,
+    );
+    const operatorReplay = await publishListingToEbayAndNotify(
+      operator.client,
+      "operator-user",
+      operator.listing.id,
+      operatorAdapter,
+    );
+    expect(operatorFirst.alreadyPublished).toBe(false);
+    expect(operatorReplay.alreadyPublished).toBe(true);
+    expect(operatorAdapter.requests).toHaveLength(1);
+  });
+
   it("binds the publish claim through the tenant server authority client", async () => {
     const { client, listing } = fakePublishClient(177.77);
     const authorityRpcs: string[] = [];

@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { EbayTokenProvider } from "./types";
+import type {
+  EbayPublishBindingProvenance,
+  EbayTokenProvider,
+} from "./types";
 import { EbayApiError } from "./types";
 import { ebayApiBaseUrl } from "./oauth";
 import {
@@ -64,6 +67,7 @@ export class UserTokenProvider implements EbayTokenProvider {
     operation: "publish" | "reprice",
     expectedConnectionGeneration?: string | null,
     expectedPublishClaimId?: string | null,
+    expectedPublishBinding?: EbayPublishBindingProvenance | null,
   ) {
     const {
       accountGeneration,
@@ -77,6 +81,7 @@ export class UserTokenProvider implements EbayTokenProvider {
       operation,
       expectedConnectionGeneration,
       expectedPublishClaimId,
+      expectedPublishBinding,
       this.scheduled,
     );
     if (this.scheduled && userId !== this.userId) {

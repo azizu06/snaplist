@@ -6,6 +6,7 @@ import {
   parseEncryptionKey,
 } from "../../crypto/secretbox";
 import type { EbayIdentity, EbayTokenGrant } from "./oauth";
+import type { EbayPublishBindingProvenance } from "./types";
 
 /**
  * The ebay_connections store (issue #17): per-user eBay OAuth tokens,
@@ -187,6 +188,7 @@ export async function beginEbayProviderDispatch(
   operation: "publish" | "reprice",
   expectedConnectionGeneration: string | null | undefined,
   expectedPublishClaimId: string | null | undefined,
+  expectedPublishBinding: EbayPublishBindingProvenance | null | undefined,
   scheduled = false,
 ): Promise<{
   accountGeneration: string;
@@ -205,6 +207,7 @@ export async function beginEbayProviderDispatch(
         p_operation: operation,
         p_connection_generation: expectedConnectionGeneration ?? null,
         p_publish_claim_id: expectedPublishClaimId ?? null,
+        p_publish_binding: expectedPublishBinding ?? null,
       });
   if (error) throw new Error(`Failed to begin eBay provider dispatch: ${error.message}`);
   const lease = data as {

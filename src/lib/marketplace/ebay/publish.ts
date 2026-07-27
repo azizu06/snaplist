@@ -191,17 +191,16 @@ export async function publishListingToEbay(
     );
   }
 
-  const offerBinding = await readEbayOfferBinding(
-    supabase,
-    marketplaceId,
-    adapter,
-  );
-
   // 2. Idempotency: already live -> return the stored result, no eBay call.
   if (listing.ebay_listing_id && listing.ebay_status === "published") {
+    const currentConnectionGeneration = await readEbayReplayConnectionGeneration(
+      supabase,
+      marketplaceId,
+      adapter,
+    );
     if (
       listing.ebay_publish_connection_generation
-      !== offerBinding.connectionGeneration
+      !== currentConnectionGeneration
     ) {
       throw new PublishValidationError(
         "The eBay connection changed after this listing was published.",
@@ -215,6 +214,12 @@ export async function publishListingToEbay(
       alreadyPublished: true,
     };
   }
+
+  const offerBinding = await readEbayOfferBinding(
+    supabase,
+    marketplaceId,
+    adapter,
+  );
 
   // 3. Pull the current review token used by the atomic publish claim. The claim
   // returns the seller override from the same locked review snapshot and rejects
@@ -450,6 +455,34 @@ async function readEbayOfferBinding(
     returnPolicyId: parsed.data.returnPolicy.selectedId,
     merchantLocationKey: parsed.data.inventoryLocation.selectedId,
   };
+}
+
+async function readEbayReplayConnectionGeneration(
+  supabase: SupabaseClient,
+  marketplaceId: string,
+  adapter: EbayAdapter,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("ebay_connections")
+    .select("connection_generation")
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to read eBay connection generation: ${error.message}`);
+  }
+  if (data) {
+    return data.connection_generation as string;
+  }
+  const fallback = adapter.getPublishFallbackBinding?.();
+  if (
+    fallback
+    && fallback.marketplaceId === marketplaceId
+    && fallback.connectionGeneration === null
+  ) {
+    return null;
+  }
+  throw new PublishValidationError(
+    "Connect eBay before replaying this published listing.",
+  );
 }
 
 async function persistPublishedListing(

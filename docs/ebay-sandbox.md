@@ -84,14 +84,22 @@ call live eBay.
 4. **Business policies + location** — on the sandbox seller account create a
    fulfillment, payment, and return policy (Seller Hub → Business policies, or
    the Account API) and an inventory location (`POST
-   /sell/inventory/v1/location/{key}` or Seller Hub). Set:
-   `EBAY_FULFILLMENT_POLICY_ID`, `EBAY_PAYMENT_POLICY_ID`,
-   `EBAY_RETURN_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`.
+   /sell/inventory/v1/location/{key}` or Seller Hub). For a connected seller,
+   SnapList discovers and stores the selected marketplace values on that
+   seller's current connection generation; publish remains blocked until that
+   binding is ready. Set `EBAY_FULFILLMENT_POLICY_ID`,
+   `EBAY_PAYMENT_POLICY_ID`, `EBAY_RETURN_POLICY_ID`, and
+   `EBAY_MERCHANT_LOCATION_KEY` only for the exact operator fallback described
+   above. Those shared values are refused for every other tenant and every
+   production origin.
 5. Optionally set `EBAY_DEFAULT_CATEGORY_ID` to a leaf category for your test
    items (defaults to eBay's generic "Everything Else > Other" until real
    category resolution lands).
 
-All of these go in `.env.local` (see `.env.example`). Use a current
+App credentials and any explicitly chosen operator-fallback values go in
+`.env.local` (see `.env.example`). Connected-seller policy/location selections
+live on the RLS-owned connection row, not in shared environment configuration.
+Use a current
 `sb_secret_...` value for `SUPABASE_SERVICE_ROLE_KEY`; tenant-bound transactional
 writes reject legacy JWT-style service-role keys. The adapters read eBay config
 lazily at provider-call time and fail with a readable error when it is missing —
@@ -109,7 +117,7 @@ nothing breaks at import/boot when credentials are absent.
 | `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` | sandbox keyset | production keyset |
 | `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` | operator fallback or per-user setup | **unset**; per-user connection only |
 | `EBAY_MESSAGING_SANDBOX_OPERATOR_*` | optional one-tenant fallback binding | **unset** |
-| Policy ids + `EBAY_MERCHANT_LOCATION_KEY` | sandbox seller's | real seller's |
+| Policy ids + `EBAY_MERCHANT_LOCATION_KEY` | optional exact-operator fallback only | **unset**; each connected seller's verified binding |
 | `EBAY_VERIFICATION_TOKEN` / `EBAY_DELETION_ENDPOINT_URL` | blank | required (account-deletion endpoint) |
 
 Per-user OAuth swaps the `EbayTokenProvider` implementation handed to the HTTP

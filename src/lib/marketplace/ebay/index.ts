@@ -84,13 +84,10 @@ export function createEbayAdapter(
  * an eBay account is connected. Env credentials are accepted only for the
  * explicitly configured operator user/seller on the exact Sandbox origin.
  *
- * SINGLE-SELLER CONSTRAINT (deliberate, documented in docs/ebay-production.md):
- * business policies (EBAY_*_POLICY_ID) and the merchant location stay
- * env-configured, and policies belong to the eBay account that created them —
- * so production publishing is correct for THE seller whose policies are in the
- * env (the #17 go-live story), not for arbitrary additional sellers. True
- * multi-seller needs per-connection policy discovery via the Sell Account API
- * (sell.account scope) — tracked as a follow-up issue, out of scope here.
+ * Normal sellers publish only with the verified marketplace policy/location
+ * binding stored on their current connection generation. Process-wide policy
+ * and location values are reserved for the exact configured operator tenant
+ * and seller on `https://api.sandbox.ebay.com`; production never uses them.
  */
 export async function createEbayAdapterForUser(
   supabase: SupabaseClient,

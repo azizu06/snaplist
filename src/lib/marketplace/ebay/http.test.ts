@@ -66,6 +66,73 @@ function json(status: number, body: unknown): Response {
 }
 
 describe("HttpEbayAdapter.publishListing", () => {
+  it("rejects a changed selected binding before the first provider write", async () => {
+    type ExpectedBinding = Pick<
+      EbayPublishRequest,
+      | "marketplaceId"
+      | "fulfillmentPolicyId"
+      | "paymentPolicyId"
+      | "returnPolicyId"
+      | "merchantLocationKey"
+    >;
+    let currentBinding: ExpectedBinding = {
+      marketplaceId: request.marketplaceId,
+      fulfillmentPolicyId: request.fulfillmentPolicyId,
+      paymentPolicyId: request.paymentPolicyId,
+      returnPolicyId: request.returnPolicyId,
+      merchantLocationKey: request.merchantLocationKey,
+    };
+    const complete = vi.fn(async () => undefined);
+    const release = vi.fn(async () => undefined);
+    const { fetch, calls } = fakeFetch((url) => {
+      if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
+      if (url.endsWith("/offer")) return json(201, { offerId: "stale-binding-offer" });
+      return json(200, { listingId: "stale-binding-listing" });
+    });
+    const adapter = new HttpEbayAdapter({
+      fetch,
+      tokenProvider: {
+        getAccessToken: async () => "generation-token",
+        beginProviderDispatch: async (
+          _resourceId,
+          _operation,
+          _expectedConnectionGeneration,
+          _expectedPublishClaimId,
+          expectedBinding?: ExpectedBinding | null,
+        ) => {
+          if (
+            expectedBinding
+            && JSON.stringify(expectedBinding) !== JSON.stringify(currentBinding)
+          ) {
+            throw new Error("eBay offer binding changed before provider dispatch");
+          }
+          return {
+            accountGeneration: "11111111-1111-4111-8111-111111111111",
+            connectionGeneration: request.connectionGeneration,
+            publishClaimId: request.publishClaimId,
+            attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            signal: new AbortController().signal,
+            release,
+          };
+        },
+      },
+      env: () => sellerEnv,
+    });
+
+    currentBinding = {
+      marketplaceId: request.marketplaceId,
+      fulfillmentPolicyId: "fulfil-reselected",
+      paymentPolicyId: "pay-reselected",
+      returnPolicyId: "ret-reselected",
+      merchantLocationKey: "loc-reselected",
+    };
+    const result = await adapter.publishListing(request, complete).catch((error) => error);
+
+    expect(result).toBeInstanceOf(Error);
+    expect(calls).toHaveLength(0);
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it("holds a generation-bound dispatch lease through the publish flow", async () => {
     const release = vi.fn(async () => undefined);
     const complete = vi.fn(async () => undefined);
@@ -98,6 +165,13 @@ describe("HttpEbayAdapter.publishListing", () => {
       "publish",
       request.connectionGeneration,
       request.publishClaimId,
+      {
+        marketplaceId: request.marketplaceId,
+        fulfillmentPolicyId: request.fulfillmentPolicyId,
+        paymentPolicyId: request.paymentPolicyId,
+        returnPolicyId: request.returnPolicyId,
+        merchantLocationKey: request.merchantLocationKey,
+      },
     );
     expect(getAccessToken).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",

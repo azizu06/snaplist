@@ -15,6 +15,13 @@ const accountGenerationMigration = readFileSync(
   ),
   "utf8",
 ).replace(/\s+/g, " ");
+const durableCompletionPgTap = readFileSync(
+  new URL(
+    "../../../../supabase/tests/ebay_dispatch_durable_completion.test.sql",
+    import.meta.url,
+  ),
+  "utf8",
+).replace(/\s+/g, " ");
 
 describe("eBay publish connection-generation migration", () => {
   it("pins the listing claim and provider lease to connection provenance", () => {
@@ -23,6 +30,8 @@ describe("eBay publish connection-generation migration", () => {
     );
     expect(migration).toContain("add column connection_generation uuid");
     expect(migration).toContain("add column publish_claim_id uuid");
+    expect(migration).toContain("add column ebay_publish_binding jsonb");
+    expect(migration).toContain("add column publish_binding jsonb");
     expect(migration).toContain(
       "listing.ebay_publish_claim_id = p_publish_claim_id",
     );
@@ -33,6 +42,9 @@ describe("eBay publish connection-generation migration", () => {
       "lease.connection_generation is not distinct from p_connection_generation",
     );
     expect(migration).toContain("lease.publish_claim_id = p_claim_id");
+    expect(migration).toContain(
+      "lease.publish_binding is not distinct from v_publish_binding",
+    );
     expect(migration).toContain("lease.attempt_token = p_attempt_token");
   });
 
@@ -56,6 +68,15 @@ describe("eBay publish connection-generation migration", () => {
       expect(migration).toContain(`v_binding#>>'{${path},state}' <> 'bound'`);
       expect(migration).toContain(`v_binding#>>'{${path},selectedId}' <>`);
     }
+    expect(migration).toContain(
+      "listing.ebay_publish_binding is not distinct from p_publish_binding",
+    );
+    expect(migration).toContain(
+      "v_binding#>>'{fulfillmentPolicy,selectedId}' <> p_publish_binding->>'fulfillmentPolicyId'",
+    );
+    expect(migration).toContain(
+      "v_binding#>>'{inventoryLocation,selectedId}' <> p_publish_binding->>'merchantLocationKey'",
+    );
   });
 
   it("keeps the operator Sandbox fallback separate and null-safe", () => {
@@ -88,12 +109,21 @@ describe("eBay publish connection-generation migration", () => {
     );
 
     expect(retryableApplicationConflicts).toBeNull();
-    expect(deterministicApplicationConflicts).toHaveLength(13);
+    expect(deterministicApplicationConflicts).toHaveLength(17);
     expect(migration).toContain(
-      "errcode = 'PT409', message = 'eBay connection generation changed before provider dispatch'",
+      "errcode = 'PT409', message = 'eBay offer binding changed before provider dispatch'",
     );
     expect(migration).toContain(
       "errcode = 'PT409', message = 'eBay provider dispatch lease expired before local completion'",
+    );
+  });
+
+  it("expects the deterministic completion conflict through PostgREST PT409", () => {
+    expect(durableCompletionPgTap).toContain(
+      "'PT409', 'eBay account generation changed before local completion'",
+    );
+    expect(durableCompletionPgTap).not.toContain(
+      "'40001', 'eBay account generation changed before local completion'",
     );
   });
 

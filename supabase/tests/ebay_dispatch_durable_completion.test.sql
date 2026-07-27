@@ -212,7 +212,7 @@ select extensions.throws_ok(
     )
     from denied_publish_dispatch_fixture
   $$,
-  '40001',
+  'PT409',
   'eBay account generation changed before local completion',
   'another tenant cannot complete a provider result using the captured generation'
 );

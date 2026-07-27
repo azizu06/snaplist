@@ -1,18 +1,26 @@
 alter table public.listings
-  add column ebay_publish_connection_generation uuid;
+  add column ebay_publish_connection_generation uuid,
+  add column ebay_publish_binding jsonb;
 
 comment on column public.listings.ebay_publish_connection_generation is
   'Connection generation pinned to the current eBay publish claim and retained on its acknowledged result.';
 
+comment on column public.listings.ebay_publish_binding is
+  'Normalized marketplace/policy/location tuple pinned to the current connected-seller publish claim; null only for the exact operator Sandbox fallback.';
+
 alter table private.ebay_provider_dispatch_leases
   add column connection_generation uuid,
-  add column publish_claim_id uuid;
+  add column publish_claim_id uuid,
+  add column publish_binding jsonb;
 
 comment on column private.ebay_provider_dispatch_leases.connection_generation is
   'Exact connected-seller generation for publish; null only for account-bound operator Sandbox fallback and non-publish operations.';
 
 comment on column private.ebay_provider_dispatch_leases.publish_claim_id is
   'Exact local publish claim that authorized a publish dispatch; null for non-publish operations.';
+
+comment on column private.ebay_provider_dispatch_leases.publish_binding is
+  'Exact connected-seller marketplace/policy/location tuple admitted before the provider attempt; null for non-publish operations and the exact operator Sandbox fallback.';
 
 create function public.bind_ebay_publish_connection_generation(
   p_listing_id uuid,
@@ -78,7 +86,14 @@ begin
   end if;
 
   update public.listings listing
-  set ebay_publish_connection_generation = p_connection_generation
+  set ebay_publish_connection_generation = p_connection_generation,
+      ebay_publish_binding = jsonb_build_object(
+        'marketplaceId', p_marketplace_id,
+        'fulfillmentPolicyId', p_fulfillment_policy_id,
+        'paymentPolicyId', p_payment_policy_id,
+        'returnPolicyId', p_return_policy_id,
+        'merchantLocationKey', p_merchant_location_key
+      )
   where listing.id = p_listing_id
     and listing.user_id = v_user_id
     and listing.platform = 'ebay'
@@ -104,7 +119,8 @@ create function private.begin_ebay_publish_dispatch_for_tenant(
   p_resource_id uuid,
   p_account_generation uuid,
   p_connection_generation uuid,
-  p_publish_claim_id uuid
+  p_publish_claim_id uuid,
+  p_publish_binding jsonb
 )
 returns jsonb
 language plpgsql
@@ -115,6 +131,7 @@ declare
   v_account private.ebay_messaging_account_generations%rowtype;
   v_attempted_at timestamptz := statement_timestamp();
   v_attempt_token uuid := gen_random_uuid();
+  v_binding jsonb;
 begin
   if p_publish_claim_id is null then
     raise exception using
@@ -131,19 +148,49 @@ begin
   end if;
 
   if p_connection_generation is not null then
-    perform 1
+    if p_publish_binding is null
+      or jsonb_typeof(p_publish_binding) <> 'object'
+      or nullif(btrim(p_publish_binding->>'marketplaceId'), '') is null
+      or nullif(btrim(p_publish_binding->>'fulfillmentPolicyId'), '') is null
+      or nullif(btrim(p_publish_binding->>'paymentPolicyId'), '') is null
+      or nullif(btrim(p_publish_binding->>'returnPolicyId'), '') is null
+      or nullif(btrim(p_publish_binding->>'merchantLocationKey'), '') is null then
+      raise exception using
+        errcode = '22023',
+        message = 'An exact eBay offer binding is required for provider dispatch';
+    end if;
+
+    select connection.policy_location_bindings -> (p_publish_binding->>'marketplaceId')
+    into v_binding
     from public.ebay_connections connection
     where connection.user_id = p_user_id
       and connection.account_generation = p_account_generation
       and connection.connection_generation = p_connection_generation
     for update;
-    if not found then
+    if not found
+      or v_binding is null
+      or v_binding->>'state' <> 'ready'
+      or v_binding->>'marketplaceId' <> p_publish_binding->>'marketplaceId'
+      or v_binding->>'connectionGeneration' <> p_connection_generation::text
+      or v_binding#>>'{fulfillmentPolicy,state}' <> 'bound'
+      or v_binding#>>'{fulfillmentPolicy,selectedId}'
+        <> p_publish_binding->>'fulfillmentPolicyId'
+      or v_binding#>>'{paymentPolicy,state}' <> 'bound'
+      or v_binding#>>'{paymentPolicy,selectedId}'
+        <> p_publish_binding->>'paymentPolicyId'
+      or v_binding#>>'{returnPolicy,state}' <> 'bound'
+      or v_binding#>>'{returnPolicy,selectedId}'
+        <> p_publish_binding->>'returnPolicyId'
+      or v_binding#>>'{inventoryLocation,state}' <> 'bound'
+      or v_binding#>>'{inventoryLocation,selectedId}'
+        <> p_publish_binding->>'merchantLocationKey' then
       raise exception using
         errcode = 'PT409',
-        message = 'eBay connection generation changed before provider dispatch';
+        message = 'eBay offer binding changed before provider dispatch';
     end if;
   else
-    if exists (
+    if p_publish_binding is not null
+      or exists (
       select 1
       from public.ebay_connections connection
       where connection.user_id = p_user_id
@@ -168,6 +215,7 @@ begin
     and listing.ebay_publish_claim_id = p_publish_claim_id
     and listing.ebay_publish_connection_generation
       is not distinct from p_connection_generation
+    and listing.ebay_publish_binding is not distinct from p_publish_binding
   for update;
   if not found then
     raise exception using
@@ -181,6 +229,7 @@ begin
     account_generation,
     connection_generation,
     publish_claim_id,
+    publish_binding,
     dispatch_kind,
     attempt_token,
     attempted_at,
@@ -191,6 +240,7 @@ begin
     p_account_generation,
     p_connection_generation,
     p_publish_claim_id,
+    p_publish_binding,
     'publish',
     v_attempt_token,
     v_attempted_at,
@@ -201,6 +251,7 @@ begin
     'account_generation', p_account_generation,
     'connection_generation', p_connection_generation,
     'publish_claim_id', p_publish_claim_id,
+    'publish_binding', p_publish_binding,
     'attempt_token', v_attempt_token,
     'attempted_at', v_attempted_at
   );
@@ -212,7 +263,7 @@ end;
 $$;
 
 revoke all on function private.begin_ebay_publish_dispatch_for_tenant(
-  text, uuid, uuid, uuid, uuid
+  text, uuid, uuid, uuid, uuid, jsonb
 ) from public, anon, authenticated, service_role;
 
 drop function public.begin_ebay_transactional_dispatch(uuid, text);
@@ -221,7 +272,8 @@ create function public.begin_ebay_transactional_dispatch(
   p_resource_id uuid,
   p_operation text,
   p_connection_generation uuid default null,
-  p_publish_claim_id uuid default null
+  p_publish_claim_id uuid default null,
+  p_publish_binding jsonb default null
 )
 returns jsonb
 language plpgsql
@@ -249,7 +301,8 @@ begin
       p_resource_id,
       v_account.generation,
       p_connection_generation,
-      p_publish_claim_id
+      p_publish_claim_id,
+      p_publish_binding
     );
   end if;
   return private.begin_ebay_transactional_dispatch_for_tenant(
@@ -261,10 +314,10 @@ end;
 $$;
 
 revoke all on function public.begin_ebay_transactional_dispatch(
-  uuid, text, uuid, uuid
+  uuid, text, uuid, uuid, jsonb
 ) from public, anon, service_role;
 grant execute on function public.begin_ebay_transactional_dispatch(
-  uuid, text, uuid, uuid
+  uuid, text, uuid, uuid, jsonb
 ) to authenticated;
 
 create function private.renew_ebay_publish_dispatch_for_tenant(
@@ -280,9 +333,14 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_connection_bindings jsonb;
+  v_publish_binding jsonb;
+  v_binding jsonb;
 begin
   if p_connection_generation is not null then
-    perform 1
+    select connection.policy_location_bindings
+    into v_connection_bindings
     from public.ebay_connections connection
     where connection.user_id = p_user_id
       and connection.account_generation = p_account_generation
@@ -310,7 +368,8 @@ begin
     end if;
   end if;
 
-  perform 1
+  select listing.ebay_publish_binding
+  into v_publish_binding
   from public.listings listing
   where listing.id = p_resource_id
     and listing.user_id = p_user_id
@@ -326,6 +385,35 @@ begin
       message = 'eBay publish claim changed during provider dispatch';
   end if;
 
+  if p_connection_generation is not null then
+    v_binding := v_connection_bindings -> (v_publish_binding->>'marketplaceId');
+    if v_publish_binding is null
+      or v_binding is null
+      or v_binding->>'state' <> 'ready'
+      or v_binding->>'marketplaceId' <> v_publish_binding->>'marketplaceId'
+      or v_binding->>'connectionGeneration' <> p_connection_generation::text
+      or v_binding#>>'{fulfillmentPolicy,state}' <> 'bound'
+      or v_binding#>>'{fulfillmentPolicy,selectedId}'
+        <> v_publish_binding->>'fulfillmentPolicyId'
+      or v_binding#>>'{paymentPolicy,state}' <> 'bound'
+      or v_binding#>>'{paymentPolicy,selectedId}'
+        <> v_publish_binding->>'paymentPolicyId'
+      or v_binding#>>'{returnPolicy,state}' <> 'bound'
+      or v_binding#>>'{returnPolicy,selectedId}'
+        <> v_publish_binding->>'returnPolicyId'
+      or v_binding#>>'{inventoryLocation,state}' <> 'bound'
+      or v_binding#>>'{inventoryLocation,selectedId}'
+        <> v_publish_binding->>'merchantLocationKey' then
+      raise exception using
+        errcode = 'PT409',
+        message = 'eBay offer binding changed during provider dispatch';
+    end if;
+  elsif v_publish_binding is not null then
+    raise exception using
+      errcode = 'PT409',
+      message = 'eBay Sandbox fallback binding changed during provider dispatch';
+  end if;
+
   update private.ebay_provider_dispatch_leases lease
   set expires_at = statement_timestamp() + interval '5 minutes'
   where lease.user_id = p_user_id
@@ -334,6 +422,7 @@ begin
     and lease.account_generation = p_account_generation
     and lease.connection_generation is not distinct from p_connection_generation
     and lease.publish_claim_id = p_publish_claim_id
+    and lease.publish_binding is not distinct from v_publish_binding
     and lease.attempt_token = p_attempt_token
     and lease.expires_at > statement_timestamp();
   if not found then
@@ -461,6 +550,7 @@ begin
           and listing.ebay_publish_claim_id = p_publish_claim_id
           and listing.ebay_publish_connection_generation
             is not distinct from p_connection_generation
+          and listing.ebay_publish_binding is not distinct from lease.publish_binding
       )
     );
 end;
@@ -500,6 +590,9 @@ declare
     ''
   );
   v_account private.ebay_messaging_account_generations%rowtype;
+  v_connection_bindings jsonb;
+  v_publish_binding jsonb;
+  v_binding jsonb;
 begin
   if coalesce(auth.jwt()->>'role', '') <> 'authenticated' or v_user_id = '' then
     raise exception using errcode = '42501', message = 'Seller authorization is required';
@@ -517,7 +610,8 @@ begin
   end if;
 
   if p_connection_generation is not null then
-    perform 1
+    select connection.policy_location_bindings
+    into v_connection_bindings
     from public.ebay_connections connection
     where connection.user_id = v_user_id
       and connection.account_generation = p_account_generation
@@ -545,7 +639,8 @@ begin
     end if;
   end if;
 
-  perform 1
+  select lease.publish_binding
+  into v_publish_binding
   from private.ebay_provider_dispatch_leases lease
   where lease.user_id = v_user_id
     and lease.message_id = p_listing_id
@@ -560,6 +655,35 @@ begin
     raise exception using
       errcode = 'PT409',
       message = 'eBay provider dispatch lease expired before local completion';
+  end if;
+
+  if p_connection_generation is not null then
+    v_binding := v_connection_bindings -> (v_publish_binding->>'marketplaceId');
+    if v_publish_binding is null
+      or v_binding is null
+      or v_binding->>'state' <> 'ready'
+      or v_binding->>'marketplaceId' <> v_publish_binding->>'marketplaceId'
+      or v_binding->>'connectionGeneration' <> p_connection_generation::text
+      or v_binding#>>'{fulfillmentPolicy,state}' <> 'bound'
+      or v_binding#>>'{fulfillmentPolicy,selectedId}'
+        <> v_publish_binding->>'fulfillmentPolicyId'
+      or v_binding#>>'{paymentPolicy,state}' <> 'bound'
+      or v_binding#>>'{paymentPolicy,selectedId}'
+        <> v_publish_binding->>'paymentPolicyId'
+      or v_binding#>>'{returnPolicy,state}' <> 'bound'
+      or v_binding#>>'{returnPolicy,selectedId}'
+        <> v_publish_binding->>'returnPolicyId'
+      or v_binding#>>'{inventoryLocation,state}' <> 'bound'
+      or v_binding#>>'{inventoryLocation,selectedId}'
+        <> v_publish_binding->>'merchantLocationKey' then
+      raise exception using
+        errcode = 'PT409',
+        message = 'eBay offer binding changed before local completion';
+    end if;
+  elsif v_publish_binding is not null then
+    raise exception using
+      errcode = 'PT409',
+      message = 'eBay Sandbox fallback binding changed before local completion';
   end if;
 
   update public.listings listing
@@ -577,7 +701,8 @@ begin
     and listing.ebay_status = 'publishing'
     and listing.ebay_publish_claim_id = p_claim_id
     and listing.ebay_publish_connection_generation
-      is not distinct from p_connection_generation;
+      is not distinct from p_connection_generation
+    and listing.ebay_publish_binding is not distinct from v_publish_binding;
   if not found then
     raise exception using
       errcode = 'P0002',
@@ -591,6 +716,7 @@ begin
     and lease.account_generation = p_account_generation
     and lease.connection_generation is not distinct from p_connection_generation
     and lease.publish_claim_id = p_claim_id
+    and lease.publish_binding is not distinct from v_publish_binding
     and lease.attempt_token = p_attempt_token;
 end;
 $$;

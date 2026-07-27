@@ -60,14 +60,18 @@ export interface EbayPublishListingRequest {
  * the current connection generation; the HTTP adapter must not substitute
  * process-wide seller configuration.
  */
-export interface EbayPublishRequest extends EbayPublishListingRequest {
+export interface EbayPublishBindingProvenance {
   marketplaceId: string;
-  connectionGeneration: string | null;
-  publishClaimId: string;
   fulfillmentPolicyId: string;
   paymentPolicyId: string;
   returnPolicyId: string;
   merchantLocationKey: string;
+}
+
+export interface EbayPublishRequest
+  extends EbayPublishListingRequest, EbayPublishBindingProvenance {
+  connectionGeneration: string | null;
+  publishClaimId: string;
 }
 
 /** Outcome of a successful inventory item -> offer -> publish run. */
@@ -168,6 +172,7 @@ export interface EbayTokenProvider {
     operation: "publish" | "reprice",
     expectedConnectionGeneration?: string | null,
     expectedPublishClaimId?: string | null,
+    expectedPublishBinding?: EbayPublishBindingProvenance | null,
   ): Promise<EbayProviderDispatchLease>;
 }
 

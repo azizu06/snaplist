@@ -522,6 +522,13 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
     const noTokenEgress = async () => {
       throw new Error("Cached seller token should prevent OAuth egress");
     };
+    const storeA = createSupabaseEbayPolicyLocationBindingStore(serverA);
+    const storeB = createSupabaseEbayPolicyLocationBindingStore(serverB);
+    const [contextA, contextB] = await Promise.all([
+      storeA.readConnectionContext(),
+      storeB.readConnectionContext(),
+    ]);
+    if (!contextA || !contextB) throw new Error("Test connections are required");
 
     // Same-generation stored-result replay is exactly once.
     const replayListingId = await persistedListing(userB);
@@ -540,15 +547,89 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
       replayAdapter,
       { completionClient: serverB },
     );
-    const sameGenerationReplay = await publishListingToEbay(
-      userB.client,
-      replayListingId,
-      replayAdapter,
-      { completionClient: serverB },
-    );
     expect(firstReplay.alreadyPublished).toBe(false);
-    expect(sameGenerationReplay.alreadyPublished).toBe(true);
-    expect(replayFake.calls).toHaveLength(3);
+    for (const fixture of [
+      { name: "missing", bindings: {} },
+      {
+        name: "setup-required",
+        bindings: {
+          EBAY_US: setupRequiredBinding(contextB.connectionGeneration),
+        },
+      },
+      {
+        name: "selection-required",
+        bindings: {
+          EBAY_US: selectionRequiredBinding(contextB.connectionGeneration),
+        },
+      },
+    ]) {
+      const { error } = await admin
+        .from("ebay_connections")
+        .update({ policy_location_bindings: fixture.bindings })
+        .eq("user_id", userB.id);
+      expect(error, fixture.name).toBeNull();
+      const sameGenerationReplay = await publishListingToEbay(
+        userB.client,
+        replayListingId,
+        replayAdapter,
+        { completionClient: serverB },
+      );
+      expect(sameGenerationReplay.alreadyPublished, fixture.name).toBe(true);
+      expect(replayFake.calls, fixture.name).toHaveLength(3);
+    }
+    await storeB.saveBinding(
+      readyBinding("seller-b", contextB.connectionGeneration),
+    );
+
+    // A policy/location reselection inside the same connection generation is
+    // fenced after preflight and before the real dispatch RPC.
+    const preDispatchBindingListingId = await persistedListing(userA);
+    const preDispatchBindingFake = fakeEbayFetch("pre-dispatch-binding-change");
+    const preDispatchBindingAdapter = new HttpEbayAdapter({
+      fetch: preDispatchBindingFake.fetch,
+      tokenProvider: new UserTokenProvider(serverA, {
+        fetch: noTokenEgress as typeof fetch,
+        env: () => TEST_ENV,
+      }),
+      env: () => SHARED_ENV_FALLBACK,
+    });
+    const bindingDispatch = preDispatchBindingAdapter.publishListing.bind(
+      preDispatchBindingAdapter,
+    );
+    preDispatchBindingAdapter.publishListing = async (request, complete) => {
+      await storeA.saveBinding(
+        readyBinding("seller-a-reselected", contextA.connectionGeneration),
+      );
+      return bindingDispatch(request, complete);
+    };
+    const preDispatchBindingResult = await publishListingToEbay(
+      userA.client,
+      preDispatchBindingListingId,
+      preDispatchBindingAdapter,
+      { completionClient: serverA },
+    ).catch((error: unknown) => error);
+    const preDispatchBindingRow = await userA.client
+      .from("listings")
+      .select("ebay_status, ebay_listing_id")
+      .eq("id", preDispatchBindingListingId)
+      .single();
+    expect.soft(
+      preDispatchBindingFake.calls,
+      "pre-dispatch binding change",
+    ).toHaveLength(0);
+    expect.soft(
+      preDispatchBindingResult,
+      "pre-dispatch binding change",
+    ).toBeInstanceOf(Error);
+    expect.soft(
+      preDispatchBindingRow.data,
+      "pre-dispatch binding change",
+    ).not.toMatchObject({
+      ebay_status: "published",
+    });
+    await storeA.saveBinding(
+      readyBinding("seller-a", contextA.connectionGeneration),
+    );
 
     // Reconnect after binding preflight but before the real dispatch RPC.
     const preDispatchListingId = await persistedListing(userA);

@@ -109,6 +109,15 @@ export class HttpEbayAdapter implements EbayAdapter {
       "publish",
       request.connectionGeneration,
       request.publishClaimId,
+      request.connectionGeneration === null
+        ? null
+        : {
+            marketplaceId: request.marketplaceId,
+            fulfillmentPolicyId: request.fulfillmentPolicyId,
+            paymentPolicyId: request.paymentPolicyId,
+            returnPolicyId: request.returnPolicyId,
+            merchantLocationKey: request.merchantLocationKey,
+          },
     );
     const signal = providerDispatchSignal(lease?.signal);
     try {
