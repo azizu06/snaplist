@@ -3995,6 +3995,76 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(store.photos.first, photos[2])
     }
 
+    func testPhotoReviewDragCancelAndSamePositionRestoreFocusWithoutMutationOrAnnouncement() {
+        let fingerprints = [
+            "drag-cancel-a-digest",
+            "drag-cancel-b-digest",
+            "drag-cancel-c-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000011",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000012",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000013",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+
+        let cancelledStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(cancelledStore.selectPhotoForActions(id: photos[1].id))
+        let cancelled = PhotoReviewDragPresentation()
+
+        XCTAssertTrue(
+            cancelled.begin(photoID: photos[2].id, store: cancelledStore)
+        )
+        cancelled.updateInsertion(
+            to: 0,
+            store: cancelledStore,
+            reduceMotion: true
+        )
+        cancelled.cancel(reduceMotion: true)
+
+        XCTAssertEqual(cancelledStore.photos, photos)
+        XCTAssertEqual(cancelledStore.selectedPhotoID, photos[1].id)
+        XCTAssertEqual(cancelledStore.actionsPhotoID, photos[1].id)
+        XCTAssertEqual(cancelled.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(cancelled.consumeFocusPhotoID())
+        XCTAssertNil(cancelled.consumeAnnouncement())
+        XCTAssertNil(cancelled.draggedPhotoID)
+        XCTAssertNil(cancelled.insertionIndex)
+
+        let unchangedStore = PhotoReviewStore(photos: photos)
+        let unchanged = PhotoReviewDragPresentation()
+        XCTAssertTrue(
+            unchanged.begin(photoID: photos[2].id, store: unchangedStore)
+        )
+
+        XCTAssertNil(
+            unchanged.commit(
+                to: 2,
+                store: unchangedStore,
+                reduceMotion: false
+            )
+        )
+        XCTAssertEqual(unchangedStore.photos, photos)
+        XCTAssertEqual(unchangedStore.selectedPhotoID, photos[0].id)
+        XCTAssertNil(unchangedStore.actionsPhotoID)
+        XCTAssertEqual(unchanged.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(unchanged.consumeFocusPhotoID())
+        XCTAssertNil(unchanged.consumeAnnouncement())
+        XCTAssertNil(unchanged.draggedPhotoID)
+        XCTAssertNil(unchanged.insertionIndex)
+    }
+
     func testPhotoReviewAccessibilityActionPresentationRestoresStableFocusAndConsumesOneAnnouncement() {
         let fingerprints = [
             "action-presentation-a-digest",

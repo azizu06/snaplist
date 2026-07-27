@@ -1,9 +1,167 @@
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 #if DEBUG
 import ImageIO
 #endif
+
+@MainActor
+@Observable
+final class PhotoReviewDragPresentation {
+    private(set) var draggedPhotoID: StagedCapturePhoto.ID?
+    private(set) var insertionIndex: Int?
+    private(set) var pendingFocusPhotoID: StagedCapturePhoto.ID?
+    private(set) var pendingAnnouncement: String?
+    @ObservationIgnored private var cancellationTask: Task<Void, Never>?
+
+    func begin(
+        photoID: StagedCapturePhoto.ID,
+        store: PhotoReviewStore
+    ) -> Bool {
+        guard store.photos.count > 1,
+              store.photos.contains(where: { $0.id == photoID }) else {
+            return false
+        }
+        cancellationTask?.cancel()
+        pendingFocusPhotoID = nil
+        pendingAnnouncement = nil
+        draggedPhotoID = photoID
+        insertionIndex = store.photos.firstIndex(where: { $0.id == photoID })
+        return true
+    }
+
+    func updateInsertion(
+        to destinationIndex: Int,
+        store: PhotoReviewStore,
+        reduceMotion: Bool
+    ) {
+        guard draggedPhotoID != nil,
+              store.photos.indices.contains(destinationIndex) else {
+            return
+        }
+        cancellationTask?.cancel()
+        guard insertionIndex != destinationIndex else {
+            return
+        }
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+            insertionIndex = destinationIndex
+        }
+    }
+
+    @discardableResult
+    func commit(
+        to destinationIndex: Int,
+        store: PhotoReviewStore,
+        reduceMotion: Bool
+    ) -> PhotoReviewReorderResult? {
+        guard let photoID = draggedPhotoID else {
+            return nil
+        }
+        cancellationTask?.cancel()
+        let result = store.performDragReorder(
+            photoID: photoID,
+            to: destinationIndex
+        )
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+            draggedPhotoID = nil
+            insertionIndex = nil
+        }
+        pendingFocusPhotoID = photoID
+        pendingAnnouncement = result?.announcement
+        return result
+    }
+
+    func scheduleCancellation(reduceMotion: Bool) {
+        guard draggedPhotoID != nil else {
+            return
+        }
+        cancellationTask?.cancel()
+        cancellationTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.cancel(reduceMotion: reduceMotion)
+        }
+    }
+
+    func cancel(reduceMotion: Bool) {
+        guard let photoID = draggedPhotoID else {
+            return
+        }
+        cancellationTask?.cancel()
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+            draggedPhotoID = nil
+            insertionIndex = nil
+        }
+        pendingFocusPhotoID = photoID
+        pendingAnnouncement = nil
+    }
+
+    func consumeFocusPhotoID() -> StagedCapturePhoto.ID? {
+        defer { pendingFocusPhotoID = nil }
+        return pendingFocusPhotoID
+    }
+
+    func consumeAnnouncement() -> String? {
+        defer { pendingAnnouncement = nil }
+        return pendingAnnouncement
+    }
+}
+
+@MainActor
+private struct PhotoReviewThumbnailDropDelegate: DropDelegate {
+    let destinationIndex: Int
+    let store: PhotoReviewStore
+    let presentation: PhotoReviewDragPresentation
+    let reduceMotion: Bool
+    var autoScroll: (() -> Void)? = nil
+
+    func validateDrop(info: DropInfo) -> Bool {
+        guard presentation.draggedPhotoID != nil else {
+            return false
+        }
+        return info.hasItemsConforming(to: [UTType.plainText])
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard info.hasItemsConforming(to: [UTType.plainText]) else {
+            return
+        }
+        presentation.updateInsertion(
+            to: destinationIndex,
+            store: store,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard validateDrop(info: info) else {
+            return DropProposal(operation: .cancel)
+        }
+        autoScroll?()
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        presentation.scheduleCancellation(reduceMotion: reduceMotion)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard info.hasItemsConforming(to: [UTType.plainText]),
+              presentation.draggedPhotoID != nil else {
+            presentation.cancel(reduceMotion: reduceMotion)
+            return false
+        }
+        presentation.commit(
+            to: destinationIndex,
+            store: store,
+            reduceMotion: reduceMotion
+        )
+        return true
+    }
+}
 
 @MainActor
 @Observable
@@ -737,6 +895,7 @@ struct PhotoReviewView: View {
     @State private var actionPresentation = PhotoReviewActionPresentation()
     @State private var accessibilityActionPresentation =
         PhotoReviewAccessibilityActionPresentation()
+    @State private var dragPresentation = PhotoReviewDragPresentation()
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
@@ -745,6 +904,7 @@ struct PhotoReviewView: View {
     // Outside dismissal focus stays independent from picker cancellation focus.
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum PickerFocusTarget: Hashable {
         case addButton
@@ -798,6 +958,23 @@ struct PhotoReviewView: View {
                 presentation,
                 postAnnouncement: postSubmissionAnnouncement,
                 acknowledgePresentation: acknowledgeSubmissionPresentation
+            )
+        }
+        .onChange(of: dragPresentation.pendingFocusPhotoID) { _, photoID in
+            guard photoID != nil,
+                  let focusPhotoID = dragPresentation.consumeFocusPhotoID() else {
+                return
+            }
+            focusedThumbnailID = focusPhotoID
+        }
+        .onChange(of: dragPresentation.pendingAnnouncement) { _, announcement in
+            guard announcement != nil,
+                  let announcement = dragPresentation.consumeAnnouncement() else {
+                return
+            }
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: announcement
             )
         }
     }
@@ -913,16 +1090,39 @@ struct PhotoReviewView: View {
     }
 
     private var thumbnailStrip: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 12) {
-                ForEach(Array(store.photos.enumerated()), id: \.element.id) { index, photo in
-                    thumbnail(photo, index: index)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(Array(store.photos.enumerated()), id: \.element.id) { index, photo in
+                        thumbnail(photo, index: index)
+                            .id(photo.id)
+                    }
+                    addButton
                 }
-                addButton
+                .padding(.vertical, 3)
             }
-            .padding(.vertical, 3)
+            .scrollIndicators(.hidden)
+            .overlay {
+                if dragPresentation.draggedPhotoID != nil,
+                   !store.photos.isEmpty {
+                    HStack(spacing: 0) {
+                        edgeAutoScrollDropZone(
+                            destinationIndex: 0,
+                            proxy: proxy,
+                            anchor: .leading
+                        )
+                        Spacer(minLength: 0)
+                        edgeAutoScrollDropZone(
+                            destinationIndex: store.photos.index(
+                                before: store.photos.endIndex
+                            ),
+                            proxy: proxy,
+                            anchor: .trailing
+                        )
+                    }
+                }
+            }
         }
-        .scrollIndicators(.hidden)
     }
 
     private func thumbnail(
@@ -930,6 +1130,16 @@ struct PhotoReviewView: View {
         index: Int
     ) -> some View {
         let isSelected = photo.id == store.selectedPhotoID
+        let showsInsertionGap =
+            dragPresentation.insertionIndex == index
+            && dragPresentation.draggedPhotoID != photo.id
+        let draggedSourceIndex = dragPresentation.draggedPhotoID.flatMap { draggedID in
+            store.photos.firstIndex(where: { $0.id == draggedID })
+        }
+        let showsLeadingInsertionGap =
+            showsInsertionGap && (draggedSourceIndex ?? index) > index
+        let showsTrailingInsertionGap =
+            showsInsertionGap && (draggedSourceIndex ?? index) < index
         return VStack(spacing: 6) {
             Button {
                 store.selectPhotoForActions(id: photo.id)
@@ -989,6 +1199,78 @@ struct PhotoReviewView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .accessibilityIdentifier("photo-review.cover")
+            }
+        }
+        // v1.2 interaction.drag.insertion_gap_px. This exists only while a native
+        // drag is over a different ordinal, so the resting strip gains no control.
+        .padding(.leading, showsLeadingInsertionGap ? 62 : 0)
+        .padding(.trailing, showsTrailingInsertionGap ? 62 : 0)
+        .opacity(dragPresentation.draggedPhotoID == photo.id ? 0.97 : 1)
+        .onDrag {
+            guard dragPresentation.begin(photoID: photo.id, store: store) else {
+                return NSItemProvider()
+            }
+            return NSItemProvider(object: photo.id.uuidString as NSString)
+        } preview: {
+            LocalCaptureImage(
+                url: photo.thumbnailURL,
+                maximumPixelSize: 180
+            )
+            .scaledToFill()
+            .frame(width: 76, height: 76)
+            .clipped()
+            .clipShape(.rect(cornerRadius: 12))
+        }
+        .onDrop(
+            of: [UTType.plainText],
+            delegate: PhotoReviewThumbnailDropDelegate(
+                destinationIndex: index,
+                store: store,
+                presentation: dragPresentation,
+                reduceMotion: reduceMotion
+            )
+        )
+    }
+
+    private func edgeAutoScrollDropZone(
+        destinationIndex: Int,
+        proxy: ScrollViewProxy,
+        anchor: UnitPoint
+    ) -> some View {
+        Color.clear
+            .frame(width: 28)
+            .contentShape(Rectangle())
+            .onDrop(
+                of: [UTType.plainText],
+                delegate: PhotoReviewThumbnailDropDelegate(
+                    destinationIndex: destinationIndex,
+                    store: store,
+                    presentation: dragPresentation,
+                    reduceMotion: reduceMotion,
+                    autoScroll: {
+                        scrollToPhoto(
+                            at: destinationIndex,
+                            proxy: proxy,
+                            anchor: anchor
+                        )
+                    }
+                )
+            )
+    }
+
+    private func scrollToPhoto(
+        at destinationIndex: Int,
+        proxy: ScrollViewProxy,
+        anchor: UnitPoint
+    ) {
+        guard store.photos.indices.contains(destinationIndex) else {
+            return
+        }
+        if reduceMotion {
+            proxy.scrollTo(store.photos[destinationIndex].id, anchor: anchor)
+        } else {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                proxy.scrollTo(store.photos[destinationIndex].id, anchor: anchor)
             }
         }
     }
