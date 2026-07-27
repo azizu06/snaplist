@@ -371,6 +371,14 @@ final class PhotoReviewStore {
     }
 
     @discardableResult
+    func performDragReorder(
+        photoID: StagedCapturePhoto.ID,
+        to destinationIndex: Int
+    ) -> PhotoReviewReorderResult? {
+        nil
+    }
+
+    @discardableResult
     func performAccessibilityReorder(
         photoID: StagedCapturePhoto.ID,
         action: PhotoReviewReorderAction

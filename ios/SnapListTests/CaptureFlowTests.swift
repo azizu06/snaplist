@@ -3956,6 +3956,45 @@ final class CaptureFlowTests: XCTestCase {
         assertExactPhotoValues(invalidStore)
     }
 
+    func testPhotoReviewDragMovesKnownIdentityFromThirdToCoverWithoutChangingItsValues() {
+        let fingerprints = [
+            "drag-a-digest",
+            "drag-b-digest",
+            "drag-c-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000001",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000002",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000003",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+        let store = PhotoReviewStore(photos: photos)
+
+        XCTAssertEqual(
+            store.performDragReorder(photoID: photos[2].id, to: 0),
+            PhotoReviewReorderResult(
+                photoID: photos[2].id,
+                index: 1,
+                count: 3,
+                announcement: "Moved to photo 1 of 3. Cover."
+            )
+        )
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+        XCTAssertEqual(store.selectedPhotoID, photos[2].id)
+        XCTAssertEqual(store.photos.first, photos[2])
+    }
+
     func testPhotoReviewAccessibilityActionPresentationRestoresStableFocusAndConsumesOneAnnouncement() {
         let fingerprints = [
             "action-presentation-a-digest",
