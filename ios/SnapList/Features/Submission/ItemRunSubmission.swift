@@ -112,13 +112,20 @@ struct ItemRunSubmissionPayload: Equatable, Sendable {
     let photoData: [Data]
 }
 
-/// The canonical durable run identity a validated receipt carries. This is the typed
-/// hand-off #375 consumes; it makes no claim about analysis, pricing, or delivery.
+/// The canonical durable run identity a validated receipt carries. It makes no claim
+/// about analysis, pricing, or delivery.
 struct AcceptedItemRun: Equatable, Sendable {
     let runID: UUID
     let itemID: UUID
     let status: String
     let stage: String
+}
+
+/// The exact logical submission identity and canonical run produced by one
+/// validated created or replayed receipt.
+struct AcceptedItemRunHandoff: Equatable, Sendable {
+    let idempotencyKey: UUID
+    let acceptedRun: AcceptedItemRun
 }
 
 /// What one transport attempt resolved to. Every case except the two receipts leaves
