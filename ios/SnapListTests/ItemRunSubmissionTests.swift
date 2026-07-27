@@ -67,6 +67,191 @@ final class ItemRunSubmissionTests: XCTestCase {
         }
     }
 
+    func testEveryRetentionProducesOneExhaustiveTypedDestinationDecision() {
+        let cases: [(
+            retention: ItemRunSubmissionRetention,
+            decision: ItemRunSubmissionDestinationDecision
+        )] = [
+            (.ambiguous, .photoReview(.sub03)),
+            (.conflict, .photoReview(.sub04)),
+            (.rateLimited(reason: "opaque"), .photoReview(.sub06)),
+            (.submissionUnavailable, .photoReview(.sub06)),
+            (.attemptNotPersisted, .photoReview(.sub06)),
+            (.rejected, .photoReview(.sub07)),
+            (.intakeUnavailable, .photoReview(.sub07)),
+            (.creditDenied(reason: "opaque"), .handoff(.pay01)),
+            (.receiptMismatch, .handoff(.pay08)),
+            (.authenticationRequired, .handoff(.accountClaim12aThrough12c)),
+        ]
+
+        XCTAssertEqual(cases.count, 10)
+
+        for testCase in cases {
+            XCTAssertEqual(
+                ItemRunSubmissionDestinationDecision(
+                    retention: testCase.retention
+                ),
+                testCase.decision,
+                "Unexpected destination for \(testCase.retention)"
+            )
+        }
+
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .rateLimited(reason: nil)
+            ),
+            .photoReview(.sub06)
+        )
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(reason: nil)
+            ),
+            .handoff(.pay01)
+        )
+
+        let handoffs = cases.compactMap {
+            testCase -> ItemRunSubmissionDestinationDecision.Handoff? in
+            guard case let .handoff(handoff) = testCase.decision else {
+                return nil
+            }
+            return handoff
+        }
+        XCTAssertEqual(
+            handoffs,
+            [.pay01, .pay08, .accountClaim12aThrough12c]
+        )
+    }
+
+    func testExternalRetentionsPublishOneTypedHandoffAndConsumeOnlyMatchingEvent() async throws {
+        let cases: [(
+            seed: String,
+            retention: ItemRunSubmissionRetention,
+            handoff: ItemRunSubmissionDestinationDecision.Handoff,
+            outcome: (SubmissionIntakeFixture) -> ItemRunSubmissionTransportOutcome
+        )] = [
+            (
+                "pay-01",
+                .creditDenied(reason: "opaque-not-presentation-authority"),
+                .pay01,
+                { _ in .creditDenied(reason: "opaque-not-presentation-authority") }
+            ),
+            (
+                "pay-08",
+                .receiptMismatch,
+                .pay08,
+                { intake in
+                    var mismatchedPhotos = intake.expectedReceiptPhotos
+                    mismatchedPhotos[0] = .init(
+                        ordinal: 0,
+                        contentSha256: String(repeating: "f", count: 64),
+                        byteLength: mismatchedPhotos[0].byteLength,
+                        mediaType: mismatchedPhotos[0].mediaType
+                    )
+                    return .created(Self.receipt(photos: mismatchedPhotos))
+                }
+            ),
+            (
+                "account-claim",
+                .authenticationRequired,
+                .accountClaim12aThrough12c,
+                { _ in .authenticationRequired }
+            ),
+        ]
+        let staleEventID = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000081"
+        )!
+        var observedEventIDs: [UUID] = []
+
+        for testCase in cases {
+            let intake = SubmissionIntakeFixture(
+                photoCount: 2,
+                seed: testCase.seed
+            )
+            let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+            let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+            let submitter = RecordingItemRunSubmitter(
+                outcomes: [testCase.outcome(intake)]
+            )
+            let host = ItemRunSubmissionHost(
+                coordinator: makeCoordinator(
+                    intake: intake,
+                    attemptStore: attemptStore,
+                    submitter: submitter,
+                    draftStore: draftStore,
+                    keys: [Self.firstKey]
+                )
+            )
+
+            await host.startListing(photos: intake.photos)
+
+            XCTAssertEqual(host.retention, testCase.retention)
+            XCTAssertNil(host.acceptedRun)
+            XCTAssertFalse(host.clearedIntake)
+            XCTAssertFalse(host.isSubmitting)
+            guard case .destinationHandoff(
+                eventID: let eventID,
+                handoff: let handoff
+            )? = host.pendingPresentationEvent else {
+                XCTFail("Expected one typed destination handoff.")
+                continue
+            }
+            observedEventIDs.append(eventID)
+            XCTAssertEqual(handoff, testCase.handoff)
+            XCTAssertEqual(
+                ItemRunSubmissionDestinationDecision(
+                    retention: testCase.retention
+                ),
+                .handoff(testCase.handoff)
+            )
+
+            let attemptBeforeConsumption = try await attemptStore.loadAttempt()
+            let photosBeforeConsumption = try await draftStore.loadPhotos()
+            let payloadsBeforeConsumption = await submitter.payloads
+            let discardCountBeforeConsumption = await draftStore.discardCount
+            XCTAssertEqual(
+                attemptBeforeConsumption?.idempotencyKey,
+                Self.firstKey
+            )
+            XCTAssertEqual(photosBeforeConsumption, intake.photos)
+            XCTAssertEqual(payloadsBeforeConsumption.count, 1)
+            XCTAssertEqual(discardCountBeforeConsumption, 0)
+
+            XCTAssertNil(
+                host.consumeDestinationHandoff(eventID: staleEventID)
+            )
+            XCTAssertEqual(
+                host.pendingPresentationEvent,
+                .destinationHandoff(
+                    eventID: eventID,
+                    handoff: testCase.handoff
+                )
+            )
+            XCTAssertEqual(
+                host.consumeDestinationHandoff(eventID: eventID),
+                testCase.handoff
+            )
+            XCTAssertNil(host.pendingPresentationEvent)
+            XCTAssertNil(
+                host.consumeDestinationHandoff(eventID: eventID),
+                "A consumed handoff cannot navigate or fire twice."
+            )
+
+            let attemptAfterConsumption = try await attemptStore.loadAttempt()
+            let photosAfterConsumption = try await draftStore.loadPhotos()
+            let payloadsAfterConsumption = await submitter.payloads
+            let discardCountAfterConsumption = await draftStore.discardCount
+            XCTAssertEqual(attemptAfterConsumption, attemptBeforeConsumption)
+            XCTAssertEqual(photosAfterConsumption, photosBeforeConsumption)
+            XCTAssertEqual(payloadsAfterConsumption, payloadsBeforeConsumption)
+            XCTAssertEqual(
+                discardCountAfterConsumption,
+                discardCountBeforeConsumption
+            )
+        }
+
+        XCTAssertEqual(Set(observedEventIDs).count, cases.count)
+    }
+
     // MARK: Persisted attempt identity
 
     func testPersistsOneKeyAndTheOrderedSnapshotBeforeAnyNetworkActivity() async {
@@ -2271,12 +2456,26 @@ actor RecordingItemRunSubmitter: ItemRunSubmitting {
     }
 }
 
-private actor SubmissionResponseGate {
+actor SubmissionResponseGate {
     private var isHeld = false
+    private var observedCallCount = 0
+    private var releasePending = false
     private var heldWaiters: [CheckedContinuation<Void, Never>] = []
     private var releaseContinuation: CheckedContinuation<Void, Never>?
 
+    func hold(onCall targetCall: Int) async {
+        observedCallCount += 1
+        guard observedCallCount == targetCall else {
+            return
+        }
+        await hold()
+    }
+
     func hold() async {
+        guard !releasePending else {
+            releasePending = false
+            return
+        }
         isHeld = true
         let waiters = heldWaiters
         heldWaiters.removeAll()
@@ -2294,8 +2493,12 @@ private actor SubmissionResponseGate {
     }
 
     func release() {
-        releaseContinuation?.resume()
-        releaseContinuation = nil
+        guard let releaseContinuation else {
+            releasePending = true
+            return
+        }
+        releaseContinuation.resume()
+        self.releaseContinuation = nil
     }
 }
 

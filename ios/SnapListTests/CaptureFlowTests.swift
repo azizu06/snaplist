@@ -931,6 +931,341 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(restoredPresentation.announcementEvent)
     }
 
+    func testAmbiguousSubmissionPresentsTryAgainAndRetriesExactAttemptOnlyForMatchingEvent() async throws {
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-ambiguous-submission",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemIndigo,
+                    rightColor: .systemYellow
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemMint,
+                    rightColor: .systemPurple
+                ),
+            ]
+        )
+        defer { scenario.cleanUp() }
+        let submittedPhotos = scenario.displayedPhotos
+        let intake = SubmissionIntakeFixture(stagedPhotos: submittedPhotos)
+        let events = AttemptPersistenceRecoveryEventRecorder()
+        let attemptStore = RecoveringItemRunSubmissionAttemptStore(
+            base: LocalItemRunSubmissionAttemptStore(
+                rootDirectory: scenario.attemptRoot
+            ),
+            events: events
+        )
+        await attemptStore.recover()
+        let tokenProvider = AttemptPersistenceRecordingTokenProvider(
+            attemptStore: attemptStore,
+            events: events
+        )
+        let responseGate = SubmissionResponseGate()
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.ambiguous, .ambiguous],
+            beforeResponse: {
+                await responseGate.hold(onCall: 2)
+            }
+        )
+        let persistedKey = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000072"
+        )!
+        let unusedFreshKey = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000073"
+        )!
+        let keySequence = KeySequence(
+            keys: [persistedKey, unusedFreshKey]
+        )
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: scenario.draftStore,
+                tokenProvider: tokenProvider,
+                readData: intake.read,
+                newIdempotencyKey: { keySequence.next() }
+            )
+        )
+
+        await scenario.perform(submissionHost: submissionHost)
+
+        XCTAssertEqual(submissionHost.retention, .ambiguous)
+        XCTAssertNil(submissionHost.acceptedRun)
+        XCTAssertFalse(submissionHost.clearedIntake)
+        XCTAssertFalse(submissionHost.isSubmitting)
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
+        let exactMessage =
+            "We couldn't confirm this went through. Your item is still saved on this phone."
+        var presentationProbe = RetainedSubmissionPresentationProbe()
+        let firstEvent = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .ambiguous,
+            primaryActionLabel: "Try again",
+            primaryActionEvent: {
+                .retryAmbiguousSubmission(eventID: $0)
+            },
+            message: exactMessage
+        )
+        let firstEventID = firstEvent.eventID
+
+        var payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+        let firstPayload = try XCTUnwrap(payloads.first)
+        let storedAttempt = try await attemptStore.loadAttempt()
+        let retainedAttempt = try XCTUnwrap(storedAttempt)
+        XCTAssertEqual(retainedAttempt.idempotencyKey, persistedKey)
+        XCTAssertEqual(
+            retainedAttempt.photos.map(\.photoID),
+            submittedPhotos.map(\.id)
+        )
+        XCTAssertEqual(firstPayload.attempt, retainedAttempt)
+        XCTAssertEqual(firstPayload.photoData, intake.expectedBytes)
+        let initialTokenCallCount = await tokenProvider.callCount
+        let initialAttemptSaveCount =
+            await attemptStore.successfulSaveCount
+        let initialAttemptClearCount = await attemptStore.clearCount
+        XCTAssertEqual(initialTokenCallCount, 1)
+        XCTAssertEqual(initialAttemptSaveCount, 1)
+        XCTAssertEqual(initialAttemptClearCount, 0)
+        XCTAssertEqual(
+            events.events,
+            [
+                .attemptPersisted(persistedKey),
+                .tokenRequested(persistedKey),
+            ]
+        )
+        XCTAssertEqual(presentationProbe.announcements, [exactMessage])
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
+        try await scenario.assertPreserved()
+
+        var wrongUUID = firstEventID.uuid
+        wrongUUID.0 ^= 1
+        await scenario.perform(
+            primaryAction:
+                .retryAmbiguousSubmission(eventID: UUID(uuid: wrongUUID)),
+            submissionHost: submissionHost
+        )
+        let payloadsAfterWrongAction = await submitter.payloads
+        let tokenCallsAfterWrongAction = await tokenProvider.callCount
+        XCTAssertEqual(payloadsAfterWrongAction.count, 1)
+        XCTAssertEqual(tokenCallsAfterWrongAction, 1)
+        XCTAssertEqual(
+            submissionHost.pendingPresentationEvent,
+            .submissionRejected(
+                eventID: firstEventID,
+                retention: .ambiguous
+            )
+        )
+
+        let retryEnteredSubmission = expectation(
+            description: "Matching ambiguous retry enters SUB-01"
+        )
+        withObservationTracking {
+            _ = submissionHost.isSubmitting
+        } onChange: {
+            retryEnteredSubmission.fulfill()
+        }
+        let retryTask = Task {
+            await scenario.perform(
+                primaryAction: firstEvent.presentation.primaryActionEvent,
+                submissionHost: submissionHost
+            )
+        }
+        await fulfillment(of: [retryEnteredSubmission], timeout: 3)
+        XCTAssertTrue(submissionHost.isSubmitting)
+        XCTAssertTrue(scenario.photoReviewHost.isCommitting)
+        XCTAssertNil(submissionHost.pendingPresentationEvent)
+        await responseGate.release()
+        await retryTask.value
+
+        let secondEvent = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .ambiguous,
+            primaryActionLabel: "Try again",
+            primaryActionEvent: {
+                .retryAmbiguousSubmission(eventID: $0)
+            },
+            message: exactMessage
+        )
+        XCTAssertNotEqual(secondEvent.eventID, firstEventID)
+        XCTAssertEqual(
+            presentationProbe.announcements,
+            [exactMessage, exactMessage]
+        )
+        payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 2)
+        XCTAssertEqual(
+            payloads.map(\.attempt.idempotencyKey),
+            [persistedKey, persistedKey]
+        )
+        XCTAssertEqual(payloads[0].attempt.photos, payloads[1].attempt.photos)
+        XCTAssertEqual(payloads[0].photoData, payloads[1].photoData)
+        XCTAssertEqual(payloads[1].photoData, intake.expectedBytes)
+        let retryBearerTokenLengths =
+            await submitter.bearerTokenLengths
+        XCTAssertEqual(retryBearerTokenLengths.count, 2)
+        let retryTokenCallCount = await tokenProvider.callCount
+        let retryAttemptSaveCount =
+            await attemptStore.successfulSaveCount
+        let retryAttemptClearCount = await attemptStore.clearCount
+        let attemptAfterRetry = try await attemptStore.loadAttempt()
+        XCTAssertEqual(retryTokenCallCount, 2)
+        XCTAssertEqual(retryAttemptSaveCount, 1)
+        XCTAssertEqual(retryAttemptClearCount, 0)
+        XCTAssertEqual(attemptAfterRetry, retainedAttempt)
+
+        await scenario.perform(
+            primaryAction: firstEvent.presentation.primaryActionEvent,
+            submissionHost: submissionHost
+        )
+        let payloadsAfterDuplicateAction = await submitter.payloads
+        let tokenCallsAfterDuplicateAction =
+            await tokenProvider.callCount
+        XCTAssertEqual(payloadsAfterDuplicateAction.count, 2)
+        XCTAssertEqual(tokenCallsAfterDuplicateAction, 2)
+        XCTAssertEqual(
+            events.events,
+            [
+                .attemptPersisted(persistedKey),
+                .tokenRequested(persistedKey),
+                .tokenRequested(persistedKey),
+            ]
+        )
+        try await scenario.assertPreserved()
+    }
+
+    func testConflictSubmissionPresentsReviewAndReviewOnlyRetiresMatchingAdvisory() async throws {
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-conflict-submission-review",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemRed,
+                    rightColor: .systemBlue
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemYellow,
+                    rightColor: .systemPurple
+                ),
+            ]
+        )
+        defer { scenario.cleanUp() }
+        let submittedPhotos = scenario.displayedPhotos
+        let intake = SubmissionIntakeFixture(stagedPhotos: submittedPhotos)
+        let submitter = RecordingItemRunSubmitter(outcomes: [.conflict])
+        let attemptStore = LocalItemRunSubmissionAttemptStore(
+            rootDirectory: scenario.attemptRoot
+        )
+        let persistedKey = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000082"
+        )!
+        let unusedFreshKey = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000083"
+        )!
+        let keySequence = KeySequence(
+            keys: [persistedKey, unusedFreshKey]
+        )
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: scenario.draftStore,
+                tokenProvider: CaptureFlowBearerTokenProvider(),
+                readData: intake.read,
+                newIdempotencyKey: { keySequence.next() }
+            )
+        )
+
+        await scenario.perform(submissionHost: submissionHost)
+
+        XCTAssertEqual(submissionHost.retention, .conflict)
+        XCTAssertNil(submissionHost.acceptedRun)
+        XCTAssertFalse(submissionHost.clearedIntake)
+        XCTAssertFalse(submissionHost.isSubmitting)
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
+        let payloadsAfterConflict = await submitter.payloads
+        XCTAssertEqual(payloadsAfterConflict.count, 1)
+        let conflictedPayload = try XCTUnwrap(payloadsAfterConflict.first)
+        XCTAssertEqual(conflictedPayload.attempt.idempotencyKey, persistedKey)
+        XCTAssertEqual(conflictedPayload.photoData, intake.expectedBytes)
+        let attemptBeforePresentation = try await attemptStore.loadAttempt()
+        XCTAssertNil(
+            attemptBeforePresentation,
+            "The exact wedged attempt retires before SUB-04 is published."
+        )
+
+        let visibleMessage =
+            "Something changed since your last try. Review your item, then start again."
+        let announcement = "Something changed since your last try."
+        var presentationProbe = RetainedSubmissionPresentationProbe()
+        let conflict = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .conflict,
+            primaryActionLabel: "Review",
+            primaryActionEvent: {
+                .reviewConflictedSubmission(eventID: $0)
+            },
+            message: visibleMessage,
+            announcement: announcement
+        )
+        let eventID = conflict.eventID
+        XCTAssertEqual(
+            presentationProbe.announcements,
+            [announcement]
+        )
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
+        try await scenario.assertPreserved()
+
+        var staleUUID = eventID.uuid
+        staleUUID.0 ^= 1
+        await scenario.perform(
+            primaryAction: .reviewConflictedSubmission(
+                eventID: UUID(uuid: staleUUID)
+            ),
+            submissionHost: submissionHost
+        )
+        XCTAssertEqual(
+            submissionHost.pendingPresentationEvent,
+            .submissionRejected(
+                eventID: eventID,
+                retention: .conflict
+            )
+        )
+        var payloadsAfterReview = await submitter.payloads
+        XCTAssertEqual(payloadsAfterReview.count, 1)
+
+        await scenario.perform(
+            primaryAction: conflict.presentation.primaryActionEvent,
+            submissionHost: submissionHost
+        )
+        XCTAssertNil(submissionHost.pendingPresentationEvent)
+        let returnedPresentation = PhotoReviewSubmissionPresentation(
+            host: submissionHost
+        )
+        XCTAssertEqual(returnedPresentation.primaryActionLabel, "Start listing")
+        XCTAssertNil(returnedPresentation.visibleMessage)
+        XCTAssertEqual(
+            returnedPresentation.primaryActionEvent,
+            .startListing
+        )
+
+        await scenario.perform(
+            primaryAction: conflict.presentation.primaryActionEvent,
+            submissionHost: submissionHost
+        )
+        payloadsAfterReview = await submitter.payloads
+        let attemptAfterDuplicateReview = try await attemptStore.loadAttempt()
+        XCTAssertEqual(payloadsAfterReview.count, 1)
+        XCTAssertNil(attemptAfterDuplicateReview)
+        XCTAssertEqual(submissionHost.retention, .conflict)
+        presentationProbe.consumeIdle(host: submissionHost)
+        XCTAssertEqual(
+            presentationProbe.announcements,
+            [announcement]
+        )
+        XCTAssertTrue(presentationProbe.acknowledgedEventIDs.isEmpty)
+        try await scenario.assertPreserved()
+    }
+
     func testRateLimitedSubmissionPresentsTryAgainOnceAndPreservesPhotoReviewForExplicitRetry() async throws {
         let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
             name: "snaplist-rate-limited-submission",
@@ -5888,6 +6223,21 @@ private final class RetainedSubmissionPhotoReviewScenario {
         )
     }
 
+    func perform(
+        primaryAction: PhotoReviewBoundaryEvent,
+        submissionHost: ItemRunSubmissionHost
+    ) async {
+        await AppShellPhotoReviewSubmissionTransaction.perform(
+            primaryAction: primaryAction,
+            session: session,
+            captureFlow: captureFlow,
+            host: photoReviewHost,
+            router: router,
+            submissionHost: submissionHost,
+            setReturnFocus: { self.pendingScanFocus = $0 }
+        )
+    }
+
     func assertPreserved() async throws {
         let durablePhotos = try await draftStore.loadPhotos()
         XCTAssertEqual(
@@ -5963,6 +6313,32 @@ private struct RetainedSubmissionPresentationProbe {
         eventID: UUID,
         presentation: PhotoReviewSubmissionPresentation
     ) {
+        try assertNewEvent(
+            host: host,
+            retention: retention,
+            primaryActionLabel: family.primaryActionLabel,
+            primaryActionEvent: {
+                family.primaryActionEvent(eventID: $0)
+            },
+            message: family.message,
+            file: file,
+            line: line
+        )
+    }
+
+    mutating func assertNewEvent(
+        host: ItemRunSubmissionHost,
+        retention: ItemRunSubmissionRetention,
+        primaryActionLabel: String,
+        primaryActionEvent: (UUID) -> PhotoReviewBoundaryEvent,
+        message: String,
+        announcement: String? = nil,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> (
+        eventID: UUID,
+        presentation: PhotoReviewSubmissionPresentation
+    ) {
         guard case .submissionRejected(
             eventID: let eventID,
             retention: let eventRetention
@@ -5979,25 +6355,25 @@ private struct RetainedSubmissionPresentationProbe {
         let presentation = PhotoReviewSubmissionPresentation(host: host)
         XCTAssertEqual(
             presentation.primaryActionLabel,
-            family.primaryActionLabel,
+            primaryActionLabel,
             file: file,
             line: line
         )
         XCTAssertEqual(
             presentation.primaryActionEvent,
-            family.primaryActionEvent(eventID: eventID),
+            primaryActionEvent(eventID),
             file: file,
             line: line
         )
         XCTAssertEqual(
             presentation.visibleMessage,
-            family.message,
+            message,
             file: file,
             line: line
         )
         XCTAssertEqual(
             presentation.accessibilityAnnouncement,
-            family.message,
+            announcement ?? message,
             file: file,
             line: line
         )
@@ -6036,7 +6412,7 @@ private struct RetainedSubmissionPresentationProbe {
         )
         XCTAssertEqual(
             announcements.last,
-            family.message,
+            announcement ?? message,
             file: file,
             line: line
         )

@@ -478,7 +478,9 @@ struct PhotoReviewFixtureView: View {
 enum PhotoReviewBoundaryEvent: Equatable {
     case openVoiceNote
     case startListing
+    case retryAmbiguousSubmission(eventID: UUID)
     case reviewSubmission(eventID: UUID)
+    case reviewConflictedSubmission(eventID: UUID)
 }
 
 /// When the approved Start listing control is offered.

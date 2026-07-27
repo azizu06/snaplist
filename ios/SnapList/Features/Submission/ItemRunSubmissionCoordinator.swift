@@ -7,37 +7,91 @@ enum ItemRunSubmissionPresentationEvent: Equatable, Sendable {
         eventID: UUID,
         retention: ItemRunSubmissionRetention
     )
+    case destinationHandoff(
+        eventID: UUID,
+        handoff: ItemRunSubmissionDestinationDecision.Handoff
+    )
+}
+
+enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
+    enum PhotoReview: Equatable, Sendable {
+        case sub03
+        case sub04
+        case sub06
+        case sub07
+    }
+
+    enum Handoff: Equatable, Sendable {
+        case pay01
+        case pay08
+        case accountClaim12aThrough12c
+    }
+
+    case photoReview(PhotoReview)
+    case handoff(Handoff)
+
+    init(retention: ItemRunSubmissionRetention) {
+        switch retention {
+        case .ambiguous:
+            self = .photoReview(.sub03)
+        case .conflict:
+            self = .photoReview(.sub04)
+        case .creditDenied(reason: _):
+            self = .handoff(.pay01)
+        case .rateLimited(reason: _):
+            self = .photoReview(.sub06)
+        case .rejected:
+            self = .photoReview(.sub07)
+        case .authenticationRequired:
+            self = .handoff(.accountClaim12aThrough12c)
+        case .receiptMismatch:
+            self = .handoff(.pay08)
+        case .intakeUnavailable:
+            self = .photoReview(.sub07)
+        case .attemptNotPersisted:
+            self = .photoReview(.sub06)
+        case .submissionUnavailable:
+            self = .photoReview(.sub06)
+        }
+    }
 }
 
 enum PhotoReviewSubmissionRejectionFamily: Equatable {
+    case ambiguity
+    case conflict
     case tryAgain
     case review
 
     init?(retention: ItemRunSubmissionRetention) {
-        switch retention {
-        case .rateLimited(reason: _),
-             .attemptNotPersisted,
-             .submissionUnavailable:
+        switch ItemRunSubmissionDestinationDecision(retention: retention) {
+        case .photoReview(.sub03):
+            self = .ambiguity
+        case .photoReview(.sub04):
+            self = .conflict
+        case .photoReview(.sub06):
             self = .tryAgain
-        case .rejected,
-             .intakeUnavailable:
+        case .photoReview(.sub07):
             self = .review
-        default:
+        case .handoff(_):
             return nil
         }
     }
 
     var primaryActionLabel: String {
         switch self {
-        case .tryAgain:
+        case .ambiguity, .tryAgain:
             "Try again"
-        case .review:
+        case .conflict, .review:
             "Review"
         }
     }
 
     var message: String {
         switch self {
+        case .ambiguity:
+            "We couldn't confirm this went through. Your item is still saved on this phone."
+        case .conflict:
+            "Something changed since your last try. Review your item, then start again."
         case .tryAgain:
             "This didn't go through. Your item is still saved on this phone."
         case .review:
@@ -45,8 +99,21 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         }
     }
 
+    var accessibilityAnnouncement: String {
+        switch self {
+        case .conflict:
+            "Something changed since your last try."
+        case .ambiguity, .tryAgain, .review:
+            message
+        }
+    }
+
     func primaryActionEvent(eventID: UUID) -> PhotoReviewBoundaryEvent {
         switch self {
+        case .ambiguity:
+            .retryAmbiguousSubmission(eventID: eventID)
+        case .conflict:
+            .reviewConflictedSubmission(eventID: eventID)
         case .tryAgain:
             .startListing
         case .review:
@@ -253,12 +320,22 @@ final class ItemRunSubmissionHost {
             acceptedRun = nil
             clearedIntake = false
             self.retention = retention
-            if PhotoReviewSubmissionRejectionFamily(
+            switch ItemRunSubmissionDestinationDecision(
                 retention: retention
-            ) != nil {
-                pendingPresentationEvent = .submissionRejected(
-                    eventID: UUID(),
+            ) {
+            case .photoReview:
+                if PhotoReviewSubmissionRejectionFamily(
                     retention: retention
+                ) != nil {
+                    pendingPresentationEvent = .submissionRejected(
+                        eventID: UUID(),
+                        retention: retention
+                    )
+                }
+            case .handoff(let handoff):
+                pendingPresentationEvent = .destinationHandoff(
+                    eventID: UUID(),
+                    handoff: handoff
                 )
             }
         }
@@ -281,6 +358,26 @@ final class ItemRunSubmissionHost {
         presentationAcknowledgmentGate?.acknowledge(eventID: eventID)
     }
 
+    func canRetryAmbiguousSubmission(eventID: UUID) -> Bool {
+        guard !isSubmitting,
+              case .submissionRejected(
+                  eventID: let pendingEventID,
+                  retention: .ambiguous
+              )? = pendingPresentationEvent else {
+            return false
+        }
+        return pendingEventID == eventID
+    }
+
+    @discardableResult
+    func retryAmbiguousSubmission(eventID: UUID) -> Bool {
+        guard canRetryAmbiguousSubmission(eventID: eventID) else {
+            return false
+        }
+        pendingPresentationEvent = nil
+        return true
+    }
+
     @discardableResult
     func reviewRejectedSubmission(eventID: UUID) -> Bool {
         guard case .submissionRejected(
@@ -295,6 +392,33 @@ final class ItemRunSubmissionHost {
         }
         pendingPresentationEvent = nil
         return true
+    }
+
+    @discardableResult
+    func reviewConflictedSubmission(eventID: UUID) -> Bool {
+        guard case .submissionRejected(
+            eventID: let pendingEventID,
+            retention: .conflict
+        )? = pendingPresentationEvent,
+              pendingEventID == eventID else {
+            return false
+        }
+        pendingPresentationEvent = nil
+        return true
+    }
+
+    func consumeDestinationHandoff(
+        eventID: UUID
+    ) -> ItemRunSubmissionDestinationDecision.Handoff? {
+        guard case .destinationHandoff(
+            eventID: let pendingEventID,
+            handoff: let handoff
+        )? = pendingPresentationEvent,
+              pendingEventID == eventID else {
+            return nil
+        }
+        pendingPresentationEvent = nil
+        return handoff
     }
 
     func completeClearedIntakePresentation() {
@@ -387,7 +511,7 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 primaryActionEvent: family.primaryActionEvent(eventID: eventID),
                 mutationControlsLocked: false,
                 announcementEvent: .submissionRejected(eventID: eventID),
-                accessibilityAnnouncement: family.message,
+                accessibilityAnnouncement: family.accessibilityAnnouncement,
                 visibleMessage: family.message,
                 rendersSubmittedMedia: true
             )
@@ -446,10 +570,14 @@ enum PhotoReviewSubmissionPrimaryActionConsumer {
         _ event: PhotoReviewBoundaryEvent,
         submissionHost: ItemRunSubmissionHost
     ) -> Bool {
-        guard case .reviewSubmission(let eventID) = event else {
+        switch event {
+        case .reviewSubmission(let eventID):
+            return submissionHost.reviewRejectedSubmission(eventID: eventID)
+        case .reviewConflictedSubmission(let eventID):
+            return submissionHost.reviewConflictedSubmission(eventID: eventID)
+        case .openVoiceNote, .startListing, .retryAmbiguousSubmission:
             return false
         }
-        return submissionHost.reviewRejectedSubmission(eventID: eventID)
     }
 }
 
