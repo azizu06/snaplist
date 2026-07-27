@@ -147,16 +147,53 @@ const dockerProxyFields = new Set([
   "ftpproxy",
   "allproxy",
 ]);
+const dockerContextRootFields = new Set([
+  "name",
+  "metadata",
+  "endpoints",
+]);
+const dockerEndpointFields = new Set(["host", "skiptlsverify"]);
+
+function goEqualFoldAscii(key, asciiField) {
+  const keyRunes = [...key];
+  if (keyRunes.length !== asciiField.length) return false;
+
+  for (let index = 0; index < keyRunes.length; index += 1) {
+    const fieldCode = asciiField.charCodeAt(index);
+    const foldedFieldCode =
+      fieldCode >= 0x41 && fieldCode <= 0x5a
+        ? fieldCode + 0x20
+        : fieldCode;
+    const keyCode = keyRunes[index].codePointAt(0);
+    const foldedKeyCode =
+      keyCode >= 0x41 && keyCode <= 0x5a
+        ? keyCode + 0x20
+        : keyCode === 0x017f
+          ? 0x73
+          : keyCode === 0x212a
+            ? 0x6b
+            : keyCode;
+    if (foldedKeyCode !== foldedFieldCode) return false;
+  }
+  return true;
+}
+
+function goFoldedAsciiField(key, fields) {
+  for (const field of fields) {
+    if (goEqualFoldAscii(key, field)) return field;
+  }
+  return null;
+}
 
 function duplicateJsonFieldIdentity(kind, objectPath, key) {
-  const normalizedKey = key.toLowerCase();
   if (kind === "docker-config") {
     if (objectPath.length === 0) {
-      return dockerConfigRootFields.has(normalizedKey)
-        ? normalizedKey
-        : null;
+      return goFoldedAsciiField(key, dockerConfigRootFields);
     }
-    const rootField = objectPath[0].toLowerCase();
+    const rootField = goFoldedAsciiField(
+      objectPath[0],
+      dockerConfigRootFields,
+    );
     if (
       objectPath.length === 1 &&
       (dockerConfigStringMapFields.has(rootField) ||
@@ -167,12 +204,10 @@ function duplicateJsonFieldIdentity(kind, objectPath, key) {
       return key;
     }
     if (objectPath.length === 2 && rootField === "auths") {
-      return dockerAuthFields.has(normalizedKey) ? normalizedKey : null;
+      return goFoldedAsciiField(key, dockerAuthFields);
     }
     if (objectPath.length === 2 && rootField === "proxies") {
-      return dockerProxyFields.has(normalizedKey)
-        ? normalizedKey
-        : null;
+      return goFoldedAsciiField(key, dockerProxyFields);
     }
     if (objectPath.length === 2 && rootField === "plugins") {
       return key;
@@ -182,11 +217,12 @@ function duplicateJsonFieldIdentity(kind, objectPath, key) {
 
   if (kind === "docker-context") {
     if (objectPath.length === 0) {
-      return ["name", "metadata", "endpoints"].includes(normalizedKey)
-        ? normalizedKey
-        : null;
+      return goFoldedAsciiField(key, dockerContextRootFields);
     }
-    const rootField = objectPath[0].toLowerCase();
+    const rootField = goFoldedAsciiField(
+      objectPath[0],
+      dockerContextRootFields,
+    );
     if (objectPath.length === 1 && rootField === "metadata") {
       return key === "Description" ? key : null;
     }
@@ -198,9 +234,7 @@ function duplicateJsonFieldIdentity(kind, objectPath, key) {
       rootField === "endpoints" &&
       objectPath[1] === "docker"
     ) {
-      return ["host", "skiptlsverify"].includes(normalizedKey)
-        ? normalizedKey
-        : null;
+      return goFoldedAsciiField(key, dockerEndpointFields);
     }
   }
   return null;
@@ -317,9 +351,8 @@ async function readOptionalJson(filePath, label, kind) {
 }
 
 function goFieldValues(object, jsonName) {
-  const normalizedName = jsonName.toLowerCase();
   return Object.entries(object)
-    .filter(([key]) => key.toLowerCase() === normalizedName)
+    .filter(([key]) => goEqualFoldAscii(key, jsonName))
     .map(([, value]) => value);
 }
 

@@ -45,7 +45,9 @@ metadata. The wrapper validates the pinned Docker v28.5.2 typed configuration,
 context, and endpoint JSON shapes while preserving ordinary credential,
 plugin, feature, and unknown extension keys. Duplicate typed fields fail
 closed, while the custom context `Description` field keeps Docker's exact-case
-semantics. Only the default Darwin/Linux Unix socket or a named context with an
+semantics. Other known fields use pinned Go Unicode simple-fold matching
+without multi-character full-case expansion. Only the default Darwin/Linux
+Unix socket or a named context with an
 absolute, authority-free `unix://` endpoint is accepted. TCP, SSH, malformed,
 missing, relative, and otherwise unprovable endpoints fail closed. The
 validated endpoint is then pinned into child `DOCKER_HOST`, with

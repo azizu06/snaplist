@@ -512,6 +512,20 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
       }).slice(0, -1)},"Endpoints":{"docker":{"Host":"unix:///var/run/docker.sock","SkipTLSVerify":false}}}`,
       useDockerConfig: true,
     },
+    {
+      name: "Go EqualFold long-s alias hides an earlier typed error",
+      context: "unicode-long-s",
+      metadata:
+        '{"Name":"unicode-long-s","Metadata":{},"Endpointſ":[],"Endpoints":{"docker":{"Host":"unix:///var/run/docker.sock","SkipTLSVerify":false}}}',
+      useDockerConfig: true,
+    },
+    {
+      name: "Go EqualFold Kelvin alias hides an earlier typed error",
+      context: "unicode-kelvin",
+      metadata:
+        '{"Name":"unicode-kelvin","Metadata":{},"Endpoints":{"docker":{"Host":"unix:///var/run/docker.sock","SKipTLSVerify":"false","SkipTLSVerify":false}}}',
+      useDockerConfig: true,
+    },
   ];
 
   for (const contextCase of blocked) {
@@ -581,6 +595,10 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
       "duplicate key hides an earlier typed error",
       '{"currentContext":"default","auths":[],"auths":{}}\n',
     ],
+    [
+      "single Go EqualFold alias remains typed",
+      '{"currentContext":"default","aliaseſ":[]}\n',
+    ],
   ];
   for (const [name, contents] of malformedConfigs) {
     await t.test(`malformed Docker configuration: ${name}`, async (t) => {
@@ -648,6 +666,7 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
             auths: {
               "registry.example.test": {
                 auth: Buffer.from("user:password").toString("base64"),
+                "paßword": { remainsUnknown: true },
               },
             },
             credsStore: "desktop",

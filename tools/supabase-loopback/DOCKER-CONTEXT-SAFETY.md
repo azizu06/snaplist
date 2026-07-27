@@ -172,6 +172,17 @@ unknown extensions keep the pinned last-value behavior. Docker's custom
 `DockerContext` decoder treats only exact-case `Description` as typed, so
 case-varied extension keys remain opaque and compatible.
 
+For the other typed struct fields, pinned Go `encoding/json` uses
+Unicode-simple-fold equality rather than JavaScript casing. Because every
+known field name here is ASCII, the wrapper uses a narrow matcher for ASCII
+case plus the two pinned simple-fold orbits that reach ASCII: long s (`ſ`) to
+`S`/`s` and Kelvin sign (`K`) to `K`/`k`. It does not apply multi-character
+full-case expansions: for example, `paßword` remains an unknown extension and
+does not become `password`. The duplicate scanner and semantic validators use
+the same matcher so their typed identities cannot diverge.
+([Go 1.25.5 JSON field folding](https://github.com/golang/go/blob/go1.25.5/src/encoding/json/fold.go),
+[Go 1.25.5 simple-fold table](https://github.com/golang/go/blob/go1.25.5/src/unicode/tables.go#L9345-L9431))
+
 ## TOCTOU model and mitigation
 
 Validation followed by an unchanged inherited environment is insufficient.
