@@ -156,6 +156,20 @@ test("every published-port constructor crosses central dual-loopback guard", asy
     /func DockerRunOnceWithConfig[\s\S]*?DockerStart\(/,
   );
 
+  const databaseStartSource = await readFile(
+    path.join(goRoot, "internal", "db", "start", "start.go"),
+    "utf8",
+  );
+  const databaseGuardIndex = databaseStartSource.indexOf(
+    "isolation.ValidateContainer(config, hostConfig)",
+  );
+  const volumeInspectIndex = databaseStartSource.indexOf(
+    "Docker.VolumeInspect(ctx, utils.DbId)",
+  );
+  assert.ok(databaseGuardIndex >= 0);
+  assert.ok(volumeInspectIndex >= 0);
+  assert.ok(databaseGuardIndex < volumeInspectIndex);
+
   const startSource = await readFile(
     path.join(goRoot, "internal", "start", "start.go"),
     "utf8",
@@ -200,7 +214,11 @@ test("patched source rejects Docker host capabilities before side effects", () =
     [["./internal/utils/isolation"], "."],
     [
       ["./internal/utils"],
-      "^TestDockerStartRejects(DeviceCgroupRules)?BeforeDockerAction$",
+      "^(TestDockerStartRejects(DeviceCgroupRules)?BeforeDockerAction|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
+    ],
+    [
+      ["./internal/db/start"],
+      "^TestStartDatabase(RejectsUnsafeDerivedConfigBeforeDockerAction)?$",
     ],
     [
       ["./internal/start"],

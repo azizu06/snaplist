@@ -47,10 +47,10 @@ index 9736fa6..c6a4a78 100644
  	}
 diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
 new file mode 100644
-index 0000000..28e4a6d
+index 0000000..3359dc2
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_isolation_test.go
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,179 @@
 +package utils
 +
 +import (
@@ -79,6 +79,74 @@ index 0000000..28e4a6d
 +	}, nil
 +}
 +
++type safeCachedImageRoundTripper struct {
++	imageInspect    int
++	imagePull       int
++	containerCreate int
++	containerStart  int
++	other           int
++}
++
++func (transport *safeCachedImageRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
++	status := http.StatusInternalServerError
++	body := "unexpected Docker action"
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		transport.imageInspect++
++		status = http.StatusOK
++		body = "{}"
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		transport.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		transport.containerCreate++
++		status = http.StatusCreated
++		body = `{"Id":"safe-container","Warnings":[]}`
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
++		transport.containerStart++
++		status = http.StatusNoContent
++		body = ""
++	default:
++		transport.other++
++	}
++	return &http.Response{
++		StatusCode: status,
++		Body:       io.NopCloser(strings.NewReader(body)),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestDockerStartUsesCachedImageAndStartsSafeContainer(t *testing.T) {
++	transport := &safeCachedImageRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	containerID, err := DockerStart(
++		context.Background(),
++		container.Config{Image: "example.invalid/supabase/test:latest"},
++		container.HostConfig{NetworkMode: container.NetworkMode("bridge")},
++		network.NetworkingConfig{},
++		"safe-cached-image-test",
++	)
++	require.NoError(t, err)
++	require.Equal(t, "safe-container", containerID)
++	require.Equal(t, 1, transport.imageInspect)
++	require.Zero(t, transport.imagePull)
++	require.Equal(t, 1, transport.containerCreate)
++	require.Equal(t, 1, transport.containerStart)
++	require.Zero(t, transport.other)
++}
++
 +func TestDockerStartRejectsBeforeDockerAction(t *testing.T) {
 +	transport := &countingRoundTripper{}
 +	fakeDocker, err := client.NewClientWithOpts(
@@ -101,6 +169,32 @@ index 0000000..28e4a6d
 +		container.HostConfig{Privileged: true},
 +		network.NetworkingConfig{},
 +		"unsafe-test",
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, transport.calls)
++}
++
++func TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction(t *testing.T) {
++	transport := &countingRoundTripper{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: transport}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := Docker
++	Docker = fakeDocker
++	t.Cleanup(func() {
++		Docker = previousDocker
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	_, err = DockerRunOnce(
++		context.Background(),
++		"example.invalid/supabase/test:latest",
++		[]string{"DOCKER_HOST=tcp://docker:2375"},
++		[]string{"true"},
 +	)
 +	require.ErrorContains(t, err, "unsafe Docker container capability")
 +	require.Zero(t, transport.calls)
@@ -764,5 +858,121 @@ index 0000000000000000000000000000000000000000..d1483e6a791e86c5fe4c643a68339426
 +	require.Zero(t, counter.volumeCreate)
 +	require.Zero(t, counter.containerCreate)
 +	require.Zero(t, counter.containerStart)
++	require.Zero(t, counter.other)
++}
+diff --git a/apps/cli-go/internal/db/start/start.go b/apps/cli-go/internal/db/start/start.go
+index 6f1eeac..2b49dba 100644
+--- a/apps/cli-go/internal/db/start/start.go
++++ b/apps/cli-go/internal/db/start/start.go
+@@ -25,6 +25,7 @@ import (
+ 	"github.com/supabase/cli/internal/status"
+ 	"github.com/supabase/cli/internal/utils"
+ 	"github.com/supabase/cli/internal/utils/flags"
++	"github.com/supabase/cli/internal/utils/isolation"
+ 	"github.com/supabase/cli/pkg/config"
+ 	"github.com/supabase/cli/pkg/migration"
+ 	"github.com/supabase/cli/pkg/vault"
+@@ -162,6 +163,9 @@ EOF`}
+ 		}
+ 		hostConfig.Binds = append(hostConfig.Binds, utils.ToDockerPath(fromBackup)+":/etc/backup.sql:ro")
+ 	}
++	if err := isolation.ValidateContainer(config, hostConfig); err != nil {
++		return errors.Errorf("unsafe Docker container capability: %w", err)
++	}
+ 	// Creating volume will not override existing volume, so we must inspect explicitly
+ 	_, err := utils.Docker.VolumeInspect(ctx, utils.DbId)
+ 	utils.NoBackupVolume = errdefs.IsNotFound(err)
+diff --git a/apps/cli-go/internal/db/start/start_isolation_test.go b/apps/cli-go/internal/db/start/start_isolation_test.go
+new file mode 100644
+index 0000000..fac320f
+--- /dev/null
++++ b/apps/cli-go/internal/db/start/start_isolation_test.go
+@@ -0,0 +1,88 @@
++package start
++
++import (
++	"context"
++	"io"
++	"net/http"
++	"strings"
++	"testing"
++
++	"github.com/docker/docker/client"
++	"github.com/spf13/afero"
++	"github.com/stretchr/testify/require"
++
++	"github.com/supabase/cli/internal/utils"
++	"github.com/supabase/cli/pkg/config"
++)
++
++type databaseDockerActionCounter struct {
++	volumeInspect   int
++	imageInspect    int
++	imagePull       int
++	networkCreate   int
++	volumeCreate    int
++	containerCreate int
++	other           int
++}
++
++func (counter *databaseDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/volumes/"):
++		counter.volumeInspect++
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		counter.imageInspect++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		counter.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/networks/create"):
++		counter.networkCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		counter.volumeCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		counter.containerCreate++
++	default:
++		counter.other++
++	}
++	return &http.Response{
++		StatusCode: http.StatusInternalServerError,
++		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestStartDatabaseRejectsUnsafeDerivedConfigBeforeDockerAction(t *testing.T) {
++	counter := &databaseDockerActionCounter{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	previousDbID := utils.DbId
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	utils.DbId = "/var/run/docker.sock"
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		utils.DbId = previousDbID
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	err = StartDatabase(
++		context.Background(),
++		"",
++		afero.NewMemMapFs(),
++		io.Discard,
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, counter.volumeInspect)
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
 +	require.Zero(t, counter.other)
 +}

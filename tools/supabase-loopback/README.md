@@ -45,7 +45,8 @@ mode; host networking; devices, device requests, and device cgroup rules; and
 image inspection or pull, network/volume creation, or container creation. The
 tagged start path does not pre-pull through Compose; each fully derived
 container, including one-shot jobs, crosses the same guard before its
-cached-image check.
+cached-image check. The fully derived local database container also crosses the
+guard before its backup-volume inspection.
 
 The generated source checkout, binary, and build receipt live under `.cache/`
 and are intentionally ignored. The executable is never committed.

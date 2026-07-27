@@ -126,6 +126,8 @@ run(
     "apps/cli-go/internal/utils/isolation/hostconfig_test.go",
     "apps/cli-go/internal/utils/loopback/portbindings.go",
     "apps/cli-go/internal/utils/loopback/portbindings_test.go",
+    "apps/cli-go/internal/db/start/start.go",
+    "apps/cli-go/internal/db/start/start_isolation_test.go",
     "apps/cli-go/internal/start/start.go",
     "apps/cli-go/internal/start/start_isolation_test.go",
   ],
@@ -171,7 +173,18 @@ run(
     "test",
     "./internal/utils",
     "-run",
-    "^TestDockerStartRejects(DeviceCgroupRules)?BeforeDockerAction$",
+    "^(TestDockerStartRejects(DeviceCgroupRules)?BeforeDockerAction|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
+    "-count=1",
+  ],
+  { cwd: goRoot, env: testEnvironment, stdio: "inherit" },
+);
+run(
+  "go",
+  [
+    "test",
+    "./internal/db/start",
+    "-run",
+    "^TestStartDatabase(RejectsUnsafeDerivedConfigBeforeDockerAction)?$",
     "-count=1",
   ],
   { cwd: goRoot, env: testEnvironment, stdio: "inherit" },
