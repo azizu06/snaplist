@@ -214,7 +214,7 @@ test("patched source rejects Docker host capabilities before side effects", () =
     [["./internal/utils/isolation"], "."],
     [
       ["./internal/utils"],
-      "^(TestDockerStartRejects(BeforeDockerAction|DeviceCgroupRulesBeforeDockerAction|SymlinkedRuntimeSocketSourcesBeforeDockerAction|DirectoryContainingRuntimeEndpointBeforeDockerAction|DirectoryContainingFIFOBeforeDockerAction|HostBindFromUntrustedWritableParentBeforeDockerAction|WritableRegularFileBeforeDockerAction|HostBindReplacedAfterImageInspectionBeforeContainerCreate|HostBindWithDarwinACLBeforeDockerAction)|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
+      "^(TestDockerStartRejects(BeforeDockerAction|DeviceCgroupRulesBeforeDockerAction|SymlinkedRuntimeSocketSourcesBeforeDockerAction|DirectoryContainingRuntimeEndpointBeforeDockerAction|DirectoryContainingFIFOBeforeDockerAction|HostBindFromUntrustedWritableParentBeforeDockerAction|WritableRegularFileBeforeDockerAction|HostBindReplacedAfterImageInspectionBeforeContainerCreate|HostBindWithDarwinACLBeforeDockerAction|IncompleteStructuredBindBeforeDockerAction)|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
     ],
     [
       ["./internal/db/start"],

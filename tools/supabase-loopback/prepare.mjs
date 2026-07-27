@@ -182,7 +182,7 @@ run(
     "test",
     "./internal/utils",
     "-run",
-    "^(TestDockerStartRejects(BeforeDockerAction|DeviceCgroupRulesBeforeDockerAction|SymlinkedRuntimeSocketSourcesBeforeDockerAction|DirectoryContainingRuntimeEndpointBeforeDockerAction|DirectoryContainingFIFOBeforeDockerAction|HostBindFromUntrustedWritableParentBeforeDockerAction|WritableRegularFileBeforeDockerAction|HostBindReplacedAfterImageInspectionBeforeContainerCreate|HostBindWithDarwinACLBeforeDockerAction)|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
+    "^(TestDockerStartRejects(BeforeDockerAction|DeviceCgroupRulesBeforeDockerAction|SymlinkedRuntimeSocketSourcesBeforeDockerAction|DirectoryContainingRuntimeEndpointBeforeDockerAction|DirectoryContainingFIFOBeforeDockerAction|HostBindFromUntrustedWritableParentBeforeDockerAction|WritableRegularFileBeforeDockerAction|HostBindReplacedAfterImageInspectionBeforeContainerCreate|HostBindWithDarwinACLBeforeDockerAction|IncompleteStructuredBindBeforeDockerAction)|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
     "-count=1",
   ],
   { cwd: goRoot, env: testEnvironment, stdio: "inherit" },

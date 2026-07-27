@@ -1,5 +1,5 @@
 diff --git a/apps/cli-go/internal/db/start/start.go b/apps/cli-go/internal/db/start/start.go
-index 6f1eeac..fea410f 100644
+index 6f1eeacde36237f16679c4e975ff48382285e38a..fea410f7ec0918ba85477a5893e26442599952e9 100644
 --- a/apps/cli-go/internal/db/start/start.go
 +++ b/apps/cli-go/internal/db/start/start.go
 @@ -25,6 +25,7 @@ import (
@@ -112,7 +112,7 @@ index 6f1eeac..fea410f 100644
  		fmt.Fprintln(w, "Starting database...")
 diff --git a/apps/cli-go/internal/db/start/start_isolation_test.go b/apps/cli-go/internal/db/start/start_isolation_test.go
 new file mode 100644
-index 0000000..6a98fe4
+index 0000000000000000000000000000000000000000..6a98fe4882a3d22aaa0013e2169a583404ac27fa
 --- /dev/null
 +++ b/apps/cli-go/internal/db/start/start_isolation_test.go
 @@ -0,0 +1,456 @@
@@ -573,7 +573,7 @@ index 0000000..6a98fe4
 +	require.Zero(t, counter.other)
 +}
 diff --git a/apps/cli-go/internal/start/start.go b/apps/cli-go/internal/start/start.go
-index 6ce6a44..906b72e 100644
+index 6ce6a4434dafce83ee4db398f3b16ed04a8dae59..906b72e2ed7e94726451e15205d0fd6f22f5ab8e 100644
 --- a/apps/cli-go/internal/start/start.go
 +++ b/apps/cli-go/internal/start/start.go
 @@ -6,7 +6,6 @@ import (
@@ -704,7 +704,7 @@ index 6ce6a44..906b72e 100644
  		binds = utils.RemoveDuplicates(binds)
 diff --git a/apps/cli-go/internal/start/start_isolation_test.go b/apps/cli-go/internal/start/start_isolation_test.go
 new file mode 100644
-index 0000000..2800a0e
+index 0000000000000000000000000000000000000000..2800a0e7efc6c7d2f649c2b131063526eb46d053
 --- /dev/null
 +++ b/apps/cli-go/internal/start/start_isolation_test.go
 @@ -0,0 +1,206 @@
@@ -915,7 +915,7 @@ index 0000000..2800a0e
 +	require.Zero(t, transport.other)
 +}
 diff --git a/apps/cli-go/internal/start/start_test.go b/apps/cli-go/internal/start/start_test.go
-index afafbd8..cdd2cce 100644
+index afafbd815e0cff8588157d80eae9c55d457f1174..cdd2ccecc8e82b0815303565b3c7f1621fb9cee7 100644
 --- a/apps/cli-go/internal/start/start_test.go
 +++ b/apps/cli-go/internal/start/start_test.go
 @@ -5,6 +5,8 @@ import (
@@ -938,7 +938,7 @@ index afafbd8..cdd2cce 100644
  		analytics := &fakeAnalytics{enabled: true}
  		service, err := phtelemetry.NewService(fsys, phtelemetry.Options{
 diff --git a/apps/cli-go/internal/utils/docker.go b/apps/cli-go/internal/utils/docker.go
-index 9736fa6..3356205 100644
+index 9736fa651d187e4ed716b3699e01ae7ad6a4e321..33562055c1cb4147f220d124b4a5dbc26a1abd14 100644
 --- a/apps/cli-go/internal/utils/docker.go
 +++ b/apps/cli-go/internal/utils/docker.go
 @@ -33,6 +33,8 @@ import (
@@ -1002,7 +1002,7 @@ index 9736fa6..3356205 100644
  	if err != nil {
 diff --git a/apps/cli-go/internal/utils/docker_acl_darwin_test.go b/apps/cli-go/internal/utils/docker_acl_darwin_test.go
 new file mode 100644
-index 0000000..c3988d9
+index 0000000000000000000000000000000000000000..c3988d96bbe5455ef760bbbb4d27305f08d3eb17
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_acl_darwin_test.go
 @@ -0,0 +1,90 @@
@@ -1098,10 +1098,10 @@ index 0000000..c3988d9
 +}
 diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
 new file mode 100644
-index 0000000..91f617c
+index 0000000000000000000000000000000000000000..3c4920802ad6c74db5f7876a77687d342bb0bc75
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_isolation_test.go
-@@ -0,0 +1,569 @@
+@@ -0,0 +1,622 @@
 +package utils
 +
 +import (
@@ -1215,6 +1215,7 @@ index 0000000..91f617c
 +
 +func TestDockerStartUsesCachedImageAndStartsSafeContainer(t *testing.T) {
 +	tempDir := t.TempDir()
++	t.Chdir(tempDir)
 +	configPath := filepath.Join(tempDir, "config.json")
 +	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 +
@@ -1244,7 +1245,7 @@ index 0000000..91f617c
 +			},
 +			Mounts: []mount.Mount{{
 +				Type:   mount.TypeBind,
-+				Source: tempDir,
++				Source: ".",
 +				Target: "/safe/work",
 +			}},
 +		},
@@ -1259,6 +1260,58 @@ index 0000000..91f617c
 +	require.Equal(t, 1, transport.containerCreate)
 +	require.Equal(t, 1, transport.containerStart)
 +	require.Zero(t, transport.other)
++}
++
++func TestDockerStartRejectsIncompleteStructuredBindBeforeDockerAction(t *testing.T) {
++	tempDir := t.TempDir()
++	t.Chdir(tempDir)
++	safeSource := filepath.Join(tempDir, "config.json")
++	require.NoError(t, os.WriteFile(safeSource, []byte("{}"), 0o600))
++
++	tests := map[string]mount.Mount{
++		"empty source": {
++			Type:   mount.TypeBind,
++			Source: "",
++			Target: "/safe/work",
++		},
++		"empty target": {
++			Type:   mount.TypeBind,
++			Source: safeSource,
++			Target: "",
++		},
++	}
++	for name, mounted := range tests {
++		mounted := mounted
++		t.Run(name, func(t *testing.T) {
++			transport := &countingRoundTripper{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: transport}),
++			)
++			require.NoError(t, err)
++
++			previousDocker := Docker
++			Docker = fakeDocker
++			t.Cleanup(func() {
++				Docker = previousDocker
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			_, err = DockerStart(
++				context.Background(),
++				container.Config{Image: "example.invalid/supabase/test:latest"},
++				container.HostConfig{
++					NetworkMode: container.NetworkMode("bridge"),
++					Mounts:      []mount.Mount{mounted},
++				},
++				network.NetworkingConfig{},
++				"incomplete-structured-bind-test",
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, transport.calls)
++		})
++	}
 +}
 +
 +func TestDockerStartRejectsBeforeDockerAction(t *testing.T) {
@@ -1673,7 +1726,7 @@ index 0000000..91f617c
 +}
 diff --git a/apps/cli-go/internal/utils/docker_special_unix_test.go b/apps/cli-go/internal/utils/docker_special_unix_test.go
 new file mode 100644
-index 0000000..73017aa
+index 0000000000000000000000000000000000000000..73017aa67247016839638856800203bf33084d8e
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_special_unix_test.go
 @@ -0,0 +1,64 @@
@@ -1743,10 +1796,10 @@ index 0000000..73017aa
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig.go b/apps/cli-go/internal/utils/isolation/hostconfig.go
 new file mode 100644
-index 0000000..8be6ea2
+index 0000000000000000000000000000000000000000..79b029aabc4e68dad3dd2098f26a41bf307eb2a1
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig.go
-@@ -0,0 +1,425 @@
+@@ -0,0 +1,428 @@
 +package isolation
 +
 +import (
@@ -1808,6 +1861,9 @@ index 0000000..8be6ea2
 +		}
 +	}
 +	for index, mounted := range hostConfig.Mounts {
++		if mounted.Type == mount.TypeBind && (mounted.Source == "" || mounted.Target == "") {
++			return fail(fmt.Errorf("structured bind source and target are required"))
++		}
 +		if containsContainerRuntimeSocket(mounted.Target) {
 +			return fail(fmt.Errorf("container runtime socket mount is forbidden"))
 +		}
@@ -2174,7 +2230,7 @@ index 0000000..8be6ea2
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig_test.go b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
 new file mode 100644
-index 0000000..e4b96d1
+index 0000000000000000000000000000000000000000..e4b96d1a1907614ac5f6846214b2963f4da55790
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
 @@ -0,0 +1,265 @@
@@ -2445,7 +2501,7 @@ index 0000000..e4b96d1
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go
 new file mode 100644
-index 0000000..4234b27
+index 0000000000000000000000000000000000000000..4234b2757f60594e4acc65ac1e79cf87db8b2f7b
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin.go
 @@ -0,0 +1,108 @@
@@ -2559,7 +2615,7 @@ index 0000000..4234b27
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go
 new file mode 100644
-index 0000000..e3083ae
+index 0000000000000000000000000000000000000000..e3083aebccae210ab255f4333123696d7be6c133
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_darwin_test.go
 @@ -0,0 +1,60 @@
@@ -2625,7 +2681,7 @@ index 0000000..e3083ae
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go b/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go
 new file mode 100644
-index 0000000..3a857f3
+index 0000000000000000000000000000000000000000..3a857f35af4ba05bcc86f742e3d102148766dce0
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_acl_linux.go
 @@ -0,0 +1,12 @@
@@ -2643,7 +2699,7 @@ index 0000000..3a857f3
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
 new file mode 100644
-index 0000000..f4d6388
+index 0000000000000000000000000000000000000000..f4d63886adc13d801619a05092b8be550be9c546
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix.go
 @@ -0,0 +1,83 @@
@@ -2732,7 +2788,7 @@ index 0000000..f4d6388
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go
 new file mode 100644
-index 0000000..4d6b307
+index 0000000000000000000000000000000000000000..4d6b307c86f026cb8b9baae38edc23574fa5cc3a
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unix_test.go
 @@ -0,0 +1,135 @@
@@ -2873,7 +2929,7 @@ index 0000000..4d6b307
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go b/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go
 new file mode 100644
-index 0000000..5fd41af
+index 0000000000000000000000000000000000000000..5fd41af1db3d714a66f33adcbf06394eb071b441
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostsource_trust_unsupported.go
 @@ -0,0 +1,16 @@
@@ -2895,7 +2951,7 @@ index 0000000..5fd41af
 +}
 diff --git a/apps/cli-go/internal/utils/loopback/portbindings.go b/apps/cli-go/internal/utils/loopback/portbindings.go
 new file mode 100644
-index 0000000..0df0346
+index 0000000000000000000000000000000000000000..0df0346bb9e56425a48edcf0121468f40b0fd3b3
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/loopback/portbindings.go
 @@ -0,0 +1,96 @@
@@ -2997,7 +3053,7 @@ index 0000000..0df0346
 +}
 diff --git a/apps/cli-go/internal/utils/loopback/portbindings_test.go b/apps/cli-go/internal/utils/loopback/portbindings_test.go
 new file mode 100644
-index 0000000..f6436fa
+index 0000000000000000000000000000000000000000..f6436fab4ef13e707125f0e727b1fc024ed5449b
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/loopback/portbindings_test.go
 @@ -0,0 +1,70 @@
