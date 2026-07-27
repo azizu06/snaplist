@@ -124,6 +124,22 @@ enum RunDetailFixture: String, Equatable {
 
 enum SubmissionFixture: String, Equatable {
     case delayed
+    case acceptedPresentationGated = "accepted-presentation-gated"
+    case rateLimited = "rate-limited"
+}
+
+struct SubmissionAcknowledgmentNotificationName: Equatable {
+    static let prefix = "dev.snaplist.ios.test.submission-ack."
+
+    let rawValue: String
+
+    init?(rawValue: String) {
+        guard rawValue.hasPrefix(Self.prefix),
+              rawValue.count > Self.prefix.count else {
+            return nil
+        }
+        self.rawValue = rawValue
+    }
 }
 
 enum PhotoReviewVisualStateID: String, Equatable {
@@ -157,6 +173,8 @@ struct LaunchConfiguration: Equatable {
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
     var submissionFixture: SubmissionFixture?
+    var submissionAcknowledgmentNotification:
+        SubmissionAcknowledgmentNotificationName?
     var runDetailFixture: RunDetailFixture?
 
     static let standard = LaunchConfiguration(
@@ -172,6 +190,7 @@ struct LaunchConfiguration: Equatable {
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
+        submissionAcknowledgmentNotification: nil,
         runDetailFixture: nil
     )
 
@@ -188,6 +207,7 @@ struct LaunchConfiguration: Equatable {
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
+        submissionAcknowledgmentNotification: nil,
         runDetailFixture: .loaded
     )
 
@@ -221,6 +241,16 @@ struct LaunchConfiguration: Equatable {
                     configuration.usesZeroNetworkFixtures = true
                 }
 #endif
+            } else if argument.hasPrefix(
+                "--submission-acknowledgment-notification="
+            ) {
+                let value = String(
+                    argument.dropFirst(
+                        "--submission-acknowledgment-notification=".count
+                    )
+                )
+                configuration.submissionAcknowledgmentNotification =
+                    SubmissionAcknowledgmentNotificationName(rawValue: value)
             } else if argument.hasPrefix("--fixture=") {
                 let value = String(argument.dropFirst("--fixture=".count))
                 configuration.fixture = FoundationFixture(rawValue: value) ?? .home

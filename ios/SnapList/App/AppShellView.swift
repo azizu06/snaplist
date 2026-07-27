@@ -57,6 +57,9 @@ struct AppShellView: View {
                     submissionPresentation: PhotoReviewSubmissionPresentation(
                         host: submissionHost
                     ),
+                    acknowledgeSubmissionPresentation: { eventID in
+                        submissionHost.acknowledgePresentation(eventID: eventID)
+                    },
                     backToCamera: {
                         returnFromPhotoReview(session)
                     },
@@ -73,6 +76,12 @@ struct AppShellView: View {
                     // inert here. Start listing submits the photos in their displayed
                     // order; only a validated receipt may clear the intake.
                     openBoundary: { event in
+                        if PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                            event,
+                            submissionHost: submissionHost
+                        ) {
+                            return
+                        }
                         guard case .startListing = event else { return }
                         Task {
                             await AppShellPhotoReviewSubmissionTransaction.perform(
@@ -80,7 +89,8 @@ struct AppShellView: View {
                                 captureFlow: captureFlow,
                                 host: photoReviewHost,
                                 router: router,
-                                submissionHost: submissionHost
+                                submissionHost: submissionHost,
+                                setReturnFocus: { pendingScanReturnFocus = $0 }
                             )
                         }
                     },
@@ -334,7 +344,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
         captureFlow: CaptureFlowModel,
         host: PhotoReviewLiveHost,
         router: AppRouter,
-        submissionHost: ItemRunSubmissionHost
+        submissionHost: ItemRunSubmissionHost,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
     ) async {
         // Photo Review stays mounted across the request and the exact clear, exactly
         // like the two exits. Without the lock the seller could delete or reorder in
@@ -364,7 +375,14 @@ enum AppShellPhotoReviewSubmissionTransaction {
         }
         captureFlow.dropIntakeDiscardedElsewhere()
         await captureFlow.startCamera()
-        _ = host.leaveForClearedIntake(from: session, using: router)
+        guard host.session === session else {
+            return
+        }
+        setReturnFocus(.addPhotoButton)
+        guard host.leaveForClearedIntake(from: session, using: router) else {
+            return
+        }
+        submissionHost.completeClearedIntakePresentation()
     }
 }
 

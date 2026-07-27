@@ -271,6 +271,8 @@ struct ScanCameraView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @AccessibilityFocusState private var focusedLibraryControl:
+        ScanLibraryFocusConsumer.MountedLibraryControl?
     @State private var libraryItems: [PhotosPickerItem] = []
 
     var body: some View {
@@ -362,7 +364,15 @@ struct ScanCameraView: View {
     }
 
     private func libraryPicker(labelStyle: ScanLibraryLabelStyle) -> some View {
-        PhotosPicker(
+        let mountedControl: ScanLibraryFocusConsumer.MountedLibraryControl =
+            switch labelStyle {
+            case .icon:
+                .liveLibrary
+            case .recovery:
+                .recoveryLibrary
+            }
+
+        return PhotosPicker(
             selection: $libraryItems,
             maxSelectionCount: max(1, 5 - flow.stagedPhotos.count),
             selectionBehavior: .ordered,
@@ -376,6 +386,27 @@ struct ScanCameraView: View {
             labelStyle == .icon ? "scan.library" : "scan.choose-library"
         )
         .accessibilitySortPriority(60)
+        .accessibilityFocused(
+            $focusedLibraryControl,
+            equals: mountedControl
+        )
+        .onAppear {
+            consumeLibraryFocusIfPossible(mountedControl)
+        }
+        .onChange(of: returnFocus) { _, _ in
+            consumeLibraryFocusIfPossible(mountedControl)
+        }
+    }
+
+    private func consumeLibraryFocusIfPossible(
+        _ mountedControl: ScanLibraryFocusConsumer.MountedLibraryControl
+    ) {
+        ScanLibraryFocusConsumer().consume(
+            pendingFocus: returnFocus,
+            mountedControl: mountedControl,
+            applyAccessibilityFocus: { focusedLibraryControl = $0 },
+            consumePendingFocus: { returnFocus = nil }
+        )
     }
 
     private func open(
@@ -386,6 +417,26 @@ struct ScanCameraView: View {
         let photos = flow.stagedPhotos
         flow.cancelCamera()
         openBoundary(destination, photos, opener)
+    }
+}
+
+struct ScanLibraryFocusConsumer {
+    enum MountedLibraryControl: Hashable {
+        case liveLibrary
+        case recoveryLibrary
+    }
+
+    func consume(
+        pendingFocus: PhotoReviewScanFocus?,
+        mountedControl: MountedLibraryControl?,
+        applyAccessibilityFocus: (MountedLibraryControl) -> Void,
+        consumePendingFocus: () -> Void
+    ) {
+        guard pendingFocus == .addPhotoButton, let mountedControl else {
+            return
+        }
+        applyAccessibilityFocus(mountedControl)
+        consumePendingFocus()
     }
 }
 

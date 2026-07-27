@@ -471,13 +471,14 @@ struct PhotoReviewFixtureView: View {
 }
 #endif
 
-/// The two typed boundaries Photo Review opens. Photo Review owns neither
-/// destination: #469 owns the Voice recorder interior and which approved VOX state
-/// it resolves to, and #457 owns submission transport. Emitting one of these makes
-/// no claim about recording, upload, acceptance, queueing, AI work, or credit use.
+/// The typed boundaries Photo Review opens. Photo Review owns neither destination:
+/// #469 owns the Voice recorder interior and which approved VOX state it resolves to,
+/// and submission stays behind its typed host. Emitting one of these makes no claim
+/// about recording, upload, acceptance, queueing, AI work, or credit use.
 enum PhotoReviewBoundaryEvent: Equatable {
     case openVoiceNote
     case startListing
+    case reviewSubmission(eventID: UUID)
 }
 
 /// When the approved Start listing control is offered.
@@ -723,6 +724,7 @@ struct PhotoReviewView: View {
     var postSubmissionAnnouncement: (String) -> Void = {
         UIAccessibility.post(notification: .announcement, argument: $0)
     }
+    var acknowledgeSubmissionPresentation: (UUID) -> Void = { _ in }
     var backToCamera: (() -> Void)? = nil
     let delete: () async -> PhotoReviewDeleteApplication?
     var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
@@ -736,8 +738,8 @@ struct PhotoReviewView: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
-    @State private var submissionAnnouncementTracker =
-        PhotoReviewSubmissionAnnouncementTracker()
+    @State private var submissionEffectConsumer =
+        PhotoReviewSubmissionEffectConsumer()
     // Outside dismissal focus stays independent from picker cancellation focus.
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
@@ -753,26 +755,83 @@ struct PhotoReviewView: View {
     }
 
     var body: some View {
+        Group {
+            if submissionPresentation.rendersSubmittedMedia {
+                reviewContent
+                    .photosPicker(
+                        isPresented: pickerIsPresented,
+                        selection: $pickerItems,
+                        maxSelectionCount: pickerSelectionLimit,
+                        matching: .images
+                    )
+                    .onChange(of: pickerItems) { _, items in
+                        guard !items.isEmpty else { return }
+                        // Clear before applying so the next transaction starts from an
+                        // empty selection and a redelivered result cannot be read as a
+                        // new one.
+                        pickerItems = []
+                        _ = pickerPresentation.dismiss(
+                            hasConfirmedSelection: true,
+                            store: store
+                        )
+                        applyPickerSelection(items)
+                    }
+            } else {
+                reviewContent
+            }
+        }
+        .background {
+            SnapListColorToken.groupingFill.color
+                .contentShape(.rect)
+                .onTapGesture(perform: dismissActionsOutside)
+        }
+        .disabled(
+            isCommitting || submissionPresentation.mutationControlsLocked
+        )
+        .onChange(
+            of: submissionPresentation,
+            initial: true
+        ) { _, presentation in
+            submissionEffectConsumer.consume(
+                presentation,
+                postAnnouncement: postSubmissionAnnouncement,
+                acknowledgePresentation: acknowledgeSubmissionPresentation
+            )
+        }
+    }
+
+    private var reviewContent: some View {
         ScrollView {
             VStack(spacing: 20) {
                 topBar
-                hero
-                thumbnailStrip
-
-                if let recovery = intake?.recovery {
-                    Text(recovery.message)
-                        .snapListTypography(.metadata)
+                if let visibleMessage = submissionPresentation.visibleMessage {
+                    Text(visibleMessage)
+                        .snapListTypography(.body)
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("photo-review.intake-recovery")
+                        .accessibilityIdentifier(
+                            "photo-review.submission-message"
+                        )
                 }
+                if submissionPresentation.rendersSubmittedMedia {
+                    hero
+                    thumbnailStrip
 
-                if store.actionsPhotoID != nil {
-                    actionRow
-                }
+                    if let recovery = intake?.recovery {
+                        Text(recovery.message)
+                            .snapListTypography(.metadata)
+                            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("photo-review.intake-recovery")
+                    }
 
-                if let openBoundary {
-                    voiceRow(openBoundary)
+                    if store.actionsPhotoID != nil {
+                        actionRow
+                    }
+
+                    if let openBoundary {
+                        voiceRow(openBoundary)
+                    }
                 }
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
@@ -793,41 +852,6 @@ struct PhotoReviewView: View {
                     .padding(.horizontal, SnapListMetrics.screenGutter)
                     .padding(.vertical, 12)
             }
-        }
-        .background {
-            SnapListColorToken.groupingFill.color
-                .contentShape(.rect)
-                .onTapGesture(perform: dismissActionsOutside)
-        }
-        .disabled(
-            isCommitting || submissionPresentation.mutationControlsLocked
-        )
-        .onChange(
-            of: submissionPresentation,
-            initial: true
-        ) { _, presentation in
-            guard let announcement =
-                submissionAnnouncementTracker.consume(presentation) else {
-                return
-            }
-            postSubmissionAnnouncement(announcement)
-        }
-        .photosPicker(
-            isPresented: pickerIsPresented,
-            selection: $pickerItems,
-            maxSelectionCount: pickerSelectionLimit,
-            matching: .images
-        )
-        .onChange(of: pickerItems) { _, items in
-            guard !items.isEmpty else { return }
-            // Clear before applying so the next transaction starts from an empty
-            // selection and a redelivered result cannot be read as a new one.
-            pickerItems = []
-            _ = pickerPresentation.dismiss(
-                hasConfirmedSelection: true,
-                store: store
-            )
-            applyPickerSelection(items)
         }
     }
 
@@ -1095,7 +1119,7 @@ struct PhotoReviewView: View {
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
         Button {
-            openBoundary(.startListing)
+            openBoundary(submissionPresentation.primaryActionEvent)
         } label: {
             Text(submissionPresentation.primaryActionLabel)
                 .frame(

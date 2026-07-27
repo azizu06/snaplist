@@ -1,3 +1,4 @@
+import CoreFoundation
 import XCTest
 import UIKit
 
@@ -317,6 +318,181 @@ final class SnapListUITests: XCTestCase {
             .completed,
             "Only the in-flight interval may keep Photo Review mutations locked."
         )
+    }
+
+    func testRateLimitedSubmissionRendersExactRetainedMessageInLivePhotoReview() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--submission-fixture=rate-limited"
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+
+        let hero = app.buttons["photo-review.hero"]
+        let thumbnail = app.buttons["photo-review.thumbnail.1"]
+        let addPhoto = app.buttons["photo-review.add"]
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(hero.exists)
+        XCTAssertTrue(thumbnail.exists)
+        XCTAssertTrue(addPhoto.exists)
+        XCTAssertTrue(startListing.exists)
+        XCTAssertEqual(startListing.label, "Start listing")
+        XCTAssertTrue(startListing.isEnabled)
+        XCTAssertTrue(addPhoto.isEnabled)
+
+        startListing.tap()
+
+        let retainedMessage =
+            app.staticTexts["photo-review.submission-message"]
+        let rejectionPresented = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                startListing.exists
+                    && startListing.label == "Try again"
+                    && startListing.isEnabled
+                    && addPhoto.isEnabled
+                    && hero.exists
+                    && thumbnail.exists
+                    && retainedMessage.exists
+                    && retainedMessage.label
+                        == "This didn't go through. Your item is still saved on this phone."
+            },
+            object: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [rejectionPresented], timeout: 3),
+            .completed,
+            "Typed rate limiting must visibly render the exact retained-item message."
+        )
+
+        XCTAssertTrue(screen.exists)
+        XCTAssertEqual(
+            app.staticTexts.matching(
+                identifier: "photo-review.submission-message"
+            ).count,
+            1,
+            "One rejection event must render one stable visible message."
+        )
+        XCTAssertFalse(app.buttons["scan.library"].exists)
+        XCTAssertFalse(app.buttons["scan.choose-library"].exists)
+        XCTAssertFalse(app.buttons["trophy-wall.tab"].exists)
+        XCTAssertFalse(app.staticTexts["Listing Review"].exists)
+        XCTAssertFalse(app.buttons["Cancel"].exists)
+        // Announcement once-per-event remains the direct submission effect-consumer
+        // contract. XCUI proves rendered copy only; it cannot observe VoiceOver delivery.
+    }
+
+    func testAcceptedSubmissionRendersSavedWithoutSubmittedMediaThenReturnsToReadyScan() {
+        let acknowledgmentNotification =
+            "dev.snaplist.ios.test.submission-ack.\(UUID().uuidString)"
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--submission-fixture=accepted-presentation-gated",
+            "--submission-acknowledgment-notification=\(acknowledgmentNotification)"
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+
+        let hero = app.buttons["photo-review.hero"]
+        let thumbnail = app.buttons["photo-review.thumbnail.1"]
+        let addPhoto = app.buttons["photo-review.add"]
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(hero.exists)
+        XCTAssertTrue(thumbnail.exists)
+        XCTAssertTrue(addPhoto.exists)
+        XCTAssertTrue(startListing.exists)
+        XCTAssertEqual(startListing.label, "Start listing")
+
+        startListing.tap()
+
+        let saved = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                startListing.exists && startListing.label == "Item saved"
+            },
+            object: startListing
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [saved], timeout: 3),
+            .completed,
+            "The real accepted host must render Item saved before exact clear."
+        )
+
+        XCTAssertTrue(screen.exists)
+        XCTAssertFalse(startListing.isEnabled)
+        XCTAssertFalse(hero.exists)
+        XCTAssertFalse(thumbnail.exists)
+        XCTAssertFalse(addPhoto.exists)
+        XCTAssertFalse(app.staticTexts["photo-review.cover"].exists)
+        XCTAssertFalse(app.buttons["scan.library"].exists)
+        XCTAssertFalse(app.buttons["scan.choose-library"].exists)
+
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(
+                rawValue: acknowledgmentNotification as CFString
+            ),
+            nil,
+            nil,
+            true
+        )
+
+        let liveLibrary = app.buttons["scan.library"]
+        let recoveryLibrary = app.buttons["scan.choose-library"]
+        let readyScan = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                liveLibrary.exists || recoveryLibrary.exists
+            },
+            object: nil
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [readyScan], timeout: 5),
+            .completed,
+            "Matching acknowledgment must finish exact clear and return to ready Scan."
+        )
+
+        XCTAssertFalse(screen.exists)
+        XCTAssertFalse(startListing.exists)
+        XCTAssertFalse(hero.exists)
+        XCTAssertFalse(thumbnail.exists)
+        XCTAssertFalse(addPhoto.exists)
+        XCTAssertFalse(app.buttons["scan.review"].exists)
+        XCTAssertFalse(app.staticTexts["scan.photo-count"].exists)
+
+        if liveLibrary.exists {
+            XCTAssertEqual(liveLibrary.label, "Library")
+            XCTAssertTrue(liveLibrary.isEnabled)
+        } else {
+            XCTAssertEqual(recoveryLibrary.label, "Choose from library")
+            XCTAssertTrue(recoveryLibrary.isEnabled)
+        }
+
+        XCTAssertTrue(app.buttons["scan.tab"].isSelected)
+        XCTAssertFalse(app.buttons["trophy-wall.tab"].isSelected)
+        XCTAssertFalse(app.staticTexts["Listing Review"].exists)
+        XCTAssertFalse(app.buttons["Cancel"].exists)
+        // Announcement delivery remains the direct B1 effect-consumer contract.
+        // Accessibility focus remains the direct B2 mounted-Library contract.
     }
 
     // v1.2 primary_action.position is a sticky bottom action above the home-indicator
