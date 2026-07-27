@@ -65,6 +65,46 @@ function dockerContextMetadata(name, host) {
   };
 }
 
+async function configureFixturePlatform(fixture, platform, architecture) {
+  const platformKey = `${platform}-${architecture}`;
+  const packageName = `@supabase/cli-${platformKey}`;
+  const packageBytes = Buffer.from(
+    `${JSON.stringify({ name: packageName, version: "2.105.0" })}\n`,
+  );
+  await writeFile(fixture.paths.platformPackageJsonPath, packageBytes);
+
+  const darwinArtifact = fixture.manifest.artifacts["darwin-arm64"];
+  const artifact = {
+    ...darwinArtifact,
+    platform,
+    architecture,
+    platformPackage: packageName,
+    platformPackageJsonSha256: sha256(packageBytes),
+  };
+  fixture.manifest.artifacts = { [platformKey]: artifact };
+  fixture.options.contract.artifacts = {
+    [platformKey]: {
+      ...fixture.options.contract.artifacts["darwin-arm64"],
+      platform,
+      architecture,
+      platformPackage: packageName,
+      platformPackageJsonSha256: sha256(packageBytes),
+    },
+  };
+  fixture.options.platform = platform;
+  fixture.options.architecture = architecture;
+
+  const receipt = JSON.parse(
+    await readFile(fixture.paths.receiptPath, "utf8"),
+  );
+  receipt.platform = platform;
+  receipt.architecture = architecture;
+  await writeFile(
+    fixture.paths.receiptPath,
+    `${JSON.stringify(receipt)}\n`,
+  );
+}
+
 async function makeFixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "snaplist-loopback-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -417,6 +457,51 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
       host: "unix://relative/docker.sock",
       useDockerConfig: true,
     },
+    {
+      name: "unsupported local-looking endpoint scheme",
+      context: "unsupported-scheme",
+      host: "fd://docker.sock",
+      useDockerConfig: true,
+    },
+    {
+      name: "inconsistent context metadata name",
+      context: "expected-name",
+      metadata: dockerContextMetadata(
+        "different-name",
+        "unix:///var/run/docker.sock",
+      ),
+      useDockerConfig: true,
+    },
+    {
+      name: "typed-invalid Docker endpoint metadata",
+      context: "typed-invalid-endpoint",
+      metadata: {
+        Name: "typed-invalid-endpoint",
+        Metadata: {},
+        Endpoints: {
+          docker: {
+            Host: "unix:///var/run/docker.sock",
+            SkipTLSVerify: "false",
+          },
+        },
+      },
+      useDockerConfig: true,
+    },
+    {
+      name: "typed-invalid Docker context metadata",
+      context: "typed-invalid-context",
+      metadata: {
+        Name: "typed-invalid-context",
+        Metadata: { Description: null },
+        Endpoints: {
+          docker: {
+            Host: "unix:///var/run/docker.sock",
+            SkipTLSVerify: false,
+          },
+        },
+      },
+      useDockerConfig: true,
+    },
   ];
 
   for (const contextCase of blocked) {
@@ -473,33 +558,47 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
     });
   }
 
-  const malformedFixture = await makeFixture(t);
-  await writeSafeAnalyticsConfig(malformedFixture.root);
-  const malformedConfigRoot = path.join(
-    malformedFixture.root,
-    "malformed-docker-config",
-  );
-  await mkdir(malformedConfigRoot);
-  await writeFile(
-    path.join(malformedConfigRoot, "config.json"),
-    "{not-json",
-  );
-  let malformedChildSpawned = false;
-  await assert.rejects(
-    runSupabase(["--version", "--workdir", malformedFixture.root], {
-      ...malformedFixture.options,
-      processEnvironment: {
-        HOME: path.join(malformedFixture.root, "home"),
-        DOCKER_CONFIG: malformedConfigRoot,
-      },
-      invokeCli: async () => {
-        malformedChildSpawned = true;
-        return { status: 0 };
-      },
-    }),
-    /Docker configuration/i,
-  );
-  assert.equal(malformedChildSpawned, false);
+  const malformedConfigs = [
+    ["invalid JSON", "{not-json"],
+    [
+      "typed-invalid auths",
+      `${JSON.stringify({
+        currentContext: "default",
+        auths: [],
+      })}\n`,
+    ],
+  ];
+  for (const [name, contents] of malformedConfigs) {
+    await t.test(`malformed Docker configuration: ${name}`, async (t) => {
+      const malformedFixture = await makeFixture(t);
+      await writeSafeAnalyticsConfig(malformedFixture.root);
+      const malformedConfigRoot = path.join(
+        malformedFixture.root,
+        "malformed-docker-config",
+      );
+      await mkdir(malformedConfigRoot);
+      await writeFile(
+        path.join(malformedConfigRoot, "config.json"),
+        contents,
+      );
+      let malformedChildSpawned = false;
+      await assert.rejects(
+        runSupabase(["--version", "--workdir", malformedFixture.root], {
+          ...malformedFixture.options,
+          processEnvironment: {
+            HOME: path.join(malformedFixture.root, "home"),
+            DOCKER_CONFIG: malformedConfigRoot,
+          },
+          invokeCli: async () => {
+            malformedChildSpawned = true;
+            return { status: 0 };
+          },
+        }),
+        /Docker configuration/i,
+      );
+      assert.equal(malformedChildSpawned, false);
+    });
+  }
 
   const allowed = [
     {
@@ -526,6 +625,33 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
             "unix:///Users/test/.docker/run/docker.sock",
           ),
         );
+        await writeFile(
+          path.join(configRoot, "config.json"),
+          `${JSON.stringify({
+            auths: {
+              "registry.example.test": {
+                auth: Buffer.from("user:password").toString("base64"),
+              },
+            },
+            credsStore: "desktop",
+            currentContext: contextName,
+            plugins: {
+              debug: { hooks: "exec" },
+            },
+            features: { hooks: "true" },
+            vendorExtension: { preserved: true },
+          })}\n`,
+        );
+        return { HOME: home };
+      },
+    },
+    {
+      name: "Linux default local Unix socket",
+      expectedHost: "unix:///var/run/docker.sock",
+      configure: async (fixture) => {
+        await configureFixturePlatform(fixture, "linux", "x64");
+        const home = path.join(fixture.root, "home");
+        await mkdir(path.join(home, ".docker"), { recursive: true });
         return { HOME: home };
       },
     },
@@ -553,7 +679,13 @@ test("wrapper resolves only local Unix Docker contexts before child spawn", asyn
         contextCase.expectedHost,
       );
       assert.equal(calls[0].options.env.DOCKER_CONTEXT, "default");
-      assert.equal(path.isAbsolute(calls[0].options.env.DOCKER_CONFIG), true);
+      assert.equal(
+        calls[0].options.env.DOCKER_CONFIG,
+        path.resolve(
+          processEnvironment.DOCKER_CONFIG ??
+            path.join(processEnvironment.HOME, ".docker"),
+        ),
+      );
     });
   }
 });

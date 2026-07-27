@@ -157,6 +157,17 @@ Strict rejection of malformed configuration is an intentional fail-closed
 strengthening over Docker CLI v28.5.2, while the selection precedence and valid
 endpoint result remain compatible.
 
+The wrapper mirrors the bounded typed JSON surface used by the pinned
+`ConfigFile`, `DockerContext`, and Docker `EndpointMeta` decoders before using
+any selection field. That includes the string, string-map, string-slice, auth,
+proxy, and plugin shapes in `config.json`; the typed context description; and
+the Docker endpoint's string `Host` and boolean `SkipTLSVerify`. Unknown
+configuration keys remain compatible because Go's decoder ignores them.
+Realistic registry, credential-store, plugin, and feature settings therefore
+remain valid, while a known field with the wrong JSON type fails before child
+spawn. Named-context metadata uses the same rule for both its typed context
+metadata and every endpoint object.
+
 ## TOCTOU model and mitigation
 
 Validation followed by an unchanged inherited environment is insufficient.
@@ -184,8 +195,10 @@ immutable.
 
 Required public no-spawn cases are TCP and SSH contexts selected only through
 default-HOME configuration and through inherited `DOCKER_CONFIG`, plus malformed
-config, missing metadata, malformed metadata, missing endpoint, and unsupported
-scheme. Positive controls are the virtual default Unix socket and a named
-Docker Desktop-style absolute Unix endpoint. Tests must assert that the child
-receives only the normalized controlled endpoint/context values, not the
-caller's endpoint selectors.
+config (including a wrong typed field), missing metadata, malformed or
+inconsistently named metadata, a wrong typed Docker endpoint, missing endpoint,
+and unsupported scheme. Positive controls are the Darwin and Linux virtual
+default Unix socket and a named Docker Desktop-style absolute Unix endpoint
+alongside realistic Docker configuration fields. Tests must assert that the
+child receives only the normalized controlled endpoint/context values, the
+exact inspected configuration root, and not the caller's endpoint selectors.

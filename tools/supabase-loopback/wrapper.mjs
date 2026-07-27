@@ -115,6 +115,259 @@ async function readOptionalJson(filePath, label) {
   }
 }
 
+function goFieldValues(object, jsonName) {
+  const normalizedName = jsonName.toLowerCase();
+  return Object.entries(object)
+    .filter(([key]) => key.toLowerCase() === normalizedName)
+    .map(([, value]) => value);
+}
+
+function goFieldValue(object, jsonName) {
+  return goFieldValues(object, jsonName).at(-1);
+}
+
+function validateGoScalar(value, expectedType, label) {
+  if (value !== null && typeof value !== expectedType) {
+    fail(`${label} must be ${expectedType}`);
+  }
+}
+
+function validateGoObject(value, label) {
+  if (
+    value !== null &&
+    (typeof value !== "object" || Array.isArray(value))
+  ) {
+    fail(`${label} must be an object`);
+  }
+}
+
+function validateGoField(object, jsonName, validator, label) {
+  for (const value of goFieldValues(object, jsonName)) {
+    validator(value, label);
+  }
+}
+
+function validateGoStringMap(value, label) {
+  validateGoObject(value, label);
+  if (value === null) return;
+  for (const [key, entry] of Object.entries(value)) {
+    validateGoScalar(entry, "string", `${label}.${key}`);
+  }
+}
+
+function validateGoStringArray(value, label) {
+  if (value !== null && !Array.isArray(value)) {
+    fail(`${label} must be an array`);
+  }
+  if (value === null) return;
+  for (const [index, entry] of value.entries()) {
+    validateGoScalar(entry, "string", `${label}[${index}]`);
+  }
+}
+
+function validateDockerAuth(value, label) {
+  if (value === null) return;
+  const normalized = value.replace(/[\r\n]/g, "");
+  if (
+    normalized.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      normalized,
+    )
+  ) {
+    fail(`${label} is not valid base64`);
+  }
+  const decoded = Buffer.from(normalized, "base64").toString("utf8");
+  if (decoded.indexOf(":") <= 0) {
+    fail(`${label} is not a valid Docker auth entry`);
+  }
+}
+
+function validateDockerAuthMap(value, label) {
+  validateGoObject(value, label);
+  if (value === null) return;
+  const stringFields = [
+    "username",
+    "password",
+    "auth",
+    "email",
+    "serveraddress",
+    "identitytoken",
+    "registrytoken",
+  ];
+  for (const [registry, auth] of Object.entries(value)) {
+    validateGoObject(auth, `${label}.${registry}`);
+    if (auth === null) continue;
+    for (const field of stringFields) {
+      validateGoField(
+        auth,
+        field,
+        (entry, entryLabel) =>
+          validateGoScalar(entry, "string", entryLabel),
+        `${label}.${registry}.${field}`,
+      );
+    }
+    const encoded = goFieldValue(auth, "auth");
+    if (typeof encoded === "string" && encoded !== "") {
+      validateDockerAuth(encoded, `${label}.${registry}.auth`);
+    }
+  }
+}
+
+function validateDockerProxyMap(value, label) {
+  validateGoObject(value, label);
+  if (value === null) return;
+  const stringFields = [
+    "httpProxy",
+    "httpsProxy",
+    "noProxy",
+    "ftpProxy",
+    "allProxy",
+  ];
+  for (const [endpoint, proxy] of Object.entries(value)) {
+    validateGoObject(proxy, `${label}.${endpoint}`);
+    if (proxy === null) continue;
+    for (const field of stringFields) {
+      validateGoField(
+        proxy,
+        field,
+        (entry, entryLabel) =>
+          validateGoScalar(entry, "string", entryLabel),
+        `${label}.${endpoint}.${field}`,
+      );
+    }
+  }
+}
+
+function validateDockerPluginMap(value, label) {
+  validateGoObject(value, label);
+  if (value === null) return;
+  for (const [plugin, settings] of Object.entries(value)) {
+    validateGoStringMap(settings, `${label}.${plugin}`);
+  }
+}
+
+function validateDockerConfig(config) {
+  const stringFields = [
+    "psFormat",
+    "imagesFormat",
+    "networksFormat",
+    "pluginsFormat",
+    "volumesFormat",
+    "statsFormat",
+    "detachKeys",
+    "credsStore",
+    "serviceInspectFormat",
+    "servicesFormat",
+    "tasksFormat",
+    "secretFormat",
+    "configFormat",
+    "nodesFormat",
+    "currentContext",
+    "experimental",
+  ];
+  for (const field of stringFields) {
+    validateGoField(
+      config,
+      field,
+      (value, label) => validateGoScalar(value, "string", label),
+      `Docker configuration ${field}`,
+    );
+  }
+  for (const field of [
+    "HttpHeaders",
+    "credHelpers",
+    "aliases",
+    "features",
+  ]) {
+    validateGoField(
+      config,
+      field,
+      validateGoStringMap,
+      `Docker configuration ${field}`,
+    );
+  }
+  for (const field of ["pruneFilters", "cliPluginsExtraDirs"]) {
+    validateGoField(
+      config,
+      field,
+      validateGoStringArray,
+      `Docker configuration ${field}`,
+    );
+  }
+  validateGoField(
+    config,
+    "auths",
+    validateDockerAuthMap,
+    "Docker configuration auths",
+  );
+  validateGoField(
+    config,
+    "proxies",
+    validateDockerProxyMap,
+    "Docker configuration proxies",
+  );
+  validateGoField(
+    config,
+    "plugins",
+    validateDockerPluginMap,
+    "Docker configuration plugins",
+  );
+}
+
+function validateDockerContextMetadata(metadata, contextName) {
+  validateGoField(
+    metadata,
+    "Name",
+    (value, label) => validateGoScalar(value, "string", label),
+    `Docker context ${contextName} Name`,
+  );
+  validateGoField(
+    metadata,
+    "Metadata",
+    validateGoObject,
+    `Docker context ${contextName} Metadata`,
+  );
+  const contextDetails = goFieldValue(metadata, "Metadata");
+  if (contextDetails && typeof contextDetails === "object") {
+    validateGoField(
+      contextDetails,
+      "Description",
+      (value, label) => {
+        if (typeof value !== "string") fail(`${label} must be string`);
+      },
+      `Docker context ${contextName} Metadata.Description`,
+    );
+  }
+
+  validateGoField(
+    metadata,
+    "Endpoints",
+    validateGoObject,
+    `Docker context ${contextName} Endpoints`,
+  );
+  const endpoints = goFieldValue(metadata, "Endpoints");
+  if (endpoints === undefined || endpoints === null) return;
+  for (const [name, endpoint] of Object.entries(endpoints)) {
+    validateGoObject(
+      endpoint,
+      `Docker context ${contextName} endpoint ${name}`,
+    );
+    if (name !== "docker" || endpoint === null) continue;
+    validateGoField(
+      endpoint,
+      "Host",
+      (value, label) => validateGoScalar(value, "string", label),
+      `Docker context ${contextName} Docker endpoint Host`,
+    );
+    validateGoField(
+      endpoint,
+      "SkipTLSVerify",
+      (value, label) => validateGoScalar(value, "boolean", label),
+      `Docker context ${contextName} Docker endpoint SkipTLSVerify`,
+    );
+  }
+}
+
 function assertEqual(actual, expected, label) {
   if (actual !== expected) {
     fail(`${label} mismatch: expected ${expected}, found ${actual}`);
@@ -173,13 +426,10 @@ async function resolveLocalDockerEndpoint(processEnvironment, platform) {
   );
   const configPath = path.join(configRoot, "config.json");
   const config = await readOptionalJson(configPath, "Docker configuration");
-  const currentContext = config?.currentContext;
-  if (
-    currentContext !== undefined &&
-    typeof currentContext !== "string"
-  ) {
-    fail("Docker configuration currentContext must be a string");
-  }
+  if (config) validateDockerConfig(config);
+  const currentContext = config
+    ? goFieldValue(config, "currentContext")
+    : undefined;
   if (!currentContext || currentContext === "default") {
     return {
       configRoot,
@@ -205,10 +455,16 @@ async function resolveLocalDockerEndpoint(processEnvironment, platform) {
   if (!metadata) {
     fail(`missing Docker context ${currentContext}: ${metadataPath}`);
   }
-  if (metadata.Name !== currentContext) {
+  validateDockerContextMetadata(metadata, currentContext);
+  if (goFieldValue(metadata, "Name") !== currentContext) {
     fail(`Docker context ${currentContext} has inconsistent metadata`);
   }
-  const endpoint = metadata.Endpoints?.docker?.Host;
+  const endpoints = goFieldValue(metadata, "Endpoints");
+  const endpointMetadata = endpoints?.docker;
+  const endpoint =
+    endpointMetadata && typeof endpointMetadata === "object"
+      ? goFieldValue(endpointMetadata, "Host")
+      : undefined;
   if (typeof endpoint !== "string" || endpoint === "") {
     fail(`Docker context ${currentContext} has no Docker endpoint`);
   }
