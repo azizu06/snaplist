@@ -16,6 +16,55 @@ import { preflightSupabase, runSupabase } from "./wrapper.mjs";
 const sha256 = (value) =>
   createHash("sha256").update(value).digest("hex");
 
+async function writeSafeAnalyticsConfig(root) {
+  const supabaseRoot = path.join(root, "supabase");
+  await mkdir(supabaseRoot, { recursive: true });
+  await writeFile(
+    path.join(supabaseRoot, "config.toml"),
+    "[analytics]\nenabled = false\n",
+  );
+}
+
+async function defaultDockerEnvironment(fixture, extra = {}) {
+  const home = path.join(fixture.root, "home");
+  await mkdir(path.join(home, ".docker"), { recursive: true });
+  return { HOME: home, ...extra };
+}
+
+async function writeDockerContext(configRoot, name, metadata) {
+  await mkdir(configRoot, { recursive: true });
+  await writeFile(
+    path.join(configRoot, "config.json"),
+    `${JSON.stringify({ currentContext: name })}\n`,
+  );
+  const metadataRoot = path.join(
+    configRoot,
+    "contexts",
+    "meta",
+    sha256(name),
+  );
+  await mkdir(metadataRoot, { recursive: true });
+  await writeFile(
+    path.join(metadataRoot, "meta.json"),
+    typeof metadata === "string"
+      ? metadata
+      : `${JSON.stringify(metadata)}\n`,
+  );
+}
+
+function dockerContextMetadata(name, host) {
+  return {
+    Name: name,
+    Metadata: {},
+    Endpoints: {
+      docker: {
+        Host: host,
+        SkipTLSVerify: false,
+      },
+    },
+  };
+}
+
 async function makeFixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "snaplist-loopback-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -266,7 +315,9 @@ test("wrapper exports validated SUPABASE_GO_BINARY and blocks stock fallback", a
 
   const result = await runSupabase(["--version"], {
     ...fixture.options,
-    processEnvironment: { SNAPLIST_SAFE: "preserved" },
+    processEnvironment: await defaultDockerEnvironment(fixture, {
+      SNAPLIST_SAFE: "preserved",
+    }),
     invokeCli: async (command, args, options) => {
       calls.push({ command, args, options });
       return { status: 0 };
@@ -324,6 +375,189 @@ test("wrapper rejects caller Docker transport overrides before child spawn", asy
   }
 });
 
+test("wrapper resolves only local Unix Docker contexts before child spawn", async (t) => {
+  const blocked = [
+    {
+      name: "TCP currentContext through DOCKER_CONFIG",
+      context: "remote-tcp",
+      host: "tcp://docker.example.test:2376",
+      useDockerConfig: true,
+    },
+    {
+      name: "SSH currentContext through default HOME config",
+      context: "remote-ssh",
+      host: "ssh://builder@docker.example.test",
+      useDockerConfig: false,
+    },
+    {
+      name: "missing named context metadata",
+      context: "missing-context",
+      omitMetadata: true,
+      useDockerConfig: true,
+    },
+    {
+      name: "malformed named context metadata",
+      context: "malformed-context",
+      metadata: "{not-json",
+      useDockerConfig: true,
+    },
+    {
+      name: "named context without Docker endpoint",
+      context: "missing-endpoint",
+      metadata: {
+        Name: "missing-endpoint",
+        Metadata: {},
+        Endpoints: {},
+      },
+      useDockerConfig: true,
+    },
+    {
+      name: "relative Unix endpoint",
+      context: "relative-unix",
+      host: "unix://relative/docker.sock",
+      useDockerConfig: true,
+    },
+  ];
+
+  for (const contextCase of blocked) {
+    await t.test(contextCase.name, async (t) => {
+      const fixture = await makeFixture(t);
+      await writeSafeAnalyticsConfig(fixture.root);
+      const home = path.join(fixture.root, "home");
+      const configRoot = contextCase.useDockerConfig
+        ? path.join(fixture.root, "docker-config")
+        : path.join(home, ".docker");
+      await mkdir(configRoot, { recursive: true });
+      await writeFile(
+        path.join(configRoot, "config.json"),
+        `${JSON.stringify({ currentContext: contextCase.context })}\n`,
+      );
+      if (!contextCase.omitMetadata) {
+        const metadata =
+          contextCase.metadata ??
+          dockerContextMetadata(contextCase.context, contextCase.host);
+        const metadataRoot = path.join(
+          configRoot,
+          "contexts",
+          "meta",
+          sha256(contextCase.context),
+        );
+        await mkdir(metadataRoot, { recursive: true });
+        await writeFile(
+          path.join(metadataRoot, "meta.json"),
+          typeof metadata === "string"
+            ? metadata
+            : `${JSON.stringify(metadata)}\n`,
+        );
+      }
+      let childSpawned = false;
+      const processEnvironment = {
+        HOME: home,
+        ...(contextCase.useDockerConfig
+          ? { DOCKER_CONFIG: configRoot }
+          : {}),
+      };
+
+      await assert.rejects(
+        runSupabase(["--version", "--workdir", fixture.root], {
+          ...fixture.options,
+          processEnvironment,
+          invokeCli: async () => {
+            childSpawned = true;
+            return { status: 0 };
+          },
+        }),
+        /Docker (?:configuration|context|endpoint)/i,
+      );
+      assert.equal(childSpawned, false);
+    });
+  }
+
+  const malformedFixture = await makeFixture(t);
+  await writeSafeAnalyticsConfig(malformedFixture.root);
+  const malformedConfigRoot = path.join(
+    malformedFixture.root,
+    "malformed-docker-config",
+  );
+  await mkdir(malformedConfigRoot);
+  await writeFile(
+    path.join(malformedConfigRoot, "config.json"),
+    "{not-json",
+  );
+  let malformedChildSpawned = false;
+  await assert.rejects(
+    runSupabase(["--version", "--workdir", malformedFixture.root], {
+      ...malformedFixture.options,
+      processEnvironment: {
+        HOME: path.join(malformedFixture.root, "home"),
+        DOCKER_CONFIG: malformedConfigRoot,
+      },
+      invokeCli: async () => {
+        malformedChildSpawned = true;
+        return { status: 0 };
+      },
+    }),
+    /Docker configuration/i,
+  );
+  assert.equal(malformedChildSpawned, false);
+
+  const allowed = [
+    {
+      name: "default local Unix socket",
+      expectedHost: "unix:///var/run/docker.sock",
+      configure: async (fixture) => {
+        const home = path.join(fixture.root, "home");
+        await mkdir(path.join(home, ".docker"), { recursive: true });
+        return { HOME: home };
+      },
+    },
+    {
+      name: "Docker Desktop-style local Unix context",
+      expectedHost: "unix:///Users/test/.docker/run/docker.sock",
+      configure: async (fixture) => {
+        const home = path.join(fixture.root, "home");
+        const configRoot = path.join(home, ".docker");
+        const contextName = "desktop-linux";
+        await writeDockerContext(
+          configRoot,
+          contextName,
+          dockerContextMetadata(
+            contextName,
+            "unix:///Users/test/.docker/run/docker.sock",
+          ),
+        );
+        return { HOME: home };
+      },
+    },
+  ];
+
+  for (const contextCase of allowed) {
+    await t.test(contextCase.name, async (t) => {
+      const fixture = await makeFixture(t);
+      await writeSafeAnalyticsConfig(fixture.root);
+      const processEnvironment = await contextCase.configure(fixture);
+      const calls = [];
+
+      await runSupabase(["--version", "--workdir", fixture.root], {
+        ...fixture.options,
+        processEnvironment,
+        invokeCli: async (command, args, options) => {
+          calls.push({ command, args, options });
+          return { status: 0 };
+        },
+      });
+
+      assert.equal(calls.length, 1);
+      assert.equal(
+        calls[0].options.env.DOCKER_HOST,
+        contextCase.expectedHost,
+      );
+      assert.equal(calls[0].options.env.DOCKER_CONTEXT, "default");
+      assert.equal(path.isAbsolute(calls[0].options.env.DOCKER_CONFIG), true);
+    });
+  }
+});
+
 test("wrapper rejects unsafe effective Analytics config before child spawn", async (t) => {
   const cases = [
     ["missing analytics block", "[api]\nport = 54321\n"],
@@ -364,7 +598,7 @@ test("wrapper rejects unsafe effective Analytics config before child spawn", asy
   const calls = [];
   await runSupabase(["start", "--workdir", fixture.root], {
     ...fixture.options,
-    processEnvironment: {},
+    processEnvironment: await defaultDockerEnvironment(fixture),
     invokeCli: async (command, args, options) => {
       calls.push({ command, args, options });
       return { status: 0 };

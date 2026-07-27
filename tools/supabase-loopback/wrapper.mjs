@@ -95,10 +95,127 @@ async function readRequired(filePath, label) {
   }
 }
 
+async function readOptionalJson(filePath, label) {
+  let contents;
+  try {
+    contents = await readFile(filePath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    fail(`unable to read ${label}: ${filePath}`);
+  }
+  try {
+    const parsed = JSON.parse(contents);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      fail(`${label} must be a JSON object`);
+    }
+    return parsed;
+  } catch (error) {
+    if (error.message?.startsWith("[supabase-loopback]")) throw error;
+    fail(`malformed ${label}: ${filePath}`);
+  }
+}
+
 function assertEqual(actual, expected, label) {
   if (actual !== expected) {
     fail(`${label} mismatch: expected ${expected}, found ${actual}`);
   }
+}
+
+function normalizeLocalDockerEndpoint(endpoint, platform) {
+  if (platform !== "darwin" && platform !== "linux") {
+    fail(`Docker endpoint validation does not support platform ${platform}`);
+  }
+  if (
+    typeof endpoint !== "string" ||
+    !endpoint.startsWith("unix:///") ||
+    endpoint.includes("%")
+  ) {
+    fail("Docker endpoint must be an absolute local Unix socket");
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    fail("Docker endpoint is malformed");
+  }
+  if (
+    parsed.protocol !== "unix:" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.hostname !== "" ||
+    parsed.port !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    !path.posix.isAbsolute(parsed.pathname)
+  ) {
+    fail("Docker endpoint must be an absolute local Unix socket");
+  }
+
+  const socketPath = path.posix.normalize(parsed.pathname);
+  if (socketPath === "/") {
+    fail("Docker endpoint must name a local Unix socket path");
+  }
+  return `unix://${socketPath}`;
+}
+
+async function resolveLocalDockerEndpoint(processEnvironment, platform) {
+  const configuredRoot = processEnvironment.DOCKER_CONFIG;
+  const home = processEnvironment.HOME || os.homedir();
+  if (
+    (configuredRoot === undefined || configuredRoot === "") &&
+    (typeof home !== "string" || home === "")
+  ) {
+    fail("Docker configuration requires HOME or DOCKER_CONFIG");
+  }
+  const configRoot = path.resolve(
+    configuredRoot || path.join(home, ".docker"),
+  );
+  const configPath = path.join(configRoot, "config.json");
+  const config = await readOptionalJson(configPath, "Docker configuration");
+  const currentContext = config?.currentContext;
+  if (
+    currentContext !== undefined &&
+    typeof currentContext !== "string"
+  ) {
+    fail("Docker configuration currentContext must be a string");
+  }
+  if (!currentContext || currentContext === "default") {
+    return {
+      configRoot,
+      endpoint: normalizeLocalDockerEndpoint(
+        "unix:///var/run/docker.sock",
+        platform,
+      ),
+    };
+  }
+
+  const contextId = sha256(currentContext);
+  const metadataPath = path.join(
+    configRoot,
+    "contexts",
+    "meta",
+    contextId,
+    "meta.json",
+  );
+  const metadata = await readOptionalJson(
+    metadataPath,
+    `Docker context ${currentContext}`,
+  );
+  if (!metadata) {
+    fail(`missing Docker context ${currentContext}: ${metadataPath}`);
+  }
+  if (metadata.Name !== currentContext) {
+    fail(`Docker context ${currentContext} has inconsistent metadata`);
+  }
+  const endpoint = metadata.Endpoints?.docker?.Host;
+  if (typeof endpoint !== "string" || endpoint === "") {
+    fail(`Docker context ${currentContext} has no Docker endpoint`);
+  }
+  return {
+    configRoot,
+    endpoint: normalizeLocalDockerEndpoint(endpoint, platform),
+  };
 }
 
 function resolveWorkdir(args) {
@@ -440,9 +557,16 @@ export async function runSupabase(args, options = {}) {
 
   rejectUnsafeNetworkOverride(args);
   await preflightAnalytics(args);
+  const docker = await resolveLocalDockerEndpoint(
+    processEnvironment,
+    options.platform ?? process.platform,
+  );
   const validated = await preflightSupabase(options);
   const environment = {
     ...processEnvironment,
+    DOCKER_CONFIG: docker.configRoot,
+    DOCKER_CONTEXT: "default",
+    DOCKER_HOST: docker.endpoint,
     SUPABASE_GO_BINARY: validated.binaryPath,
     SUPABASE_CLI_BINARY_OVERRIDE: validated.platformCliPath,
   };

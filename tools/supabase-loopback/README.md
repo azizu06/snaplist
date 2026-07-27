@@ -38,6 +38,18 @@ overrides, and caller-provided host networking fail before child spawn.
 Disabling Analytics removes both Vector and Logflare, so local analytics port
 `54327` is intentionally absent.
 
+The wrapper also resolves the pinned Docker CLI v28.5.2 effective context
+before child spawn. Inherited `DOCKER_CONFIG` takes precedence over the default
+`$HOME/.docker`; a named `currentContext` is loaded from its hashed context
+metadata. Only the default Darwin/Linux Unix socket or a named context with an
+absolute, authority-free `unix://` endpoint is accepted. TCP, SSH, malformed,
+missing, relative, and otherwise unprovable endpoints fail closed. The
+validated endpoint is then pinned into child `DOCKER_HOST`, with
+`DOCKER_CONTEXT=default` and an absolute `DOCKER_CONFIG`, so later replacement
+of configuration or named-context metadata cannot redirect Docker endpoint
+selection. The exact precedence and race boundary are recorded in
+[`DOCKER-CONTEXT-SAFETY.md`](./DOCKER-CONTEXT-SAFETY.md).
+
 The exact-tag Go patch also rejects Docker, containerd, Podman, CRI-O, and
 Windows Docker Engine socket binds/mounts; container `DOCKER_HOST`; privileged
 mode; host networking; devices, device requests, and device cgroup rules; and
