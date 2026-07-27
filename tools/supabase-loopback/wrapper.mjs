@@ -24,10 +24,10 @@ export const DEFAULT_CONTRACT = Object.freeze({
   sourceTagObject: "6b84c68f097184b3221dc44c8cee45d3ccb0d7c1",
   sourceCommit: "b749d52b8e86813dfbcef4b34d0f038b78695131",
   sourceTree: "b98153e6684637de7da209e511614bd36c7a5f01",
-  patchedTree: "ee7742839f60aabe9ad85c0c4ef9dc51a91d4148",
+  patchedTree: "f11da8c77fd9054b6091a23e101971596707b9d6",
   patchPath: "patches/supabase-go-v2.105.0-loopback.patch",
   patchSha256:
-    "94ae7e42de437e7d8a5dd9c4bf51d80941189bdae6e52680d68adf90c6892530",
+    "d5a49335cf8ec5542215f5e70f75fc85453624be6b8c9c165d84fef14b60ea24",
   overrideVariable: "SUPABASE_GO_BINARY",
   overrideSourcePath: "apps/cli/src/shared/legacy/go-proxy.layer.ts",
   overrideSourceSha256:
@@ -52,10 +52,26 @@ export const DEFAULT_CONTRACT = Object.freeze({
         "635c7f8360df5f098628a0ee1c1d489fb8e45e0a7ca7d1b1299cce51c1e1e184",
       binaryPath: ".cache/v2.105.0/darwin-arm64/supabase-go",
       binarySha256:
-        "51d19433e8728b2ad65ae76be9c882fc2b76a6e7caf1d9c1ee9b97d3d2354d63",
-      binarySize: 96348530,
+        "dbe781a908a99a2efc2ada39ee9fc73923dbde0d879928652574c0488d041e1f",
+      binarySize: 47579986,
       receiptPath:
         ".cache/v2.105.0/darwin-arm64/build-receipt.json",
+    },
+    "linux-x64": {
+      platform: "linux",
+      architecture: "x64",
+      platformPackage: "@supabase/cli-linux-x64",
+      platformPackageVersion: "2.105.0",
+      platformPackageJsonSha256:
+        "f6d63e6aa86d98d093d89545b93b8a3f77b19b0dbd8152e9fd633f4e6d011f08",
+      platformCliSha256:
+        "039206687deb55706063371d7452c0d2b18de1e530dbc783f10b39f5589c3414",
+      binaryPath: ".cache/v2.105.0/linux-x64/supabase-go",
+      binarySha256:
+        "f3421c9147797ec7c0f5b8c5a44eed3e336b7321a92095c35b12b0acfe78ef6b",
+      binarySize: 49549496,
+      receiptPath:
+        ".cache/v2.105.0/linux-x64/build-receipt.json",
     },
   },
 });
@@ -160,7 +176,6 @@ function parseAnalyticsDisabled(config) {
 }
 
 async function preflightAnalytics(args) {
-  if (!args.includes("start")) return;
   const workdir = resolveWorkdir(args);
   const configPath = path.join(workdir, "supabase", "config.toml");
   const config = await readRequired(configPath, "effective Supabase config");

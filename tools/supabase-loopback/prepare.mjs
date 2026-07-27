@@ -9,9 +9,6 @@ const toolRoot = path.dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(
   await readFile(path.join(toolRoot, "manifest.json"), "utf8"),
 );
-const platform = process.platform;
-const architecture = os.arch();
-const artifact = manifest.artifacts[`${platform}-${architecture}`];
 
 function fail(message) {
   throw new Error(`[supabase-loopback] ${message}`);
@@ -41,12 +38,25 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-if (process.argv.slice(2).filter((arg) => arg !== "--").join(" ") !== "--source-only") {
-  fail("usage: pnpm prepare:supabase-loopback -- --source-only");
+const args = process.argv.slice(2).filter((arg) => arg !== "--");
+let targetKey = `${process.platform}-${os.arch()}`;
+if (args.length === 3 && args[0] === "--source-only" && args[1] === "--target") {
+  targetKey = args[2];
+} else if (args.length !== 1 || args[0] !== "--source-only") {
+  fail(
+    "usage: pnpm prepare:supabase-loopback -- --source-only [--target <platform-architecture>]",
+  );
 }
+const artifact = manifest.artifacts[targetKey];
 if (!artifact) {
-  fail(`unsupported platform ${platform}-${architecture}`);
+  fail(`unsupported platform ${targetKey}`);
 }
+const { platform, architecture } = artifact;
+if (targetKey !== `${platform}-${architecture}`) {
+  fail(`artifact key ${targetKey} does not match its platform contract`);
+}
+const goArchitecture = architecture === "x64" ? "amd64" : architecture;
+const hostArchitecture = os.arch() === "x64" ? "amd64" : os.arch();
 
 const sourceRoot = path.join(
   toolRoot,
@@ -116,6 +126,8 @@ run(
     "apps/cli-go/internal/utils/isolation/hostconfig_test.go",
     "apps/cli-go/internal/utils/loopback/portbindings.go",
     "apps/cli-go/internal/utils/loopback/portbindings_test.go",
+    "apps/cli-go/internal/start/start.go",
+    "apps/cli-go/internal/start/start_isolation_test.go",
   ],
   { cwd: sourceRoot },
 );
@@ -128,12 +140,19 @@ if (patchedTree !== manifest.source.patchedTree) {
 }
 
 const goRoot = path.join(sourceRoot, "apps", "cli-go");
-const goEnvironment = {
+const testEnvironment = {
+  ...process.env,
+  GOTOOLCHAIN: manifest.build.goVersion,
+  CGO_ENABLED: manifest.build.cgoEnabled,
+  GOOS: process.platform,
+  GOARCH: hostArchitecture,
+};
+const buildEnvironment = {
   ...process.env,
   GOTOOLCHAIN: manifest.build.goVersion,
   CGO_ENABLED: manifest.build.cgoEnabled,
   GOOS: platform,
-  GOARCH: architecture,
+  GOARCH: goArchitecture,
 };
 
 run(
@@ -144,7 +163,7 @@ run(
     "./internal/utils/isolation",
     "-count=1",
   ],
-  { cwd: goRoot, env: goEnvironment, stdio: "inherit" },
+  { cwd: goRoot, env: testEnvironment, stdio: "inherit" },
 );
 run(
   "go",
@@ -155,7 +174,18 @@ run(
     "^TestDockerStartRejects(DeviceCgroupRules)?BeforeDockerAction$",
     "-count=1",
   ],
-  { cwd: goRoot, env: goEnvironment, stdio: "inherit" },
+  { cwd: goRoot, env: testEnvironment, stdio: "inherit" },
+);
+run(
+  "go",
+  [
+    "test",
+    "./internal/start",
+    "-run",
+    "^TestRunRejectsUnsafeServiceBeforeDockerAction$",
+    "-count=1",
+  ],
+  { cwd: goRoot, env: testEnvironment, stdio: "inherit" },
 );
 
 await mkdir(artifactRoot, { recursive: true });
@@ -170,7 +200,7 @@ run(
     binaryPath,
     ".",
   ],
-  { cwd: goRoot, env: goEnvironment, stdio: "inherit" },
+  { cwd: goRoot, env: buildEnvironment, stdio: "inherit" },
 );
 
 const binary = await readFile(binaryPath);

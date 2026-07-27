@@ -538,3 +538,231 @@ index 0000000..f6436fa
 +
 +	require.Error(t, BindPublishedPorts(bindings))
 +}
+diff --git a/apps/cli-go/internal/start/start.go b/apps/cli-go/internal/start/start.go
+index 6ce6a4434dafce83ee4db398f3b16ed04a8dae59..36f64aefcaca97117db102503caa47a0dabdcbf8 100644
+--- a/apps/cli-go/internal/start/start.go
++++ b/apps/cli-go/internal/start/start.go
+@@ -6,7 +6,6 @@ import (
+ 	_ "embed"
+ 	"encoding/json"
+ 	"fmt"
+-	"io"
+ 	"net"
+ 	"net/url"
+ 	"os"
+@@ -18,14 +17,7 @@ import (
+ 	"text/template"
+ 	"time"
+ 
+-	"github.com/cenkalti/backoff/v4"
+-	"github.com/compose-spec/compose-go/v2/types"
+-	"github.com/docker/cli/cli/command"
+-	dockerFlags "github.com/docker/cli/cli/flags"
+-	"github.com/docker/compose/v2/pkg/api"
+-	"github.com/docker/compose/v2/pkg/compose"
+ 	"github.com/docker/docker/api/types/container"
+-	"github.com/docker/docker/api/types/image"
+ 	"github.com/docker/docker/api/types/network"
+ 	"github.com/docker/docker/client"
+ 	"github.com/docker/go-connections/nat"
+@@ -153,92 +145,17 @@ var (
+ 
+ var serviceTimeout = 30 * time.Second
+ 
+-// RetryClient wraps a Docker client to add retry logic for image pulls
+-type RetryClient struct {
+-	*client.Client
+-}
+-
+-func isPermanentError(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	// Rate limited errors can be recovered by retry
+-	if msg := err.Error(); strings.Contains(msg, "toomanyrequests:") {
+-		return false
+-	}
+-	return true
+-}
+-
+-// ImagePull wraps the Docker client's ImagePull with retry logic and registry auth
+-func (cli *RetryClient) ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
+-	if len(options.RegistryAuth) == 0 {
+-		options.RegistryAuth = utils.GetRegistryAuth()
+-	}
+-	pull := func() (io.ReadCloser, error) {
+-		resp, err := cli.Client.ImagePull(ctx, refStr, options)
+-		if isPermanentError(err) {
+-			return resp, &backoff.PermanentError{Err: err}
+-		}
+-		return resp, err
+-	}
+-	policy := utils.NewBackoffPolicy(ctx)
+-	return backoff.RetryWithData(pull, policy)
+-}
+-
+-// Also retry ImageInspect: https://github.com/docker/compose/blob/main/pkg/compose/pull.go#L174
+-func (cli *RetryClient) ImageInspect(ctx context.Context, refStr string, options ...client.ImageInspectOption) (image.InspectResponse, error) {
+-	pull := func() (image.InspectResponse, error) {
+-		resp, err := cli.Client.ImageInspect(ctx, refStr, options...)
+-		if isPermanentError(err) {
+-			return resp, &backoff.PermanentError{Err: err}
+-		}
+-		return resp, err
+-	}
+-	policy := utils.NewBackoffPolicy(ctx)
+-	return backoff.RetryWithData(pull, policy)
+-}
+-
+-// pullImagesUsingCompose pulls all required images using docker-compose service
+-func pullImagesUsingCompose(ctx context.Context, project types.Project) error {
+-	// Create Docker CLI
+-	cli, err := command.NewDockerCli()
+-	if err != nil {
+-		return errors.Errorf("failed to create Docker CLI: %w", err)
+-	}
+-	// Initialize Docker CLI
+-	opt := command.WithAPIClient(&RetryClient{Client: utils.Docker})
+-	if err := cli.Initialize(&dockerFlags.ClientOptions{}, opt); err != nil {
+-		return errors.Errorf("failed to initialize Docker CLI: %w", err)
+-	}
+-	service := compose.NewComposeService(cli)
+-	// Fallback to regular image pull by ignoring failures
+-	return service.Pull(ctx, &project, api.PullOptions{IgnoreFailures: true})
+-}
+-
+ func run(ctx context.Context, fsys afero.Fs, excludedContainers []string, dbConfig pgconn.Config, options ...func(*pgx.ConnConfig)) error {
+ 	excluded := make(map[string]bool)
+ 	for _, name := range excludedContainers {
+ 		excluded[name] = true
+ 	}
+-	notExcluded := func(sc types.ServiceConfig) bool {
+-		val, ok := excluded[sc.Name]
+-		return !val || !ok
+-	}
+ 
+ 	jwks, err := utils.Config.Auth.ResolveJWKS(ctx)
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+-	// TODO: start services using compose up
+-	project := types.Project{
+-		Name:     "supabase-cli",
+-		Services: utils.GetServices().Filter(notExcluded),
+-	}
+-	if err := pullImagesUsingCompose(ctx, project); err != nil {
+-		return err
+-	}
+-
+ 	// Start Postgres.
+ 	if dbConfig.Host == utils.DbId {
+ 		if err := start.StartDatabase(ctx, "", fsys, os.Stderr, options...); err != nil {
+diff --git a/apps/cli-go/internal/start/start_isolation_test.go b/apps/cli-go/internal/start/start_isolation_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..d1483e6a791e86c5fe4c643a6833942677453a7c
+--- /dev/null
++++ b/apps/cli-go/internal/start/start_isolation_test.go
+@@ -0,0 +1,102 @@
++package start
++
++import (
++	"context"
++	"io"
++	"net/http"
++	"strings"
++	"testing"
++
++	"github.com/docker/docker/client"
++	"github.com/jackc/pgconn"
++	"github.com/spf13/afero"
++	"github.com/stretchr/testify/require"
++
++	"github.com/supabase/cli/internal/utils"
++	"github.com/supabase/cli/pkg/config"
++)
++
++type startDockerActionCounter struct {
++	imageInspect    int
++	imagePull       int
++	networkCreate   int
++	volumeCreate    int
++	containerCreate int
++	containerStart  int
++	other           int
++}
++
++func (counter *startDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		counter.imageInspect++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		counter.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/networks/create"):
++		counter.networkCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		counter.volumeCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		counter.containerCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
++		counter.containerStart++
++	default:
++		counter.other++
++	}
++	return &http.Response{
++		StatusCode: http.StatusInternalServerError,
++		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestRunRejectsUnsafeServiceBeforeDockerAction(t *testing.T) {
++	counter := &startDockerActionCounter{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("unix:///var/run/docker.sock"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	utils.Config.Api.Enabled = false
++	utils.Config.Auth.Enabled = false
++	utils.Config.Inbucket.Enabled = false
++	utils.Config.Realtime.Enabled = false
++	utils.Config.Storage.Enabled = false
++	utils.Config.EdgeRuntime.Enabled = false
++	utils.Config.Studio.Enabled = false
++	utils.Config.Db.Pooler.Enabled = false
++	utils.Config.Analytics.Enabled = true
++	utils.Config.Analytics.Image = "example.invalid/logflare:latest"
++	utils.Config.Analytics.VectorImage = "example.invalid/vector:latest"
++
++	excluded := []string{
++		utils.ShortContainerImageName(utils.Config.Db.Image),
++		utils.ShortContainerImageName(utils.Config.Analytics.Image),
++	}
++	err = run(
++		context.Background(),
++		afero.NewMemMapFs(),
++		excluded,
++		pgconn.Config{Host: "external-db", Port: 5432},
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
++	require.Zero(t, counter.containerStart)
++	require.Zero(t, counter.other)
++}

@@ -207,12 +207,42 @@ test("preflight rejects every source, manifest, platform, and artifact mismatch"
         ),
     ],
     [
+      "wrong platform package digest",
+      async (fixture) =>
+        writeFile(
+          fixture.paths.platformPackageJsonPath,
+          `${JSON.stringify({
+            name: "@supabase/cli-darwin-arm64",
+            version: "2.105.0",
+            changed: true,
+          })}\n`,
+        ),
+    ],
+    [
+      "wrong platform CLI digest",
+      async (fixture) =>
+        writeFile(fixture.paths.platformCliPath, "changed platform CLI\n"),
+    ],
+    [
       "wrong binary version",
       async (fixture) => {
         const receipt = JSON.parse(
           await readFile(fixture.paths.receiptPath, "utf8"),
         );
         receipt.cliVersion = "2.104.0";
+        await writeFile(
+          fixture.paths.receiptPath,
+          `${JSON.stringify(receipt)}\n`,
+        );
+      },
+    ],
+    [
+      "wrong receipt platform",
+      async (fixture) => {
+        const receipt = JSON.parse(
+          await readFile(fixture.paths.receiptPath, "utf8"),
+        );
+        receipt.platform = "linux";
         await writeFile(
           fixture.paths.receiptPath,
           `${JSON.stringify(receipt)}\n`,
@@ -345,6 +375,49 @@ test("wrapper rejects unsafe effective Analytics config before child spawn", asy
     calls[0].options.env.SUPABASE_GO_BINARY,
     fixture.paths.binaryPath,
   );
+});
+
+test("every wrapper command rejects unsafe effective Analytics config before child spawn", async (t) => {
+  const commands = [
+    ["start"],
+    ["test", "db", "--local"],
+    ["stop", "--no-backup"],
+    ["--version"],
+  ];
+  const configs = [
+    ["missing analytics block", "[api]\nport = 54321\n"],
+    ["analytics enabled", "[analytics]\nenabled = true\n"],
+    ["malformed analytics flag", '[analytics]\nenabled = "false"\n'],
+    [
+      "duplicate analytics blocks",
+      "[analytics]\nenabled = false\n[analytics]\nenabled = false\n",
+    ],
+  ];
+
+  for (const args of commands) {
+    for (const [configName, config] of configs) {
+      await t.test(`${args.join(" ")}: ${configName}`, async (t) => {
+        const fixture = await makeFixture(t);
+        const supabaseRoot = path.join(fixture.root, "supabase");
+        await mkdir(supabaseRoot);
+        await writeFile(path.join(supabaseRoot, "config.toml"), config);
+        let childSpawned = false;
+
+        await assert.rejects(
+          runSupabase([...args, "--workdir", fixture.root], {
+            ...fixture.options,
+            processEnvironment: {},
+            invokeCli: async () => {
+              childSpawned = true;
+              return { status: 0 };
+            },
+          }),
+          /analytics/i,
+        );
+        assert.equal(childSpawned, false);
+      });
+    }
+  }
 });
 
 test("wrapper rejects caller host-network override before child spawn", async (t) => {
