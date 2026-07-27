@@ -602,3 +602,112 @@ private actor RecordingHomeReconnectSleeper {
         delays
     }
 }
+
+// MARK: - Trophy Wall domain convergence
+
+@MainActor
+final class TrophyWallDomainTests: XCTestCase {
+    func testStoreConvergesOnlyExactPrincipalScopedLogicalIdentity() {
+        let principal = TrophyWallPrincipalScope(opaqueValue: "principal-a")
+        let otherPrincipal = TrophyWallPrincipalScope(opaqueValue: "principal-b")
+        let logicalID = TrophyWallLogicalIdentity(
+            idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000001")!
+        )
+        let unrelatedLogicalID = TrophyWallLogicalIdentity(
+            idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000002")!
+        )
+        let runID = UUID(uuidString: "37500000-0000-4000-8000-000000000003")!
+        let pendingUpdate = Date(timeIntervalSince1970: 20)
+        let unrelatedUpdate = Date(timeIntervalSince1970: 10)
+        let acceptedUpdate = Date(timeIntervalSince1970: 30)
+        let initialCards: [TrophyWallCard] = [
+            .pending(
+                principalScope: principal,
+                logicalIdentity: logicalID,
+                lastMeaningfulUpdateAt: pendingUpdate
+            ),
+            .pending(
+                principalScope: principal,
+                logicalIdentity: unrelatedLogicalID,
+                lastMeaningfulUpdateAt: unrelatedUpdate
+            ),
+        ]
+        let cases = [
+            TrophyWallConvergenceCase(
+                name: "exact principal and logical identity",
+                acceptedRun: TrophyWallCanonicalAcceptedRun(
+                    principalScope: principal,
+                    runID: runID,
+                    linkedLogicalIdentity: logicalID,
+                    lastMeaningfulUpdateAt: acceptedUpdate
+                ),
+                expectedCards: [
+                    .accepted(
+                        principalScope: principal,
+                        runID: runID,
+                        lastMeaningfulUpdateAt: acceptedUpdate
+                    ),
+                    .pending(
+                        principalScope: principal,
+                        logicalIdentity: unrelatedLogicalID,
+                        lastMeaningfulUpdateAt: unrelatedUpdate
+                    ),
+                ]
+            ),
+            TrophyWallConvergenceCase(
+                name: "wrong principal",
+                acceptedRun: TrophyWallCanonicalAcceptedRun(
+                    principalScope: otherPrincipal,
+                    runID: runID,
+                    linkedLogicalIdentity: logicalID,
+                    lastMeaningfulUpdateAt: acceptedUpdate
+                ),
+                expectedCards: initialCards
+            ),
+            TrophyWallConvergenceCase(
+                name: "missing logical link",
+                acceptedRun: TrophyWallCanonicalAcceptedRun(
+                    principalScope: principal,
+                    runID: runID,
+                    linkedLogicalIdentity: nil,
+                    lastMeaningfulUpdateAt: acceptedUpdate
+                ),
+                expectedCards: [
+                    .accepted(
+                        principalScope: principal,
+                        runID: runID,
+                        lastMeaningfulUpdateAt: acceptedUpdate
+                    ),
+                    initialCards[0],
+                    initialCards[1],
+                ]
+            ),
+        ]
+
+        for testCase in cases {
+            let store = TrophyWallStore(
+                principalScope: principal,
+                repository: StaticTrophyWallRepository(cards: initialCards)
+            )
+
+            store.ingest(testCase.acceptedRun)
+
+            XCTAssertEqual(store.principalScope, principal, testCase.name)
+            XCTAssertEqual(store.cards, testCase.expectedCards, testCase.name)
+        }
+    }
+}
+
+private struct TrophyWallConvergenceCase {
+    let name: String
+    let acceptedRun: TrophyWallCanonicalAcceptedRun
+    let expectedCards: [TrophyWallCard]
+}
+
+private struct StaticTrophyWallRepository: TrophyWallRepository {
+    let cards: [TrophyWallCard]
+
+    func initialCards(for principalScope: TrophyWallPrincipalScope) -> [TrophyWallCard] {
+        cards.filter { $0.principalScope == principalScope }
+    }
+}

@@ -166,3 +166,136 @@ struct HomeModel: Hashable, Sendable {
         }
     }
 }
+
+// MARK: - Trophy Wall domain
+
+struct TrophyWallPrincipalScope: Hashable, Sendable {
+    private let opaqueValue: String
+
+    init(opaqueValue: String) {
+        precondition(!opaqueValue.isEmpty)
+        self.opaqueValue = opaqueValue
+    }
+}
+
+struct TrophyWallLogicalIdentity: Hashable, Sendable {
+    fileprivate let idempotencyKey: UUID
+
+    init(idempotencyKey: UUID) {
+        self.idempotencyKey = idempotencyKey
+    }
+}
+
+enum TrophyWallCardIdentity: Hashable, Sendable {
+    case local(TrophyWallLogicalIdentity)
+    case run(UUID)
+}
+
+enum TrophyWallCardState: Hashable, Sendable {
+    case pendingUpload
+    case accepted
+}
+
+struct TrophyWallOrderKey: Hashable, Comparable, Sendable {
+    let lastMeaningfulUpdateAt: Date
+    private let stableIdentity: UUID
+
+    fileprivate init(lastMeaningfulUpdateAt: Date, stableIdentity: UUID) {
+        self.lastMeaningfulUpdateAt = lastMeaningfulUpdateAt
+        self.stableIdentity = stableIdentity
+    }
+
+    static func < (lhs: TrophyWallOrderKey, rhs: TrophyWallOrderKey) -> Bool {
+        if lhs.lastMeaningfulUpdateAt != rhs.lastMeaningfulUpdateAt {
+            return lhs.lastMeaningfulUpdateAt < rhs.lastMeaningfulUpdateAt
+        }
+        return lhs.stableIdentity.uuidString < rhs.stableIdentity.uuidString
+    }
+}
+
+struct TrophyWallCard: Hashable, Sendable {
+    let principalScope: TrophyWallPrincipalScope
+    let identity: TrophyWallCardIdentity
+    let state: TrophyWallCardState
+    let orderKey: TrophyWallOrderKey
+
+    static func pending(
+        principalScope: TrophyWallPrincipalScope,
+        logicalIdentity: TrophyWallLogicalIdentity,
+        lastMeaningfulUpdateAt: Date
+    ) -> TrophyWallCard {
+        TrophyWallCard(
+            principalScope: principalScope,
+            identity: .local(logicalIdentity),
+            state: .pendingUpload,
+            orderKey: TrophyWallOrderKey(
+                lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
+                stableIdentity: logicalIdentity.idempotencyKey
+            )
+        )
+    }
+
+    static func accepted(
+        principalScope: TrophyWallPrincipalScope,
+        runID: UUID,
+        lastMeaningfulUpdateAt: Date
+    ) -> TrophyWallCard {
+        TrophyWallCard(
+            principalScope: principalScope,
+            identity: .run(runID),
+            state: .accepted,
+            orderKey: TrophyWallOrderKey(
+                lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
+                stableIdentity: runID
+            )
+        )
+    }
+}
+
+struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
+    let principalScope: TrophyWallPrincipalScope
+    let runID: UUID
+    let linkedLogicalIdentity: TrophyWallLogicalIdentity?
+    let lastMeaningfulUpdateAt: Date
+}
+
+protocol TrophyWallRepository: Sendable {
+    func initialCards(for principalScope: TrophyWallPrincipalScope) -> [TrophyWallCard]
+}
+
+@MainActor
+final class TrophyWallStore {
+    let principalScope: TrophyWallPrincipalScope
+    private(set) var cards: [TrophyWallCard]
+
+    init(
+        principalScope: TrophyWallPrincipalScope,
+        repository: any TrophyWallRepository
+    ) {
+        self.principalScope = principalScope
+        cards = repository.initialCards(for: principalScope)
+            .filter { $0.principalScope == principalScope }
+            .sorted { $0.orderKey > $1.orderKey }
+    }
+
+    func ingest(_ acceptedRun: TrophyWallCanonicalAcceptedRun) {
+        guard acceptedRun.principalScope == principalScope else {
+            return
+        }
+
+        if let linkedLogicalIdentity = acceptedRun.linkedLogicalIdentity {
+            cards.removeAll {
+                $0.identity == .local(linkedLogicalIdentity)
+            }
+        }
+
+        let canonicalCard = TrophyWallCard.accepted(
+            principalScope: principalScope,
+            runID: acceptedRun.runID,
+            lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt
+        )
+        cards.removeAll { $0.identity == canonicalCard.identity }
+        cards.append(canonicalCard)
+        cards.sort { $0.orderKey > $1.orderKey }
+    }
+}
