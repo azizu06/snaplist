@@ -208,6 +208,10 @@ final class ItemRunSubmissionHost {
     private let coordinator: ItemRunSubmissionCoordinator?
     private var presentationAcknowledgmentGate:
         ItemRunSubmissionPresentationAcknowledgmentGate?
+    private var pendingAmbiguousRetry:
+        ItemRunSubmissionCoordinator.AmbiguousRetry?
+    private var admittedAmbiguousRetry:
+        ItemRunSubmissionCoordinator.AmbiguousRetry?
     /// Fixture launches render approved states with no server behind them, so Start
     /// listing is inert by design there rather than unavailable.
     private let isInert: Bool
@@ -277,8 +281,17 @@ final class ItemRunSubmissionHost {
         isSubmitting = true
         defer { isSubmitting = false }
 
-        switch await coordinator.prepareSubmission(photos: photos) {
+        let preparation: ItemRunSubmissionCoordinator.Preparation
+        if let retry = admittedAmbiguousRetry {
+            admittedAmbiguousRetry = nil
+            preparation = await coordinator.retryAmbiguousSubmission(retry)
+        } else {
+            preparation = await coordinator.prepareSubmission(photos: photos)
+        }
+
+        switch preparation {
         case .accepted(let submission):
+            pendingAmbiguousRetry = nil
             retention = nil
             acceptedRun = submission.acceptedRun
             clearedIntake = false
@@ -316,28 +329,36 @@ final class ItemRunSubmissionHost {
                ) {
                 pendingPresentationEvent = nil
             }
+        case .ambiguous(let retry):
+            pendingAmbiguousRetry = retry
+            publish(retention: .ambiguous)
         case .retained(let retention):
-            acceptedRun = nil
-            clearedIntake = false
-            self.retention = retention
-            switch ItemRunSubmissionDestinationDecision(
+            pendingAmbiguousRetry = nil
+            publish(retention: retention)
+        }
+    }
+
+    private func publish(retention: ItemRunSubmissionRetention) {
+        acceptedRun = nil
+        clearedIntake = false
+        self.retention = retention
+        switch ItemRunSubmissionDestinationDecision(
+            retention: retention
+        ) {
+        case .photoReview:
+            if PhotoReviewSubmissionRejectionFamily(
                 retention: retention
-            ) {
-            case .photoReview:
-                if PhotoReviewSubmissionRejectionFamily(
-                    retention: retention
-                ) != nil {
-                    pendingPresentationEvent = .submissionRejected(
-                        eventID: UUID(),
-                        retention: retention
-                    )
-                }
-            case .handoff(let handoff):
-                pendingPresentationEvent = .destinationHandoff(
+            ) != nil {
+                pendingPresentationEvent = .submissionRejected(
                     eventID: UUID(),
-                    handoff: handoff
+                    retention: retention
                 )
             }
+        case .handoff(let handoff):
+            pendingPresentationEvent = .destinationHandoff(
+                eventID: UUID(),
+                handoff: handoff
+            )
         }
     }
 
@@ -371,9 +392,12 @@ final class ItemRunSubmissionHost {
 
     @discardableResult
     func retryAmbiguousSubmission(eventID: UUID) -> Bool {
-        guard canRetryAmbiguousSubmission(eventID: eventID) else {
+        guard canRetryAmbiguousSubmission(eventID: eventID),
+              let pendingAmbiguousRetry else {
             return false
         }
+        admittedAmbiguousRetry = pendingAmbiguousRetry
+        self.pendingAmbiguousRetry = nil
         pendingPresentationEvent = nil
         return true
     }
@@ -618,6 +642,11 @@ enum ItemRunSubmissionHostFactory {
 /// Turns the seller's ordered Photo Review intake into one canonical durable run.
 @MainActor
 final class ItemRunSubmissionCoordinator {
+    fileprivate struct AmbiguousRetry {
+        fileprivate let submittedPhotos: [StagedCapturePhoto]
+        fileprivate let payload: ItemRunSubmissionPayload
+    }
+
     fileprivate struct Submission {
         fileprivate let acceptedRun: AcceptedItemRun
         fileprivate let submittedPhotos: [StagedCapturePhoto]
@@ -626,6 +655,7 @@ final class ItemRunSubmissionCoordinator {
 
     fileprivate enum Preparation {
         case accepted(Submission)
+        case ambiguous(AmbiguousRetry)
         case retained(ItemRunSubmissionRetention)
     }
 
@@ -658,6 +688,8 @@ final class ItemRunSubmissionCoordinator {
         switch await prepareSubmission(photos: photos) {
         case .accepted(let submission):
             return .accepted(await finalize(submission))
+        case .ambiguous:
+            return .retained(.ambiguous)
         case .retained(let retention):
             return .retained(retention)
         }
@@ -743,11 +775,62 @@ final class ItemRunSubmissionCoordinator {
             return .retained(.authenticationRequired)
         }
 
+        let payload = ItemRunSubmissionPayload(
+            attempt: attempt,
+            photoData: intake.photoData
+        )
         let outcome = await submitter.submit(
-            ItemRunSubmissionPayload(attempt: attempt, photoData: intake.photoData),
+            payload,
             bearerToken: token
         )
 
+        return await resolve(
+            outcome,
+            payload: payload,
+            submittedPhotos: photos
+        )
+    }
+
+    fileprivate func retryAmbiguousSubmission(
+        _ retry: AmbiguousRetry
+    ) async -> Preparation {
+        let storedAttempt: ItemRunSubmissionAttempt?
+        do {
+            storedAttempt = try await attemptStore.loadAttempt()
+        } catch {
+            return .retained(.attemptNotPersisted)
+        }
+        guard storedAttempt == retry.payload.attempt else {
+            return .retained(.attemptNotPersisted)
+        }
+        guard let submitter else {
+            return .retained(.submissionUnavailable)
+        }
+
+        let token: String
+        do {
+            token = try await tokenProvider.bearerToken()
+        } catch {
+            return .retained(.authenticationRequired)
+        }
+
+        let outcome = await submitter.submit(
+            retry.payload,
+            bearerToken: token
+        )
+        return await resolve(
+            outcome,
+            payload: retry.payload,
+            submittedPhotos: retry.submittedPhotos
+        )
+    }
+
+    private func resolve(
+        _ outcome: ItemRunSubmissionTransportOutcome,
+        payload: ItemRunSubmissionPayload,
+        submittedPhotos: [StagedCapturePhoto]
+    ) async -> Preparation {
+        let attempt = payload.attempt
         switch outcome {
         case .created(let receipt), .replayed(let receipt):
             // The receipt has to account for what was actually sent before any photo is
@@ -764,7 +847,7 @@ final class ItemRunSubmissionCoordinator {
                         status: receipt.status,
                         stage: receipt.stage
                     ),
-                    submittedPhotos: photos,
+                    submittedPhotos: submittedPhotos,
                     attempt: attempt
                 )
             )
@@ -782,7 +865,12 @@ final class ItemRunSubmissionCoordinator {
         case .rateLimited(let reason):
             return .retained(.rateLimited(reason: reason))
         case .ambiguous:
-            return .retained(.ambiguous)
+            return .ambiguous(
+                AmbiguousRetry(
+                    submittedPhotos: submittedPhotos,
+                    payload: payload
+                )
+            )
         }
     }
 

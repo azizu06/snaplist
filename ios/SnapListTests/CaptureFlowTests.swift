@@ -1057,6 +1057,21 @@ final class CaptureFlowTests: XCTestCase {
             )
         )
 
+        XCTAssertTrue(
+            scenario.session.store.movePhoto(
+                id: submittedPhotos[1].id,
+                to: 0
+            )
+        )
+        let editedPhotos = scenario.session.store.photos
+        let selectedPhotoAfterEdit =
+            scenario.session.store.selectedPhotoID
+        let actionsPhotoAfterEdit =
+            scenario.session.store.actionsPhotoID
+        let routeAfterEdit = scenario.router.captureBoundaryRequest
+        let fullScreenAfterEdit = scenario.router.presentedFullScreen
+        let scanReturnAfterEdit = scenario.router.photoReviewScanReturn
+
         let retryEnteredSubmission = expectation(
             description: "Matching ambiguous retry enters SUB-01"
         )
@@ -1131,7 +1146,37 @@ final class CaptureFlowTests: XCTestCase {
                 .tokenRequested(persistedKey),
             ]
         )
-        try await scenario.assertPreserved()
+        let durablePhotosAfterRetry =
+            try await scenario.draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotosAfterRetry, submittedPhotos)
+        XCTAssertEqual(scenario.session.store.photos, editedPhotos)
+        XCTAssertEqual(
+            scenario.session.store.selectedPhotoID,
+            selectedPhotoAfterEdit
+        )
+        XCTAssertEqual(
+            scenario.session.store.actionsPhotoID,
+            actionsPhotoAfterEdit
+        )
+        XCTAssertTrue(
+            scenario.photoReviewHost.session === scenario.session
+        )
+        XCTAssertEqual(
+            scenario.router.captureBoundaryRequest,
+            routeAfterEdit
+        )
+        XCTAssertEqual(
+            scenario.router.presentedFullScreen,
+            fullScreenAfterEdit
+        )
+        XCTAssertEqual(
+            scenario.router.photoReviewScanReturn,
+            scanReturnAfterEdit
+        )
+        XCTAssertNil(scenario.pendingScanFocus)
+        XCTAssertEqual(scenario.camera.startCount, 0)
+        XCTAssertEqual(scenario.camera.captureCount, 0)
+        XCTAssertFalse(scenario.photoReviewHost.isCommitting)
     }
 
     func testConflictSubmissionPresentsReviewAndReviewOnlyRetiresMatchingAdvisory() async throws {
