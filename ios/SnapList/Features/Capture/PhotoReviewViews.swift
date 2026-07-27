@@ -486,21 +486,38 @@ final class PhotoReviewIntake {
 @MainActor
 struct PhotoReviewFixtureView: View {
     @State private var store: PhotoReviewStore
+    private let forceReducedMotion: Bool
 
-    init(state: PhotoReviewVisualStateID) {
+    init(
+        state: PhotoReviewVisualStateID,
+        forceReducedMotion: Bool = false
+    ) {
         _store = State(
             initialValue: PhotoReviewStore(
                 photos: Self.photos(for: state)
             )
         )
+        self.forceReducedMotion = forceReducedMotion
     }
 
     var body: some View {
         // REV-02 is a fixture-only state: it stages no live session, so delete is inert.
         PhotoReviewView(
             store: store,
+            forceReducedMotion: forceReducedMotion,
             delete: { nil }
         )
+        .overlay(alignment: .topLeading) {
+            Text(store.photos.map(\.id.uuidString).joined(separator: "|"))
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+                .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+                .accessibilityLabel(
+                    store.photos.map(\.id.uuidString).joined(separator: "|")
+                )
+                .accessibilityIdentifier("photo-review.fixture-order")
+        }
     }
 
     static func photos(
@@ -880,6 +897,8 @@ struct PhotoReviewView: View {
     /// Set while an exit transaction is committing, so the seller cannot make an edit
     /// that the in-flight snapshot would silently discard.
     var isCommitting: Bool = false
+    /// Fixture-only override. Live Photo Review always follows the system setting.
+    var forceReducedMotion = false
     var submissionPresentation: PhotoReviewSubmissionPresentation = .idle
     var postSubmissionAnnouncement: (String) -> Void = {
         UIAccessibility.post(notification: .announcement, argument: $0)
@@ -904,7 +923,8 @@ struct PhotoReviewView: View {
     // Outside dismissal focus stays independent from picker cancellation focus.
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @GestureState private var nativeDragGestureIsActive = false
 
     private enum PickerFocusTarget: Hashable {
         case addButton
@@ -914,6 +934,10 @@ struct PhotoReviewView: View {
     private var selectedPhoto: StagedCapturePhoto? {
         store.photos.first(where: { $0.id == store.selectedPhotoID })
             ?? store.photos.first
+    }
+
+    private var reduceMotion: Bool {
+        systemReduceMotion || forceReducedMotion
     }
 
     var body: some View {
@@ -976,6 +1000,38 @@ struct PhotoReviewView: View {
                 notification: .announcement,
                 argument: announcement
             )
+        }
+        .onChange(
+            of: nativeDragGestureIsActive
+        ) { wasActive, isActive in
+            guard wasActive, !isActive else {
+                return
+            }
+            // SwiftUI's DropDelegate has no general session-ended callback. This
+            // simultaneous observer resets automatically for release and system
+            // cancellation; the short delay lets a valid performDrop win first.
+            dragPresentation.scheduleCancellation(reduceMotion: reduceMotion)
+        }
+        .overlay(alignment: .topLeading) {
+#if DEBUG
+            VStack(spacing: 0) {
+                if reduceMotion {
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityElement()
+                        .accessibilityLabel("Reduced motion")
+                        .accessibilityIdentifier("photo-review.motion-reduced")
+                }
+                if dragPresentation.draggedPhotoID != nil {
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityElement()
+                        .accessibilityLabel("Drag active")
+                        .accessibilityIdentifier("photo-review.drag-active")
+                }
+            }
+            .allowsHitTesting(false)
+#endif
         }
     }
 
@@ -1221,6 +1277,7 @@ struct PhotoReviewView: View {
             .clipped()
             .clipShape(.rect(cornerRadius: 12))
         }
+        .simultaneousGesture(nativeDragLifecycleObserver)
         .onDrop(
             of: [UTType.plainText],
             delegate: PhotoReviewThumbnailDropDelegate(
@@ -1230,6 +1287,19 @@ struct PhotoReviewView: View {
                 reduceMotion: reduceMotion
             )
         )
+    }
+
+    private var nativeDragLifecycleObserver: some Gesture {
+        LongPressGesture(minimumDuration: 0.25)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .updating($nativeDragGestureIsActive) { value, isActive, _ in
+                switch value {
+                case .first(true), .second(true, _):
+                    isActive = true
+                default:
+                    break
+                }
+            }
     }
 
     private func edgeAutoScrollDropZone(

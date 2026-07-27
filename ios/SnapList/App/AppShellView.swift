@@ -29,7 +29,10 @@ struct AppShellView: View {
                 )
             } else if let photoReviewState = configuration.photoReviewState {
 #if DEBUG
-                PhotoReviewFixtureView(state: photoReviewState)
+                PhotoReviewFixtureView(
+                    state: photoReviewState,
+                    forceReducedMotion: configuration.forceReducedMotion
+                )
 #else
                 shell
 #endif
