@@ -27,6 +27,7 @@ export interface EbayConnectionStatus {
 interface ConnectionRow {
   user_id: string;
   account_generation: string;
+  connection_generation: string;
   ebay_user_id: string | null;
   ebay_username: string | null;
   refresh_token_enc: string;
@@ -100,6 +101,7 @@ export async function deleteEbayConnection(
 export interface DecryptedConnection {
   userId: string;
   accountGeneration: string;
+  connectionGeneration: string;
   refreshToken: string;
   accessToken: string | null;
   /** Epoch ms, null when no cached access token. */
@@ -126,7 +128,7 @@ export async function getDecryptedConnection(
     let query = supabase
       .from("ebay_connections")
       .select(
-        "user_id, account_generation, ebay_user_id, ebay_username, refresh_token_enc, access_token_enc, access_token_expires_at, scopes",
+        "user_id, account_generation, connection_generation, ebay_user_id, ebay_username, refresh_token_enc, access_token_enc, access_token_expires_at, scopes",
       );
     if (userId) query = query.eq("user_id", userId);
     const result = await query.maybeSingle<ConnectionRow>();
@@ -140,6 +142,7 @@ export async function getDecryptedConnection(
   return {
     userId: data.user_id,
     accountGeneration: data.account_generation,
+    connectionGeneration: data.connection_generation,
     refreshToken: decryptSecret(data.refresh_token_enc, key),
     accessToken: data.access_token_enc
       ? decryptSecret(data.access_token_enc, key)
@@ -182,35 +185,63 @@ export async function beginEbayProviderDispatch(
   supabase: SupabaseClient,
   resourceId: string,
   operation: "publish" | "reprice",
+  expectedConnectionGeneration: string | null | undefined,
+  expectedPublishClaimId: string | null | undefined,
   scheduled = false,
 ): Promise<{
   accountGeneration: string;
+  connectionGeneration: string | null;
+  publishClaimId: string | null;
   attemptToken: string;
   userId?: string;
 }> {
-  const { data, error } = await supabase.rpc(
-    scheduled
-      ? "begin_scheduled_ebay_transactional_dispatch"
-      : "begin_ebay_transactional_dispatch",
-    {
-      p_resource_id: resourceId,
-      p_operation: operation,
-    },
-  );
+  const { data, error } = scheduled
+    ? await supabase.rpc("begin_scheduled_ebay_transactional_dispatch", {
+        p_resource_id: resourceId,
+        p_operation: operation,
+      })
+    : await supabase.rpc("begin_ebay_transactional_dispatch", {
+        p_resource_id: resourceId,
+        p_operation: operation,
+        p_connection_generation: expectedConnectionGeneration ?? null,
+        p_publish_claim_id: expectedPublishClaimId ?? null,
+      });
   if (error) throw new Error(`Failed to begin eBay provider dispatch: ${error.message}`);
   const lease = data as {
     account_generation?: unknown;
+    connection_generation?: unknown;
+    publish_claim_id?: unknown;
     attempt_token?: unknown;
     user_id?: unknown;
   } | null;
   if (
     typeof lease?.account_generation !== "string" ||
+    !(
+      lease.connection_generation === undefined
+      ||
+      lease.connection_generation === null
+      || typeof lease.connection_generation === "string"
+    )
+    || !(
+      lease.publish_claim_id === undefined
+      || lease.publish_claim_id === null
+      || typeof lease.publish_claim_id === "string"
+    )
+    ||
     typeof lease.attempt_token !== "string"
   ) {
     throw new Error("Failed to begin eBay provider dispatch: invalid lease");
   }
   return {
     accountGeneration: lease.account_generation,
+    connectionGeneration:
+      typeof lease.connection_generation === "string"
+        ? lease.connection_generation
+        : null,
+    publishClaimId:
+      typeof lease.publish_claim_id === "string"
+        ? lease.publish_claim_id
+        : null,
     attemptToken: lease.attempt_token,
     userId: typeof lease.user_id === "string" ? lease.user_id : undefined,
   };
@@ -221,20 +252,24 @@ export async function renewEbayProviderDispatch(
   resourceId: string,
   operation: "publish" | "reprice",
   accountGeneration: string,
+  connectionGeneration: string | null,
+  publishClaimId: string | null,
   attemptToken: string,
   scheduled = false,
 ): Promise<void> {
-  const { error } = await supabase.rpc(
-    scheduled
-      ? "renew_scheduled_ebay_transactional_dispatch"
-      : "renew_ebay_transactional_dispatch",
-    {
-      p_resource_id: resourceId,
-      p_operation: operation,
-      p_account_generation: accountGeneration,
-      p_attempt_token: attemptToken,
-    },
-  );
+  const payload = {
+    p_resource_id: resourceId,
+    p_operation: operation,
+    p_account_generation: accountGeneration,
+    p_attempt_token: attemptToken,
+  };
+  const { error } = scheduled
+    ? await supabase.rpc("renew_scheduled_ebay_transactional_dispatch", payload)
+    : await supabase.rpc("renew_ebay_transactional_dispatch", {
+        ...payload,
+        p_connection_generation: connectionGeneration,
+        p_publish_claim_id: publishClaimId,
+      });
   if (error) throw new Error(`Failed to renew eBay provider dispatch: ${error.message}`);
 }
 
@@ -243,20 +278,24 @@ export async function endEbayProviderDispatch(
   resourceId: string,
   operation: "publish" | "reprice",
   accountGeneration: string,
+  connectionGeneration: string | null,
+  publishClaimId: string | null,
   attemptToken: string,
   scheduled = false,
 ): Promise<void> {
-  const { error } = await supabase.rpc(
-    scheduled
-      ? "end_scheduled_ebay_transactional_dispatch"
-      : "end_ebay_transactional_dispatch",
-    {
-      p_resource_id: resourceId,
-      p_operation: operation,
-      p_account_generation: accountGeneration,
-      p_attempt_token: attemptToken,
-    },
-  );
+  const payload = {
+    p_resource_id: resourceId,
+    p_operation: operation,
+    p_account_generation: accountGeneration,
+    p_attempt_token: attemptToken,
+  };
+  const { error } = scheduled
+    ? await supabase.rpc("end_scheduled_ebay_transactional_dispatch", payload)
+    : await supabase.rpc("end_ebay_transactional_dispatch", {
+        ...payload,
+        p_connection_generation: connectionGeneration,
+        p_publish_claim_id: publishClaimId,
+      });
   if (error) throw new Error(`Failed to end eBay provider dispatch: ${error.message}`);
 }
 

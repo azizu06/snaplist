@@ -143,6 +143,8 @@ describe("applyRepriceSuggestion", () => {
       const result = { offerId: revision.offerId, status: "revised" as const };
       await complete?.(result, {
         accountGeneration: "33333333-3333-4333-8333-333333333333",
+        connectionGeneration: null,
+        publishClaimId: null,
         attemptToken: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       });
       return result;

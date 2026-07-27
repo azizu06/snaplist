@@ -62,11 +62,21 @@ export class UserTokenProvider implements EbayTokenProvider {
   async beginProviderDispatch(
     resourceId: string,
     operation: "publish" | "reprice",
+    expectedConnectionGeneration?: string | null,
+    expectedPublishClaimId?: string | null,
   ) {
-    const { accountGeneration, attemptToken, userId } = await beginEbayProviderDispatch(
+    const {
+      accountGeneration,
+      connectionGeneration,
+      publishClaimId,
+      attemptToken,
+      userId,
+    } = await beginEbayProviderDispatch(
       this.supabase,
       resourceId,
       operation,
+      expectedConnectionGeneration,
+      expectedPublishClaimId,
       this.scheduled,
     );
     if (this.scheduled && userId !== this.userId) {
@@ -75,6 +85,8 @@ export class UserTokenProvider implements EbayTokenProvider {
         resourceId,
         operation,
         accountGeneration,
+        connectionGeneration,
+        publishClaimId,
         attemptToken,
         true,
       ).catch(() => undefined);
@@ -90,6 +102,8 @@ export class UserTokenProvider implements EbayTokenProvider {
         resourceId,
         operation,
         accountGeneration,
+        connectionGeneration,
+        publishClaimId,
         attemptToken,
         this.scheduled,
       )
@@ -104,6 +118,8 @@ export class UserTokenProvider implements EbayTokenProvider {
 
     return {
       accountGeneration,
+      connectionGeneration,
+      publishClaimId,
       attemptToken,
       signal: controller.signal,
       release: async () => {
@@ -113,6 +129,8 @@ export class UserTokenProvider implements EbayTokenProvider {
           resourceId,
           operation,
           accountGeneration,
+          connectionGeneration,
+          publishClaimId,
           attemptToken,
           this.scheduled,
         ).catch(() => undefined);
@@ -123,6 +141,7 @@ export class UserTokenProvider implements EbayTokenProvider {
   async getAccessToken(
     expectedAccountGeneration?: string,
     parentSignal?: AbortSignal,
+    expectedConnectionGeneration?: string | null,
   ): Promise<string> {
     const env = this.readEnv();
     const connection = await getDecryptedConnection(
@@ -141,6 +160,12 @@ export class UserTokenProvider implements EbayTokenProvider {
       connection.accountGeneration !== expectedAccountGeneration
     ) {
       throw new Error("eBay account generation changed before provider dispatch");
+    }
+    if (
+      expectedConnectionGeneration
+      && connection.connectionGeneration !== expectedConnectionGeneration
+    ) {
+      throw new Error("eBay connection generation changed before provider dispatch");
     }
 
     if (

@@ -49,6 +49,8 @@ describe("HttpEbayAdapter.revisePrice", () => {
       getAccessToken,
       beginProviderDispatch: vi.fn(async () => ({
         accountGeneration: "22222222-2222-4222-8222-222222222222",
+        connectionGeneration: null,
+        publishClaimId: null,
         attemptToken: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         signal: new AbortController().signal,
         release,
@@ -80,6 +82,8 @@ describe("HttpEbayAdapter.revisePrice", () => {
       { offerId: "offer-9", status: "revised" },
       {
         accountGeneration: "22222222-2222-4222-8222-222222222222",
+        connectionGeneration: null,
+        publishClaimId: null,
         attemptToken: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       },
     );

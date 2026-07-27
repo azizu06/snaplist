@@ -1,7 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
+  mintUserJwt,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "../../supabase/test-users";
@@ -10,6 +12,9 @@ import { runPipelineAndPersist } from "../../pipeline/persist";
 import { MockEbayAdapter } from "./mock";
 import { publishListingToEbay } from "./publish";
 import { toEbayCondition } from "./map";
+import { saveEbayConnection } from "./connections";
+import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
+import type { EbayPolicyLocationBinding } from "./policy-location-contract";
 
 /**
  * eBay publish seam test (issue #14): persisted listing -> adapter ->
@@ -28,11 +33,17 @@ const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL ??
   "http://127.0.0.1:54321";
 const ANON_KEY =
-  process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_PUBLISHABLE_KEY
+  ?? process.env.SUPABASE_ANON_KEY
+  ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SECRET_KEY =
+  process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+const CONNECTION_ENV = {
+  EBAY_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
+};
 
 async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
+  if (!ANON_KEY || !SECRET_KEY) return false;
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
       headers: { apikey: ANON_KEY },
@@ -49,11 +60,72 @@ let reachable = false;
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
+let serverA: SupabaseClient;
+let serverB: SupabaseClient;
 
 // Clerk-era provisioning (issue #41): identities are minted JWTs with text
 // subs — no auth.users rows. See test-users.ts.
 async function provisionUser(label: string): Promise<ClerkTestUser> {
   return provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, `publish_${label}`);
+}
+
+async function tenantServerClient(userId: string): Promise<SupabaseClient> {
+  const token = await mintUserJwt(userId);
+  return createClient(SUPABASE_URL, SECRET_KEY!, {
+    accessToken: async () => token,
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+function readyBinding(
+  marketplaceId: string,
+  connectionGeneration: string,
+): EbayPolicyLocationBinding {
+  const choice = (kind: string) => ({
+    state: "bound" as const,
+    selectedId: `${marketplaceId}-${kind}`,
+    candidates: [{
+      id: `${marketplaceId}-${kind}`,
+      label: `${marketplaceId} ${kind}`,
+      providerDefault: false,
+    }],
+  });
+  return {
+    state: "ready",
+    marketplaceId,
+    connectionGeneration,
+    fulfillmentPolicy: choice("fulfillment"),
+    paymentPolicy: choice("payment"),
+    returnPolicy: choice("return"),
+    inventoryLocation: choice("location"),
+    discoveredAt: "2026-07-27T12:00:00.000Z",
+  };
+}
+
+async function connectAndBind(
+  server: SupabaseClient,
+  seller: string,
+  marketplaces: string[],
+): Promise<void> {
+  await saveEbayConnection(
+    server,
+    {
+      accessToken: `${seller}-access`,
+      refreshToken: `${seller}-refresh`,
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+      scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+    },
+    { userId: `${seller}-id`, username: seller },
+    CONNECTION_ENV,
+  );
+  const store = createSupabaseEbayPolicyLocationBindingStore(server);
+  const context = await store.readConnectionContext();
+  if (!context) throw new Error("eBay connection fixture was not created");
+  for (const marketplaceId of marketplaces) {
+    await store.saveBinding(
+      readyBinding(marketplaceId, context.connectionGeneration),
+    );
+  }
 }
 
 /** Upload a tiny PNG to the user-scoped path, as the upload route would. */
@@ -82,10 +154,18 @@ async function persistedRun(user: ClerkTestUser) {
 beforeAll(async () => {
   reachable = await stackReachable();
   if (!reachable) return;
-  admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
+  admin = createClient(SUPABASE_URL, SECRET_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   [userA, userB] = await Promise.all([provisionUser("a"), provisionUser("b")]);
+  [serverA, serverB] = await Promise.all([
+    tenantServerClient(userA.id),
+    tenantServerClient(userB.id),
+  ]);
+  await Promise.all([
+    connectAndBind(serverA, "publish-a", ["EBAY_US", "EBAY_GB"]),
+    connectAndBind(serverB, "publish-b", ["EBAY_US"]),
+  ]);
 });
 
 afterAll(async () => {
@@ -239,6 +319,8 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
       };
       await complete?.(result, {
         accountGeneration: "55555555-5555-4555-8555-555555555555",
+        connectionGeneration: "55555555-5555-4555-8555-555555555555",
+        publishClaimId: request.publishClaimId,
         attemptToken: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
       });
       return result;

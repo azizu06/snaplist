@@ -27,6 +27,13 @@ const sellerEnv = {
 
 const request: EbayPublishRequest = {
   sku: "listing-uuid-1",
+  marketplaceId: "EBAY_US",
+  connectionGeneration: "11111111-1111-4111-8111-111111111111",
+  publishClaimId: "22222222-2222-4222-8222-222222222222",
+  fulfillmentPolicyId: "fulfil-1",
+  paymentPolicyId: "pay-1",
+  returnPolicyId: "ret-1",
+  merchantLocationKey: "loc-1",
   title: "Sony WH-1000XM4 Wireless Headphones",
   description: "Great condition.",
   aspects: { Brand: ["Sony"] },
@@ -67,6 +74,8 @@ describe("HttpEbayAdapter.publishListing", () => {
       getAccessToken,
       beginProviderDispatch: vi.fn(async () => ({
         accountGeneration: "11111111-1111-4111-8111-111111111111",
+        connectionGeneration: request.connectionGeneration,
+        publishClaimId: request.publishClaimId,
         attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         signal: new AbortController().signal,
         release,
@@ -87,15 +96,20 @@ describe("HttpEbayAdapter.publishListing", () => {
     expect(leasedProvider.beginProviderDispatch).toHaveBeenCalledWith(
       request.sku,
       "publish",
+      request.connectionGeneration,
+      request.publishClaimId,
     );
     expect(getAccessToken).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
       expect.any(AbortSignal),
+      request.connectionGeneration,
     );
     expect(complete).toHaveBeenCalledWith(
       { listingId: "listing-lease", offerId: "offer-lease", status: "published" },
       {
         accountGeneration: "11111111-1111-4111-8111-111111111111",
+        connectionGeneration: request.connectionGeneration,
+        publishClaimId: request.publishClaimId,
         attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       },
     );
@@ -115,6 +129,8 @@ describe("HttpEbayAdapter.publishListing", () => {
         getAccessToken: async () => "generation-token",
         beginProviderDispatch: async () => ({
           accountGeneration: "11111111-1111-4111-8111-111111111111",
+          connectionGeneration: request.connectionGeneration,
+          publishClaimId: request.publishClaimId,
           attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           signal: new AbortController().signal,
           release,
@@ -172,20 +188,20 @@ describe("HttpEbayAdapter.publishListing", () => {
     }
   });
 
-  it("derives Content-Language from the configured marketplace (and honors the override)", async () => {
+  it("derives Content-Language from the request marketplace (and honors the override)", async () => {
     const respond = (url: string) => {
       if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
       if (url.endsWith("/offer")) return json(201, { offerId: "o" });
       return json(200, { listingId: "l" });
     };
 
-    // The sandbox→production/marketplace flip is env-only: EBAY_DE must speak de-DE.
+    // The tenant-owned request marketplace wins over process-wide env.
     const de = fakeFetch(respond);
     await new HttpEbayAdapter({
       fetch: de.fetch,
       tokenProvider,
-      env: () => ({ ...sellerEnv, EBAY_MARKETPLACE_ID: "EBAY_DE" }),
-    }).publishListing(request);
+      env: () => sellerEnv,
+    }).publishListing({ ...request, marketplaceId: "EBAY_DE" });
     for (const call of de.calls) {
       expect((call.init.headers as Record<string, string>)["content-language"]).toBe("de-DE");
     }
@@ -197,16 +213,15 @@ describe("HttpEbayAdapter.publishListing", () => {
       tokenProvider,
       env: () => ({
         ...sellerEnv,
-        EBAY_MARKETPLACE_ID: "EBAY_BE",
         EBAY_CONTENT_LANGUAGE: "nl-BE",
       }),
-    }).publishListing(request);
+    }).publishListing({ ...request, marketplaceId: "EBAY_BE" });
     for (const call of be.calls) {
       expect((call.init.headers as Record<string, string>)["content-language"]).toBe("nl-BE");
     }
   });
 
-  it("maps the request onto the inventory-item and offer payloads (incl. env policies)", async () => {
+  it("maps the request onto the inventory-item and offer payloads", async () => {
     const { fetch, calls } = fakeFetch((url) => {
       if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
       if (url.endsWith("/offer")) return json(201, { offerId: "o" });
@@ -434,25 +449,30 @@ describe("HttpEbayAdapter.publishListing", () => {
     expect((err as EbayApiError).message).toContain("Invalid aspects.");
   });
 
-  it("fails fast with a readable error when seller policy env vars are missing (no network)", async () => {
-    const fetchSpy = vi.fn();
+  it("uses request-owned policy/location values when shared env values are absent", async () => {
+    const fake = fakeFetch((url) => {
+      if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
+      if (url.endsWith("/offer")) return json(201, { offerId: "request-offer" });
+      return json(200, { listingId: "request-listing" });
+    });
     const adapter = new HttpEbayAdapter({
-      fetch: fetchSpy as unknown as typeof fetch,
+      fetch: fake.fetch,
       tokenProvider,
       env: () => ({ EBAY_BASE_URL: BASE }),
     });
 
-    const err = await adapter.publishListing(request).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(Error);
-    for (const name of [
-      "EBAY_FULFILLMENT_POLICY_ID",
-      "EBAY_PAYMENT_POLICY_ID",
-      "EBAY_RETURN_POLICY_ID",
-      "EBAY_MERCHANT_LOCATION_KEY",
-    ]) {
-      expect((err as Error).message).toContain(name);
-    }
-    expect(fetchSpy).not.toHaveBeenCalled();
+    await expect(adapter.publishListing(request)).resolves.toMatchObject({
+      listingId: "request-listing",
+    });
+    expect(fake.calls).toHaveLength(3);
+    expect(JSON.parse(String(fake.calls[1]!.init.body))).toMatchObject({
+      listingPolicies: {
+        fulfillmentPolicyId: request.fulfillmentPolicyId,
+        paymentPolicyId: request.paymentPolicyId,
+        returnPolicyId: request.returnPolicyId,
+      },
+      merchantLocationKey: request.merchantLocationKey,
+    });
   });
 
   it("sandbox -> production is ONLY the EBAY_BASE_URL flip (URLs follow the env)", async () => {

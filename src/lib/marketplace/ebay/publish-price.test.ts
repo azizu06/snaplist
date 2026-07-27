@@ -24,6 +24,7 @@ interface FakeListing {
   ebay_offer_id: string | null;
   ebay_status: string | null;
   ebay_publish_claim_id: string | null;
+  ebay_publish_connection_generation: string | null;
   listed_price?: number;
   last_priced_at?: string;
 }
@@ -34,6 +35,7 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
 } {
   const reviewRevision = "review-revision-1";
   const claimId = "publish-claim-1";
+  const connectionGeneration = "11111111-1111-4111-8111-111111111111";
   const listing: FakeListing = {
     id: "listing-1",
     item_id: "item-1",
@@ -47,6 +49,7 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
     ebay_offer_id: null,
     ebay_status: null,
     ebay_publish_claim_id: null,
+    ebay_publish_connection_generation: null,
   };
 
   const client = {
@@ -92,6 +95,62 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
           }),
         };
       }
+      if (table === "ebay_connections") {
+        return {
+          select: () => ({
+            maybeSingle: async () => ({
+              data: {
+                connection_generation: connectionGeneration,
+                policy_location_bindings: {
+                  EBAY_US: {
+                    state: "ready",
+                    marketplaceId: "EBAY_US",
+                    connectionGeneration,
+                    fulfillmentPolicy: {
+                      state: "bound",
+                      selectedId: "fulfillment-1",
+                      candidates: [{
+                        id: "fulfillment-1",
+                        label: "Fulfillment",
+                        providerDefault: false,
+                      }],
+                    },
+                    paymentPolicy: {
+                      state: "bound",
+                      selectedId: "payment-1",
+                      candidates: [{
+                        id: "payment-1",
+                        label: "Payment",
+                        providerDefault: false,
+                      }],
+                    },
+                    returnPolicy: {
+                      state: "bound",
+                      selectedId: "return-1",
+                      candidates: [{
+                        id: "return-1",
+                        label: "Return",
+                        providerDefault: false,
+                      }],
+                    },
+                    inventoryLocation: {
+                      state: "bound",
+                      selectedId: "location-1",
+                      candidates: [{
+                        id: "location-1",
+                        label: "Location",
+                        providerDefault: false,
+                      }],
+                    },
+                    discoveredAt: "2026-07-27T12:00:00.000Z",
+                  },
+                },
+              },
+              error: null,
+            }),
+          }),
+        };
+      }
       if (table === "prediction_logs") {
         return {
           select: () => ({
@@ -114,6 +173,17 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
       throw new Error(`unexpected table ${table}`);
     },
     async rpc(name: string, params: Record<string, unknown>) {
+      if (name === "bind_ebay_publish_connection_generation") {
+        if (
+          params.p_listing_id !== listing.id
+          || params.p_claim_id !== claimId
+          || params.p_connection_generation !== connectionGeneration
+        ) {
+          return { data: null, error: { message: "binding changed" } };
+        }
+        listing.ebay_publish_connection_generation = connectionGeneration;
+        return { data: null, error: null };
+      }
       if (name !== "begin_ebay_publish") {
         throw new Error(`unexpected rpc ${name}`);
       }
@@ -162,6 +232,30 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
 }
 
 describe("publishListingToEbayAndNotify effective-price contract", () => {
+  it("binds the publish claim through the tenant server authority client", async () => {
+    const { client, listing } = fakePublishClient(177.77);
+    const authorityRpcs: string[] = [];
+    const completionClient = {
+      from: client.from.bind(client),
+      rpc: async (name: string, params: Record<string, unknown>) => {
+        authorityRpcs.push(name);
+        return client.rpc(name, params);
+      },
+    } as unknown as SupabaseClient;
+
+    await publishListingToEbayAndNotify(
+      client,
+      "user-1",
+      listing.id,
+      new MockEbayAdapter(),
+      { completionClient },
+    );
+
+    expect(authorityRpcs).toEqual([
+      "bind_ebay_publish_connection_generation",
+    ]);
+  });
+
   it.each(["server action", "API route"])(
     "%s publishes the seller override through the shared service",
     async () => {

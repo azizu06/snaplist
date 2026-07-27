@@ -128,6 +128,9 @@ export async function createEbayAdapterForUser(
       userId,
       options.scheduled ?? false,
     ),
+    publishFallbackBinding: options.scheduled
+      ? undefined
+      : operatorSandboxPublishBinding(),
   });
 }
 
@@ -259,4 +262,29 @@ function assertOperatorSandboxFallback(userId: string | undefined): {
     throw new Error("App-level eBay Sandbox identity is not configured.");
   }
   return { userId, sellerId };
+}
+
+function operatorSandboxPublishBinding() {
+  const values = {
+    fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID,
+    paymentPolicyId: process.env.EBAY_PAYMENT_POLICY_ID,
+    returnPolicyId: process.env.EBAY_RETURN_POLICY_ID,
+    merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY,
+  };
+  const missing = Object.entries(values)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missing.length > 0) {
+    throw new Error(
+      `The eBay Sandbox operator offer binding is incomplete: ${missing.join(", ")}.`,
+    );
+  }
+  return {
+    marketplaceId: process.env.EBAY_MARKETPLACE_ID ?? "EBAY_US",
+    connectionGeneration: null,
+    fulfillmentPolicyId: values.fulfillmentPolicyId!,
+    paymentPolicyId: values.paymentPolicyId!,
+    returnPolicyId: values.returnPolicyId!,
+    merchantLocationKey: values.merchantLocationKey!,
+  } as const;
 }
