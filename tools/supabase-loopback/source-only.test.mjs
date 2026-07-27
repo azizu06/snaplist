@@ -125,7 +125,7 @@ test("every published-port constructor crosses central dual-loopback guard", asy
     "loopback.BindPublishedPorts(hostConfig.PortBindings)",
   );
   const isolationIndex = dockerStartSource.indexOf(
-    "isolation.ValidateContainer(config, hostConfig)",
+    "isolation.PrepareContainer(config, hostConfig)",
   );
   const networkModeIndex = dockerStartSource.indexOf(
     "hostConfig.NetworkMode = container.NetworkMode(NetId)",
@@ -161,7 +161,7 @@ test("every published-port constructor crosses central dual-loopback guard", asy
     "utf8",
   );
   const databaseGuardIndex = databaseStartSource.indexOf(
-    "isolation.ValidateContainer(config, hostConfig)",
+    "isolation.PrepareContainer(config, hostConfig)",
   );
   const volumeInspectIndex = databaseStartSource.indexOf(
     "Docker.VolumeInspect(ctx, utils.DbId)",
@@ -214,11 +214,11 @@ test("patched source rejects Docker host capabilities before side effects", () =
     [["./internal/utils/isolation"], "."],
     [
       ["./internal/utils"],
-      "^(TestDockerStartRejects(DeviceCgroupRules)?BeforeDockerAction|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
+      "^(TestDockerStartRejects(DeviceCgroupRules|SymlinkedRuntimeSocketSources)?BeforeDockerAction|TestDockerStartUsesCachedImageAndStartsSafeContainer|TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction)$",
     ],
     [
       ["./internal/db/start"],
-      "^TestStartDatabase(RejectsUnsafeDerivedConfigBeforeDockerAction)?$",
+      "^TestStartDatabase(RejectsUnsafeDerivedConfigBeforeDockerAction|FromBackupRejectsSymlinkedRuntimeSocketBeforeDockerAction|FromBackupAllowsOrdinaryRegularFileBeforeDockerAction)?$",
     ],
     [
       ["./internal/start"],

@@ -1,5 +1,505 @@
+diff --git a/apps/cli-go/internal/db/start/start.go b/apps/cli-go/internal/db/start/start.go
+index 6f1eeac..f695edb 100644
+--- a/apps/cli-go/internal/db/start/start.go
++++ b/apps/cli-go/internal/db/start/start.go
+@@ -25,6 +25,7 @@ import (
+ 	"github.com/supabase/cli/internal/status"
+ 	"github.com/supabase/cli/internal/utils"
+ 	"github.com/supabase/cli/internal/utils/flags"
++	"github.com/supabase/cli/internal/utils/isolation"
+ 	"github.com/supabase/cli/pkg/config"
+ 	"github.com/supabase/cli/pkg/migration"
+ 	"github.com/supabase/cli/pkg/vault"
+@@ -133,6 +134,8 @@ func NewHostConfig() container.HostConfig {
+ func StartDatabase(ctx context.Context, fromBackup string, fsys afero.Fs, w io.Writer, options ...func(*pgx.ConnConfig)) error {
+ 	config := NewContainerConfig()
+ 	hostConfig := NewHostConfig()
++	cleanupBackup := func() {}
++	defer func() { cleanupBackup() }()
+ 	networkingConfig := network.NetworkingConfig{
+ 		EndpointsConfig: map[string]*network.EndpointSettings{
+ 			utils.NetId: {
+@@ -160,10 +163,20 @@ EOF`}
+ 		if !filepath.IsAbs(fromBackup) {
+ 			fromBackup = filepath.Join(utils.CurrentDirAbs, fromBackup)
+ 		}
+-		hostConfig.Binds = append(hostConfig.Binds, utils.ToDockerPath(fromBackup)+":/etc/backup.sql:ro")
++		stagedBackup, cleanup, err := isolation.StageRegularFile(fromBackup, utils.TempDir)
++		if err != nil {
++			return errors.Errorf("unsafe Docker container capability: %w", err)
++		}
++		cleanupBackup = cleanup
++		hostConfig.Binds = append(hostConfig.Binds, utils.ToDockerPath(stagedBackup)+":/etc/backup.sql:ro")
++	}
++	preparedHostConfig, err := isolation.PrepareContainer(config, hostConfig)
++	if err != nil {
++		return errors.Errorf("unsafe Docker container capability: %w", err)
+ 	}
++	hostConfig = preparedHostConfig
+ 	// Creating volume will not override existing volume, so we must inspect explicitly
+-	_, err := utils.Docker.VolumeInspect(ctx, utils.DbId)
++	_, err = utils.Docker.VolumeInspect(ctx, utils.DbId)
+ 	utils.NoBackupVolume = errdefs.IsNotFound(err)
+ 	if utils.NoBackupVolume {
+ 		fmt.Fprintln(w, "Starting database...")
+diff --git a/apps/cli-go/internal/db/start/start_isolation_test.go b/apps/cli-go/internal/db/start/start_isolation_test.go
+new file mode 100644
+index 0000000..c1fb7c6
+--- /dev/null
++++ b/apps/cli-go/internal/db/start/start_isolation_test.go
+@@ -0,0 +1,189 @@
++package start
++
++import (
++	"context"
++	"io"
++	"net/http"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/docker/docker/client"
++	"github.com/spf13/afero"
++	"github.com/stretchr/testify/require"
++
++	"github.com/supabase/cli/internal/utils"
++	"github.com/supabase/cli/pkg/config"
++)
++
++type databaseDockerActionCounter struct {
++	volumeInspect   int
++	imageInspect    int
++	imagePull       int
++	networkCreate   int
++	volumeCreate    int
++	containerCreate int
++	other           int
++}
++
++func (counter *databaseDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/volumes/"):
++		counter.volumeInspect++
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		counter.imageInspect++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		counter.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/networks/create"):
++		counter.networkCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		counter.volumeCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		counter.containerCreate++
++	default:
++		counter.other++
++	}
++	return &http.Response{
++		StatusCode: http.StatusInternalServerError,
++		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestStartDatabaseRejectsUnsafeDerivedConfigBeforeDockerAction(t *testing.T) {
++	counter := &databaseDockerActionCounter{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	previousDbID := utils.DbId
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	utils.DbId = "/var/run/docker.sock"
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		utils.DbId = previousDbID
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	err = StartDatabase(
++		context.Background(),
++		"",
++		afero.NewMemMapFs(),
++		io.Discard,
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, counter.volumeInspect)
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
++	require.Zero(t, counter.other)
++}
++
++func TestStartDatabaseFromBackupRejectsSymlinkedRuntimeSocketBeforeDockerAction(t *testing.T) {
++	socketNames := []string{
++		"docker.sock",
++		"containerd.sock",
++		"podman.sock",
++		"crio.sock",
++		"docker_engine",
++	}
++
++	for _, socketName := range socketNames {
++		socketName := socketName
++		t.Run(socketName, func(t *testing.T) {
++			counter := &databaseDockerActionCounter{}
++			fakeDocker, err := client.NewClientWithOpts(
++				client.WithHost("http://docker.invalid"),
++				client.WithVersion("1.47"),
++				client.WithHTTPClient(&http.Client{Transport: counter}),
++			)
++			require.NoError(t, err)
++
++			previousDocker := utils.Docker
++			previousConfig := utils.Config
++			previousDbID := utils.DbId
++			utils.Docker = fakeDocker
++			utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++			utils.DbId = "supabase_db_snaplist"
++			t.Cleanup(func() {
++				utils.Docker = previousDocker
++				utils.Config = previousConfig
++				utils.DbId = previousDbID
++				require.NoError(t, fakeDocker.Close())
++			})
++
++			tempDir := t.TempDir()
++			socketPath := filepath.Join(tempDir, socketName)
++			require.NoError(t, os.WriteFile(socketPath, []byte("protected"), 0o600))
++			safeLookingBackup := filepath.Join(tempDir, "backup.sql")
++			require.NoError(t, os.Symlink(socketPath, safeLookingBackup))
++
++			err = StartDatabase(
++				context.Background(),
++				safeLookingBackup,
++				afero.NewOsFs(),
++				io.Discard,
++			)
++			require.ErrorContains(t, err, "unsafe Docker container capability")
++			require.Zero(t, counter.volumeInspect)
++			require.Zero(t, counter.imageInspect)
++			require.Zero(t, counter.imagePull)
++			require.Zero(t, counter.networkCreate)
++			require.Zero(t, counter.volumeCreate)
++			require.Zero(t, counter.containerCreate)
++			require.Zero(t, counter.other)
++		})
++	}
++}
++
++func TestStartDatabaseFromBackupAllowsOrdinaryRegularFileBeforeDockerAction(t *testing.T) {
++	counter := &databaseDockerActionCounter{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("http://docker.invalid"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	previousDbID := utils.DbId
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	utils.DbId = "supabase_db_snaplist"
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		utils.DbId = previousDbID
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	backupPath := filepath.Join(t.TempDir(), "backup.sql")
++	require.NoError(t, os.WriteFile(backupPath, []byte("select 1;"), 0o600))
++
++	err = StartDatabase(
++		context.Background(),
++		backupPath,
++		afero.NewOsFs(),
++		io.Discard,
++	)
++	require.Error(t, err)
++	require.NotContains(t, err.Error(), "unsafe Docker container capability")
++	require.Equal(t, 1, counter.volumeInspect)
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
++	require.Zero(t, counter.other)
++}
+diff --git a/apps/cli-go/internal/start/start.go b/apps/cli-go/internal/start/start.go
+index 6ce6a44..906b72e 100644
+--- a/apps/cli-go/internal/start/start.go
++++ b/apps/cli-go/internal/start/start.go
+@@ -6,7 +6,6 @@ import (
+ 	_ "embed"
+ 	"encoding/json"
+ 	"fmt"
+-	"io"
+ 	"net"
+ 	"net/url"
+ 	"os"
+@@ -18,14 +17,7 @@ import (
+ 	"text/template"
+ 	"time"
+ 
+-	"github.com/cenkalti/backoff/v4"
+-	"github.com/compose-spec/compose-go/v2/types"
+-	"github.com/docker/cli/cli/command"
+-	dockerFlags "github.com/docker/cli/cli/flags"
+-	"github.com/docker/compose/v2/pkg/api"
+-	"github.com/docker/compose/v2/pkg/compose"
+ 	"github.com/docker/docker/api/types/container"
+-	"github.com/docker/docker/api/types/image"
+ 	"github.com/docker/docker/api/types/network"
+ 	"github.com/docker/docker/client"
+ 	"github.com/docker/go-connections/nat"
+@@ -153,92 +145,17 @@ var (
+ 
+ var serviceTimeout = 30 * time.Second
+ 
+-// RetryClient wraps a Docker client to add retry logic for image pulls
+-type RetryClient struct {
+-	*client.Client
+-}
+-
+-func isPermanentError(err error) bool {
+-	if err == nil {
+-		return false
+-	}
+-	// Rate limited errors can be recovered by retry
+-	if msg := err.Error(); strings.Contains(msg, "toomanyrequests:") {
+-		return false
+-	}
+-	return true
+-}
+-
+-// ImagePull wraps the Docker client's ImagePull with retry logic and registry auth
+-func (cli *RetryClient) ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
+-	if len(options.RegistryAuth) == 0 {
+-		options.RegistryAuth = utils.GetRegistryAuth()
+-	}
+-	pull := func() (io.ReadCloser, error) {
+-		resp, err := cli.Client.ImagePull(ctx, refStr, options)
+-		if isPermanentError(err) {
+-			return resp, &backoff.PermanentError{Err: err}
+-		}
+-		return resp, err
+-	}
+-	policy := utils.NewBackoffPolicy(ctx)
+-	return backoff.RetryWithData(pull, policy)
+-}
+-
+-// Also retry ImageInspect: https://github.com/docker/compose/blob/main/pkg/compose/pull.go#L174
+-func (cli *RetryClient) ImageInspect(ctx context.Context, refStr string, options ...client.ImageInspectOption) (image.InspectResponse, error) {
+-	pull := func() (image.InspectResponse, error) {
+-		resp, err := cli.Client.ImageInspect(ctx, refStr, options...)
+-		if isPermanentError(err) {
+-			return resp, &backoff.PermanentError{Err: err}
+-		}
+-		return resp, err
+-	}
+-	policy := utils.NewBackoffPolicy(ctx)
+-	return backoff.RetryWithData(pull, policy)
+-}
+-
+-// pullImagesUsingCompose pulls all required images using docker-compose service
+-func pullImagesUsingCompose(ctx context.Context, project types.Project) error {
+-	// Create Docker CLI
+-	cli, err := command.NewDockerCli()
+-	if err != nil {
+-		return errors.Errorf("failed to create Docker CLI: %w", err)
+-	}
+-	// Initialize Docker CLI
+-	opt := command.WithAPIClient(&RetryClient{Client: utils.Docker})
+-	if err := cli.Initialize(&dockerFlags.ClientOptions{}, opt); err != nil {
+-		return errors.Errorf("failed to initialize Docker CLI: %w", err)
+-	}
+-	service := compose.NewComposeService(cli)
+-	// Fallback to regular image pull by ignoring failures
+-	return service.Pull(ctx, &project, api.PullOptions{IgnoreFailures: true})
+-}
+-
+ func run(ctx context.Context, fsys afero.Fs, excludedContainers []string, dbConfig pgconn.Config, options ...func(*pgx.ConnConfig)) error {
+ 	excluded := make(map[string]bool)
+ 	for _, name := range excludedContainers {
+ 		excluded[name] = true
+ 	}
+-	notExcluded := func(sc types.ServiceConfig) bool {
+-		val, ok := excluded[sc.Name]
+-		return !val || !ok
+-	}
+ 
+ 	jwks, err := utils.Config.Auth.ResolveJWKS(ctx)
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+-	// TODO: start services using compose up
+-	project := types.Project{
+-		Name:     "supabase-cli",
+-		Services: utils.GetServices().Filter(notExcluded),
+-	}
+-	if err := pullImagesUsingCompose(ctx, project); err != nil {
+-		return err
+-	}
+-
+ 	// Start Postgres.
+ 	if dbConfig.Host == utils.DbId {
+ 		if err := start.StartDatabase(ctx, "", fsys, os.Stderr, options...); err != nil {
+@@ -1100,6 +1017,9 @@ EOF
+ 
+ 		// Mount snippets directory for Studio to access
+ 		hostSnippetsPath := filepath.Join(workdir, utils.SnippetsDir)
++		if err := fsys.MkdirAll(hostSnippetsPath, 0o755); err != nil {
++			return errors.Errorf("failed to create Studio snippets directory: %w", err)
++		}
+ 		containerSnippetsPath := utils.ToDockerPath(hostSnippetsPath)
+ 		binds = append(binds, fmt.Sprintf("%s:%s:rw", hostSnippetsPath, containerSnippetsPath))
+ 		binds = utils.RemoveDuplicates(binds)
+diff --git a/apps/cli-go/internal/start/start_isolation_test.go b/apps/cli-go/internal/start/start_isolation_test.go
+new file mode 100644
+index 0000000..d1483e6
+--- /dev/null
++++ b/apps/cli-go/internal/start/start_isolation_test.go
+@@ -0,0 +1,102 @@
++package start
++
++import (
++	"context"
++	"io"
++	"net/http"
++	"strings"
++	"testing"
++
++	"github.com/docker/docker/client"
++	"github.com/jackc/pgconn"
++	"github.com/spf13/afero"
++	"github.com/stretchr/testify/require"
++
++	"github.com/supabase/cli/internal/utils"
++	"github.com/supabase/cli/pkg/config"
++)
++
++type startDockerActionCounter struct {
++	imageInspect    int
++	imagePull       int
++	networkCreate   int
++	volumeCreate    int
++	containerCreate int
++	containerStart  int
++	other           int
++}
++
++func (counter *startDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
++	switch {
++	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
++		counter.imageInspect++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
++		counter.imagePull++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/networks/create"):
++		counter.networkCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
++		counter.volumeCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
++		counter.containerCreate++
++	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
++		counter.containerStart++
++	default:
++		counter.other++
++	}
++	return &http.Response{
++		StatusCode: http.StatusInternalServerError,
++		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
++		Header:     make(http.Header),
++	}, nil
++}
++
++func TestRunRejectsUnsafeServiceBeforeDockerAction(t *testing.T) {
++	counter := &startDockerActionCounter{}
++	fakeDocker, err := client.NewClientWithOpts(
++		client.WithHost("unix:///var/run/docker.sock"),
++		client.WithVersion("1.47"),
++		client.WithHTTPClient(&http.Client{Transport: counter}),
++	)
++	require.NoError(t, err)
++
++	previousDocker := utils.Docker
++	previousConfig := utils.Config
++	utils.Docker = fakeDocker
++	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
++	t.Cleanup(func() {
++		utils.Docker = previousDocker
++		utils.Config = previousConfig
++		require.NoError(t, fakeDocker.Close())
++	})
++
++	utils.Config.Api.Enabled = false
++	utils.Config.Auth.Enabled = false
++	utils.Config.Inbucket.Enabled = false
++	utils.Config.Realtime.Enabled = false
++	utils.Config.Storage.Enabled = false
++	utils.Config.EdgeRuntime.Enabled = false
++	utils.Config.Studio.Enabled = false
++	utils.Config.Db.Pooler.Enabled = false
++	utils.Config.Analytics.Enabled = true
++	utils.Config.Analytics.Image = "example.invalid/logflare:latest"
++	utils.Config.Analytics.VectorImage = "example.invalid/vector:latest"
++
++	excluded := []string{
++		utils.ShortContainerImageName(utils.Config.Db.Image),
++		utils.ShortContainerImageName(utils.Config.Analytics.Image),
++	}
++	err = run(
++		context.Background(),
++		afero.NewMemMapFs(),
++		excluded,
++		pgconn.Config{Host: "external-db", Port: 5432},
++	)
++	require.ErrorContains(t, err, "unsafe Docker container capability")
++	require.Zero(t, counter.imageInspect)
++	require.Zero(t, counter.imagePull)
++	require.Zero(t, counter.networkCreate)
++	require.Zero(t, counter.volumeCreate)
++	require.Zero(t, counter.containerCreate)
++	require.Zero(t, counter.containerStart)
++	require.Zero(t, counter.other)
++}
+diff --git a/apps/cli-go/internal/start/start_test.go b/apps/cli-go/internal/start/start_test.go
+index afafbd8..cdd2cce 100644
+--- a/apps/cli-go/internal/start/start_test.go
++++ b/apps/cli-go/internal/start/start_test.go
+@@ -5,6 +5,8 @@ import (
+ 	"context"
+ 	"errors"
+ 	"net/http"
++	"os"
++	"path/filepath"
+ 	"regexp"
+ 	"strings"
+ 	"testing"
+@@ -123,6 +125,9 @@ func TestDatabaseStart(t *testing.T) {
+ 	t.Run("starts database locally", func(t *testing.T) {
+ 		// Setup in-memory fs
+ 		fsys := afero.NewMemMapFs()
++		hostSnippetsPath := filepath.Join(utils.CurrentDirAbs, utils.SnippetsDir)
++		require.NoError(t, os.MkdirAll(hostSnippetsPath, 0o755))
++		t.Cleanup(func() { require.NoError(t, os.RemoveAll(filepath.Join(utils.CurrentDirAbs, utils.SupabaseDirPath))) })
+ 		t.Setenv("SUPABASE_HOME", "/tmp/supabase-home")
+ 		analytics := &fakeAnalytics{enabled: true}
+ 		service, err := phtelemetry.NewService(fsys, phtelemetry.Options{
 diff --git a/apps/cli-go/internal/utils/docker.go b/apps/cli-go/internal/utils/docker.go
-index 9736fa6..c6a4a78 100644
+index 9736fa6..6404265 100644
 --- a/apps/cli-go/internal/utils/docker.go
 +++ b/apps/cli-go/internal/utils/docker.go
 @@ -33,6 +33,8 @@ import (
@@ -25,13 +525,15 @@ index 9736fa6..c6a4a78 100644
  	// Setup default config
  	config.Image = GetRegistryImageUrl(config.Image)
  	if config.Labels == nil {
-@@ -269,6 +264,19 @@ func DockerStart(ctx context.Context, config container.Config, hostConfig contai
+@@ -269,6 +264,21 @@ func DockerStart(ctx context.Context, config container.Config, hostConfig contai
  	} else if len(hostConfig.NetworkMode) == 0 {
  		hostConfig.NetworkMode = container.NetworkMode(NetId)
  	}
-+	if err := isolation.ValidateContainer(config, hostConfig); err != nil {
++	preparedHostConfig, err := isolation.PrepareContainer(config, hostConfig)
++	if err != nil {
 +		return "", errors.Errorf("unsafe Docker container capability: %w", err)
 +	}
++	hostConfig = preparedHostConfig
 +	if err := loopback.BindPublishedPorts(hostConfig.PortBindings); err != nil {
 +		return "", errors.Errorf("failed to secure published Docker ports: %w", err)
 +	}
@@ -47,20 +549,23 @@ index 9736fa6..c6a4a78 100644
  	}
 diff --git a/apps/cli-go/internal/utils/docker_isolation_test.go b/apps/cli-go/internal/utils/docker_isolation_test.go
 new file mode 100644
-index 0000000..3359dc2
+index 0000000..87c7795
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/docker_isolation_test.go
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,246 @@
 +package utils
 +
 +import (
 +	"context"
 +	"io"
 +	"net/http"
++	"os"
++	"path/filepath"
 +	"strings"
 +	"testing"
 +
 +	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
 +	"github.com/docker/docker/api/types/network"
 +	"github.com/docker/docker/client"
 +	"github.com/stretchr/testify/require"
@@ -174,6 +679,70 @@ index 0000000..3359dc2
 +	require.Zero(t, transport.calls)
 +}
 +
++func TestDockerStartRejectsSymlinkedRuntimeSocketSourcesBeforeDockerAction(t *testing.T) {
++	socketNames := []string{
++		"docker.sock",
++		"containerd.sock",
++		"podman.sock",
++		"crio.sock",
++		"docker_engine",
++	}
++
++	for _, socketName := range socketNames {
++		socketName := socketName
++		t.Run(socketName, func(t *testing.T) {
++			tempDir := t.TempDir()
++			socketPath := filepath.Join(tempDir, socketName)
++			require.NoError(t, os.WriteFile(socketPath, []byte("protected"), 0o600))
++			safeLookingPath := filepath.Join(tempDir, "backup.sql")
++			require.NoError(t, os.Symlink(socketPath, safeLookingPath))
++
++			cases := map[string]container.HostConfig{
++				"bind": {
++					Binds: []string{safeLookingPath + ":/safe/runtime:ro"},
++				},
++				"mount": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: safeLookingPath,
++						Target: "/safe/runtime",
++					}},
++				},
++			}
++
++			for form, hostConfig := range cases {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					transport := &countingRoundTripper{}
++					fakeDocker, err := client.NewClientWithOpts(
++						client.WithHost("http://docker.invalid"),
++						client.WithVersion("1.47"),
++						client.WithHTTPClient(&http.Client{Transport: transport}),
++					)
++					require.NoError(t, err)
++
++					previousDocker := Docker
++					Docker = fakeDocker
++					t.Cleanup(func() {
++						Docker = previousDocker
++						require.NoError(t, fakeDocker.Close())
++					})
++
++					_, err = DockerStart(
++						context.Background(),
++						container.Config{Image: "example.invalid/supabase/test:latest"},
++						hostConfig,
++						network.NetworkingConfig{},
++						"unsafe-symlink-test",
++					)
++					require.ErrorContains(t, err, "unsafe Docker container capability")
++					require.Zero(t, transport.calls)
++				})
++			}
++		})
++	}
++}
++
 +func TestDockerRunOnceRejectsUnsafeConfigBeforeDockerAction(t *testing.T) {
 +	transport := &countingRoundTripper{}
 +	fakeDocker, err := client.NewClientWithOpts(
@@ -232,55 +801,209 @@ index 0000000..3359dc2
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig.go b/apps/cli-go/internal/utils/isolation/hostconfig.go
 new file mode 100644
-index 0000000..92a948f
+index 0000000..b1d1ced
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig.go
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,216 @@
 +package isolation
 +
 +import (
 +	"fmt"
++	"io"
++	"os"
++	"path/filepath"
 +	"strings"
 +
 +	"github.com/docker/docker/api/types/container"
++	"github.com/docker/docker/api/types/mount"
 +)
 +
 +func ValidateContainer(config container.Config, hostConfig container.HostConfig) error {
-+	for _, bind := range hostConfig.Binds {
-+		if containsContainerRuntimeSocket(bind) {
-+			return fmt.Errorf("container runtime socket bind is forbidden")
++	_, err := PrepareContainer(config, hostConfig)
++	return err
++}
++
++func PrepareContainer(config container.Config, hostConfig container.HostConfig) (container.HostConfig, error) {
++	hostConfig.Binds = append([]string(nil), hostConfig.Binds...)
++	hostConfig.Mounts = append([]mount.Mount(nil), hostConfig.Mounts...)
++	for index, bind := range hostConfig.Binds {
++		source, destination, mode, hostPath, err := parseBind(bind)
++		if err != nil {
++			return hostConfig, fmt.Errorf("invalid bind specification: %w", err)
++		}
++		if containsContainerRuntimeSocket(destination) {
++			return hostConfig, fmt.Errorf("container runtime socket bind is forbidden")
++		}
++		if containsContainerRuntimeSocket(source) {
++			return hostConfig, fmt.Errorf("container runtime socket bind is forbidden")
++		}
++		if hostPath {
++			source, err = prepareHostSource(source)
++			if err != nil {
++				return hostConfig, err
++			}
++			hostConfig.Binds[index] = source + ":" + destination
++			if mode != "" {
++				hostConfig.Binds[index] += ":" + mode
++			}
++		} else {
++			// Named volumes do not traverse a caller-selected host path.
 +		}
 +	}
-+	for _, mounted := range hostConfig.Mounts {
-+		if containsContainerRuntimeSocket(mounted.Source) || containsContainerRuntimeSocket(mounted.Target) {
-+			return fmt.Errorf("container runtime socket mount is forbidden")
++	for index, mounted := range hostConfig.Mounts {
++		if containsContainerRuntimeSocket(mounted.Target) {
++			return hostConfig, fmt.Errorf("container runtime socket mount is forbidden")
++		}
++		switch mounted.Type {
++		case mount.TypeBind:
++			source, err := prepareHostSource(mounted.Source)
++			if err != nil {
++				return hostConfig, err
++			}
++			hostConfig.Mounts[index].Source = source
++		case mount.TypeVolume, mount.TypeTmpfs:
++			// Named volumes and tmpfs mounts have no caller-selected host path.
++		case mount.TypeNamedPipe:
++			return hostConfig, fmt.Errorf("container runtime named-pipe mount is forbidden")
++		default:
++			return hostConfig, fmt.Errorf("unsupported mount type %q", mounted.Type)
 +		}
 +	}
 +	for _, environment := range config.Env {
 +		name, _, _ := strings.Cut(environment, "=")
 +		if strings.EqualFold(name, "DOCKER_HOST") {
-+			return fmt.Errorf("container DOCKER_HOST is forbidden")
++			return hostConfig, fmt.Errorf("container DOCKER_HOST is forbidden")
 +		}
 +	}
 +	if hostConfig.Privileged {
-+		return fmt.Errorf("privileged mode is forbidden")
++		return hostConfig, fmt.Errorf("privileged mode is forbidden")
 +	}
 +	if hostConfig.NetworkMode.IsHost() {
-+		return fmt.Errorf("host network is forbidden")
++		return hostConfig, fmt.Errorf("host network is forbidden")
 +	}
 +	if len(hostConfig.Resources.Devices) > 0 {
-+		return fmt.Errorf("device mappings are forbidden")
++		return hostConfig, fmt.Errorf("device mappings are forbidden")
 +	}
 +	if len(hostConfig.Resources.DeviceRequests) > 0 {
-+		return fmt.Errorf("device requests are forbidden")
++		return hostConfig, fmt.Errorf("device requests are forbidden")
 +	}
 +	if len(hostConfig.Resources.DeviceCgroupRules) > 0 {
-+		return fmt.Errorf("device cgroup rules are forbidden")
++		return hostConfig, fmt.Errorf("device cgroup rules are forbidden")
 +	}
 +	if hostConfig.PublishAllPorts {
-+		return fmt.Errorf("PublishAllPorts is forbidden")
++		return hostConfig, fmt.Errorf("PublishAllPorts is forbidden")
 +	}
-+	return nil
++	return hostConfig, nil
++}
++
++func parseBind(bind string) (source, destination, mode string, hostPath bool, err error) {
++	if containsWindowsNamedPipe(bind) {
++		return "", "", "", false, fmt.Errorf("container runtime named-pipe bind is forbidden")
++	}
++	parts := strings.SplitN(bind, ":", 4)
++	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || parts[1] == "" {
++		return "", "", "", false, fmt.Errorf("expected source:destination[:mode]")
++	}
++	source, destination = parts[0], parts[1]
++	if len(parts) == 3 {
++		mode = parts[2]
++	}
++	return source, destination, mode, filepath.IsAbs(source), nil
++}
++
++func StageRegularFile(source, stagingParent string) (string, func(), error) {
++	canonical, err := prepareHostSource(source)
++	if err != nil {
++		return "", func() {}, err
++	}
++	input, err := os.Open(canonical)
++	if err != nil {
++		return "", func() {}, fmt.Errorf("open host bind source: %w", err)
++	}
++	defer input.Close()
++	info, err := input.Stat()
++	if err != nil {
++		return "", func() {}, fmt.Errorf("inspect host bind source: %w", err)
++	}
++	if !info.Mode().IsRegular() {
++		return "", func() {}, fmt.Errorf("host bind source must be a regular file")
++	}
++	if err := os.MkdirAll(stagingParent, 0o700); err != nil {
++		return "", func() {}, fmt.Errorf("create host bind staging parent: %w", err)
++	}
++	stagingDir, err := os.MkdirTemp(stagingParent, "isolated-bind-")
++	if err != nil {
++		return "", func() {}, fmt.Errorf("create host bind staging directory: %w", err)
++	}
++	cleanup := func() { _ = os.RemoveAll(stagingDir) }
++	if err := os.Chmod(stagingDir, 0o700); err != nil {
++		cleanup()
++		return "", func() {}, fmt.Errorf("secure host bind staging directory: %w", err)
++	}
++	staged := filepath.Join(stagingDir, "source")
++	output, err := os.OpenFile(staged, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
++	if err != nil {
++		cleanup()
++		return "", func() {}, fmt.Errorf("create staged host bind source: %w", err)
++	}
++	if _, err := io.Copy(output, input); err != nil {
++		_ = output.Close()
++		cleanup()
++		return "", func() {}, fmt.Errorf("stage host bind source: %w", err)
++	}
++	if err := output.Close(); err != nil {
++		cleanup()
++		return "", func() {}, fmt.Errorf("close staged host bind source: %w", err)
++	}
++	return staged, cleanup, nil
++}
++
++func prepareHostSource(source string) (string, error) {
++	absolute, err := filepath.Abs(source)
++	if err != nil {
++		return "", fmt.Errorf("resolve host bind source: %w", err)
++	}
++	canonical, err := filepath.EvalSymlinks(absolute)
++	if err != nil {
++		return "", fmt.Errorf("resolve host bind source: %w", err)
++	}
++	canonical = filepath.Clean(canonical)
++	if containsContainerRuntimeSocket(canonical) {
++		return "", fmt.Errorf("container runtime socket bind is forbidden")
++	}
++	if _, err := validateCanonicalComponents(canonical); err != nil {
++		return "", err
++	}
++	return canonical, nil
++}
++
++func validateCanonicalComponents(canonical string) (os.FileInfo, error) {
++	volume := filepath.VolumeName(canonical)
++	current := volume + string(os.PathSeparator)
++	relative := strings.TrimPrefix(canonical, current)
++	components := strings.Split(relative, string(os.PathSeparator))
++	var info os.FileInfo
++	for index, component := range components {
++		if component == "" {
++			continue
++		}
++		current = filepath.Join(current, component)
++		var err error
++		info, err = os.Lstat(current)
++		if err != nil {
++			return nil, fmt.Errorf("inspect host bind source component: %w", err)
++		}
++		if info.Mode()&os.ModeSymlink != 0 {
++			return nil, fmt.Errorf("host bind source contains a symlink component")
++		}
++		if index < len(components)-1 && !info.IsDir() {
++			return nil, fmt.Errorf("host bind source parent must be a directory")
++		}
++	}
++	if info == nil || (!info.Mode().IsRegular() && !info.IsDir()) {
++		return nil, fmt.Errorf("host bind source must be a regular file or directory")
++	}
++	return info, nil
 +}
 +
 +func containsContainerRuntimeSocket(value string) bool {
@@ -289,17 +1012,26 @@ index 0000000..92a948f
 +		strings.Contains(normalized, "containerd.sock") ||
 +		strings.Contains(normalized, "podman.sock") ||
 +		strings.Contains(normalized, "crio.sock") ||
-+		strings.Contains(normalized, "//./pipe/docker_engine")
++		strings.Contains(normalized, "//./pipe/docker_engine") ||
++		normalized == "docker_engine" ||
++		strings.HasSuffix(normalized, "/docker_engine")
++}
++
++func containsWindowsNamedPipe(value string) bool {
++	normalized := strings.ToLower(strings.ReplaceAll(value, "\\", "/"))
++	return strings.Contains(normalized, "//./pipe/")
 +}
 diff --git a/apps/cli-go/internal/utils/isolation/hostconfig_test.go b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
 new file mode 100644
-index 0000000..90b24cc
+index 0000000..36f3acd
 --- /dev/null
 +++ b/apps/cli-go/internal/utils/isolation/hostconfig_test.go
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,209 @@
 +package isolation
 +
 +import (
++	"os"
++	"path/filepath"
 +	"testing"
 +
 +	"github.com/docker/docker/api/types/container"
@@ -435,19 +1167,69 @@ index 0000000..90b24cc
 +	}
 +}
 +
++func TestValidateContainerRejectsSymlinkedContainerRuntimeSocketSources(t *testing.T) {
++	t.Parallel()
++
++	socketNames := []string{
++		"docker.sock",
++		"containerd.sock",
++		"podman.sock",
++		"crio.sock",
++		"docker_engine",
++	}
++
++	for _, socketName := range socketNames {
++		socketName := socketName
++		t.Run(socketName, func(t *testing.T) {
++			t.Parallel()
++
++			tempDir := t.TempDir()
++			socketPath := filepath.Join(tempDir, socketName)
++			require.NoError(t, os.WriteFile(socketPath, []byte("protected"), 0o600))
++			safeLookingPath := filepath.Join(tempDir, "backup.sql")
++			require.NoError(t, os.Symlink(socketPath, safeLookingPath))
++
++			cases := map[string]container.HostConfig{
++				"bind source": {
++					Binds: []string{safeLookingPath + ":/safe/runtime:ro"},
++				},
++				"mount source": {
++					Mounts: []mount.Mount{{
++						Type:   mount.TypeBind,
++						Source: safeLookingPath,
++						Target: "/safe/runtime",
++					}},
++				},
++			}
++
++			for form, hostConfig := range cases {
++				form, hostConfig := form, hostConfig
++				t.Run(form, func(t *testing.T) {
++					t.Parallel()
++					require.Error(t, ValidateContainer(container.Config{}, hostConfig))
++				})
++			}
++		})
++	}
++}
++
 +func TestValidateContainerAllowsOrdinaryBridgeAndStorage(t *testing.T) {
 +	t.Parallel()
++
++	tempDir := t.TempDir()
++	configPath := filepath.Join(tempDir, "snaplist-config")
++	require.NoError(t, os.WriteFile(configPath, []byte("safe"), 0o600))
 +
 +	config := container.Config{Env: []string{"APP_ENV=local"}}
 +	hostConfig := container.HostConfig{
 +		NetworkMode: container.NetworkMode("supabase_network_snaplist"),
 +		Binds: []string{
-+			"/tmp/snaplist:/work:ro",
++			tempDir + ":/work:ro",
 +			"snaplist-db-data:/var/lib/postgresql/data",
 +		},
 +		Mounts: []mount.Mount{{
 +			Type:   mount.TypeBind,
-+			Source: "/tmp/snaplist-config",
++			Source: configPath,
 +			Target: "/etc/snaplist",
 +		}},
 +	}
@@ -631,348 +1413,4 @@ index 0000000..f6436fa
 +	}
 +
 +	require.Error(t, BindPublishedPorts(bindings))
-+}
-diff --git a/apps/cli-go/internal/start/start.go b/apps/cli-go/internal/start/start.go
-index 6ce6a4434dafce83ee4db398f3b16ed04a8dae59..36f64aefcaca97117db102503caa47a0dabdcbf8 100644
---- a/apps/cli-go/internal/start/start.go
-+++ b/apps/cli-go/internal/start/start.go
-@@ -6,7 +6,6 @@ import (
- 	_ "embed"
- 	"encoding/json"
- 	"fmt"
--	"io"
- 	"net"
- 	"net/url"
- 	"os"
-@@ -18,14 +17,7 @@ import (
- 	"text/template"
- 	"time"
- 
--	"github.com/cenkalti/backoff/v4"
--	"github.com/compose-spec/compose-go/v2/types"
--	"github.com/docker/cli/cli/command"
--	dockerFlags "github.com/docker/cli/cli/flags"
--	"github.com/docker/compose/v2/pkg/api"
--	"github.com/docker/compose/v2/pkg/compose"
- 	"github.com/docker/docker/api/types/container"
--	"github.com/docker/docker/api/types/image"
- 	"github.com/docker/docker/api/types/network"
- 	"github.com/docker/docker/client"
- 	"github.com/docker/go-connections/nat"
-@@ -153,92 +145,17 @@ var (
- 
- var serviceTimeout = 30 * time.Second
- 
--// RetryClient wraps a Docker client to add retry logic for image pulls
--type RetryClient struct {
--	*client.Client
--}
--
--func isPermanentError(err error) bool {
--	if err == nil {
--		return false
--	}
--	// Rate limited errors can be recovered by retry
--	if msg := err.Error(); strings.Contains(msg, "toomanyrequests:") {
--		return false
--	}
--	return true
--}
--
--// ImagePull wraps the Docker client's ImagePull with retry logic and registry auth
--func (cli *RetryClient) ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error) {
--	if len(options.RegistryAuth) == 0 {
--		options.RegistryAuth = utils.GetRegistryAuth()
--	}
--	pull := func() (io.ReadCloser, error) {
--		resp, err := cli.Client.ImagePull(ctx, refStr, options)
--		if isPermanentError(err) {
--			return resp, &backoff.PermanentError{Err: err}
--		}
--		return resp, err
--	}
--	policy := utils.NewBackoffPolicy(ctx)
--	return backoff.RetryWithData(pull, policy)
--}
--
--// Also retry ImageInspect: https://github.com/docker/compose/blob/main/pkg/compose/pull.go#L174
--func (cli *RetryClient) ImageInspect(ctx context.Context, refStr string, options ...client.ImageInspectOption) (image.InspectResponse, error) {
--	pull := func() (image.InspectResponse, error) {
--		resp, err := cli.Client.ImageInspect(ctx, refStr, options...)
--		if isPermanentError(err) {
--			return resp, &backoff.PermanentError{Err: err}
--		}
--		return resp, err
--	}
--	policy := utils.NewBackoffPolicy(ctx)
--	return backoff.RetryWithData(pull, policy)
--}
--
--// pullImagesUsingCompose pulls all required images using docker-compose service
--func pullImagesUsingCompose(ctx context.Context, project types.Project) error {
--	// Create Docker CLI
--	cli, err := command.NewDockerCli()
--	if err != nil {
--		return errors.Errorf("failed to create Docker CLI: %w", err)
--	}
--	// Initialize Docker CLI
--	opt := command.WithAPIClient(&RetryClient{Client: utils.Docker})
--	if err := cli.Initialize(&dockerFlags.ClientOptions{}, opt); err != nil {
--		return errors.Errorf("failed to initialize Docker CLI: %w", err)
--	}
--	service := compose.NewComposeService(cli)
--	// Fallback to regular image pull by ignoring failures
--	return service.Pull(ctx, &project, api.PullOptions{IgnoreFailures: true})
--}
--
- func run(ctx context.Context, fsys afero.Fs, excludedContainers []string, dbConfig pgconn.Config, options ...func(*pgx.ConnConfig)) error {
- 	excluded := make(map[string]bool)
- 	for _, name := range excludedContainers {
- 		excluded[name] = true
- 	}
--	notExcluded := func(sc types.ServiceConfig) bool {
--		val, ok := excluded[sc.Name]
--		return !val || !ok
--	}
- 
- 	jwks, err := utils.Config.Auth.ResolveJWKS(ctx)
- 	if err != nil {
- 		return err
- 	}
- 
--	// TODO: start services using compose up
--	project := types.Project{
--		Name:     "supabase-cli",
--		Services: utils.GetServices().Filter(notExcluded),
--	}
--	if err := pullImagesUsingCompose(ctx, project); err != nil {
--		return err
--	}
--
- 	// Start Postgres.
- 	if dbConfig.Host == utils.DbId {
- 		if err := start.StartDatabase(ctx, "", fsys, os.Stderr, options...); err != nil {
-diff --git a/apps/cli-go/internal/start/start_isolation_test.go b/apps/cli-go/internal/start/start_isolation_test.go
-new file mode 100644
-index 0000000000000000000000000000000000000000..d1483e6a791e86c5fe4c643a6833942677453a7c
---- /dev/null
-+++ b/apps/cli-go/internal/start/start_isolation_test.go
-@@ -0,0 +1,102 @@
-+package start
-+
-+import (
-+	"context"
-+	"io"
-+	"net/http"
-+	"strings"
-+	"testing"
-+
-+	"github.com/docker/docker/client"
-+	"github.com/jackc/pgconn"
-+	"github.com/spf13/afero"
-+	"github.com/stretchr/testify/require"
-+
-+	"github.com/supabase/cli/internal/utils"
-+	"github.com/supabase/cli/pkg/config"
-+)
-+
-+type startDockerActionCounter struct {
-+	imageInspect    int
-+	imagePull       int
-+	networkCreate   int
-+	volumeCreate    int
-+	containerCreate int
-+	containerStart  int
-+	other           int
-+}
-+
-+func (counter *startDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
-+	switch {
-+	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
-+		counter.imageInspect++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
-+		counter.imagePull++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/networks/create"):
-+		counter.networkCreate++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
-+		counter.volumeCreate++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
-+		counter.containerCreate++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start"):
-+		counter.containerStart++
-+	default:
-+		counter.other++
-+	}
-+	return &http.Response{
-+		StatusCode: http.StatusInternalServerError,
-+		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
-+		Header:     make(http.Header),
-+	}, nil
-+}
-+
-+func TestRunRejectsUnsafeServiceBeforeDockerAction(t *testing.T) {
-+	counter := &startDockerActionCounter{}
-+	fakeDocker, err := client.NewClientWithOpts(
-+		client.WithHost("unix:///var/run/docker.sock"),
-+		client.WithVersion("1.47"),
-+		client.WithHTTPClient(&http.Client{Transport: counter}),
-+	)
-+	require.NoError(t, err)
-+
-+	previousDocker := utils.Docker
-+	previousConfig := utils.Config
-+	utils.Docker = fakeDocker
-+	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
-+	t.Cleanup(func() {
-+		utils.Docker = previousDocker
-+		utils.Config = previousConfig
-+		require.NoError(t, fakeDocker.Close())
-+	})
-+
-+	utils.Config.Api.Enabled = false
-+	utils.Config.Auth.Enabled = false
-+	utils.Config.Inbucket.Enabled = false
-+	utils.Config.Realtime.Enabled = false
-+	utils.Config.Storage.Enabled = false
-+	utils.Config.EdgeRuntime.Enabled = false
-+	utils.Config.Studio.Enabled = false
-+	utils.Config.Db.Pooler.Enabled = false
-+	utils.Config.Analytics.Enabled = true
-+	utils.Config.Analytics.Image = "example.invalid/logflare:latest"
-+	utils.Config.Analytics.VectorImage = "example.invalid/vector:latest"
-+
-+	excluded := []string{
-+		utils.ShortContainerImageName(utils.Config.Db.Image),
-+		utils.ShortContainerImageName(utils.Config.Analytics.Image),
-+	}
-+	err = run(
-+		context.Background(),
-+		afero.NewMemMapFs(),
-+		excluded,
-+		pgconn.Config{Host: "external-db", Port: 5432},
-+	)
-+	require.ErrorContains(t, err, "unsafe Docker container capability")
-+	require.Zero(t, counter.imageInspect)
-+	require.Zero(t, counter.imagePull)
-+	require.Zero(t, counter.networkCreate)
-+	require.Zero(t, counter.volumeCreate)
-+	require.Zero(t, counter.containerCreate)
-+	require.Zero(t, counter.containerStart)
-+	require.Zero(t, counter.other)
-+}
-diff --git a/apps/cli-go/internal/db/start/start.go b/apps/cli-go/internal/db/start/start.go
-index 6f1eeac..2b49dba 100644
---- a/apps/cli-go/internal/db/start/start.go
-+++ b/apps/cli-go/internal/db/start/start.go
-@@ -25,6 +25,7 @@ import (
- 	"github.com/supabase/cli/internal/status"
- 	"github.com/supabase/cli/internal/utils"
- 	"github.com/supabase/cli/internal/utils/flags"
-+	"github.com/supabase/cli/internal/utils/isolation"
- 	"github.com/supabase/cli/pkg/config"
- 	"github.com/supabase/cli/pkg/migration"
- 	"github.com/supabase/cli/pkg/vault"
-@@ -162,6 +163,9 @@ EOF`}
- 		}
- 		hostConfig.Binds = append(hostConfig.Binds, utils.ToDockerPath(fromBackup)+":/etc/backup.sql:ro")
- 	}
-+	if err := isolation.ValidateContainer(config, hostConfig); err != nil {
-+		return errors.Errorf("unsafe Docker container capability: %w", err)
-+	}
- 	// Creating volume will not override existing volume, so we must inspect explicitly
- 	_, err := utils.Docker.VolumeInspect(ctx, utils.DbId)
- 	utils.NoBackupVolume = errdefs.IsNotFound(err)
-diff --git a/apps/cli-go/internal/db/start/start_isolation_test.go b/apps/cli-go/internal/db/start/start_isolation_test.go
-new file mode 100644
-index 0000000..fac320f
---- /dev/null
-+++ b/apps/cli-go/internal/db/start/start_isolation_test.go
-@@ -0,0 +1,88 @@
-+package start
-+
-+import (
-+	"context"
-+	"io"
-+	"net/http"
-+	"strings"
-+	"testing"
-+
-+	"github.com/docker/docker/client"
-+	"github.com/spf13/afero"
-+	"github.com/stretchr/testify/require"
-+
-+	"github.com/supabase/cli/internal/utils"
-+	"github.com/supabase/cli/pkg/config"
-+)
-+
-+type databaseDockerActionCounter struct {
-+	volumeInspect   int
-+	imageInspect    int
-+	imagePull       int
-+	networkCreate   int
-+	volumeCreate    int
-+	containerCreate int
-+	other           int
-+}
-+
-+func (counter *databaseDockerActionCounter) RoundTrip(request *http.Request) (*http.Response, error) {
-+	switch {
-+	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/volumes/"):
-+		counter.volumeInspect++
-+	case request.Method == http.MethodGet && strings.Contains(request.URL.Path, "/images/") && strings.HasSuffix(request.URL.Path, "/json"):
-+		counter.imageInspect++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/images/create"):
-+		counter.imagePull++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/networks/create"):
-+		counter.networkCreate++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/volumes/create"):
-+		counter.volumeCreate++
-+	case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/containers/create"):
-+		counter.containerCreate++
-+	default:
-+		counter.other++
-+	}
-+	return &http.Response{
-+		StatusCode: http.StatusInternalServerError,
-+		Body:       io.NopCloser(strings.NewReader("unexpected Docker action")),
-+		Header:     make(http.Header),
-+	}, nil
-+}
-+
-+func TestStartDatabaseRejectsUnsafeDerivedConfigBeforeDockerAction(t *testing.T) {
-+	counter := &databaseDockerActionCounter{}
-+	fakeDocker, err := client.NewClientWithOpts(
-+		client.WithHost("http://docker.invalid"),
-+		client.WithVersion("1.47"),
-+		client.WithHTTPClient(&http.Client{Transport: counter}),
-+	)
-+	require.NoError(t, err)
-+
-+	previousDocker := utils.Docker
-+	previousConfig := utils.Config
-+	previousDbID := utils.DbId
-+	utils.Docker = fakeDocker
-+	utils.Config = config.NewConfig(config.WithHostname("127.0.0.1"))
-+	utils.DbId = "/var/run/docker.sock"
-+	t.Cleanup(func() {
-+		utils.Docker = previousDocker
-+		utils.Config = previousConfig
-+		utils.DbId = previousDbID
-+		require.NoError(t, fakeDocker.Close())
-+	})
-+
-+	err = StartDatabase(
-+		context.Background(),
-+		"",
-+		afero.NewMemMapFs(),
-+		io.Discard,
-+	)
-+	require.ErrorContains(t, err, "unsafe Docker container capability")
-+	require.Zero(t, counter.volumeInspect)
-+	require.Zero(t, counter.imageInspect)
-+	require.Zero(t, counter.imagePull)
-+	require.Zero(t, counter.networkCreate)
-+	require.Zero(t, counter.volumeCreate)
-+	require.Zero(t, counter.containerCreate)
-+	require.Zero(t, counter.other)
 +}
