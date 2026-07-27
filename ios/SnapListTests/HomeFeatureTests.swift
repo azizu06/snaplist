@@ -666,10 +666,7 @@ final class TrophyWallDomainTests: XCTestCase {
         ]
 
         for testCase in cases {
-            let store = TrophyWallStore(
-                principalScope: fixture.principal,
-                repository: StaticTrophyWallRepository(cards: fixture.initialCards)
-            )
+            let store = fixture.makeStore()
 
             store.ingest(testCase.acceptedRun)
 
@@ -686,10 +683,7 @@ final class TrophyWallDomainTests: XCTestCase {
             linkedLogicalIdentity: fixture.logicalID,
             lastMeaningfulUpdateAt: fixture.acceptedUpdate
         )
-        let store = TrophyWallStore(
-            principalScope: fixture.principal,
-            repository: StaticTrophyWallRepository(cards: fixture.initialCards)
-        )
+        let store = fixture.makeStore()
 
         store.ingest(acceptedRun)
 
@@ -732,10 +726,7 @@ final class TrophyWallDomainTests: XCTestCase {
 
     func testProcessingViewRendersApprovedMergedRowsAtPhoneWidth() async {
         let fixture = TrophyWallTestFixture()
-        let store = TrophyWallStore(
-            principalScope: fixture.principal,
-            repository: StaticTrophyWallRepository(cards: fixture.initialCards)
-        )
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
         store.ingest(
             TrophyWallCanonicalAcceptedRun(
                 principalScope: fixture.principal,
@@ -745,11 +736,37 @@ final class TrophyWallDomainTests: XCTestCase {
             )
         )
         var openedRoutes: [HomeRoute] = []
-        XCTAssertEqual(store.processingRows.count, 2)
-        XCTAssertLessThanOrEqual(
-            store.processingRows.count,
-            3,
-            "The approved compact Processing surface renders at most three eager rows."
+        XCTAssertEqual(store.processingRows.count, 5)
+        let standardRows = TrophyWallProcessingView.visibleRows(
+            from: store.processingRows,
+            availableHeight: 844
+        )
+        let smallestHeightRows = TrophyWallProcessingView.visibleRows(
+            from: store.processingRows,
+            availableHeight: 667
+        )
+        XCTAssertEqual(
+            standardRows.map(\.id),
+            [
+                .run(fixture.runID),
+                .local(fixture.unrelatedLogicalID),
+                .run(fixture.thirdRunID),
+            ]
+        )
+        XCTAssertEqual(
+            standardRows.map(\.destination),
+            [.run(fixture.runID), nil, .run(fixture.thirdRunID)]
+        )
+        XCTAssertEqual(
+            smallestHeightRows.map(\.id),
+            [
+                .run(fixture.runID),
+                .local(fixture.unrelatedLogicalID),
+            ]
+        )
+        XCTAssertEqual(
+            smallestHeightRows.map(\.destination),
+            [.run(fixture.runID), nil]
         )
         let standardImage = await captureHostedTrophyWallProcessingView(
             rows: store.processingRows,
@@ -786,6 +803,26 @@ final class TrophyWallDomainTests: XCTestCase {
             add(attachment)
         }
     }
+
+    func testProcessingViewWithholdsEmptySuccessWithoutCollectionTruth() async {
+        var openedRoutes: [HomeRoute] = []
+        let image = await captureHostedTrophyWallProcessingView(
+            rows: [],
+            size: CGSize(width: 390, height: 844),
+            dynamicTypeSize: .large,
+            openRoute: { openedRoutes.append($0) }
+        )
+
+        XCTAssertEqual(image.size, CGSize(width: 390, height: 844))
+        XCTAssertEqual(
+            image.opaqueDarkPixelCount(
+                in: CGRect(x: 0, y: 160, width: image.size.width, height: 500)
+            ),
+            0,
+            "Unproven collection state must not render empty-success copy or actions."
+        )
+        XCTAssertTrue(openedRoutes.isEmpty)
+    }
 }
 
 @MainActor
@@ -799,7 +836,6 @@ private func captureHostedTrophyWallProcessingView(
         rootView: TrophyWallProcessingView(
             rows: rows,
             onBack: {},
-            openCapture: {},
             openRoute: openRoute
         )
         .dynamicTypeSize(dynamicTypeSize)
@@ -935,6 +971,11 @@ private struct TrophyWallTestFixture {
         idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000002")!
     )
     let runID = UUID(uuidString: "37500000-0000-4000-8000-000000000003")!
+    let thirdRunID = UUID(uuidString: "37500000-0000-4000-8000-000000000004")!
+    let hiddenRunID = UUID(uuidString: "37500000-0000-4000-8000-000000000005")!
+    let hiddenLogicalID = TrophyWallLogicalIdentity(
+        idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000006")!
+    )
     let matchedItemName = "Vintage Pyrex bowl set"
     let unrelatedItemName = "Nintendo Game Boy"
     let pendingUpdate = Date(timeIntervalSince1970: 20)
@@ -956,6 +997,37 @@ private struct TrophyWallTestFixture {
                 lastMeaningfulUpdateAt: unrelatedUpdate
             ),
         ]
+    }
+
+    var processingInitialCards: [TrophyWallCard] {
+        initialCards + [
+            .accepted(
+                principalScope: principal,
+                runID: thirdRunID,
+                itemName: "Canon AE-1 film camera",
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 9)
+            ),
+            .accepted(
+                principalScope: principal,
+                runID: hiddenRunID,
+                itemName: "Hidden accepted row",
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 8)
+            ),
+            .pending(
+                principalScope: principal,
+                logicalIdentity: hiddenLogicalID,
+                itemName: "Hidden pending row",
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 7)
+            ),
+        ]
+    }
+
+    @MainActor
+    func makeStore(cards: [TrophyWallCard]? = nil) -> TrophyWallStore {
+        TrophyWallStore(
+            principalScope: principal,
+            repository: StaticTrophyWallRepository(cards: cards ?? initialCards)
+        )
     }
 }
 

@@ -803,82 +803,91 @@ private struct HomeHowItWorksStep: View {
 // MARK: - Trophy Wall Processing
 
 struct TrophyWallProcessingView: View {
+    private static let smallestSupportedHeight: CGFloat = 667
+    private static let compactRowLimit = 3
+    private static let smallestHeightRowLimit = 2
+
     @ScaledMetric(relativeTo: .title2) private var titleSize = 24
 
     let rows: [TrophyWallProcessingRow]
     let onBack: () -> Void
-    let openCapture: () -> Void
     let openRoute: (HomeRoute) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(
-                            width: SnapListMetrics.minimumTouchTarget,
-                            height: SnapListMetrics.minimumTouchTarget
-                        )
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .accessibilityLabel("Back to Trophy Wall")
-                .accessibilityIdentifier("trophy.processing.back")
+        GeometryReader { proxy in
+            let visibleRows = Self.visibleRows(
+                from: rows,
+                availableHeight: proxy.size.height
+            )
 
-                Text("Processing")
-                    .font(.system(size: titleSize, weight: .bold))
-                    .tracking(-0.5)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 10)
-
-            if rows.isEmpty {
-                ContentUnavailableView {
-                    Text("Nothing is processing.")
-                } actions: {
-                    Button("Scan an item", action: openCapture)
-                        .buttonStyle(.borderedProminent)
-                        .tint(SnapListColorToken.action.color)
-                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                        .accessibilityIdentifier("trophy.processing.scan")
-                }
-                .accessibilityIdentifier("trophy.processing.empty")
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(rows) { row in
-                            TrophyWallProcessingRowView(
-                                row: row,
-                                openRoute: openRoute
+            VStack(spacing: 0) {
+                HStack(spacing: 4) {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(
+                                width: SnapListMetrics.minimumTouchTarget,
+                                height: SnapListMetrics.minimumTouchTarget
                             )
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .accessibilityLabel("Back to Trophy Wall")
+                    .accessibilityIdentifier("trophy.processing.back")
 
-                            if row.id != rows.last?.id {
-                                Divider()
-                                    .foregroundStyle(SnapListColorToken.hairline.color)
-                                    .padding(.leading, 69)
+                    Text("Processing")
+                        .font(.system(size: titleSize, weight: .bold))
+                        .tracking(-0.5)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 10)
+
+                if !visibleRows.isEmpty {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(visibleRows) { row in
+                                TrophyWallProcessingRowView(
+                                    row: row,
+                                    openRoute: openRoute
+                                )
+
+                                if row.id != visibleRows.last?.id {
+                                    Divider()
+                                        .foregroundStyle(SnapListColorToken.hairline.color)
+                                        .padding(.leading, 69)
+                                }
                             }
                         }
+                        .background(SnapListColorToken.canvas.color)
+                        .clipShape(.rect(cornerRadius: 14))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.top, 8)
                     }
-                    .background(SnapListColorToken.canvas.color)
-                    .clipShape(.rect(cornerRadius: 14))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 8)
+                    .scrollIndicators(.hidden)
                 }
-                .scrollIndicators(.hidden)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(SnapListColorToken.canvas.color)
         .accessibilityIdentifier("trophy.processing")
+    }
+
+    static func visibleRows(
+        from rows: [TrophyWallProcessingRow],
+        availableHeight: CGFloat
+    ) -> [TrophyWallProcessingRow] {
+        let limit = availableHeight <= smallestSupportedHeight
+            ? smallestHeightRowLimit
+            : compactRowLimit
+        return Array(rows.prefix(limit))
     }
 }
 
