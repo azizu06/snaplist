@@ -309,6 +309,21 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
     let runID: UUID
     let linkedLogicalIdentity: TrophyWallLogicalIdentity?
     let lastMeaningfulUpdateAt: Date
+    let itemName: String?
+
+    init(
+        principalScope: TrophyWallPrincipalScope,
+        runID: UUID,
+        linkedLogicalIdentity: TrophyWallLogicalIdentity?,
+        lastMeaningfulUpdateAt: Date,
+        itemName: String? = nil
+    ) {
+        self.principalScope = principalScope
+        self.runID = runID
+        self.linkedLogicalIdentity = linkedLogicalIdentity
+        self.lastMeaningfulUpdateAt = lastMeaningfulUpdateAt
+        self.itemName = itemName
+    }
 }
 
 protocol TrophyWallRepository: Sendable {
@@ -358,11 +373,55 @@ final class TrophyWallStore {
         let canonicalCard = TrophyWallCard.accepted(
             principalScope: principalScope,
             runID: acceptedRun.runID,
-            itemName: linkedItemName ?? existingCanonicalItemName,
+            itemName: linkedItemName ?? acceptedRun.itemName ?? existingCanonicalItemName,
             lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt
         )
         cards.removeAll { $0.identity == canonicalCard.identity }
         cards.append(canonicalCard)
         cards.sort { $0.orderKey > $1.orderKey }
+    }
+
+    func ingest(
+        acceptedHandoff: AcceptedItemRunHandoff,
+        runDetail: DurableRun,
+        principalScope requestedPrincipalScope: TrophyWallPrincipalScope
+    ) {
+        let acceptedRun = acceptedHandoff.acceptedRun
+        guard requestedPrincipalScope == principalScope,
+              acceptedRun.runID == runDetail.id,
+              acceptedRun.itemID == runDetail.itemID,
+              acceptedRun.status == runDetail.status.rawValue,
+              acceptedRun.stage == runDetail.stage.rawValue,
+              runDetail.status == .queued,
+              runDetail.stage == .queued,
+              let lastMeaningfulUpdateAt = Self.serverDate(
+                  from: runDetail.lastMeaningfulUpdateAt
+              ) else {
+            return
+        }
+
+        ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: requestedPrincipalScope,
+                runID: runDetail.id,
+                linkedLogicalIdentity: TrophyWallLogicalIdentity(
+                    idempotencyKey: acceptedHandoff.idempotencyKey
+                ),
+                lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
+                itemName: runDetail.item?.title
+            )
+        )
+    }
+
+    private static func serverDate(from value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) {
+            return date
+        }
+
+        let wholeSeconds = ISO8601DateFormatter()
+        wholeSeconds.formatOptions = [.withInternetDateTime]
+        return wholeSeconds.date(from: value)
     }
 }

@@ -675,6 +675,81 @@ final class TrophyWallDomainTests: XCTestCase {
         }
     }
 
+    func testStoreConvergesAcceptedHandoffOnlyWithExactPrincipalScopedRunDetail() throws {
+        let fixture = TrophyWallTestFixture()
+        let acceptedCard = TrophyWallCard.accepted(
+            principalScope: fixture.principal,
+            runID: fixture.runID,
+            itemName: fixture.matchedItemName,
+            lastMeaningfulUpdateAt: fixture.runDetailUpdate
+        )
+        let exactCards = [
+            fixture.initialCards[1],
+            acceptedCard,
+        ]
+        let cases = [
+            TrophyWallRunDetailConvergenceCase(
+                name: "exact principal, run, and item",
+                principalScope: fixture.principal,
+                runDetail: try fixture.decodedRunDetail(
+                    runID: fixture.runID,
+                    itemID: fixture.itemID
+                ),
+                expectedCards: exactCards,
+                expectedDestinations: [nil, .run(fixture.runID)]
+            ),
+            TrophyWallRunDetailConvergenceCase(
+                name: "wrong principal",
+                principalScope: fixture.otherPrincipal,
+                runDetail: try fixture.decodedRunDetail(
+                    runID: fixture.runID,
+                    itemID: fixture.itemID
+                ),
+                expectedCards: fixture.initialCards,
+                expectedDestinations: [nil, nil]
+            ),
+            TrophyWallRunDetailConvergenceCase(
+                name: "wrong run",
+                principalScope: fixture.principal,
+                runDetail: try fixture.decodedRunDetail(
+                    runID: fixture.thirdRunID,
+                    itemID: fixture.itemID
+                ),
+                expectedCards: fixture.initialCards,
+                expectedDestinations: [nil, nil]
+            ),
+            TrophyWallRunDetailConvergenceCase(
+                name: "wrong item",
+                principalScope: fixture.principal,
+                runDetail: try fixture.decodedRunDetail(
+                    runID: fixture.runID,
+                    itemID: fixture.otherItemID
+                ),
+                expectedCards: fixture.initialCards,
+                expectedDestinations: [nil, nil]
+            ),
+        ]
+
+        for testCase in cases {
+            let store = fixture.makeStore()
+
+            store.ingest(
+                acceptedHandoff: fixture.acceptedHandoff,
+                runDetail: testCase.runDetail,
+                principalScope: testCase.principalScope
+            )
+
+            XCTAssertEqual(store.principalScope, fixture.principal, testCase.name)
+            XCTAssertEqual(store.cards, testCase.expectedCards, testCase.name)
+            XCTAssertEqual(store.cards.count, 2, testCase.name)
+            XCTAssertEqual(
+                store.processingRows.map(\.destination),
+                testCase.expectedDestinations,
+                testCase.name
+            )
+        }
+    }
+
     func testProcessingProjectionPreservesExactMergeTruthAndRunDestination() {
         let fixture = TrophyWallTestFixture()
         let acceptedRun = TrophyWallCanonicalAcceptedRun(
@@ -961,12 +1036,18 @@ private struct TrophyWallConvergenceCase {
     let expectedCards: [TrophyWallCard]
 }
 
+private struct TrophyWallRunDetailConvergenceCase {
+    let name: String
+    let principalScope: TrophyWallPrincipalScope
+    let runDetail: DurableRun
+    let expectedCards: [TrophyWallCard]
+    let expectedDestinations: [HomeRoute?]
+}
+
 private struct TrophyWallTestFixture {
     let principal = TrophyWallPrincipalScope(opaqueValue: "principal-a")
     let otherPrincipal = TrophyWallPrincipalScope(opaqueValue: "principal-b")
-    let logicalID = TrophyWallLogicalIdentity(
-        idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000001")!
-    )
+    let idempotencyKey = UUID(uuidString: "37500000-0000-4000-8000-000000000001")!
     let unrelatedLogicalID = TrophyWallLogicalIdentity(
         idempotencyKey: UUID(uuidString: "37500000-0000-4000-8000-000000000002")!
     )
@@ -981,6 +1062,25 @@ private struct TrophyWallTestFixture {
     let pendingUpdate = Date(timeIntervalSince1970: 20)
     let unrelatedUpdate = Date(timeIntervalSince1970: 10)
     let acceptedUpdate = Date(timeIntervalSince1970: 30)
+    let runDetailUpdate = Date(timeIntervalSince1970: 5)
+    let itemID = UUID(uuidString: "37500000-0000-4000-8000-000000000007")!
+    let otherItemID = UUID(uuidString: "37500000-0000-4000-8000-000000000008")!
+
+    var logicalID: TrophyWallLogicalIdentity {
+        TrophyWallLogicalIdentity(idempotencyKey: idempotencyKey)
+    }
+
+    var acceptedHandoff: AcceptedItemRunHandoff {
+        AcceptedItemRunHandoff(
+            idempotencyKey: idempotencyKey,
+            acceptedRun: AcceptedItemRun(
+                runID: runID,
+                itemID: itemID,
+                status: "queued",
+                stage: "queued"
+            )
+        )
+    }
 
     var initialCards: [TrophyWallCard] {
         [
@@ -1028,6 +1128,45 @@ private struct TrophyWallTestFixture {
             principalScope: principal,
             repository: StaticTrophyWallRepository(cards: cards ?? initialCards)
         )
+    }
+
+    func decodedRunDetail(runID: UUID, itemID: UUID) throws -> DurableRun {
+        let json = """
+        {
+          "id": "\(runID.uuidString.lowercased())",
+          "itemId": "\(itemID.uuidString.lowercased())",
+          "listingId": null,
+          "status": "queued",
+          "stage": "queued",
+          "attemptCount": 0,
+          "maxAttempts": 3,
+          "schemaVersion": 1,
+          "timestamps": {
+            "createdAt": "1970-01-01T00:00:01.000Z",
+            "updatedAt": "1970-01-01T00:00:05.000Z",
+            "enqueuedAt": "1970-01-01T00:00:02.000Z",
+            "startedAt": null,
+            "lastAttemptedAt": null,
+            "nextAttemptAt": null,
+            "completedAt": null,
+            "retentionCleanedAt": null
+          },
+          "item": { "title": "Server canonical title", "photoCount": 3 },
+          "requiredInput": null,
+          "terminalOutcome": null,
+          "safeFailure": null,
+          "allowance": "reserved",
+          "legalActions": {
+            "canRetry": false,
+            "canCancel": false,
+            "canOpenReview": false,
+            "canStartNewCapture": false
+          },
+          "lastMeaningfulUpdateAt": "1970-01-01T00:00:05.000Z",
+          "retentionCleanedAt": null
+        }
+        """
+        return try JSONDecoder().decode(DurableRun.self, from: Data(json.utf8))
     }
 }
 
