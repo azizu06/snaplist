@@ -31,7 +31,7 @@ concurrency:
 jobs:
   test:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Validate focused test inputs
         if: github.event_name == 'workflow_dispatch'

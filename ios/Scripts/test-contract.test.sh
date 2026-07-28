@@ -86,6 +86,24 @@ assert_default_runs_the_full_suite() {
   grep -Fxq -- "test" "$arguments_file"
 }
 
+assert_automatic_full_suite_has_sixty_minute_budget() {
+  ruby -ryaml -e '
+    workflow = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+    test_job = workflow.fetch("jobs").fetch("test")
+    full_suite_step = test_job.fetch("steps").find do |step|
+      step["name"] == "Build app and run unit and UI smoke tests"
+    end
+
+    abort "automatic full-suite step is missing" unless full_suite_step
+    abort "automatic full-suite guard changed" unless
+      full_suite_step["if"] == "github.event_name != '\''workflow_dispatch'\''"
+    abort "automatic full-suite command changed" unless
+      full_suite_step["run"] == "ios/Scripts/test.sh"
+    abort "automatic full-suite budget must be 60 minutes" unless
+      test_job["timeout-minutes"] == 60
+  ' "$workflow_file"
+}
+
 assert_focused_selector_uses_the_target_repository() {
   local selector="SnapListTests/CaptureFlowTests/testShutterAccessibleNameOnlyAnnouncesTheLimitAtFiveDurablePhotos"
   : > "$arguments_file"
@@ -322,6 +340,7 @@ failures=0
 
 for contract_case in \
   assert_default_runs_the_full_suite \
+  assert_automatic_full_suite_has_sixty_minute_budget \
   assert_focused_selector_uses_the_target_repository \
   assert_malformed_selectors_fail_before_xcodebuild \
   assert_manual_dispatch_cannot_cancel_automatic_runs \
