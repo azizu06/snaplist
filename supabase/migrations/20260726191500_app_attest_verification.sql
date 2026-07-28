@@ -66,15 +66,6 @@ begin
     raise exception 'invalid_app_attest_challenge';
   end if;
 
-  if p_kind = 'assertion' and not exists (
-    select 1
-    from private.app_attest_keys key
-    where key.key_id = p_key_id
-      and key.environment = p_environment
-  ) then
-    raise exception 'unknown_app_attest_key';
-  end if;
-
   insert into private.app_attest_challenges (
     challenge_id,
     challenge,

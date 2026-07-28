@@ -30,6 +30,12 @@ describe("App Attest private persistence contract", () => {
     );
   });
 
+  it("allows assertion challenges before key registration so verification can return typed key_not_attested", () => {
+    expect(executableSql).not.toMatch(
+      /p_kind = 'assertion' and not exists[\s\S]*unknown_app_attest_key/i,
+    );
+  });
+
   it("exposes only narrow server-owned RPCs and no guest or domain authority", () => {
     expect(migration).toMatch(/revoke all on table private\.app_attest_challenges from public/i);
     expect(migration).toMatch(/revoke all on table private\.app_attest_keys from public/i);

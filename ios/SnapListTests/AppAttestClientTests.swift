@@ -133,7 +133,7 @@ final class AppAttestClientTests: XCTestCase {
 
     func testPersistedKeyRejectedByServerNeverReportsVerified() async {
         let keyStore = AppAttestKeyStoreStub(
-            key: .init(id: "server-missing-key-id", state: .verified)
+            key: .init(id: "server-missing-key-id", state: .pending)
         )
         let service = AppAttestServiceStub(isSupported: true)
         let server = AppAttestServerStub(
@@ -154,21 +154,40 @@ final class AppAttestClientTests: XCTestCase {
         XCTAssertEqual(verificationCallCount, 1)
         XCTAssertEqual(service.generateKeyCallCount, 0)
         XCTAssertEqual(keyStore.removeCallCount, 0)
+        XCTAssertEqual(
+            keyStore.key,
+            AppAttestStoredKey(id: "server-missing-key-id", state: .pending)
+        )
     }
 
     func testPersistedKeyNotAttestedReenrollsOnceBeforeReportingVerified() async {
+        AppAttestURLProtocolStub.responses = [
+            .init(
+                body: #"{"data":{"challenge":"cGVuZGluZy1hc3NlcnRpb24tY2hhbGxlbmdlLTMzMQ","challengeId":"00000000-0000-4000-8000-000000000331","expiresAt":"2026-07-20T20:05:00.000Z","kind":"assertion"}}"#,
+                status: 200
+            ),
+            .init(
+                body: #"{"data":{"code":"key_not_attested","kind":"assertion","status":"invalid"}}"#,
+                status: 401
+            ),
+            .init(
+                body: #"{"data":{"challenge":"ZnJlc2gtYXR0ZXN0YXRpb24tY2hhbGxlbmdlLTMzMQ","challengeId":"00000000-0000-4000-8000-000000000332","expiresAt":"2026-07-20T20:05:00.000Z","kind":"attestation"}}"#,
+                status: 200
+            ),
+            .init(
+                body: #"{"data":{"counter":0,"environment":"production","keyId":"native-fixed-key-id","kind":"attestation","status":"verified"}}"#,
+                status: 200
+            ),
+        ]
         let keyStore = AppAttestKeyStoreStub(
             key: .init(id: "server-missing-key-id", state: .pending)
         )
         let service = AppAttestServiceStub(isSupported: true)
-        let server = AppAttestServerStub(
-            assertionError: AppAttestServerClientError.keyNotAttested
-        )
         let client = AppAttestClient(
             appID: "TEAMID1234.dev.snaplist.ios",
             environment: .production,
             keyStore: keyStore,
-            server: server,
+            server: makeURLSessionServerClient(),
             service: service
         )
 
@@ -185,8 +204,11 @@ final class AppAttestClientTests: XCTestCase {
         )
         XCTAssertEqual(service.generateKeyCallCount, 1)
         XCTAssertEqual(keyStore.removeCallCount, 1)
-        let challengeCallCount = await server.challengeCallCount
-        XCTAssertEqual(challengeCallCount, 2)
+        XCTAssertEqual(
+            keyStore.key,
+            AppAttestStoredKey(id: "native-fixed-key-id", state: .verified)
+        )
+        XCTAssertTrue(AppAttestURLProtocolStub.responses.isEmpty)
     }
 
     func testPersistedStaleDeviceKeyReenrollsOnceBeforeReportingVerified() async {
@@ -264,7 +286,7 @@ final class AppAttestClientTests: XCTestCase {
             ),
         ]
         let keyStore = AppAttestKeyStoreStub(
-            key: .init(id: "native-fixed-key-id", state: .verified)
+            key: .init(id: "native-fixed-key-id", state: .pending)
         )
         let service = AppAttestServiceStub(isSupported: true)
         let client = AppAttestClient(
@@ -280,6 +302,10 @@ final class AppAttestClientTests: XCTestCase {
         XCTAssertEqual(truth, .unavailable(.serverUnavailable))
         XCTAssertEqual(service.generateKeyCallCount, 0)
         XCTAssertEqual(keyStore.removeCallCount, 0)
+        XCTAssertEqual(
+            keyStore.key,
+            AppAttestStoredKey(id: "native-fixed-key-id", state: .pending)
+        )
     }
 
     func testGenericServerFailureDoesNotRotatePersistedKey() async {
@@ -287,7 +313,7 @@ final class AppAttestClientTests: XCTestCase {
             .init(body: "upstream failure", status: 500),
         ]
         let keyStore = AppAttestKeyStoreStub(
-            key: .init(id: "native-fixed-key-id", state: .verified)
+            key: .init(id: "native-fixed-key-id", state: .pending)
         )
         let service = AppAttestServiceStub(isSupported: true)
         let client = AppAttestClient(
@@ -303,6 +329,10 @@ final class AppAttestClientTests: XCTestCase {
         XCTAssertEqual(truth, .unavailable(.serverUnavailable))
         XCTAssertEqual(service.generateKeyCallCount, 0)
         XCTAssertEqual(keyStore.removeCallCount, 0)
+        XCTAssertEqual(
+            keyStore.key,
+            AppAttestStoredKey(id: "native-fixed-key-id", state: .pending)
+        )
     }
 
     func testTypedServerInvalidResponseMapsToServerRejected() async throws {
@@ -430,13 +460,11 @@ private actor AppAttestServerStub: AppAttestServerClient {
     private(set) var assertionVerificationCallCount = 0
     private(set) var challengeCallCount = 0
     private let assertionChallenge: Data
-    private let assertionError: Error?
     private let assertionTruth: AppAttestTruth
     private let attestationChallenge: Data
 
     init(
         assertionChallenge: Data = Data("assertion-challenge".utf8),
-        assertionError: Error? = nil,
         assertionTruth: AppAttestTruth = .verified(.init(
             counter: 1,
             environment: .production,
@@ -446,7 +474,6 @@ private actor AppAttestServerStub: AppAttestServerClient {
         attestationChallenge: Data = Data("attestation-challenge".utf8)
     ) {
         self.assertionChallenge = assertionChallenge
-        self.assertionError = assertionError
         self.assertionTruth = assertionTruth
         self.attestationChallenge = attestationChallenge
     }
@@ -475,7 +502,6 @@ private actor AppAttestServerStub: AppAttestServerClient {
         assertionObject: Data,
         requestBody: Data
     ) async throws -> AppAttestTruth {
-        if let assertionError { throw assertionError }
         assertionVerificationCallCount += 1
         assertionRequestBody = requestBody
         return assertionTruth

@@ -72,4 +72,39 @@ describe("App Attest verification service", () => {
     expect(store.snapshot()).toEqual(committedState);
     expect(verifier.verifyAttestation).toHaveBeenCalledTimes(1);
   });
+
+  it("returns key_not_attested after issuing an assertion challenge for an uncommitted key", async () => {
+    const store = new InMemoryAppAttestStore();
+    const verifier = fixedVerifier();
+    const service = createAppAttestService({
+      challengeBytes: () => FIXED_CHALLENGE,
+      challengeId: () => "pending-key-challenge-331",
+      challengeTtlMs: 5 * 60 * 1000,
+      clock: () => FIXED_NOW,
+      environment: "production",
+      store,
+      verifier,
+    });
+
+    const challenge = await service.issueChallenge({
+      keyId: FIXED_KEY_ID,
+      kind: "assertion",
+    });
+    const issuedState = store.snapshot();
+
+    await expect(
+      service.verifyAssertion({
+        assertionObject: "fixed-assertion-object",
+        challengeId: challenge.challengeId,
+        keyId: FIXED_KEY_ID,
+        requestBody: Buffer.from('{"operation":"restore-app-attest-key"}'),
+      }),
+    ).resolves.toEqual({
+      code: "key_not_attested",
+      kind: "assertion",
+      status: "invalid",
+    });
+    expect(store.snapshot()).toEqual(issuedState);
+    expect(verifier.verifyAssertion).not.toHaveBeenCalled();
+  });
 });

@@ -10,6 +10,7 @@ const DATABASE_URL = resolveLocalTestDatabaseUrl(
 );
 const APP_ID = "TEAMID1234.dev.snaplist.ios";
 const KEY_ID = Buffer.alloc(32, 0x33).toString("base64");
+const PENDING_KEY_ID = Buffer.alloc(32, 0x39).toString("base64");
 const RETENTION_KEY_IDS = [0x41, 0x42, 0x43, 0x44, 0x45].map((byte) =>
   Buffer.alloc(32, byte).toString("base64"),
 );
@@ -106,7 +107,7 @@ afterAll(async () => {
   );
   await admin.query(
     "delete from private.app_attest_keys where key_id = any($1::text[])",
-    [[KEY_ID, ...RETENTION_KEY_IDS]],
+    [[KEY_ID, PENDING_KEY_ID, ...RETENTION_KEY_IDS]],
   );
   await Promise.all([admin.end(), first.end(), second.end()]);
 });
@@ -174,6 +175,48 @@ describe("App Attest private replay boundary", () => {
         kind: "attestation",
       }),
     ).resolves.toBeNull();
+  });
+
+  it("issues an assertion challenge for an uncommitted key without creating key authority", async () => {
+    if (!reachable) return;
+    const challengeId = randomUUID();
+    await issueChallenge({
+      challenge: Buffer.alloc(32, 0x39),
+      challengeId,
+      keyId: PENDING_KEY_ID,
+      kind: "assertion",
+    });
+
+    const state = await admin.query<{
+      challenge_count: number;
+      key_count: number;
+    }>(
+      `select
+         (
+           select count(*)::integer
+           from private.app_attest_challenges
+           where challenge_id = $1
+             and key_id = $2
+             and kind = 'assertion'
+             and consumed_at is null
+         ) as challenge_count,
+         (
+           select count(*)::integer
+           from private.app_attest_keys
+           where key_id = $2
+         ) as key_count`,
+      [challengeId, PENDING_KEY_ID],
+    );
+    expect(state.rows[0]).toEqual({
+      challenge_count: 1,
+      key_count: 0,
+    });
+
+    const key = await first.query(
+      "select * from public.read_app_attest_key($1::text)",
+      [PENDING_KEY_ID],
+    );
+    expect(key.rows).toEqual([]);
   });
 
   it("commits one strictly increasing assertion counter under concurrency", async () => {
