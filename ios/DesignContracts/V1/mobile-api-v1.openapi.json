@@ -94,7 +94,7 @@
         "x-owner-issue": 334,
         "x-related-owner-issues": [159, 333, 332],
         "x-implementation-status": "implemented",
-        "security": [{ "ClerkBearer": [] }],
+        "security": [{ "ClerkBearer": [] }, { "GuestBearer": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/CreateItemRunMultipart" } } } },
         "responses": {

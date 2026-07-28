@@ -13,6 +13,172 @@ const photoReceipts = [
 ];
 
 describe("fixed mobile item submission RPC capability", () => {
+  it("uses the authenticated caller for guest replay lookup without sending a principal", async () => {
+    const rpc = vi.fn(async () => ({ data: [], error: null }));
+    const staging = createSupabaseMobileItemSubmissionStaging(
+      { rpc },
+      { authority: "authenticated-self" },
+    );
+
+    await expect(staging.findSubmission({
+      userId: "guest_server_verified",
+      idempotencyKey: "33220000-0000-4000-8000-000000000001",
+      requestFingerprint: "c".repeat(64),
+    })).resolves.toBeNull();
+
+    expect(rpc).toHaveBeenCalledWith("find_mobile_item_submission", {
+      p_idempotency_key: "33220000-0000-4000-8000-000000000001",
+      p_request_fingerprint: "c".repeat(64),
+    });
+  });
+
+  it("uses the authenticated caller for guest staging without sending a principal", async () => {
+    const rpc = vi.fn(async () => ({ data: true, error: null }));
+    const staging = createSupabaseMobileItemSubmissionStaging(
+      { rpc },
+      { authority: "authenticated-self" },
+    );
+
+    await staging.beginSubmission({
+      userId: "guest_server_verified",
+      idempotencyKey: "33220000-0000-4000-8000-000000000001",
+      requestFingerprint: "c".repeat(64),
+      batchId: "33220000-0000-4000-8000-000000000001",
+      cleanupId: "33220000-0000-4000-8000-000000000004",
+      costBasis: 12.34,
+      photoReceipts: [{
+        ...photoReceipts[0],
+        storagePath:
+          "guest_server_verified/pipeline-staging/33220000-0000-4000-8000-000000000001/0/0-photo.jpg",
+      }],
+    });
+
+    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission", {
+      p_batch_id: "33220000-0000-4000-8000-000000000001",
+      p_cleanup_id: "33220000-0000-4000-8000-000000000004",
+      p_cost_basis: 12.34,
+      p_idempotency_key: "33220000-0000-4000-8000-000000000001",
+      p_photo_receipts: [{
+        ordinal: 0,
+        storage_path:
+          "guest_server_verified/pipeline-staging/33220000-0000-4000-8000-000000000001/0/0-photo.jpg",
+        content_sha256: "a".repeat(64),
+        byte_length: 6,
+        media_type: "image/jpeg",
+      }],
+      p_request_fingerprint: "c".repeat(64),
+    });
+  });
+
+  it("uses the authenticated caller for guest commit without sending a principal", async () => {
+    const rpc = vi.fn(async () => ({
+      data: [{
+        item_id: "33220000-0000-4000-8000-000000000002",
+        run_id: "33220000-0000-4000-8000-000000000003",
+        queue_message_id: 32,
+        photo_identity_kind: "content_sha256_set_v1",
+        photo_identity_fingerprint: "b".repeat(64),
+        photo_receipts: [{
+          ordinal: 0,
+          storage_path:
+            "guest_server_verified/pipeline-staging/33220000-0000-4000-8000-000000000001/0/0-photo.jpg",
+          content_sha256: "a".repeat(64),
+          byte_length: 6,
+          media_type: "image/jpeg",
+        }],
+        is_replay: false,
+      }],
+      error: null,
+    }));
+    const staging = createSupabaseMobileItemSubmissionStaging(
+      { rpc },
+      { authority: "authenticated-self" },
+    );
+
+    await staging.commitSubmission({
+      userId: "guest_server_verified",
+      idempotencyKey: "33220000-0000-4000-8000-000000000001",
+      requestFingerprint: "c".repeat(64),
+      batchId: "33220000-0000-4000-8000-000000000001",
+      cleanupId: "33220000-0000-4000-8000-000000000004",
+      costBasis: 12.34,
+      dailyLimit: 15,
+      perMinuteLimit: 20,
+      photoIdentity: {
+        kind: "content_sha256_set_v1",
+        fingerprint: "b".repeat(64),
+      },
+      photoReceipts: [{
+        ...photoReceipts[0],
+        storagePath:
+          "guest_server_verified/pipeline-staging/33220000-0000-4000-8000-000000000001/0/0-photo.jpg",
+      }],
+    });
+
+    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission", {
+      p_batch_id: "33220000-0000-4000-8000-000000000001",
+      p_cleanup_id: "33220000-0000-4000-8000-000000000004",
+      p_cost_basis: 12.34,
+      p_daily_limit: 15,
+      p_idempotency_key: "33220000-0000-4000-8000-000000000001",
+      p_per_minute_limit: 20,
+      p_photo_identity: {
+        kind: "content_sha256_set_v1",
+        fingerprint: "b".repeat(64),
+      },
+      p_photo_receipts: [{
+        ordinal: 0,
+        storage_path:
+          "guest_server_verified/pipeline-staging/33220000-0000-4000-8000-000000000001/0/0-photo.jpg",
+        content_sha256: "a".repeat(64),
+        byte_length: 6,
+        media_type: "image/jpeg",
+      }],
+      p_request_fingerprint: "c".repeat(64),
+    });
+  });
+
+  it("maps an atomically persisted guest commit denial", async () => {
+    const staging = createSupabaseMobileItemSubmissionStaging(
+      {
+        rpc: vi.fn(async () => ({
+          data: [{
+            item_id: null,
+            run_id: null,
+            queue_message_id: null,
+            photo_identity_kind: null,
+            photo_identity_fingerprint: null,
+            photo_receipts: null,
+            is_replay: false,
+            denial_reason: "monthly-allowance-reached",
+          }],
+          error: null,
+        })),
+      },
+      { authority: "authenticated-self" },
+    );
+
+    await expect(staging.commitSubmission({
+      userId: "guest_server_verified",
+      idempotencyKey: "33220000-0000-4000-8000-000000000001",
+      requestFingerprint: "c".repeat(64),
+      batchId: "33220000-0000-4000-8000-000000000001",
+      cleanupId: "33220000-0000-4000-8000-000000000004",
+      costBasis: 12.34,
+      dailyLimit: 15,
+      perMinuteLimit: 20,
+      photoIdentity: {
+        kind: "content_sha256_set_v1",
+        fingerprint: "b".repeat(64),
+      },
+      photoReceipts,
+    })).rejects.toMatchObject({
+      code: "mobile_item_submission_denied",
+      kind: "allowance_denied",
+      reason: "monthly-allowance-reached",
+    });
+  });
+
   it("projects five ordered verified receipts from the fixed atomic commit capability", async () => {
     const receipts = Array.from({ length: 5 }, (_, ordinal) => ({
       ordinal,

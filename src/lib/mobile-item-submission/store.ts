@@ -30,6 +30,10 @@ export interface MobileItemSubmissionRpcClient {
   ): PromiseLike<RpcResult>;
 }
 
+export interface MobileItemSubmissionStagingOptions {
+  authority?: "service-role" | "authenticated-self";
+}
+
 const storedPhotoReceiptSchema = z
   .object({
     ordinal: z.number().int().min(0).max(MAX_MOBILE_ITEM_PHOTOS - 1),
@@ -51,6 +55,42 @@ const submissionRowSchema = z
     is_replay: z.boolean(),
   })
   .strict();
+
+const commitDenialReasonSchema = z.enum([
+  "snaplist-pro-required",
+  "storekit-entitlement-unavailable",
+  "monthly-allowance-reached",
+  "daily-capacity-reached",
+  "per-minute-capacity-reached",
+]);
+
+const authenticatedCommitRowSchema = z.union([
+  submissionRowSchema.extend({
+    denial_reason: z.null().optional(),
+  }),
+  z
+    .object({
+      item_id: z.null(),
+      run_id: z.null(),
+      queue_message_id: z.null(),
+      photo_identity_kind: z.null(),
+      photo_identity_fingerprint: z.null(),
+      photo_receipts: z.null(),
+      is_replay: z.literal(false),
+      denial_reason: commitDenialReasonSchema,
+    })
+    .strict(),
+]);
+
+function deniedError(reason: z.infer<typeof commitDenialReasonSchema>) {
+  return new MobileItemSubmissionDeniedError(
+    reason === "daily-capacity-reached" ||
+      reason === "per-minute-capacity-reached"
+      ? "rate_limited"
+      : "allowance_denied",
+    reason,
+  );
+}
 
 function rpcData(operation: string, result: RpcResult): unknown {
   if (result.error) {
@@ -123,13 +163,17 @@ function receiptFromRow(raw: unknown) {
 
 export function createSupabaseMobileItemSubmissionStaging(
   client: MobileItemSubmissionRpcClient,
+  options: MobileItemSubmissionStagingOptions = {},
 ): MobileItemSubmissionStaging {
+  const authority = options.authority ?? "service-role";
   return {
     async findSubmission(input) {
       const result = await client.rpc("find_mobile_item_submission", {
         p_idempotency_key: z.string().uuid().parse(input.idempotencyKey),
         p_request_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(input.requestFingerprint),
-        p_user_id: z.string().min(1).max(255).parse(input.userId),
+        ...(authority === "service-role"
+          ? { p_user_id: z.string().min(1).max(255).parse(input.userId) }
+          : {}),
       });
       const rows = z.array(submissionRowSchema).max(1).parse(
         rpcData("replay lookup", result),
@@ -145,7 +189,9 @@ export function createSupabaseMobileItemSubmissionStaging(
         p_idempotency_key: z.string().uuid().parse(input.idempotencyKey),
         p_photo_receipts: toRpcPhotoReceipts(input.photoReceipts),
         p_request_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(input.requestFingerprint),
-        p_user_id: z.string().min(1).max(255).parse(input.userId),
+        ...(authority === "service-role"
+          ? { p_user_id: z.string().min(1).max(255).parse(input.userId) }
+          : {}),
       });
       return z.boolean().parse(rpcData("uploading submission binding", result));
     },
@@ -168,8 +214,22 @@ export function createSupabaseMobileItemSubmissionStaging(
         p_photo_identity: input.photoIdentity,
         p_photo_receipts: toRpcPhotoReceipts(input.photoReceipts),
         p_request_fingerprint: input.requestFingerprint,
-        p_user_id: input.userId,
+        ...(authority === "service-role" ? { p_user_id: input.userId } : {}),
       });
+      if (authority === "authenticated-self") {
+        const rows = z.array(authenticatedCommitRowSchema).length(1).parse(
+          rpcData("atomic commit", result),
+        );
+        if (rows[0].denial_reason) {
+          throw deniedError(rows[0].denial_reason);
+        }
+        const committed = { ...rows[0] };
+        delete committed.denial_reason;
+        return {
+          outcome: committed.is_replay ? "replayed" : "created",
+          receipt: receiptFromRow(committed),
+        };
+      }
       const rows = z.array(submissionRowSchema).length(1).parse(
         rpcData("atomic commit", result),
       );

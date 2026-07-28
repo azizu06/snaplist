@@ -34,7 +34,12 @@ describe("POST /v1/items/runs", () => {
       requestId: () => "req_photo_count",
       itemSubmission: {
         async resolvePrincipal(bearerToken) {
-          return { kind: "verifiedGuest", userId: "guest_352", bearerToken };
+          return {
+            kind: "verifiedGuest",
+            userId: "guest_352",
+            capabilityId: "35200000-0000-4000-8000-000000000001",
+            mintOperationToken: async () => bearerToken,
+          };
         },
         submit,
       },

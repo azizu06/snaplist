@@ -15,13 +15,23 @@ export type MobileSubmissionMediaType = z.infer<
   typeof mobileSubmissionMediaTypeSchema
 >;
 
-export interface SubmissionPrincipal {
-  kind: "clerk" | "verifiedGuest";
-  /** Server-resolved domain owner. Request fields can never supply this value. */
-  userId: string;
-  /** Opaque credential used only by the principal's tenant-scoped Storage adapter. */
-  bearerToken: string;
-}
+export type SubmissionPrincipal =
+  | {
+      kind: "clerk";
+      /** Server-resolved domain owner. Request fields can never supply this value. */
+      userId: string;
+      /** Clerk credential used only by the tenant-scoped Storage adapter. */
+      bearerToken: string;
+    }
+  | {
+      kind: "verifiedGuest";
+      /** Server-resolved domain owner. Request fields can never supply this value. */
+      userId: string;
+      /** Durable authority id resolved from the opaque GuestBearer digest. */
+      capabilityId: string;
+      /** Mints one fresh, bounded project JWT for one protected operation. */
+      mintOperationToken(): Promise<string>;
+    };
 
 export interface PreparedMobileSubmissionPhoto {
   ordinal: number;
