@@ -3956,29 +3956,96 @@ final class CaptureFlowTests: XCTestCase {
         assertExactPhotoValues(invalidStore)
     }
 
-    func testPhotoReviewDragMovesKnownIdentityFromThirdToCoverWithoutChangingItsValues() {
-        let fingerprints = [
-            "drag-a-digest",
-            "drag-b-digest",
-            "drag-c-digest"
-        ]
-        let photos = [
-            makePickerPhoto(
-                id: "46000000-0000-4000-8000-000000000001",
-                ordinal: 0,
-                fingerprints: fingerprints
-            ),
-            makePickerPhoto(
-                id: "46000000-0000-4000-8000-000000000002",
-                ordinal: 1,
-                fingerprints: fingerprints
-            ),
-            makePickerPhoto(
-                id: "46000000-0000-4000-8000-000000000003",
-                ordinal: 2,
-                fingerprints: fingerprints
+    func testPhotoReviewNativeDragContractCarriesOneStableIdentityType() {
+        let photoID = UUID(
+            uuidString: "46000000-0000-4000-8000-000000000003"
+        )!
+        let provider = PhotoReviewNativeDragContract.itemProvider(
+            photoID: photoID
+        )
+
+        XCTAssertEqual(
+            provider.registeredTypeIdentifiers,
+            [PhotoReviewNativeDragContract.contentType.identifier]
+        )
+        XCTAssertEqual(
+            PhotoReviewNativeDragContract.photoID(from: provider),
+            photoID
+        )
+        XCTAssertNil(
+            PhotoReviewNativeDragContract.photoID(
+                from: NSItemProvider(
+                    object: photoID.uuidString as NSString
+                )
             )
+        )
+    }
+
+    func testPhotoReviewStripDropGeometryMapsKnownThirdIdentityToCover() {
+        let photos = makeDragPhotos()
+        let restingFrames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 176, y: 0, width: 76, height: 98)
         ]
+        let coverGapFrames = [
+            photos[0].id: CGRect(x: 62, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 150, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 238, y: 0, width: 76, height: 98)
+        ]
+
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.destinationIndex(
+                at: CGPoint(x: 214, y: 38),
+                photos: photos,
+                frames: restingFrames
+            ),
+            2
+        )
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.destinationIndex(
+                at: CGPoint(x: 38, y: 38),
+                photos: photos,
+                frames: restingFrames
+            ),
+            0
+        )
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.destinationIndex(
+                at: CGPoint(x: 38, y: 38),
+                photos: photos,
+                frames: coverGapFrames
+            ),
+            0
+        )
+    }
+
+    func testPhotoReviewDragCleanupWaitsUntilNativeDestinationExit() async {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+
+        XCTAssertTrue(
+            presentation.begin(photoID: photos[2].id, store: store)
+        )
+        presentation.enterDropTarget()
+        presentation.scheduleCancellation(reduceMotion: true)
+        try? await Task.sleep(for: .milliseconds(450))
+
+        XCTAssertEqual(presentation.draggedPhotoID, photos[2].id)
+        XCTAssertTrue(presentation.isInsideDropTarget)
+
+        presentation.leaveDropTarget(reduceMotion: true)
+        try? await Task.sleep(for: .milliseconds(450))
+
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertFalse(presentation.isInsideDropTarget)
+        XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.consumeAnnouncement())
+    }
+
+    func testPhotoReviewDragMovesKnownIdentityFromThirdToCoverWithoutChangingItsValues() {
+        let photos = makeDragPhotos()
         let store = PhotoReviewStore(photos: photos)
 
         XCTAssertEqual(
@@ -4474,6 +4541,31 @@ final class CaptureFlowTests: XCTestCase {
             thumbnailURL: URL(fileURLWithPath: "/tmp/thumbnail-\(photoID).jpg"),
             createdAt: Date(timeIntervalSinceReferenceDate: 455)
         )
+    }
+
+    private func makeDragPhotos() -> [StagedCapturePhoto] {
+        let fingerprints = [
+            "drag-a-digest",
+            "drag-b-digest",
+            "drag-c-digest"
+        ]
+        return [
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000001",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000002",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000003",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
     }
 
     private func makePickerPhoto(
