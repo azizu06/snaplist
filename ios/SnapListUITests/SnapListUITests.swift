@@ -788,6 +788,190 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(firstPhoto.isSelected)
     }
 
+    func testPhotoReviewNativeDragSourcePreservesNonCoverThumbnailTapActions() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-02"])
+        let screen = app.scrollViews["photo-review.screen"]
+
+        XCTAssertTrue(
+            screen.waitForExistence(timeout: 3),
+            "The live Photo Review fixture must render the native drag source."
+        )
+
+        let secondPhoto = app.buttons["photo-review.thumbnail.2"]
+        XCTAssertTrue(secondPhoto.exists)
+        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
+        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+
+        secondPhoto.tap()
+
+        XCTAssertTrue(
+            app.buttons["photo-review.replace"].waitForExistence(timeout: 2),
+            "The native drag attachment must preserve the thumbnail Button tap."
+        )
+        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
+        XCTAssertTrue(secondPhoto.isSelected)
+    }
+
+    func testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion() {
+        let app = launch(extraArguments: [
+            "--photo-review-state=REV-02",
+            "--reduced-motion"
+        ])
+        let screen = app.scrollViews["photo-review.screen"]
+
+        XCTAssertTrue(
+            screen.waitForExistence(timeout: 3),
+            "The approved Photo Review fixture must render the public drag surface."
+        )
+
+        let order = app.staticTexts["photo-review.fixture-order"]
+        XCTAssertTrue(
+            order.waitForExistence(timeout: 2),
+            "The fixture must expose stable identities without changing seller UI."
+        )
+        let initialOrder = [
+            "45500000-0000-4000-8000-000000000001",
+            "45500000-0000-4000-8000-000000000002",
+            "45500000-0000-4000-8000-000000000003"
+        ].joined(separator: "|")
+        let reordered = [
+            "45500000-0000-4000-8000-000000000003",
+            "45500000-0000-4000-8000-000000000001",
+            "45500000-0000-4000-8000-000000000002"
+        ].joined(separator: "|")
+        XCTAssertEqual(order.label, initialOrder)
+        XCTAssertTrue(
+            app.otherElements["photo-review.motion-reduced"].exists,
+            "The fixture must drive Photo Review through its Reduced Motion path."
+        )
+
+        let firstPhoto = app.buttons["photo-review.thumbnail.1"]
+        let thirdPhoto = app.buttons["photo-review.thumbnail.3"]
+        thirdPhoto.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).press(
+            forDuration: 0.8,
+            thenDragTo: firstPhoto.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+            ),
+            withVelocity: 500,
+            // Keep the native session over Cover long enough for SwiftUI to
+            // render the transient production gap before performDrop clears it.
+            thenHoldForDuration: 0.6
+        )
+
+        let reorderedExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", reordered),
+            object: order
+        )
+        let dragObservation = app.otherElements[
+            "photo-review.drag-observation"
+        ]
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [reorderedExpectation], timeout: 3),
+            .completed,
+            dragObservation.exists
+                ? "Native drop chronology: \(dragObservation.label)"
+                : "Native drop chronology was not projected."
+        )
+        XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
+        XCTAssertTrue(firstPhoto.label.contains("Cover"))
+        XCTAssertTrue(firstPhoto.isSelected)
+
+        XCTAssertTrue(
+            dragObservation.waitForExistence(timeout: 2),
+            "The fixture must project the production drag decisions."
+        )
+        XCTAssertTrue(
+            dragObservation.label.contains("gap=62"),
+            "The native destination must render the approved active insertion gap."
+        )
+        XCTAssertTrue(
+            dragObservation.label.contains("transition=suppressed"),
+            "Reduced Motion must suppress the production drag transition decision."
+        )
+
+        let outside = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)
+        )
+        firstPhoto.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).press(
+            forDuration: 0.8,
+            thenDragTo: outside
+        )
+
+        let dragEndedExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.otherElements["photo-review.drag-active"]
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [dragEndedExpectation], timeout: 2),
+            .completed
+        )
+        XCTAssertEqual(order.label, reordered)
+        XCTAssertTrue(firstPhoto.label.contains("Cover"))
+        XCTAssertTrue(firstPhoto.isSelected)
+
+        app.terminate()
+
+        let edgeApp = launch(extraArguments: [
+            "--photo-review-state=REV-03",
+            "--reduced-motion"
+        ])
+        XCTAssertTrue(
+            edgeApp.scrollViews["photo-review.screen"].waitForExistence(
+                timeout: 3
+            )
+        )
+        let edgeSource = edgeApp.buttons["photo-review.thumbnail.1"]
+        let fifthPhoto = edgeApp.buttons["photo-review.thumbnail.5"]
+        let edgeOrder = edgeApp.staticTexts["photo-review.fixture-order"]
+        XCTAssertTrue(edgeSource.exists)
+        XCTAssertTrue(fifthPhoto.exists)
+        XCTAssertTrue(
+            edgeOrder.waitForExistence(timeout: 2),
+            "The fixture must expose stable photo identity order."
+        )
+        let edgeOrderBeforeDrag = edgeOrder.label
+        let fifthPhotoMinXBeforeDrag = fifthPhoto.frame.minX
+
+        let appFrame = edgeApp.windows.firstMatch.frame
+        let trailingEdge = edgeApp.coordinate(
+            withNormalizedOffset: CGVector(
+                dx: 0.99,
+                dy: edgeSource.frame.midY / appFrame.height
+            )
+        )
+        edgeSource.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).press(
+            forDuration: 0.8,
+            thenDragTo: trailingEdge
+        )
+
+        let edgeObservation = edgeApp.otherElements[
+            "photo-review.drag-observation"
+        ]
+        XCTAssertTrue(edgeObservation.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            edgeObservation.label.contains("edge=trailing"),
+            "The drag must cross the production 28pt trailing threshold."
+        )
+        let fifthPhotoDisplacement =
+            fifthPhotoMinXBeforeDrag - fifthPhoto.frame.minX
+        XCTAssertGreaterThan(
+            fifthPhotoDisplacement,
+            8,
+            "Crossing the edge threshold must visibly move the real strip."
+        )
+        XCTAssertEqual(
+            edgeOrder.label,
+            edgeOrderBeforeDrag,
+            "Edge autoscroll must not reorder an outside drop."
+        )
+    }
+
     func testPhotoReviewAtFivePhotosShowsAddDimmedDisabledAndInert() {
         let app = launch(extraArguments: ["--photo-review-state=REV-03"])
         let screen = app.scrollViews["photo-review.screen"]

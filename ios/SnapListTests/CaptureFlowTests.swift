@@ -3956,6 +3956,1112 @@ final class CaptureFlowTests: XCTestCase {
         assertExactPhotoValues(invalidStore)
     }
 
+    func testPhotoReviewNativeDragContractCarriesOneStableIdentityType() {
+        let photoID = UUID(
+            uuidString: "46000000-0000-4000-8000-000000000003"
+        )!
+        let provider = PhotoReviewNativeDragContract.itemProvider(
+            photoID: photoID
+        )
+
+        XCTAssertEqual(
+            provider.registeredTypeIdentifiers,
+            [PhotoReviewNativeDragContract.contentType.identifier]
+        )
+        XCTAssertEqual(
+            PhotoReviewNativeDragContract.photoID(from: provider),
+            photoID
+        )
+        XCTAssertNil(
+            PhotoReviewNativeDragContract.photoID(
+                from: NSItemProvider(
+                    object: photoID.uuidString as NSString
+                )
+            )
+        )
+    }
+
+    func testPhotoReviewNativeSourceMapsFivePhotoTouchToExactIdentity() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-native-source-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let photos = PhotoReviewFixtureView.photos(
+            for: .fivePhotos,
+            rootDirectory: root
+        )
+        let frames = Dictionary(
+            uniqueKeysWithValues: photos.enumerated().map { index, photo in
+                (
+                    photo.id,
+                    CGRect(
+                        x: CGFloat(index) * 88,
+                        y: 0,
+                        width: 76,
+                        height: 98
+                    )
+                )
+            }
+        )
+
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { location in
+                PhotoReviewNativeDragSourceGeometry.source(
+                    at: location,
+                    photos: photos,
+                    frames: frames
+                )
+            }
+        )
+        let sourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        let hostController = UIViewController()
+        let window = UIWindow(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 844)
+        )
+        window.rootViewController = hostController
+        window.makeKeyAndVisible()
+        hostController.view.addSubview(sourceView)
+        hostController.view.layoutIfNeeded()
+        defer {
+            window.isHidden = true
+            withExtendedLifetime(window) {}
+        }
+
+        sourceView.contentSize = CGSize(width: 440, height: 122)
+        sourceView.bounds = CGRect(
+            x: 88,
+            y: 24,
+            width: 320,
+            height: 98
+        )
+        source.attach(to: sourceView)
+        source.attach(to: sourceView)
+
+        XCTAssertEqual(
+            sourceView.interactions.compactMap { $0 as? UIDragInteraction }.count,
+            1
+        )
+        let interaction = try XCTUnwrap(
+            sourceView.interactions.compactMap { $0 as? UIDragInteraction }.first
+        )
+        XCTAssertTrue(interaction.view === sourceView)
+
+        for photo in photos {
+            let frame = try XCTUnwrap(frames[photo.id])
+            let session = PhotoReviewDragSessionStub()
+            session.currentLocation = CGPoint(
+                x: frame.midX + sourceView.bounds.minX,
+                y: frame.midY + sourceView.bounds.minY
+            )
+
+            let items = source.dragInteraction(
+                interaction,
+                itemsForBeginning: session
+            )
+            let item = try XCTUnwrap(items.first)
+
+            XCTAssertEqual(
+                PhotoReviewNativeDragContract.photoID(
+                    from: item.itemProvider
+                ),
+                photo.id
+            )
+            XCTAssertEqual(presentation.draggedPhotoID, photo.id)
+
+            let preview = try XCTUnwrap(
+                source.dragInteraction(
+                    interaction,
+                    previewForLifting: item,
+                    session: session
+                )
+            )
+            XCTAssertNotNil((preview.view as? UIImageView)?.image)
+            XCTAssertTrue(preview.target.container === sourceView)
+            XCTAssertEqual(
+                preview.target.center.x,
+                frame.midX + sourceView.bounds.minX,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(
+                preview.target.center.y,
+                frame.midY + sourceView.bounds.minY,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(
+                preview.target.center.x - sourceView.bounds.minX,
+                frame.midX,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(
+                preview.target.center.y - sourceView.bounds.minY,
+                frame.midY,
+                accuracy: 0.001
+            )
+
+            source.dragInteraction(
+                interaction,
+                session: session,
+                didEndWith: .cancel
+            )
+            XCTAssertNil(presentation.draggedPhotoID)
+            XCTAssertEqual(presentation.consumeFocusPhotoID(), photo.id)
+            XCTAssertNil(presentation.consumeAnnouncement())
+        }
+    }
+
+    func testPhotoReviewNativeSourceObservationClassifiesEveryPreLiftGuard() throws {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        var observation = PhotoReviewNativeDragSourceObservation()
+        let observe: (PhotoReviewNativeDragSourceEvent) -> Void = {
+            observation.observe($0)
+        }
+        let sourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        sourceView.contentSize = CGSize(width: 440, height: 98)
+        sourceView.bounds.origin.x = 44
+
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false,
+            sourceAtLocation: { _ in
+                XCTFail("A disabled source must not resolve thumbnail frames.")
+                return nil
+            },
+            observeSource: observe
+        )
+        XCTAssertTrue(
+            source.dragInteraction(
+                UIDragInteraction(delegate: source),
+                itemsForBeginning: PhotoReviewDragSessionStub()
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            observation.beginOutcome,
+            "rejected-missing-view"
+        )
+        source.attach(to: sourceView)
+        let interaction = try XCTUnwrap(
+            sourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(x: 82, y: 49)
+
+        XCTAssertTrue(
+            source.dragInteraction(
+                interaction,
+                itemsForBeginning: session
+            ).isEmpty
+        )
+        XCTAssertEqual(observation.beginOutcome, "rejected-disabled")
+        XCTAssertTrue(observation.isAttached)
+        XCTAssertFalse(observation.isEnabled)
+
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in
+                observe(.resolving(frameCount: photos.count))
+                return nil
+            },
+            observeSource: observe
+        )
+        XCTAssertTrue(
+            source.dragInteraction(
+                interaction,
+                itemsForBeginning: session
+            ).isEmpty
+        )
+        XCTAssertEqual(observation.frameCount, photos.count)
+        XCTAssertEqual(observation.beginOutcome, "rejected-no-source")
+        XCTAssertTrue(observation.isEnabled)
+
+        let missingPhoto = PhotoReviewNativeDragSource(
+            photoID: UUID(),
+            thumbnailURL: photos[0].thumbnailURL,
+            frame: CGRect(x: 0, y: 0, width: 76, height: 98)
+        )
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in
+                observe(.resolving(frameCount: photos.count))
+                return missingPhoto
+            },
+            observeSource: observe
+        )
+        XCTAssertTrue(
+            source.dragInteraction(
+                interaction,
+                itemsForBeginning: session
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            observation.beginOutcome,
+            "rejected-presentation"
+        )
+
+        let thirdPhoto = PhotoReviewNativeDragSource(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            frame: CGRect(x: 176, y: 0, width: 76, height: 98)
+        )
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in
+                observe(.resolving(frameCount: photos.count))
+                return thirdPhoto
+            },
+            observeSource: observe
+        )
+        let items = source.dragInteraction(
+            interaction,
+            itemsForBeginning: session
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(observation.beginOutcome, "provided")
+        XCTAssertEqual(observation.photoID, photos[2].id)
+        XCTAssertEqual(observation.hostBounds, sourceView.bounds)
+        XCTAssertEqual(observation.hostContentSize, sourceView.contentSize)
+    }
+
+    func testPhotoReviewNativeAttachmentsResolveNestedHorizontalStripHostInsteadOfOuterScreenScroll() {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in nil }
+        )
+        let destination = PhotoReviewNativeDropAttachment.Coordinator(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in }
+        )
+
+        let host = makeNativeInteractionHost()
+
+        let sourceAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        let destinationAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        host.stripContent.addSubview(sourceAttachment)
+        host.stripContent.addSubview(destinationAttachment)
+        defer {
+            sourceAttachment.dismantle()
+            destinationAttachment.dismantle()
+            host.cleanUp()
+        }
+
+        sourceAttachment.update(
+            shouldAttach: true,
+            attach: source.attach(to:),
+            detach: source.detach
+        )
+        destinationAttachment.update(
+            shouldAttach: true,
+            attach: destination.attach(to:),
+            detach: destination.detach
+        )
+        sourceAttachment.resolveHostAndAttach()
+        destinationAttachment.resolveHostAndAttach()
+
+        XCTAssertEqual(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .count,
+            1
+        )
+        XCTAssertEqual(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .count,
+            1
+        )
+        XCTAssertTrue(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first?
+                .view === host.innerHorizontalStrip
+        )
+        XCTAssertTrue(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .first?
+                .view === host.innerHorizontalStrip
+        )
+        XCTAssertTrue(
+            host.outerScreenScroll.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .isEmpty
+        )
+        XCTAssertTrue(
+            host.outerScreenScroll.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .isEmpty
+        )
+    }
+
+    func testPhotoReviewStripDropGeometryMapsKnownThirdIdentityToCover() {
+        let photos = makeDragPhotos()
+        let restingFrames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 176, y: 0, width: 76, height: 98)
+        ]
+        let coverGapFrames = [
+            photos[0].id: CGRect(x: 62, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 150, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 238, y: 0, width: 76, height: 98)
+        ]
+        let leadingPaddedContainerFrames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 138, height: 98),
+            photos[1].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 176, y: 0, width: 76, height: 98)
+        ]
+
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.destinationIndex(
+                at: CGPoint(x: 214, y: 38),
+                photos: photos,
+                frames: restingFrames
+            ),
+            2
+        )
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.destinationIndex(
+                at: CGPoint(x: 38, y: 38),
+                photos: photos,
+                frames: restingFrames
+            ),
+            0
+        )
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.maximumPositiveWidthGrowth(
+                from: restingFrames,
+                to: coverGapFrames
+            ),
+            0
+        )
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.maximumPositiveWidthGrowth(
+                from: restingFrames,
+                to: leadingPaddedContainerFrames
+            ),
+            PhotoReviewDragLayout.insertionGap
+        )
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.destinationIndex(
+                at: CGPoint(x: 38, y: 38),
+                photos: photos,
+                frames: coverGapFrames
+            ),
+            0
+        )
+    }
+
+    func testPhotoReviewRenderedGapObservationLatchesDeferredWidthGrowthWithoutTreatingReorderAsGap() {
+        let photos = makeDragPhotos()
+        let restingFrames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 176, y: 0, width: 76, height: 98)
+        ]
+        let deferredCoverGapFrames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 138, height: 98),
+            photos[1].id: CGRect(x: 150, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 238, y: 0, width: 76, height: 98)
+        ]
+        let postDropReorderedFrames = [
+            photos[0].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 176, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 0, y: 0, width: 76, height: 98)
+        ]
+
+        var deferredGapObservation =
+            PhotoReviewRenderedInsertionGapObservation()
+        deferredGapObservation.observe(
+            frames: restingFrames,
+            isDragActive: false
+        )
+        deferredGapObservation.observe(
+            frames: deferredCoverGapFrames,
+            isDragActive: false
+        )
+
+        XCTAssertEqual(
+            deferredGapObservation.maximumRenderedInsertionGap,
+            PhotoReviewDragLayout.insertionGap
+        )
+
+        var reorderOnlyObservation =
+            PhotoReviewRenderedInsertionGapObservation()
+        reorderOnlyObservation.observe(
+            frames: restingFrames,
+            isDragActive: false
+        )
+        reorderOnlyObservation.observe(
+            frames: postDropReorderedFrames,
+            isDragActive: false
+        )
+
+        XCTAssertEqual(
+            reorderOnlyObservation.maximumRenderedInsertionGap,
+            0
+        )
+    }
+
+    func testPhotoReviewNativeSessionEndWithoutDropExitClearsOnceAndRestoresExactFocus() {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+
+        XCTAssertTrue(
+            presentation.begin(photoID: photos[2].id, store: store)
+        )
+        presentation.updateInsertion(
+            to: 0,
+            store: store,
+            reduceMotion: true
+        )
+        presentation.endNativeDragSession(reduceMotion: true)
+
+        XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertNil(presentation.insertionIndex)
+        XCTAssertEqual(
+            presentation.lastTransitionDecision,
+            .suppressed
+        )
+        XCTAssertEqual(presentation.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        presentation.endNativeDragSession(reduceMotion: true)
+
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        let committedStore = PhotoReviewStore(photos: photos)
+        let committed = PhotoReviewDragPresentation()
+        XCTAssertTrue(
+            committed.begin(photoID: photos[2].id, store: committedStore)
+        )
+        committed.updateInsertion(
+            to: 0,
+            store: committedStore,
+            reduceMotion: true
+        )
+        XCTAssertNotNil(
+            committed.commit(
+                to: 0,
+                store: committedStore,
+                reduceMotion: true
+            )
+        )
+
+        committed.endNativeDragSession(reduceMotion: true)
+
+        XCTAssertEqual(
+            committedStore.photos,
+            [photos[2], photos[0], photos[1]]
+        )
+        XCTAssertEqual(committed.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(committed.consumeFocusPhotoID())
+        XCTAssertEqual(
+            committed.consumeAnnouncement(),
+            "Moved to photo 1 of 3. Cover."
+        )
+        XCTAssertNil(committed.consumeAnnouncement())
+    }
+
+    func testPhotoReviewNativeSourceDelegateEndsAcceptedAndOutsideSessionsExactlyOnce() throws {
+        let photos = makeDragPhotos()
+        let outsideStore = PhotoReviewStore(photos: photos)
+        let outside = PhotoReviewDragPresentation()
+        let outsideResolvedSource = PhotoReviewNativeDragSource(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            frame: .zero
+        )
+        let outsideSource = PhotoReviewNativeDragSourceDelegate(
+            store: outsideStore,
+            presentation: outside,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in outsideResolvedSource }
+        )
+        let outsideSourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        outsideSourceView.bounds = CGRect(
+            x: 88,
+            y: 24,
+            width: 320,
+            height: 98
+        )
+        outsideSource.attach(to: outsideSourceView)
+        let outsideInteraction = try XCTUnwrap(
+            outsideSourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        XCTAssertTrue(outsideInteraction.view === outsideSourceView)
+        let outsideSession = PhotoReviewDragSessionStub()
+
+        let outsideItems = outsideSource.dragInteraction(
+            outsideInteraction,
+            itemsForBeginning: outsideSession
+        )
+        outsideSession.items = outsideItems
+
+        XCTAssertEqual(outsideItems.count, 1)
+        XCTAssertEqual(
+            outsideItems.first.flatMap {
+                PhotoReviewNativeDragContract.photoID(
+                    from: $0.itemProvider
+                )
+            },
+            photos[2].id
+        )
+        outside.updateInsertion(
+            to: 0,
+            store: outsideStore,
+            reduceMotion: true
+        )
+        outsideSource.dragInteraction(
+            outsideInteraction,
+            session: outsideSession,
+            didEndWith: .cancel
+        )
+
+        XCTAssertEqual(outsideStore.photos, photos)
+        XCTAssertNil(outside.draggedPhotoID)
+        XCTAssertNil(outside.insertionIndex)
+        XCTAssertEqual(outside.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(outside.consumeAnnouncement())
+
+        outsideSource.dragInteraction(
+            outsideInteraction,
+            session: outsideSession,
+            didEndWith: .cancel
+        )
+
+        XCTAssertNil(outside.consumeFocusPhotoID())
+        XCTAssertNil(outside.consumeAnnouncement())
+
+        let committedStore = PhotoReviewStore(photos: photos)
+        let committed = PhotoReviewDragPresentation()
+        let committedResolvedSource = PhotoReviewNativeDragSource(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            frame: .zero
+        )
+        let committedSource = PhotoReviewNativeDragSourceDelegate(
+            store: committedStore,
+            presentation: committed,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in committedResolvedSource }
+        )
+        let committedSourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        committedSourceView.bounds = CGRect(
+            x: 88,
+            y: 24,
+            width: 320,
+            height: 98
+        )
+        committedSource.attach(to: committedSourceView)
+        let committedInteraction = try XCTUnwrap(
+            committedSourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        XCTAssertTrue(committedInteraction.view === committedSourceView)
+        let committedSession = PhotoReviewDragSessionStub()
+
+        let committedItems = committedSource.dragInteraction(
+            committedInteraction,
+            itemsForBeginning: committedSession
+        )
+        committedSession.items = committedItems
+
+        XCTAssertEqual(committedItems.count, 1)
+        XCTAssertEqual(
+            committedItems.first.flatMap {
+                PhotoReviewNativeDragContract.photoID(
+                    from: $0.itemProvider
+                )
+            },
+            photos[2].id
+        )
+        committed.updateInsertion(
+            to: 0,
+            store: committedStore,
+            reduceMotion: true
+        )
+        XCTAssertNotNil(
+            committed.commit(
+                to: 0,
+                store: committedStore,
+                reduceMotion: true
+            )
+        )
+        committedSource.dragInteraction(
+            committedInteraction,
+            session: committedSession,
+            didEndWith: .move
+        )
+
+        XCTAssertEqual(
+            committedStore.photos,
+            [photos[2], photos[0], photos[1]]
+        )
+        XCTAssertEqual(committed.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertEqual(
+            committed.consumeAnnouncement(),
+            "Moved to photo 1 of 3. Cover."
+        )
+        XCTAssertNil(committed.consumeFocusPhotoID())
+        XCTAssertNil(committed.consumeAnnouncement())
+    }
+
+    func testPhotoReviewNativeDropObservationDistinguishesMissingCallbackFromGuardRejectionAndCommit() throws {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        var observation = PhotoReviewNativeDropObservation()
+        let destination = PhotoReviewNativeDropAttachment.Coordinator(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in },
+            observeDrop: { observation.observe($0) }
+        )
+        let destinationView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        destinationView.bounds = CGRect(
+            x: 88,
+            y: 24,
+            width: 320,
+            height: 98
+        )
+        destination.attach(to: destinationView)
+        let interaction = try XCTUnwrap(
+            destinationView.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(x: 20, y: 49)
+        session.items = [
+            UIDragItem(
+                itemProvider: PhotoReviewNativeDragContract.itemProvider(
+                    photoID: photos[2].id
+                )
+            )
+        ]
+
+        destination.dropInteraction(
+            interaction,
+            sessionDidEnter: session
+        )
+        XCTAssertEqual(
+            destination.dropInteraction(
+                interaction,
+                sessionDidUpdate: session
+            ).operation,
+            .move
+        )
+        XCTAssertEqual(
+            observation.label,
+            "entered:true,updated:true,perform:not-called"
+        )
+        XCTAssertEqual(store.photos, photos)
+
+        destination.dropInteraction(
+            interaction,
+            performDrop: session
+        )
+        XCTAssertEqual(
+            observation.label,
+            "entered:true,updated:true,perform:committed"
+        )
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+
+        let rejectedSession = PhotoReviewDragSessionStub()
+        rejectedSession.items = [
+            UIDragItem(
+                itemProvider: PhotoReviewNativeDragContract.itemProvider(
+                    photoID: UUID(
+                        uuidString: "46000000-0000-4000-8000-000000000099"
+                    )!
+                )
+            )
+        ]
+
+        destination.dropInteraction(
+            interaction,
+            performDrop: rejectedSession
+        )
+        XCTAssertEqual(
+            observation.label,
+            "entered:true,updated:true,perform:rejected-admission"
+        )
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+        XCTAssertNil(presentation.draggedPhotoID)
+    }
+
+    func testPhotoReviewNativeInteractionsFenceTransactionLocksAndResumeWithoutMutation() throws {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+
+        XCTAssertFalse(
+            PhotoReviewNativeInteractionPolicy.isEnabled(
+                isCommitting: true,
+                mutationControlsLocked: false
+            )
+        )
+        XCTAssertFalse(
+            PhotoReviewNativeInteractionPolicy.isEnabled(
+                isCommitting: false,
+                mutationControlsLocked: true
+            )
+        )
+        XCTAssertTrue(
+            PhotoReviewNativeInteractionPolicy.isEnabled(
+                isCommitting: false,
+                mutationControlsLocked: false
+            )
+        )
+
+        let resolvedSource = PhotoReviewNativeDragSource(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            frame: .zero
+        )
+        let sourceAtLocation: (CGPoint) -> PhotoReviewNativeDragSource? = {
+            _ in resolvedSource
+        }
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false,
+            sourceAtLocation: sourceAtLocation
+        )
+        let host = makeNativeInteractionHost()
+        let sourceAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        host.stripContent.addSubview(sourceAttachment)
+        sourceAttachment.update(
+            shouldAttach: true,
+            attach: source.attach(to:),
+            detach: source.detach
+        )
+        defer {
+            sourceAttachment.dismantle()
+            host.cleanUp()
+        }
+        let sourceInteraction = try XCTUnwrap(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+
+        XCTAssertTrue(
+            source.dragInteraction(
+                sourceInteraction,
+                itemsForBeginning: session
+            ).isEmpty
+        )
+        XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.draggedPhotoID)
+
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: sourceAtLocation
+        )
+        session.items = source.dragInteraction(
+            sourceInteraction,
+            itemsForBeginning: session
+        )
+        XCTAssertEqual(session.items.count, 1)
+        presentation.updateInsertion(
+            to: 0,
+            store: store,
+            reduceMotion: true
+        )
+
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false,
+            sourceAtLocation: sourceAtLocation
+        )
+
+        XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertNil(presentation.insertionIndex)
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        source.dragInteraction(
+            sourceInteraction,
+            session: session,
+            didEndWith: .cancel
+        )
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        let destination = PhotoReviewNativeDropAttachment.Coordinator(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in }
+        )
+        let destinationAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        host.stripContent.addSubview(destinationAttachment)
+        destinationAttachment.update(
+            shouldAttach: false,
+            attach: destination.attach(to:),
+            detach: destination.detach
+        )
+        defer {
+            destinationAttachment.dismantle()
+        }
+        XCTAssertFalse(destination.isInteractionAttached)
+
+        XCTAssertTrue(
+            presentation.begin(photoID: photos[2].id, store: store)
+        )
+        let lockedInteraction = UIDropInteraction(delegate: destination)
+        XCTAssertFalse(
+            destination.dropInteraction(
+                lockedInteraction,
+                canHandle: session
+            )
+        )
+        XCTAssertEqual(
+            destination.dropInteraction(
+                lockedInteraction,
+                sessionDidUpdate: session
+            ).operation,
+            .cancel
+        )
+        destination.dropInteraction(
+            lockedInteraction,
+            performDrop: session
+        )
+        XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        destination.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in }
+        )
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertNil(presentation.insertionIndex)
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: sourceAtLocation
+        )
+        session.items = source.dragInteraction(
+            sourceInteraction,
+            itemsForBeginning: session
+        )
+        destination.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in }
+        )
+        destinationAttachment.update(
+            shouldAttach: true,
+            attach: destination.attach(to:),
+            detach: destination.detach
+        )
+
+        XCTAssertTrue(destination.isInteractionAttached)
+        let activeInteraction = try XCTUnwrap(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .first
+        )
+        XCTAssertTrue(
+            destination.dropInteraction(
+                activeInteraction,
+                canHandle: session
+            )
+        )
+        XCTAssertEqual(
+            destination.dropInteraction(
+                activeInteraction,
+                sessionDidUpdate: session
+            ).operation,
+            .move
+        )
+        destination.dropInteraction(
+            activeInteraction,
+            performDrop: session
+        )
+
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+        XCTAssertEqual(presentation.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertEqual(
+            presentation.consumeAnnouncement(),
+            "Moved to photo 1 of 3. Cover."
+        )
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+    }
+
+    func testPhotoReviewDragMovesKnownIdentityFromThirdToCoverWithoutChangingItsValues() {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+
+        XCTAssertEqual(
+            store.performDragReorder(photoID: photos[2].id, to: 0),
+            PhotoReviewReorderResult(
+                photoID: photos[2].id,
+                index: 1,
+                count: 3,
+                announcement: "Moved to photo 1 of 3. Cover."
+            )
+        )
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+        XCTAssertEqual(store.selectedPhotoID, photos[2].id)
+        XCTAssertEqual(store.photos.first, photos[2])
+    }
+
+    func testPhotoReviewDragCancelAndSamePositionRestoreFocusWithoutMutationOrAnnouncement() {
+        let fingerprints = [
+            "drag-cancel-a-digest",
+            "drag-cancel-b-digest",
+            "drag-cancel-c-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000011",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000012",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000013",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+
+        let cancelledStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(cancelledStore.selectPhotoForActions(id: photos[1].id))
+        let cancelled = PhotoReviewDragPresentation()
+
+        XCTAssertTrue(
+            cancelled.begin(photoID: photos[2].id, store: cancelledStore)
+        )
+        cancelled.updateInsertion(
+            to: 0,
+            store: cancelledStore,
+            reduceMotion: true
+        )
+        cancelled.cancel(reduceMotion: true)
+
+        XCTAssertEqual(cancelledStore.photos, photos)
+        XCTAssertEqual(cancelledStore.selectedPhotoID, photos[1].id)
+        XCTAssertEqual(cancelledStore.actionsPhotoID, photos[1].id)
+        XCTAssertEqual(cancelled.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(cancelled.consumeFocusPhotoID())
+        XCTAssertNil(cancelled.consumeAnnouncement())
+        XCTAssertNil(cancelled.draggedPhotoID)
+        XCTAssertNil(cancelled.insertionIndex)
+
+        let unchangedStore = PhotoReviewStore(photos: photos)
+        let unchanged = PhotoReviewDragPresentation()
+        XCTAssertTrue(
+            unchanged.begin(photoID: photos[2].id, store: unchangedStore)
+        )
+
+        XCTAssertNil(
+            unchanged.commit(
+                to: 2,
+                store: unchangedStore,
+                reduceMotion: false
+            )
+        )
+        XCTAssertEqual(unchangedStore.photos, photos)
+        XCTAssertEqual(unchangedStore.selectedPhotoID, photos[0].id)
+        XCTAssertNil(unchangedStore.actionsPhotoID)
+        XCTAssertEqual(unchanged.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(unchanged.consumeFocusPhotoID())
+        XCTAssertNil(unchanged.consumeAnnouncement())
+        XCTAssertNil(unchanged.draggedPhotoID)
+        XCTAssertNil(unchanged.insertionIndex)
+    }
+
     func testPhotoReviewAccessibilityActionPresentationRestoresStableFocusAndConsumesOneAnnouncement() {
         let fingerprints = [
             "action-presentation-a-digest",
@@ -4364,6 +5470,76 @@ final class CaptureFlowTests: XCTestCase {
             photoURL: URL(fileURLWithPath: "/tmp/photo-\(photoID).jpg"),
             thumbnailURL: URL(fileURLWithPath: "/tmp/thumbnail-\(photoID).jpg"),
             createdAt: Date(timeIntervalSinceReferenceDate: 455)
+        )
+    }
+
+    private func makeDragPhotos() -> [StagedCapturePhoto] {
+        let fingerprints = [
+            "drag-a-digest",
+            "drag-b-digest",
+            "drag-c-digest"
+        ]
+        return [
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000001",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000002",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "46000000-0000-4000-8000-000000000003",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+    }
+
+    private struct NativeInteractionHost {
+        let window: UIWindow
+        let outerScreenScroll: UIScrollView
+        let innerHorizontalStrip: UIScrollView
+        let stripContent: UIView
+
+        func cleanUp() {
+            window.isHidden = true
+            withExtendedLifetime(window) {}
+        }
+    }
+
+    private func makeNativeInteractionHost() -> NativeInteractionHost {
+        let window = UIWindow(
+            frame: CGRect(x: 0, y: 0, width: 440, height: 956)
+        )
+        let controller = UIViewController()
+        window.rootViewController = controller
+
+        let outerScreenScroll = UIScrollView(frame: window.bounds)
+        outerScreenScroll.alwaysBounceVertical = true
+        outerScreenScroll.contentSize = CGSize(width: 440, height: 1_200)
+        controller.view.addSubview(outerScreenScroll)
+
+        let innerHorizontalStrip = UIScrollView(
+            frame: CGRect(x: 16, y: 360, width: 408, height: 104)
+        )
+        innerHorizontalStrip.alwaysBounceHorizontal = true
+        innerHorizontalStrip.contentSize = CGSize(width: 520, height: 104)
+        outerScreenScroll.addSubview(innerHorizontalStrip)
+
+        let stripContent = UIView(
+            frame: CGRect(x: 0, y: 0, width: 520, height: 104)
+        )
+        innerHorizontalStrip.addSubview(stripContent)
+        window.makeKeyAndVisible()
+
+        return NativeInteractionHost(
+            window: window,
+            outerScreenScroll: outerScreenScroll,
+            innerHorizontalStrip: innerHorizontalStrip,
+            stripContent: stripContent
         )
     }
 
@@ -6214,6 +7390,50 @@ final class CaptureFlowTests: XCTestCase {
             rightColor.setFill()
             context.fill(CGRect(x: 200, y: 0, width: 200, height: 200))
         })
+    }
+}
+
+@MainActor
+private final class PhotoReviewDragSessionStub: NSObject,
+    UIDragSession,
+    UIDropSession {
+    var items: [UIDragItem] = []
+    var currentLocation = CGPoint.zero
+    var allowsMoveOperation = true
+    var isRestrictedToDraggingApplication = true
+    var localContext: Any?
+    let progress = Progress(totalUnitCount: 1)
+    var localDragSession: UIDragSession? { self }
+    var progressIndicatorStyle: UIDropSessionProgressIndicatorStyle = .default
+
+    func location(in _: UIView) -> CGPoint {
+        currentLocation
+    }
+
+    func hasItemsConforming(
+        toTypeIdentifiers typeIdentifiers: [String]
+    ) -> Bool {
+        items.contains { item in
+            typeIdentifiers.contains { typeIdentifier in
+                item.itemProvider.hasItemConformingToTypeIdentifier(
+                    typeIdentifier
+                )
+            }
+        }
+    }
+
+    func canLoadObjects(
+        ofClass _: NSItemProviderReading.Type
+    ) -> Bool {
+        false
+    }
+
+    func loadObjects(
+        ofClass _: NSItemProviderReading.Type,
+        completion: @escaping ([NSItemProviderReading]) -> Void
+    ) -> Progress {
+        completion([])
+        return Progress(totalUnitCount: 0)
     }
 }
 
