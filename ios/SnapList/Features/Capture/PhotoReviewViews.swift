@@ -228,6 +228,10 @@ final class PhotoReviewDragPresentation {
         cancel(reduceMotion: reduceMotion)
     }
 
+    func endNativeDragPreview(reduceMotion: Bool) {
+        endNativeDragSession(reduceMotion: reduceMotion)
+    }
+
     func cancel(reduceMotion: Bool) {
         guard let photoID = draggedPhotoID else {
             return
@@ -1713,6 +1717,13 @@ struct PhotoReviewView: View {
             .frame(width: 76, height: 76)
             .clipped()
             .clipShape(.rect(cornerRadius: 12))
+            .onDisappear {
+                // The preview is the source-owned lifetime signal when an outside
+                // release does not reach this strip's destination callback.
+                dragPresentation.endNativeDragPreview(
+                    reduceMotion: reduceMotion
+                )
+            }
         }
     }
 

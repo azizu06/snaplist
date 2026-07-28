@@ -4154,6 +4154,56 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(committed.consumeAnnouncement())
     }
 
+    func testPhotoReviewNativePreviewDisappearanceEndsOutsideDragWithoutMutatingCommittedDrop() {
+        let photos = makeDragPhotos()
+        let outsideStore = PhotoReviewStore(photos: photos)
+        let outside = PhotoReviewDragPresentation()
+
+        XCTAssertTrue(
+            outside.begin(photoID: photos[2].id, store: outsideStore)
+        )
+        outside.updateInsertion(
+            to: 0,
+            store: outsideStore,
+            reduceMotion: true
+        )
+
+        outside.endNativeDragPreview(reduceMotion: true)
+
+        XCTAssertEqual(outsideStore.photos, photos)
+        XCTAssertNil(outside.draggedPhotoID)
+        XCTAssertNil(outside.insertionIndex)
+        XCTAssertEqual(outside.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(outside.consumeAnnouncement())
+
+        let committedStore = PhotoReviewStore(photos: photos)
+        let committed = PhotoReviewDragPresentation()
+        XCTAssertTrue(
+            committed.begin(photoID: photos[2].id, store: committedStore)
+        )
+        XCTAssertNotNil(
+            committed.commit(
+                to: 0,
+                store: committedStore,
+                reduceMotion: true
+            )
+        )
+
+        committed.endNativeDragPreview(reduceMotion: true)
+
+        XCTAssertEqual(
+            committedStore.photos,
+            [photos[2], photos[0], photos[1]]
+        )
+        XCTAssertEqual(committed.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertEqual(
+            committed.consumeAnnouncement(),
+            "Moved to photo 1 of 3. Cover."
+        )
+        XCTAssertNil(committed.consumeFocusPhotoID())
+        XCTAssertNil(committed.consumeAnnouncement())
+    }
+
     func testPhotoReviewDragMovesKnownIdentityFromThirdToCoverWithoutChangingItsValues() {
         let photos = makeDragPhotos()
         let store = PhotoReviewStore(photos: photos)
