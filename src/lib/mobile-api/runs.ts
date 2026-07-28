@@ -102,6 +102,7 @@ const cursorPayloadSchema = z
 const runHistoryRowSchema = z
   .object({
     run_id: z.string().uuid(),
+    logical_idempotency_key: z.string().min(1).max(128),
     last_meaningful_update_at: z.string().datetime({ offset: true }),
     snapshot_revision: z.string().regex(/^[1-9][0-9]*$/u),
   })
@@ -325,7 +326,16 @@ export function createMobileRunOperations(
       const boundary = rows.length > input.limit ? pageRows.at(-1) : undefined;
 
       return mobileRunCollectionSchema.parse({
-        runs,
+        entries: pageRows.map((row, index) => ({
+          run: runs[index],
+          logicalIdentity: {
+            idempotencyKey: row.logical_idempotency_key,
+          },
+          orderKey: {
+            lastMeaningfulUpdateAt: row.last_meaningful_update_at,
+            runId: row.run_id,
+          },
+        })),
         nextCursor: boundary && snapshotRevision
           ? encodeCursor({
               snapshotRevision,

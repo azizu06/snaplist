@@ -3,6 +3,73 @@ import XCTest
 @testable import SnapList
 
 final class RunAPIClientTests: XCTestCase {
+    func testRunHistoryRepositoryPreservesFrozenOrderAndLogicalIdentity() async throws {
+        let expectedRunID = UUID(
+            uuidString: "37500000-0000-4000-8000-000000000031"
+        )!
+        let expectedLogicalKey = "37500000-0000-4000-8000-000000000032"
+        let session = makeSession { request in
+            XCTAssertEqual(request.url?.path, "/v1/runs")
+            XCTAssertEqual(
+                URLComponents(
+                    url: try XCTUnwrap(request.url),
+                    resolvingAgainstBaseURL: false
+                )?.queryItems,
+                [
+                    URLQueryItem(name: "limit", value: "2"),
+                    URLQueryItem(name: "cursor", value: "opaque-page"),
+                ]
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Bearer exact-clerk-token"
+            )
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(Self.runHistoryEnvelope.utf8)
+            )
+        }
+        let repository = AuthenticatedTrophyWallRunHistoryRepository(
+            service: RunAPIClient(
+                baseURL: URL(string: "https://api.snaplist.dev")!,
+                session: session
+            ),
+            tokenProvider: RunHistoryBearerTokenProvider(
+                token: "exact-clerk-token"
+            )
+        )
+
+        let page = try await repository.fetchPage(
+            limit: 2,
+            cursor: "opaque-page"
+        )
+
+        XCTAssertEqual(page.entries.map(\.run.id), [expectedRunID])
+        XCTAssertEqual(
+            page.entries.map(\.logicalIdentity),
+            [TrophyWallLogicalIdentity(persistedKey: expectedLogicalKey)]
+        )
+        XCTAssertEqual(
+            page.entries.map(\.orderKey),
+            [
+                TrophyWallOrderKey(
+                    lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 5),
+                    stableIdentity: expectedRunID.uuidString.lowercased()
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            page.entries.first?.run.lastMeaningfulUpdateAt,
+            "1970-01-01T00:00:50.000Z"
+        )
+        XCTAssertEqual(page.nextCursor, "opaque-next")
+    }
+
     func testServerLegalActionsOverrideClientStatusInference() async throws {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000001")!
         let session = makeSession { request in
@@ -163,6 +230,67 @@ final class RunAPIClientTests: XCTestCase {
       "meta": { "requestId": "req_317_running" }
     }
     """#
+
+    private static let runHistoryEnvelope = #"""
+    {
+      "data": {
+        "entries": [
+          {
+            "run": {
+              "id": "37500000-0000-4000-8000-000000000031",
+              "itemId": "37500000-0000-4000-8000-000000000033",
+              "listingId": null,
+              "status": "running",
+              "stage": "pricing",
+              "attemptCount": 1,
+              "maxAttempts": 3,
+              "schemaVersion": 1,
+              "timestamps": {
+                "createdAt": "1970-01-01T00:00:01.000Z",
+                "updatedAt": "1970-01-01T00:00:50.000Z",
+                "enqueuedAt": "1970-01-01T00:00:02.000Z",
+                "startedAt": "1970-01-01T00:00:03.000Z",
+                "lastAttemptedAt": "1970-01-01T00:00:04.000Z",
+                "nextAttemptAt": null,
+                "completedAt": null,
+                "retentionCleanedAt": null
+              },
+              "item": { "title": "Server mutable title", "photoCount": 3 },
+              "requiredInput": null,
+              "terminalOutcome": null,
+              "safeFailure": null,
+              "allowance": "reserved",
+              "legalActions": {
+                "canRetry": false,
+                "canCancel": false,
+                "canOpenReview": false,
+                "canStartNewCapture": false
+              },
+              "lastMeaningfulUpdateAt": "1970-01-01T00:00:50.000Z",
+              "retentionCleanedAt": null
+            },
+            "logicalIdentity": {
+              "idempotencyKey": "37500000-0000-4000-8000-000000000032"
+            },
+            "orderKey": {
+              "lastMeaningfulUpdateAt": "1970-01-01T00:00:05.000Z",
+              "runId": "37500000-0000-4000-8000-000000000031"
+            }
+          }
+        ],
+        "nextCursor": "opaque-next"
+      },
+      "meta": { "requestId": "req_375_history" }
+    }
+    """#
+}
+
+private struct RunHistoryBearerTokenProvider: BearerTokenProviding {
+    let token: String
+
+    func bearerToken() async throws -> String {
+        token
+    }
 }
 
 private final class RunURLProtocolStub: URLProtocol, @unchecked Sendable {

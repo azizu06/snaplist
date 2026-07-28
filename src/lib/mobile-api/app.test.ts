@@ -108,7 +108,7 @@ describe("mobile API v1 provider-neutral handler", () => {
 
   it("lists one tenant run snapshot from the verified bearer principal", async () => {
     const list = vi.fn().mockResolvedValue({
-      runs: [],
+      entries: [],
       nextCursor: "opaque-next-page",
     });
 
@@ -126,7 +126,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       cursor: "opaque-page",
     });
     await expect(response.json()).resolves.toEqual({
-      data: { runs: [], nextCursor: "opaque-next-page" },
+      data: { entries: [], nextCursor: "opaque-next-page" },
       meta: { requestId: "req_test" },
     });
   });

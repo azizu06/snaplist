@@ -11,6 +11,8 @@ import {
 const RUN_ID = "24100000-0000-4000-8000-000000000001";
 const ITEM_ID = "24100000-0000-4000-8000-000000000002";
 const OLDER_RUN_ID = "24100000-0000-4000-8000-000000000003";
+const LOGICAL_KEY = "24100000-0000-4000-8000-000000000004";
+const OLDER_LOGICAL_KEY = "24100000-0000-4000-8000-000000000005";
 
 function runRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -68,11 +70,13 @@ describe("mobile durable-run operations", () => {
         data: [
           {
             run_id: RUN_ID,
+            logical_idempotency_key: LOGICAL_KEY,
             last_meaningful_update_at: "2026-07-19T18:01:00.000Z",
             snapshot_revision: "7",
           },
           {
             run_id: OLDER_RUN_ID,
+            logical_idempotency_key: OLDER_LOGICAL_KEY,
             last_meaningful_update_at: olderUpdatedAt,
             snapshot_revision: "7",
           },
@@ -83,6 +87,7 @@ describe("mobile durable-run operations", () => {
         data: [
           {
             run_id: OLDER_RUN_ID,
+            logical_idempotency_key: OLDER_LOGICAL_KEY,
             last_meaningful_update_at: "2026-07-19T17:59:00.000Z",
             snapshot_revision: "7",
           },
@@ -118,9 +123,16 @@ describe("mobile durable-run operations", () => {
     });
 
     expect([
-      ...first.runs.map((run) => run.id),
-      ...second.runs.map((run) => run.id),
+      ...first.entries.map((entry) => entry.run.id),
+      ...second.entries.map((entry) => entry.run.id),
     ]).toEqual([RUN_ID, OLDER_RUN_ID]);
+    expect(second.entries[0]?.orderKey).toEqual({
+      lastMeaningfulUpdateAt: "2026-07-19T17:59:00.000Z",
+      runId: OLDER_RUN_ID,
+    });
+    expect(second.entries[0]?.logicalIdentity).toEqual({
+      idempotencyKey: OLDER_LOGICAL_KEY,
+    });
     expect(listRunHistoryPage).toHaveBeenNthCalledWith(1, { limit: 2 });
     expect(listRunHistoryPage).toHaveBeenNthCalledWith(2, {
       limit: 2,
@@ -131,7 +143,7 @@ describe("mobile durable-run operations", () => {
       },
     });
     expect(second.nextCursor).toBeNull();
-    expect(second.runs[0]?.lastMeaningfulUpdateAt).toBe(
+    expect(second.entries[0]?.run.lastMeaningfulUpdateAt).toBe(
       "2026-07-19T18:02:00.000Z",
     );
   });

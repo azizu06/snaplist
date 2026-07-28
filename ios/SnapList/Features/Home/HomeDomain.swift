@@ -179,10 +179,15 @@ struct TrophyWallPrincipalScope: Hashable, Sendable {
 }
 
 struct TrophyWallLogicalIdentity: Hashable, Sendable {
-    fileprivate let idempotencyKey: UUID
+    fileprivate let persistedKey: String
 
     init(idempotencyKey: UUID) {
-        self.idempotencyKey = idempotencyKey
+        persistedKey = idempotencyKey.uuidString.lowercased()
+    }
+
+    init(persistedKey: String) {
+        precondition(!persistedKey.isEmpty && persistedKey.count <= 128)
+        self.persistedKey = persistedKey
     }
 }
 
@@ -202,18 +207,32 @@ enum TrophyWallCardState: Hashable, Sendable {
 
 struct TrophyWallOrderKey: Hashable, Comparable, Sendable {
     let lastMeaningfulUpdateAt: Date
-    private let stableIdentity: UUID
+    private let stableIdentity: String
 
-    fileprivate init(lastMeaningfulUpdateAt: Date, stableIdentity: UUID) {
+    init(lastMeaningfulUpdateAt: Date, stableIdentity: String) {
         self.lastMeaningfulUpdateAt = lastMeaningfulUpdateAt
         self.stableIdentity = stableIdentity
+    }
+
+    init?(serverTimestamp: String, runID: UUID) {
+        guard let date = TrophyWallServerDate.parse(serverTimestamp) else {
+            return nil
+        }
+        self.init(
+            lastMeaningfulUpdateAt: date,
+            stableIdentity: runID.uuidString.lowercased()
+        )
+    }
+
+    fileprivate func matches(runID: UUID) -> Bool {
+        stableIdentity == runID.uuidString.lowercased()
     }
 
     static func < (lhs: TrophyWallOrderKey, rhs: TrophyWallOrderKey) -> Bool {
         if lhs.lastMeaningfulUpdateAt != rhs.lastMeaningfulUpdateAt {
             return lhs.lastMeaningfulUpdateAt < rhs.lastMeaningfulUpdateAt
         }
-        return lhs.stableIdentity.uuidString < rhs.stableIdentity.uuidString
+        return lhs.stableIdentity < rhs.stableIdentity
     }
 }
 
@@ -238,7 +257,7 @@ struct TrophyWallCard: Hashable, Sendable {
             itemName: itemName,
             orderKey: TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
-                stableIdentity: logicalIdentity.idempotencyKey
+                stableIdentity: logicalIdentity.persistedKey
             )
         )
     }
@@ -248,7 +267,8 @@ struct TrophyWallCard: Hashable, Sendable {
         runID: UUID,
         state: TrophyWallCardState = .accepted,
         itemName: String? = nil,
-        lastMeaningfulUpdateAt: Date
+        lastMeaningfulUpdateAt: Date,
+        orderKey: TrophyWallOrderKey? = nil
     ) -> TrophyWallCard {
         if let itemName {
             precondition(!itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -258,9 +278,9 @@ struct TrophyWallCard: Hashable, Sendable {
             identity: .run(runID),
             state: state,
             itemName: itemName,
-            orderKey: TrophyWallOrderKey(
+            orderKey: orderKey ?? TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
-                stableIdentity: runID
+                stableIdentity: runID.uuidString.lowercased()
             )
         )
     }
@@ -289,7 +309,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             if case .local(let logicalIdentity) = card.identity {
                 accessibilityIdentifier =
                     "trophy.processing.row.local."
-                    + logicalIdentity.idempotencyKey.uuidString.lowercased()
+                    + logicalIdentity.persistedKey.lowercased()
             } else {
                 return nil
             }
@@ -337,6 +357,7 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
     let linkedLogicalIdentity: TrophyWallLogicalIdentity?
     let state: TrophyWallCardState
     let lastMeaningfulUpdateAt: Date
+    let historyOrderKey: TrophyWallOrderKey?
     let itemName: String?
 
     init(
@@ -345,6 +366,7 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         linkedLogicalIdentity: TrophyWallLogicalIdentity?,
         state: TrophyWallCardState = .accepted,
         lastMeaningfulUpdateAt: Date,
+        historyOrderKey: TrophyWallOrderKey? = nil,
         itemName: String? = nil
     ) {
         self.principalScope = principalScope
@@ -352,8 +374,20 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         self.linkedLogicalIdentity = linkedLogicalIdentity
         self.state = state
         self.lastMeaningfulUpdateAt = lastMeaningfulUpdateAt
+        self.historyOrderKey = historyOrderKey
         self.itemName = itemName
     }
+}
+
+struct TrophyWallRunHistoryEntry: Equatable, Sendable {
+    let logicalIdentity: TrophyWallLogicalIdentity
+    let orderKey: TrophyWallOrderKey
+    let run: DurableRun
+}
+
+struct TrophyWallRunHistoryPage: Equatable, Sendable {
+    let entries: [TrophyWallRunHistoryEntry]
+    let nextCursor: String?
 }
 
 protocol TrophyWallRepository: Sendable {
@@ -405,11 +439,43 @@ final class TrophyWallStore {
             runID: acceptedRun.runID,
             state: acceptedRun.state,
             itemName: linkedItemName ?? existingCanonicalItemName ?? acceptedRun.itemName,
-            lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt
+            lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt,
+            orderKey: acceptedRun.historyOrderKey
         )
         cards.removeAll { $0.identity == canonicalCard.identity }
         cards.append(canonicalCard)
         cards.sort { $0.orderKey > $1.orderKey }
+    }
+
+    func ingest(
+        historyPage: TrophyWallRunHistoryPage,
+        principalScope requestedPrincipalScope: TrophyWallPrincipalScope
+    ) {
+        guard requestedPrincipalScope == principalScope else {
+            return
+        }
+
+        for entry in historyPage.entries {
+            let runDetail = entry.run
+            guard entry.orderKey.matches(runID: runDetail.id),
+                  let state = Self.cardState(for: runDetail),
+                  let lastMeaningfulUpdateAt = TrophyWallServerDate.parse(
+                      runDetail.lastMeaningfulUpdateAt
+                  ) else {
+                continue
+            }
+            ingest(
+                TrophyWallCanonicalAcceptedRun(
+                    principalScope: requestedPrincipalScope,
+                    runID: runDetail.id,
+                    linkedLogicalIdentity: entry.logicalIdentity,
+                    state: state,
+                    lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
+                    historyOrderKey: entry.orderKey,
+                    itemName: runDetail.item?.title
+                )
+            )
+        }
     }
 
     func ingest(
@@ -422,8 +488,8 @@ final class TrophyWallStore {
               acceptedRun.runID == runDetail.id,
               acceptedRun.itemID == runDetail.itemID,
               let state = Self.cardState(for: runDetail),
-              let lastMeaningfulUpdateAt = Self.serverDate(
-                  from: runDetail.lastMeaningfulUpdateAt
+              let lastMeaningfulUpdateAt = TrophyWallServerDate.parse(
+                  runDetail.lastMeaningfulUpdateAt
               ) else {
             return
         }
@@ -459,7 +525,10 @@ final class TrophyWallStore {
         }
     }
 
-    private static func serverDate(from value: String) -> Date? {
+}
+
+private enum TrophyWallServerDate {
+    static func parse(_ value: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = fractional.date(from: value) {

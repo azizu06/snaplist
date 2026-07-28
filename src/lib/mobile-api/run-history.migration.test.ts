@@ -53,9 +53,30 @@ describe("Trophy Wall run-history snapshot migration", () => {
     );
   });
 
+  it("moves every run ordering version to the new tenant during an authorized ownership transfer", () => {
+    const ownershipTransfer = migration.indexOf(
+      "new.user_id is distinct from old.user_id",
+    );
+    const unchangedTimestampReturn = migration.indexOf(
+      "new.updated_at is not distinct from old.updated_at",
+    );
+
+    expect(ownershipTransfer).toBeGreaterThan(-1);
+    expect(ownershipTransfer).toBeLessThan(unchangedTimestampReturn);
+    expect(migration).toMatch(
+      /new\.user_id is distinct from old\.user_id[\s\S]*unnest\(array\[old\.user_id, new\.user_id\]\)[\s\S]*order by value[\s\S]*pg_advisory_xact_lock\([\s\S]*trophy-run-order:/i,
+    );
+    expect(migration).toMatch(
+      /update public\.pipeline_run_history_order_versions[\s\S]*set user_id = new\.user_id[\s\S]*where run_id = new\.id[\s\S]*and user_id = old\.user_id/i,
+    );
+  });
+
   it("freezes membership and order at the caller's opaque snapshot revision", () => {
     expect(migration).toMatch(
       /create or replace function public\.list_mobile_run_history_page\([\s\S]*p_snapshot_revision text[\s\S]*security invoker/i,
+    );
+    expect(migration).toMatch(
+      /returns table \([\s\S]*run_id uuid,[\s\S]*logical_idempotency_key text,[\s\S]*last_meaningful_update_at timestamptz/i,
     );
     expect(migration).toMatch(
       /v_user_id text := public\.clerk_user_id\(\)/i,
@@ -66,6 +87,9 @@ describe("Trophy Wall run-history snapshot migration", () => {
     );
     expect(migration).toMatch(
       /select distinct on \(version\.run_id\)[\s\S]*version\.revision <= v_snapshot_revision[\s\S]*order by version\.run_id, version\.revision desc/i,
+    );
+    expect(migration).toMatch(
+      /frozen\.run_id,[\s\S]*run\.idempotency_key,[\s\S]*join public\.pipeline_runs as run[\s\S]*run\.user_id = v_user_id/i,
     );
     expect(migration).toMatch(
       /frozen\.last_meaningful_update_at < p_before_updated_at[\s\S]*frozen\.run_id < p_before_run_id[\s\S]*order by frozen\.last_meaningful_update_at desc, frozen\.run_id desc[\s\S]*limit p_limit/i,

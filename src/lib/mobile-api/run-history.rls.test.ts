@@ -26,12 +26,15 @@ const FOREIGN_RUN = "37500000-0000-4000-8000-000000000999";
 const OWNER_ITEM_NEWER = "37500000-0000-4000-8000-000000000012";
 const OWNER_ITEM_MUTATED = "37500000-0000-4000-8000-000000000011";
 const FOREIGN_ITEM = "37500000-0000-4000-8000-000000000019";
+const TRANSFER_RECOVERY_ID = "37500000-0000-4000-8000-000000000021";
+const TRANSFER_LEASE_TOKEN = "37500000-0000-4000-8000-000000000022";
 
 let reachable = false;
 let admin: SupabaseClient;
 let ownerId = "";
 let foreignId = "";
 let ownerToken = "";
+let foreignToken = "";
 
 async function stackReachable(): Promise<boolean> {
   if (!SECRET_API_KEY) return false;
@@ -54,6 +57,7 @@ beforeAll(async () => {
   ownerId = `user_test_run_history_owner_${Date.now()}`;
   foreignId = `user_test_run_history_foreign_${Date.now()}`;
   ownerToken = await mintUserJwt(ownerId);
+  foreignToken = await mintUserJwt(foreignId);
   admin = createClient(SUPABASE_URL, SECRET_API_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -108,35 +112,58 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!reachable) return;
+  const database = new Client({ connectionString: DATABASE_URL });
+  await database.connect();
+  try {
+    await database.query(
+      "delete from private.guest_draft_recoveries where id = $1::uuid",
+      [TRANSFER_RECOVERY_ID],
+    );
+  } finally {
+    await database.end();
+  }
   await cleanupClerkTestUsers(admin, [ownerId, foreignId]);
 });
+
+function runHistoryHandler() {
+  const operations = createConfiguredSupabaseMobileRunOperations({
+    supabaseURL: SUPABASE_URL,
+    anonKey: SECRET_API_KEY!,
+  });
+  return createMobileApiHandler({
+    async authenticate(token) {
+      if (token === ownerToken) return { userId: ownerId };
+      if (token === foreignToken) return { userId: foreignId };
+      throw new Error("forged token");
+    },
+    runHistory: operations,
+    runOperations: operations,
+    worker: {
+      consume: async () => ({
+        claimed: 0,
+        succeeded: 0,
+        retrying: 0,
+        failed: 0,
+        skipped: 0,
+      }),
+    },
+    requestId: () => "req_375_run_history",
+  });
+}
+
+function expectExactInstant(actual: string, expected: string): void {
+  const actualInstant = Date.parse(actual);
+  const expectedInstant = Date.parse(expected);
+  expect(Number.isFinite(actualInstant)).toBe(true);
+  expect(Number.isFinite(expectedInstant)).toBe(true);
+  expect(actualInstant).toBe(expectedInstant);
+}
 
 describe.runIf(await stackReachable())(
   "authenticated snapshot-stable durable-run collection",
   () => {
     it("continues owned history without repeats or skips after an unseen run updates", async () => {
-      const operations = createConfiguredSupabaseMobileRunOperations({
-        supabaseURL: SUPABASE_URL,
-        anonKey: SECRET_API_KEY!,
-      });
-      const handle = createMobileApiHandler({
-        async authenticate(token) {
-          if (token !== ownerToken) throw new Error("forged token");
-          return { userId: ownerId };
-        },
-        runHistory: operations,
-        runOperations: operations,
-        worker: {
-          consume: async () => ({
-            claimed: 0,
-            succeeded: 0,
-            retrying: 0,
-            failed: 0,
-            skipped: 0,
-          }),
-        },
-        requestId: () => "req_375_run_history",
-      });
+      const handle = runHistoryHandler();
 
       const firstResponse = await handle(
         new Request("http://localhost/v1/runs?limit=1", {
@@ -145,9 +172,26 @@ describe.runIf(await stackReachable())(
       );
       expect(firstResponse.status).toBe(200);
       const first = await firstResponse.json() as {
-        data: { runs: Array<{ id: string }>; nextCursor: string | null };
+        data: {
+          entries: Array<{
+            run: { id: string };
+            logicalIdentity: { idempotencyKey: string };
+            orderKey: { lastMeaningfulUpdateAt: string; runId: string };
+          }>;
+          nextCursor: string | null;
+        };
       };
-      expect(first.data.runs.map((run) => run.id)).toEqual([OWNER_RUN_NEWER]);
+      expect(first.data.entries.map((entry) => entry.run.id)).toEqual([
+        OWNER_RUN_NEWER,
+      ]);
+      expect(first.data.entries[0]?.logicalIdentity).toEqual({
+        idempotencyKey: "run-history-owner-newer",
+      });
+      expect(first.data.entries[0]?.orderKey.runId).toBe(OWNER_RUN_NEWER);
+      expectExactInstant(
+        first.data.entries[0]!.orderKey.lastMeaningfulUpdateAt,
+        "2026-07-19T18:01:00.000Z",
+      );
       expect(first.data.nextCursor).toEqual(expect.any(String));
 
       const database = new Client({ connectionString: DATABASE_URL });
@@ -174,22 +218,139 @@ describe.runIf(await stackReachable())(
       expect(secondResponse.status).toBe(200);
       const second = await secondResponse.json() as {
         data: {
-          runs: Array<{ id: string; lastMeaningfulUpdateAt: string }>;
+          entries: Array<{
+            run: { id: string; lastMeaningfulUpdateAt: string };
+            logicalIdentity: { idempotencyKey: string };
+            orderKey: { lastMeaningfulUpdateAt: string; runId: string };
+          }>;
           nextCursor: string | null;
         };
       };
 
       const returnedIds = [
-        ...first.data.runs.map((run) => run.id),
-        ...second.data.runs.map((run) => run.id),
+        ...first.data.entries.map((entry) => entry.run.id),
+        ...second.data.entries.map((entry) => entry.run.id),
       ];
       expect(returnedIds).toEqual([OWNER_RUN_NEWER, OWNER_RUN_MUTATED]);
       expect(new Set(returnedIds).size).toBe(2);
       expect(returnedIds).not.toContain(FOREIGN_RUN);
-      expect(second.data.runs[0]?.lastMeaningfulUpdateAt).not.toBe(
+      expect(second.data.entries[0]?.run.lastMeaningfulUpdateAt).not.toBe(
         "2026-07-19T17:59:00.000Z",
       );
+      expect(second.data.entries[0]?.orderKey.runId).toBe(OWNER_RUN_MUTATED);
+      expectExactInstant(
+        second.data.entries[0]!.orderKey.lastMeaningfulUpdateAt,
+        "2026-07-19T17:59:00.000Z",
+      );
+      expect(second.data.entries[0]?.logicalIdentity.idempotencyKey).toBe(
+        "run-history-owner-mutated",
+      );
       expect(second.data.nextCursor).toBeNull();
+    });
+
+    it("moves run history to the exact new tenant without old-owner visibility", async () => {
+      const handle = runHistoryHandler();
+      const database = new Client({ connectionString: DATABASE_URL });
+      await database.connect();
+      try {
+        await database.query("begin");
+        await database.query(
+          `insert into private.guest_draft_recoveries (
+             id, guest_user_id, pipeline_run_id, item_id, draft_id,
+             reservation_id, allowance_period_id, recovery_token_hash,
+             encrypted_artifact, storage_manifest, storage_object_count,
+             usable_draft_at, expires_at, state, claim_target_user_id,
+             claim_lease_token, claim_lease_expires_at
+           ) values (
+             $1::uuid, $3, $2::uuid, $4::uuid,
+             '37500000-0000-4000-8000-000000000023'::uuid,
+             '37500000-0000-4000-8000-000000000024'::uuid,
+             '37500000-0000-4000-8000-000000000025'::uuid,
+             repeat('a', 64), '{}'::jsonb, '[]'::jsonb, 1,
+             statement_timestamp(), statement_timestamp() + interval '24 hours',
+             'copying', $5, $6::uuid, statement_timestamp() + interval '5 minutes'
+           )`,
+          [
+            TRANSFER_RECOVERY_ID,
+            OWNER_RUN_MUTATED,
+            ownerId,
+            OWNER_ITEM_MUTATED,
+            foreignId,
+            TRANSFER_LEASE_TOKEN,
+          ],
+        );
+        await database.query(
+          "select set_config('snaplist.guest_claim_recovery_id', $1, true)",
+          [TRANSFER_RECOVERY_ID],
+        );
+        await database.query(
+          "select set_config('snaplist.guest_claim_lease_token', $1, true)",
+          [TRANSFER_LEASE_TOKEN],
+        );
+        await database.query(
+          "set constraints public.pipeline_runs_item_user_fkey deferred",
+        );
+        await database.query(
+          `update public.items
+           set user_id = $2
+           where id = $1::uuid and user_id = $3`,
+          [OWNER_ITEM_MUTATED, foreignId, ownerId],
+        );
+        await database.query(
+          `update public.pipeline_runs
+           set user_id = $2
+           where id = $1::uuid and user_id = $3`,
+          [OWNER_RUN_MUTATED, foreignId, ownerId],
+        );
+        await database.query("commit");
+      } catch (error) {
+        await database.query("rollback").catch(() => undefined);
+        throw error;
+      } finally {
+        await database.end();
+      }
+
+      const ownerResponse = await handle(
+        new Request("http://localhost/v1/runs?limit=50", {
+          headers: { authorization: `Bearer ${ownerToken}` },
+        }),
+      );
+      const foreignResponse = await handle(
+        new Request("http://localhost/v1/runs?limit=50", {
+          headers: { authorization: `Bearer ${foreignToken}` },
+        }),
+      );
+      expect(ownerResponse.status).toBe(200);
+      expect(foreignResponse.status).toBe(200);
+      const owner = await ownerResponse.json() as {
+        data: { entries: Array<{ run: { id: string } }> };
+      };
+      const foreign = await foreignResponse.json() as {
+        data: { entries: Array<{ run: { id: string } }> };
+      };
+      expect(owner.data.entries.map((entry) => entry.run.id)).not.toContain(
+        OWNER_RUN_MUTATED,
+      );
+      expect(foreign.data.entries.map((entry) => entry.run.id)).toContain(
+        OWNER_RUN_MUTATED,
+      );
+
+      const ledger = new Client({ connectionString: DATABASE_URL });
+      await ledger.connect();
+      try {
+        const ownership = await ledger.query(
+          `select user_id, count(*)::integer as version_count
+           from public.pipeline_run_history_order_versions
+           where run_id = $1::uuid
+           group by user_id`,
+          [OWNER_RUN_MUTATED],
+        );
+        expect(ownership.rows).toEqual([
+          { user_id: foreignId, version_count: expect.any(Number) },
+        ]);
+      } finally {
+        await ledger.end();
+      }
     });
   },
 );

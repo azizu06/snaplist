@@ -873,6 +873,65 @@ final class TrophyWallDomainTests: XCTestCase {
         }
     }
 
+    func testStoreConvergesRelaunchedPendingFromFrozenRunHistoryPageWithoutMutableReordering()
+        throws {
+        let fixture = TrophyWallTestFixture()
+        let mutableRun = try fixture.decodedRunDetail(
+            runID: fixture.runID,
+            itemID: fixture.itemID,
+            status: .running,
+            stage: .pricing,
+            lastMeaningfulUpdateAt: "1970-01-01T00:00:50.000Z"
+        )
+        let page = TrophyWallRunHistoryPage(
+            entries: [
+                TrophyWallRunHistoryEntry(
+                    logicalIdentity: fixture.logicalID,
+                    orderKey: TrophyWallOrderKey(
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 5),
+                        stableIdentity: fixture.runID.uuidString.lowercased()
+                    ),
+                    run: mutableRun
+                ),
+            ],
+            nextCursor: nil
+        )
+        let store = fixture.makeStore()
+
+        for _ in 0..<2 {
+            store.ingest(
+                historyPage: page,
+                principalScope: fixture.principal
+            )
+        }
+
+        XCTAssertEqual(store.cards.count, 2)
+        XCTAssertEqual(
+            store.cards.map(\.identity),
+            [.local(fixture.unrelatedLogicalID), .run(fixture.runID)]
+        )
+        XCTAssertEqual(
+            store.cards.map(\.orderKey.lastMeaningfulUpdateAt),
+            [fixture.unrelatedUpdate, Date(timeIntervalSince1970: 5)]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.itemName),
+            [fixture.unrelatedItemName, fixture.matchedItemName]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.stateLabel),
+            ["Pending upload", "Pricing"]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.destination),
+            [nil, .run(fixture.runID)]
+        )
+        XCTAssertEqual(
+            page.entries.first?.run.lastMeaningfulUpdateAt,
+            "1970-01-01T00:00:50.000Z"
+        )
+    }
+
     func testProcessingProjectionPreservesExactMergeTruthAndRunDestination() {
         let fixture = TrophyWallTestFixture()
         let acceptedRun = TrophyWallCanonicalAcceptedRun(
@@ -1257,7 +1316,8 @@ private struct TrophyWallTestFixture {
         runID: UUID,
         itemID: UUID,
         status: DurableRunStatus = .queued,
-        stage: DurableRunStage = .queued
+        stage: DurableRunStage = .queued,
+        lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z"
     ) throws -> DurableRun {
         let json = """
         {
@@ -1290,7 +1350,7 @@ private struct TrophyWallTestFixture {
             "canOpenReview": false,
             "canStartNewCapture": false
           },
-          "lastMeaningfulUpdateAt": "1970-01-01T00:00:05.000Z",
+          "lastMeaningfulUpdateAt": "\(lastMeaningfulUpdateAt)",
           "retentionCleanedAt": null
         }
         """

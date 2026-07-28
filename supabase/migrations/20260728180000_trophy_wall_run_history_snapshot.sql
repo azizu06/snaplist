@@ -51,18 +51,47 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_lock_user text;
 begin
+  if tg_op = 'UPDATE' then
+    if new.user_id is distinct from old.user_id then
+      -- Guest claim already serializes and transfers the owning run in one
+      -- transaction. Take both tenant history locks in stable order before
+      -- moving every frozen version with that same run.
+      for v_lock_user in
+        select value
+        from unnest(array[old.user_id, new.user_id]) value
+        order by value
+      loop
+        perform pg_advisory_xact_lock(
+          hashtextextended('trophy-run-order:' || v_lock_user, 0)
+        );
+      end loop;
+
+      update public.pipeline_run_history_order_versions
+      set user_id = new.user_id
+      where run_id = new.id
+        and user_id = old.user_id;
+    elsif new.updated_at is not distinct from old.updated_at then
+      return new;
+    end if;
+  end if;
+
+  if tg_op <> 'UPDATE'
+    or new.user_id is not distinct from old.user_id then
+    -- Sequence allocation alone does not define commit order. Serializing only
+    -- this tenant's ordering writes ensures a visible max(revision) is a safe
+    -- snapshot frontier even when another run update is still in flight.
+    perform pg_advisory_xact_lock(
+      hashtextextended('trophy-run-order:' || new.user_id, 0)
+    );
+  end if;
+
   if tg_op = 'UPDATE'
     and new.updated_at is not distinct from old.updated_at then
     return new;
   end if;
-
-  -- Sequence allocation alone does not define commit order. Serializing only
-  -- this tenant's ordering writes ensures a visible max(revision) is a safe
-  -- snapshot frontier even when another run update is still in flight.
-  perform pg_advisory_xact_lock(
-    hashtextextended('trophy-run-order:' || new.user_id, 0)
-  );
 
   insert into public.pipeline_run_history_order_versions (
     run_id,
@@ -115,6 +144,7 @@ create or replace function public.list_mobile_run_history_page(
 )
 returns table (
   run_id uuid,
+  logical_idempotency_key text,
   last_meaningful_update_at timestamptz,
   snapshot_revision text
 )
@@ -187,9 +217,13 @@ begin
   )
   select
     frozen.run_id,
+    run.idempotency_key,
     frozen.last_meaningful_update_at,
     v_snapshot_revision::text
   from frozen_run_order as frozen
+  join public.pipeline_runs as run
+    on run.id = frozen.run_id
+   and run.user_id = v_user_id
   where p_before_updated_at is null
     or frozen.last_meaningful_update_at < p_before_updated_at
     or (
