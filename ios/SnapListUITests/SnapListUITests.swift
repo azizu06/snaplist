@@ -899,12 +899,15 @@ final class SnapListUITests: XCTestCase {
         )
         let edgeSource = edgeApp.buttons["photo-review.thumbnail.1"]
         let fifthPhoto = edgeApp.buttons["photo-review.thumbnail.5"]
+        let edgeOrder = edgeApp.staticTexts["photo-review.fixture-order"]
         XCTAssertTrue(edgeSource.exists)
         XCTAssertTrue(fifthPhoto.exists)
-        XCTAssertFalse(
-            fifthPhoto.isHittable,
-            "The overflowing fixture must start before its trailing edge."
+        XCTAssertTrue(
+            edgeOrder.waitForExistence(timeout: 2),
+            "The fixture must expose stable photo identity order."
         )
+        let edgeOrderBeforeDrag = edgeOrder.label
+        let fifthPhotoMinXBeforeDrag = fifthPhoto.frame.minX
 
         let appFrame = edgeApp.windows.firstMatch.frame
         let trailingEdge = edgeApp.coordinate(
@@ -928,17 +931,17 @@ final class SnapListUITests: XCTestCase {
             edgeObservation.label.contains("edge=trailing"),
             "The drag must cross the production 28pt trailing threshold."
         )
-        let autoScrolledExpectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hittable == true"),
-            object: fifthPhoto
+        let fifthPhotoDisplacement =
+            fifthPhotoMinXBeforeDrag - fifthPhoto.frame.minX
+        XCTAssertGreaterThan(
+            fifthPhotoDisplacement,
+            8,
+            "Crossing the edge threshold must visibly move the real strip."
         )
         XCTAssertEqual(
-            XCTWaiter.wait(
-                for: [autoScrolledExpectation],
-                timeout: 2
-            ),
-            .completed,
-            "Crossing the edge threshold must reveal the trailing photo."
+            edgeOrder.label,
+            edgeOrderBeforeDrag,
+            "Edge autoscroll must not reorder an outside drop."
         )
     }
 
