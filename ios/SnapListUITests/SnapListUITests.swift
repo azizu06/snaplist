@@ -288,6 +288,51 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
+    func testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--voice-note-take-ready-fixture"
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let voice = app.buttons["photo-review.voice"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 3))
+        voice.tap()
+
+        let cancel = app.buttons["voice-note.cancel"]
+        let elapsed = app.staticTexts["voice-note.elapsed"]
+        let save = app.buttons["voice-note.save"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 2))
+        XCTAssertTrue(elapsed.exists)
+        XCTAssertTrue(save.exists)
+
+        let orderedIdentifiers = app
+            .descendants(matching: .any)
+            .allElementsBoundByAccessibilityElement
+            .map(\.identifier)
+        let cancelIndex = try? XCTUnwrap(
+            orderedIdentifiers.firstIndex(of: "voice-note.cancel")
+        )
+        let elapsedIndex = try? XCTUnwrap(
+            orderedIdentifiers.firstIndex(of: "voice-note.elapsed")
+        )
+        let saveIndex = try? XCTUnwrap(
+            orderedIdentifiers.firstIndex(of: "voice-note.save")
+        )
+
+        XCTAssertLessThan(cancelIndex ?? .max, elapsedIndex ?? .max)
+        XCTAssertLessThan(elapsedIndex ?? .max, saveIndex ?? .max)
+    }
+
     func testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission() {
         let app = XCUIApplication()
         app.launchArguments = [

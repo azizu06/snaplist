@@ -7,28 +7,69 @@ enum AVFoundationVoiceNoteError: Error {
 }
 
 @MainActor
+protocol VoiceNoteAudioSessionControlling: AnyObject {
+    func setCategory(
+        _ category: AVAudioSession.Category,
+        mode: AVAudioSession.Mode,
+        options: AVAudioSession.CategoryOptions
+    ) throws
+    func setActive(
+        _ active: Bool,
+        options: AVAudioSession.SetActiveOptions
+    ) throws
+}
+
+extension AVAudioSession: VoiceNoteAudioSessionControlling {}
+
+@MainActor
+protocol VoiceNoteRecording: AnyObject {
+    var delegate: AVAudioRecorderDelegate? { get set }
+    var isMeteringEnabled: Bool { get set }
+    var currentTime: TimeInterval { get }
+
+    @discardableResult
+    func prepareToRecord() -> Bool
+    func record(forDuration duration: TimeInterval) -> Bool
+    func stop()
+    func updateMeters()
+    func averagePower(forChannel channelNumber: Int) -> Float
+}
+
+extension AVAudioRecorder: VoiceNoteRecording {}
+
+@MainActor
 final class AVFoundationVoiceNoteAudioClient:
     NSObject,
     VoiceNoteAudioClient,
+    AVAudioRecorderDelegate,
     AVAudioPlayerDelegate
 {
     var interruptionHandler: (() -> Void)?
     var routeChangeHandler: (() -> Void)?
     var playbackFinishedHandler: (() -> Void)?
+    var recordingFinishedHandler: ((VoiceNoteRecordingCompletion) -> Void)?
 
-    private let audioSession: AVAudioSession
+    private let audioSession: VoiceNoteAudioSessionControlling
     private let notificationCenter: NotificationCenter
-    private var recorder: AVAudioRecorder?
+    private let recorderFactory:
+        (URL, [String: Any]) throws -> VoiceNoteRecording
+    private var recorder: VoiceNoteRecording?
     private var player: AVAudioPlayer?
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
 
     init(
-        audioSession: AVAudioSession = .sharedInstance(),
-        notificationCenter: NotificationCenter = .default
+        audioSession: VoiceNoteAudioSessionControlling =
+            AVAudioSession.sharedInstance(),
+        notificationCenter: NotificationCenter = .default,
+        recorderFactory: @escaping
+            (URL, [String: Any]) throws -> VoiceNoteRecording = {
+                try AVAudioRecorder(url: $0, settings: $1)
+            }
     ) {
         self.audioSession = audioSession
         self.notificationCenter = notificationCenter
+        self.recorderFactory = recorderFactory
         super.init()
         interruptionObserver = notificationCenter.addObserver(
             forName: AVAudioSession.interruptionNotification,
@@ -70,15 +111,17 @@ final class AVFoundationVoiceNoteAudioClient:
     }
 
     var permission: VoiceNoteMicrophonePermission {
-        switch AVAudioApplication.shared.recordPermission {
-        case .granted:
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
             return .allowed
         case .denied:
             return .denied
-        case .undetermined:
+        case .restricted:
+            return .restricted
+        case .notDetermined:
             return .undetermined
         @unknown default:
-            return .denied
+            return .restricted
         }
     }
 
@@ -102,13 +145,17 @@ final class AVFoundationVoiceNoteAudioClient:
                 continuation.resume(returning: granted)
             }
         }
-        return granted ? .allowed : .denied
+        return granted ? .allowed : permission
     }
 
     func startRecording(to url: URL) throws {
         stopPlaying()
-        try audioSession.setCategory(.record, mode: .default)
-        try audioSession.setActive(true)
+        try audioSession.setCategory(
+            .record,
+            mode: .default,
+            options: []
+        )
+        try audioSession.setActive(true, options: [])
 
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
@@ -118,12 +165,14 @@ final class AVFoundationVoiceNoteAudioClient:
             AVLinearPCMIsBigEndianKey: false,
             AVLinearPCMIsFloatKey: false
         ]
-        let recorder = try AVAudioRecorder(url: url, settings: settings)
+        let recorder = try recorderFactory(url, settings)
+        recorder.delegate = self
         recorder.isMeteringEnabled = true
         recorder.prepareToRecord()
         guard recorder.record(
             forDuration: VoiceNotePresentation.maximumDuration
         ) else {
+            recorder.delegate = nil
             try? audioSession.setActive(
                 false,
                 options: .notifyOthersOnDeactivation
@@ -134,6 +183,7 @@ final class AVFoundationVoiceNoteAudioClient:
     }
 
     func stopRecording() {
+        recorder?.delegate = nil
         recorder?.stop()
         recorder = nil
         deactivateSessionIfIdle()
@@ -141,8 +191,12 @@ final class AVFoundationVoiceNoteAudioClient:
 
     func startPlaying(_ url: URL) throws {
         stopRecording()
-        try audioSession.setCategory(.playback, mode: .default)
-        try audioSession.setActive(true)
+        try audioSession.setCategory(
+            .playback,
+            mode: .default,
+            options: []
+        )
+        try audioSession.setActive(true, options: [])
         let player = try AVAudioPlayer(contentsOf: url)
         player.delegate = self
         player.prepareToPlay()
@@ -174,6 +228,19 @@ final class AVFoundationVoiceNoteAudioClient:
             self?.player = nil
             self?.deactivateSessionIfIdle()
             self?.playbackFinishedHandler?()
+        }
+    }
+
+    nonisolated func audioRecorderDidFinishRecording(
+        _: AVAudioRecorder,
+        successfully flag: Bool
+    ) {
+        Task { @MainActor [weak self] in
+            self?.recorder = nil
+            self?.deactivateSessionIfIdle()
+            self?.recordingFinishedHandler?(
+                flag ? .timeLimitReached : .failed
+            )
         }
     }
 

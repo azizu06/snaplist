@@ -1628,12 +1628,22 @@ final class PhotoReviewLiveSession {
               (1...5).contains(request.photos.count) else {
             return nil
         }
+        let voiceNoteStore = VoiceNoteStore(
+            audio: AVFoundationVoiceNoteAudioClient(),
+            files: VoiceNoteLocalFileStore()
+        )
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains(
+            "--voice-note-take-ready-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(
+                .takeReady(duration: 7)
+            )
+        }
+#endif
         return PhotoReviewLiveSession(
             store: PhotoReviewStore(photos: request.photos),
-            voiceNoteStore: VoiceNoteStore(
-                audio: AVFoundationVoiceNoteAudioClient(),
-                files: VoiceNoteLocalFileStore()
-            )
+            voiceNoteStore: voiceNoteStore
         )
     }
 
@@ -2552,7 +2562,6 @@ struct PhotoReviewView: View {
     }
 
     private func restoreVoiceNoteOpenerFocus() {
-        voiceNoteStore?.dismiss()
         _ = voiceNoteStore?.consumeFocusRequest()
         focusedVoiceNoteOpener = true
     }

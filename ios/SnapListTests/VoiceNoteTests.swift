@@ -1,9 +1,69 @@
+import AVFoundation
 import Foundation
 import XCTest
 @testable import SnapList
 
 @MainActor
 final class VoiceNoteTests: XCTestCase {
+    func testRecorderCompletionEventTransitionsAtHardLimitWithoutPostStopPolling() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let files = VoiceNoteFileStoreStub()
+        let store = VoiceNoteStore(audio: audio, files: files)
+
+        await store.startRecording()
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 14.9,
+            averagePower: -24
+        )
+        store.refreshRecording()
+
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 0,
+            averagePower: -160
+        )
+        audio.finishRecordingAtTimeLimit()
+
+        XCTAssertEqual(store.phase, .takeReady(duration: 15))
+        XCTAssertNil(store.savedNote)
+        XCTAssertEqual(files.committedURLs, [])
+    }
+
+    func testAVFoundationDelegateRoutesSuccessfulTimeLimitCompletion() async throws {
+        let session = VoiceNoteAudioSessionStub()
+        let recorderStub = VoiceNoteRecorderStub()
+        let adapter = AVFoundationVoiceNoteAudioClient(
+            audioSession: session,
+            recorderFactory: { _, _ in recorderStub }
+        )
+        let completion = expectation(description: "time limit completion")
+        adapter.recordingFinishedHandler = { event in
+            XCTAssertEqual(event, .timeLimitReached)
+            completion.fulfill()
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "snaplist-recorder-delegate-\(UUID().uuidString).wav"
+        )
+        defer { try? FileManager.default.removeItem(at: url) }
+        let recorder = try AVAudioRecorder(
+            url: url,
+            settings: [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 16_000,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16
+            ]
+        )
+
+        try adapter.startRecording(to: url)
+        XCTAssertTrue(recorderStub.delegate === adapter)
+        adapter.audioRecorderDidFinishRecording(
+            recorder,
+            successfully: true
+        )
+
+        await fulfillment(of: [completion], timeout: 1)
+    }
+
     func testFifteenSecondBoundaryWaitsForExplicitSaveBeforeCommitting() async throws {
         let audio = VoiceNoteAudioClientStub(permission: .allowed)
         let files = VoiceNoteFileStoreStub()
@@ -41,17 +101,11 @@ final class VoiceNoteTests: XCTestCase {
     }
 
     func testRerecordCancelInterruptionAndSaveFailurePreservePriorNote() async {
-        let prior = VoiceNoteAsset(
-            url: URL(fileURLWithPath: "/tmp/original.wav"),
-            duration: 8
-        )
-        let audio = VoiceNoteAudioClientStub(permission: .allowed)
-        let files = VoiceNoteFileStoreStub()
-        let store = VoiceNoteStore(
-            savedNote: prior,
-            audio: audio,
-            files: files
-        )
+        let fixture = makePriorNoteFixture()
+        let prior = fixture.prior
+        let audio = fixture.audio
+        let files = fixture.files
+        let store = fixture.store
 
         await store.rerecord()
         store.cancelRecording()
@@ -81,23 +135,82 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(store.savedNote, prior)
         XCTAssertEqual(store.phase, .saveFailed)
 
-        store.dismiss()
+        XCTAssertTrue(store.dismiss())
+        XCTAssertEqual(store.savedNote, prior)
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
+        XCTAssertTrue(store.dismiss())
+        XCTAssertEqual(files.discardedURLs.count, 3)
         XCTAssertEqual(store.consumeFocusRequest(), .voiceNoteOpener)
         XCTAssertNil(store.consumeFocusRequest())
     }
 
+    func testCleanupFailuresRetainStateUntilCancelAndDeleteRetrySucceed() async {
+        let fixture = makePriorNoteFixture()
+        let prior = fixture.prior
+        let audio = fixture.audio
+        let files = fixture.files
+        let store = fixture.store
+
+        await store.rerecord()
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 4,
+            averagePower: -20
+        )
+        store.refreshRecording()
+        files.discardError = .removalFailed
+
+        XCTAssertFalse(store.allowsInteractiveDismissal)
+        XCTAssertFalse(store.cancelRecording())
+        XCTAssertEqual(store.savedNote, prior)
+        XCTAssertEqual(store.phase, .takeReady(duration: 4))
+        XCTAssertEqual(files.discardedURLs, [])
+
+        files.discardError = nil
+        XCTAssertTrue(store.cancelRecording())
+        XCTAssertEqual(store.savedNote, prior)
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
+        XCTAssertTrue(store.allowsInteractiveDismissal)
+        XCTAssertEqual(files.discardedURLs, [audio.provisionalURL])
+
+        await store.rerecord()
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 2,
+            averagePower: -20
+        )
+        files.commitError = .writeFailed
+        store.save()
+        files.discardError = .removalFailed
+
+        XCTAssertFalse(store.allowsInteractiveDismissal)
+        XCTAssertFalse(store.dismiss())
+        XCTAssertEqual(store.savedNote, prior)
+        XCTAssertEqual(store.phase, .saveFailed)
+
+        files.discardError = nil
+        XCTAssertTrue(store.dismiss())
+        XCTAssertEqual(store.savedNote, prior)
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
+        XCTAssertTrue(store.allowsInteractiveDismissal)
+
+        files.deleteError = .removalFailed
+        XCTAssertFalse(store.deleteSavedNote())
+        XCTAssertEqual(store.savedNote, prior)
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
+        XCTAssertEqual(files.deletedAssets, [])
+
+        files.deleteError = nil
+        XCTAssertTrue(store.deleteSavedNote())
+        XCTAssertNil(store.savedNote)
+        XCTAssertEqual(store.phase, .ready)
+        XCTAssertEqual(files.deletedAssets, [prior])
+    }
+
     func testSavedReplacementUsesDiscretePlaybackAndDeleteRemovesOnlyVoiceAsset() async throws {
-        let prior = VoiceNoteAsset(
-            url: URL(fileURLWithPath: "/tmp/original.wav"),
-            duration: 8
-        )
-        let audio = VoiceNoteAudioClientStub(permission: .allowed)
-        let files = VoiceNoteFileStoreStub()
-        let store = VoiceNoteStore(
-            savedNote: prior,
-            audio: audio,
-            files: files
-        )
+        let fixture = makePriorNoteFixture()
+        let prior = fixture.prior
+        let audio = fixture.audio
+        let files = fixture.files
+        let store = fixture.store
 
         await store.rerecord()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
@@ -125,29 +238,22 @@ final class VoiceNoteTests: XCTestCase {
     }
 
     func testDeniedPermissionAndInactiveOrRouteChangesNeverReplacePriorNote() async {
-        let prior = VoiceNoteAsset(
-            url: URL(fileURLWithPath: "/tmp/original.wav"),
-            duration: 8
-        )
-        let deniedAudio = VoiceNoteAudioClientStub(permission: .denied)
-        let deniedStore = VoiceNoteStore(
-            savedNote: prior,
-            audio: deniedAudio,
-            files: VoiceNoteFileStoreStub()
-        )
+        let deniedFixture = makePriorNoteFixture(permission: .denied)
+        let prior = deniedFixture.prior
+        let deniedStore = deniedFixture.store
 
         await deniedStore.rerecord()
 
-        XCTAssertEqual(deniedStore.phase, .accessOff)
+        XCTAssertEqual(
+            deniedStore.phase,
+            .accessOff(permission: .denied)
+        )
         XCTAssertEqual(deniedStore.savedNote, prior)
 
-        let audio = VoiceNoteAudioClientStub(permission: .allowed)
-        let files = VoiceNoteFileStoreStub()
-        let store = VoiceNoteStore(
-            savedNote: prior,
-            audio: audio,
-            files: files
-        )
+        let fixture = makePriorNoteFixture()
+        let audio = fixture.audio
+        let files = fixture.files
+        let store = fixture.store
 
         await store.rerecord()
         store.handleSceneInactive()
@@ -162,6 +268,36 @@ final class VoiceNoteTests: XCTestCase {
             files.discardedURLs,
             [audio.provisionalURL, audio.provisionalURL]
         )
+    }
+
+    func testRestrictedPermissionHasNoSettingsRecoveryWhileDeniedDoes() async {
+        let restricted = VoiceNoteAudioClientStub(permission: .restricted)
+        let restrictedStore = VoiceNoteStore(
+            audio: restricted,
+            files: VoiceNoteFileStoreStub()
+        )
+
+        await restrictedStore.startRecording()
+
+        XCTAssertEqual(
+            restrictedStore.phase,
+            .accessOff(permission: .restricted)
+        )
+        XCTAssertFalse(restricted.permission.canOpenSettings)
+
+        let denied = VoiceNoteAudioClientStub(permission: .denied)
+        let deniedStore = VoiceNoteStore(
+            audio: denied,
+            files: VoiceNoteFileStoreStub()
+        )
+
+        await deniedStore.startRecording()
+
+        XCTAssertEqual(
+            deniedStore.phase,
+            .accessOff(permission: .denied)
+        )
+        XCTAssertTrue(denied.permission.canOpenSettings)
     }
 
     func testFrozenV21CopyGeometryAndAccessibilityTruth() {
@@ -182,6 +318,10 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(
             VoiceNotePresentation.recordingAccessibilityLabel(elapsed: 7.8),
             "Recording, 7 seconds of 15"
+        )
+        XCTAssertEqual(
+            VoiceNotePresentation.recordingAccessibilityOrder,
+            [.cancel, .elapsed, .save]
         )
         XCTAssertEqual(
             VoiceNotePresentation.playbackAccessibilityLabel(isPlaying: false),
@@ -249,6 +389,73 @@ final class VoiceNoteTests: XCTestCase {
             "A rejected replacement must leave the prior WAV authoritative."
         )
     }
+
+    private func makePriorNoteFixture(
+        permission: VoiceNoteMicrophonePermission = .allowed
+    ) -> PriorNoteFixture {
+        let prior = VoiceNoteAsset(
+            url: URL(fileURLWithPath: "/tmp/original.wav"),
+            duration: 8
+        )
+        let audio = VoiceNoteAudioClientStub(permission: permission)
+        let files = VoiceNoteFileStoreStub()
+        return PriorNoteFixture(
+            prior: prior,
+            audio: audio,
+            files: files,
+            store: VoiceNoteStore(
+                savedNote: prior,
+                audio: audio,
+                files: files
+            )
+        )
+    }
+}
+
+@MainActor
+private struct PriorNoteFixture {
+    let prior: VoiceNoteAsset
+    let audio: VoiceNoteAudioClientStub
+    let files: VoiceNoteFileStoreStub
+    let store: VoiceNoteStore
+}
+
+@MainActor
+private final class VoiceNoteAudioSessionStub:
+    VoiceNoteAudioSessionControlling
+{
+    func setCategory(
+        _: AVAudioSession.Category,
+        mode _: AVAudioSession.Mode,
+        options _: AVAudioSession.CategoryOptions
+    ) throws {}
+
+    func setActive(
+        _: Bool,
+        options _: AVAudioSession.SetActiveOptions
+    ) throws {}
+}
+
+@MainActor
+private final class VoiceNoteRecorderStub: VoiceNoteRecording {
+    weak var delegate: AVAudioRecorderDelegate?
+    var isMeteringEnabled = false
+    var currentTime: TimeInterval = 0
+
+    func prepareToRecord() -> Bool {
+        true
+    }
+
+    func record(forDuration _: TimeInterval) -> Bool {
+        true
+    }
+
+    func stop() {}
+    func updateMeters() {}
+
+    func averagePower(forChannel _: Int) -> Float {
+        -160
+    }
 }
 
 @MainActor
@@ -264,6 +471,7 @@ private final class VoiceNoteAudioClientStub: VoiceNoteAudioClient {
     var interruptionHandler: (() -> Void)?
     var routeChangeHandler: (() -> Void)?
     var playbackFinishedHandler: (() -> Void)?
+    var recordingFinishedHandler: ((VoiceNoteRecordingCompletion) -> Void)?
 
     init(permission: VoiceNoteMicrophonePermission) {
         self.permission = permission
@@ -282,16 +490,23 @@ private final class VoiceNoteAudioClientStub: VoiceNoteAudioClient {
         pauseCount += 1
     }
     func stopPlaying() {}
+
+    func finishRecordingAtTimeLimit() {
+        recordingFinishedHandler?(.timeLimitReached)
+    }
 }
 
 private final class VoiceNoteFileStoreStub: VoiceNoteFileStoring {
     enum StubError: Error {
         case writeFailed
+        case removalFailed
     }
 
     var committedURLs: [URL] = []
     var discardedURLs: [URL] = []
     var commitError: StubError?
+    var discardError: StubError?
+    var deleteError: StubError?
     var replacedNotes: [VoiceNoteAsset] = []
     var authoritativeAssets: [VoiceNoteAsset] = []
     var deletedAssets: [VoiceNoteAsset] = []
@@ -317,10 +532,16 @@ private final class VoiceNoteFileStoreStub: VoiceNoteFileStoring {
         return asset
     }
 
-    func discardProvisional(at url: URL) {
+    func discardProvisional(at url: URL) throws {
+        if let discardError {
+            throw discardError
+        }
         discardedURLs.append(url)
     }
-    func delete(_ note: VoiceNoteAsset) {
+    func delete(_ note: VoiceNoteAsset) throws {
+        if let deleteError {
+            throw deleteError
+        }
         deletedAssets.append(note)
         authoritativeAssets = []
     }

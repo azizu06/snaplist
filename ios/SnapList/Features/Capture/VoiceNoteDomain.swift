@@ -10,6 +10,11 @@ enum VoiceNoteMicrophonePermission: Equatable {
     case undetermined
     case allowed
     case denied
+    case restricted
+
+    var canOpenSettings: Bool {
+        self == .denied
+    }
 }
 
 struct VoiceNoteRecordingSnapshot: Equatable {
@@ -17,12 +22,17 @@ struct VoiceNoteRecordingSnapshot: Equatable {
     let averagePower: Float
 }
 
+enum VoiceNoteRecordingCompletion: Equatable {
+    case timeLimitReached
+    case failed
+}
+
 enum VoiceNotePhase: Equatable {
     case ready
     case recording(elapsed: TimeInterval, level: Double)
     case takeReady(duration: TimeInterval)
     case saved(isPlaying: Bool)
-    case accessOff
+    case accessOff(permission: VoiceNoteMicrophonePermission)
     case interrupted
     case saveFailed
 }
@@ -30,6 +40,23 @@ enum VoiceNotePhase: Equatable {
 enum VoiceNoteFocusRequest: Equatable {
     case voiceNoteOpener
     case savedNoteSummary
+}
+
+enum VoiceNoteRecordingAccessibilityElement: Equatable {
+    case cancel
+    case elapsed
+    case save
+
+    var sortPriority: Double {
+        switch self {
+        case .cancel:
+            return 3
+        case .elapsed:
+            return 2
+        case .save:
+            return 1
+        }
+    }
 }
 
 enum VoiceNotePresentation {
@@ -44,6 +71,12 @@ enum VoiceNotePresentation {
     static let sheetContext = "Add details the photos might miss."
     static let emptyRowAccessibilityLabel =
         "Voice note, optional, collapsed"
+    static let recordingAccessibilityOrder:
+        [VoiceNoteRecordingAccessibilityElement] = [
+            .cancel,
+            .elapsed,
+            .save
+        ]
     static let savedWaveformIsAccessibilityHidden = true
     static let savedWaveformIsInteractive = false
 
@@ -69,6 +102,9 @@ protocol VoiceNoteAudioClient: AnyObject {
     var interruptionHandler: (() -> Void)? { get set }
     var routeChangeHandler: (() -> Void)? { get set }
     var playbackFinishedHandler: (() -> Void)? { get set }
+    var recordingFinishedHandler: ((VoiceNoteRecordingCompletion) -> Void)? {
+        get set
+    }
 
     func requestPermission() async -> VoiceNoteMicrophonePermission
     func startRecording(to url: URL) throws
@@ -85,8 +121,8 @@ protocol VoiceNoteFileStoring: AnyObject {
         duration: TimeInterval,
         replacing priorNote: VoiceNoteAsset?
     ) throws -> VoiceNoteAsset
-    func discardProvisional(at url: URL)
-    func delete(_ note: VoiceNoteAsset)
+    func discardProvisional(at url: URL) throws
+    func delete(_ note: VoiceNoteAsset) throws
 }
 
 enum VoiceNoteFileStoreError: Error {
@@ -156,12 +192,18 @@ final class VoiceNoteLocalFileStore: VoiceNoteFileStoring {
         return VoiceNoteAsset(url: destination, duration: duration)
     }
 
-    func discardProvisional(at url: URL) {
-        try? fileManager.removeItem(at: url)
+    func discardProvisional(at url: URL) throws {
+        guard fileManager.fileExists(atPath: url.path) else {
+            return
+        }
+        try fileManager.removeItem(at: url)
     }
 
-    func delete(_ note: VoiceNoteAsset) {
-        try? fileManager.removeItem(at: note.url)
+    func delete(_ note: VoiceNoteAsset) throws {
+        guard fileManager.fileExists(atPath: note.url.path) else {
+            return
+        }
+        try fileManager.removeItem(at: note.url)
     }
 
     private func prepareRootDirectory() throws {
@@ -233,6 +275,10 @@ final class VoiceNoteStore {
     private var provisionalDuration: TimeInterval?
     private var pendingFocusRequest: VoiceNoteFocusRequest?
 
+    var allowsInteractiveDismissal: Bool {
+        provisionalURL == nil
+    }
+
     init(
         savedNote: VoiceNoteAsset? = nil,
         audio: VoiceNoteAudioClient,
@@ -251,34 +297,45 @@ final class VoiceNoteStore {
         audio.playbackFinishedHandler = { [weak self] in
             self?.handlePlaybackFinished()
         }
+        audio.recordingFinishedHandler = { [weak self] completion in
+            self?.handleRecordingFinished(completion)
+        }
     }
 
     func startRecording() async {
+        guard discardPendingProvisionalBeforeRecording() else {
+            return
+        }
+
         let permission: VoiceNoteMicrophonePermission
         switch audio.permission {
         case .allowed:
             permission = .allowed
         case .denied:
             permission = .denied
+        case .restricted:
+            permission = .restricted
         case .undetermined:
             permission = await audio.requestPermission()
         }
 
         guard permission == .allowed else {
-            phase = .accessOff
+            phase = .accessOff(permission: permission)
             return
         }
 
         do {
             let url = try files.makeProvisionalURL()
+            provisionalURL = url
+            provisionalDuration = nil
             do {
                 try audio.startRecording(to: url)
             } catch {
-                files.discardProvisional(at: url)
-                throw error
+                audio.stopRecording()
+                _ = discardPendingProvisional()
+                phase = .interrupted
+                return
             }
-            provisionalURL = url
-            provisionalDuration = nil
             phase = .recording(elapsed: 0, level: 0)
         } catch {
             phase = .interrupted
@@ -305,6 +362,20 @@ final class VoiceNoteStore {
         )
     }
 
+    func handleRecordingFinished(_ completion: VoiceNoteRecordingCompletion) {
+        guard case .recording = phase, provisionalURL != nil else {
+            return
+        }
+
+        switch completion {
+        case .timeLimitReached:
+            provisionalDuration = Self.maximumDuration
+            phase = .takeReady(duration: Self.maximumDuration)
+        case .failed:
+            handleInterruption()
+        }
+    }
+
     func save() {
         if case .recording = phase {
             let snapshot = audio.recordingSnapshot
@@ -321,10 +392,12 @@ final class VoiceNoteStore {
             provisionalDuration > 0
         else {
             if self.provisionalURL != nil {
-                discardProvisionalTake()
-                phase = savedNote == nil
-                    ? .interrupted
-                    : .saved(isPlaying: false)
+                prepareProvisionalForCleanup()
+                if discardPendingProvisional() {
+                    phase = savedNote == nil
+                        ? .interrupted
+                        : .saved(isPlaying: false)
+                }
             }
             return
         }
@@ -350,12 +423,20 @@ final class VoiceNoteStore {
         await startRecording()
     }
 
-    func cancelRecording() {
-        discardProvisionalTake()
+    @discardableResult
+    func cancelRecording() -> Bool {
+        guard provisionalURL != nil else {
+            return true
+        }
+        prepareProvisionalForCleanup()
+        guard discardPendingProvisional() else {
+            return false
+        }
         phase = savedNote == nil ? .interrupted : .saved(isPlaying: false)
         if savedNote != nil {
             pendingFocusRequest = .savedNoteSummary
         }
+        return true
     }
 
     func handleInterruption() {
@@ -377,7 +458,10 @@ final class VoiceNoteStore {
     }
 
     func refreshPermissionTruth() {
-        guard phase == .accessOff, audio.permission == .allowed else {
+        guard
+            case .accessOff = phase,
+            audio.permission == .allowed
+        else {
             return
         }
         phase = savedNote == nil ? .ready : .saved(isPlaying: false)
@@ -409,22 +493,36 @@ final class VoiceNoteStore {
         phase = .saved(isPlaying: false)
     }
 
-    func deleteSavedNote() {
+    @discardableResult
+    func deleteSavedNote() -> Bool {
         guard let savedNote else {
-            return
+            return true
         }
         audio.stopPlaying()
-        files.delete(savedNote)
-        self.savedNote = nil
-        phase = .ready
+        do {
+            try files.delete(savedNote)
+            self.savedNote = nil
+            phase = .ready
+            return true
+        } catch {
+            phase = .saved(isPlaying: false)
+            return false
+        }
     }
 
-    func dismiss() {
+    @discardableResult
+    func dismiss() -> Bool {
         audio.stopPlaying()
         if provisionalURL != nil {
-            discardProvisionalTake()
+            prepareProvisionalForCleanup()
+            guard discardPendingProvisional() else {
+                pendingFocusRequest = .voiceNoteOpener
+                return false
+            }
         }
+        phase = savedNote == nil ? .ready : .saved(isPlaying: false)
         pendingFocusRequest = .voiceNoteOpener
+        return true
     }
 
     func consumeFocusRequest() -> VoiceNoteFocusRequest? {
@@ -432,16 +530,54 @@ final class VoiceNoteStore {
         return pendingFocusRequest
     }
 
+#if DEBUG
+    func applyLaunchFixturePhase(_ phase: VoiceNotePhase) {
+        self.phase = phase
+    }
+#endif
+
     private static func normalizedLevel(from averagePower: Float) -> Double {
         min(max(Double(averagePower + 60) / 60, 0), 1)
     }
 
-    private func discardProvisionalTake() {
-        audio.stopRecording()
-        if let provisionalURL {
-            files.discardProvisional(at: provisionalURL)
+    private func discardPendingProvisionalBeforeRecording() -> Bool {
+        guard provisionalURL != nil else {
+            return true
         }
-        provisionalURL = nil
+        prepareProvisionalForCleanup()
+        return discardPendingProvisional()
+    }
+
+    private func prepareProvisionalForCleanup() {
+        guard case .recording = phase else {
+            audio.stopRecording()
+            return
+        }
+
+        let elapsed = min(
+            max(audio.recordingSnapshot.elapsed, 0),
+            Self.maximumDuration
+        )
+        audio.stopRecording()
+        if elapsed > 0 {
+            provisionalDuration = elapsed
+            phase = .takeReady(duration: elapsed)
+        } else {
+            phase = .interrupted
+        }
+    }
+
+    private func discardPendingProvisional() -> Bool {
+        guard let provisionalURL else {
+            return true
+        }
+        do {
+            try files.discardProvisional(at: provisionalURL)
+        } catch {
+            return false
+        }
+        self.provisionalURL = nil
         provisionalDuration = nil
+        return true
     }
 }

@@ -39,6 +39,7 @@ struct VoiceNoteSheet: View {
             [.height(VoiceNotePresentation.sheetHeight), .medium],
             selection: $selectedDetent
         )
+        .interactiveDismissDisabled(!store.allowsInteractiveDismissal)
         .onAppear {
             if dynamicTypeSize.isAccessibilitySize {
                 selectedDetent = .medium
@@ -80,9 +81,6 @@ struct VoiceNoteSheet: View {
                 )
             }
         }
-        .onDisappear {
-            store.dismiss()
-        }
     }
 
     @ViewBuilder
@@ -113,9 +111,9 @@ struct VoiceNoteSheet: View {
             standardHeader
             savedPlayback(isPlaying: isPlaying)
                 .padding(.top, 8)
-        case .accessOff:
+        case .accessOff(let permission):
             standardHeader
-            accessOff
+            accessOff(permission: permission)
                 .padding(.top, 8)
         case .interrupted:
             standardHeader
@@ -136,8 +134,9 @@ struct VoiceNoteSheet: View {
                 .accessibilityIdentifier("voice-note.title")
             Spacer()
             Button {
-                store.dismiss()
-                dismiss()
+                if store.dismiss() {
+                    dismiss()
+                }
             } label: {
                 Image(systemName: "xmark")
             }
@@ -192,6 +191,11 @@ struct VoiceNoteSheet: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Cancel recording")
                 .accessibilityIdentifier("voice-note.cancel")
+                .accessibilitySortPriority(
+                    VoiceNoteRecordingAccessibilityElement
+                        .cancel
+                        .sortPriority
+                )
 
                 VoiceNoteWaveform(
                     level: level,
@@ -217,6 +221,11 @@ struct VoiceNoteSheet: View {
                 .disabled(!canSave)
                 .accessibilityLabel("Save voice note")
                 .accessibilityIdentifier("voice-note.save")
+                .accessibilitySortPriority(
+                    VoiceNoteRecordingAccessibilityElement
+                        .save
+                        .sortPriority
+                )
             }
 
             Text(VoiceNotePresentation.elapsedText(elapsed))
@@ -228,6 +237,11 @@ struct VoiceNoteSheet: View {
                     )
                 )
                 .accessibilityIdentifier("voice-note.elapsed")
+                .accessibilitySortPriority(
+                    VoiceNoteRecordingAccessibilityElement
+                        .elapsed
+                        .sortPriority
+                )
         }
         .padding(.top, 16)
     }
@@ -320,23 +334,27 @@ struct VoiceNoteSheet: View {
         }
     }
 
-    private var accessOff: some View {
+    private func accessOff(
+        permission: VoiceNoteMicrophonePermission
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Microphone access is required to record a voice note.")
                 .snapListTypography(.body)
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
-            SnapListSecondaryButton(title: "Open Settings") {
-                guard let url = URL(
-                    string: UIApplication.openSettingsURLString
-                ) else {
-                    return
+            if permission.canOpenSettings {
+                SnapListSecondaryButton(title: "Open Settings") {
+                    guard let url = URL(
+                        string: UIApplication.openSettingsURLString
+                    ) else {
+                        return
+                    }
+                    UIApplication.shared.open(url)
                 }
-                UIApplication.shared.open(url)
+                .accessibilityFocused(
+                    $focusedControl,
+                    equals: .permissionRecovery
+                )
             }
-            .accessibilityFocused(
-                $focusedControl,
-                equals: .permissionRecovery
-            )
         }
     }
 
