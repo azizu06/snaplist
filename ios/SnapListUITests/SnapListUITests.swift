@@ -864,17 +864,20 @@ final class SnapListUITests: XCTestCase {
             predicate: NSPredicate(format: "label == %@", reordered),
             object: order
         )
+        let dragObservation = app.otherElements[
+            "photo-review.drag-observation"
+        ]
         XCTAssertEqual(
             XCTWaiter.wait(for: [reorderedExpectation], timeout: 3),
-            .completed
+            .completed,
+            dragObservation.exists
+                ? "Native drop chronology: \(dragObservation.label)"
+                : "Native drop chronology was not projected."
         )
         XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
         XCTAssertTrue(firstPhoto.label.contains("Cover"))
         XCTAssertTrue(firstPhoto.isSelected)
 
-        let dragObservation = app.otherElements[
-            "photo-review.drag-observation"
-        ]
         XCTAssertTrue(
             dragObservation.waitForExistence(timeout: 2),
             "The fixture must project the production drag decisions."

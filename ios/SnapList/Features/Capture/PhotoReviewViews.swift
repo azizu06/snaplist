@@ -173,6 +173,49 @@ enum PhotoReviewNativeInteractionPolicy {
     }
 }
 
+enum PhotoReviewNativeDropEvent: Equatable {
+    case entered
+    case updated
+    case rejectedDisabled
+    case rejectedAdmission
+    case rejectedDestination
+    case rejectedCommit
+    case committed
+}
+
+struct PhotoReviewNativeDropObservation: Equatable {
+    private(set) var didEnter = false
+    private(set) var didUpdate = false
+    private(set) var performDropOutcome = "not-called"
+
+    var hasActivity: Bool {
+        didEnter || didUpdate || performDropOutcome != "not-called"
+    }
+
+    var label: String {
+        "entered:\(didEnter),updated:\(didUpdate),perform:\(performDropOutcome)"
+    }
+
+    mutating func observe(_ event: PhotoReviewNativeDropEvent) {
+        switch event {
+        case .entered:
+            didEnter = true
+        case .updated:
+            didUpdate = true
+        case .rejectedDisabled:
+            performDropOutcome = "rejected-disabled"
+        case .rejectedAdmission:
+            performDropOutcome = "rejected-admission"
+        case .rejectedDestination:
+            performDropOutcome = "rejected-destination"
+        case .rejectedCommit:
+            performDropOutcome = "rejected-commit"
+        case .committed:
+            performDropOutcome = "committed"
+        }
+    }
+}
+
 private struct PhotoReviewThumbnailFramePreferenceKey: PreferenceKey {
     static var defaultValue: [StagedCapturePhoto.ID: CGRect] = [:]
 
@@ -572,6 +615,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
     let isEnabled: Bool
     let destinationIndex: (CGPoint) -> Int?
     let autoScroll: (CGPoint) -> Void
+    let observeDrop: (PhotoReviewNativeDropEvent) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -580,7 +624,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             reduceMotion: reduceMotion,
             isEnabled: isEnabled,
             destinationIndex: destinationIndex,
-            autoScroll: autoScroll
+            autoScroll: autoScroll,
+            observeDrop: observeDrop
         )
     }
 
@@ -600,7 +645,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             reduceMotion: reduceMotion,
             isEnabled: isEnabled,
             destinationIndex: destinationIndex,
-            autoScroll: autoScroll
+            autoScroll: autoScroll,
+            observeDrop: observeDrop
         )
         uiView.attachToNearestScrollView()
     }
@@ -645,6 +691,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         private(set) var isEnabled: Bool
         private var destinationIndex: (CGPoint) -> Int?
         private var autoScroll: (CGPoint) -> Void
+        private var observeDrop: (PhotoReviewNativeDropEvent) -> Void
         private weak var attachedView: UIView?
         private var dropInteraction: UIDropInteraction?
         var isInteractionAttached: Bool {
@@ -657,7 +704,9 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             reduceMotion: Bool,
             isEnabled: Bool,
             destinationIndex: @escaping (CGPoint) -> Int?,
-            autoScroll: @escaping (CGPoint) -> Void
+            autoScroll: @escaping (CGPoint) -> Void,
+            observeDrop: @escaping
+                (PhotoReviewNativeDropEvent) -> Void = { _ in }
         ) {
             self.store = store
             self.presentation = presentation
@@ -665,6 +714,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             self.isEnabled = isEnabled
             self.destinationIndex = destinationIndex
             self.autoScroll = autoScroll
+            self.observeDrop = observeDrop
             if !isEnabled {
                 presentation.suspendNativeDragSessionForInteractionLock(
                     reduceMotion: reduceMotion
@@ -678,7 +728,9 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             reduceMotion: Bool,
             isEnabled: Bool,
             destinationIndex: @escaping (CGPoint) -> Int?,
-            autoScroll: @escaping (CGPoint) -> Void
+            autoScroll: @escaping (CGPoint) -> Void,
+            observeDrop: @escaping
+                (PhotoReviewNativeDropEvent) -> Void = { _ in }
         ) {
             self.store = store
             self.presentation = presentation
@@ -686,6 +738,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             self.isEnabled = isEnabled
             self.destinationIndex = destinationIndex
             self.autoScroll = autoScroll
+            self.observeDrop = observeDrop
             if !isEnabled {
                 presentation.suspendNativeDragSessionForInteractionLock(
                     reduceMotion: reduceMotion
@@ -737,6 +790,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
                     interaction: interaction
                 )
             )
+            observeDrop(.entered)
         }
 
         func dropInteraction(
@@ -752,6 +806,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             )
             updateDestination(at: location)
             autoScroll(location)
+            observeDrop(.updated)
             return UIDropProposal(operation: .move)
         }
 
@@ -768,16 +823,24 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
                 session: session,
                 interaction: interaction
             )
-            guard isEnabled,
-                  admit(session: session),
-                  let destinationIndex = destinationIndex(location) else {
+            guard isEnabled else {
+                observeDrop(.rejectedDisabled)
                 return
             }
-            presentation.commit(
+            guard admit(session: session) else {
+                observeDrop(.rejectedAdmission)
+                return
+            }
+            guard let destinationIndex = destinationIndex(location) else {
+                observeDrop(.rejectedDestination)
+                return
+            }
+            let result = presentation.commit(
                 to: destinationIndex,
                 store: store,
                 reduceMotion: reduceMotion
             )
+            observeDrop(result == nil ? .rejectedCommit : .committed)
         }
 
         func dropInteraction(
@@ -1604,6 +1667,8 @@ struct PhotoReviewView: View {
 #if DEBUG
     @State private var renderedInsertionGapObservation =
         PhotoReviewRenderedInsertionGapObservation()
+    @State private var nativeDropObservation =
+        PhotoReviewNativeDropObservation()
     @State private var observedAutoScrollEdge: String?
 #endif
     @State private var pickerItems: [PhotosPickerItem] = []
@@ -1640,7 +1705,13 @@ struct PhotoReviewView: View {
         let edge = observedAutoScrollEdge ?? "none"
         let transition =
             dragPresentation.lastTransitionDecision?.rawValue ?? "none"
-        return "gap=\(gap);edge=\(edge);transition=\(transition)"
+        return [
+            "gap=\(gap)",
+            "edge=\(edge)",
+            "transition=\(transition)",
+            "drop=\(nativeDropObservation.label)"
+        ]
+        .joined(separator: ";")
     }
 #endif
 
@@ -1725,7 +1796,8 @@ struct PhotoReviewView: View {
                 if renderedInsertionGapObservation
                     .maximumRenderedInsertionGap > 0
                     || observedAutoScrollEdge != nil
-                    || dragPresentation.lastTransitionDecision != nil {
+                    || dragPresentation.lastTransitionDecision != nil
+                    || nativeDropObservation.hasActivity {
                     Color.clear
                         .frame(width: 1, height: 1)
                         .accessibilityElement()
@@ -1916,7 +1988,8 @@ struct PhotoReviewView: View {
                                 at: location,
                                 proxy: proxy
                             )
-                        }
+                        },
+                        observeDrop: observeNativeDrop
                     )
                 }
             }
@@ -2050,6 +2123,12 @@ struct PhotoReviewView: View {
                 anchor: .trailing
             )
         }
+    }
+
+    private func observeNativeDrop(_ event: PhotoReviewNativeDropEvent) {
+#if DEBUG
+        nativeDropObservation.observe(event)
+#endif
     }
 
     private func scrollToPhoto(

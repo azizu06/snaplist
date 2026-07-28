@@ -4446,6 +4446,95 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(committed.consumeAnnouncement())
     }
 
+    func testPhotoReviewNativeDropObservationDistinguishesMissingCallbackFromGuardRejectionAndCommit() throws {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        var observation = PhotoReviewNativeDropObservation()
+        let destination = PhotoReviewNativeDropAttachment.Coordinator(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in },
+            observeDrop: { observation.observe($0) }
+        )
+        let destinationView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        destinationView.bounds = CGRect(
+            x: 88,
+            y: 24,
+            width: 320,
+            height: 98
+        )
+        destination.attach(to: destinationView)
+        let interaction = try XCTUnwrap(
+            destinationView.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(x: 20, y: 49)
+        session.items = [
+            UIDragItem(
+                itemProvider: PhotoReviewNativeDragContract.itemProvider(
+                    photoID: photos[2].id
+                )
+            )
+        ]
+
+        destination.dropInteraction(
+            interaction,
+            sessionDidEnter: session
+        )
+        XCTAssertEqual(
+            destination.dropInteraction(
+                interaction,
+                sessionDidUpdate: session
+            ).operation,
+            .move
+        )
+        XCTAssertEqual(
+            observation.label,
+            "entered:true,updated:true,perform:not-called"
+        )
+        XCTAssertEqual(store.photos, photos)
+
+        destination.dropInteraction(
+            interaction,
+            performDrop: session
+        )
+        XCTAssertEqual(
+            observation.label,
+            "entered:true,updated:true,perform:committed"
+        )
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+
+        let rejectedSession = PhotoReviewDragSessionStub()
+        rejectedSession.items = [
+            UIDragItem(
+                itemProvider: PhotoReviewNativeDragContract.itemProvider(
+                    photoID: UUID(
+                        uuidString: "46000000-0000-4000-8000-000000000099"
+                    )!
+                )
+            )
+        ]
+
+        destination.dropInteraction(
+            interaction,
+            performDrop: rejectedSession
+        )
+        XCTAssertEqual(
+            observation.label,
+            "entered:true,updated:true,perform:rejected-admission"
+        )
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+        XCTAssertNil(presentation.draggedPhotoID)
+    }
+
     func testPhotoReviewNativeInteractionsFenceTransactionLocksAndResumeWithoutMutation() throws {
         let photos = makeDragPhotos()
         let store = PhotoReviewStore(photos: photos)
