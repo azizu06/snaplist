@@ -24,17 +24,99 @@ on:
 permissions:
   contents: read
 
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+  SNAPLIST_IOS_DESTINATION: platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5
+
 concurrency:
   group: ios-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Show Apple toolchain
+        run: xcodebuild -version
+
+      - name: Validate reusable iOS test script and shard inventory
+        run: zsh ios/Scripts/test-contract.test.sh
+
+      - name: Validate deep-link configuration
+        run: zsh ios/Scripts/deep-link-contract.test.sh
+
+  shard:
+    name: shard (${{ matrix.shard }})
+    if: github.event_name == 'pull_request'
+    needs: validate
+    runs-on: macos-26
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit, ui-1, ui-2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Show Apple toolchain
+        run: xcodebuild -version
+
+      - name: Build app and run declared test shard
+        env:
+          SNAPLIST_IOS_SHARD: ${{ matrix.shard }}
+        run: ios/Scripts/test.sh
+
   test:
+    needs: [validate, shard]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require validation and every shard
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          SHARD_RESULT: ${{ needs.shard.result }}
+        run: |
+          if [[ "$VALIDATE_RESULT" != "success" || "$SHARD_RESULT" != "success" ]]; then
+            echo "iOS validation or one or more declared test shards failed." >&2
+            exit 1
+          fi
+
+  serial:
+    if: github.event_name == 'push'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Show Apple toolchain
+        run: xcodebuild -version
+
+      - name: Validate reusable iOS test script and shard inventory
+        run: zsh ios/Scripts/test-contract.test.sh
+
+      - name: Validate deep-link configuration
+        run: zsh ios/Scripts/deep-link-contract.test.sh
+
+      - name: Build app and run complete serial test suite
+        run: ios/Scripts/test.sh
+
+  focused:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-26
     timeout-minutes: 60
     steps:
       - name: Validate focused test inputs
-        if: github.event_name == 'workflow_dispatch'
         env:
           SNAPLIST_COMMIT_SHA: ${{ inputs.commit_sha }}
           SNAPLIST_IOS_ONLY_TESTING: ${{ inputs.test_selector }}
@@ -49,18 +131,13 @@ jobs:
             exit 64
           fi
 
-      - uses: actions/checkout@v4
-        if: github.event_name != 'workflow_dispatch'
-
       - name: Check out trusted workflow tooling
-        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.workflow_sha }}
           path: workflow-tooling
 
       - name: Check out exact test target
-        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit_sha }}
@@ -69,28 +146,13 @@ jobs:
       - name: Show Apple toolchain
         run: xcodebuild -version
 
-      - name: Validate reusable iOS test script
-        if: github.event_name != 'workflow_dispatch'
-        run: zsh ios/Scripts/test-contract.test.sh
-
-      - name: Validate deep-link configuration
-        if: github.event_name != 'workflow_dispatch'
-        run: zsh ios/Scripts/deep-link-contract.test.sh
-
       - name: Validate trusted reusable iOS test script
-        if: github.event_name == 'workflow_dispatch'
         run: zsh workflow-tooling/ios/Scripts/test-contract.test.sh
 
       - name: Validate exact-head deep-link configuration
-        if: github.event_name == 'workflow_dispatch'
         run: zsh test-target/ios/Scripts/deep-link-contract.test.sh
 
-      - name: Build app and run unit and UI smoke tests
-        if: github.event_name != 'workflow_dispatch'
-        run: ios/Scripts/test.sh
-
       - name: Build app and run one focused test
-        if: github.event_name == 'workflow_dispatch'
         env:
           SNAPLIST_IOS_ONLY_TESTING: ${{ inputs.test_selector }}
           SNAPLIST_IOS_REPOSITORY_ROOT: ${{ github.workspace }}/test-target

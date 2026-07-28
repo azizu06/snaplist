@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "run_id": 30375251078,
+    "required_job_wall_clock": "30m19s",
+    "xcode_version": "26.5",
+    "xcode_build": "17F42",
+    "unit_test_count": 273,
+    "ui_test_count": 64,
+    "ui_shard_observed_seconds": {
+      "ui-1": 605.283,
+      "ui-2": 601.232
+    }
+  },
+  "execution_model": {
+    "build_products": "isolated-per-shard",
+    "reason": "GitHub-hosted macOS jobs do not share local DerivedData, and a relocatable xctestrun bundle has not been proven safe for this project. Each shard therefore builds the same explicit github.sha with the same pinned Xcode and simulator runtime."
+  },
+  "shards": {
+    "unit": [
+      "SnapListTests"
+    ],
+    "ui-1": [
+      "SnapListUITests/HomeUITests/testApprovedSellerStatesRenderTheirDurableTruth",
+      "SnapListUITests/HomeUITests/testCompletedRunOffersReviewCopyOnlyWhenServerAllowsIt",
+      "SnapListUITests/HomeUITests/testExactCustomRunDeepLinkOpensDetailAndBackReturnsHome",
+      "SnapListUITests/HomeUITests/testFocusedSearchFiltersRealListingModelsAndHidesDockForKeyboard",
+      "SnapListUITests/HomeUITests/testNewSellerStartsTheExistingCaptureFlow",
+      "SnapListUITests/HomeUITests/testRun02VisualStateUsesTheCanonicalDetailRouteShell",
+      "SnapListUITests/HomeUITests/testRunDetailRefreshIsAccessibleAndReplacesServerTruth",
+      "SnapListUITests/HomeUITests/testRunDetailShowsLoadedItemAndStageTruth",
+      "SnapListUITests/HomeUITests/testTerminalRunStatusDominatesStaleActiveStageCopy",
+      "SnapListUITests/SnapListUITests/testAcceptedSubmissionRendersSavedWithoutSubmittedMediaThenReturnsToReadyScan",
+      "SnapListUITests/SnapListUITests/testAccessibilityDynamicTypeKeepsFoundationControlsReachable",
+      "SnapListUITests/SnapListUITests/testAllElevenIssue206GoldenStatesRenderAtCanonicalViewport",
+      "SnapListUITests/SnapListUITests/testCapturePresentsAndDismissesAnItemDrivenSheet",
+      "SnapListUITests/SnapListUITests/testFloatingDockRespectsTheBottomSafeArea",
+      "SnapListUITests/SnapListUITests/testKeyboardHidesTheFloatingDock",
+      "SnapListUITests/SnapListUITests/testLibraryPickerCancelRestoresThePrimerAndItsOpener",
+      "SnapListUITests/SnapListUITests/testLivePhotoReviewBackReturnsExactRestoredPhotoAndFocusesScanReview",
+      "SnapListUITests/SnapListUITests/testLivePhotoReviewKeepsStartListingStickyBelowTheScrollingReviewContent",
+      "SnapListUITests/SnapListUITests/testOnboardingAccessibilityAtLargeDynamicTypeKeepsTargetsAndSafeAreas",
+      "SnapListUITests/SnapListUITests/testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity",
+      "SnapListUITests/SnapListUITests/testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion",
+      "SnapListUITests/SnapListUITests/testPhotoReviewNativeDragSourcePreservesNonCoverThumbnailTapActions",
+      "SnapListUITests/SnapListUITests/testPrimaryShellNavigationAndTypedDestinations",
+      "SnapListUITests/SnapListUITests/testRealSystemCameraPermissionCanBeDeniedWithoutCounterfeitSuccess",
+      "SnapListUITests/SnapListUITests/testRestoredDraftResumesBeforeTheFreshLauncherCanOverwriteIt",
+      "SnapListUITests/SnapListUITests/testScanCameraFlashControlMatchesTheApprovedFortyEightPointCircle",
+      "SnapListUITests/SnapListUITests/testScanLibraryUsesExactLiveAndRecoveryLabels",
+      "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachCAP01"
+    ],
+    "ui-2": [
+      "SnapListUITests/FidelityScreenshotTests/testFoundationShellScreenshot",
+      "SnapListUITests/HomeUITests/testAttentionAndCurrentRunUseTypedFutureRoutes",
+      "SnapListUITests/HomeUITests/testFinalListingRowClearsTheFloatingDockWhenScrolled",
+      "SnapListUITests/HomeUITests/testHomeRemainsReachableAtAccessibilityTypeWithReducedMotion",
+      "SnapListUITests/HomeUITests/testRun02RouteShellReflowsAtAccessibility3WithReducedMotion",
+      "SnapListUITests/HomeUITests/testRunDetailShowsFactualUnavailableState",
+      "SnapListUITests/HomeUITests/testRunDetailUsesSystemBackAndReturnsToExactHomeOpener",
+      "SnapListUITests/HomeUITests/testStandardHomeCanReachFocusedSearchWithoutAVisualStateFixture",
+      "SnapListUITests/HomeVisualRegressionTests/testAllFourApprovedHomeStatesRenderAtCanonicalViewport",
+      "SnapListUITests/SnapListUITests/testApprovedScanCameraRecoveryStatesUseExactCopyAndHonestActions",
+      "SnapListUITests/SnapListUITests/testApprovedScanCameraZeroAndFivePhotoStatesExposeTheFrozenControls",
+      "SnapListUITests/SnapListUITests/testApprovedVisualStateLaunchArgumentUsesTypedBoundary",
+      "SnapListUITests/SnapListUITests/testCameraDeniedAndRestrictedUseLibraryRecovery",
+      "SnapListUITests/SnapListUITests/testCaptureGuidanceRespectsLandscapeSafeAreas",
+      "SnapListUITests/SnapListUITests/testCaptureLauncherSurvivesAccessibilityTypeAndReducedMotion",
+      "SnapListUITests/SnapListUITests/testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary",
+      "SnapListUITests/SnapListUITests/testFreshAccountlessJourneyEntersTheRealCaptureFlow",
+      "SnapListUITests/SnapListUITests/testHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets",
+      "SnapListUITests/SnapListUITests/testLivePhotoReviewDeletingTheOnlyPhotoReturnsToGuidedScanWithNoPhotos",
+      "SnapListUITests/SnapListUITests/testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission",
+      "SnapListUITests/SnapListUITests/testLivePhotoReviewTopBarHoldsTheTouchFloorAcrossDynamicType",
+      "SnapListUITests/SnapListUITests/testLivePhotoReviewVoiceAndStartListingStayTypedBoundariesOverIntake",
+      "SnapListUITests/SnapListUITests/testLiveScanReviewOpensApprovedPhotoReviewShellWithExactRestoredPhoto",
+      "SnapListUITests/SnapListUITests/testPhotoReviewAtFivePhotosShowsAddDimmedDisabledAndInert",
+      "SnapListUITests/SnapListUITests/testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionCoverAndProgressiveActions",
+      "SnapListUITests/SnapListUITests/testRateLimitedSubmissionRendersExactRetainedMessageInLivePhotoReview",
+      "SnapListUITests/SnapListUITests/testScanCameraKeepsNamedControlsReachableAtAccessibilityTypeAndReducedMotion",
+      "SnapListUITests/SnapListUITests/testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessThatSuspendsAfterHomeStillTerminatesAndVerifiesExit",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessUsesNativeWaitToObserveSuspensionBeforeTermination",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testPositiveForegroundExitWitnessAllowsStaleForegroundTargetTermination",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest"
+    ]
+  }
+}
