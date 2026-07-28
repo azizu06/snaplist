@@ -3,7 +3,6 @@ import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   acquireExclusiveTestResource,
-  resolveLocalTestDatabaseUrl,
   type ExclusiveTestResourceLease,
 } from "@/test/exclusive-resource-lock";
 import { cleanupClerkTestUsers, mintUserJwt } from "@/lib/supabase/test-users";
@@ -12,13 +11,20 @@ import { createMobileItemSubmissionOperations } from "./service";
 import { createSupabaseMobileItemSubmissionStaging } from "./store";
 import { runPipelineMaintenance } from "@/lib/pipeline-operations/maintenance";
 import { createSupabasePipelineOperationsStore } from "@/lib/pipeline-operations/store";
+import {
+  DATABASE_URL,
+  PUBLISHABLE_KEY,
+  SECRET_KEY,
+  SUPABASE_URL,
+  connectDatabase,
+  fiveJpegs,
+  fivePhotoMultipart,
+  jpeg,
+  multipart,
+  request,
+} from "./rls-test-fixture";
 
 vi.mock("server-only", () => ({}));
-
-const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
-const PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
-const SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
-const DATABASE_URL = resolveLocalTestDatabaseUrl();
 
 let reachable = false;
 let database: Client;
@@ -42,71 +48,6 @@ let itemId = "";
 let runId = "";
 let queueMessageId = "";
 let storagePaths: string[] = [];
-
-const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
-const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const fiveJpegs = Array.from(
-  { length: 5 },
-  (_, ordinal) => new Uint8Array([...jpeg, ordinal]),
-);
-
-function multipart(costBasis = "12.50", reverse = false): FormData {
-  const body = new FormData();
-  const photos = reverse
-    ? [[png, "back.png", "image/png"], [jpeg, "front.jpg", "image/jpeg"]]
-    : [[jpeg, "front.jpg", "image/jpeg"], [png, "back.png", "image/png"]];
-  for (const [bytes, name, type] of photos as Array<[Uint8Array, string, string]>) {
-    body.append("photo", new File([new Uint8Array(bytes).buffer], name, { type }));
-  }
-  body.append("costBasis", costBasis);
-  return body;
-}
-
-function fivePhotoMultipart(
-  costBasis = "12.50",
-  order = [0, 1, 2, 3, 4],
-  changedOrdinal: number | null = null,
-): FormData {
-  const body = new FormData();
-  const photos = [
-    [fiveJpegs[0], "front.jpg", "image/jpeg"],
-    [fiveJpegs[1], "left.jpg", "image/jpeg"],
-    [fiveJpegs[2], "back.jpg", "image/jpeg"],
-    [fiveJpegs[3], "right.jpg", "image/jpeg"],
-    [fiveJpegs[4], "detail.jpg", "image/jpeg"],
-  ] as const;
-  for (const ordinal of order) {
-    const [originalBytes, name, type] = photos[ordinal]!;
-    const bytes = changedOrdinal === ordinal
-      ? new Uint8Array([...originalBytes, 0xff])
-      : originalBytes;
-    body.append("photo", new File([bytes.buffer], name, { type }));
-  }
-  body.append("costBasis", costBasis);
-  return body;
-}
-
-function request(token: string, key: string, body: FormData): Request {
-  return new Request("http://127.0.0.1:3001/v1/items/runs", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "idempotency-key": key,
-    },
-    body,
-  });
-}
-
-async function connectDatabase(applicationName: string): Promise<Client> {
-  const client = new Client({
-    application_name: applicationName,
-    connectionString: DATABASE_URL,
-    connectionTimeoutMillis: 2_000,
-  });
-  await client.connect();
-  await client.query("set statement_timeout = '10s'");
-  return client;
-}
 
 async function assumeServiceRole(client: Client): Promise<void> {
   await client.query("select set_config('request.jwt.claims', $1, true)", [

@@ -33,7 +33,10 @@ jobs:
       # DB-gated integration tests (the RLS tenancy suite) probe for a local
       # Supabase stack and skip gracefully when it's absent — by design; they
       # run locally via `pnpm supabase start`. Everything else is offline.
-      - run: pnpm test
+      - name: Run the offline Vitest suite
+        env:
+          SNAPLIST_OFFLINE_VERIFY: "1"
+        run: pnpm test
 
       # Eval harness, OFFLINE path: checked-in sample predictions scored
       # against the gold set with the deterministic heuristic judge. The

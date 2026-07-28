@@ -4,6 +4,8 @@ import { createAppleAppAttestVerifier } from "@/lib/app-attest/apple-verifier";
 import { createAppAttestHttpHandler } from "@/lib/app-attest/http";
 import { createAppAttestService, type AppAttestEnvironment } from "@/lib/app-attest/service";
 import { createSupabaseAppAttestStore } from "@/lib/app-attest/supabase-store";
+import { createVerifiedGuestCapabilityService } from "@/lib/guest-capability/service";
+import { createSupabaseVerifiedGuestCapabilityStore } from "@/lib/guest-capability/supabase-store";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -42,14 +44,37 @@ export async function POST(request: Request): Promise<Response> {
 
   const config = configuration();
   if (!config) return unavailable();
+  const configured = config;
 
-  return createAppAttestHttpHandler(() =>
-    createAppAttestService({
-      appId: config.appId,
-      challengeTtlMs: config.ttlMs,
-      environment: config.environment,
-      store: createSupabaseAppAttestStore(createAdminClient()),
-      verifier: createAppleAppAttestVerifier({}),
-    }),
+  let dependencies:
+    | {
+        appAttest: ReturnType<typeof createAppAttestService>;
+        guestCapability: ReturnType<typeof createVerifiedGuestCapabilityService>;
+      }
+    | undefined;
+  function configuredDependencies() {
+    if (dependencies) return dependencies;
+    const client = createAdminClient();
+    dependencies = {
+      appAttest: createAppAttestService({
+        appId: configured.appId,
+        challengeTtlMs: configured.ttlMs,
+        environment: configured.environment,
+        store: createSupabaseAppAttestStore(client),
+        verifier: createAppleAppAttestVerifier({}),
+      }),
+      guestCapability: createVerifiedGuestCapabilityService({
+        store: createSupabaseVerifiedGuestCapabilityStore(client),
+      }),
+    };
+    return dependencies;
+  }
+
+  return createAppAttestHttpHandler(
+    () => configuredDependencies().appAttest,
+    {
+      issueGuestCapability: (assertion) =>
+        configuredDependencies().guestCapability.issue(assertion),
+    },
   )(request);
 }

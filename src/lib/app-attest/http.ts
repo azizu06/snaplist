@@ -1,7 +1,10 @@
 import "server-only";
 
 import { z } from "zod";
-import type { createAppAttestService } from "./service";
+import type {
+  AppAttestVerificationResult,
+  createAppAttestService,
+} from "./service";
 
 type AppAttestService = ReturnType<typeof createAppAttestService>;
 
@@ -72,6 +75,18 @@ function invalidRequest(): Response {
 
 export function createAppAttestHttpHandler(
   dependency: AppAttestService | (() => AppAttestService),
+  options: {
+    issueGuestCapability?: (
+      assertion: Extract<
+        AppAttestVerificationResult,
+        { kind: "assertion"; status: "verified" }
+      >,
+    ) => Promise<{
+      bearerToken: string;
+      expiresAt: string;
+      refreshAfter: string;
+    }>;
+  } = {},
 ) {
   return async (request: Request): Promise<Response> => {
     if (request.method !== "POST") return invalidRequest();
@@ -108,7 +123,15 @@ export function createAppAttestHttpHandler(
         keyId: parsed.data.keyId,
         requestBody: Buffer.from(parsed.data.requestBody, "base64"),
       });
-      return Response.json({ data }, { status: data.status === "verified" ? 200 : 401 });
+      if (data.status !== "verified" || data.kind !== "assertion") {
+        return Response.json({ data }, { status: 401 });
+      }
+      const guestCapability = options.issueGuestCapability
+        ? await options.issueGuestCapability(data)
+        : undefined;
+      return Response.json({
+        data: guestCapability ? { ...data, guestCapability } : data,
+      });
     } catch {
       return Response.json(
         { data: { code: "service_unavailable", status: "unavailable" } },

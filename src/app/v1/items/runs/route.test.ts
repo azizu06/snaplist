@@ -1,14 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { verifyToken, createConfiguredMobileItemSubmissionOperations, submit } = vi.hoisted(() => ({
-  verifyToken: vi.fn(),
+const {
+  createConfiguredMobileItemSubmissionOperations,
+  createConfiguredVerifiedGuestPrincipalResolver,
+  resolveGuest,
+  signGuestOperation,
+  submit,
+  verifyToken,
+} = vi.hoisted(() => ({
   createConfiguredMobileItemSubmissionOperations: vi.fn(),
+  createConfiguredVerifiedGuestPrincipalResolver: vi.fn(),
+  resolveGuest: vi.fn(),
+  signGuestOperation: vi.fn(),
   submit: vi.fn(),
+  verifyToken: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ verifyToken }));
 vi.mock("@/lib/mobile-item-submission/configured", () => ({
   createConfiguredMobileItemSubmissionOperations,
+}));
+vi.mock("@/lib/guest-capability/configured", () => ({
+  createConfiguredVerifiedGuestPrincipalResolver,
 }));
 
 import { POST } from "./route";
@@ -21,6 +34,8 @@ const environmentKeys = [
   "SUPABASE_PUBLISHABLE_KEY",
   "SUPABASE_SECRET_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_GUEST_JWT_KEY_ID",
+  "SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM",
 ] as const;
 
 beforeEach(() => {
@@ -29,6 +44,8 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
   process.env.SUPABASE_PUBLISHABLE_KEY = "sb_publishable_release";
   process.env.SUPABASE_SECRET_KEY = "sb_secret_release";
+  process.env.SUPABASE_GUEST_JWT_KEY_ID = "guest-es256-release";
+  process.env.SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM = "-----BEGIN PRIVATE KEY-----\\nfixed";
   verifyToken.mockResolvedValue({ sub: "user_release" });
   submit.mockResolvedValue({
     outcome: "created",
@@ -50,6 +67,15 @@ beforeEach(() => {
     },
   });
   createConfiguredMobileItemSubmissionOperations.mockReturnValue({ submit });
+  resolveGuest.mockResolvedValue({
+    capabilityId: "33200000-0000-4000-8000-000000000002",
+    kind: "verifiedGuest",
+    mintOperationToken: signGuestOperation,
+    userId: "guest_0123456789abcdef0123456789abcdef0123456789abcdef",
+  });
+  createConfiguredVerifiedGuestPrincipalResolver.mockReturnValue({
+    resolve: resolveGuest,
+  });
 });
 
 afterEach(() => {
@@ -127,5 +153,71 @@ describe("production mobile item submission route", () => {
       publishableKey: "sb_publishable_documented",
       secretKey: "sb_secret_documented",
     });
+  });
+
+  it("resolves GuestBearer without Clerk fallback and passes no service credential to submission", async () => {
+    const body = new FormData();
+    body.append(
+      "photo",
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], "item.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+    const guestBearer = `guestcap_${"A".repeat(43)}`;
+
+    const response = await POST(new Request("https://snaplist.example/v1/items/runs", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${guestBearer}`,
+        "idempotency-key": "33430000-0000-4000-8000-000000000001",
+      },
+      body,
+    }));
+
+    expect(response.status).toBe(202);
+    expect(verifyToken).not.toHaveBeenCalled();
+    expect(createConfiguredVerifiedGuestPrincipalResolver).toHaveBeenCalledWith({
+      keyId: "guest-es256-release",
+      privateKeyPem: "-----BEGIN PRIVATE KEY-----\\nfixed",
+      secretKey: "sb_secret_release",
+      supabaseURL: "https://project.supabase.co",
+    });
+    expect(resolveGuest).toHaveBeenCalledWith(guestBearer);
+    expect(createConfiguredMobileItemSubmissionOperations).toHaveBeenCalledWith({
+      publishableKey: "sb_publishable_release",
+      supabaseURL: "https://project.supabase.co",
+    });
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({
+      principal: expect.objectContaining({
+        capabilityId: "33200000-0000-4000-8000-000000000002",
+        kind: "verifiedGuest",
+        userId: "guest_0123456789abcdef0123456789abcdef0123456789abcdef",
+      }),
+    }));
+    expect(JSON.stringify(submit.mock.calls)).not.toContain(guestBearer);
+  });
+
+  it("never falls through a rejected GuestBearer to Clerk", async () => {
+    resolveGuest.mockRejectedValueOnce(new Error("Inactive guest capability."));
+    const body = new FormData();
+    body.append(
+      "photo",
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], "item.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+
+    const response = await POST(new Request("https://snaplist.example/v1/items/runs", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer guestcap_${"Z".repeat(43)}`,
+        "idempotency-key": "33430000-0000-4000-8000-000000000001",
+      },
+      body,
+    }));
+
+    expect(response.status).toBe(401);
+    expect(verifyToken).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
   });
 });
