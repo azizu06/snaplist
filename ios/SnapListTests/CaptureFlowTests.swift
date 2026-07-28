@@ -4270,42 +4270,18 @@ final class CaptureFlowTests: XCTestCase {
             autoScroll: { _ in }
         )
 
-        let window = UIWindow(
-            frame: CGRect(x: 0, y: 0, width: 440, height: 956)
-        )
-        let controller = UIViewController()
-        window.rootViewController = controller
-
-        let outerScreenScroll = UIScrollView(frame: window.bounds)
-        outerScreenScroll.alwaysBounceVertical = true
-        outerScreenScroll.contentSize = CGSize(width: 440, height: 1_200)
-        controller.view.addSubview(outerScreenScroll)
-
-        let innerHorizontalStrip = UIScrollView(
-            frame: CGRect(x: 16, y: 360, width: 408, height: 104)
-        )
-        innerHorizontalStrip.alwaysBounceHorizontal = true
-        innerHorizontalStrip.contentSize = CGSize(width: 520, height: 104)
-        outerScreenScroll.addSubview(innerHorizontalStrip)
-
-        let stripContent = UIView(
-            frame: CGRect(x: 0, y: 0, width: 520, height: 104)
-        )
-        innerHorizontalStrip.addSubview(stripContent)
+        let host = makeNativeInteractionHost()
 
         let sourceAttachment =
             PhotoReviewNativeStripInteractionAttachmentView()
         let destinationAttachment =
             PhotoReviewNativeStripInteractionAttachmentView()
-        stripContent.addSubview(sourceAttachment)
-        stripContent.addSubview(destinationAttachment)
-
-        window.makeKeyAndVisible()
+        host.stripContent.addSubview(sourceAttachment)
+        host.stripContent.addSubview(destinationAttachment)
         defer {
             sourceAttachment.dismantle()
             destinationAttachment.dismantle()
-            window.isHidden = true
-            withExtendedLifetime(window) {}
+            host.cleanUp()
         }
 
         sourceAttachment.update(
@@ -4322,36 +4298,36 @@ final class CaptureFlowTests: XCTestCase {
         destinationAttachment.resolveHostAndAttach()
 
         XCTAssertEqual(
-            innerHorizontalStrip.interactions
+            host.innerHorizontalStrip.interactions
                 .compactMap { $0 as? UIDragInteraction }
                 .count,
             1
         )
         XCTAssertEqual(
-            innerHorizontalStrip.interactions
+            host.innerHorizontalStrip.interactions
                 .compactMap { $0 as? UIDropInteraction }
                 .count,
             1
         )
         XCTAssertTrue(
-            innerHorizontalStrip.interactions
+            host.innerHorizontalStrip.interactions
                 .compactMap { $0 as? UIDragInteraction }
                 .first?
-                .view === innerHorizontalStrip
+                .view === host.innerHorizontalStrip
         )
         XCTAssertTrue(
-            innerHorizontalStrip.interactions
+            host.innerHorizontalStrip.interactions
                 .compactMap { $0 as? UIDropInteraction }
                 .first?
-                .view === innerHorizontalStrip
+                .view === host.innerHorizontalStrip
         )
         XCTAssertTrue(
-            outerScreenScroll.interactions
+            host.outerScreenScroll.interactions
                 .compactMap { $0 as? UIDragInteraction }
                 .isEmpty
         )
         XCTAssertTrue(
-            outerScreenScroll.interactions
+            host.outerScreenScroll.interactions
                 .compactMap { $0 as? UIDropInteraction }
                 .isEmpty
         )
@@ -4811,7 +4787,24 @@ final class CaptureFlowTests: XCTestCase {
             isEnabled: false,
             sourceAtLocation: sourceAtLocation
         )
-        let sourceInteraction = UIDragInteraction(delegate: source)
+        let host = makeNativeInteractionHost()
+        let sourceAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        host.stripContent.addSubview(sourceAttachment)
+        sourceAttachment.update(
+            shouldAttach: true,
+            attach: source.attach(to:),
+            detach: source.detach
+        )
+        defer {
+            sourceAttachment.dismantle()
+            host.cleanUp()
+        }
+        let sourceInteraction = try XCTUnwrap(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
         let session = PhotoReviewDragSessionStub()
 
         XCTAssertTrue(
@@ -4871,10 +4864,17 @@ final class CaptureFlowTests: XCTestCase {
             destinationIndex: { _ in 0 },
             autoScroll: { _ in }
         )
-        let destinationView = UIView(
-            frame: CGRect(x: 0, y: 0, width: 320, height: 120)
+        let destinationAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        host.stripContent.addSubview(destinationAttachment)
+        destinationAttachment.update(
+            shouldAttach: false,
+            attach: destination.attach(to:),
+            detach: destination.detach
         )
-        destination.attach(to: destinationView)
+        defer {
+            destinationAttachment.dismantle()
+        }
         XCTAssertFalse(destination.isInteractionAttached)
 
         XCTAssertTrue(
@@ -4934,11 +4934,15 @@ final class CaptureFlowTests: XCTestCase {
             destinationIndex: { _ in 0 },
             autoScroll: { _ in }
         )
-        destination.attach(to: destinationView)
+        destinationAttachment.update(
+            shouldAttach: true,
+            attach: destination.attach(to:),
+            detach: destination.detach
+        )
 
         XCTAssertTrue(destination.isInteractionAttached)
         let activeInteraction = try XCTUnwrap(
-            destinationView.interactions
+            host.innerHorizontalStrip.interactions
                 .compactMap { $0 as? UIDropInteraction }
                 .first
         )
@@ -5492,6 +5496,51 @@ final class CaptureFlowTests: XCTestCase {
                 fingerprints: fingerprints
             )
         ]
+    }
+
+    private struct NativeInteractionHost {
+        let window: UIWindow
+        let outerScreenScroll: UIScrollView
+        let innerHorizontalStrip: UIScrollView
+        let stripContent: UIView
+
+        func cleanUp() {
+            window.isHidden = true
+            withExtendedLifetime(window) {}
+        }
+    }
+
+    private func makeNativeInteractionHost() -> NativeInteractionHost {
+        let window = UIWindow(
+            frame: CGRect(x: 0, y: 0, width: 440, height: 956)
+        )
+        let controller = UIViewController()
+        window.rootViewController = controller
+
+        let outerScreenScroll = UIScrollView(frame: window.bounds)
+        outerScreenScroll.alwaysBounceVertical = true
+        outerScreenScroll.contentSize = CGSize(width: 440, height: 1_200)
+        controller.view.addSubview(outerScreenScroll)
+
+        let innerHorizontalStrip = UIScrollView(
+            frame: CGRect(x: 16, y: 360, width: 408, height: 104)
+        )
+        innerHorizontalStrip.alwaysBounceHorizontal = true
+        innerHorizontalStrip.contentSize = CGSize(width: 520, height: 104)
+        outerScreenScroll.addSubview(innerHorizontalStrip)
+
+        let stripContent = UIView(
+            frame: CGRect(x: 0, y: 0, width: 520, height: 104)
+        )
+        innerHorizontalStrip.addSubview(stripContent)
+        window.makeKeyAndVisible()
+
+        return NativeInteractionHost(
+            window: window,
+            outerScreenScroll: outerScreenScroll,
+            innerHorizontalStrip: innerHorizontalStrip,
+            stripContent: stripContent
+        )
     }
 
     private func makePickerPhoto(
