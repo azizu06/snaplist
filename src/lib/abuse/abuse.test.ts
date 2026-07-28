@@ -5,6 +5,7 @@ import { getLimiter, incrDaily, __resetInMemoryStores } from "./store";
 import {
   checkDailyItemQuota,
   checkRateLimit,
+  enforceAppAttestRateLimit,
   enforceRateLimit,
   rateLimitAllows,
   recordPipelineRunAndMaybeAlert,
@@ -147,6 +148,29 @@ describe("abuse rate limiting", () => {
     expect(blocked!.headers.get("Retry-After")).toBeTruthy();
     const body = await blocked!.json();
     expect(body.error).toMatch(/too many requests/i);
+  });
+
+  it("enforceAppAttestRateLimit uses a dedicated IP bucket and typed unavailable truth", async () => {
+    const env = { RATE_LIMIT_FREE_PER_MINUTE: "1" };
+    const request = new Request("https://snaplist.dev/api/app-attest", {
+      headers: { "x-forwarded-for": "198.51.100.31" },
+      method: "POST",
+    });
+    expect(await enforceAppAttestRateLimit(request, env)).toBeNull();
+
+    const blocked = await enforceAppAttestRateLimit(request, env);
+    expect(blocked).not.toBeNull();
+    expect(blocked!.status).toBe(429);
+    expect(blocked!.headers.get("Retry-After")).toBeTruthy();
+    await expect(blocked!.json()).resolves.toEqual({
+      data: { code: "rate_limited", status: "unavailable" },
+    });
+
+    const otherIP = new Request("https://snaplist.dev/api/app-attest", {
+      headers: { "x-real-ip": "198.51.100.32" },
+      method: "POST",
+    });
+    expect(await enforceAppAttestRateLimit(otherIP, env)).toBeNull();
   });
 });
 

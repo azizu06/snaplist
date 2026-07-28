@@ -71,6 +71,13 @@ describe("auth proxy", () => {
     expect(doesProxyMatch("/dashboard")).toBe(true);
   });
 
+  it("lets only the exact App Attest endpoint own its evidence boundary", () => {
+    expect(doesProxyMatch("/api/app-attest")).toBe(false);
+    expect(doesProxyMatch("/api/app-attest/")).toBe(false);
+    expect(doesProxyMatch("/api/app-attest/child")).toBe(true);
+    expect(doesProxyMatch("/api/app-attest-extra")).toBe(true);
+  });
+
   it("lets only the exact eBay OAuth callback bypass cookie authentication", async () => {
     const callbackResponse = await proxy(
       new NextRequest("https://snaplist.test/v1/ebay/oauth/callback"),

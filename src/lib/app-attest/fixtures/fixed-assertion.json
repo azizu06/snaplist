@@ -1,0 +1,19 @@
+{
+  "source": "offline fixed P-256 assertion fixture for issue #331",
+  "appId": "TEAMID1234.dev.snaplist.ios",
+  "environment": "production",
+  "keyId": "5pdXlrweSiFHprxZGYsuio8FYiwzAkykkzP7CDpVy8M=",
+  "challenge": "Zml4ZWQtYXNzZXJ0aW9uLWNoYWxsZW5nZS0zMzE",
+  "requestBody": "eyJvcGVyYXRpb24iOiJndWVzdC1wcm9vZi1vbmx5IiwidmFsdWUiOjMzMX0=",
+  "requestHash": "kUMXw3pS06BjXllcLb9Qae8b0lCieSj1ynePmusUmsU",
+  "clientData": "eyJhcHBJZCI6IlRFQU1JRDEyMzQuZGV2LnNuYXBsaXN0LmlvcyIsImNoYWxsZW5nZSI6IlptbDRaV1F0WVhOelpYSjBhVzl1TFdOb1lXeHNaVzVuWlMwek16RSIsImVudmlyb25tZW50IjoicHJvZHVjdGlvbiIsImtleUlkIjoiNXBkWGxyd2VTaUZIcHJ4WkdZc3VpbzhGWWl3ekFreWtrelA3Q0RwVnk4TT0iLCJyZXF1ZXN0SGFzaCI6ImtVTVh3M3BTMDZCalhsbGNMYjlRYWU4YjBsQ2llU2oxeW5lUG11c1Vtc1UifQ==",
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEK1CklFtYKbUxNdoykAeD7heC7JxA\nSsAx8IIfqX1HuzKjRTDmb7slvsrkEBJMAfA15qu2ma0+JjNMLsFYJPUqng==\n-----END PUBLIC KEY-----\n",
+  "assertionObject": "uQACaXNpZ25hdHVyZVhHMEUCIQD3dSn6GyBIeVMhoNf7DBUizOCzADfqx0W9/RfvGW/D2QIgQuUFou9Qx+Q8KWOvvokM3cA/uWHKmTJrXukqdLJKPpBxYXV0aGVudGljYXRvckRhdGFYZVMYa4kTeT2tPNLHl/1gRQJ4rODjZBQM0s1qCm/p8lcjAQAAAAG5AAJ3YXBwbGVfYnVuZGxlX3ZlcnNpb25fMDFhMXgcYXBwbGVfdmFsaWRhdGlvbl9jYXRlZ29yeV8wMUQEAAAA",
+  "legacyAssertionObject": "uQACaXNpZ25hdHVyZVhIMEYCIQDJdCzHa6Xxw29NxDtbbm6K+EF9HYW9Z0AmBgM/+LoGtgIhAMBt7PRhQRFwg4KqPW1i+oS1dr8RcE+62GZp+amIg6S2cWF1dGhlbnRpY2F0b3JEYXRhWCVTGGuJE3k9rTzSx5f9YEUCeKzg42QUDNLNagpv6fJXIwEAAAAB",
+  "doubleHashedAssertionObject": "uQACaXNpZ25hdHVyZVhGMEQCIF2mmBHOEjqhkyz/twOSLdgWNiA3Droj1A5BsEEF8XEYAiAC6O3KbHL1cqQMQxvdvqFGIz2J6/rehqD8I8+DHjioLXFhdXRoZW50aWNhdG9yRGF0YVhlUxhriRN5Pa080seX/WBFAnis4ONkFAzSzWoKb+nyVyMBAAAAAbkAAndhcHBsZV9idW5kbGVfdmVyc2lvbl8wMWExeBxhcHBsZV92YWxpZGF0aW9uX2NhdGVnb3J5XzAxRAQAAAA=",
+  "expected": {
+    "bundleVersion": "1",
+    "counter": 1,
+    "validationCategory": 4
+  }
+}

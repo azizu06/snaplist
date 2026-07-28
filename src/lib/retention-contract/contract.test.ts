@@ -109,6 +109,8 @@ describe("lean-MVP release retention contract", () => {
       "pricing-evidence",
       "per-run-telemetry",
       "guest-recovery",
+      "app-attest-challenges",
+      "app-attest-current-keys",
       "ai-item-credits",
       "mobile-ebay-oauth-session-state",
       "ebay-connections",
@@ -146,6 +148,80 @@ describe("lean-MVP release retention contract", () => {
         ],
       },
     ]);
+  });
+
+  it("defines exact App Attest challenge and current-key retention dispositions", () => {
+    const appAttestData = contract.data.filter(({ id }) =>
+      ["app-attest-challenges", "app-attest-current-keys"].includes(id),
+    );
+
+    expect(appAttestData).toEqual([
+      {
+        id: "app-attest-challenges",
+        releaseDatum: true,
+        dispositions: [
+          {
+            treatment: "delete",
+            owner: "guest-device-attestation",
+            deletionTriggers: [
+              "challenge-consumed",
+              "challenge-expires",
+              "account-or-guest-erasure",
+            ],
+            maximumRetention:
+              "active unexpired rows are ineligible; delete no later than 24 hours after consumed_at or expires_at, whichever first makes the row eligible",
+            executor:
+              "private-hourly-app-attest-retention-and-immediate-erasure-capability",
+            completionProof:
+              "the private cleanup result and durable absence prove no eligible challenge row remains; cron.job registration and cron.job_run_details prove at least one successful cleanup in every rolling 24 hours",
+            ownerDecision:
+              "Aziz approved this challenge ceiling and executor for issue #331 on 2026-07-26. SnapList retains no challenge history.",
+          },
+        ],
+      },
+      {
+        id: "app-attest-current-keys",
+        releaseDatum: true,
+        dispositions: [
+          {
+            treatment: "delete",
+            owner: "guest-device-attestation",
+            deletionTriggers: [
+              "key-inactive-for-90-days",
+              "account-or-guest-erasure",
+            ],
+            maximumRetention:
+              "retain only the current key state while used; delete 90 days after latest successful assertion, or 90 days after attestation for a never-successful key",
+            executor:
+              "private-hourly-app-attest-retention-and-immediate-erasure-capability",
+            completionProof:
+              "the private cleanup result and durable absence prove no inactive key row remains; cron.job registration and cron.job_run_details prove at least one successful cleanup in every rolling 24 hours",
+            ownerDecision:
+              "Aziz approved this inactivity ceiling for issue #331 on 2026-07-26. Store only the current key ID, public key, required current receipt, counter, environment, attestation time, and latest successful verification time; retain no raw device fingerprint, historical receipt, or superseded key history.",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("rejects omitted or duplicate App Attest retention dispositions", () => {
+    const omitted = structuredClone(contract);
+    omitted.data = omitted.data.filter(
+      ({ id }) => id !== "app-attest-challenges",
+    );
+    expect(() => parseReleaseRetentionContract(omitted)).toThrow(
+      /exactly one App Attest challenge disposition/i,
+    );
+
+    const duplicated = structuredClone(contract);
+    const currentKeys = duplicated.data.find(
+      ({ id }) => id === "app-attest-current-keys",
+    );
+    if (!currentKeys) throw new Error("App Attest current-key row is missing");
+    duplicated.data.push(structuredClone(currentKeys));
+    expect(() => parseReleaseRetentionContract(duplicated)).toThrow(
+      /exactly one App Attest current-key disposition/i,
+    );
   });
 
   it("rejects an omitted mobile eBay OAuth session/state disposition", () => {

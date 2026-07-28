@@ -105,6 +105,37 @@ export async function enforceRateLimit(
   );
 }
 
+/** Protect the public App Attest truth endpoint with its own IP-based bucket. */
+export async function enforceAppAttestRateLimit(
+  request: Request,
+  env: Record<string, string | undefined> = process.env,
+): Promise<NextResponse | null> {
+  const id = requestIdentifier(request);
+  let result: LimitResult;
+  try {
+    maybeAlertFallbackInProduction(env);
+    result = await getLimiter(
+      "app-attest",
+      tierLimits("free", env).meteredPerMinute,
+      60,
+      env,
+    ).limit(id);
+  } catch (err) {
+    logEvent("ratelimit.app-attest.error", {
+      id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+  if (result.success) return null;
+  const retrySec = Math.ceil(result.resetMs / 1000);
+  logEvent("ratelimit.app-attest.block", { id, limit: result.limit, retrySec });
+  return NextResponse.json(
+    { data: { code: "rate_limited", status: "unavailable" } },
+    { status: 429, headers: { "Retry-After": String(retrySec) } },
+  );
+}
+
 /**
  * Server-action equivalent of `enforceRateLimit` — a server action can't return a
  * `429`, so this returns whether the call is ALLOWED (caller redirects on false).

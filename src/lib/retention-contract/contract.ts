@@ -78,6 +78,19 @@ const releaseRetentionContractSchema = z
         path: ["data", "mobile-ebay-oauth-session-state"],
       });
     }
+    for (const [id, label] of [
+      ["app-attest-challenges", "challenge"],
+      ["app-attest-current-keys", "current-key"],
+    ] as const) {
+      const count = contract.data.filter((datum) => datum.id === id).length;
+      if (count !== 1) {
+        context.addIssue({
+          code: "custom",
+          message: `The contract must contain exactly one App Attest ${label} disposition.`,
+          path: ["data", id],
+        });
+      }
+    }
     const rawVoice = contract.data.find(
       ({ id }) => id === "private-storage-raw-voice",
     );
