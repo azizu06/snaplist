@@ -410,7 +410,14 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         _ interaction: UIDragInteraction,
         itemsForBeginning session: UIDragSession
     ) -> [UIDragItem] {
-        let location = interaction.view.map(session.location(in:)) ?? .zero
+        guard let sourceView = interaction.view else {
+            return []
+        }
+        let sourceLocation = session.location(in: sourceView)
+        let location = CGPoint(
+            x: sourceLocation.x - sourceView.bounds.minX,
+            y: sourceLocation.y - sourceView.bounds.minY
+        )
         guard isEnabled,
               let source = sourceAtLocation(location),
               presentation.begin(
@@ -458,8 +465,8 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         let target = UIDragPreviewTarget(
             container: sourceView,
             center: CGPoint(
-                x: activeSource.frame.midX,
-                y: activeSource.frame.midY
+                x: activeSource.frame.midX + sourceView.bounds.minX,
+                y: activeSource.frame.midY + sourceView.bounds.minY
             )
         )
         return UITargetedDragPreview(

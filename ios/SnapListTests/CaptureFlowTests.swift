@@ -3981,7 +3981,7 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
-    func testPhotoReviewNativeSourceMapsFivePhotoTouchToExactIdentity() {
+    func testPhotoReviewNativeSourceMapsFivePhotoTouchToExactIdentity() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(
             "snaplist-photo-review-native-source-\(UUID().uuidString)",
@@ -4022,28 +4022,78 @@ final class CaptureFlowTests: XCTestCase {
                 )
             }
         )
-        let sourceView = UIView(
-            frame: CGRect(x: 0, y: 0, width: 440, height: 98)
+        let sourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
         )
-        let interaction = UIDragInteraction(delegate: source)
-        sourceView.addInteraction(interaction)
-        let session = PhotoReviewDragSessionStub()
-        session.currentLocation = CGPoint(x: 38, y: 38)
-
-        let items = source.dragInteraction(
-            interaction,
-            itemsForBeginning: session
+        sourceView.contentSize = CGSize(width: 440, height: 122)
+        sourceView.bounds = CGRect(
+            x: 88,
+            y: 24,
+            width: 320,
+            height: 98
         )
+        source.attach(to: sourceView)
+        source.attach(to: sourceView)
 
         XCTAssertEqual(
-            items.first.flatMap {
-                PhotoReviewNativeDragContract.photoID(
-                    from: $0.itemProvider
-                )
-            },
-            photos[0].id
+            sourceView.interactions.compactMap { $0 as? UIDragInteraction }.count,
+            1
         )
-        XCTAssertEqual(presentation.draggedPhotoID, photos[0].id)
+        let interaction = try XCTUnwrap(
+            sourceView.interactions.compactMap { $0 as? UIDragInteraction }.first
+        )
+
+        for photo in photos {
+            let frame = try XCTUnwrap(frames[photo.id])
+            let session = PhotoReviewDragSessionStub()
+            session.currentLocation = CGPoint(
+                x: frame.midX + sourceView.bounds.minX,
+                y: frame.midY + sourceView.bounds.minY
+            )
+
+            let items = source.dragInteraction(
+                interaction,
+                itemsForBeginning: session
+            )
+            let item = try XCTUnwrap(items.first)
+
+            XCTAssertEqual(
+                PhotoReviewNativeDragContract.photoID(
+                    from: item.itemProvider
+                ),
+                photo.id
+            )
+            XCTAssertEqual(presentation.draggedPhotoID, photo.id)
+
+            let preview = try XCTUnwrap(
+                source.dragInteraction(
+                    interaction,
+                    previewForLifting: item,
+                    session: session
+                )
+            )
+            XCTAssertNotNil((preview.view as? UIImageView)?.image)
+            XCTAssertTrue(preview.target.container === sourceView)
+            XCTAssertEqual(
+                preview.target.center.x,
+                frame.midX + sourceView.bounds.minX,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(
+                preview.target.center.y,
+                frame.midY + sourceView.bounds.minY,
+                accuracy: 0.001
+            )
+
+            source.dragInteraction(
+                interaction,
+                session: session,
+                didEndWith: .cancel
+            )
+            XCTAssertNil(presentation.draggedPhotoID)
+            XCTAssertEqual(presentation.consumeFocusPhotoID(), photo.id)
+            XCTAssertNil(presentation.consumeAnnouncement())
+        }
     }
 
     func testPhotoReviewStripDropGeometryMapsKnownThirdIdentityToCover() {
@@ -4305,6 +4355,14 @@ final class CaptureFlowTests: XCTestCase {
         committedSession.items = committedItems
 
         XCTAssertEqual(committedItems.count, 1)
+        XCTAssertEqual(
+            committedItems.first.flatMap {
+                PhotoReviewNativeDragContract.photoID(
+                    from: $0.itemProvider
+                )
+            },
+            photos[2].id
+        )
         committed.updateInsertion(
             to: 0,
             store: committedStore,
