@@ -4011,6 +4011,13 @@ final class CaptureFlowTests: XCTestCase {
             0
         )
         XCTAssertEqual(
+            PhotoReviewStripDropGeometry.maximumFrameShift(
+                from: restingFrames,
+                to: coverGapFrames
+            ),
+            PhotoReviewDragLayout.insertionGap
+        )
+        XCTAssertEqual(
             PhotoReviewStripDropGeometry.destinationIndex(
                 at: CGPoint(x: 38, y: 38),
                 photos: photos,
@@ -4028,7 +4035,6 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(
             presentation.begin(photoID: photos[2].id, store: store)
         )
-        presentation.enterDropTarget()
         presentation.updateInsertion(
             to: 0,
             store: store,
@@ -4039,6 +4045,10 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(store.photos, photos)
         XCTAssertNil(presentation.draggedPhotoID)
         XCTAssertNil(presentation.insertionIndex)
+        XCTAssertEqual(
+            presentation.lastTransitionDecision,
+            .suppressed
+        )
         XCTAssertEqual(presentation.consumeFocusPhotoID(), photos[2].id)
         XCTAssertNil(presentation.consumeFocusPhotoID())
         XCTAssertNil(presentation.consumeAnnouncement())
@@ -4047,6 +4057,38 @@ final class CaptureFlowTests: XCTestCase {
 
         XCTAssertNil(presentation.consumeFocusPhotoID())
         XCTAssertNil(presentation.consumeAnnouncement())
+
+        let committedStore = PhotoReviewStore(photos: photos)
+        let committed = PhotoReviewDragPresentation()
+        XCTAssertTrue(
+            committed.begin(photoID: photos[2].id, store: committedStore)
+        )
+        committed.updateInsertion(
+            to: 0,
+            store: committedStore,
+            reduceMotion: true
+        )
+        XCTAssertNotNil(
+            committed.commit(
+                to: 0,
+                store: committedStore,
+                reduceMotion: true
+            )
+        )
+
+        committed.endNativeDragSession(reduceMotion: true)
+
+        XCTAssertEqual(
+            committedStore.photos,
+            [photos[2], photos[0], photos[1]]
+        )
+        XCTAssertEqual(committed.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(committed.consumeFocusPhotoID())
+        XCTAssertEqual(
+            committed.consumeAnnouncement(),
+            "Moved to photo 1 of 3. Cover."
+        )
+        XCTAssertNil(committed.consumeAnnouncement())
     }
 
     func testPhotoReviewDragMovesKnownIdentityFromThirdToCoverWithoutChangingItsValues() {

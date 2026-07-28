@@ -62,6 +62,52 @@ enum PhotoReviewStripDropGeometry {
             }?
             .index
     }
+
+    static func maximumFrameShift(
+        from baseline: [StagedCapturePhoto.ID: CGRect],
+        to current: [StagedCapturePhoto.ID: CGRect]
+    ) -> CGFloat {
+        baseline.compactMap { photoID, baselineFrame in
+            current[photoID].map {
+                abs($0.minX - baselineFrame.minX)
+            }
+        }
+        .max() ?? 0
+    }
+}
+
+enum PhotoReviewDragTransitionDecision: String, Equatable {
+    case animated
+    case suppressed
+}
+
+enum PhotoReviewDragAnimationPolicy {
+    static func decision(
+        reduceMotion: Bool
+    ) -> PhotoReviewDragTransitionDecision {
+        reduceMotion ? .suppressed : .animated
+    }
+
+    static func animation(
+        for decision: PhotoReviewDragTransitionDecision
+    ) -> Animation? {
+        switch decision {
+        case .animated:
+            .easeInOut(duration: 0.16)
+        case .suppressed:
+            nil
+        }
+    }
+}
+
+enum PhotoReviewInsertionEdge: Equatable {
+    case leading
+    case trailing
+}
+
+enum PhotoReviewDragLayout {
+    static let insertionGap: CGFloat = 62
+    static let edgeAutoScrollThreshold: CGFloat = 28
 }
 
 private struct PhotoReviewThumbnailFramePreferenceKey: PreferenceKey {
@@ -93,8 +139,8 @@ final class PhotoReviewDragPresentation {
     private(set) var insertionIndex: Int?
     private(set) var pendingFocusPhotoID: StagedCapturePhoto.ID?
     private(set) var pendingAnnouncement: String?
-    private(set) var isInsideDropTarget = false
-    @ObservationIgnored private var cancellationTask: Task<Void, Never>?
+    private(set) var lastTransitionDecision:
+        PhotoReviewDragTransitionDecision?
 
     func begin(
         photoID: StagedCapturePhoto.ID,
@@ -104,26 +150,12 @@ final class PhotoReviewDragPresentation {
               store.photos.contains(where: { $0.id == photoID }) else {
             return false
         }
-        cancellationTask?.cancel()
         pendingFocusPhotoID = nil
         pendingAnnouncement = nil
         draggedPhotoID = photoID
         insertionIndex = store.photos.firstIndex(where: { $0.id == photoID })
-        isInsideDropTarget = false
+        lastTransitionDecision = nil
         return true
-    }
-
-    func enterDropTarget() {
-        guard draggedPhotoID != nil else {
-            return
-        }
-        isInsideDropTarget = true
-        cancellationTask?.cancel()
-    }
-
-    func leaveDropTarget(reduceMotion: Bool) {
-        isInsideDropTarget = false
-        scheduleCancellation(reduceMotion: reduceMotion)
     }
 
     func updateInsertion(
@@ -135,11 +167,10 @@ final class PhotoReviewDragPresentation {
               store.photos.indices.contains(destinationIndex) else {
             return
         }
-        cancellationTask?.cancel()
         guard insertionIndex != destinationIndex else {
             return
         }
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+        withAnimation(transitionAnimation(reduceMotion: reduceMotion)) {
             insertionIndex = destinationIndex
         }
     }
@@ -153,45 +184,30 @@ final class PhotoReviewDragPresentation {
         guard let photoID = draggedPhotoID else {
             return nil
         }
-        cancellationTask?.cancel()
         let result = store.performDragReorder(
             photoID: photoID,
             to: destinationIndex
         )
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+        withAnimation(transitionAnimation(reduceMotion: reduceMotion)) {
             draggedPhotoID = nil
             insertionIndex = nil
-            isInsideDropTarget = false
         }
         pendingFocusPhotoID = photoID
         pendingAnnouncement = result?.announcement
         return result
     }
 
-    func scheduleCancellation(reduceMotion: Bool) {
-        guard draggedPhotoID != nil,
-              !isInsideDropTarget else {
-            return
-        }
-        cancellationTask?.cancel()
-        cancellationTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else {
-                return
-            }
-            self?.cancel(reduceMotion: reduceMotion)
-        }
+    func endNativeDragSession(reduceMotion: Bool) {
+        cancel(reduceMotion: reduceMotion)
     }
 
     func cancel(reduceMotion: Bool) {
         guard let photoID = draggedPhotoID else {
             return
         }
-        cancellationTask?.cancel()
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+        withAnimation(transitionAnimation(reduceMotion: reduceMotion)) {
             draggedPhotoID = nil
             insertionIndex = nil
-            isInsideDropTarget = false
         }
         pendingFocusPhotoID = photoID
         pendingAnnouncement = nil
@@ -206,80 +222,287 @@ final class PhotoReviewDragPresentation {
         defer { pendingAnnouncement = nil }
         return pendingAnnouncement
     }
+
+    func insertionEdge(
+        for photoID: StagedCapturePhoto.ID,
+        at index: Int,
+        store: PhotoReviewStore
+    ) -> PhotoReviewInsertionEdge? {
+        guard insertionIndex == index,
+              let draggedPhotoID,
+              draggedPhotoID != photoID,
+              let sourceIndex = store.photos.firstIndex(
+                where: { $0.id == draggedPhotoID }
+              ) else {
+            return nil
+        }
+        return sourceIndex > index ? .leading : .trailing
+    }
+
+    private func transitionAnimation(
+        reduceMotion: Bool
+    ) -> Animation? {
+        let decision = PhotoReviewDragAnimationPolicy.decision(
+            reduceMotion: reduceMotion
+        )
+        lastTransitionDecision = decision
+        return PhotoReviewDragAnimationPolicy.animation(for: decision)
+    }
 }
 
 @MainActor
-private struct PhotoReviewThumbnailStripDropDelegate: DropDelegate {
+private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
     let store: PhotoReviewStore
     let presentation: PhotoReviewDragPresentation
     let reduceMotion: Bool
     let destinationIndex: (CGPoint) -> Int?
     let autoScroll: (CGPoint) -> Void
 
-    func validateDrop(info: DropInfo) -> Bool {
-        acceptedPhotoID(info: info) != nil
-    }
-
-    func dropEntered(info: DropInfo) {
-        guard acceptedPhotoID(info: info) != nil else {
-            return
-        }
-        presentation.enterDropTarget()
-        updateDestination(info: info)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard validateDrop(info: info) else {
-            return DropProposal(operation: .cancel)
-        }
-        presentation.enterDropTarget()
-        updateDestination(info: info)
-        autoScroll(info.location)
-        return DropProposal(operation: .move)
-    }
-
-    func dropExited(info: DropInfo) {
-        presentation.leaveDropTarget(reduceMotion: reduceMotion)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard acceptedPhotoID(info: info) != nil,
-              let destinationIndex = destinationIndex(info.location) else {
-            presentation.cancel(reduceMotion: reduceMotion)
-            return false
-        }
-        presentation.commit(
-            to: destinationIndex,
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
             store: store,
-            reduceMotion: reduceMotion
+            presentation: presentation,
+            reduceMotion: reduceMotion,
+            destinationIndex: destinationIndex,
+            autoScroll: autoScroll
         )
-        return true
     }
 
-    private func acceptedPhotoID(
-        info: DropInfo
-    ) -> StagedCapturePhoto.ID? {
-        guard let draggedPhotoID = presentation.draggedPhotoID else {
-            return nil
-        }
-        return info.itemProviders(
-            for: [PhotoReviewNativeDragContract.contentType]
-        )
-        .lazy
-        .compactMap(PhotoReviewNativeDragContract.photoID(from:))
-        .first(where: { $0 == draggedPhotoID })
+    func makeUIView(context: Context) -> AttachmentView {
+        let view = AttachmentView()
+        view.coordinator = context.coordinator
+        return view
     }
 
-    private func updateDestination(info: DropInfo) {
-        guard acceptedPhotoID(info: info) != nil,
-              let destinationIndex = destinationIndex(info.location) else {
-            return
-        }
-        presentation.updateInsertion(
-            to: destinationIndex,
+    func updateUIView(
+        _ uiView: AttachmentView,
+        context: Context
+    ) {
+        context.coordinator.update(
             store: store,
-            reduceMotion: reduceMotion
+            presentation: presentation,
+            reduceMotion: reduceMotion,
+            destinationIndex: destinationIndex,
+            autoScroll: autoScroll
         )
+        uiView.attachToNearestScrollView()
+    }
+
+    static func dismantleUIView(
+        _ uiView: AttachmentView,
+        coordinator: Coordinator
+    ) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class AttachmentView: UIView {
+        weak var coordinator: Coordinator?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            attachToNearestScrollView()
+        }
+
+        func attachToNearestScrollView() {
+            guard window != nil else {
+                coordinator?.detach()
+                return
+            }
+            var ancestor = superview
+            while let view = ancestor {
+                if let scrollView = view as? UIScrollView {
+                    coordinator?.attach(to: scrollView)
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UIDropInteractionDelegate {
+        private var store: PhotoReviewStore
+        private var presentation: PhotoReviewDragPresentation
+        private var reduceMotion: Bool
+        private var destinationIndex: (CGPoint) -> Int?
+        private var autoScroll: (CGPoint) -> Void
+        private weak var attachedView: UIView?
+        private var dropInteraction: UIDropInteraction?
+
+        init(
+            store: PhotoReviewStore,
+            presentation: PhotoReviewDragPresentation,
+            reduceMotion: Bool,
+            destinationIndex: @escaping (CGPoint) -> Int?,
+            autoScroll: @escaping (CGPoint) -> Void
+        ) {
+            self.store = store
+            self.presentation = presentation
+            self.reduceMotion = reduceMotion
+            self.destinationIndex = destinationIndex
+            self.autoScroll = autoScroll
+        }
+
+        func update(
+            store: PhotoReviewStore,
+            presentation: PhotoReviewDragPresentation,
+            reduceMotion: Bool,
+            destinationIndex: @escaping (CGPoint) -> Int?,
+            autoScroll: @escaping (CGPoint) -> Void
+        ) {
+            self.store = store
+            self.presentation = presentation
+            self.reduceMotion = reduceMotion
+            self.destinationIndex = destinationIndex
+            self.autoScroll = autoScroll
+        }
+
+        func attach(to view: UIView) {
+            guard attachedView !== view else {
+                return
+            }
+            detach()
+            let interaction = UIDropInteraction(delegate: self)
+            view.addInteraction(interaction)
+            attachedView = view
+            dropInteraction = interaction
+        }
+
+        func detach() {
+            if let dropInteraction {
+                attachedView?.removeInteraction(dropInteraction)
+            }
+            dropInteraction = nil
+            attachedView = nil
+        }
+
+        func dropInteraction(
+            _ interaction: UIDropInteraction,
+            canHandle session: UIDropSession
+        ) -> Bool {
+            acceptedPhotoID(session: session) != nil
+        }
+
+        func dropInteraction(
+            _ interaction: UIDropInteraction,
+            sessionDidEnter session: UIDropSession
+        ) {
+            guard admit(session: session) else {
+                return
+            }
+            updateDestination(
+                at: sessionLocation(
+                    session: session,
+                    interaction: interaction
+                )
+            )
+        }
+
+        func dropInteraction(
+            _ interaction: UIDropInteraction,
+            sessionDidUpdate session: UIDropSession
+        ) -> UIDropProposal {
+            guard admit(session: session) else {
+                return UIDropProposal(operation: .cancel)
+            }
+            let location = sessionLocation(
+                session: session,
+                interaction: interaction
+            )
+            updateDestination(at: location)
+            autoScroll(location)
+            return UIDropProposal(operation: .move)
+        }
+
+        func dropInteraction(
+            _ interaction: UIDropInteraction,
+            sessionDidExit session: UIDropSession
+        ) {}
+
+        func dropInteraction(
+            _ interaction: UIDropInteraction,
+            performDrop session: UIDropSession
+        ) {
+            let location = sessionLocation(
+                session: session,
+                interaction: interaction
+            )
+            guard admit(session: session),
+                  let destinationIndex = destinationIndex(location) else {
+                return
+            }
+            presentation.commit(
+                to: destinationIndex,
+                store: store,
+                reduceMotion: reduceMotion
+            )
+        }
+
+        func dropInteraction(
+            _ interaction: UIDropInteraction,
+            sessionDidEnd session: UIDropSession
+        ) {
+            // UIKit calls this for every session that entered, updated, or exited
+            // this one owner, including interruption without performDrop.
+            presentation.endNativeDragSession(
+                reduceMotion: reduceMotion
+            )
+        }
+
+        private func acceptedPhotoID(
+            session: UIDropSession
+        ) -> StagedCapturePhoto.ID? {
+            guard let photoID = session.items
+                .lazy
+                .map(\.itemProvider)
+                .compactMap(PhotoReviewNativeDragContract.photoID(from:))
+                .first(where: { candidate in
+                    store.photos.contains(where: { $0.id == candidate })
+                }) else {
+                return nil
+            }
+            guard presentation.draggedPhotoID == nil
+                    || presentation.draggedPhotoID == photoID else {
+                return nil
+            }
+            return photoID
+        }
+
+        private func admit(session: UIDropSession) -> Bool {
+            guard let photoID = acceptedPhotoID(session: session) else {
+                return false
+            }
+            if presentation.draggedPhotoID == nil {
+                return presentation.begin(photoID: photoID, store: store)
+            }
+            return true
+        }
+
+        private func updateDestination(at location: CGPoint) {
+            guard let destinationIndex = destinationIndex(location) else {
+                return
+            }
+            presentation.updateInsertion(
+                to: destinationIndex,
+                store: store,
+                reduceMotion: reduceMotion
+            )
+        }
+
+        private func sessionLocation(
+            session: UIDropSession,
+            interaction: UIDropInteraction
+        ) -> CGPoint {
+            guard let view = interaction.view else {
+                return .zero
+            }
+            let location = session.location(in: view)
+            return CGPoint(
+                x: location.x - view.bounds.minX,
+                y: location.y - view.bounds.minY
+            )
+        }
     }
 }
 
@@ -1037,6 +1260,12 @@ struct PhotoReviewView: View {
     @State private var dragPresentation = PhotoReviewDragPresentation()
     @State private var thumbnailFrames: [StagedCapturePhoto.ID: CGRect] = [:]
     @State private var thumbnailStripViewportWidth: CGFloat = 0
+#if DEBUG
+    @State private var restingThumbnailFrames:
+        [StagedCapturePhoto.ID: CGRect] = [:]
+    @State private var observedRenderedInsertionGap: CGFloat = 0
+    @State private var observedAutoScrollEdge: String?
+#endif
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
@@ -1060,6 +1289,16 @@ struct PhotoReviewView: View {
     private var reduceMotion: Bool {
         systemReduceMotion || forceReducedMotion
     }
+
+#if DEBUG
+    private var dragObservationLabel: String {
+        let gap = Int(observedRenderedInsertionGap.rounded())
+        let edge = observedAutoScrollEdge ?? "none"
+        let transition =
+            dragPresentation.lastTransitionDecision?.rawValue ?? "none"
+        return "gap=\(gap);edge=\(edge);transition=\(transition)"
+    }
+#endif
 
     var body: some View {
         Group {
@@ -1138,6 +1377,17 @@ struct PhotoReviewView: View {
                         .accessibilityElement()
                         .accessibilityLabel("Drag active")
                         .accessibilityIdentifier("photo-review.drag-active")
+                }
+                if observedRenderedInsertionGap > 0
+                    || observedAutoScrollEdge != nil
+                    || dragPresentation.lastTransitionDecision != nil {
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityElement()
+                        .accessibilityLabel(dragObservationLabel)
+                        .accessibilityIdentifier(
+                            "photo-review.drag-observation"
+                        )
                 }
             }
             .allowsHitTesting(false)
@@ -1284,16 +1534,39 @@ struct PhotoReviewView: View {
             .coordinateSpace(name: "photo-review.thumbnail-strip")
             .scrollIndicators(.hidden)
             .background {
-                GeometryReader { geometry in
-                    Color.clear.preference(
-                        key: PhotoReviewThumbnailStripWidthPreferenceKey.self,
-                        value: geometry.size.width
+                ZStack {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: PhotoReviewThumbnailStripWidthPreferenceKey.self,
+                            value: geometry.size.width
+                        )
+                    }
+                    PhotoReviewNativeDropAttachment(
+                        store: store,
+                        presentation: dragPresentation,
+                        reduceMotion: reduceMotion,
+                        destinationIndex: { location in
+                            PhotoReviewStripDropGeometry.destinationIndex(
+                                at: location,
+                                photos: store.photos,
+                                frames: thumbnailFrames
+                            )
+                        },
+                        autoScroll: { location in
+                            autoScrollThumbnailStripIfNeeded(
+                                at: location,
+                                proxy: proxy
+                            )
+                        }
                     )
                 }
             }
             .onPreferenceChange(
                 PhotoReviewThumbnailFramePreferenceKey.self
             ) { frames in
+#if DEBUG
+                observeRenderedInsertionGap(frames: frames)
+#endif
                 thumbnailFrames = frames
             }
             .onPreferenceChange(
@@ -1301,27 +1574,6 @@ struct PhotoReviewView: View {
             ) { width in
                 thumbnailStripViewportWidth = width
             }
-            .onDrop(
-                of: [PhotoReviewNativeDragContract.contentType],
-                delegate: PhotoReviewThumbnailStripDropDelegate(
-                    store: store,
-                    presentation: dragPresentation,
-                    reduceMotion: reduceMotion,
-                    destinationIndex: { location in
-                        PhotoReviewStripDropGeometry.destinationIndex(
-                            at: location,
-                            photos: store.photos,
-                            frames: thumbnailFrames
-                        )
-                    },
-                    autoScroll: { location in
-                        autoScrollThumbnailStripIfNeeded(
-                            at: location,
-                            proxy: proxy
-                        )
-                    }
-                )
-            )
         }
     }
 
@@ -1330,16 +1582,11 @@ struct PhotoReviewView: View {
         index: Int
     ) -> some View {
         let isSelected = photo.id == store.selectedPhotoID
-        let showsInsertionGap =
-            dragPresentation.insertionIndex == index
-            && dragPresentation.draggedPhotoID != photo.id
-        let draggedSourceIndex = dragPresentation.draggedPhotoID.flatMap { draggedID in
-            store.photos.firstIndex(where: { $0.id == draggedID })
-        }
-        let showsLeadingInsertionGap =
-            showsInsertionGap && (draggedSourceIndex ?? index) > index
-        let showsTrailingInsertionGap =
-            showsInsertionGap && (draggedSourceIndex ?? index) < index
+        let insertionEdge = dragPresentation.insertionEdge(
+            for: photo.id,
+            at: index,
+            store: store
+        )
         return VStack(spacing: 6) {
             Button {
                 store.selectPhotoForActions(id: photo.id)
@@ -1403,8 +1650,18 @@ struct PhotoReviewView: View {
         }
         // v1.2 interaction.drag.insertion_gap_px. This exists only while a native
         // drag is over a different ordinal, so the resting strip gains no control.
-        .padding(.leading, showsLeadingInsertionGap ? 62 : 0)
-        .padding(.trailing, showsTrailingInsertionGap ? 62 : 0)
+        .padding(
+            .leading,
+            insertionEdge == .leading
+                ? PhotoReviewDragLayout.insertionGap
+                : 0
+        )
+        .padding(
+            .trailing,
+            insertionEdge == .trailing
+                ? PhotoReviewDragLayout.insertionGap
+                : 0
+        )
         .opacity(dragPresentation.draggedPhotoID == photo.id ? 0.97 : 1)
         .onDrag {
             guard dragPresentation.begin(photoID: photo.id, store: store) else {
@@ -1422,16 +1679,29 @@ struct PhotoReviewView: View {
             .frame(width: 76, height: 76)
             .clipped()
             .clipShape(.rect(cornerRadius: 12))
-            .onDisappear {
-                // The native preview owns the drag-session lifetime. Its disappearance
-                // covers release and system cancellation even when no drop target
-                // receives dropExited or performDrop.
-                dragPresentation.scheduleCancellation(
-                    reduceMotion: reduceMotion
-                )
-            }
         }
     }
+
+#if DEBUG
+    private func observeRenderedInsertionGap(
+        frames: [StagedCapturePhoto.ID: CGRect]
+    ) {
+        guard dragPresentation.draggedPhotoID != nil else {
+            restingThumbnailFrames = frames
+            return
+        }
+        guard !restingThumbnailFrames.isEmpty else {
+            return
+        }
+        observedRenderedInsertionGap = max(
+            observedRenderedInsertionGap,
+            PhotoReviewStripDropGeometry.maximumFrameShift(
+                from: restingThumbnailFrames,
+                to: frames
+            )
+        )
+    }
+#endif
 
     private func autoScrollThumbnailStripIfNeeded(
         at location: CGPoint,
@@ -1440,9 +1710,16 @@ struct PhotoReviewView: View {
         guard !store.photos.isEmpty else {
             return
         }
-        if location.x <= 28 {
+        if location.x <= PhotoReviewDragLayout.edgeAutoScrollThreshold {
+#if DEBUG
+            observedAutoScrollEdge = "leading"
+#endif
             scrollToPhoto(at: 0, proxy: proxy, anchor: .leading)
-        } else if location.x >= thumbnailStripViewportWidth - 28 {
+        } else if location.x >= thumbnailStripViewportWidth
+            - PhotoReviewDragLayout.edgeAutoScrollThreshold {
+#if DEBUG
+            observedAutoScrollEdge = "trailing"
+#endif
             scrollToPhoto(
                 at: store.photos.index(before: store.photos.endIndex),
                 proxy: proxy,
@@ -1459,10 +1736,15 @@ struct PhotoReviewView: View {
         guard store.photos.indices.contains(destinationIndex) else {
             return
         }
-        if reduceMotion {
+        let decision = PhotoReviewDragAnimationPolicy.decision(
+            reduceMotion: reduceMotion
+        )
+        if decision == .suppressed {
             proxy.scrollTo(store.photos[destinationIndex].id, anchor: anchor)
         } else {
-            withAnimation(.easeInOut(duration: 0.16)) {
+            withAnimation(
+                PhotoReviewDragAnimationPolicy.animation(for: decision)
+            ) {
                 proxy.scrollTo(store.photos[destinationIndex].id, anchor: anchor)
             }
         }
