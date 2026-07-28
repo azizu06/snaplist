@@ -22,6 +22,88 @@ comment on column private.ebay_provider_dispatch_leases.publish_claim_id is
 comment on column private.ebay_provider_dispatch_leases.publish_binding is
   'Exact connected-seller marketplace/policy/location tuple admitted before the provider attempt; null for non-publish operations and the exact operator Sandbox fallback.';
 
+create or replace function public.save_ebay_policy_location_binding(
+  p_marketplace_id text,
+  p_connection_generation uuid,
+  p_binding jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+  v_connection public.ebay_connections%rowtype;
+  v_safe_binding jsonb;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or nullif(v_user_id, '') is null then
+    raise exception using errcode = '42501', message = 'Seller authorization is required';
+  end if;
+  if v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server API authorization is required';
+  end if;
+
+  v_safe_binding := private.validate_ebay_policy_location_binding(
+    p_marketplace_id,
+    p_connection_generation,
+    p_binding
+  );
+
+  select connection.*
+  into v_connection
+  from public.ebay_connections connection
+  join private.ebay_messaging_account_generations account
+    on account.user_id = connection.user_id
+    and account.generation = connection.account_generation
+  where connection.user_id = v_user_id
+    and account.seller_erased = false
+  for update of connection;
+  if not found then
+    raise exception using errcode = '22023', message = 'An active eBay connection is required';
+  end if;
+  if v_connection.connection_generation is distinct from p_connection_generation then
+    raise exception using errcode = 'PT409', message = 'The eBay connection changed during policy discovery';
+  end if;
+  if exists (
+    select 1
+    from private.ebay_provider_dispatch_leases lease
+    where lease.user_id = v_user_id
+      and lease.dispatch_kind = 'publish'
+      and lease.connection_generation = p_connection_generation
+      and lease.publish_binding->>'marketplaceId' = p_marketplace_id
+      and lease.expires_at > statement_timestamp()
+  ) then
+    raise exception using
+      errcode = 'PT409',
+      message = 'eBay policy selection is in use by an active publish dispatch';
+  end if;
+
+  update public.ebay_connections connection
+  set policy_location_bindings = jsonb_set(
+    connection.policy_location_bindings,
+    array[p_marketplace_id],
+    v_safe_binding,
+    true
+  )
+  where connection.user_id = v_user_id;
+
+  return v_safe_binding;
+end;
+$$;
+
+revoke all on function public.save_ebay_policy_location_binding(
+  text, uuid, jsonb
+) from public, anon, authenticated, service_role;
+grant execute on function public.save_ebay_policy_location_binding(
+  text, uuid, jsonb
+) to authenticated;
+
 create function public.bind_ebay_publish_connection_generation(
   p_listing_id uuid,
   p_claim_id uuid,
@@ -98,7 +180,23 @@ begin
     and listing.user_id = v_user_id
     and listing.platform = 'ebay'
     and listing.ebay_status = 'publishing'
-    and listing.ebay_publish_claim_id = p_claim_id;
+    and listing.ebay_publish_claim_id = p_claim_id
+    and (
+      (
+        listing.ebay_publish_connection_generation is null
+        and listing.ebay_publish_binding is null
+      )
+      or (
+        listing.ebay_publish_connection_generation = p_connection_generation
+        and listing.ebay_publish_binding = jsonb_build_object(
+          'marketplaceId', p_marketplace_id,
+          'fulfillmentPolicyId', p_fulfillment_policy_id,
+          'paymentPolicyId', p_payment_policy_id,
+          'returnPolicyId', p_return_policy_id,
+          'merchantLocationKey', p_merchant_location_key
+        )
+      )
+    );
   if not found then
     raise exception using
       errcode = 'P0002',

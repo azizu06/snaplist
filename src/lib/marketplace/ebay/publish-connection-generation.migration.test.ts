@@ -46,6 +46,12 @@ describe("eBay publish connection-generation migration", () => {
       "lease.publish_binding is not distinct from v_publish_binding",
     );
     expect(migration).toContain("lease.attempt_token = p_attempt_token");
+    expect(migration).toContain(
+      "listing.ebay_publish_connection_generation is null and listing.ebay_publish_binding is null",
+    );
+    expect(migration).toContain(
+      "listing.ebay_publish_connection_generation = p_connection_generation and listing.ebay_publish_binding = jsonb_build_object(",
+    );
   });
 
   it("revalidates the exact ready marketplace policy/location selection", () => {
@@ -79,6 +85,34 @@ describe("eBay publish connection-generation migration", () => {
     );
   });
 
+  it("rejects same-marketplace binding mutation while its publish lease is active", () => {
+    const saveBindingFunction = migration.match(
+      /create or replace function public\.save_ebay_policy_location_binding\(.*?(?=revoke all on function public\.save_ebay_policy_location_binding)/,
+    )?.[0];
+
+    expect(saveBindingFunction).toContain(
+      "coalesce(auth.jwt()->>'role', '') <> 'authenticated'",
+    );
+    expect(saveBindingFunction).toContain("v_api_key not like 'sb_secret_%'");
+    expect(saveBindingFunction).toContain("lease.user_id = v_user_id");
+    expect(saveBindingFunction).toContain("lease.dispatch_kind = 'publish'");
+    expect(saveBindingFunction).toContain(
+      "lease.connection_generation = p_connection_generation",
+    );
+    expect(saveBindingFunction).toContain(
+      "lease.publish_binding->>'marketplaceId' = p_marketplace_id",
+    );
+    expect(saveBindingFunction).toContain(
+      "lease.expires_at > statement_timestamp()",
+    );
+    expect(saveBindingFunction).toContain(
+      "errcode = 'PT409', message = 'eBay policy selection is in use by an active publish dispatch'",
+    );
+    expect(saveBindingFunction).toContain(
+      "set policy_location_bindings = jsonb_set(",
+    );
+  });
+
   it("keeps the operator Sandbox fallback separate and null-safe", () => {
     expect(migration).toContain(
       "if p_connection_generation is not null then",
@@ -109,7 +143,7 @@ describe("eBay publish connection-generation migration", () => {
     );
 
     expect(retryableApplicationConflicts).toBeNull();
-    expect(deterministicApplicationConflicts).toHaveLength(17);
+    expect(deterministicApplicationConflicts).toHaveLength(19);
     expect(migration).toContain(
       "errcode = 'PT409', message = 'eBay offer binding changed before provider dispatch'",
     );
@@ -125,6 +159,17 @@ describe("eBay publish connection-generation migration", () => {
     expect(durableCompletionPgTap).not.toContain(
       "'40001', 'eBay account generation changed before local completion'",
     );
+    expect(durableCompletionPgTap).toContain(
+      "set policy_location_bindings = jsonb_build_object(",
+    );
+    expect(durableCompletionPgTap).toContain(
+      "ebay_publish_binding = jsonb_build_object(",
+    );
+    expect(
+      durableCompletionPgTap.match(
+        /'merchantLocationKey', 'dispatch-location'/g,
+      ),
+    ).toHaveLength(3);
   });
 
   it("locks the seller connection through a narrowly authorized server RPC", () => {

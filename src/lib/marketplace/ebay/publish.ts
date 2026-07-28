@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   EbayApiError,
+  EbayWriteAmbiguousError,
   type EbayAdapter,
   type EbayDispatchContext,
   type EbayPublishRequest,
@@ -269,7 +270,12 @@ export async function publishListingToEbay(
   const claim = parsePublishClaimSnapshot(claimData);
   if (!claim) {
     if (returnedClaimId) {
-      await markPublishFailed(supabase, listingId, returnedClaimId);
+      await markPublishFailed(
+        supabase,
+        listingId,
+        returnedClaimId,
+        offerBinding,
+      );
     }
     throw new Error("Failed to start eBay publish: publish snapshot was not returned.");
   }
@@ -282,12 +288,12 @@ export async function publishListingToEbay(
       offerBinding,
     );
   } catch (error) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw error;
   }
   const price = effectivePrice(claim.price, claim.priceOverride);
   if (price == null) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw new PublishValidationError(
       `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
     );
@@ -302,11 +308,11 @@ export async function publishListingToEbay(
       options.signedUrlTtlSeconds ?? SIGNED_URL_TTL_SECONDS,
     );
   } catch (error) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw error;
   }
   if (imageUrls.length === 0) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw new PublishValidationError(
       photoPaths.length === 0
         ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
@@ -335,7 +341,7 @@ export async function publishListingToEbay(
       publishClaimId: claimId,
     };
   } catch (error) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw error;
   }
 
@@ -358,8 +364,11 @@ export async function publishListingToEbay(
       );
     });
   } catch (err) {
-    if (!providerAcknowledged) {
-      await markPublishFailed(supabase, listingId, claimId);
+    if (
+      !providerAcknowledged
+      && !(err instanceof EbayWriteAmbiguousError)
+    ) {
+      await markPublishFailed(supabase, listingId, claimId, offerBinding);
     }
     throw err;
   }
@@ -599,20 +608,70 @@ async function markPublishFailed(
   supabase: SupabaseClient,
   listingId: string,
   claimId?: string,
+  expectedOfferBinding?: EbayOfferBinding,
 ): Promise<void> {
-  let query = supabase
-    .from("listings")
-    .update({
-      ebay_status: "failed",
-      ebay_publish_claim_id: null,
-      ebay_publish_claimed_at: null,
-      ebay_publish_connection_generation: null,
-    })
-    .eq("id", listingId);
-  query = claimId
-    ? query.eq("ebay_status", "publishing").eq("ebay_publish_claim_id", claimId)
-    : query.or("ebay_status.is.null,ebay_status.eq.failed");
-  await query.then(undefined, () => undefined);
+  const expectedConnectionGeneration =
+    expectedOfferBinding?.connectionGeneration ?? null;
+  const expectedPublishBinding =
+    expectedConnectionGeneration === null || !expectedOfferBinding
+      ? null
+      : {
+          marketplaceId: expectedOfferBinding.marketplaceId,
+          fulfillmentPolicyId: expectedOfferBinding.fulfillmentPolicyId,
+          paymentPolicyId: expectedOfferBinding.paymentPolicyId,
+          returnPolicyId: expectedOfferBinding.returnPolicyId,
+          merchantLocationKey: expectedOfferBinding.merchantLocationKey,
+        };
+
+  const clearMatchingAttempt = async (
+    connectionGeneration: string | null,
+    publishBinding: typeof expectedPublishBinding,
+  ): Promise<boolean> => {
+    let query = supabase
+      .from("listings")
+      .update({
+        ebay_status: "failed",
+        ebay_publish_claim_id: null,
+        ebay_publish_claimed_at: null,
+        ebay_publish_connection_generation: null,
+        ebay_publish_binding: null,
+      })
+      .eq("id", listingId);
+    query = claimId
+      ? query.eq("ebay_status", "publishing").eq("ebay_publish_claim_id", claimId)
+      : query.or("ebay_status.is.null,ebay_status.eq.failed");
+    query = connectionGeneration === null
+      ? query.is("ebay_publish_connection_generation", null)
+      : query.eq(
+          "ebay_publish_connection_generation",
+          connectionGeneration,
+        );
+    query = publishBinding === null
+      ? query.is("ebay_publish_binding", null)
+      : query.filter(
+          "ebay_publish_binding",
+          "eq",
+          JSON.stringify(publishBinding),
+        );
+    const { data } = await query.select("id");
+    return (data?.length ?? 0) > 0;
+  };
+
+  try {
+    if (
+      await clearMatchingAttempt(
+        expectedConnectionGeneration,
+        expectedPublishBinding,
+      )
+    ) {
+      return;
+    }
+    if (expectedConnectionGeneration !== null) {
+      await clearMatchingAttempt(null, null);
+    }
+  } catch {
+    // Best effort: never mask the publish error being reported.
+  }
 }
 
 /**

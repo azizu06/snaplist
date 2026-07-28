@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MockEbayAdapter } from "./mock";
 import { publishListingToEbayAndNotify } from "./publish";
-import type { EbayPublishFallbackBinding } from "./types";
+import {
+  EbayWriteAmbiguousError,
+  type EbayPublishFallbackBinding,
+} from "./types";
 
 /**
  * Fully offline contract tests for the shared publish service used by BOTH
@@ -26,6 +29,7 @@ interface FakeListing {
   ebay_status: string | null;
   ebay_publish_claim_id: string | null;
   ebay_publish_connection_generation: string | null;
+  ebay_publish_binding: Record<string, string> | null;
   listed_price?: number;
   last_priced_at?: string;
 }
@@ -113,6 +117,7 @@ function fakePublishClient(
     ebay_status: null,
     ebay_publish_claim_id: null,
     ebay_publish_connection_generation: null,
+    ebay_publish_binding: null,
   };
 
   const client = {
@@ -126,20 +131,49 @@ function fakePublishClient(
           }),
           update: (patch: Partial<FakeListing>) => {
             const filters: Array<[keyof FakeListing, unknown]> = [];
+            const apply = () => {
+              const matches = filters.every(
+                ([column, value]) =>
+                  JSON.stringify(listing[column]) === JSON.stringify(value),
+              );
+              if (matches) Object.assign(listing, patch);
+              return { data: matches ? [{ id: listing.id }] : [], error: null };
+            };
             const builder = {
               eq(column: keyof FakeListing, value: unknown) {
-                filters.push([column, value]);
+                filters.push([
+                  column,
+                  value !== null && typeof value === "object"
+                    ? String(value)
+                    : value,
+                ]);
                 return builder;
               },
               is(column: keyof FakeListing, value: null) {
                 filters.push([column, value]);
                 return builder;
               },
+              filter(
+                column: keyof FakeListing,
+                operator: string,
+                value: string,
+              ) {
+                if (operator !== "eq") {
+                  throw new Error(`unexpected filter operator ${operator}`);
+                }
+                filters.push([column, JSON.parse(value)]);
+                return builder;
+              },
               async select() {
-                const matches = filters.every(([column, value]) => listing[column] === value);
-                if (!matches) return { data: [], error: null };
-                Object.assign(listing, patch);
-                return { data: [{ id: listing.id }], error: null };
+                return apply();
+              },
+              then<TResult1 = ReturnType<typeof apply>, TResult2 = never>(
+                onFulfilled?:
+                  | ((value: ReturnType<typeof apply>) => TResult1 | PromiseLike<TResult1>)
+                  | null,
+                onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+              ) {
+                return Promise.resolve(apply()).then(onFulfilled, onRejected);
               },
             };
             return builder;
@@ -195,14 +229,33 @@ function fakePublishClient(
     },
     async rpc(name: string, params: Record<string, unknown>) {
       if (name === "bind_ebay_publish_connection_generation") {
+        const requestedBinding = {
+          marketplaceId: params.p_marketplace_id as string,
+          fulfillmentPolicyId: params.p_fulfillment_policy_id as string,
+          paymentPolicyId: params.p_payment_policy_id as string,
+          returnPolicyId: params.p_return_policy_id as string,
+          merchantLocationKey: params.p_merchant_location_key as string,
+        };
         if (
           params.p_listing_id !== listing.id
           || params.p_claim_id !== claimId
-          || params.p_connection_generation !== connectionGeneration
+          || params.p_connection_generation
+            !== connectionState.current?.connection_generation
+          || (
+            listing.ebay_publish_connection_generation !== null
+            && (
+              listing.ebay_publish_connection_generation
+                !== params.p_connection_generation
+              || JSON.stringify(listing.ebay_publish_binding)
+                !== JSON.stringify(requestedBinding)
+            )
+          )
         ) {
           return { data: null, error: { message: "binding changed" } };
         }
-        listing.ebay_publish_connection_generation = connectionGeneration;
+        listing.ebay_publish_connection_generation =
+          params.p_connection_generation as string;
+        listing.ebay_publish_binding = requestedBinding;
         return { data: null, error: null };
       }
       if (name !== "begin_ebay_publish") {
@@ -253,6 +306,94 @@ function fakePublishClient(
 }
 
 describe("publishListingToEbayAndNotify effective-price contract", () => {
+  it("retains exact publish provenance when an eBay write may have committed", async () => {
+    const { client, listing, connection } = fakePublishClient(177.77);
+    const initialGeneration = connection.connection_generation;
+    const adapter = new MockEbayAdapter();
+    adapter.failWith = new EbayWriteAmbiguousError(
+      "eBay PUT ended without an acknowledgement",
+      0,
+      new Error("socket closed"),
+    );
+
+    await expect(
+      publishListingToEbayAndNotify(
+        client,
+        "user-1",
+        listing.id,
+        adapter,
+      ),
+    ).rejects.toBe(adapter.failWith);
+
+    expect(adapter.requests).toHaveLength(1);
+    expect(listing).toMatchObject({
+      ebay_status: "publishing",
+      ebay_publish_claim_id: "publish-claim-1",
+      ebay_publish_connection_generation: connection.connection_generation,
+      ebay_publish_binding: {
+        marketplaceId: "EBAY_US",
+        fulfillmentPolicyId: "fulfillment-1",
+        paymentPolicyId: "payment-1",
+        returnPolicyId: "return-1",
+        merchantLocationKey: "location-1",
+      },
+    });
+
+    // Simulate claim expiry, then a reconnect that presents a new ready
+    // generation. The prior maybe-committed attempt must remain pinned and the
+    // replacement attempt must stop before reaching the adapter.
+    listing.ebay_status = "failed";
+    listing.ebay_publish_claim_id = null;
+    const replacementGeneration = "22222222-2222-4222-8222-222222222222";
+    connection.connection_generation = replacementGeneration;
+    (
+      connection.policy_location_bindings.EBAY_US as {
+        connectionGeneration: string;
+      }
+    ).connectionGeneration = replacementGeneration;
+    const retryAdapter = new MockEbayAdapter();
+    await expect(
+      publishListingToEbayAndNotify(
+        client,
+        "user-1",
+        listing.id,
+        retryAdapter,
+      ),
+    ).rejects.toThrow(/connection changed before provider dispatch/i);
+    expect(retryAdapter.requests).toHaveLength(0);
+    expect(listing.ebay_publish_connection_generation).toBe(initialGeneration);
+    expect(listing.ebay_publish_binding).toEqual({
+      marketplaceId: "EBAY_US",
+      fulfillmentPolicyId: "fulfillment-1",
+      paymentPolicyId: "payment-1",
+      returnPolicyId: "return-1",
+      merchantLocationKey: "location-1",
+    });
+  });
+
+  it("clears generation and binding together after a definite pre-ack failure", async () => {
+    const { client, listing } = fakePublishClient(177.77);
+    const adapter = new MockEbayAdapter();
+    adapter.failWith = new Error("eBay rejected the offer before acknowledgement");
+
+    await expect(
+      publishListingToEbayAndNotify(
+        client,
+        "user-1",
+        listing.id,
+        adapter,
+      ),
+    ).rejects.toBe(adapter.failWith);
+
+    expect(adapter.requests).toHaveLength(1);
+    expect(listing).toMatchObject({
+      ebay_status: "failed",
+      ebay_publish_claim_id: null,
+      ebay_publish_connection_generation: null,
+      ebay_publish_binding: null,
+    });
+  });
+
   it("returns a durable same-generation replay before requiring a ready binding", async () => {
     const { client, listing, connection } = fakePublishClient(177.77);
     const adapter = new MockEbayAdapter();

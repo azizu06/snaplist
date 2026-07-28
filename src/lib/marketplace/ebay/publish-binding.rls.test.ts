@@ -238,6 +238,29 @@ function fakeEbayFetch(
   return { fetch: fetchImpl as typeof fetch, calls };
 }
 
+function failingEbayFetch(
+  response: "ambiguous" | "rejected",
+): {
+  fetch: typeof fetch;
+  calls: RecordedCall[];
+} {
+  const calls: RecordedCall[] = [];
+  const fetchImpl = async (
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+  ): Promise<Response> => {
+    calls.push({ url: String(input), init });
+    if (response === "ambiguous") {
+      throw new Error("Fake eBay connection ended without acknowledgement");
+    }
+    return Response.json(
+      { errors: [{ errorId: 25001, message: "Rejected fixture write" }] },
+      { status: 400 },
+    );
+  };
+  return { fetch: fetchImpl as typeof fetch, calls };
+}
+
 function offerBody(calls: RecordedCall[]): Record<string, unknown> {
   const call = calls.find(
     ({ url, init }) =>
@@ -631,6 +654,53 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
       readyBinding("seller-a", contextA.connectionGeneration),
     );
 
+    // Once dispatch admission pins the exact tuple, a same-marketplace
+    // reselection is rejected before token access or any provider write. The
+    // same save remains available after the lease is released.
+    const activeLeaseListingId = await persistedListing(userA);
+    const activeLeaseFake = fakeEbayFetch("active-lease-binding-change");
+    const activeLeaseProvider = new UserTokenProvider(serverA, {
+      fetch: noTokenEgress as typeof fetch,
+      env: () => TEST_ENV,
+    });
+    activeLeaseProvider.getAccessToken = async () => {
+      await storeA.saveBinding(
+        readyBinding("seller-a-during-lease", contextA.connectionGeneration),
+      );
+      throw new Error("Active-lease binding mutation unexpectedly succeeded");
+    };
+    const activeLeaseAdapter = new HttpEbayAdapter({
+      fetch: activeLeaseFake.fetch,
+      tokenProvider: activeLeaseProvider,
+      env: () => SHARED_ENV_FALLBACK,
+    });
+    const activeLeaseResult = await publishListingToEbay(
+      userA.client,
+      activeLeaseListingId,
+      activeLeaseAdapter,
+      { completionClient: serverA },
+    ).catch((error: unknown) => error);
+    const activeLeaseRow = await userA.client
+      .from("listings")
+      .select("ebay_status, ebay_listing_id")
+      .eq("id", activeLeaseListingId)
+      .single();
+    expect.soft(activeLeaseFake.calls, "active publish lease").toHaveLength(0);
+    expect.soft(activeLeaseResult, "active publish lease").toBeInstanceOf(Error);
+    expect.soft(
+      (activeLeaseResult as Error).message,
+      "active publish lease",
+    ).toMatch(/active publish dispatch/i);
+    expect.soft(activeLeaseRow.data, "active publish lease").not.toMatchObject({
+      ebay_status: "published",
+    });
+    await storeA.saveBinding(
+      readyBinding("seller-a-after-lease", contextA.connectionGeneration),
+    );
+    await storeA.saveBinding(
+      readyBinding("seller-a", contextA.connectionGeneration),
+    );
+
     // Reconnect after binding preflight but before the real dispatch RPC.
     const preDispatchListingId = await persistedListing(userA);
     const preDispatchFake = fakeEbayFetch("pre-dispatch-reconnect");
@@ -671,6 +741,162 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
     expect.soft(preDispatchFake.calls, "pre-dispatch reconnect").toHaveLength(0);
     expect.soft(preDispatchResult, "pre-dispatch reconnect").toBeInstanceOf(Error);
     expect.soft(preDispatchRow.data, "pre-dispatch reconnect").not.toMatchObject({
+      ebay_status: "published",
+    });
+
+    const currentContextA = await storeA.readConnectionContext();
+    if (!currentContextA) {
+      throw new Error("Reconnected seller A context is required");
+    }
+    await storeA.saveBinding(
+      readyBinding("seller-a-current", currentContextA.connectionGeneration),
+    );
+
+    // A definite provider rejection clears both connected-seller provenance
+    // fields, so a later exact null-generation operator fallback is not wedged
+    // by half-cleared state.
+    const rejectedListingId = await persistedListing(userA);
+    const rejectedFake = failingEbayFetch("rejected");
+    const rejectedAdapter = new HttpEbayAdapter({
+      fetch: rejectedFake.fetch,
+      tokenProvider: new UserTokenProvider(serverA, {
+        fetch: noTokenEgress as typeof fetch,
+        env: () => TEST_ENV,
+      }),
+      env: () => SHARED_ENV_FALLBACK,
+    });
+    const rejectedResult = await publishListingToEbay(
+      userA.client,
+      rejectedListingId,
+      rejectedAdapter,
+      { completionClient: serverA },
+    ).catch((error: unknown) => error);
+    const rejectedRow = await userA.client
+      .from("listings")
+      .select(
+        "ebay_status, ebay_listing_id, ebay_publish_connection_generation, ebay_publish_binding",
+      )
+      .eq("id", rejectedListingId)
+      .single();
+    expect.soft(rejectedFake.calls, "definite provider rejection").toHaveLength(1);
+    expect.soft(rejectedResult, "definite provider rejection").toBeInstanceOf(Error);
+    expect.soft(rejectedRow.data, "definite provider rejection").toMatchObject({
+      ebay_status: "failed",
+      ebay_listing_id: null,
+      ebay_publish_connection_generation: null,
+      ebay_publish_binding: null,
+    });
+
+    // A provider-may-have-committed write retains the original generation and
+    // tuple. Even after claim expiry and reconnect, the replacement generation
+    // cannot erase that provenance or reach eBay again.
+    const ambiguousListingId = await persistedListing(userA);
+    const ambiguousFake = failingEbayFetch("ambiguous");
+    const ambiguousAdapter = new HttpEbayAdapter({
+      fetch: ambiguousFake.fetch,
+      tokenProvider: new UserTokenProvider(serverA, {
+        fetch: noTokenEgress as typeof fetch,
+        env: () => TEST_ENV,
+      }),
+      env: () => SHARED_ENV_FALLBACK,
+    });
+    const ambiguousResult = await publishListingToEbay(
+      userA.client,
+      ambiguousListingId,
+      ambiguousAdapter,
+      { completionClient: serverA },
+    ).catch((error: unknown) => error);
+    const ambiguousPinnedRow = await userA.client
+      .from("listings")
+      .select(
+        "ebay_status, ebay_publish_claim_id, ebay_publish_connection_generation, ebay_publish_binding",
+      )
+      .eq("id", ambiguousListingId)
+      .single();
+    expect.soft(ambiguousFake.calls, "ambiguous provider write").toHaveLength(1);
+    expect.soft(ambiguousResult, "ambiguous provider write").toBeInstanceOf(Error);
+    expect.soft(ambiguousPinnedRow.data, "ambiguous provider write").toMatchObject({
+      ebay_status: "publishing",
+      ebay_publish_connection_generation: currentContextA.connectionGeneration,
+    });
+    expect(
+      ambiguousPinnedRow.data?.ebay_publish_claim_id,
+      "ambiguous provider write",
+    ).toBeTruthy();
+    expect(
+      ambiguousPinnedRow.data?.ebay_publish_binding,
+      "ambiguous provider write",
+    ).toBeTruthy();
+
+    const { error: expireClaimError } = await admin
+      .from("listings")
+      .update({
+        ebay_publish_claimed_at: "2026-07-27T00:00:00.000Z",
+      })
+      .eq("id", ambiguousListingId);
+    expect(expireClaimError).toBeNull();
+    await saveEbayConnection(
+      serverA,
+      {
+        accessToken: "seller-a-ambiguous-reconnect-access-token",
+        refreshToken: "seller-a-ambiguous-reconnect-refresh-token",
+        accessTokenExpiresAt: Date.now() + 2 * 60 * 60 * 1000,
+        scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+      },
+      ebayIdentityA,
+      TEST_ENV,
+    );
+    const replacementContextA = await storeA.readConnectionContext();
+    if (!replacementContextA) {
+      throw new Error("Replacement seller A context is required");
+    }
+    await storeA.saveBinding(
+      readyBinding(
+        "seller-a-ambiguous-replacement",
+        replacementContextA.connectionGeneration,
+      ),
+    );
+    const ambiguousRetryFake = fakeEbayFetch("ambiguous-retry");
+    const ambiguousRetryAdapter = new HttpEbayAdapter({
+      fetch: ambiguousRetryFake.fetch,
+      tokenProvider: new UserTokenProvider(serverA, {
+        fetch: noTokenEgress as typeof fetch,
+        env: () => TEST_ENV,
+      }),
+      env: () => SHARED_ENV_FALLBACK,
+    });
+    const ambiguousRetryResult = await publishListingToEbay(
+      userA.client,
+      ambiguousListingId,
+      ambiguousRetryAdapter,
+      { completionClient: serverA },
+    ).catch((error: unknown) => error);
+    const ambiguousRetryRow = await userA.client
+      .from("listings")
+      .select(
+        "ebay_status, ebay_listing_id, ebay_publish_connection_generation, ebay_publish_binding",
+      )
+      .eq("id", ambiguousListingId)
+      .single();
+    expect.soft(
+      ambiguousRetryFake.calls,
+      "changed-generation ambiguous retry",
+    ).toHaveLength(0);
+    expect.soft(
+      ambiguousRetryResult,
+      "changed-generation ambiguous retry",
+    ).toBeInstanceOf(Error);
+    expect.soft(
+      ambiguousRetryRow.data,
+      "changed-generation ambiguous retry",
+    ).toMatchObject({
+      ebay_publish_connection_generation: currentContextA.connectionGeneration,
+      ebay_publish_binding: ambiguousPinnedRow.data?.ebay_publish_binding,
+    });
+    expect.soft(
+      ambiguousRetryRow.data,
+      "changed-generation ambiguous retry",
+    ).not.toMatchObject({
       ebay_status: "published",
     });
 

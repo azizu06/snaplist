@@ -72,8 +72,42 @@ select account.user_id,
 from private.ebay_messaging_account_generations account
 where account.user_id in ('dispatch-completion-a', 'dispatch-completion-b');
 
+update public.ebay_connections connection
+set policy_location_bindings = jsonb_build_object(
+  'EBAY_US',
+  jsonb_build_object(
+    'state', 'ready',
+    'marketplaceId', 'EBAY_US',
+    'connectionGeneration', connection.connection_generation,
+    'fulfillmentPolicy', jsonb_build_object(
+      'state', 'bound',
+      'selectedId', 'dispatch-fulfillment'
+    ),
+    'paymentPolicy', jsonb_build_object(
+      'state', 'bound',
+      'selectedId', 'dispatch-payment'
+    ),
+    'returnPolicy', jsonb_build_object(
+      'state', 'bound',
+      'selectedId', 'dispatch-return'
+    ),
+    'inventoryLocation', jsonb_build_object(
+      'state', 'bound',
+      'selectedId', 'dispatch-location'
+    )
+  )
+)
+where connection.user_id in ('dispatch-completion-a', 'dispatch-completion-b');
+
 update public.listings listing
-set ebay_publish_connection_generation = connection.connection_generation
+set ebay_publish_connection_generation = connection.connection_generation,
+    ebay_publish_binding = jsonb_build_object(
+      'marketplaceId', 'EBAY_US',
+      'fulfillmentPolicyId', 'dispatch-fulfillment',
+      'paymentPolicyId', 'dispatch-payment',
+      'returnPolicyId', 'dispatch-return',
+      'merchantLocationKey', 'dispatch-location'
+    )
 from public.ebay_connections connection
 where connection.user_id = listing.user_id
   and listing.ebay_status = 'publishing';
@@ -100,7 +134,14 @@ from (
       from public.ebay_connections
       where user_id = 'dispatch-completion-a'
     ),
-    'a3000000-0000-4000-8000-000000000001'
+    'a3000000-0000-4000-8000-000000000001',
+    jsonb_build_object(
+      'marketplaceId', 'EBAY_US',
+      'fulfillmentPolicyId', 'dispatch-fulfillment',
+      'paymentPolicyId', 'dispatch-payment',
+      'returnPolicyId', 'dispatch-return',
+      'merchantLocationKey', 'dispatch-location'
+    )
   ) as lease
 ) started;
 
@@ -187,7 +228,14 @@ from (
       from public.ebay_connections
       where user_id = 'dispatch-completion-a'
     ),
-    'a3000000-0000-4000-8000-000000000001'
+    'a3000000-0000-4000-8000-000000000001',
+    jsonb_build_object(
+      'marketplaceId', 'EBAY_US',
+      'fulfillmentPolicyId', 'dispatch-fulfillment',
+      'paymentPolicyId', 'dispatch-payment',
+      'returnPolicyId', 'dispatch-return',
+      'merchantLocationKey', 'dispatch-location'
+    )
   ) as lease
 ) started;
 
