@@ -4025,6 +4025,19 @@ final class CaptureFlowTests: XCTestCase {
         let sourceView = UIScrollView(
             frame: CGRect(x: 0, y: 0, width: 320, height: 98)
         )
+        let hostController = UIViewController()
+        let window = UIWindow(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 844)
+        )
+        window.rootViewController = hostController
+        window.makeKeyAndVisible()
+        hostController.view.addSubview(sourceView)
+        hostController.view.layoutIfNeeded()
+        defer {
+            window.isHidden = true
+            withExtendedLifetime(window) {}
+        }
+
         sourceView.contentSize = CGSize(width: 440, height: 122)
         sourceView.bounds = CGRect(
             x: 88,
@@ -4042,6 +4055,7 @@ final class CaptureFlowTests: XCTestCase {
         let interaction = try XCTUnwrap(
             sourceView.interactions.compactMap { $0 as? UIDragInteraction }.first
         )
+        XCTAssertTrue(interaction.view === sourceView)
 
         for photo in photos {
             let frame = try XCTUnwrap(frames[photo.id])
@@ -4082,6 +4096,16 @@ final class CaptureFlowTests: XCTestCase {
             XCTAssertEqual(
                 preview.target.center.y,
                 frame.midY + sourceView.bounds.minY,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(
+                preview.target.center.x - sourceView.bounds.minX,
+                frame.midX,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(
+                preview.target.center.y - sourceView.bounds.minY,
+                frame.midY,
                 accuracy: 0.001
             )
 
@@ -4269,7 +4293,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(committed.consumeAnnouncement())
     }
 
-    func testPhotoReviewNativeSourceDelegateEndsAcceptedAndOutsideSessionsExactlyOnce() {
+    func testPhotoReviewNativeSourceDelegateEndsAcceptedAndOutsideSessionsExactlyOnce() throws {
         let photos = makeDragPhotos()
         let outsideStore = PhotoReviewStore(photos: photos)
         let outside = PhotoReviewDragPresentation()
@@ -4285,7 +4309,22 @@ final class CaptureFlowTests: XCTestCase {
             isEnabled: true,
             sourceAtLocation: { _ in outsideResolvedSource }
         )
-        let outsideInteraction = UIDragInteraction(delegate: outsideSource)
+        let outsideSourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        outsideSourceView.bounds = CGRect(
+            x: 88,
+            y: 24,
+            width: 320,
+            height: 98
+        )
+        outsideSource.attach(to: outsideSourceView)
+        let outsideInteraction = try XCTUnwrap(
+            outsideSourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        XCTAssertTrue(outsideInteraction.view === outsideSourceView)
         let outsideSession = PhotoReviewDragSessionStub()
 
         let outsideItems = outsideSource.dragInteraction(
@@ -4343,9 +4382,22 @@ final class CaptureFlowTests: XCTestCase {
             isEnabled: true,
             sourceAtLocation: { _ in committedResolvedSource }
         )
-        let committedInteraction = UIDragInteraction(
-            delegate: committedSource
+        let committedSourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
         )
+        committedSourceView.bounds = CGRect(
+            x: 88,
+            y: 24,
+            width: 320,
+            height: 98
+        )
+        committedSource.attach(to: committedSourceView)
+        let committedInteraction = try XCTUnwrap(
+            committedSourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        XCTAssertTrue(committedInteraction.view === committedSourceView)
         let committedSession = PhotoReviewDragSessionStub()
 
         let committedItems = committedSource.dragInteraction(
