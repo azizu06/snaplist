@@ -41,6 +41,8 @@
 	<string>AccentColor</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Your photos stay on this device until you choose to create a listing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Voice notes are recorded and stored on this phone.</string>
 	<key>SnapListAPIOrigin</key>
 	<string>$(SNAPLIST_API_ORIGIN)</string>
 	<key>SnapListClerkPublishableKey</key>

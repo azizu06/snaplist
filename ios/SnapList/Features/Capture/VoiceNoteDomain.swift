@@ -1,0 +1,447 @@
+import Foundation
+import Observation
+
+struct VoiceNoteAsset: Equatable, Sendable {
+    let url: URL
+    let duration: TimeInterval
+}
+
+enum VoiceNoteMicrophonePermission: Equatable {
+    case undetermined
+    case allowed
+    case denied
+}
+
+struct VoiceNoteRecordingSnapshot: Equatable {
+    let elapsed: TimeInterval
+    let averagePower: Float
+}
+
+enum VoiceNotePhase: Equatable {
+    case ready
+    case recording(elapsed: TimeInterval, level: Double)
+    case takeReady(duration: TimeInterval)
+    case saved(isPlaying: Bool)
+    case accessOff
+    case interrupted
+    case saveFailed
+}
+
+enum VoiceNoteFocusRequest: Equatable {
+    case voiceNoteOpener
+    case savedNoteSummary
+}
+
+enum VoiceNotePresentation {
+    static let maximumDuration: TimeInterval = 15
+    static let sheetHeight: CGFloat = 220
+    static let minimumTarget: CGFloat = 44
+    // Compact card sheets render through a width transform (386 / 402 on
+    // iPhone 17 Pro). 46 is the smallest whole-point layout target whose
+    // public accessibility frame remains at least 44 points.
+    static let compactSheetControlLayoutTarget: CGFloat = 46
+    static let emptyRowHelper = "Add details the photos might miss"
+    static let sheetContext = "Add details the photos might miss."
+    static let emptyRowAccessibilityLabel =
+        "Voice note, optional, collapsed"
+    static let savedWaveformIsAccessibilityHidden = true
+    static let savedWaveformIsInteractive = false
+
+    static func elapsedText(_ elapsed: TimeInterval) -> String {
+        "0:\(String(format: "%02d", Int(max(elapsed, 0))))"
+    }
+
+    static func recordingAccessibilityLabel(
+        elapsed: TimeInterval
+    ) -> String {
+        "Recording, \(Int(max(elapsed, 0))) seconds of 15"
+    }
+
+    static func playbackAccessibilityLabel(isPlaying: Bool) -> String {
+        isPlaying ? "Pause voice note" : "Play voice note"
+    }
+}
+
+@MainActor
+protocol VoiceNoteAudioClient: AnyObject {
+    var permission: VoiceNoteMicrophonePermission { get }
+    var recordingSnapshot: VoiceNoteRecordingSnapshot { get }
+    var interruptionHandler: (() -> Void)? { get set }
+    var routeChangeHandler: (() -> Void)? { get set }
+    var playbackFinishedHandler: (() -> Void)? { get set }
+
+    func requestPermission() async -> VoiceNoteMicrophonePermission
+    func startRecording(to url: URL) throws
+    func stopRecording()
+    func startPlaying(_ url: URL) throws
+    func pausePlaying()
+    func stopPlaying()
+}
+
+protocol VoiceNoteFileStoring: AnyObject {
+    func makeProvisionalURL() throws -> URL
+    func commit(
+        provisionalURL: URL,
+        duration: TimeInterval,
+        replacing priorNote: VoiceNoteAsset?
+    ) throws -> VoiceNoteAsset
+    func discardProvisional(at url: URL)
+    func delete(_ note: VoiceNoteAsset)
+}
+
+enum VoiceNoteFileStoreError: Error {
+    case invalidDuration
+    case invalidFile
+    case fileTooLarge
+}
+
+final class VoiceNoteLocalFileStore: VoiceNoteFileStoring {
+    static let maximumBytes = 524_288
+    static let recoveryCeiling: TimeInterval = 24 * 60 * 60
+
+    private let fileManager: FileManager
+    private let rootDirectory: URL
+
+    init(
+        rootDirectory: URL = VoiceNoteLocalFileStore.defaultRootDirectory(),
+        fileManager: FileManager = .default
+    ) {
+        self.rootDirectory = rootDirectory
+        self.fileManager = fileManager
+        removeExpiredSiblingDirectories()
+    }
+
+    func makeProvisionalURL() throws -> URL {
+        try prepareRootDirectory()
+        return rootDirectory.appendingPathComponent(
+            "take-\(UUID().uuidString).wav",
+            isDirectory: false
+        )
+    }
+
+    func commit(
+        provisionalURL: URL,
+        duration: TimeInterval,
+        replacing _: VoiceNoteAsset?
+    ) throws -> VoiceNoteAsset {
+        guard
+            duration > 0,
+            duration <= VoiceNotePresentation.maximumDuration
+        else {
+            throw VoiceNoteFileStoreError.invalidDuration
+        }
+        let attributes = try fileManager.attributesOfItem(
+            atPath: provisionalURL.path
+        )
+        guard let fileSize = attributes[.size] as? NSNumber else {
+            throw VoiceNoteFileStoreError.invalidFile
+        }
+        guard fileSize.intValue > 0 else {
+            throw VoiceNoteFileStoreError.invalidFile
+        }
+        guard fileSize.intValue < Self.maximumBytes else {
+            throw VoiceNoteFileStoreError.fileTooLarge
+        }
+
+        try protectAndExcludeFromBackup(provisionalURL)
+        let destination = rootDirectory.appendingPathComponent("voice-note.wav")
+        if fileManager.fileExists(atPath: destination.path) {
+            _ = try fileManager.replaceItemAt(
+                destination,
+                withItemAt: provisionalURL
+            )
+        } else {
+            try fileManager.moveItem(at: provisionalURL, to: destination)
+        }
+        return VoiceNoteAsset(url: destination, duration: duration)
+    }
+
+    func discardProvisional(at url: URL) {
+        try? fileManager.removeItem(at: url)
+    }
+
+    func delete(_ note: VoiceNoteAsset) {
+        try? fileManager.removeItem(at: note.url)
+    }
+
+    private func prepareRootDirectory() throws {
+        try fileManager.createDirectory(
+            at: rootDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.complete]
+        )
+        try protectAndExcludeFromBackup(rootDirectory)
+    }
+
+    private func protectAndExcludeFromBackup(_ url: URL) throws {
+        try fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.complete],
+            ofItemAtPath: url.path
+        )
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var protectedURL = url
+        try protectedURL.setResourceValues(values)
+    }
+
+    private func removeExpiredSiblingDirectories() {
+        let parent = rootDirectory.deletingLastPathComponent()
+        guard let siblings = try? fileManager.contentsOfDirectory(
+            at: parent,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+        let cutoff = Date().addingTimeInterval(-Self.recoveryCeiling)
+        for sibling in siblings where sibling != rootDirectory {
+            guard
+                let modified = try? sibling.resourceValues(
+                    forKeys: [.contentModificationDateKey]
+                ).contentModificationDate,
+                modified < cutoff
+            else {
+                continue
+            }
+            try? fileManager.removeItem(at: sibling)
+        }
+    }
+
+    private static func defaultRootDirectory() -> URL {
+        let base = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        return base
+            .appendingPathComponent("VoiceNotes", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+}
+
+@MainActor
+@Observable
+final class VoiceNoteStore {
+    nonisolated static let maximumDuration =
+        VoiceNotePresentation.maximumDuration
+
+    private(set) var phase: VoiceNotePhase
+    private(set) var savedNote: VoiceNoteAsset?
+
+    private let audio: VoiceNoteAudioClient
+    private let files: VoiceNoteFileStoring
+    private var provisionalURL: URL?
+    private var provisionalDuration: TimeInterval?
+    private var pendingFocusRequest: VoiceNoteFocusRequest?
+
+    init(
+        savedNote: VoiceNoteAsset? = nil,
+        audio: VoiceNoteAudioClient,
+        files: VoiceNoteFileStoring
+    ) {
+        self.savedNote = savedNote
+        self.audio = audio
+        self.files = files
+        phase = savedNote == nil ? .ready : .saved(isPlaying: false)
+        audio.interruptionHandler = { [weak self] in
+            self?.handleInterruption()
+        }
+        audio.routeChangeHandler = { [weak self] in
+            self?.handleRouteChange()
+        }
+        audio.playbackFinishedHandler = { [weak self] in
+            self?.handlePlaybackFinished()
+        }
+    }
+
+    func startRecording() async {
+        let permission: VoiceNoteMicrophonePermission
+        switch audio.permission {
+        case .allowed:
+            permission = .allowed
+        case .denied:
+            permission = .denied
+        case .undetermined:
+            permission = await audio.requestPermission()
+        }
+
+        guard permission == .allowed else {
+            phase = .accessOff
+            return
+        }
+
+        do {
+            let url = try files.makeProvisionalURL()
+            do {
+                try audio.startRecording(to: url)
+            } catch {
+                files.discardProvisional(at: url)
+                throw error
+            }
+            provisionalURL = url
+            provisionalDuration = nil
+            phase = .recording(elapsed: 0, level: 0)
+        } catch {
+            phase = .interrupted
+        }
+    }
+
+    func refreshRecording() {
+        guard case .recording = phase else {
+            return
+        }
+
+        let snapshot = audio.recordingSnapshot
+        let elapsed = min(max(snapshot.elapsed, 0), Self.maximumDuration)
+        if elapsed >= Self.maximumDuration {
+            audio.stopRecording()
+            provisionalDuration = Self.maximumDuration
+            phase = .takeReady(duration: Self.maximumDuration)
+            return
+        }
+
+        phase = .recording(
+            elapsed: elapsed,
+            level: Self.normalizedLevel(from: snapshot.averagePower)
+        )
+    }
+
+    func save() {
+        if case .recording = phase {
+            let snapshot = audio.recordingSnapshot
+            audio.stopRecording()
+            provisionalDuration = min(
+                max(snapshot.elapsed, 0),
+                Self.maximumDuration
+            )
+        }
+
+        guard
+            let provisionalURL,
+            let provisionalDuration,
+            provisionalDuration > 0
+        else {
+            if self.provisionalURL != nil {
+                discardProvisionalTake()
+                phase = savedNote == nil
+                    ? .interrupted
+                    : .saved(isPlaying: false)
+            }
+            return
+        }
+
+        do {
+            let savedNote = try files.commit(
+                provisionalURL: provisionalURL,
+                duration: provisionalDuration,
+                replacing: savedNote
+            )
+            self.savedNote = savedNote
+            self.provisionalURL = nil
+            self.provisionalDuration = nil
+            phase = .saved(isPlaying: false)
+            pendingFocusRequest = .savedNoteSummary
+        } catch {
+            phase = .saveFailed
+        }
+    }
+
+    func rerecord() async {
+        audio.stopPlaying()
+        await startRecording()
+    }
+
+    func cancelRecording() {
+        discardProvisionalTake()
+        phase = savedNote == nil ? .interrupted : .saved(isPlaying: false)
+        if savedNote != nil {
+            pendingFocusRequest = .savedNoteSummary
+        }
+    }
+
+    func handleInterruption() {
+        cancelRecording()
+    }
+
+    func handleSceneInactive() {
+        guard case .recording = phase else {
+            return
+        }
+        handleInterruption()
+    }
+
+    func handleRouteChange() {
+        guard case .recording = phase else {
+            return
+        }
+        handleInterruption()
+    }
+
+    func refreshPermissionTruth() {
+        guard phase == .accessOff, audio.permission == .allowed else {
+            return
+        }
+        phase = savedNote == nil ? .ready : .saved(isPlaying: false)
+    }
+
+    func togglePlayback() {
+        guard let savedNote else {
+            return
+        }
+
+        if phase == .saved(isPlaying: true) {
+            audio.pausePlaying()
+            phase = .saved(isPlaying: false)
+            return
+        }
+
+        do {
+            try audio.startPlaying(savedNote.url)
+            phase = .saved(isPlaying: true)
+        } catch {
+            phase = .saved(isPlaying: false)
+        }
+    }
+
+    func handlePlaybackFinished() {
+        guard savedNote != nil else {
+            return
+        }
+        phase = .saved(isPlaying: false)
+    }
+
+    func deleteSavedNote() {
+        guard let savedNote else {
+            return
+        }
+        audio.stopPlaying()
+        files.delete(savedNote)
+        self.savedNote = nil
+        phase = .ready
+    }
+
+    func dismiss() {
+        audio.stopPlaying()
+        if provisionalURL != nil {
+            discardProvisionalTake()
+        }
+        pendingFocusRequest = .voiceNoteOpener
+    }
+
+    func consumeFocusRequest() -> VoiceNoteFocusRequest? {
+        defer { pendingFocusRequest = nil }
+        return pendingFocusRequest
+    }
+
+    private static func normalizedLevel(from averagePower: Float) -> Double {
+        min(max(Double(averagePower + 60) / 60, 0), 1)
+    }
+
+    private func discardProvisionalTake() {
+        audio.stopRecording()
+        if let provisionalURL {
+            files.discardProvisional(at: provisionalURL)
+        }
+        provisionalURL = nil
+        provisionalDuration = nil
+    }
+}

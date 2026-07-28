@@ -221,10 +221,9 @@ final class SnapListUITests: XCTestCase {
         let startListing = app.buttons["photo-review.start-listing"]
         XCTAssertTrue(voice.waitForExistence(timeout: 2))
         XCTAssertTrue(startListing.exists)
-        // Photo Review v1.2 owns this screen and names the row "Voice context". Its
-        // optional and collapsed state is structural truth a seller who cannot see the
-        // row still needs. v2 owns the recorder interior, which is #469, not this label.
-        XCTAssertEqual(voice.label, "Voice context, optional, collapsed")
+        // The exact live-source Voice Note v2.1 package controls the visible helper
+        // and the optional collapsed semantics.
+        XCTAssertEqual(voice.label, "Voice note, optional, collapsed")
         XCTAssertEqual(startListing.label, "Start listing")
         XCTAssertTrue(startListing.isEnabled)
         XCTAssertGreaterThanOrEqual(voice.frame.height, 44)
@@ -235,11 +234,37 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(count.label, "1 of 5")
 
         voice.tap()
+        let sheetTitle = app.staticTexts["voice-note.title"]
+        let helper = app.staticTexts["voice-note.helper"]
+        let record = app.buttons["voice-note.record"]
+        let close = app.buttons["voice-note.close"]
+        XCTAssertTrue(sheetTitle.waitForExistence(timeout: 2))
+        XCTAssertEqual(sheetTitle.label, "Voice note")
+        XCTAssertEqual(helper.label, "Add details the photos might miss.")
+        XCTAssertTrue(record.exists)
+        XCTAssertEqual(record.label, "Start recording")
+        XCTAssertGreaterThanOrEqual(record.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(record.frame.height, 44)
+        XCTAssertTrue(close.exists)
+        XCTAssertEqual(close.label, "Close")
+        XCTAssertGreaterThanOrEqual(
+            close.frame.width,
+            44,
+            "Voice note Close must expose the approved 44-point target width."
+        )
+        XCTAssertGreaterThanOrEqual(
+            close.frame.height,
+            44,
+            "Voice note Close must expose the approved 44-point target height."
+        )
+        close.tap()
+        XCTAssertTrue(voice.waitForExistence(timeout: 2))
+
         startListing.tap()
 
         XCTAssertTrue(
             screen.exists,
-            "Neither boundary owns a destination in this shell."
+            "Start listing stays in place until its canonical receipt resolves."
         )
         XCTAssertEqual(
             count.label,
@@ -498,7 +523,7 @@ final class SnapListUITests: XCTestCase {
 
     // v1.2 primary_action.position is a sticky bottom action above the home-indicator
     // safe area, and its adaptive-layout contract says that action never covers the
-    // thumbnails, Voice context, or the home indicator. The hero and thumbnail strip are
+    // thumbnails, Voice note, or the home indicator. The hero and thumbnail strip are
     // fixed, so text is the only thing that lengthens this page; the largest Dynamic Type
     // is what puts the content decisively past the viewport, which is what makes the
     // scroll below real rather than a rubber-band that settles back to its start.
@@ -525,14 +550,14 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(startListing.waitForExistence(timeout: 3))
 
         // Structural truth: Start listing is pinned outside the scrolling content while
-        // Voice context stays in flow above it.
+        // Voice note stays in flow above it.
         XCTAssertFalse(
             screen.buttons["photo-review.start-listing"].exists,
             "Start listing must be a sticky action, not part of the scrolling content."
         )
         XCTAssertTrue(
             screen.buttons["photo-review.voice"].exists,
-            "Voice context stays in flow; only Start listing is sticky."
+            "Voice note stays in flow; only Start listing is sticky."
         )
 
         // Behavioural truth: the content scrolls under it and the action does not move.
