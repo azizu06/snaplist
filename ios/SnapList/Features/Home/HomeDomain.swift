@@ -194,7 +194,10 @@ enum TrophyWallCardIdentity: Hashable, Sendable {
 enum TrophyWallCardState: Hashable, Sendable {
     case pendingUpload
     case accepted
+    case workingIdentifying
+    case workingGenerating
     case workingPricing
+    case workingPersisting
 }
 
 struct TrophyWallOrderKey: Hashable, Comparable, Sendable {
@@ -292,7 +295,11 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             }
             accessibilityLabel =
                 "\(itemName), pending upload. Local item, not sent yet."
-        case .accepted, .workingPricing:
+        case .accepted,
+             .workingIdentifying,
+             .workingGenerating,
+             .workingPricing,
+             .workingPersisting:
             if case .run(let runID) = card.identity {
                 destination = .run(runID)
                 accessibilityIdentifier =
@@ -305,9 +312,18 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             case .accepted:
                 stateLabel = "Accepted"
                 accessibilityLabel = "\(itemName), accepted."
+            case .workingIdentifying:
+                stateLabel = "Identifying"
+                accessibilityLabel = "\(itemName), working, identifying."
+            case .workingGenerating:
+                stateLabel = "Writing listing"
+                accessibilityLabel = "\(itemName), working, writing listing."
             case .workingPricing:
                 stateLabel = "Pricing"
                 accessibilityLabel = "\(itemName), working, pricing."
+            case .workingPersisting:
+                stateLabel = "Saving"
+                accessibilityLabel = "\(itemName), working, saving."
             case .pendingUpload:
                 return nil
             }
@@ -430,8 +446,14 @@ final class TrophyWallStore {
         switch (runDetail.status, runDetail.stage) {
         case (.queued, .queued):
             .accepted
+        case (.running, .identifying):
+            .workingIdentifying
+        case (.running, .generating):
+            .workingGenerating
         case (.running, .pricing):
             .workingPricing
+        case (.running, .persisting):
+            .workingPersisting
         default:
             nil
         }

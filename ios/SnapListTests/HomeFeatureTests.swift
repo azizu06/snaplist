@@ -795,6 +795,84 @@ final class TrophyWallDomainTests: XCTestCase {
         )
     }
 
+    func testStoreProjectsRemainingCanonicalWorkingStagesFromAcceptedHandoffRunDetail() throws {
+        let fixture = TrophyWallTestFixture()
+        let cases = [
+            (
+                name: "identifying",
+                stage: DurableRunStage.identifying,
+                stateLabel: "Identifying",
+                accessibilityFact: "identifying"
+            ),
+            (
+                name: "generating",
+                stage: DurableRunStage.generating,
+                stateLabel: "Writing listing",
+                accessibilityFact: "writing listing"
+            ),
+            (
+                name: "persisting",
+                stage: DurableRunStage.persisting,
+                stateLabel: "Saving",
+                accessibilityFact: "saving"
+            ),
+        ]
+
+        for testCase in cases {
+            let store = fixture.makeStore()
+            let laterRunDetail = try fixture.decodedRunDetail(
+                runID: fixture.runID,
+                itemID: fixture.itemID,
+                status: .running,
+                stage: testCase.stage
+            )
+
+            for _ in 0..<2 {
+                store.ingest(
+                    acceptedHandoff: fixture.acceptedHandoff,
+                    runDetail: laterRunDetail,
+                    principalScope: fixture.principal
+                )
+            }
+
+            XCTAssertEqual(store.cards.count, 2, testCase.name)
+            XCTAssertEqual(store.cards.first, fixture.initialCards[1], testCase.name)
+            XCTAssertEqual(
+                store.cards.map(\.identity),
+                [.local(fixture.unrelatedLogicalID), .run(fixture.runID)],
+                testCase.name
+            )
+            XCTAssertEqual(
+                store.cards.last?.orderKey.lastMeaningfulUpdateAt,
+                fixture.runDetailUpdate,
+                testCase.name
+            )
+            XCTAssertEqual(
+                store.processingRows.map(\.itemName),
+                [fixture.unrelatedItemName, fixture.matchedItemName],
+                testCase.name
+            )
+            XCTAssertEqual(
+                store.processingRows.map(\.stateLabel),
+                ["Pending upload", testCase.stateLabel],
+                testCase.name
+            )
+            XCTAssertEqual(
+                store.processingRows.map(\.accessibilityLabel),
+                [
+                    "\(fixture.unrelatedItemName), pending upload. Local item, not sent yet.",
+                    "\(fixture.matchedItemName), working, \(testCase.accessibilityFact).",
+                ],
+                testCase.name
+            )
+            XCTAssertEqual(
+                store.processingRows.map(\.destination),
+                [nil, .run(fixture.runID)],
+                testCase.name
+            )
+        }
+    }
+
     func testProcessingProjectionPreservesExactMergeTruthAndRunDestination() {
         let fixture = TrophyWallTestFixture()
         let acceptedRun = TrophyWallCanonicalAcceptedRun(
