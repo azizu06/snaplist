@@ -139,6 +139,19 @@ export const mobileRunEnvelopeSchema = z
   .object({ data: mobileRunSchema, meta: apiMetaSchema })
   .strict();
 
+export const mobileRunCollectionSchema = z
+  .object({
+    runs: z.array(mobileRunSchema),
+    nextCursor: z.string().min(1).nullable(),
+  })
+  .strict();
+
+export type MobileRunCollection = z.infer<typeof mobileRunCollectionSchema>;
+
+export const mobileRunCollectionEnvelopeSchema = z
+  .object({ data: mobileRunCollectionSchema, meta: apiMetaSchema })
+  .strict();
+
 export const pricingEvidenceEnvelopeSchema = z
   .object({ data: pricingEvidenceProjectionSchema, meta: apiMetaSchema })
   .strict();

@@ -45,6 +45,11 @@ const handler = createMobileApiHandler({
       return configuredRunOperations().cancel(input);
     },
   },
+  runHistory: {
+    list(input) {
+      return configuredRunOperations().list(input);
+    },
+  },
   worker: unavailableWorker,
 });
 

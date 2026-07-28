@@ -4,7 +4,9 @@ import type { HomeProjectionReader } from "@/lib/home/projection";
 import type { PricingEvidenceReader } from "@/lib/pricing-evidence";
 import {
   MobileRunConflictError,
+  MobileRunInvalidCursorError,
   MobileRunNotFoundError,
+  type MobileRunHistoryReader,
   type MobileRunOperations,
 } from "./runs";
 import { z } from "zod";
@@ -21,6 +23,7 @@ import {
   apiErrorEnvelopeSchema,
   healthEnvelopeSchema,
   homeProjectionEnvelopeSchema,
+  mobileRunCollectionEnvelopeSchema,
   mobileRunEnvelopeSchema,
   pricingEvidenceEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
@@ -73,6 +76,8 @@ export interface MobileApiDependencies {
   homeProjection?: HomeProjectionReader;
   /** Authenticated, tenant/RLS-scoped view of canonical #161 durable-run truth. */
   runOperations?: MobileRunOperations;
+  /** Snapshot-stable tenant/RLS-scoped chronological run collection. */
+  runHistory?: MobileRunHistoryReader;
   /** Immutable, run-coherent RLS pricing evidence for native item detail. */
   pricingEvidence?: PricingEvidenceReader;
   workerSecret?: string;
@@ -173,6 +178,94 @@ export function createMobileApiHandler(
           401,
           "unauthorized",
           "Authentication is required.",
+        );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/runs`) {
+      if (request.method !== "GET") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const url = new URL(request.url);
+      const query = z
+        .object({
+          limit: z.coerce.number().int().min(1).max(50).default(20),
+          cursor: z.string().min(1).optional(),
+        })
+        .strict()
+        .safeParse({
+          limit: url.searchParams.get("limit") ?? undefined,
+          cursor: url.searchParams.get("cursor") ?? undefined,
+        });
+      if (!query.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid run-history query is required.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      if (!dependencies.runHistory) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Run history is temporarily unavailable.",
+        );
+      }
+      try {
+        const history = await dependencies.runHistory.list({
+          userId: principal.userId,
+          bearerToken: token,
+          ...query.data,
+        });
+        return json(
+          mobileRunCollectionEnvelopeSchema.parse({
+            data: history,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        if (error instanceof MobileRunInvalidCursorError) {
+          return errorResponse(
+            requestId,
+            400,
+            "invalid_request",
+            "The run-history cursor is invalid.",
+          );
+        }
+        dependencies.reportError?.("mobile-api.run-history", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Run history is temporarily unavailable.",
         );
       }
     }

@@ -10,6 +10,7 @@ import {
 
 const RUN_ID = "24100000-0000-4000-8000-000000000001";
 const ITEM_ID = "24100000-0000-4000-8000-000000000002";
+const OLDER_RUN_ID = "24100000-0000-4000-8000-000000000003";
 
 function runRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -37,6 +38,7 @@ function runRow(overrides: Record<string, unknown> = {}) {
 
 function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunDataClient {
   return {
+    listRunHistoryPage: vi.fn().mockResolvedValue({ data: [], error: null }),
     readRun: vi.fn().mockResolvedValue({ data: runRow(), error: null }),
     readItem: vi.fn().mockResolvedValue({
       data: {
@@ -58,6 +60,82 @@ function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunData
 }
 
 describe("mobile durable-run operations", () => {
+  it("continues a frozen tenant run snapshot when an unseen run updates", async () => {
+    let olderUpdatedAt = "2026-07-19T17:59:00.000Z";
+    const listRunHistoryPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          {
+            run_id: RUN_ID,
+            last_meaningful_update_at: "2026-07-19T18:01:00.000Z",
+            snapshot_revision: "7",
+          },
+          {
+            run_id: OLDER_RUN_ID,
+            last_meaningful_update_at: olderUpdatedAt,
+            snapshot_revision: "7",
+          },
+        ],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            run_id: OLDER_RUN_ID,
+            last_meaningful_update_at: "2026-07-19T17:59:00.000Z",
+            snapshot_revision: "7",
+          },
+        ],
+        error: null,
+      });
+    const client = dataClient({
+      readRun: vi.fn(async (runId: string) => ({
+        data: runRow(
+          runId === OLDER_RUN_ID
+            ? { id: runId, updated_at: olderUpdatedAt }
+            : { id: runId },
+        ),
+        error: null,
+      })),
+    });
+    const operations = createMobileRunOperations(async () => ({
+      ...client,
+      listRunHistoryPage,
+    }));
+
+    const first = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 1,
+    });
+    olderUpdatedAt = "2026-07-19T18:02:00.000Z";
+    const second = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 1,
+      cursor: first.nextCursor!,
+    });
+
+    expect([
+      ...first.runs.map((run) => run.id),
+      ...second.runs.map((run) => run.id),
+    ]).toEqual([RUN_ID, OLDER_RUN_ID]);
+    expect(listRunHistoryPage).toHaveBeenNthCalledWith(1, { limit: 2 });
+    expect(listRunHistoryPage).toHaveBeenNthCalledWith(2, {
+      limit: 2,
+      snapshotRevision: "7",
+      before: {
+        lastMeaningfulUpdateAt: "2026-07-19T18:01:00.000Z",
+        runId: RUN_ID,
+      },
+    });
+    expect(second.nextCursor).toBeNull();
+    expect(second.runs[0]?.lastMeaningfulUpdateAt).toBe(
+      "2026-07-19T18:02:00.000Z",
+    );
+  });
+
   it("maps the authenticated RLS row into the full provider-neutral run detail", async () => {
     const client = {
       readRun: vi.fn().mockResolvedValue({

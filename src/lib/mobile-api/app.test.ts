@@ -106,6 +106,31 @@ describe("mobile API v1 provider-neutral handler", () => {
     });
   });
 
+  it("lists one tenant run snapshot from the verified bearer principal", async () => {
+    const list = vi.fn().mockResolvedValue({
+      runs: [],
+      nextCursor: "opaque-next-page",
+    });
+
+    const response = await handler({ runHistory: { list } })(
+      new Request("http://localhost/v1/runs?limit=2&cursor=opaque-page", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(list).toHaveBeenCalledWith({
+      userId: "user_smoke",
+      bearerToken: "signed-jwt",
+      limit: 2,
+      cursor: "opaque-page",
+    });
+    await expect(response.json()).resolves.toEqual({
+      data: { runs: [], nextCursor: "opaque-next-page" },
+      meta: { requestId: "req_test" },
+    });
+  });
+
   it("creates one tenant-bound eBay Sandbox OAuth session through the authenticated mobile seam", async () => {
     const createSession = vi.fn().mockResolvedValue({
       sessionId: "38700000-0000-4000-8000-000000000001",
