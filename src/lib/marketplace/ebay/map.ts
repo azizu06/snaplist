@@ -1,4 +1,4 @@
-import type { EbayCondition, EbayPublishRequest } from "./types";
+import type { EbayCondition, EbayPublishListingRequest } from "./types";
 import { normalizeConditionAlias } from "../../items/condition";
 import { PublishValidationError } from "./errors";
 
@@ -145,7 +145,9 @@ export function toEbayPrice(price: number, currency = "USD"): { value: string; c
 }
 
 /** Assemble the full publish request. Throws on unpublishable input (no price). */
-export function toEbayPublishRequest(listing: ListingForPublish): EbayPublishRequest {
+export function toEbayPublishRequest(
+  listing: ListingForPublish,
+): EbayPublishListingRequest {
   if (!listing.title.trim() || !listing.description.trim()) {
     throw new PublishValidationError(
       "Cannot publish to eBay: listing is missing a title or description.",

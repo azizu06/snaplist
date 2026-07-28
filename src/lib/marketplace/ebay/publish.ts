@@ -1,11 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   EbayApiError,
+  EbayWriteAmbiguousError,
   type EbayAdapter,
   type EbayDispatchContext,
+  type EbayPublishRequest,
   type EbayPublishResult,
 } from "./types";
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
+import { ebayPolicyLocationBindingSchema } from "./policy-location-contract";
 import {
   PublishValidationError,
   isEbayAuthError,
@@ -69,6 +72,15 @@ interface PublishClaimSnapshot {
   priceOverride: number | string | null;
 }
 
+interface EbayOfferBinding {
+  marketplaceId: string;
+  connectionGeneration: string | null;
+  fulfillmentPolicyId: string;
+  paymentPolicyId: string;
+  returnPolicyId: string;
+  merchantLocationKey: string;
+}
+
 /**
  * Fallback leaf category when EBAY_DEFAULT_CATEGORY_ID is unset: eBay's
  * "Everything Else > Other" — the generic catch-all. Real category resolution
@@ -85,6 +97,8 @@ const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
  * publishing under a different currency must reprice, never relabel.
  */
 const PRICING_CURRENCY = "USD";
+
+class PublishedReplayConflictError extends PublishValidationError {}
 
 /**
  * `publishListingToEbay` + the seller's activity-feed notifications, shared by
@@ -106,6 +120,9 @@ export async function publishListingToEbayAndNotify(
   try {
     outcome = await publishListingToEbay(supabase, listingId, adapter, options);
   } catch (err) {
+    if (err instanceof PublishedReplayConflictError) {
+      throw err;
+    }
     // An AUTH failure (expired/invalid token) has ONE fix — reconnect eBay in
     // Settings — so the feed shows the actionable reconnect message, matching
     // the error banner both entry points surface, never the raw HTTP-401 text.
@@ -158,12 +175,13 @@ export async function publishListingToEbay(
   options: PublishOptions = {},
 ): Promise<PublishOutcome> {
   const env = options.env?.() ?? process.env;
+  const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
 
   // 1. Load the listing UNDER RLS — a foreign or unknown id is simply not found.
   const { data: listing, error: listingErr } = await supabase
     .from("listings")
     .select(
-      "id, item_id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_offer_id, ebay_status",
+      "id, item_id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_offer_id, ebay_status, ebay_publish_connection_generation",
     )
     .eq("id", listingId)
     .maybeSingle();
@@ -181,6 +199,19 @@ export async function publishListingToEbay(
 
   // 2. Idempotency: already live -> return the stored result, no eBay call.
   if (listing.ebay_listing_id && listing.ebay_status === "published") {
+    const currentConnectionGeneration = await readEbayReplayConnectionGeneration(
+      supabase,
+      marketplaceId,
+      adapter,
+    );
+    if (
+      listing.ebay_publish_connection_generation
+      !== currentConnectionGeneration
+    ) {
+      throw new PublishedReplayConflictError(
+        "The eBay connection changed after this listing was published.",
+      );
+    }
     return {
       listingId,
       ebayListingId: listing.ebay_listing_id as string,
@@ -189,6 +220,12 @@ export async function publishListingToEbay(
       alreadyPublished: true,
     };
   }
+
+  const offerBinding = await readEbayOfferBinding(
+    supabase,
+    marketplaceId,
+    adapter,
+  );
 
   // 3. Pull the current review token used by the atomic publish claim. The claim
   // returns the seller override from the same locked review snapshot and rejects
@@ -211,10 +248,10 @@ export async function publishListingToEbay(
   // the operator explicitly declares the pricing currency via EBAY_CURRENCY
   // (the escape hatch for a future repricing flow whose numerics genuinely
   // are in that currency).
-  const currency = marketplaceCurrency(env.EBAY_MARKETPLACE_ID, env.EBAY_CURRENCY);
+  const currency = marketplaceCurrency(marketplaceId, env.EBAY_CURRENCY);
   if (!env.EBAY_CURRENCY && currency !== PRICING_CURRENCY) {
     throw new PublishValidationError(
-      `Listing ${listingId} cannot publish to ${env.EBAY_MARKETPLACE_ID}: its price ` +
+      `Listing ${listingId} cannot publish to ${marketplaceId}: its price ` +
         `was computed in ${PRICING_CURRENCY}, and relabeling the amount as ${currency} ` +
         "would misprice the live listing. Reprice for the target marketplace, or set " +
         "EBAY_CURRENCY explicitly if the persisted prices really are in that currency.",
@@ -238,14 +275,30 @@ export async function publishListingToEbay(
   const claim = parsePublishClaimSnapshot(claimData);
   if (!claim) {
     if (returnedClaimId) {
-      await markPublishFailed(supabase, listingId, returnedClaimId);
+      await markPublishFailed(
+        supabase,
+        listingId,
+        returnedClaimId,
+        offerBinding,
+      );
     }
     throw new Error("Failed to start eBay publish: publish snapshot was not returned.");
   }
   const claimId = claim.claimId;
+  try {
+    await bindPublishClaimToConnection(
+      options.completionClient ?? supabase,
+      listingId,
+      claimId,
+      offerBinding,
+    );
+  } catch (error) {
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
+    throw error;
+  }
   const price = effectivePrice(claim.price, claim.priceOverride);
   if (price == null) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw new PublishValidationError(
       `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
     );
@@ -260,11 +313,11 @@ export async function publishListingToEbay(
       options.signedUrlTtlSeconds ?? SIGNED_URL_TTL_SECONDS,
     );
   } catch (error) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw error;
   }
   if (imageUrls.length === 0) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw new PublishValidationError(
       photoPaths.length === 0
         ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
@@ -275,21 +328,25 @@ export async function publishListingToEbay(
     );
   }
 
-  let request: ReturnType<typeof toEbayPublishRequest>;
+  let request: EbayPublishRequest;
   try {
-    request = toEbayPublishRequest({
-      listingId,
-      title: claim.title ?? "",
-      description: claim.description ?? "",
-      copy: claim.copy,
-      condition: claim.condition,
-      price,
-      imageUrls,
-      categoryId: env.EBAY_DEFAULT_CATEGORY_ID ?? GENERIC_CATEGORY_ID,
-      currency,
-    });
+    request = {
+      ...toEbayPublishRequest({
+        listingId,
+        title: claim.title ?? "",
+        description: claim.description ?? "",
+        copy: claim.copy,
+        condition: claim.condition,
+        price,
+        imageUrls,
+        categoryId: env.EBAY_DEFAULT_CATEGORY_ID ?? GENERIC_CATEGORY_ID,
+        currency,
+      }),
+      ...offerBinding,
+      publishClaimId: claimId,
+    };
   } catch (error) {
-    await markPublishFailed(supabase, listingId, claimId);
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw error;
   }
 
@@ -305,14 +362,18 @@ export async function publishListingToEbay(
         options.completionClient ?? supabase,
         listingId,
         claimId,
+        request.connectionGeneration,
         price,
         acknowledgement,
         context,
       );
     });
   } catch (err) {
-    if (!providerAcknowledged) {
-      await markPublishFailed(supabase, listingId, claimId);
+    if (
+      !providerAcknowledged
+      && !(err instanceof EbayWriteAmbiguousError)
+    ) {
+      await markPublishFailed(supabase, listingId, claimId, offerBinding);
     }
     throw err;
   }
@@ -326,20 +387,142 @@ export async function publishListingToEbay(
   };
 }
 
+async function bindPublishClaimToConnection(
+  supabase: SupabaseClient,
+  listingId: string,
+  claimId: string,
+  binding: EbayOfferBinding,
+): Promise<void> {
+  if (binding.connectionGeneration === null) {
+    return;
+  }
+  const { error } = await supabase.rpc(
+    "bind_ebay_publish_connection_generation",
+    {
+      p_listing_id: listingId,
+      p_claim_id: claimId,
+      p_marketplace_id: binding.marketplaceId,
+      p_connection_generation: binding.connectionGeneration,
+      p_fulfillment_policy_id: binding.fulfillmentPolicyId,
+      p_payment_policy_id: binding.paymentPolicyId,
+      p_return_policy_id: binding.returnPolicyId,
+      p_merchant_location_key: binding.merchantLocationKey,
+    },
+  );
+  if (error) {
+    throw new PublishValidationError(
+      `The eBay connection changed before provider dispatch: ${error.message}`,
+    );
+  }
+}
+
+async function readEbayOfferBinding(
+  supabase: SupabaseClient,
+  marketplaceId: string,
+  adapter: EbayAdapter,
+): Promise<EbayOfferBinding> {
+  const { data, error } = await supabase
+    .from("ebay_connections")
+    .select("connection_generation, policy_location_bindings")
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to read eBay offer setup: ${error.message}`);
+  }
+  if (!data) {
+    const fallback = adapter.getPublishFallbackBinding?.();
+    if (
+      fallback
+      && fallback.marketplaceId === marketplaceId
+      && fallback.connectionGeneration === null
+    ) {
+      return fallback;
+    }
+    throw new PublishValidationError(
+      "Connect eBay and finish policy/location setup before publishing.",
+    );
+  }
+  const bindings = data.policy_location_bindings;
+  const rawBinding =
+    bindings && typeof bindings === "object" && !Array.isArray(bindings)
+      ? (bindings as Record<string, unknown>)[marketplaceId]
+      : undefined;
+  const parsed = ebayPolicyLocationBindingSchema.safeParse(rawBinding);
+  if (
+    !parsed.success
+    || parsed.data.state !== "ready"
+    || parsed.data.marketplaceId !== marketplaceId
+    || parsed.data.connectionGeneration !== data.connection_generation
+    || parsed.data.fulfillmentPolicy.state !== "bound"
+    || parsed.data.paymentPolicy.state !== "bound"
+    || parsed.data.returnPolicy.state !== "bound"
+    || parsed.data.inventoryLocation.state !== "bound"
+  ) {
+    throw new PublishValidationError(
+      `Finish eBay policy/location setup for ${marketplaceId} before publishing.`,
+    );
+  }
+  return {
+    marketplaceId,
+    connectionGeneration: parsed.data.connectionGeneration,
+    fulfillmentPolicyId: parsed.data.fulfillmentPolicy.selectedId,
+    paymentPolicyId: parsed.data.paymentPolicy.selectedId,
+    returnPolicyId: parsed.data.returnPolicy.selectedId,
+    merchantLocationKey: parsed.data.inventoryLocation.selectedId,
+  };
+}
+
+async function readEbayReplayConnectionGeneration(
+  supabase: SupabaseClient,
+  marketplaceId: string,
+  adapter: EbayAdapter,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("ebay_connections")
+    .select("connection_generation")
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to read eBay connection generation: ${error.message}`);
+  }
+  if (data) {
+    return data.connection_generation as string;
+  }
+  const fallback = adapter.getPublishFallbackBinding?.();
+  if (
+    fallback
+    && fallback.marketplaceId === marketplaceId
+    && fallback.connectionGeneration === null
+  ) {
+    return null;
+  }
+  throw new PublishedReplayConflictError(
+    "Connect eBay before replaying this published listing.",
+  );
+}
+
 async function persistPublishedListing(
   supabase: SupabaseClient,
   listingId: string,
   claimId: string,
+  connectionGeneration: string | null,
   price: number,
   result: EbayPublishResult,
   context: EbayDispatchContext | null,
 ): Promise<void> {
   const pricedAt = new Date().toISOString();
   if (context) {
+    if (
+      context.connectionGeneration !== connectionGeneration
+      || context.publishClaimId !== claimId
+    ) {
+      throw new Error(
+        `eBay listing ${result.listingId} published but its dispatch provenance changed before persistence`,
+      );
+    }
     const { error } = await supabase.rpc("complete_ebay_publish_dispatch", {
       p_listing_id: listingId,
       p_claim_id: claimId,
       p_account_generation: context.accountGeneration,
+      p_connection_generation: context.connectionGeneration,
       p_attempt_token: context.attemptToken,
       p_ebay_listing_id: result.listingId,
       p_ebay_offer_id: result.offerId,
@@ -354,7 +537,7 @@ async function persistPublishedListing(
     return;
   }
 
-  const { data: updated, error } = await supabase
+  let update = supabase
     .from("listings")
     .update({
       ebay_listing_id: result.listingId,
@@ -368,8 +551,15 @@ async function persistPublishedListing(
     })
     .eq("id", listingId)
     .eq("ebay_status", "publishing")
-    .eq("ebay_publish_claim_id", claimId)
-    .select("id");
+    .eq("ebay_publish_claim_id", claimId);
+  update =
+    connectionGeneration === null
+      ? update.is("ebay_publish_connection_generation", null)
+      : update.eq(
+          "ebay_publish_connection_generation",
+          connectionGeneration,
+        );
+  const { data: updated, error } = await update.select("id");
   if (error || !updated || updated.length === 0) {
     throw new Error(
       `eBay listing ${result.listingId} published but persisting it failed: ${error?.message ?? "publish claim was lost"}`,
@@ -423,19 +613,70 @@ async function markPublishFailed(
   supabase: SupabaseClient,
   listingId: string,
   claimId?: string,
+  expectedOfferBinding?: EbayOfferBinding,
 ): Promise<void> {
-  let query = supabase
-    .from("listings")
-    .update({
-      ebay_status: "failed",
-      ebay_publish_claim_id: null,
-      ebay_publish_claimed_at: null,
-    })
-    .eq("id", listingId);
-  query = claimId
-    ? query.eq("ebay_status", "publishing").eq("ebay_publish_claim_id", claimId)
-    : query.or("ebay_status.is.null,ebay_status.eq.failed");
-  await query.then(undefined, () => undefined);
+  const expectedConnectionGeneration =
+    expectedOfferBinding?.connectionGeneration ?? null;
+  const expectedPublishBinding =
+    expectedConnectionGeneration === null || !expectedOfferBinding
+      ? null
+      : {
+          marketplaceId: expectedOfferBinding.marketplaceId,
+          fulfillmentPolicyId: expectedOfferBinding.fulfillmentPolicyId,
+          paymentPolicyId: expectedOfferBinding.paymentPolicyId,
+          returnPolicyId: expectedOfferBinding.returnPolicyId,
+          merchantLocationKey: expectedOfferBinding.merchantLocationKey,
+        };
+
+  const clearMatchingAttempt = async (
+    connectionGeneration: string | null,
+    publishBinding: typeof expectedPublishBinding,
+  ): Promise<boolean> => {
+    let query = supabase
+      .from("listings")
+      .update({
+        ebay_status: "failed",
+        ebay_publish_claim_id: null,
+        ebay_publish_claimed_at: null,
+        ebay_publish_connection_generation: null,
+        ebay_publish_binding: null,
+      })
+      .eq("id", listingId);
+    query = claimId
+      ? query.eq("ebay_status", "publishing").eq("ebay_publish_claim_id", claimId)
+      : query.or("ebay_status.is.null,ebay_status.eq.failed");
+    query = connectionGeneration === null
+      ? query.is("ebay_publish_connection_generation", null)
+      : query.eq(
+          "ebay_publish_connection_generation",
+          connectionGeneration,
+        );
+    query = publishBinding === null
+      ? query.is("ebay_publish_binding", null)
+      : query.filter(
+          "ebay_publish_binding",
+          "eq",
+          JSON.stringify(publishBinding),
+        );
+    const { data } = await query.select("id");
+    return (data?.length ?? 0) > 0;
+  };
+
+  try {
+    if (
+      await clearMatchingAttempt(
+        expectedConnectionGeneration,
+        expectedPublishBinding,
+      )
+    ) {
+      return;
+    }
+    if (expectedConnectionGeneration !== null) {
+      await clearMatchingAttempt(null, null);
+    }
+  } catch {
+    // Best effort: never mask the publish error being reported.
+  }
 }
 
 /**

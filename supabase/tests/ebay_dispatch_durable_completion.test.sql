@@ -72,6 +72,46 @@ select account.user_id,
 from private.ebay_messaging_account_generations account
 where account.user_id in ('dispatch-completion-a', 'dispatch-completion-b');
 
+update public.ebay_connections connection
+set policy_location_bindings = jsonb_build_object(
+  'EBAY_US',
+  jsonb_build_object(
+    'state', 'ready',
+    'marketplaceId', 'EBAY_US',
+    'connectionGeneration', connection.connection_generation,
+    'fulfillmentPolicy', jsonb_build_object(
+      'state', 'bound',
+      'selectedId', 'dispatch-fulfillment'
+    ),
+    'paymentPolicy', jsonb_build_object(
+      'state', 'bound',
+      'selectedId', 'dispatch-payment'
+    ),
+    'returnPolicy', jsonb_build_object(
+      'state', 'bound',
+      'selectedId', 'dispatch-return'
+    ),
+    'inventoryLocation', jsonb_build_object(
+      'state', 'bound',
+      'selectedId', 'dispatch-location'
+    )
+  )
+)
+where connection.user_id in ('dispatch-completion-a', 'dispatch-completion-b');
+
+update public.listings listing
+set ebay_publish_connection_generation = connection.connection_generation,
+    ebay_publish_binding = jsonb_build_object(
+      'marketplaceId', 'EBAY_US',
+      'fulfillmentPolicyId', 'dispatch-fulfillment',
+      'paymentPolicyId', 'dispatch-payment',
+      'returnPolicyId', 'dispatch-return',
+      'merchantLocationKey', 'dispatch-location'
+    )
+from public.ebay_connections connection
+where connection.user_id = listing.user_id
+  and listing.ebay_status = 'publishing';
+
 set local role authenticated;
 select set_config(
   'request.jwt.claims',
@@ -82,11 +122,26 @@ select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
 
 create temporary table publish_dispatch_fixture on commit drop as
 select (lease->>'account_generation')::uuid as account_generation,
+       (lease->>'connection_generation')::uuid as connection_generation,
+       (lease->>'publish_claim_id')::uuid as publish_claim_id,
        (lease->>'attempt_token')::uuid as attempt_token
 from (
   select public.begin_ebay_transactional_dispatch(
     'a2000000-0000-4000-8000-000000000001',
-    'publish'
+    'publish',
+    (
+      select connection_generation
+      from public.ebay_connections
+      where user_id = 'dispatch-completion-a'
+    ),
+    'a3000000-0000-4000-8000-000000000001',
+    jsonb_build_object(
+      'marketplaceId', 'EBAY_US',
+      'fulfillmentPolicyId', 'dispatch-fulfillment',
+      'paymentPolicyId', 'dispatch-payment',
+      'returnPolicyId', 'dispatch-return',
+      'merchantLocationKey', 'dispatch-location'
+    )
   ) as lease
 ) started;
 
@@ -103,6 +158,7 @@ select extensions.lives_ok(
       'a2000000-0000-4000-8000-000000000001',
       'a3000000-0000-4000-8000-000000000001',
       account_generation,
+      connection_generation,
       attempt_token,
       'provider-listing-a',
       'provider-offer-a',
@@ -150,13 +206,36 @@ select set_config(
 );
 select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
 
+update public.listings
+set status = 'draft',
+    ebay_status = 'publishing',
+    ebay_publish_claim_id = 'a3000000-0000-4000-8000-000000000001',
+    ebay_publish_claimed_at = statement_timestamp(),
+    ebay_listing_id = null,
+    ebay_offer_id = null
+where id = 'a2000000-0000-4000-8000-000000000001';
+
 create temporary table denied_publish_dispatch_fixture on commit drop as
 select (lease->>'account_generation')::uuid as account_generation,
+       (lease->>'connection_generation')::uuid as connection_generation,
        (lease->>'attempt_token')::uuid as attempt_token
 from (
   select public.begin_ebay_transactional_dispatch(
     'a2000000-0000-4000-8000-000000000001',
-    'publish'
+    'publish',
+    (
+      select connection_generation
+      from public.ebay_connections
+      where user_id = 'dispatch-completion-a'
+    ),
+    'a3000000-0000-4000-8000-000000000001',
+    jsonb_build_object(
+      'marketplaceId', 'EBAY_US',
+      'fulfillmentPolicyId', 'dispatch-fulfillment',
+      'paymentPolicyId', 'dispatch-payment',
+      'returnPolicyId', 'dispatch-return',
+      'merchantLocationKey', 'dispatch-location'
+    )
   ) as lease
 ) started;
 
@@ -172,6 +251,7 @@ select extensions.throws_ok(
       'a2000000-0000-4000-8000-000000000001',
       'a3000000-0000-4000-8000-000000000001',
       account_generation,
+      connection_generation,
       attempt_token,
       'wrong-tenant-listing',
       'wrong-tenant-offer',
@@ -180,7 +260,7 @@ select extensions.throws_ok(
     )
     from denied_publish_dispatch_fixture
   $$,
-  '40001',
+  'PT409',
   'eBay account generation changed before local completion',
   'another tenant cannot complete a provider result using the captured generation'
 );

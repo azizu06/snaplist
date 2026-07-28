@@ -30,6 +30,10 @@ const operatorEnv = {
   EBAY_OAUTH_TOKEN: "sandbox-token",
   EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID: "user_operator",
   EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID: "sandbox-seller-id",
+  EBAY_FULFILLMENT_POLICY_ID: "operator-fulfillment",
+  EBAY_PAYMENT_POLICY_ID: "operator-payment",
+  EBAY_RETURN_POLICY_ID: "operator-return",
+  EBAY_MERCHANT_LOCATION_KEY: "operator-location",
 };
 
 describe("eBay messaging composition", () => {
@@ -100,15 +104,25 @@ describe("eBay messaging composition", () => {
     }
     const credentialClient = { rpc: vi.fn() } as unknown as SupabaseClient;
 
-    await expect(
-      createEbayAdapterForUser({} as SupabaseClient, "user_operator", {
+    const adapter = await createEbayAdapterForUser(
+      {} as SupabaseClient,
+      "user_operator",
+      {
         credentialClient,
-      }),
-    ).resolves.toBeDefined();
+      },
+    );
 
     expect(userTokenProvider).toHaveBeenCalledWith(credentialClient, {
       userId: "user_operator",
       scheduled: false,
+    });
+    expect(adapter.getPublishFallbackBinding?.()).toEqual({
+      marketplaceId: "EBAY_US",
+      connectionGeneration: null,
+      fulfillmentPolicyId: "operator-fulfillment",
+      paymentPolicyId: "operator-payment",
+      returnPolicyId: "operator-return",
+      merchantLocationKey: "operator-location",
     });
   });
 

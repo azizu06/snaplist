@@ -350,6 +350,8 @@ describe("runRepriceSweep — auto-apply", () => {
       const result = { offerId: revision.offerId, status: "revised" as const };
       await complete?.(result, {
         accountGeneration: "44444444-4444-4444-8444-444444444444",
+        connectionGeneration: null,
+        publishClaimId: null,
         attemptToken: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       });
       return result;

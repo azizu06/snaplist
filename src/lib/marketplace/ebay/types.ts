@@ -29,7 +29,7 @@ export type EbayCondition =
  * provider-shaped value object: the mapping from SnapList rows to this shape is
  * pure and lives in map.ts, so the adapter never reaches back into the database.
  */
-export interface EbayPublishRequest {
+export interface EbayPublishListingRequest {
   /**
    * Seller-unique inventory SKU. SnapList uses the listing row's UUID so the
    * inventory-item PUT is naturally idempotent (re-publishing the same listing
@@ -53,6 +53,25 @@ export interface EbayPublishRequest {
   categoryId: string;
   /** Photo URLs for the inventory item (eBay requires publicly fetchable URLs). */
   imageUrls: string[];
+}
+
+/**
+ * One fully resolved seller offer request. Policy/location values belong to
+ * the current connection generation; the HTTP adapter must not substitute
+ * process-wide seller configuration.
+ */
+export interface EbayPublishBindingProvenance {
+  marketplaceId: string;
+  fulfillmentPolicyId: string;
+  paymentPolicyId: string;
+  returnPolicyId: string;
+  merchantLocationKey: string;
+}
+
+export interface EbayPublishRequest
+  extends EbayPublishListingRequest, EbayPublishBindingProvenance {
+  connectionGeneration: string | null;
+  publishClaimId: string;
 }
 
 /** Outcome of a successful inventory item -> offer -> publish run. */
@@ -102,10 +121,27 @@ export interface EbayAdapter {
     request: EbayReviseRequest,
     complete?: EbayReviseCompletion,
   ): Promise<EbayReviseResult>;
+  /**
+   * Present only on the exact-tenant, exact-origin Sandbox operator adapter.
+   * Normal connected sellers resolve offer values from their RLS-owned
+   * connection binding.
+   */
+  getPublishFallbackBinding?(): EbayPublishFallbackBinding | undefined;
+}
+
+export interface EbayPublishFallbackBinding {
+  marketplaceId: string;
+  connectionGeneration: null;
+  fulfillmentPolicyId: string;
+  paymentPolicyId: string;
+  returnPolicyId: string;
+  merchantLocationKey: string;
 }
 
 export interface EbayDispatchContext {
   accountGeneration: string;
+  connectionGeneration: string | null;
+  publishClaimId: string | null;
   attemptToken: string;
 }
 
@@ -129,15 +165,21 @@ export interface EbayTokenProvider {
   getAccessToken(
     expectedAccountGeneration?: string,
     signal?: AbortSignal,
+    expectedConnectionGeneration?: string | null,
   ): Promise<string>;
   beginProviderDispatch?(
     resourceId: string,
     operation: "publish" | "reprice",
+    expectedConnectionGeneration?: string | null,
+    expectedPublishClaimId?: string | null,
+    expectedPublishBinding?: EbayPublishBindingProvenance | null,
   ): Promise<EbayProviderDispatchLease>;
 }
 
 export interface EbayProviderDispatchLease {
   accountGeneration: string;
+  connectionGeneration: string | null;
+  publishClaimId: string | null;
   attemptToken: string;
   signal: AbortSignal;
   release(): Promise<void>;

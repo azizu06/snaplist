@@ -84,13 +84,10 @@ export function createEbayAdapter(
  * an eBay account is connected. Env credentials are accepted only for the
  * explicitly configured operator user/seller on the exact Sandbox origin.
  *
- * SINGLE-SELLER CONSTRAINT (deliberate, documented in docs/ebay-production.md):
- * business policies (EBAY_*_POLICY_ID) and the merchant location stay
- * env-configured, and policies belong to the eBay account that created them —
- * so production publishing is correct for THE seller whose policies are in the
- * env (the #17 go-live story), not for arbitrary additional sellers. True
- * multi-seller needs per-connection policy discovery via the Sell Account API
- * (sell.account scope) — tracked as a follow-up issue, out of scope here.
+ * Normal sellers publish only with the verified marketplace policy/location
+ * binding stored on their current connection generation. Process-wide policy
+ * and location values are reserved for the exact configured operator tenant
+ * and seller on `https://api.sandbox.ebay.com`; production never uses them.
  */
 export async function createEbayAdapterForUser(
   supabase: SupabaseClient,
@@ -128,6 +125,9 @@ export async function createEbayAdapterForUser(
       userId,
       options.scheduled ?? false,
     ),
+    publishFallbackBinding: options.scheduled
+      ? undefined
+      : operatorSandboxPublishBinding(),
   });
 }
 
@@ -259,4 +259,29 @@ function assertOperatorSandboxFallback(userId: string | undefined): {
     throw new Error("App-level eBay Sandbox identity is not configured.");
   }
   return { userId, sellerId };
+}
+
+function operatorSandboxPublishBinding() {
+  const values = {
+    fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID,
+    paymentPolicyId: process.env.EBAY_PAYMENT_POLICY_ID,
+    returnPolicyId: process.env.EBAY_RETURN_POLICY_ID,
+    merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY,
+  };
+  const missing = Object.entries(values)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missing.length > 0) {
+    throw new Error(
+      `The eBay Sandbox operator offer binding is incomplete: ${missing.join(", ")}.`,
+    );
+  }
+  return {
+    marketplaceId: process.env.EBAY_MARKETPLACE_ID ?? "EBAY_US",
+    connectionGeneration: null,
+    fulfillmentPolicyId: values.fulfillmentPolicyId!,
+    paymentPolicyId: values.paymentPolicyId!,
+    returnPolicyId: values.returnPolicyId!,
+    merchantLocationKey: values.merchantLocationKey!,
+  } as const;
 }

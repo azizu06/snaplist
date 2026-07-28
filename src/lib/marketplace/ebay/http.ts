@@ -1,5 +1,6 @@
 import type {
   EbayAdapter,
+  EbayPublishFallbackBinding,
   EbayPublishRequest,
   EbayPublishCompletion,
   EbayPublishResult,
@@ -43,6 +44,8 @@ export interface HttpEbayAdapterOptions {
   tokenProvider?: EbayTokenProvider;
   /** Injectable env reader; defaults to process.env. Read lazily per call. */
   env?: () => Record<string, string | undefined>;
+  /** Exact-operator Sandbox values; absent for every connected seller. */
+  publishFallbackBinding?: EbayPublishFallbackBinding;
 }
 
 /** eBay's "offer entity already exists" error id (create-offer conflict). */
@@ -61,13 +64,19 @@ export class HttpEbayAdapter implements EbayAdapter {
   private readonly fetchImpl: typeof fetch;
   private readonly tokenProvider: EbayTokenProvider;
   private readonly readEnv: () => Record<string, string | undefined>;
+  private readonly publishFallbackBinding?: EbayPublishFallbackBinding;
 
   constructor(options: HttpEbayAdapterOptions = {}) {
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.readEnv = options.env ?? (() => process.env);
+    this.publishFallbackBinding = options.publishFallbackBinding;
     this.tokenProvider =
       options.tokenProvider ??
       new EnvTokenProvider({ fetch: options.fetch, env: options.env });
+  }
+
+  getPublishFallbackBinding(): EbayPublishFallbackBinding | undefined {
+    return this.publishFallbackBinding;
   }
 
   async publishListing(
@@ -76,7 +85,7 @@ export class HttpEbayAdapter implements EbayAdapter {
   ): Promise<EbayPublishResult> {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
-    const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
+    const marketplaceId = request.marketplaceId;
     // The Sell Inventory API requires Content-Language on create/update calls
     // and documents marketplace-specific locales — en-US against EBAY_DE can
     // reject the publish, so the locale must follow the marketplace flip.
@@ -84,21 +93,6 @@ export class HttpEbayAdapter implements EbayAdapter {
       marketplaceId,
       env.EBAY_CONTENT_LANGUAGE,
     );
-
-    // Fail fast, readably, on missing seller config (sandbox business policies).
-    const missing = [
-      "EBAY_FULFILLMENT_POLICY_ID",
-      "EBAY_PAYMENT_POLICY_ID",
-      "EBAY_RETURN_POLICY_ID",
-      "EBAY_MERCHANT_LOCATION_KEY",
-    ].filter((k) => !env[k]);
-    if (missing.length > 0) {
-      throw new Error(
-        `eBay seller configuration missing: ${missing.join(", ")}. ` +
-          "Create business policies + an inventory location on the sandbox seller " +
-          "account and set these env vars (see docs/ebay-sandbox.md).",
-      );
-    }
 
     // eBay requires at least one image to publish a listing. Fail fast LOCALLY
     // — before the token mint and before any Sell API write — so a doomed
@@ -113,12 +107,24 @@ export class HttpEbayAdapter implements EbayAdapter {
     const lease = await this.tokenProvider.beginProviderDispatch?.(
       request.sku,
       "publish",
+      request.connectionGeneration,
+      request.publishClaimId,
+      request.connectionGeneration === null
+        ? null
+        : {
+            marketplaceId: request.marketplaceId,
+            fulfillmentPolicyId: request.fulfillmentPolicyId,
+            paymentPolicyId: request.paymentPolicyId,
+            returnPolicyId: request.returnPolicyId,
+            merchantLocationKey: request.merchantLocationKey,
+          },
     );
     const signal = providerDispatchSignal(lease?.signal);
     try {
       const token = await this.tokenProvider.getAccessToken(
         lease?.accountGeneration,
         signal,
+        lease?.connectionGeneration,
       );
 
     // --- 1. Upsert the inventory item (idempotent by SKU). -------------------
@@ -154,12 +160,12 @@ export class HttpEbayAdapter implements EbayAdapter {
       categoryId: request.categoryId,
       listingDescription: request.description,
       listingPolicies: {
-        fulfillmentPolicyId: env.EBAY_FULFILLMENT_POLICY_ID,
-        paymentPolicyId: env.EBAY_PAYMENT_POLICY_ID,
-        returnPolicyId: env.EBAY_RETURN_POLICY_ID,
+        fulfillmentPolicyId: request.fulfillmentPolicyId,
+        paymentPolicyId: request.paymentPolicyId,
+        returnPolicyId: request.returnPolicyId,
       },
       pricingSummary: { price: request.price },
-      merchantLocationKey: env.EBAY_MERCHANT_LOCATION_KEY,
+      merchantLocationKey: request.merchantLocationKey,
     };
 
     let offerId: string;
@@ -209,7 +215,14 @@ export class HttpEbayAdapter implements EbayAdapter {
         return result;
       }
       const existing = recovered?.offerId ?? existingOfferIdFrom(err);
-      if (!existing) throw err;
+      if (!existing) {
+        const conflict = err as EbayApiError;
+        throw new EbayWriteAmbiguousError(
+          "eBay reports an existing offer, but recovery could not identify it",
+          conflict.status,
+          conflict.body,
+        );
+      }
       // Update the recovered (unpublished) offer in place so price/description
       // are current, then publish.
       offerId = existing;
@@ -462,6 +475,8 @@ function dispatchContext(
   return lease
     ? {
         accountGeneration: lease.accountGeneration,
+        connectionGeneration: lease.connectionGeneration,
+        publishClaimId: lease.publishClaimId,
         attemptToken: lease.attemptToken,
       }
     : null;

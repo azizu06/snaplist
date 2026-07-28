@@ -164,7 +164,14 @@ export class OperatorSandboxTokenProvider implements EbayTokenProvider {
   async beginProviderDispatch(
     resourceId: string,
     operation: "publish" | "reprice",
+    expectedConnectionGeneration?: string | null,
+    expectedPublishClaimId?: string | null,
   ) {
+    if (expectedConnectionGeneration) {
+      throw new Error(
+        "eBay Sandbox fallback cannot use a connected-seller generation",
+      );
+    }
     const boundGeneration = await bindEbaySandboxFallback(
       this.supabase,
       this.userId,
@@ -174,6 +181,8 @@ export class OperatorSandboxTokenProvider implements EbayTokenProvider {
     const lease = await this.dispatchProvider.beginProviderDispatch(
       resourceId,
       operation,
+      null,
+      expectedPublishClaimId,
     );
     if (lease.accountGeneration !== boundGeneration) {
       await lease.release();
@@ -185,7 +194,13 @@ export class OperatorSandboxTokenProvider implements EbayTokenProvider {
   async getAccessToken(
     expectedAccountGeneration?: string,
     parentSignal?: AbortSignal,
+    expectedConnectionGeneration?: string | null,
   ): Promise<string> {
+    if (expectedConnectionGeneration) {
+      throw new Error(
+        "eBay Sandbox fallback cannot use a connected-seller generation",
+      );
+    }
     const boundGeneration = await bindEbaySandboxFallback(
       this.supabase,
       this.userId,

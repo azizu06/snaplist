@@ -15,7 +15,7 @@ the ordered checklist for the flip. Sandbox setup itself is documented in
 | `EBAY_DELETION_ENDPOINT_URL` | unused | `https://<host>/api/ebay/account-deletion` |
 | `EBAY_TOKEN_ENCRYPTION_KEY` | any | keep stable — rotating it orphans stored seller tokens |
 | `SUPABASE_SERVICE_ROLE_KEY` | current `sb_secret_...` | current `sb_secret_...`; required by tenant-bound completion and cron RPCs |
-| policy ids (`EBAY_*_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`) | sandbox seller's | production seller's |
+| policy ids (`EBAY_*_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`) | optional exact-operator fallback only | **unset**; each connected seller's verified binding |
 | `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` | sandbox convenience | **unset** — production publishes use per-user OAuth |
 | `EBAY_MESSAGING_SANDBOX_OPERATOR_*` | optional one-tenant fallback | **unset** — never allowed in production |
 | `CRON_SECRET` | optional for local/manual checks | required before enabling scheduled inbox sync |
@@ -70,16 +70,15 @@ EBAY_TOKEN_ENCRYPTION_KEY=<openssl rand -base64 32; then never rotate casually>
 SUPABASE_SERVICE_ROLE_KEY=<current sb_secret_... value>
 EBAY_MARKETPLACE_ID=EBAY_US
 CRON_SECRET=<openssl rand -hex 32; required before scheduled inbox sync>
-EBAY_FULFILLMENT_POLICY_ID=...   # the real seller's business policies
-EBAY_PAYMENT_POLICY_ID=...
-EBAY_RETURN_POLICY_ID=...
-EBAY_MERCHANT_LOCATION_KEY=...
 ```
 
 and remove `EBAY_OAUTH_TOKEN`, `EBAY_REFRESH_TOKEN`, and both
 `EBAY_MESSAGING_SANDBOX_OPERATOR_*` values (Sandbox-only crutches —
 with them unset, publishing *requires* a per-user connection, which is the
-correct production posture).
+correct production posture). Also remove `EBAY_FULFILLMENT_POLICY_ID`,
+`EBAY_PAYMENT_POLICY_ID`, `EBAY_RETURN_POLICY_ID`, and
+`EBAY_MERCHANT_LOCATION_KEY`; production refuses shared seller policy/location
+fallback.
 
 ### 4. Connect the seller account
 
@@ -87,6 +86,9 @@ Settings → **Connect eBay** → approve on eBay's consent screen. Tokens are
 stored AES-256-GCM-encrypted (`ebay_connections`, RLS-scoped); the seller can
 disconnect any time. Publishes now run under the seller's own identity — the
 `EbayTokenProvider` seam swaps per-user tokens in without touching the adapter.
+Policy/location discovery stores the seller's selected marketplace tuple on the
+same connection generation. A normal publish is rejected before any eBay write
+unless that exact binding is still ready when dispatch begins.
 The same per-user provider resolves authenticated pre-sale messaging tokens;
 connections created before the `commerce.message` scope was added must
 reconnect before messaging is enabled.
@@ -97,11 +99,13 @@ clears sync/reconciliation state for the retired generation, and marks any
 still-actionable imported questions `provider_unavailable`; reconnecting cannot
 resume a stale send under the replacement account.
 
-### 5. First production publish
+### 5. Redacted production-readiness validation
 
-Upload a real item, save a distinctive seller price override, then review → **Publish to eBay**.
-Verify the live offer uses the override rather than the logged suggestion and that the prediction
-log remains unchanged. Then end the listing from Seller Hub if it was only a smoke test.
+The #389 readiness check is metadata-only: report whether required app
+configuration and a seller-owned binding are present without printing tokens,
+policy ids, location keys, seller identity, or other provider values. It must
+not exchange a token or call an eBay endpoint. A live production canary remains
+separately owner-authorized under #390/#391; do not turn this checklist into one.
 
 Production messaging remains owner-controlled under #17. Enable the five-minute
 Supabase inbox cron from the Sandbox messaging runbook and run a real two-user
@@ -109,17 +113,14 @@ message only after the production keyset, deletion subscription, scopes,
 policies, and owner approval are all confirmed; until then use the Sandbox
 messaging runbook.
 
-## Known constraint: single production seller
+## Per-connection publish authority
 
-Business policies and the merchant location are env-configured
-(`EBAY_*_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`) and **belong to the eBay
-account that created them**. Production publishing is therefore correct for
-the one seller whose policies are in the env — which is exactly the #17
-go-live story. If a *second* seller connects, their publishes would submit the
-first seller's policy ids and eBay would reject the offer. True multi-seller
-support means discovering each connection's policies via the Sell Account API
-(`sell.account` scope) at connect time and injecting them per publish — tracked
-as a follow-up issue.
+Business policies and merchant locations belong to the eBay account that
+created them. SnapList therefore resolves each normal seller's offer from the
+verified marketplace binding stored on that seller's current connection
+generation. The selected tuple is pinned to the publish claim and rechecked
+before provider dispatch; missing, stale, cross-marketplace, or foreign values
+perform no eBay write. Process-wide seller ids are never a production fallback.
 
 ## Security notes
 

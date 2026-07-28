@@ -190,12 +190,16 @@ describe("eraseEbayUserData", () => {
 describe("UserTokenProvider", () => {
   it("acquires and releases a transactional provider lease for the current generation", async () => {
     const generation = "22222222-2222-4222-8222-222222222222";
+    const connectionGeneration = "33333333-3333-4333-8333-333333333333";
+    const publishClaimId = "44444444-4444-4444-8444-444444444444";
     const attemptToken = "77777777-7777-4777-8777-777777777777";
     const rpc = vi.fn(async (name: string) => {
       if (name === "begin_ebay_transactional_dispatch") {
         return {
           data: {
             account_generation: generation,
+            connection_generation: connectionGeneration,
+            publish_claim_id: publishClaimId,
             attempt_token: attemptToken,
           },
           error: null,
@@ -211,6 +215,8 @@ describe("UserTokenProvider", () => {
     const lease = await provider.beginProviderDispatch(
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       "publish",
+      connectionGeneration,
+      publishClaimId,
     );
     expect(lease.accountGeneration).toBe(generation);
     await lease.release();
@@ -219,6 +225,8 @@ describe("UserTokenProvider", () => {
       p_operation: "publish",
       p_account_generation: generation,
       p_attempt_token: attemptToken,
+      p_connection_generation: connectionGeneration,
+      p_publish_claim_id: publishClaimId,
     });
   });
 
