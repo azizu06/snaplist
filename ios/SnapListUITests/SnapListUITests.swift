@@ -788,6 +788,30 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(firstPhoto.isSelected)
     }
 
+    func testPhotoReviewNativeDragSourcePreservesNonCoverThumbnailTapActions() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-02"])
+        let screen = app.scrollViews["photo-review.screen"]
+
+        XCTAssertTrue(
+            screen.waitForExistence(timeout: 3),
+            "The live Photo Review fixture must render the native drag source."
+        )
+
+        let secondPhoto = app.buttons["photo-review.thumbnail.2"]
+        XCTAssertTrue(secondPhoto.exists)
+        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
+        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+
+        secondPhoto.tap()
+
+        XCTAssertTrue(
+            app.buttons["photo-review.replace"].waitForExistence(timeout: 2),
+            "The native drag attachment must preserve the thumbnail Button tap."
+        )
+        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
+        XCTAssertTrue(secondPhoto.isSelected)
+    }
+
     func testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion() {
         let app = launch(extraArguments: [
             "--photo-review-state=REV-02",

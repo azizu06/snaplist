@@ -4261,6 +4261,200 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(committed.consumeAnnouncement())
     }
 
+    func testPhotoReviewNativeInteractionsFenceTransactionLocksAndResumeWithoutMutation() throws {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+
+        XCTAssertFalse(
+            PhotoReviewNativeInteractionPolicy.isEnabled(
+                isCommitting: true,
+                mutationControlsLocked: false
+            )
+        )
+        XCTAssertFalse(
+            PhotoReviewNativeInteractionPolicy.isEnabled(
+                isCommitting: false,
+                mutationControlsLocked: true
+            )
+        )
+        XCTAssertTrue(
+            PhotoReviewNativeInteractionPolicy.isEnabled(
+                isCommitting: false,
+                mutationControlsLocked: false
+            )
+        )
+
+        let source = PhotoReviewNativeDragSourceDelegate(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false
+        )
+        let sourceInteraction = UIDragInteraction(delegate: source)
+        let session = PhotoReviewDragSessionStub()
+
+        XCTAssertTrue(
+            source.dragInteraction(
+                sourceInteraction,
+                itemsForBeginning: session
+            ).isEmpty
+        )
+        XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.draggedPhotoID)
+
+        source.update(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true
+        )
+        session.items = source.dragInteraction(
+            sourceInteraction,
+            itemsForBeginning: session
+        )
+        XCTAssertEqual(session.items.count, 1)
+        presentation.updateInsertion(
+            to: 0,
+            store: store,
+            reduceMotion: true
+        )
+
+        source.update(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false
+        )
+
+        XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertNil(presentation.insertionIndex)
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        source.dragInteraction(
+            sourceInteraction,
+            session: session,
+            didEndWith: .cancel
+        )
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        let destination = PhotoReviewNativeDropAttachment.Coordinator(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in }
+        )
+        let destinationView = UIView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 120)
+        )
+        destination.attach(to: destinationView)
+        XCTAssertFalse(destination.isInteractionAttached)
+
+        XCTAssertTrue(
+            presentation.begin(photoID: photos[2].id, store: store)
+        )
+        let lockedInteraction = UIDropInteraction(delegate: destination)
+        XCTAssertFalse(
+            destination.dropInteraction(
+                lockedInteraction,
+                canHandle: session
+            )
+        )
+        XCTAssertEqual(
+            destination.dropInteraction(
+                lockedInteraction,
+                sessionDidUpdate: session
+            ).operation,
+            .cancel
+        )
+        destination.dropInteraction(
+            lockedInteraction,
+            performDrop: session
+        )
+        XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        destination.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in }
+        )
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertNil(presentation.insertionIndex)
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        source.update(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true
+        )
+        session.items = source.dragInteraction(
+            sourceInteraction,
+            itemsForBeginning: session
+        )
+        destination.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in }
+        )
+        destination.attach(to: destinationView)
+
+        XCTAssertTrue(destination.isInteractionAttached)
+        let activeInteraction = try XCTUnwrap(
+            destinationView.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .first
+        )
+        XCTAssertTrue(
+            destination.dropInteraction(
+                activeInteraction,
+                canHandle: session
+            )
+        )
+        XCTAssertEqual(
+            destination.dropInteraction(
+                activeInteraction,
+                sessionDidUpdate: session
+            ).operation,
+            .move
+        )
+        destination.dropInteraction(
+            activeInteraction,
+            performDrop: session
+        )
+
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+        XCTAssertEqual(presentation.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertEqual(
+            presentation.consumeAnnouncement(),
+            "Moved to photo 1 of 3. Cover."
+        )
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+    }
+
     func testPhotoReviewDragMovesKnownIdentityFromThirdToCoverWithoutChangingItsValues() {
         let photos = makeDragPhotos()
         let store = PhotoReviewStore(photos: photos)
@@ -6636,11 +6830,16 @@ final class CaptureFlowTests: XCTestCase {
 }
 
 @MainActor
-private final class PhotoReviewDragSessionStub: NSObject, UIDragSession {
+private final class PhotoReviewDragSessionStub: NSObject,
+    UIDragSession,
+    UIDropSession {
     var items: [UIDragItem] = []
     var allowsMoveOperation = true
     var isRestrictedToDraggingApplication = true
     var localContext: Any?
+    let progress = Progress(totalUnitCount: 1)
+    var localDragSession: UIDragSession? { self }
+    var progressIndicatorStyle: UIDropSessionProgressIndicatorStyle = .default
 
     func location(in _: UIView) -> CGPoint {
         .zero
@@ -6662,6 +6861,14 @@ private final class PhotoReviewDragSessionStub: NSObject, UIDragSession {
         ofClass _: NSItemProviderReading.Type
     ) -> Bool {
         false
+    }
+
+    func loadObjects(
+        ofClass _: NSItemProviderReading.Type,
+        completion: @escaping ([NSItemProviderReading]) -> Void
+    ) -> Progress {
+        completion([])
+        return Progress(totalUnitCount: 0)
     }
 }
 

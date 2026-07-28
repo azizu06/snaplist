@@ -137,6 +137,15 @@ enum PhotoReviewDragLayout {
     static let edgeAutoScrollThreshold: CGFloat = 28
 }
 
+enum PhotoReviewNativeInteractionPolicy {
+    static func isEnabled(
+        isCommitting: Bool,
+        mutationControlsLocked: Bool
+    ) -> Bool {
+        !isCommitting && !mutationControlsLocked
+    }
+}
+
 private struct PhotoReviewThumbnailFramePreferenceKey: PreferenceKey {
     static var defaultValue: [StagedCapturePhoto.ID: CGRect] = [:]
 
@@ -228,6 +237,20 @@ final class PhotoReviewDragPresentation {
         cancel(reduceMotion: reduceMotion)
     }
 
+    func suspendNativeDragSessionForInteractionLock(
+        reduceMotion: Bool
+    ) {
+        guard draggedPhotoID != nil else {
+            return
+        }
+        withAnimation(transitionAnimation(reduceMotion: reduceMotion)) {
+            draggedPhotoID = nil
+            insertionIndex = nil
+        }
+        pendingFocusPhotoID = nil
+        pendingAnnouncement = nil
+    }
+
     func cancel(reduceMotion: Bool) {
         guard let photoID = draggedPhotoID else {
             return
@@ -288,19 +311,29 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
     private var store: PhotoReviewStore
     private var presentation: PhotoReviewDragPresentation
     private var reduceMotion: Bool
+    private(set) var isEnabled: Bool
+    private weak var attachedView: UIView?
+    private var dragInteraction: UIDragInteraction?
 
     init(
         photoID: StagedCapturePhoto.ID,
         thumbnailURL: URL,
         store: PhotoReviewStore,
         presentation: PhotoReviewDragPresentation,
-        reduceMotion: Bool
+        reduceMotion: Bool,
+        isEnabled: Bool = true
     ) {
         self.photoID = photoID
         self.thumbnailURL = thumbnailURL
         self.store = store
         self.presentation = presentation
         self.reduceMotion = reduceMotion
+        self.isEnabled = isEnabled
+        if !isEnabled, presentation.draggedPhotoID == photoID {
+            presentation.suspendNativeDragSessionForInteractionLock(
+                reduceMotion: reduceMotion
+            )
+        }
     }
 
     func update(
@@ -308,20 +341,50 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         thumbnailURL: URL,
         store: PhotoReviewStore,
         presentation: PhotoReviewDragPresentation,
-        reduceMotion: Bool
+        reduceMotion: Bool,
+        isEnabled: Bool
     ) {
         self.photoID = photoID
         self.thumbnailURL = thumbnailURL
         self.store = store
         self.presentation = presentation
         self.reduceMotion = reduceMotion
+        self.isEnabled = isEnabled
+        dragInteraction?.isEnabled = isEnabled
+        if !isEnabled, presentation.draggedPhotoID == photoID {
+            presentation.suspendNativeDragSessionForInteractionLock(
+                reduceMotion: reduceMotion
+            )
+        }
+    }
+
+    func attach(to view: UIView) {
+        guard attachedView !== view else {
+            dragInteraction?.isEnabled = isEnabled
+            return
+        }
+        detach()
+        let interaction = UIDragInteraction(delegate: self)
+        interaction.isEnabled = isEnabled
+        view.addInteraction(interaction)
+        attachedView = view
+        dragInteraction = interaction
+    }
+
+    func detach() {
+        if let dragInteraction {
+            attachedView?.removeInteraction(dragInteraction)
+        }
+        dragInteraction = nil
+        attachedView = nil
     }
 
     func dragInteraction(
         _ interaction: UIDragInteraction,
         itemsForBeginning session: UIDragSession
     ) -> [UIDragItem] {
-        guard presentation.begin(photoID: photoID, store: store) else {
+        guard isEnabled,
+              presentation.begin(photoID: photoID, store: store) else {
             return []
         }
         return [
@@ -390,6 +453,7 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
     let store: PhotoReviewStore
     let presentation: PhotoReviewDragPresentation
     let reduceMotion: Bool
+    let isEnabled: Bool
 
     func makeCoordinator() -> PhotoReviewNativeDragSourceDelegate {
         PhotoReviewNativeDragSourceDelegate(
@@ -397,21 +461,21 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
             thumbnailURL: thumbnailURL,
             store: store,
             presentation: presentation,
-            reduceMotion: reduceMotion
+            reduceMotion: reduceMotion,
+            isEnabled: isEnabled
         )
     }
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
+    func makeUIView(context: Context) -> AttachmentView {
+        let view = AttachmentView()
         view.backgroundColor = .clear
-        let interaction = UIDragInteraction(delegate: context.coordinator)
-        interaction.isEnabled = true
-        view.addInteraction(interaction)
+        view.isUserInteractionEnabled = false
+        view.coordinator = context.coordinator
         return view
     }
 
     func updateUIView(
-        _ uiView: UIView,
+        _ uiView: AttachmentView,
         context: Context
     ) {
         context.coordinator.update(
@@ -419,16 +483,44 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
             thumbnailURL: thumbnailURL,
             store: store,
             presentation: presentation,
-            reduceMotion: reduceMotion
+            reduceMotion: reduceMotion,
+            isEnabled: isEnabled
         )
+        uiView.attachToNearestHostView()
+    }
+
+    static func dismantleUIView(
+        _ uiView: AttachmentView,
+        coordinator: PhotoReviewNativeDragSourceDelegate
+    ) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class AttachmentView: UIView {
+        weak var coordinator: PhotoReviewNativeDragSourceDelegate?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            attachToNearestHostView()
+        }
+
+        func attachToNearestHostView() {
+            guard window != nil, let hostView = superview else {
+                coordinator?.detach()
+                return
+            }
+            coordinator?.attach(to: hostView)
+        }
     }
 }
 
 @MainActor
-private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
+struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
     let store: PhotoReviewStore
     let presentation: PhotoReviewDragPresentation
     let reduceMotion: Bool
+    let isEnabled: Bool
     let destinationIndex: (CGPoint) -> Int?
     let autoScroll: (CGPoint) -> Void
 
@@ -437,6 +529,7 @@ private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             store: store,
             presentation: presentation,
             reduceMotion: reduceMotion,
+            isEnabled: isEnabled,
             destinationIndex: destinationIndex,
             autoScroll: autoScroll
         )
@@ -456,6 +549,7 @@ private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             store: store,
             presentation: presentation,
             reduceMotion: reduceMotion,
+            isEnabled: isEnabled,
             destinationIndex: destinationIndex,
             autoScroll: autoScroll
         )
@@ -479,7 +573,7 @@ private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         }
 
         func attachToNearestScrollView() {
-            guard window != nil else {
+            guard window != nil, coordinator?.isEnabled == true else {
                 coordinator?.detach()
                 return
             }
@@ -499,40 +593,63 @@ private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         private var store: PhotoReviewStore
         private var presentation: PhotoReviewDragPresentation
         private var reduceMotion: Bool
+        private(set) var isEnabled: Bool
         private var destinationIndex: (CGPoint) -> Int?
         private var autoScroll: (CGPoint) -> Void
         private weak var attachedView: UIView?
         private var dropInteraction: UIDropInteraction?
+        var isInteractionAttached: Bool {
+            dropInteraction != nil
+        }
 
         init(
             store: PhotoReviewStore,
             presentation: PhotoReviewDragPresentation,
             reduceMotion: Bool,
+            isEnabled: Bool,
             destinationIndex: @escaping (CGPoint) -> Int?,
             autoScroll: @escaping (CGPoint) -> Void
         ) {
             self.store = store
             self.presentation = presentation
             self.reduceMotion = reduceMotion
+            self.isEnabled = isEnabled
             self.destinationIndex = destinationIndex
             self.autoScroll = autoScroll
+            if !isEnabled {
+                presentation.suspendNativeDragSessionForInteractionLock(
+                    reduceMotion: reduceMotion
+                )
+            }
         }
 
         func update(
             store: PhotoReviewStore,
             presentation: PhotoReviewDragPresentation,
             reduceMotion: Bool,
+            isEnabled: Bool,
             destinationIndex: @escaping (CGPoint) -> Int?,
             autoScroll: @escaping (CGPoint) -> Void
         ) {
             self.store = store
             self.presentation = presentation
             self.reduceMotion = reduceMotion
+            self.isEnabled = isEnabled
             self.destinationIndex = destinationIndex
             self.autoScroll = autoScroll
+            if !isEnabled {
+                presentation.suspendNativeDragSessionForInteractionLock(
+                    reduceMotion: reduceMotion
+                )
+                detach()
+            }
         }
 
         func attach(to view: UIView) {
+            guard isEnabled else {
+                detach()
+                return
+            }
             guard attachedView !== view else {
                 return
             }
@@ -555,14 +672,14 @@ private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             _ interaction: UIDropInteraction,
             canHandle session: UIDropSession
         ) -> Bool {
-            acceptedPhotoID(session: session) != nil
+            isEnabled && acceptedPhotoID(session: session) != nil
         }
 
         func dropInteraction(
             _ interaction: UIDropInteraction,
             sessionDidEnter session: UIDropSession
         ) {
-            guard admit(session: session) else {
+            guard isEnabled, admit(session: session) else {
                 return
             }
             updateDestination(
@@ -577,7 +694,7 @@ private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             _ interaction: UIDropInteraction,
             sessionDidUpdate session: UIDropSession
         ) -> UIDropProposal {
-            guard admit(session: session) else {
+            guard isEnabled, admit(session: session) else {
                 return UIDropProposal(operation: .cancel)
             }
             let location = sessionLocation(
@@ -602,7 +719,8 @@ private struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
                 session: session,
                 interaction: interaction
             )
-            guard admit(session: session),
+            guard isEnabled,
+                  admit(session: session),
                   let destinationIndex = destinationIndex(location) else {
                 return
             }
@@ -1723,6 +1841,7 @@ struct PhotoReviewView: View {
                         store: store,
                         presentation: dragPresentation,
                         reduceMotion: reduceMotion,
+                        isEnabled: nativeDragInteractionsEnabled,
                         destinationIndex: { location in
                             PhotoReviewStripDropGeometry.destinationIndex(
                                 at: location,
@@ -1820,13 +1939,14 @@ struct PhotoReviewView: View {
                     }
                 }
             }
-            .overlay {
+            .background {
                 PhotoReviewNativeDragSourceAttachment(
                     photoID: photo.id,
                     thumbnailURL: photo.thumbnailURL,
                     store: store,
                     presentation: dragPresentation,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    isEnabled: nativeDragInteractionsEnabled
                 )
                 .accessibilityHidden(true)
             }
@@ -1919,6 +2039,14 @@ struct PhotoReviewView: View {
 
     private var isAddEnabled: Bool {
         PhotoReviewCapacityPolicy.isAddEnabled(photoCount: store.photos.count)
+    }
+
+    private var nativeDragInteractionsEnabled: Bool {
+        PhotoReviewNativeInteractionPolicy.isEnabled(
+            isCommitting: isCommitting,
+            mutationControlsLocked:
+                submissionPresentation.mutationControlsLocked
+        )
     }
 
     private var addButton: some View {
