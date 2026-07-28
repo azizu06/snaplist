@@ -221,6 +221,12 @@ describe("App Attest private replay boundary", () => {
 
   it("deletes consumed and expired challenges while preserving active state", async () => {
     if (!reachable) return;
+    const existingEligible = await admin.query<{ count: number }>(
+      `select count(*)::integer as count
+       from private.app_attest_challenges
+       where consumed_at is not null
+          or expires_at <= statement_timestamp()`,
+    );
     const consumedId = randomUUID();
     const expiredId = randomUUID();
     const activeId = randomUUID();
@@ -254,7 +260,7 @@ describe("App Attest private replay boundary", () => {
        ) as result`,
     );
     expect(firstCleanup.rows[0]!.result).toEqual({
-      deletedChallenges: 2,
+      deletedChallenges: existingEligible.rows[0]!.count + 2,
       deletedKeys: 0,
     });
 
