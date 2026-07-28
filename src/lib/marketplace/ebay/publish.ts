@@ -98,6 +98,8 @@ const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
  */
 const PRICING_CURRENCY = "USD";
 
+class PublishedReplayConflictError extends PublishValidationError {}
+
 /**
  * `publishListingToEbay` + the seller's activity-feed notifications, shared by
  * BOTH entry points (the /listings/[listingId] server action and the
@@ -118,6 +120,9 @@ export async function publishListingToEbayAndNotify(
   try {
     outcome = await publishListingToEbay(supabase, listingId, adapter, options);
   } catch (err) {
+    if (err instanceof PublishedReplayConflictError) {
+      throw err;
+    }
     // An AUTH failure (expired/invalid token) has ONE fix — reconnect eBay in
     // Settings — so the feed shows the actionable reconnect message, matching
     // the error banner both entry points surface, never the raw HTTP-401 text.
@@ -203,7 +208,7 @@ export async function publishListingToEbay(
       listing.ebay_publish_connection_generation
       !== currentConnectionGeneration
     ) {
-      throw new PublishValidationError(
+      throw new PublishedReplayConflictError(
         "The eBay connection changed after this listing was published.",
       );
     }
@@ -489,7 +494,7 @@ async function readEbayReplayConnectionGeneration(
   ) {
     return null;
   }
-  throw new PublishValidationError(
+  throw new PublishedReplayConflictError(
     "Connect eBay before replaying this published listing.",
   );
 }

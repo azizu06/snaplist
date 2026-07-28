@@ -33,6 +33,25 @@ as $$
   )
 $$;
 
+create function pg_temp.bound_ebay_policy_choice(
+  p_id text,
+  p_label text
+)
+returns jsonb
+language sql
+immutable
+as $$
+  select jsonb_build_object(
+    'state', 'bound',
+    'selectedId', p_id,
+    'candidates', jsonb_build_array(jsonb_build_object(
+      'id', p_id,
+      'label', p_label,
+      'providerDefault', true
+    ))
+  )
+$$;
+
 insert into public.items (id, user_id, attributes)
 values
   ('91000000-0000-4000-8000-000000000001', 'message-tenant-a', '{}'),
@@ -2629,6 +2648,24 @@ select extensions.throws_ok(
 
 reset role;
 
+insert into public.items (id, user_id, attributes)
+values (
+  '97000000-0000-4000-8000-000000000002',
+  'generation-tenant',
+  '{}'
+);
+
+insert into public.listings (
+  id, user_id, item_id, platform, title, status
+) values (
+  '98000000-0000-4000-8000-000000000002',
+  'generation-tenant',
+  '97000000-0000-4000-8000-000000000002',
+  'ebay',
+  'Generation-bound publish fixture',
+  'draft'
+);
+
 set local role authenticated;
 select set_config(
   'request.jwt.claims',
@@ -2654,10 +2691,81 @@ select set_config(
   true
 );
 
+select public.save_ebay_policy_location_binding(
+  'EBAY_US',
+  (select connection_generation
+   from public.ebay_connections
+   where user_id = 'generation-tenant'),
+  jsonb_build_object(
+    'state', 'ready',
+    'marketplaceId', 'EBAY_US',
+    'connectionGeneration', (
+      select connection_generation
+      from public.ebay_connections
+      where user_id = 'generation-tenant'
+    ),
+    'fulfillmentPolicy', pg_temp.bound_ebay_policy_choice(
+      'transport-fulfillment',
+      'Transport fulfillment'
+    ),
+    'paymentPolicy', pg_temp.bound_ebay_policy_choice(
+      'transport-payment',
+      'Transport payment'
+    ),
+    'returnPolicy', pg_temp.bound_ebay_policy_choice(
+      'transport-return',
+      'Transport return'
+    ),
+    'inventoryLocation', pg_temp.bound_ebay_policy_choice(
+      'transport-location',
+      'Transport location'
+    ),
+    'discoveredAt', '2026-07-14T18:05:00Z'
+  )
+);
+
+create temporary table ebay_publish_claim_fixture on commit drop as
+select public.begin_ebay_publish(
+  '98000000-0000-4000-8000-000000000002',
+  null,
+  (select review_revision
+   from public.items
+   where id = '97000000-0000-4000-8000-000000000002')
+) as claim;
+
+select public.bind_ebay_publish_connection_generation(
+  '98000000-0000-4000-8000-000000000002',
+  (select (claim->>'claimId')::uuid from ebay_publish_claim_fixture),
+  'EBAY_US',
+  (select connection_generation
+   from public.ebay_connections
+   where user_id = 'generation-tenant'),
+  'transport-fulfillment',
+  'transport-payment',
+  'transport-return',
+  'transport-location'
+);
+
 create temporary table ebay_transactional_dispatch_fixture on commit drop as
 select public.begin_ebay_transactional_dispatch(
-  '98000000-0000-4000-8000-000000000001',
-  'publish'
+  p_resource_id => '98000000-0000-4000-8000-000000000002',
+  p_operation => 'publish',
+  p_connection_generation => (
+    select connection_generation
+    from public.ebay_connections
+    where user_id = 'generation-tenant'
+  ),
+  p_publish_claim_id => (
+    select (claim->>'claimId')::uuid
+    from ebay_publish_claim_fixture
+  ),
+  p_publish_binding => jsonb_build_object(
+    'marketplaceId', 'EBAY_US',
+    'fulfillmentPolicyId', 'transport-fulfillment',
+    'paymentPolicyId', 'transport-payment',
+    'returnPolicyId', 'transport-return',
+    'merchantLocationKey', 'transport-location'
+  )
 ) as lease;
 
 select extensions.is(
@@ -2679,7 +2787,7 @@ select extensions.is(
     select count(*)::integer
     from private.ebay_provider_dispatch_leases
     where user_id = 'generation-tenant'
-      and message_id = '98000000-0000-4000-8000-000000000001'
+      and message_id = '98000000-0000-4000-8000-000000000002'
       and dispatch_kind = 'publish'
   ),
   1,
@@ -2755,10 +2863,23 @@ select extensions.throws_ok(
 );
 
 select public.end_ebay_transactional_dispatch(
-  '98000000-0000-4000-8000-000000000001',
-  'publish',
-  (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
-  '88888888-8888-4888-8888-888888888888'
+  p_resource_id => '98000000-0000-4000-8000-000000000002',
+  p_operation => 'publish',
+  p_account_generation => (
+    select account_generation
+    from ebay_account_generation_fixture
+    where account_name = 'account-b'
+  ),
+  p_attempt_token => '88888888-8888-4888-8888-888888888888',
+  p_connection_generation => (
+    select connection_generation
+    from public.ebay_connections
+    where user_id = 'generation-tenant'
+  ),
+  p_publish_claim_id => (
+    select (claim->>'claimId')::uuid
+    from ebay_publish_claim_fixture
+  )
 );
 
 reset role;
@@ -2768,7 +2889,7 @@ select extensions.is(
     select count(*)::integer
     from private.ebay_provider_dispatch_leases
     where user_id = 'generation-tenant'
-      and message_id = '98000000-0000-4000-8000-000000000001'
+      and message_id = '98000000-0000-4000-8000-000000000002'
       and dispatch_kind = 'publish'
   ),
   1,
@@ -2788,10 +2909,26 @@ select set_config(
 );
 
 select public.end_ebay_transactional_dispatch(
-  '98000000-0000-4000-8000-000000000001',
-  'publish',
-  (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
-  (select (lease->>'attempt_token')::uuid from ebay_transactional_dispatch_fixture)
+  p_resource_id => '98000000-0000-4000-8000-000000000002',
+  p_operation => 'publish',
+  p_account_generation => (
+    select account_generation
+    from ebay_account_generation_fixture
+    where account_name = 'account-b'
+  ),
+  p_attempt_token => (
+    select (lease->>'attempt_token')::uuid
+    from ebay_transactional_dispatch_fixture
+  ),
+  p_connection_generation => (
+    select connection_generation
+    from public.ebay_connections
+    where user_id = 'generation-tenant'
+  ),
+  p_publish_claim_id => (
+    select (claim->>'claimId')::uuid
+    from ebay_publish_claim_fixture
+  )
 );
 
 reset role;

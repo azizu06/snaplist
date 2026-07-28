@@ -52,6 +52,7 @@ function fakePublishClient(
       policy_location_bindings: Record<string, unknown>;
     } | null;
   };
+  notifications: Array<Record<string, unknown>>;
 } {
   const reviewRevision = "review-revision-1";
   const claimId = "publish-claim-1";
@@ -104,6 +105,7 @@ function fakePublishClient(
     },
   };
   const connectionState = { current: connected ? connection : null };
+  const notifications: Array<Record<string, unknown>> = [];
   const listing: FakeListing = {
     id: "listing-1",
     item_id: "item-1",
@@ -224,7 +226,12 @@ function fakePublishClient(
         };
       }
       if (table === "notifications") {
-        return { insert: async () => ({ error: null }) };
+        return {
+          insert: async (notification: Record<string, unknown>) => {
+            notifications.push(notification);
+            return { error: null };
+          },
+        };
       }
       throw new Error(`unexpected table ${table}`);
     },
@@ -303,7 +310,7 @@ function fakePublishClient(
     },
   } as unknown as SupabaseClient;
 
-  return { client, listing, connection, connectionState };
+  return { client, listing, connection, connectionState, notifications };
 }
 
 describe("publishListingToEbayAndNotify effective-price contract", () => {
@@ -425,7 +432,7 @@ describe("publishListingToEbayAndNotify effective-price contract", () => {
   });
 
   it("clears generation and binding together after a definite pre-ack failure", async () => {
-    const { client, listing } = fakePublishClient(177.77);
+    const { client, listing, notifications } = fakePublishClient(177.77);
     const adapter = new MockEbayAdapter();
     adapter.failWith = new Error("eBay rejected the offer before acknowledgement");
 
@@ -445,6 +452,9 @@ describe("publishListingToEbayAndNotify effective-price contract", () => {
       ebay_publish_connection_generation: null,
       ebay_publish_binding: null,
     });
+    expect(notifications).toEqual([
+      expect.objectContaining({ kind: "listing_failed" }),
+    ]);
   });
 
   it("returns a durable same-generation replay before requiring a ready binding", async () => {
@@ -577,6 +587,57 @@ describe("publishListingToEbayAndNotify effective-price contract", () => {
     expect(operatorReplay.alreadyPublished).toBe(true);
     expect(operatorAdapter.requests).toHaveLength(1);
   });
+
+  it.each([
+    {
+      name: "seller reconnect",
+      storedGeneration: "original" as const,
+      currentGeneration: "replacement" as const,
+    },
+    {
+      name: "legacy null-generation row",
+      storedGeneration: "legacy-null" as const,
+      currentGeneration: "original" as const,
+    },
+  ])(
+    "does not record a false publish failure for a provider-authoritative replay after $name",
+    async ({ storedGeneration, currentGeneration }) => {
+      const { client, listing, connection, notifications } =
+        fakePublishClient(177.77);
+      const originalGeneration = connection.connection_generation;
+      const replacementGeneration =
+        "22222222-2222-4222-8222-222222222222";
+      listing.status = "published";
+      listing.ebay_status = "published";
+      listing.ebay_listing_id = "provider-listing-1";
+      listing.ebay_offer_id = "provider-offer-1";
+      listing.ebay_publish_connection_generation =
+        storedGeneration === "original" ? originalGeneration : null;
+      connection.connection_generation =
+        currentGeneration === "original"
+          ? originalGeneration
+          : replacementGeneration;
+      const adapter = new MockEbayAdapter();
+
+      await expect(
+        publishListingToEbayAndNotify(
+          client,
+          "user-1",
+          listing.id,
+          adapter,
+        ),
+      ).rejects.toThrow(/connection changed after this listing was published/i);
+
+      expect(adapter.requests).toHaveLength(0);
+      expect(notifications).toEqual([]);
+      expect(listing).toMatchObject({
+        status: "published",
+        ebay_status: "published",
+        ebay_listing_id: "provider-listing-1",
+        ebay_offer_id: "provider-offer-1",
+      });
+    },
+  );
 
   it("binds the publish claim through the tenant server authority client", async () => {
     const { client, listing } = fakePublishClient(177.77);
