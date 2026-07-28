@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { enforceAppAttestRateLimit } from "@/lib/abuse";
 import { createAppleAppAttestVerifier } from "@/lib/app-attest/apple-verifier";
 import { createAppAttestHttpHandler } from "@/lib/app-attest/http";
 import { createAppAttestService, type AppAttestEnvironment } from "@/lib/app-attest/service";
@@ -36,6 +37,9 @@ function configuration(): {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const limited = await enforceAppAttestRateLimit(request);
+  if (limited) return limited;
+
   const config = configuration();
   if (!config) return unavailable();
 

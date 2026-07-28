@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createAdminClient } = vi.hoisted(() => ({
+const { createAdminClient, enforceAppAttestRateLimit } = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
+  enforceAppAttestRateLimit: vi.fn(),
 }));
 
+vi.mock("@/lib/abuse", () => ({ enforceAppAttestRateLimit }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient }));
 
 import { POST } from "./route";
@@ -14,9 +16,14 @@ const keys = [
   "APP_ATTEST_CHALLENGE_TTL_SECONDS",
 ] as const;
 
+beforeEach(() => {
+  enforceAppAttestRateLimit.mockResolvedValue(null);
+});
+
 afterEach(() => {
   for (const key of keys) delete process.env[key];
   createAdminClient.mockReset();
+  enforceAppAttestRateLimit.mockReset();
 });
 
 function configure() {
@@ -49,6 +56,31 @@ describe("App Attest route", () => {
       }),
     );
     expect(response.status).toBe(400);
+    expect(createAdminClient).not.toHaveBeenCalled();
+  });
+
+  it("rate-limits before creating private persistence or challenge authority", async () => {
+    configure();
+    enforceAppAttestRateLimit.mockResolvedValue(
+      Response.json(
+        { data: { code: "rate_limited", status: "unavailable" } },
+        { status: 429 },
+      ),
+    );
+
+    const response = await POST(
+      new Request("https://snaplist.dev/api/app-attest", {
+        body: JSON.stringify({ kind: "attestation", operation: "challenge" }),
+        headers: { "x-forwarded-for": "198.51.100.31" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toEqual({
+      data: { code: "rate_limited", status: "unavailable" },
+    });
+    expect(enforceAppAttestRateLimit).toHaveBeenCalledOnce();
     expect(createAdminClient).not.toHaveBeenCalled();
   });
 
