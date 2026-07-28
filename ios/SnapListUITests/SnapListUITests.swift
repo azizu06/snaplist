@@ -844,6 +844,22 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(firstPhoto.label.contains("Cover"))
         XCTAssertTrue(firstPhoto.isSelected)
 
+        let dragObservation = app.otherElements[
+            "photo-review.drag-observation"
+        ]
+        XCTAssertTrue(
+            dragObservation.waitForExistence(timeout: 2),
+            "The fixture must project the production drag decisions."
+        )
+        XCTAssertTrue(
+            dragObservation.label.contains("gap=62"),
+            "The native destination must render the approved active insertion gap."
+        )
+        XCTAssertTrue(
+            dragObservation.label.contains("transition=suppressed"),
+            "Reduced Motion must suppress the production drag transition decision."
+        )
+
         let outside = app.coordinate(
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)
         )
@@ -865,6 +881,61 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(order.label, reordered)
         XCTAssertTrue(firstPhoto.label.contains("Cover"))
         XCTAssertTrue(firstPhoto.isSelected)
+
+        app.terminate()
+
+        let edgeApp = launch(extraArguments: [
+            "--photo-review-state=REV-03",
+            "--reduced-motion"
+        ])
+        XCTAssertTrue(
+            edgeApp.scrollViews["photo-review.screen"].waitForExistence(
+                timeout: 3
+            )
+        )
+        let edgeSource = edgeApp.buttons["photo-review.thumbnail.1"]
+        let fifthPhoto = edgeApp.buttons["photo-review.thumbnail.5"]
+        XCTAssertTrue(edgeSource.exists)
+        XCTAssertTrue(fifthPhoto.exists)
+        XCTAssertFalse(
+            fifthPhoto.isHittable,
+            "The overflowing fixture must start before its trailing edge."
+        )
+
+        let appFrame = edgeApp.windows.firstMatch.frame
+        let trailingEdge = edgeApp.coordinate(
+            withNormalizedOffset: CGVector(
+                dx: 0.99,
+                dy: edgeSource.frame.midY / appFrame.height
+            )
+        )
+        edgeSource.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).press(
+            forDuration: 0.8,
+            thenDragTo: trailingEdge
+        )
+
+        let edgeObservation = edgeApp.otherElements[
+            "photo-review.drag-observation"
+        ]
+        XCTAssertTrue(edgeObservation.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            edgeObservation.label.contains("edge=trailing"),
+            "The drag must cross the production 28pt trailing threshold."
+        )
+        let autoScrolledExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hittable == true"),
+            object: fifthPhoto
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [autoScrolledExpectation],
+                timeout: 2
+            ),
+            .completed,
+            "Crossing the edge threshold must reveal the trailing photo."
+        )
     }
 
     func testPhotoReviewAtFivePhotosShowsAddDimmedDisabledAndInert() {

@@ -4020,7 +4020,7 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
-    func testPhotoReviewDragCleanupWaitsUntilNativeDestinationExit() async {
+    func testPhotoReviewNativeSessionEndWithoutDropExitClearsOnceAndRestoresExactFocus() {
         let photos = makeDragPhotos()
         let store = PhotoReviewStore(photos: photos)
         let presentation = PhotoReviewDragPresentation()
@@ -4029,18 +4029,23 @@ final class CaptureFlowTests: XCTestCase {
             presentation.begin(photoID: photos[2].id, store: store)
         )
         presentation.enterDropTarget()
-        presentation.scheduleCancellation(reduceMotion: true)
-        try? await Task.sleep(for: .milliseconds(450))
+        presentation.updateInsertion(
+            to: 0,
+            store: store,
+            reduceMotion: true
+        )
+        presentation.endNativeDragSession(reduceMotion: true)
 
-        XCTAssertEqual(presentation.draggedPhotoID, photos[2].id)
-        XCTAssertTrue(presentation.isInsideDropTarget)
-
-        presentation.leaveDropTarget(reduceMotion: true)
-        try? await Task.sleep(for: .milliseconds(450))
-
-        XCTAssertNil(presentation.draggedPhotoID)
-        XCTAssertFalse(presentation.isInsideDropTarget)
         XCTAssertEqual(store.photos, photos)
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertNil(presentation.insertionIndex)
+        XCTAssertEqual(presentation.consumeFocusPhotoID(), photos[2].id)
+        XCTAssertNil(presentation.consumeFocusPhotoID())
+        XCTAssertNil(presentation.consumeAnnouncement())
+
+        presentation.endNativeDragSession(reduceMotion: true)
+
+        XCTAssertNil(presentation.consumeFocusPhotoID())
         XCTAssertNil(presentation.consumeAnnouncement())
     }
 
