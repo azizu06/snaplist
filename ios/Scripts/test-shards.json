@@ -14,7 +14,7 @@
   },
   "execution_model": {
     "build_products": "isolated-per-shard",
-    "reason": "GitHub-hosted macOS jobs do not share local DerivedData, and a relocatable xctestrun bundle has not been proven safe for this project. Each shard therefore builds the same explicit github.sha with the same pinned Xcode and simulator runtime."
+    "reason": "GitHub-hosted macOS jobs do not share local DerivedData, and a relocatable xctestrun bundle has not been proven safe for this project. Each shard therefore builds the same exact pull-request head with the same pinned Xcode and simulator runtime."
   },
   "shards": {
     "unit": [
