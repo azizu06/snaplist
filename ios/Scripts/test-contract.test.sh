@@ -243,8 +243,19 @@ assert_shard_inventory_fails_closed_on_omission_and_duplication() {
 }
 
 assert_nested_ui_test_file_cannot_be_silently_omitted() {
+  local validation_error_file=${temporary_directory}/nested-test-validation-error
+
   mkdir -p "${nested_test_repository}/ios"
   cp -R "${script_directory:h}/SnapListUITests" "${nested_test_repository}/ios/"
+
+  if ! "$shard_inventory_validator" \
+    "$shard_inventory_file" \
+    "$nested_test_repository" \
+    >/dev/null
+  then
+    return 1
+  fi
+
   mkdir -p "${nested_test_repository}/ios/SnapListUITests/Flows"
 
   cat > "${nested_test_repository}/ios/SnapListUITests/Flows/NewFlowTests.swift" <<'EOF'
@@ -255,10 +266,18 @@ final class NewFlowTests: XCTestCase {
 }
 EOF
 
-  ! "$shard_inventory_validator" \
+  if "$shard_inventory_validator" \
     "$shard_inventory_file" \
     "$nested_test_repository" \
-    2>/dev/null
+    >/dev/null \
+    2>"$validation_error_file"
+  then
+    return 1
+  fi
+
+  grep -Fxq \
+    "unassigned UI test selectors: SnapListUITests/NewFlowTests/testNestedFlow" \
+    "$validation_error_file"
 }
 
 assert_declared_shard_selectors_reach_xcodebuild_once() {
