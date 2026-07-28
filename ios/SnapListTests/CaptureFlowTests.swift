@@ -4120,6 +4120,136 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
+    func testPhotoReviewNativeSourceObservationClassifiesEveryPreLiftGuard() throws {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        var observation = PhotoReviewNativeDragSourceObservation()
+        let observe: (PhotoReviewNativeDragSourceEvent) -> Void = {
+            observation.observe($0)
+        }
+        let sourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        sourceView.contentSize = CGSize(width: 440, height: 98)
+        sourceView.bounds.origin.x = 44
+
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: false,
+            sourceAtLocation: { _ in
+                XCTFail("A disabled source must not resolve thumbnail frames.")
+                return nil
+            },
+            observeSource: observe
+        )
+        XCTAssertTrue(
+            source.dragInteraction(
+                UIDragInteraction(delegate: source),
+                itemsForBeginning: PhotoReviewDragSessionStub()
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            observation.beginOutcome,
+            "rejected-missing-view"
+        )
+        source.attach(to: sourceView)
+        let interaction = try XCTUnwrap(
+            sourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(x: 82, y: 49)
+
+        XCTAssertTrue(
+            source.dragInteraction(
+                interaction,
+                itemsForBeginning: session
+            ).isEmpty
+        )
+        XCTAssertEqual(observation.beginOutcome, "rejected-disabled")
+        XCTAssertTrue(observation.isAttached)
+        XCTAssertFalse(observation.isEnabled)
+
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in
+                observe(.resolving(frameCount: photos.count))
+                return nil
+            },
+            observeSource: observe
+        )
+        XCTAssertTrue(
+            source.dragInteraction(
+                interaction,
+                itemsForBeginning: session
+            ).isEmpty
+        )
+        XCTAssertEqual(observation.frameCount, photos.count)
+        XCTAssertEqual(observation.beginOutcome, "rejected-no-source")
+        XCTAssertTrue(observation.isEnabled)
+
+        let missingPhoto = PhotoReviewNativeDragSource(
+            photoID: UUID(),
+            thumbnailURL: photos[0].thumbnailURL,
+            frame: CGRect(x: 0, y: 0, width: 76, height: 98)
+        )
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in
+                observe(.resolving(frameCount: photos.count))
+                return missingPhoto
+            },
+            observeSource: observe
+        )
+        XCTAssertTrue(
+            source.dragInteraction(
+                interaction,
+                itemsForBeginning: session
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            observation.beginOutcome,
+            "rejected-presentation"
+        )
+
+        let thirdPhoto = PhotoReviewNativeDragSource(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            frame: CGRect(x: 176, y: 0, width: 76, height: 98)
+        )
+        source.update(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in
+                observe(.resolving(frameCount: photos.count))
+                return thirdPhoto
+            },
+            observeSource: observe
+        )
+        let items = source.dragInteraction(
+            interaction,
+            itemsForBeginning: session
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(observation.beginOutcome, "provided")
+        XCTAssertEqual(observation.photoID, photos[2].id)
+        XCTAssertEqual(observation.hostBounds, sourceView.bounds)
+        XCTAssertEqual(observation.hostContentSize, sourceView.contentSize)
+    }
+
     func testPhotoReviewStripDropGeometryMapsKnownThirdIdentityToCover() {
         let photos = makeDragPhotos()
         let restingFrames = [

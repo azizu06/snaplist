@@ -173,6 +173,107 @@ enum PhotoReviewNativeInteractionPolicy {
     }
 }
 
+enum PhotoReviewNativeDragSourceEvent: Equatable {
+    case attached(isEnabled: Bool)
+    case detached
+    case enabled(Bool)
+    case beginRequested(
+        hostBounds: CGRect,
+        hostContentSize: CGSize,
+        isEnabled: Bool
+    )
+    case resolving(frameCount: Int)
+    case rejectedMissingView
+    case rejectedDisabled
+    case rejectedNoSource
+    case rejectedPresentation
+    case provided(photoID: StagedCapturePhoto.ID)
+    case ended
+}
+
+struct PhotoReviewNativeDragSourceObservation: Equatable {
+    private(set) var isAttached = false
+    private(set) var isEnabled = false
+    private(set) var frameCount = 0
+    private(set) var hostBounds = CGRect.zero
+    private(set) var hostContentSize = CGSize.zero
+    private(set) var beginOutcome = "not-called"
+    private(set) var photoID: StagedCapturePhoto.ID?
+    private(set) var didEnd = false
+
+    var hasActivity: Bool {
+        isAttached || beginOutcome != "not-called"
+    }
+
+    var label: String {
+        let bounds = [
+            hostBounds.minX,
+            hostBounds.minY,
+            hostBounds.width,
+            hostBounds.height
+        ]
+        .map { Int($0.rounded()) }
+        .map(String.init)
+        .joined(separator: ",")
+        let content = [
+            hostContentSize.width,
+            hostContentSize.height
+        ]
+        .map { Int($0.rounded()) }
+        .map(String.init)
+        .joined(separator: ",")
+        return [
+            "attached:\(isAttached)",
+            "enabled:\(isEnabled)",
+            "frames:\(frameCount)",
+            "begin:\(beginOutcome)",
+            "photo:\(photoID?.uuidString ?? "none")",
+            "host:\(bounds)",
+            "content:\(content)",
+            "ended:\(didEnd)"
+        ]
+        .joined(separator: ",")
+    }
+
+    mutating func observe(_ event: PhotoReviewNativeDragSourceEvent) {
+        switch event {
+        case .attached(let isEnabled):
+            isAttached = true
+            self.isEnabled = isEnabled
+        case .detached:
+            isAttached = false
+        case .enabled(let isEnabled):
+            self.isEnabled = isEnabled
+        case .beginRequested(
+            let hostBounds,
+            let hostContentSize,
+            let isEnabled
+        ):
+            self.hostBounds = hostBounds
+            self.hostContentSize = hostContentSize
+            self.isEnabled = isEnabled
+            beginOutcome = "requested"
+            photoID = nil
+            didEnd = false
+        case .resolving(let frameCount):
+            self.frameCount = frameCount
+        case .rejectedMissingView:
+            beginOutcome = "rejected-missing-view"
+        case .rejectedDisabled:
+            beginOutcome = "rejected-disabled"
+        case .rejectedNoSource:
+            beginOutcome = "rejected-no-source"
+        case .rejectedPresentation:
+            beginOutcome = "rejected-presentation"
+        case .provided(let photoID):
+            beginOutcome = "provided"
+            self.photoID = photoID
+        case .ended:
+            didEnd = true
+        }
+    }
+}
+
 enum PhotoReviewNativeDropEvent: Equatable {
     case entered
     case updated
@@ -382,6 +483,8 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
     private(set) var isEnabled: Bool
     private var sourceAtLocation:
         (CGPoint) -> PhotoReviewNativeDragSource?
+    private var observeSource:
+        (PhotoReviewNativeDragSourceEvent) -> Void
     private var activeSource: PhotoReviewNativeDragSource?
     private weak var attachedView: UIView?
     private var dragInteraction: UIDragInteraction?
@@ -392,13 +495,16 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         reduceMotion: Bool,
         isEnabled: Bool,
         sourceAtLocation: @escaping
-            (CGPoint) -> PhotoReviewNativeDragSource?
+            (CGPoint) -> PhotoReviewNativeDragSource?,
+        observeSource: @escaping
+            (PhotoReviewNativeDragSourceEvent) -> Void = { _ in }
     ) {
         self.store = store
         self.presentation = presentation
         self.reduceMotion = reduceMotion
         self.isEnabled = isEnabled
         self.sourceAtLocation = sourceAtLocation
+        self.observeSource = observeSource
         if !isEnabled {
             presentation.suspendNativeDragSessionForInteractionLock(
                 reduceMotion: reduceMotion
@@ -412,13 +518,20 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         reduceMotion: Bool,
         isEnabled: Bool,
         sourceAtLocation: @escaping
-            (CGPoint) -> PhotoReviewNativeDragSource?
+            (CGPoint) -> PhotoReviewNativeDragSource?,
+        observeSource: @escaping
+            (PhotoReviewNativeDragSourceEvent) -> Void = { _ in }
     ) {
+        let enabledChanged = self.isEnabled != isEnabled
         self.store = store
         self.presentation = presentation
         self.reduceMotion = reduceMotion
         self.isEnabled = isEnabled
         self.sourceAtLocation = sourceAtLocation
+        self.observeSource = observeSource
+        if enabledChanged {
+            observeSource(.enabled(isEnabled))
+        }
         dragInteraction?.isEnabled = isEnabled
         if !isEnabled {
             presentation.suspendNativeDragSessionForInteractionLock(
@@ -439,14 +552,19 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         view.addInteraction(interaction)
         attachedView = view
         dragInteraction = interaction
+        observeSource(.attached(isEnabled: isEnabled))
     }
 
     func detach() {
+        let wasAttached = attachedView != nil
         if let dragInteraction {
             attachedView?.removeInteraction(dragInteraction)
         }
         dragInteraction = nil
         attachedView = nil
+        if wasAttached {
+            observeSource(.detached)
+        }
     }
 
     func dragInteraction(
@@ -454,6 +572,19 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         itemsForBeginning session: UIDragSession
     ) -> [UIDragItem] {
         guard let sourceView = interaction.view else {
+            observeSource(.rejectedMissingView)
+            return []
+        }
+        observeSource(
+            .beginRequested(
+                hostBounds: sourceView.bounds,
+                hostContentSize:
+                    (sourceView as? UIScrollView)?.contentSize ?? .zero,
+                isEnabled: isEnabled
+            )
+        )
+        guard isEnabled else {
+            observeSource(.rejectedDisabled)
             return []
         }
         let sourceLocation = session.location(in: sourceView)
@@ -461,15 +592,19 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
             x: sourceLocation.x - sourceView.bounds.minX,
             y: sourceLocation.y - sourceView.bounds.minY
         )
-        guard isEnabled,
-              let source = sourceAtLocation(location),
-              presentation.begin(
-                photoID: source.photoID,
-                store: store
-              ) else {
+        guard let source = sourceAtLocation(location) else {
+            observeSource(.rejectedNoSource)
+            return []
+        }
+        guard presentation.begin(
+            photoID: source.photoID,
+            store: store
+        ) else {
+            observeSource(.rejectedPresentation)
             return []
         }
         activeSource = source
+        observeSource(.provided(photoID: source.photoID))
         return [
             UIDragItem(
                 itemProvider: PhotoReviewNativeDragContract.itemProvider(
@@ -530,6 +665,7 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
             reduceMotion: reduceMotion
         )
         activeSource = nil
+        observeSource(.ended)
     }
 }
 
@@ -541,6 +677,7 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
     let isEnabled: Bool
     let sourceAtLocation:
         (CGPoint) -> PhotoReviewNativeDragSource?
+    let observeSource: (PhotoReviewNativeDragSourceEvent) -> Void
 
     func makeCoordinator() -> PhotoReviewNativeDragSourceDelegate {
         PhotoReviewNativeDragSourceDelegate(
@@ -548,7 +685,8 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
             presentation: presentation,
             reduceMotion: reduceMotion,
             isEnabled: isEnabled,
-            sourceAtLocation: sourceAtLocation
+            sourceAtLocation: sourceAtLocation,
+            observeSource: observeSource
         )
     }
 
@@ -569,7 +707,8 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
             presentation: presentation,
             reduceMotion: reduceMotion,
             isEnabled: isEnabled,
-            sourceAtLocation: sourceAtLocation
+            sourceAtLocation: sourceAtLocation,
+            observeSource: observeSource
         )
         uiView.attachToNearestScrollView()
     }
@@ -1667,6 +1806,8 @@ struct PhotoReviewView: View {
 #if DEBUG
     @State private var renderedInsertionGapObservation =
         PhotoReviewRenderedInsertionGapObservation()
+    @State private var nativeDragSourceObservation =
+        PhotoReviewNativeDragSourceObservation()
     @State private var nativeDropObservation =
         PhotoReviewNativeDropObservation()
     @State private var observedAutoScrollEdge: String?
@@ -1709,6 +1850,7 @@ struct PhotoReviewView: View {
             "gap=\(gap)",
             "edge=\(edge)",
             "transition=\(transition)",
+            "source=\(nativeDragSourceObservation.label)",
             "drop=\(nativeDropObservation.label)"
         ]
         .joined(separator: ";")
@@ -1797,6 +1939,7 @@ struct PhotoReviewView: View {
                     .maximumRenderedInsertionGap > 0
                     || observedAutoScrollEdge != nil
                     || dragPresentation.lastTransitionDecision != nil
+                    || nativeDragSourceObservation.hasActivity
                     || nativeDropObservation.hasActivity {
                     Color.clear
                         .frame(width: 1, height: 1)
@@ -1964,12 +2107,18 @@ struct PhotoReviewView: View {
                         reduceMotion: reduceMotion,
                         isEnabled: nativeDragInteractionsEnabled,
                         sourceAtLocation: { location in
-                            PhotoReviewNativeDragSourceGeometry.source(
+                            observeNativeDragSource(
+                                .resolving(
+                                    frameCount: thumbnailFrames.count
+                                )
+                            )
+                            return PhotoReviewNativeDragSourceGeometry.source(
                                 at: location,
                                 photos: store.photos,
                                 frames: thumbnailFrames
                             )
-                        }
+                        },
+                        observeSource: observeNativeDragSource
                     )
                     PhotoReviewNativeDropAttachment(
                         store: store,
@@ -2128,6 +2277,14 @@ struct PhotoReviewView: View {
     private func observeNativeDrop(_ event: PhotoReviewNativeDropEvent) {
 #if DEBUG
         nativeDropObservation.observe(event)
+#endif
+    }
+
+    private func observeNativeDragSource(
+        _ event: PhotoReviewNativeDragSourceEvent
+    ) {
+#if DEBUG
+        nativeDragSourceObservation.observe(event)
 #endif
     }
 
