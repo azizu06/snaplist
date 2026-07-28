@@ -3993,6 +3993,11 @@ final class CaptureFlowTests: XCTestCase {
             photos[1].id: CGRect(x: 150, y: 0, width: 76, height: 98),
             photos[2].id: CGRect(x: 238, y: 0, width: 76, height: 98)
         ]
+        let leadingPaddedContainerFrames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 138, height: 98),
+            photos[1].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 176, y: 0, width: 76, height: 98)
+        ]
 
         XCTAssertEqual(
             PhotoReviewStripDropGeometry.destinationIndex(
@@ -4014,6 +4019,13 @@ final class CaptureFlowTests: XCTestCase {
             PhotoReviewStripDropGeometry.maximumFrameShift(
                 from: restingFrames,
                 to: coverGapFrames
+            ),
+            PhotoReviewDragLayout.insertionGap
+        )
+        XCTAssertEqual(
+            PhotoReviewStripDropGeometry.maximumFrameShift(
+                from: restingFrames,
+                to: leadingPaddedContainerFrames
             ),
             PhotoReviewDragLayout.insertionGap
         )

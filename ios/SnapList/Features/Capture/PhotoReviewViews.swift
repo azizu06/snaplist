@@ -69,7 +69,10 @@ enum PhotoReviewStripDropGeometry {
     ) -> CGFloat {
         baseline.compactMap { photoID, baselineFrame in
             current[photoID].map {
-                abs($0.minX - baselineFrame.minX)
+                max(
+                    abs($0.minX - baselineFrame.minX),
+                    abs($0.width - baselineFrame.width)
+                )
             }
         }
         .max() ?? 0
