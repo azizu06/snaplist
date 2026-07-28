@@ -486,7 +486,7 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
             reduceMotion: reduceMotion,
             isEnabled: isEnabled
         )
-        uiView.attachToNearestHostView()
+        uiView.attachToButtonHitView()
     }
 
     static func dismantleUIView(
@@ -502,15 +502,27 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            attachToNearestHostView()
+            attachToButtonHitView()
         }
 
-        func attachToNearestHostView() {
-            guard window != nil, let hostView = superview else {
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            attachToButtonHitView()
+        }
+
+        func attachToButtonHitView() {
+            guard let window else {
                 coordinator?.detach()
                 return
             }
-            coordinator?.attach(to: hostView)
+            let center = CGPoint(x: bounds.midX, y: bounds.midY)
+            let pointInWindow = convert(center, to: window)
+            guard let hitView = window.hitTest(pointInWindow, with: nil),
+                  hitView !== self else {
+                coordinator?.detach()
+                return
+            }
+            coordinator?.attach(to: hitView)
         }
     }
 }
