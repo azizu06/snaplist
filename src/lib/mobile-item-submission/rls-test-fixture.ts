@@ -188,29 +188,51 @@ export async function authorizeRemoveAndCompleteStagingCleanup(input: {
   }
 }
 
-export async function proveVerifiedGuestRefreshWindow(input: {
+export async function proveVerifiedGuestLostResponseRecovery(input: {
   admin: SupabaseClient;
   database: Client;
 }): Promise<{
   activeRows: number;
   atWindowIssued: boolean;
-  earlyCode: string | undefined;
-  repeatedEarlyCode: string | undefined;
+  concurrentIssued: number;
+  concurrentResolved: number;
+  firstDigestActive: boolean;
+  firstState: string;
+  foreignActiveRows: number;
+  longLivedActiveRows: number;
+  repeatedIssued: boolean;
+  replacementDigestActive: boolean;
+  replacementIssued: boolean;
 }> {
   const userId = `guest_${crypto.randomUUID().replaceAll("-", "").padEnd(48, "0")}`;
+  const foreignUserId =
+    `guest_${crypto.randomUUID().replaceAll("-", "").padEnd(48, "f")}`;
   const firstCapabilityId = crypto.randomUUID();
+  const replacementCapabilityId = crypto.randomUUID();
+  const concurrentCapabilityIds = [crypto.randomUUID(), crypto.randomUUID()];
   const atWindowCapabilityId = crypto.randomUUID();
   const repeatedCapabilityId = crypto.randomUUID();
+  const foreignCapabilityId = crypto.randomUUID();
   let digestByte = 0x71;
-  const issue = (capabilityId: string) => {
+  const digests = new Map<string, string>();
+  const issue = (capabilityId: string, subject = userId) => {
     const activatedAt = new Date();
+    const digest = `\\x${Buffer.alloc(32, digestByte++).toString("hex")}`;
+    digests.set(capabilityId, digest);
     return input.admin.rpc("issue_verified_guest_capability", {
       p_activated_at: activatedAt.toISOString(),
-      p_bearer_digest: `\\x${Buffer.alloc(32, digestByte++).toString("hex")}`,
+      p_bearer_digest: digest,
       p_capability_id: capabilityId,
       p_expires_at: new Date(activatedAt.getTime() + 30 * 60_000).toISOString(),
-      p_user_id: userId,
+      p_user_id: subject,
     });
+  };
+  const resolves = async (capabilityId: string) => {
+    const result = await input.admin.rpc("resolve_verified_guest_capability", {
+      p_bearer_digest: digests.get(capabilityId),
+    });
+    if (result.error) throw result.error;
+    return Array.isArray(result.data) && result.data.length === 1;
   };
 
   try {
@@ -218,17 +240,57 @@ export async function proveVerifiedGuestRefreshWindow(input: {
     if (first.error || first.data !== true) {
       throw new Error("Expected initial verified guest capability issuance.");
     }
-    const early = await issue(crypto.randomUUID());
+    const foreign = await issue(foreignCapabilityId, foreignUserId);
+    if (foreign.error || foreign.data !== true) {
+      throw new Error("Expected foreign verified guest capability issuance.");
+    }
+    const replacement = await issue(replacementCapabilityId);
+    const firstAfterReplacement = await input.database.query<{ state: string }>(
+      `select state
+       from private.verified_guest_capabilities
+       where capability_id = $1::uuid`,
+      [firstCapabilityId],
+    );
+    const firstDigestActive = await resolves(firstCapabilityId);
+    const replacementDigestActive = await resolves(replacementCapabilityId);
+
+    const concurrent = await Promise.all(
+      concurrentCapabilityIds.map((capabilityId) => issue(capabilityId)),
+    );
+    const concurrentResolved = (
+      await Promise.all(concurrentCapabilityIds.map(resolves))
+    ).filter(Boolean).length;
+    const current = await input.database.query<{ capability_id: string }>(
+      `select capability_id::text
+       from private.verified_guest_capabilities
+       where user_id = $1
+         and state = 'active'
+         and revoked_at is null
+         and expires_at > statement_timestamp()
+       order by activated_at desc, capability_id desc
+       limit 1`,
+      [userId],
+    );
+    if (!current.rows[0]) {
+      throw new Error("Expected one active replacement capability.");
+    }
     await input.database.query(
       `update private.verified_guest_capabilities
        set expires_at = statement_timestamp() + interval '5 minutes'
        where capability_id = $1::uuid`,
-      [firstCapabilityId],
+      [current.rows[0].capability_id],
     );
     const atWindow = await issue(atWindowCapabilityId);
-    const repeatedEarly = await issue(repeatedCapabilityId);
-    const rows = await input.database.query<{ active_rows: number }>(
-      `select count(*)::integer active_rows
+    const repeated = await issue(repeatedCapabilityId);
+    const rows = await input.database.query<{
+      active_rows: number;
+      long_lived_active_rows: number;
+    }>(
+      `select
+         count(*)::integer active_rows,
+         count(*) filter (
+           where expires_at > statement_timestamp() + interval '60 seconds'
+         )::integer long_lived_active_rows
        from private.verified_guest_capabilities
        where user_id = $1
          and state = 'active'
@@ -236,16 +298,36 @@ export async function proveVerifiedGuestRefreshWindow(input: {
          and expires_at > statement_timestamp()`,
       [userId],
     );
+    const foreignRows = await input.database.query<{ active_rows: number }>(
+      `select count(*)::integer active_rows
+       from private.verified_guest_capabilities
+       where user_id = $1
+         and state = 'active'
+         and revoked_at is null
+         and expires_at > statement_timestamp()`,
+      [foreignUserId],
+    );
     return {
       activeRows: rows.rows[0]!.active_rows,
       atWindowIssued: atWindow.error === null && atWindow.data === true,
-      earlyCode: early.error?.code,
-      repeatedEarlyCode: repeatedEarly.error?.code,
+      concurrentIssued: concurrent.filter(
+        (result) => result.error === null && result.data === true,
+      ).length,
+      concurrentResolved,
+      firstDigestActive,
+      firstState: firstAfterReplacement.rows[0]!.state,
+      foreignActiveRows: foreignRows.rows[0]!.active_rows,
+      longLivedActiveRows: rows.rows[0]!.long_lived_active_rows,
+      repeatedIssued: repeated.error === null && repeated.data === true,
+      replacementDigestActive,
+      replacementIssued:
+        replacement.error === null && replacement.data === true,
     };
   } finally {
     await input.database.query(
-      `delete from private.verified_guest_capabilities where user_id = $1`,
-      [userId],
+      `delete from private.verified_guest_capabilities
+       where user_id = any($1::text[])`,
+      [[userId, foreignUserId]],
     );
   }
 }

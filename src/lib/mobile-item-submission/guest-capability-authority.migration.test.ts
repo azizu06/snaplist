@@ -8,6 +8,9 @@ const authorityMigrationPath = resolve(
 const operationChannelMigrationPath = resolve(
   "supabase/migrations/20260728170000_verified_guest_operation_channel.sql",
 );
+const lostResponseRecoveryMigrationPath = resolve(
+  "supabase/migrations/20260728180000_verified_guest_lost_response_recovery.sql",
+);
 const protectedMigrationPaths = [
   "supabase/migrations/20260728140000_authenticated_guest_submission_replay_lookup.sql",
   "supabase/migrations/20260728150000_authenticated_guest_submission_begin.sql",
@@ -179,6 +182,43 @@ describe("verified guest capability authority migration", () => {
     );
     expect(migration).toMatch(
       /cron\.schedule\([\s\S]*snaplist-verified-guest-capability-retention-hourly[\s\S]*41 \* \* \* \*/i,
+    );
+  });
+
+  it("atomically replaces an unreachable long-lived bearer while retaining only the refresh overlap", () => {
+    expect(existsSync(lostResponseRecoveryMigrationPath)).toBe(true);
+    const migration = readFileSync(lostResponseRecoveryMigrationPath, "utf8");
+    const issueCapability = migration.match(
+      /create or replace function public\.issue_verified_guest_capability\([\s\S]*?\n\$\$;/i,
+    )?.[0];
+
+    expect(issueCapability).toBeDefined();
+    expect(issueCapability).toMatch(
+      /security definer[\s\S]*set search_path = ''/i,
+    );
+    expect(issueCapability).toMatch(
+      /pg_advisory_xact_lock[\s\S]*snaplist:verified-guest-capability:/i,
+    );
+    expect(issueCapability).toMatch(
+      /update private\.verified_guest_capabilities capability\s+set state = 'tombstoned'[\s\S]*capability\.user_id = p_user_id[\s\S]*capability\.state = 'active'[\s\S]*capability\.revoked_at is null[\s\S]*capability\.expires_at\s+> statement_timestamp\(\) \+ interval '5 minutes'/i,
+    );
+    expect(issueCapability).toMatch(
+      /update private\.verified_guest_capabilities capability\s+set expires_at = least\([\s\S]*statement_timestamp\(\) \+ interval '60 seconds'[\s\S]*capability\.expires_at > statement_timestamp\(\)[\s\S]*capability\.expires_at\s+<= statement_timestamp\(\) \+ interval '5 minutes'/i,
+    );
+    expect(issueCapability).toMatch(
+      /insert into private\.verified_guest_capabilities[\s\S]*p_capability_id[\s\S]*p_user_id[\s\S]*p_bearer_digest/i,
+    );
+    expect(issueCapability).not.toMatch(
+      /refresh is not due|errcode = '55000'/i,
+    );
+    expect(migration).toMatch(
+      /revoke all on function public\.issue_verified_guest_capability\([\s\S]*from public, anon, authenticated/i,
+    );
+    expect(migration).toMatch(
+      /grant execute on function public\.issue_verified_guest_capability\([\s\S]*to service_role/i,
+    );
+    expect(migration).not.toMatch(
+      /grant execute on function public\.issue_verified_guest_capability\([\s\S]*to (?:anon|authenticated)/i,
     );
   });
 

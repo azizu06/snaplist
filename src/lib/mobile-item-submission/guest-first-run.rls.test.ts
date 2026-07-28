@@ -25,10 +25,11 @@ import {
   expireAndClaimStagingCleanup,
   jpeg,
   localSubmissionStackIsReachable,
-  proveVerifiedGuestRefreshWindow,
+  proveVerifiedGuestLostResponseRecovery,
   request,
   singlePhotoMultipart,
 } from "./rls-test-fixture";
+import { shouldSkipGuestFirstRunForOfflineCi } from "./guest-first-run-test-mode";
 
 vi.mock("server-only", () => ({}));
 
@@ -262,14 +263,34 @@ afterAll(async () => {
   await lease.release();
 });
 
-describe("verified guest first-run submission against local Supabase", () => {
+const describeVerifiedGuestFirstRun =
+  shouldSkipGuestFirstRunForOfflineCi(process.env)
+    ? describe.skip
+    : describe;
+
+describeVerifiedGuestFirstRun(
+  "verified guest first-run submission against local Supabase",
+  () => {
   it("serializes concurrent logical runs and replays only the winner through publishable-key RLS", async () => {
     const guestBearer = `guestcap_${crypto.randomUUID().replaceAll("-", "")}`;
     const internalJwt = await mintVerifiedGuestJwt(guestId, activeCapabilityId);
-    const refreshWindow = await proveVerifiedGuestRefreshWindow({ admin, database });
-    expect(refreshWindow).toEqual(
-      { activeRows: 2, atWindowIssued: true, earlyCode: "55000", repeatedEarlyCode: "55000" },
-    );
+    const recovery = await proveVerifiedGuestLostResponseRecovery({
+      admin,
+      database,
+    });
+    expect(recovery).toEqual({
+      activeRows: 2,
+      atWindowIssued: true,
+      concurrentIssued: 2,
+      concurrentResolved: 1,
+      firstDigestActive: false,
+      firstState: "tombstoned",
+      foreignActiveRows: 1,
+      longLivedActiveRows: 1,
+      repeatedIssued: true,
+      replacementDigestActive: true,
+      replacementIssued: true,
+    });
     const channelRejectedTokens = [
       {
         label: "missing operation channel",
@@ -1046,4 +1067,5 @@ describe("verified guest first-run submission against local Supabase", () => {
       ),
     ).toBe(true);
   });
-});
+  },
+);

@@ -77,4 +77,33 @@ describe("verified guest capability service", () => {
       /guest capability/i,
     );
   });
+
+  it("issues a distinct digest-only replacement after an earlier response is lost", async () => {
+    const issue = vi.fn().mockResolvedValue(true);
+    let nextByte = 0x61;
+    let nextId = 1;
+    const service = createVerifiedGuestCapabilityService({
+      clock: () => new Date("2026-07-28T15:00:00.000Z"),
+      randomBytes: () => Buffer.alloc(32, nextByte++),
+      randomUUID: () =>
+        `33200000-0000-4000-8000-${String(nextId++).padStart(12, "0")}`,
+      store: { issue, resolve: vi.fn() },
+    });
+
+    const unreachableResponse = await service.issue(assertion);
+    const replacement = await service.issue({ ...assertion, counter: 8 });
+
+    expect(replacement.bearerToken).not.toBe(unreachableResponse.bearerToken);
+    expect(issue).toHaveBeenCalledTimes(2);
+    expect(issue.mock.calls[0]![0].userId).toBe(issue.mock.calls[1]![0].userId);
+    expect(issue.mock.calls[0]![0].bearerDigest).not.toEqual(
+      issue.mock.calls[1]![0].bearerDigest,
+    );
+    expect(JSON.stringify(issue.mock.calls)).not.toContain(
+      unreachableResponse.bearerToken,
+    );
+    expect(JSON.stringify(issue.mock.calls)).not.toContain(
+      replacement.bearerToken,
+    );
+  });
 });
