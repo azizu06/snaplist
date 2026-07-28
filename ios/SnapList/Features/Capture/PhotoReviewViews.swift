@@ -669,6 +669,74 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
     }
 }
 
+enum PhotoReviewNativeStripHostResolver {
+    static func resolve(
+        from attachmentView: UIView
+    ) -> UIScrollView? {
+        var ancestor = attachmentView.superview
+        while let view = ancestor {
+            if let scrollView = view as? UIScrollView {
+                return scrollView
+            }
+            ancestor = view.superview
+        }
+        return nil
+    }
+}
+
+@MainActor
+final class PhotoReviewNativeStripInteractionAttachmentView: UIView {
+    private var shouldAttach = false
+    private var attach: ((UIScrollView) -> Void)?
+    private var detach: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        resolveHostAndAttach()
+    }
+
+    func update(
+        shouldAttach: Bool,
+        attach: @escaping (UIScrollView) -> Void,
+        detach: @escaping () -> Void
+    ) {
+        self.shouldAttach = shouldAttach
+        self.attach = attach
+        self.detach = detach
+        resolveHostAndAttach()
+    }
+
+    func resolveHostAndAttach() {
+        guard window != nil,
+              shouldAttach,
+              let host = PhotoReviewNativeStripHostResolver.resolve(
+                from: self
+              ) else {
+            detach?()
+            return
+        }
+        attach?(host)
+    }
+
+    func dismantle() {
+        detach?()
+        attach = nil
+        detach = nil
+    }
+}
+
 @MainActor
 private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
     let store: PhotoReviewStore
@@ -690,16 +758,20 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
         )
     }
 
-    func makeUIView(context: Context) -> AttachmentView {
-        let view = AttachmentView()
-        view.backgroundColor = .clear
-        view.isUserInteractionEnabled = false
-        view.coordinator = context.coordinator
+    func makeUIView(
+        context: Context
+    ) -> PhotoReviewNativeStripInteractionAttachmentView {
+        let view = PhotoReviewNativeStripInteractionAttachmentView()
+        view.update(
+            shouldAttach: true,
+            attach: context.coordinator.attach(to:),
+            detach: context.coordinator.detach
+        )
         return view
     }
 
     func updateUIView(
-        _ uiView: AttachmentView,
+        _ uiView: PhotoReviewNativeStripInteractionAttachmentView,
         context: Context
     ) {
         context.coordinator.update(
@@ -710,39 +782,18 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
             sourceAtLocation: sourceAtLocation,
             observeSource: observeSource
         )
-        uiView.attachToNearestScrollView()
+        uiView.update(
+            shouldAttach: true,
+            attach: context.coordinator.attach(to:),
+            detach: context.coordinator.detach
+        )
     }
 
     static func dismantleUIView(
-        _ uiView: AttachmentView,
+        _ uiView: PhotoReviewNativeStripInteractionAttachmentView,
         coordinator: PhotoReviewNativeDragSourceDelegate
     ) {
-        coordinator.detach()
-    }
-
-    @MainActor
-    final class AttachmentView: UIView {
-        weak var coordinator: PhotoReviewNativeDragSourceDelegate?
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            attachToNearestScrollView()
-        }
-
-        func attachToNearestScrollView() {
-            guard window != nil else {
-                coordinator?.detach()
-                return
-            }
-            var ancestor = superview
-            while let view = ancestor {
-                if let scrollView = view as? UIScrollView {
-                    coordinator?.attach(to: scrollView)
-                    return
-                }
-                ancestor = view.superview
-            }
-        }
+        uiView.dismantle()
     }
 }
 
@@ -768,14 +819,20 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         )
     }
 
-    func makeUIView(context: Context) -> AttachmentView {
-        let view = AttachmentView()
-        view.coordinator = context.coordinator
+    func makeUIView(
+        context: Context
+    ) -> PhotoReviewNativeStripInteractionAttachmentView {
+        let view = PhotoReviewNativeStripInteractionAttachmentView()
+        view.update(
+            shouldAttach: isEnabled,
+            attach: context.coordinator.attach(to:),
+            detach: context.coordinator.detach
+        )
         return view
     }
 
     func updateUIView(
-        _ uiView: AttachmentView,
+        _ uiView: PhotoReviewNativeStripInteractionAttachmentView,
         context: Context
     ) {
         context.coordinator.update(
@@ -787,39 +844,18 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             autoScroll: autoScroll,
             observeDrop: observeDrop
         )
-        uiView.attachToNearestScrollView()
+        uiView.update(
+            shouldAttach: isEnabled,
+            attach: context.coordinator.attach(to:),
+            detach: context.coordinator.detach
+        )
     }
 
     static func dismantleUIView(
-        _ uiView: AttachmentView,
+        _ uiView: PhotoReviewNativeStripInteractionAttachmentView,
         coordinator: Coordinator
     ) {
-        coordinator.detach()
-    }
-
-    @MainActor
-    final class AttachmentView: UIView {
-        weak var coordinator: Coordinator?
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            attachToNearestScrollView()
-        }
-
-        func attachToNearestScrollView() {
-            guard window != nil, coordinator?.isEnabled == true else {
-                coordinator?.detach()
-                return
-            }
-            var ancestor = superview
-            while let view = ancestor {
-                if let scrollView = view as? UIScrollView {
-                    coordinator?.attach(to: scrollView)
-                    return
-                }
-                ancestor = view.superview
-            }
-        }
+        uiView.dismantle()
     }
 
     @MainActor
@@ -2090,55 +2126,60 @@ struct PhotoReviewView: View {
                     addButton
                 }
                 .padding(.vertical, 3)
+                // Keeping both native attachments inside the horizontal
+                // content makes its nearest scroll ancestor the strip host,
+                // even when Photo Review is nested in the screen scroll view.
+                .background {
+                    ZStack {
+                        PhotoReviewNativeDragSourceAttachment(
+                            store: store,
+                            presentation: dragPresentation,
+                            reduceMotion: reduceMotion,
+                            isEnabled: nativeDragInteractionsEnabled,
+                            sourceAtLocation: { location in
+                                observeNativeDragSource(
+                                    .resolving(
+                                        frameCount: thumbnailFrames.count
+                                    )
+                                )
+                                return PhotoReviewNativeDragSourceGeometry.source(
+                                    at: location,
+                                    photos: store.photos,
+                                    frames: thumbnailFrames
+                                )
+                            },
+                            observeSource: observeNativeDragSource
+                        )
+                        PhotoReviewNativeDropAttachment(
+                            store: store,
+                            presentation: dragPresentation,
+                            reduceMotion: reduceMotion,
+                            isEnabled: nativeDragInteractionsEnabled,
+                            destinationIndex: { location in
+                                PhotoReviewStripDropGeometry.destinationIndex(
+                                    at: location,
+                                    photos: store.photos,
+                                    frames: thumbnailFrames
+                                )
+                            },
+                            autoScroll: { location in
+                                autoScrollThumbnailStripIfNeeded(
+                                    at: location,
+                                    proxy: proxy
+                                )
+                            },
+                            observeDrop: observeNativeDrop
+                        )
+                    }
+                }
             }
             .coordinateSpace(name: "photo-review.thumbnail-strip")
             .scrollIndicators(.hidden)
             .background {
-                ZStack {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: PhotoReviewThumbnailStripWidthPreferenceKey.self,
-                            value: geometry.size.width
-                        )
-                    }
-                    PhotoReviewNativeDragSourceAttachment(
-                        store: store,
-                        presentation: dragPresentation,
-                        reduceMotion: reduceMotion,
-                        isEnabled: nativeDragInteractionsEnabled,
-                        sourceAtLocation: { location in
-                            observeNativeDragSource(
-                                .resolving(
-                                    frameCount: thumbnailFrames.count
-                                )
-                            )
-                            return PhotoReviewNativeDragSourceGeometry.source(
-                                at: location,
-                                photos: store.photos,
-                                frames: thumbnailFrames
-                            )
-                        },
-                        observeSource: observeNativeDragSource
-                    )
-                    PhotoReviewNativeDropAttachment(
-                        store: store,
-                        presentation: dragPresentation,
-                        reduceMotion: reduceMotion,
-                        isEnabled: nativeDragInteractionsEnabled,
-                        destinationIndex: { location in
-                            PhotoReviewStripDropGeometry.destinationIndex(
-                                at: location,
-                                photos: store.photos,
-                                frames: thumbnailFrames
-                            )
-                        },
-                        autoScroll: { location in
-                            autoScrollThumbnailStripIfNeeded(
-                                at: location,
-                                proxy: proxy
-                            )
-                        },
-                        observeDrop: observeNativeDrop
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: PhotoReviewThumbnailStripWidthPreferenceKey.self,
+                        value: geometry.size.width
                     )
                 }
             }

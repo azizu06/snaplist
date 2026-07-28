@@ -4250,6 +4250,113 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(observation.hostContentSize, sourceView.contentSize)
     }
 
+    func testPhotoReviewNativeAttachmentsResolveNestedHorizontalStripHostInsteadOfOuterScreenScroll() {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in nil }
+        )
+        let destination = PhotoReviewNativeDropAttachment.Coordinator(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in }
+        )
+
+        let window = UIWindow(
+            frame: CGRect(x: 0, y: 0, width: 440, height: 956)
+        )
+        let controller = UIViewController()
+        window.rootViewController = controller
+
+        let outerScreenScroll = UIScrollView(frame: window.bounds)
+        outerScreenScroll.alwaysBounceVertical = true
+        outerScreenScroll.contentSize = CGSize(width: 440, height: 1_200)
+        controller.view.addSubview(outerScreenScroll)
+
+        let innerHorizontalStrip = UIScrollView(
+            frame: CGRect(x: 16, y: 360, width: 408, height: 104)
+        )
+        innerHorizontalStrip.alwaysBounceHorizontal = true
+        innerHorizontalStrip.contentSize = CGSize(width: 520, height: 104)
+        outerScreenScroll.addSubview(innerHorizontalStrip)
+
+        let stripContent = UIView(
+            frame: CGRect(x: 0, y: 0, width: 520, height: 104)
+        )
+        innerHorizontalStrip.addSubview(stripContent)
+
+        let sourceAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        let destinationAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        stripContent.addSubview(sourceAttachment)
+        stripContent.addSubview(destinationAttachment)
+
+        window.makeKeyAndVisible()
+        defer {
+            sourceAttachment.dismantle()
+            destinationAttachment.dismantle()
+            window.isHidden = true
+            withExtendedLifetime(window) {}
+        }
+
+        sourceAttachment.update(
+            shouldAttach: true,
+            attach: source.attach(to:),
+            detach: source.detach
+        )
+        destinationAttachment.update(
+            shouldAttach: true,
+            attach: destination.attach(to:),
+            detach: destination.detach
+        )
+        sourceAttachment.resolveHostAndAttach()
+        destinationAttachment.resolveHostAndAttach()
+
+        XCTAssertEqual(
+            innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .count,
+            1
+        )
+        XCTAssertEqual(
+            innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .count,
+            1
+        )
+        XCTAssertTrue(
+            innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first?
+                .view === innerHorizontalStrip
+        )
+        XCTAssertTrue(
+            innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .first?
+                .view === innerHorizontalStrip
+        )
+        XCTAssertTrue(
+            outerScreenScroll.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .isEmpty
+        )
+        XCTAssertTrue(
+            outerScreenScroll.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .isEmpty
+        )
+    }
+
     func testPhotoReviewStripDropGeometryMapsKnownThirdIdentityToCover() {
         let photos = makeDragPhotos()
         let restingFrames = [
