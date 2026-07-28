@@ -64,6 +64,45 @@ final class VoiceNoteTests: XCTestCase {
         await fulfillment(of: [completion], timeout: 1)
     }
 
+    func testAVFoundationPlaybackResumesRetainedPlayerUntilNaturalCompletion() async throws {
+        let session = VoiceNoteAudioSessionStub()
+        let firstPlayer = VoiceNotePlayerStub()
+        let replayPlayer = VoiceNotePlayerStub()
+        var availablePlayers = [firstPlayer, replayPlayer]
+        var requestedURLs: [URL] = []
+        let adapter = AVFoundationVoiceNoteAudioClient(
+            audioSession: session,
+            playerFactory: { url in
+                requestedURLs.append(url)
+                return availablePlayers.removeFirst()
+            }
+        )
+        let url = URL(fileURLWithPath: "/tmp/saved.wav")
+
+        try adapter.startPlaying(url)
+        adapter.pausePlaying()
+        try adapter.startPlaying(url)
+
+        XCTAssertEqual(requestedURLs, [url])
+        XCTAssertEqual(firstPlayer.playCount, 2)
+        XCTAssertEqual(firstPlayer.pauseCount, 1)
+
+        let completion = expectation(description: "natural playback completion")
+        adapter.playbackFinishedHandler = {
+            completion.fulfill()
+        }
+        adapter.audioPlayerDidFinishPlaying(
+            AVAudioPlayer(),
+            successfully: true
+        )
+        await fulfillment(of: [completion], timeout: 1)
+
+        try adapter.startPlaying(url)
+
+        XCTAssertEqual(requestedURLs, [url, url])
+        XCTAssertEqual(replayPlayer.playCount, 1)
+    }
+
     func testFifteenSecondBoundaryWaitsForExplicitSaveBeforeCommitting() async throws {
         let audio = VoiceNoteAudioClientStub(permission: .allowed)
         let files = VoiceNoteFileStoreStub()
@@ -292,6 +331,19 @@ final class VoiceNoteTests: XCTestCase {
             .saved(isPlaying: false)
         )
         XCTAssertEqual(fixture.store.savedNote, fixture.prior)
+        XCTAssertEqual(fixture.audio.stopPlayingCount, 1)
+    }
+
+    func testPlaybackInterruptionStopsPlayerAndRestoresSavedTruth() {
+        let fixture = makePriorNoteFixture()
+        fixture.store.togglePlayback()
+        XCTAssertEqual(fixture.store.phase, .saved(isPlaying: true))
+
+        fixture.audio.interruptionHandler?()
+
+        XCTAssertEqual(fixture.store.phase, .saved(isPlaying: false))
+        XCTAssertEqual(fixture.store.savedNote, fixture.prior)
+        XCTAssertEqual(fixture.audio.playedURLs, [fixture.prior.url])
         XCTAssertEqual(fixture.audio.stopPlayingCount, 1)
     }
 
@@ -546,6 +598,28 @@ private final class VoiceNoteRecorderStub: VoiceNoteRecording {
     func averagePower(forChannel _: Int) -> Float {
         -160
     }
+}
+
+@MainActor
+private final class VoiceNotePlayerStub: VoiceNotePlaying {
+    weak var delegate: AVAudioPlayerDelegate?
+    private(set) var playCount = 0
+    private(set) var pauseCount = 0
+
+    func prepareToPlay() -> Bool {
+        true
+    }
+
+    func play() -> Bool {
+        playCount += 1
+        return true
+    }
+
+    func pause() {
+        pauseCount += 1
+    }
+
+    func stop() {}
 }
 
 @MainActor

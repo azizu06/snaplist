@@ -38,6 +38,19 @@ protocol VoiceNoteRecording: AnyObject {
 extension AVAudioRecorder: VoiceNoteRecording {}
 
 @MainActor
+protocol VoiceNotePlaying: AnyObject {
+    var delegate: AVAudioPlayerDelegate? { get set }
+
+    @discardableResult
+    func prepareToPlay() -> Bool
+    func play() -> Bool
+    func pause()
+    func stop()
+}
+
+extension AVAudioPlayer: VoiceNotePlaying {}
+
+@MainActor
 final class AVFoundationVoiceNoteAudioClient:
     NSObject,
     VoiceNoteAudioClient,
@@ -53,8 +66,9 @@ final class AVFoundationVoiceNoteAudioClient:
     private let notificationCenter: NotificationCenter
     private let recorderFactory:
         (URL, [String: Any]) throws -> VoiceNoteRecording
+    private let playerFactory: (URL) throws -> VoiceNotePlaying
     private var recorder: VoiceNoteRecording?
-    private var player: AVAudioPlayer?
+    private var player: VoiceNotePlaying?
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
 
@@ -65,11 +79,16 @@ final class AVFoundationVoiceNoteAudioClient:
         recorderFactory: @escaping
             (URL, [String: Any]) throws -> VoiceNoteRecording = {
                 try AVAudioRecorder(url: $0, settings: $1)
+            },
+        playerFactory: @escaping
+            (URL) throws -> VoiceNotePlaying = {
+                try AVAudioPlayer(contentsOf: $0)
             }
     ) {
         self.audioSession = audioSession
         self.notificationCenter = notificationCenter
         self.recorderFactory = recorderFactory
+        self.playerFactory = playerFactory
         super.init()
         interruptionObserver = notificationCenter.addObserver(
             forName: AVAudioSession.interruptionNotification,
@@ -197,10 +216,18 @@ final class AVFoundationVoiceNoteAudioClient:
             options: []
         )
         try audioSession.setActive(true, options: [])
-        let player = try AVAudioPlayer(contentsOf: url)
-        player.delegate = self
-        player.prepareToPlay()
+        let player: VoiceNotePlaying
+        if let retainedPlayer = self.player {
+            player = retainedPlayer
+        } else {
+            player = try playerFactory(url)
+            player.delegate = self
+            player.prepareToPlay()
+        }
         guard player.play() else {
+            player.stop()
+            player.delegate = nil
+            self.player = nil
             try? audioSession.setActive(
                 false,
                 options: .notifyOthersOnDeactivation

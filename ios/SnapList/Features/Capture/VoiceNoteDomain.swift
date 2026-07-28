@@ -446,6 +446,11 @@ final class VoiceNoteStore {
     }
 
     func handleInterruption() {
+        if phase == .saved(isPlaying: true) {
+            audio.stopPlaying()
+            phase = .saved(isPlaying: false)
+            return
+        }
         cancelRecording()
     }
 
