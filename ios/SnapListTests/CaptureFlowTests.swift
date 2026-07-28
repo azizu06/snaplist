@@ -4154,21 +4154,45 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(committed.consumeAnnouncement())
     }
 
-    func testPhotoReviewNativePreviewDisappearanceEndsOutsideDragWithoutMutatingCommittedDrop() {
+    func testPhotoReviewNativeSourceDelegateEndsAcceptedAndOutsideSessionsExactlyOnce() {
         let photos = makeDragPhotos()
         let outsideStore = PhotoReviewStore(photos: photos)
         let outside = PhotoReviewDragPresentation()
+        let outsideSource = PhotoReviewNativeDragSourceDelegate(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            store: outsideStore,
+            presentation: outside,
+            reduceMotion: true
+        )
+        let outsideInteraction = UIDragInteraction(delegate: outsideSource)
+        let outsideSession = PhotoReviewDragSessionStub()
 
-        XCTAssertTrue(
-            outside.begin(photoID: photos[2].id, store: outsideStore)
+        let outsideItems = outsideSource.dragInteraction(
+            outsideInteraction,
+            itemsForBeginning: outsideSession
+        )
+        outsideSession.items = outsideItems
+
+        XCTAssertEqual(outsideItems.count, 1)
+        XCTAssertEqual(
+            outsideItems.first.flatMap {
+                PhotoReviewNativeDragContract.photoID(
+                    from: $0.itemProvider
+                )
+            },
+            photos[2].id
         )
         outside.updateInsertion(
             to: 0,
             store: outsideStore,
             reduceMotion: true
         )
-
-        outside.endNativeDragPreview(reduceMotion: true)
+        outsideSource.dragInteraction(
+            outsideInteraction,
+            session: outsideSession,
+            didEndWith: .cancel
+        )
 
         XCTAssertEqual(outsideStore.photos, photos)
         XCTAssertNil(outside.draggedPhotoID)
@@ -4176,10 +4200,40 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(outside.consumeFocusPhotoID(), photos[2].id)
         XCTAssertNil(outside.consumeAnnouncement())
 
+        outsideSource.dragInteraction(
+            outsideInteraction,
+            session: outsideSession,
+            didEndWith: .cancel
+        )
+
+        XCTAssertNil(outside.consumeFocusPhotoID())
+        XCTAssertNil(outside.consumeAnnouncement())
+
         let committedStore = PhotoReviewStore(photos: photos)
         let committed = PhotoReviewDragPresentation()
-        XCTAssertTrue(
-            committed.begin(photoID: photos[2].id, store: committedStore)
+        let committedSource = PhotoReviewNativeDragSourceDelegate(
+            photoID: photos[2].id,
+            thumbnailURL: photos[2].thumbnailURL,
+            store: committedStore,
+            presentation: committed,
+            reduceMotion: true
+        )
+        let committedInteraction = UIDragInteraction(
+            delegate: committedSource
+        )
+        let committedSession = PhotoReviewDragSessionStub()
+
+        let committedItems = committedSource.dragInteraction(
+            committedInteraction,
+            itemsForBeginning: committedSession
+        )
+        committedSession.items = committedItems
+
+        XCTAssertEqual(committedItems.count, 1)
+        committed.updateInsertion(
+            to: 0,
+            store: committedStore,
+            reduceMotion: true
         )
         XCTAssertNotNil(
             committed.commit(
@@ -4188,8 +4242,11 @@ final class CaptureFlowTests: XCTestCase {
                 reduceMotion: true
             )
         )
-
-        committed.endNativeDragPreview(reduceMotion: true)
+        committedSource.dragInteraction(
+            committedInteraction,
+            session: committedSession,
+            didEndWith: .move
+        )
 
         XCTAssertEqual(
             committedStore.photos,
@@ -6575,6 +6632,36 @@ final class CaptureFlowTests: XCTestCase {
             rightColor.setFill()
             context.fill(CGRect(x: 200, y: 0, width: 200, height: 200))
         })
+    }
+}
+
+@MainActor
+private final class PhotoReviewDragSessionStub: NSObject, UIDragSession {
+    var items: [UIDragItem] = []
+    var allowsMoveOperation = true
+    var isRestrictedToDraggingApplication = true
+    var localContext: Any?
+
+    func location(in _: UIView) -> CGPoint {
+        .zero
+    }
+
+    func hasItemsConforming(
+        toTypeIdentifiers typeIdentifiers: [String]
+    ) -> Bool {
+        items.contains { item in
+            typeIdentifiers.contains { typeIdentifier in
+                item.itemProvider.hasItemConformingToTypeIdentifier(
+                    typeIdentifier
+                )
+            }
+        }
+    }
+
+    func canLoadObjects(
+        ofClass _: NSItemProviderReading.Type
+    ) -> Bool {
+        false
     }
 }
 

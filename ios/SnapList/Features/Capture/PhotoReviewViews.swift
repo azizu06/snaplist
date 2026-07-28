@@ -228,10 +228,6 @@ final class PhotoReviewDragPresentation {
         cancel(reduceMotion: reduceMotion)
     }
 
-    func endNativeDragPreview(reduceMotion: Bool) {
-        endNativeDragSession(reduceMotion: reduceMotion)
-    }
-
     func cancel(reduceMotion: Bool) {
         guard let photoID = draggedPhotoID else {
             return
@@ -278,6 +274,153 @@ final class PhotoReviewDragPresentation {
         )
         lastTransitionDecision = decision
         return PhotoReviewDragAnimationPolicy.animation(for: decision)
+    }
+}
+
+@MainActor
+final class PhotoReviewNativeDragSourceDelegate: NSObject,
+    UIDragInteractionDelegate {
+    private static let previewSize = CGSize(width: 76, height: 76)
+    private static let previewCornerRadius: CGFloat = 12
+
+    private var photoID: StagedCapturePhoto.ID
+    private var thumbnailURL: URL
+    private var store: PhotoReviewStore
+    private var presentation: PhotoReviewDragPresentation
+    private var reduceMotion: Bool
+
+    init(
+        photoID: StagedCapturePhoto.ID,
+        thumbnailURL: URL,
+        store: PhotoReviewStore,
+        presentation: PhotoReviewDragPresentation,
+        reduceMotion: Bool
+    ) {
+        self.photoID = photoID
+        self.thumbnailURL = thumbnailURL
+        self.store = store
+        self.presentation = presentation
+        self.reduceMotion = reduceMotion
+    }
+
+    func update(
+        photoID: StagedCapturePhoto.ID,
+        thumbnailURL: URL,
+        store: PhotoReviewStore,
+        presentation: PhotoReviewDragPresentation,
+        reduceMotion: Bool
+    ) {
+        self.photoID = photoID
+        self.thumbnailURL = thumbnailURL
+        self.store = store
+        self.presentation = presentation
+        self.reduceMotion = reduceMotion
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        itemsForBeginning session: UIDragSession
+    ) -> [UIDragItem] {
+        guard presentation.begin(photoID: photoID, store: store) else {
+            return []
+        }
+        return [
+            UIDragItem(
+                itemProvider: PhotoReviewNativeDragContract.itemProvider(
+                    photoID: photoID
+                )
+            )
+        ]
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        previewForLifting item: UIDragItem,
+        session: UIDragSession
+    ) -> UITargetedDragPreview? {
+        guard let sourceView = interaction.view,
+              let image = UIImage(contentsOfFile: thumbnailURL.path) else {
+            return nil
+        }
+        let previewView = UIImageView(image: image)
+        previewView.bounds = CGRect(
+            origin: .zero,
+            size: Self.previewSize
+        )
+        previewView.contentMode = .scaleAspectFill
+        previewView.clipsToBounds = true
+        previewView.layer.cornerRadius = Self.previewCornerRadius
+
+        let parameters = UIDragPreviewParameters()
+        parameters.visiblePath = UIBezierPath(
+            roundedRect: previewView.bounds,
+            cornerRadius: Self.previewCornerRadius
+        )
+        let target = UIDragPreviewTarget(
+            container: sourceView,
+            center: CGPoint(
+                x: sourceView.bounds.midX,
+                y: sourceView.bounds.midY
+            )
+        )
+        return UITargetedDragPreview(
+            view: previewView,
+            parameters: parameters,
+            target: target
+        )
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        session: UIDragSession,
+        didEndWith operation: UIDropOperation
+    ) {
+        // This source callback is delivered after both accepted and cancelled
+        // sessions, even when the drag never reaches this app's drop owner.
+        presentation.endNativeDragSession(
+            reduceMotion: reduceMotion
+        )
+    }
+}
+
+@MainActor
+private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
+    let photoID: StagedCapturePhoto.ID
+    let thumbnailURL: URL
+    let store: PhotoReviewStore
+    let presentation: PhotoReviewDragPresentation
+    let reduceMotion: Bool
+
+    func makeCoordinator() -> PhotoReviewNativeDragSourceDelegate {
+        PhotoReviewNativeDragSourceDelegate(
+            photoID: photoID,
+            thumbnailURL: thumbnailURL,
+            store: store,
+            presentation: presentation,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let interaction = UIDragInteraction(delegate: context.coordinator)
+        interaction.isEnabled = true
+        view.addInteraction(interaction)
+        return view
+    }
+
+    func updateUIView(
+        _ uiView: UIView,
+        context: Context
+    ) {
+        context.coordinator.update(
+            photoID: photoID,
+            thumbnailURL: thumbnailURL,
+            store: store,
+            presentation: presentation,
+            reduceMotion: reduceMotion
+        )
     }
 }
 
@@ -1677,6 +1820,16 @@ struct PhotoReviewView: View {
                     }
                 }
             }
+            .overlay {
+                PhotoReviewNativeDragSourceAttachment(
+                    photoID: photo.id,
+                    thumbnailURL: photo.thumbnailURL,
+                    store: store,
+                    presentation: dragPresentation,
+                    reduceMotion: reduceMotion
+                )
+                .accessibilityHidden(true)
+            }
 
             if index == 0 {
                 Text("Cover")
@@ -1701,30 +1854,6 @@ struct PhotoReviewView: View {
                 : 0
         )
         .opacity(dragPresentation.draggedPhotoID == photo.id ? 0.97 : 1)
-        .onDrag {
-            guard dragPresentation.begin(photoID: photo.id, store: store) else {
-                return NSItemProvider()
-            }
-            return PhotoReviewNativeDragContract.itemProvider(
-                photoID: photo.id
-            )
-        } preview: {
-            LocalCaptureImage(
-                url: photo.thumbnailURL,
-                maximumPixelSize: 180
-            )
-            .scaledToFill()
-            .frame(width: 76, height: 76)
-            .clipped()
-            .clipShape(.rect(cornerRadius: 12))
-            .onDisappear {
-                // The preview is the source-owned lifetime signal when an outside
-                // release does not reach this strip's destination callback.
-                dragPresentation.endNativeDragPreview(
-                    reduceMotion: reduceMotion
-                )
-            }
-        }
     }
 
     private func autoScrollThumbnailStripIfNeeded(
