@@ -39,7 +39,7 @@ struct VoiceNoteSheet: View {
             [.height(VoiceNotePresentation.sheetHeight), .medium],
             selection: $selectedDetent
         )
-        .interactiveDismissDisabled(!store.allowsInteractiveDismissal)
+        .interactiveDismissDisabled(true)
         .onAppear {
             if dynamicTypeSize.isAccessibilitySize {
                 selectedDetent = .medium

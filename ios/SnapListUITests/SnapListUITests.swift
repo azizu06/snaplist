@@ -333,6 +333,56 @@ final class SnapListUITests: XCTestCase {
         XCTAssertLessThan(elapsedIndex ?? .max, saveIndex ?? .max)
     }
 
+    func testVoiceNoteSheetRejectsSwipeAndCloseRestoresStableReopenTruth() {
+        let saved = launchVoiceNoteFixture(
+            "--voice-note-saved-playing-fixture"
+        )
+        let savedClose = saved.buttons["voice-note.close"]
+        let playback = saved.buttons["voice-note.playback"]
+        XCTAssertEqual(playback.label, "Pause voice note")
+
+        attemptVoiceNoteSwipeDismiss(in: saved)
+
+        XCTAssertTrue(savedClose.exists)
+        XCTAssertEqual(playback.label, "Pause voice note")
+
+        savedClose.tap()
+        let savedRow = saved.buttons["photo-review.voice"]
+        XCTAssertTrue(savedRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(savedRow.label, "Voice note, 0:12, collapsed")
+        savedRow.tap()
+        XCTAssertEqual(
+            saved.buttons["voice-note.playback"].label,
+            "Play voice note"
+        )
+        saved.buttons["voice-note.close"].tap()
+        saved.terminate()
+
+        let interrupted = launchVoiceNoteFixture(
+            "--voice-note-interrupted-fixture"
+        )
+        let interruptedCopy = interrupted.staticTexts[
+            "Recording stopped. Nothing was saved."
+        ]
+        XCTAssertTrue(interruptedCopy.exists)
+
+        attemptVoiceNoteSwipeDismiss(in: interrupted)
+
+        XCTAssertTrue(interrupted.buttons["voice-note.close"].exists)
+        XCTAssertTrue(interruptedCopy.exists)
+
+        interrupted.buttons["voice-note.close"].tap()
+        let emptyRow = interrupted.buttons["photo-review.voice"]
+        XCTAssertTrue(emptyRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(emptyRow.label, "Voice note, optional, collapsed")
+        emptyRow.tap()
+        XCTAssertTrue(
+            interrupted.buttons["voice-note.record"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(interruptedCopy.exists)
+    }
+
     func testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -1556,6 +1606,51 @@ final class SnapListUITests: XCTestCase {
         }
         app.launch()
         return app
+    }
+
+    private func launchVoiceNoteFixture(
+        _ fixtureArgument: String
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            fixtureArgument
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let voice = app.buttons["photo-review.voice"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 3))
+        voice.tap()
+        XCTAssertTrue(
+            app.buttons["voice-note.close"].waitForExistence(timeout: 2)
+        )
+        return app
+    }
+
+    private func attemptVoiceNoteSwipeDismiss(
+        in app: XCUIApplication
+    ) {
+        let sheetTitle = app.staticTexts["voice-note.title"]
+        XCTAssertTrue(sheetTitle.exists)
+        let destination = app.windows.firstMatch.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)
+        )
+        sheetTitle.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).press(
+            forDuration: 0.05,
+            thenDragTo: destination,
+            withVelocity: 1_000,
+            thenHoldForDuration: 0
+        )
     }
 
     private func addScreenshot(named name: String) {

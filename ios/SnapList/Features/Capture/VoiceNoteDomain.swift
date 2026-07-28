@@ -275,10 +275,6 @@ final class VoiceNoteStore {
     private var provisionalDuration: TimeInterval?
     private var pendingFocusRequest: VoiceNoteFocusRequest?
 
-    var allowsInteractiveDismissal: Bool {
-        provisionalURL == nil
-    }
-
     init(
         savedNote: VoiceNoteAsset? = nil,
         audio: VoiceNoteAudioClient,
@@ -332,8 +328,13 @@ final class VoiceNoteStore {
                 try audio.startRecording(to: url)
             } catch {
                 audio.stopRecording()
-                _ = discardPendingProvisional()
-                phase = .interrupted
+                if discardPendingProvisional() {
+                    phase = savedNote == nil
+                        ? .interrupted
+                        : .saved(isPlaying: false)
+                } else {
+                    phase = authoritativePhase
+                }
                 return
             }
             phase = .recording(elapsed: 0, level: 0)
@@ -397,6 +398,8 @@ final class VoiceNoteStore {
                     phase = savedNote == nil
                         ? .interrupted
                         : .saved(isPlaying: false)
+                } else {
+                    phase = authoritativePhase
                 }
             }
             return
@@ -429,13 +432,16 @@ final class VoiceNoteStore {
             return true
         }
         prepareProvisionalForCleanup()
-        guard discardPendingProvisional() else {
-            return false
-        }
-        phase = savedNote == nil ? .interrupted : .saved(isPlaying: false)
+        phase = authoritativePhase
         if savedNote != nil {
             pendingFocusRequest = .savedNoteSummary
         }
+        guard discardPendingProvisional() else {
+            return false
+        }
+        phase = savedNote == nil
+            ? .interrupted
+            : .saved(isPlaying: false)
         return true
     }
 
@@ -515,12 +521,12 @@ final class VoiceNoteStore {
         audio.stopPlaying()
         if provisionalURL != nil {
             prepareProvisionalForCleanup()
+            phase = authoritativePhase
             guard discardPendingProvisional() else {
-                pendingFocusRequest = .voiceNoteOpener
                 return false
             }
         }
-        phase = savedNote == nil ? .ready : .saved(isPlaying: false)
+        phase = authoritativePhase
         pendingFocusRequest = .voiceNoteOpener
         return true
     }
@@ -545,26 +551,16 @@ final class VoiceNoteStore {
             return true
         }
         prepareProvisionalForCleanup()
+        phase = authoritativePhase
         return discardPendingProvisional()
     }
 
     private func prepareProvisionalForCleanup() {
-        guard case .recording = phase else {
-            audio.stopRecording()
-            return
-        }
-
-        let elapsed = min(
-            max(audio.recordingSnapshot.elapsed, 0),
-            Self.maximumDuration
-        )
         audio.stopRecording()
-        if elapsed > 0 {
-            provisionalDuration = elapsed
-            phase = .takeReady(duration: elapsed)
-        } else {
-            phase = .interrupted
-        }
+    }
+
+    private var authoritativePhase: VoiceNotePhase {
+        savedNote == nil ? .ready : .saved(isPlaying: false)
     }
 
     private func discardPendingProvisional() -> Bool {

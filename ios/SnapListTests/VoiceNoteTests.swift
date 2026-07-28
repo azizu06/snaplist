@@ -159,18 +159,21 @@ final class VoiceNoteTests: XCTestCase {
         store.refreshRecording()
         files.discardError = .removalFailed
 
-        XCTAssertFalse(store.allowsInteractiveDismissal)
         XCTAssertFalse(store.cancelRecording())
         XCTAssertEqual(store.savedNote, prior)
-        XCTAssertEqual(store.phase, .takeReady(duration: 4))
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
         XCTAssertEqual(files.discardedURLs, [])
+        XCTAssertEqual(files.discardAttempts, [audio.provisionalURL])
 
         files.discardError = nil
         XCTAssertTrue(store.cancelRecording())
         XCTAssertEqual(store.savedNote, prior)
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
-        XCTAssertTrue(store.allowsInteractiveDismissal)
         XCTAssertEqual(files.discardedURLs, [audio.provisionalURL])
+        XCTAssertEqual(
+            files.discardAttempts,
+            [audio.provisionalURL, audio.provisionalURL]
+        )
 
         await store.rerecord()
         audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
@@ -181,16 +184,14 @@ final class VoiceNoteTests: XCTestCase {
         store.save()
         files.discardError = .removalFailed
 
-        XCTAssertFalse(store.allowsInteractiveDismissal)
         XCTAssertFalse(store.dismiss())
         XCTAssertEqual(store.savedNote, prior)
-        XCTAssertEqual(store.phase, .saveFailed)
+        XCTAssertEqual(store.phase, .saved(isPlaying: false))
 
         files.discardError = nil
         XCTAssertTrue(store.dismiss())
         XCTAssertEqual(store.savedNote, prior)
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
-        XCTAssertTrue(store.allowsInteractiveDismissal)
 
         files.deleteError = .removalFailed
         XCTAssertFalse(store.deleteSavedNote())
@@ -203,6 +204,95 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertNil(store.savedNote)
         XCTAssertEqual(store.phase, .ready)
         XCTAssertEqual(files.deletedAssets, [prior])
+    }
+
+    func testCanceledAndInterruptedCleanupDebtNeverBecomesSaveable() async {
+        let emptyAudio = VoiceNoteAudioClientStub(permission: .allowed)
+        let emptyFiles = VoiceNoteFileStoreStub()
+        let emptyStore = VoiceNoteStore(
+            audio: emptyAudio,
+            files: emptyFiles
+        )
+        await emptyStore.startRecording()
+        emptyAudio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 4,
+            averagePower: -20
+        )
+        emptyFiles.discardError = .removalFailed
+
+        XCTAssertFalse(emptyStore.cancelRecording())
+        XCTAssertEqual(emptyStore.phase, .ready)
+        XCTAssertNil(emptyStore.savedNote)
+        XCTAssertEqual(
+            emptyFiles.discardAttempts,
+            [emptyAudio.provisionalURL]
+        )
+
+        emptyFiles.discardError = nil
+        XCTAssertTrue(emptyStore.dismiss())
+        XCTAssertEqual(emptyStore.phase, .ready)
+        XCTAssertEqual(
+            emptyFiles.discardAttempts,
+            [emptyAudio.provisionalURL, emptyAudio.provisionalURL]
+        )
+        XCTAssertEqual(
+            emptyFiles.discardedURLs,
+            [emptyAudio.provisionalURL]
+        )
+        XCTAssertTrue(emptyStore.dismiss())
+        XCTAssertEqual(emptyFiles.discardAttempts.count, 2)
+
+        let priorFixture = makePriorNoteFixture()
+        await priorFixture.store.rerecord()
+        priorFixture.audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 3,
+            averagePower: -20
+        )
+        priorFixture.files.discardError = .removalFailed
+
+        priorFixture.store.handleInterruption()
+
+        XCTAssertEqual(priorFixture.store.savedNote, priorFixture.prior)
+        XCTAssertEqual(
+            priorFixture.store.phase,
+            .saved(isPlaying: false)
+        )
+        XCTAssertEqual(
+            priorFixture.files.discardAttempts,
+            [priorFixture.audio.provisionalURL]
+        )
+
+        priorFixture.files.discardError = nil
+        XCTAssertTrue(priorFixture.store.dismiss())
+        XCTAssertEqual(priorFixture.store.savedNote, priorFixture.prior)
+        XCTAssertEqual(
+            priorFixture.store.phase,
+            .saved(isPlaying: false)
+        )
+        XCTAssertEqual(
+            priorFixture.files.discardAttempts,
+            [
+                priorFixture.audio.provisionalURL,
+                priorFixture.audio.provisionalURL
+            ]
+        )
+        XCTAssertTrue(priorFixture.store.dismiss())
+        XCTAssertEqual(priorFixture.files.discardAttempts.count, 2)
+    }
+
+    func testCloseStopsPlaybackAndRestoresStableSavedTruth() {
+        let fixture = makePriorNoteFixture()
+        fixture.store.togglePlayback()
+        XCTAssertEqual(fixture.store.phase, .saved(isPlaying: true))
+
+        XCTAssertTrue(fixture.store.dismiss())
+
+        XCTAssertEqual(
+            fixture.store.phase,
+            .saved(isPlaying: false)
+        )
+        XCTAssertEqual(fixture.store.savedNote, fixture.prior)
+        XCTAssertEqual(fixture.audio.stopPlayingCount, 1)
     }
 
     func testSavedReplacementUsesDiscretePlaybackAndDeleteRemovesOnlyVoiceAsset() async throws {
@@ -468,6 +558,7 @@ private final class VoiceNoteAudioClientStub: VoiceNoteAudioClient {
     let provisionalURL = URL(fileURLWithPath: "/tmp/provisional.wav")
     var playedURLs: [URL] = []
     var pauseCount = 0
+    var stopPlayingCount = 0
     var interruptionHandler: (() -> Void)?
     var routeChangeHandler: (() -> Void)?
     var playbackFinishedHandler: (() -> Void)?
@@ -489,7 +580,9 @@ private final class VoiceNoteAudioClientStub: VoiceNoteAudioClient {
     func pausePlaying() {
         pauseCount += 1
     }
-    func stopPlaying() {}
+    func stopPlaying() {
+        stopPlayingCount += 1
+    }
 
     func finishRecordingAtTimeLimit() {
         recordingFinishedHandler?(.timeLimitReached)
@@ -504,6 +597,7 @@ private final class VoiceNoteFileStoreStub: VoiceNoteFileStoring {
 
     var committedURLs: [URL] = []
     var discardedURLs: [URL] = []
+    var discardAttempts: [URL] = []
     var commitError: StubError?
     var discardError: StubError?
     var deleteError: StubError?
@@ -533,6 +627,7 @@ private final class VoiceNoteFileStoreStub: VoiceNoteFileStoring {
     }
 
     func discardProvisional(at url: URL) throws {
+        discardAttempts.append(url)
         if let discardError {
             throw discardError
         }

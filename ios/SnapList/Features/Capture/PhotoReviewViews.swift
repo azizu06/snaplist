@@ -1628,17 +1628,44 @@ final class PhotoReviewLiveSession {
               (1...5).contains(request.photos.count) else {
             return nil
         }
+#if DEBUG
+        let launchArguments = ProcessInfo.processInfo.arguments
+        let savedNote = launchArguments.contains(
+            "--voice-note-saved-playing-fixture"
+        )
+            ? VoiceNoteAsset(
+                url: URL(
+                    fileURLWithPath:
+                        "/tmp/snaplist-voice-note-ui-fixture.wav"
+                ),
+                duration: 12
+            )
+            : nil
+#else
+        let savedNote: VoiceNoteAsset? = nil
+#endif
         let voiceNoteStore = VoiceNoteStore(
+            savedNote: savedNote,
             audio: AVFoundationVoiceNoteAudioClient(),
             files: VoiceNoteLocalFileStore()
         )
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains(
+        if launchArguments.contains(
             "--voice-note-take-ready-fixture"
         ) {
             voiceNoteStore.applyLaunchFixturePhase(
                 .takeReady(duration: 7)
             )
+        } else if launchArguments.contains(
+            "--voice-note-saved-playing-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(
+                .saved(isPlaying: true)
+            )
+        } else if launchArguments.contains(
+            "--voice-note-interrupted-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(.interrupted)
         }
 #endif
         return PhotoReviewLiveSession(
