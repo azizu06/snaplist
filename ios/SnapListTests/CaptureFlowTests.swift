@@ -3981,6 +3981,71 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
+    func testPhotoReviewNativeSourceMapsFivePhotoTouchToExactIdentity() {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-native-source-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let photos = PhotoReviewFixtureView.photos(
+            for: .fivePhotos,
+            rootDirectory: root
+        )
+        let frames = Dictionary(
+            uniqueKeysWithValues: photos.enumerated().map { index, photo in
+                (
+                    photo.id,
+                    CGRect(
+                        x: CGFloat(index) * 88,
+                        y: 0,
+                        width: 76,
+                        height: 98
+                    )
+                )
+            }
+        )
+
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { location in
+                PhotoReviewNativeDragSourceGeometry.source(
+                    at: location,
+                    photos: photos,
+                    frames: frames
+                )
+            }
+        )
+        let sourceView = UIView(
+            frame: CGRect(x: 0, y: 0, width: 440, height: 98)
+        )
+        let interaction = UIDragInteraction(delegate: source)
+        sourceView.addInteraction(interaction)
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(x: 38, y: 38)
+
+        let items = source.dragInteraction(
+            interaction,
+            itemsForBeginning: session
+        )
+
+        XCTAssertEqual(
+            items.first.flatMap {
+                PhotoReviewNativeDragContract.photoID(
+                    from: $0.itemProvider
+                )
+            },
+            photos[0].id
+        )
+        XCTAssertEqual(presentation.draggedPhotoID, photos[0].id)
+    }
+
     func testPhotoReviewStripDropGeometryMapsKnownThirdIdentityToCover() {
         let photos = makeDragPhotos()
         let restingFrames = [
@@ -4158,12 +4223,17 @@ final class CaptureFlowTests: XCTestCase {
         let photos = makeDragPhotos()
         let outsideStore = PhotoReviewStore(photos: photos)
         let outside = PhotoReviewDragPresentation()
-        let outsideSource = PhotoReviewNativeDragSourceDelegate(
+        let outsideResolvedSource = PhotoReviewNativeDragSource(
             photoID: photos[2].id,
             thumbnailURL: photos[2].thumbnailURL,
+            frame: .zero
+        )
+        let outsideSource = PhotoReviewNativeDragSourceDelegate(
             store: outsideStore,
             presentation: outside,
-            reduceMotion: true
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in outsideResolvedSource }
         )
         let outsideInteraction = UIDragInteraction(delegate: outsideSource)
         let outsideSession = PhotoReviewDragSessionStub()
@@ -4211,12 +4281,17 @@ final class CaptureFlowTests: XCTestCase {
 
         let committedStore = PhotoReviewStore(photos: photos)
         let committed = PhotoReviewDragPresentation()
-        let committedSource = PhotoReviewNativeDragSourceDelegate(
+        let committedResolvedSource = PhotoReviewNativeDragSource(
             photoID: photos[2].id,
             thumbnailURL: photos[2].thumbnailURL,
+            frame: .zero
+        )
+        let committedSource = PhotoReviewNativeDragSourceDelegate(
             store: committedStore,
             presentation: committed,
-            reduceMotion: true
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in committedResolvedSource }
         )
         let committedInteraction = UIDragInteraction(
             delegate: committedSource
@@ -4285,13 +4360,20 @@ final class CaptureFlowTests: XCTestCase {
             )
         )
 
-        let source = PhotoReviewNativeDragSourceDelegate(
+        let resolvedSource = PhotoReviewNativeDragSource(
             photoID: photos[2].id,
             thumbnailURL: photos[2].thumbnailURL,
+            frame: .zero
+        )
+        let sourceAtLocation: (CGPoint) -> PhotoReviewNativeDragSource? = {
+            _ in resolvedSource
+        }
+        let source = PhotoReviewNativeDragSourceDelegate(
             store: store,
             presentation: presentation,
             reduceMotion: true,
-            isEnabled: false
+            isEnabled: false,
+            sourceAtLocation: sourceAtLocation
         )
         let sourceInteraction = UIDragInteraction(delegate: source)
         let session = PhotoReviewDragSessionStub()
@@ -4306,12 +4388,11 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(presentation.draggedPhotoID)
 
         source.update(
-            photoID: photos[2].id,
-            thumbnailURL: photos[2].thumbnailURL,
             store: store,
             presentation: presentation,
             reduceMotion: true,
-            isEnabled: true
+            isEnabled: true,
+            sourceAtLocation: sourceAtLocation
         )
         session.items = source.dragInteraction(
             sourceInteraction,
@@ -4325,12 +4406,11 @@ final class CaptureFlowTests: XCTestCase {
         )
 
         source.update(
-            photoID: photos[2].id,
-            thumbnailURL: photos[2].thumbnailURL,
             store: store,
             presentation: presentation,
             reduceMotion: true,
-            isEnabled: false
+            isEnabled: false,
+            sourceAtLocation: sourceAtLocation
         )
 
         XCTAssertEqual(store.photos, photos)
@@ -4400,12 +4480,11 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(presentation.consumeAnnouncement())
 
         source.update(
-            photoID: photos[2].id,
-            thumbnailURL: photos[2].thumbnailURL,
             store: store,
             presentation: presentation,
             reduceMotion: true,
-            isEnabled: true
+            isEnabled: true,
+            sourceAtLocation: sourceAtLocation
         )
         session.items = source.dragInteraction(
             sourceInteraction,
@@ -6834,6 +6913,7 @@ private final class PhotoReviewDragSessionStub: NSObject,
     UIDragSession,
     UIDropSession {
     var items: [UIDragItem] = []
+    var currentLocation = CGPoint.zero
     var allowsMoveOperation = true
     var isRestrictedToDraggingApplication = true
     var localContext: Any?
@@ -6842,7 +6922,7 @@ private final class PhotoReviewDragSessionStub: NSObject,
     var progressIndicatorStyle: UIDropSessionProgressIndicatorStyle = .default
 
     func location(in _: UIView) -> CGPoint {
-        .zero
+        currentLocation
     }
 
     func hasItemsConforming(

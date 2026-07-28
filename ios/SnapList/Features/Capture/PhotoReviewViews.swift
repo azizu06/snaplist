@@ -41,6 +41,33 @@ enum PhotoReviewNativeDragContract {
     }
 }
 
+struct PhotoReviewNativeDragSource: Equatable {
+    let photoID: StagedCapturePhoto.ID
+    let thumbnailURL: URL
+    let frame: CGRect
+}
+
+enum PhotoReviewNativeDragSourceGeometry {
+    static func source(
+        at location: CGPoint,
+        photos: [StagedCapturePhoto],
+        frames: [StagedCapturePhoto.ID: CGRect]
+    ) -> PhotoReviewNativeDragSource? {
+        photos.lazy.compactMap { photo in
+            guard let frame = frames[photo.id],
+                  frame.contains(location) else {
+                return nil
+            }
+            return PhotoReviewNativeDragSource(
+                photoID: photo.id,
+                thumbnailURL: photo.thumbnailURL,
+                frame: frame
+            )
+        }
+        .first
+    }
+}
+
 enum PhotoReviewStripDropGeometry {
     static func destinationIndex(
         at location: CGPoint,
@@ -306,30 +333,30 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
     private static let previewSize = CGSize(width: 76, height: 76)
     private static let previewCornerRadius: CGFloat = 12
 
-    private var photoID: StagedCapturePhoto.ID
-    private var thumbnailURL: URL
     private var store: PhotoReviewStore
     private var presentation: PhotoReviewDragPresentation
     private var reduceMotion: Bool
     private(set) var isEnabled: Bool
+    private var sourceAtLocation:
+        (CGPoint) -> PhotoReviewNativeDragSource?
+    private var activeSource: PhotoReviewNativeDragSource?
     private weak var attachedView: UIView?
     private var dragInteraction: UIDragInteraction?
 
     init(
-        photoID: StagedCapturePhoto.ID,
-        thumbnailURL: URL,
         store: PhotoReviewStore,
         presentation: PhotoReviewDragPresentation,
         reduceMotion: Bool,
-        isEnabled: Bool = true
+        isEnabled: Bool,
+        sourceAtLocation: @escaping
+            (CGPoint) -> PhotoReviewNativeDragSource?
     ) {
-        self.photoID = photoID
-        self.thumbnailURL = thumbnailURL
         self.store = store
         self.presentation = presentation
         self.reduceMotion = reduceMotion
         self.isEnabled = isEnabled
-        if !isEnabled, presentation.draggedPhotoID == photoID {
+        self.sourceAtLocation = sourceAtLocation
+        if !isEnabled {
             presentation.suspendNativeDragSessionForInteractionLock(
                 reduceMotion: reduceMotion
             )
@@ -337,24 +364,24 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
     }
 
     func update(
-        photoID: StagedCapturePhoto.ID,
-        thumbnailURL: URL,
         store: PhotoReviewStore,
         presentation: PhotoReviewDragPresentation,
         reduceMotion: Bool,
-        isEnabled: Bool
+        isEnabled: Bool,
+        sourceAtLocation: @escaping
+            (CGPoint) -> PhotoReviewNativeDragSource?
     ) {
-        self.photoID = photoID
-        self.thumbnailURL = thumbnailURL
         self.store = store
         self.presentation = presentation
         self.reduceMotion = reduceMotion
         self.isEnabled = isEnabled
+        self.sourceAtLocation = sourceAtLocation
         dragInteraction?.isEnabled = isEnabled
-        if !isEnabled, presentation.draggedPhotoID == photoID {
+        if !isEnabled {
             presentation.suspendNativeDragSessionForInteractionLock(
                 reduceMotion: reduceMotion
             )
+            activeSource = nil
         }
     }
 
@@ -383,14 +410,20 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         _ interaction: UIDragInteraction,
         itemsForBeginning session: UIDragSession
     ) -> [UIDragItem] {
+        let location = interaction.view.map(session.location(in:)) ?? .zero
         guard isEnabled,
-              presentation.begin(photoID: photoID, store: store) else {
+              let source = sourceAtLocation(location),
+              presentation.begin(
+                photoID: source.photoID,
+                store: store
+              ) else {
             return []
         }
+        activeSource = source
         return [
             UIDragItem(
                 itemProvider: PhotoReviewNativeDragContract.itemProvider(
-                    photoID: photoID
+                    photoID: source.photoID
                 )
             )
         ]
@@ -402,7 +435,10 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         session: UIDragSession
     ) -> UITargetedDragPreview? {
         guard let sourceView = interaction.view,
-              let image = UIImage(contentsOfFile: thumbnailURL.path) else {
+              let activeSource,
+              let image = UIImage(
+                contentsOfFile: activeSource.thumbnailURL.path
+              ) else {
             return nil
         }
         let previewView = UIImageView(image: image)
@@ -422,8 +458,8 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         let target = UIDragPreviewTarget(
             container: sourceView,
             center: CGPoint(
-                x: sourceView.bounds.midX,
-                y: sourceView.bounds.midY
+                x: activeSource.frame.midX,
+                y: activeSource.frame.midY
             )
         )
         return UITargetedDragPreview(
@@ -443,26 +479,26 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         presentation.endNativeDragSession(
             reduceMotion: reduceMotion
         )
+        activeSource = nil
     }
 }
 
 @MainActor
 private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
-    let photoID: StagedCapturePhoto.ID
-    let thumbnailURL: URL
     let store: PhotoReviewStore
     let presentation: PhotoReviewDragPresentation
     let reduceMotion: Bool
     let isEnabled: Bool
+    let sourceAtLocation:
+        (CGPoint) -> PhotoReviewNativeDragSource?
 
     func makeCoordinator() -> PhotoReviewNativeDragSourceDelegate {
         PhotoReviewNativeDragSourceDelegate(
-            photoID: photoID,
-            thumbnailURL: thumbnailURL,
             store: store,
             presentation: presentation,
             reduceMotion: reduceMotion,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            sourceAtLocation: sourceAtLocation
         )
     }
 
@@ -479,14 +515,13 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
         context: Context
     ) {
         context.coordinator.update(
-            photoID: photoID,
-            thumbnailURL: thumbnailURL,
             store: store,
             presentation: presentation,
             reduceMotion: reduceMotion,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            sourceAtLocation: sourceAtLocation
         )
-        uiView.attachToButtonHitView()
+        uiView.attachToNearestScrollView()
     }
 
     static func dismantleUIView(
@@ -502,27 +537,22 @@ private struct PhotoReviewNativeDragSourceAttachment: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            attachToButtonHitView()
+            attachToNearestScrollView()
         }
 
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            attachToButtonHitView()
-        }
-
-        func attachToButtonHitView() {
-            guard let window else {
+        func attachToNearestScrollView() {
+            guard window != nil else {
                 coordinator?.detach()
                 return
             }
-            let center = CGPoint(x: bounds.midX, y: bounds.midY)
-            let pointInWindow = convert(center, to: window)
-            guard let hitView = window.hitTest(pointInWindow, with: nil),
-                  hitView !== self else {
-                coordinator?.detach()
-                return
+            var ancestor = superview
+            while let view = ancestor {
+                if let scrollView = view as? UIScrollView {
+                    coordinator?.attach(to: scrollView)
+                    return
+                }
+                ancestor = view.superview
             }
-            coordinator?.attach(to: hitView)
         }
     }
 }
@@ -1849,6 +1879,19 @@ struct PhotoReviewView: View {
                             value: geometry.size.width
                         )
                     }
+                    PhotoReviewNativeDragSourceAttachment(
+                        store: store,
+                        presentation: dragPresentation,
+                        reduceMotion: reduceMotion,
+                        isEnabled: nativeDragInteractionsEnabled,
+                        sourceAtLocation: { location in
+                            PhotoReviewNativeDragSourceGeometry.source(
+                                at: location,
+                                photos: store.photos,
+                                frames: thumbnailFrames
+                            )
+                        }
+                    )
                     PhotoReviewNativeDropAttachment(
                         store: store,
                         presentation: dragPresentation,
@@ -1950,17 +1993,6 @@ struct PhotoReviewView: View {
                         performAccessibilityAction(.makeCover, photoID: photo.id)
                     }
                 }
-            }
-            .background {
-                PhotoReviewNativeDragSourceAttachment(
-                    photoID: photo.id,
-                    thumbnailURL: photo.thumbnailURL,
-                    store: store,
-                    presentation: dragPresentation,
-                    reduceMotion: reduceMotion,
-                    isEnabled: nativeDragInteractionsEnabled
-                )
-                .accessibilityHidden(true)
             }
 
             if index == 0 {
