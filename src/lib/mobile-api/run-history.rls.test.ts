@@ -23,9 +23,11 @@ const DATABASE_URL = resolveLocalTestDatabaseUrl(
 const OWNER_RUN_NEWER = "37500000-0000-4000-8000-000000000002";
 const OWNER_RUN_MUTATED = "37500000-0000-4000-8000-000000000001";
 const FOREIGN_RUN = "37500000-0000-4000-8000-000000000999";
+const FOREIGN_RUN_OLDER = "37500000-0000-4000-8000-000000000998";
 const OWNER_ITEM_NEWER = "37500000-0000-4000-8000-000000000012";
 const OWNER_ITEM_MUTATED = "37500000-0000-4000-8000-000000000011";
 const FOREIGN_ITEM = "37500000-0000-4000-8000-000000000019";
+const FOREIGN_ITEM_OLDER = "37500000-0000-4000-8000-000000000018";
 const TRANSFER_RECOVERY_ID = "37500000-0000-4000-8000-000000000021";
 const TRANSFER_LEASE_TOKEN = "37500000-0000-4000-8000-000000000022";
 
@@ -71,7 +73,8 @@ beforeAll(async () => {
        values
          ($1::uuid, $4, '{"brand":"Canon","model":"AE-1"}'::jsonb, array[$6::text]),
          ($2::uuid, $4, '{"brand":"Vintage Pyrex","model":"bowl set"}'::jsonb, array[$7::text]),
-         ($3::uuid, $5, '{"brand":"Foreign","model":"Run"}'::jsonb, array[$8::text])`,
+         ($3::uuid, $5, '{"brand":"Foreign","model":"Run"}'::jsonb, array[$8::text]),
+         ($9::uuid, $5, '{"brand":"Foreign","model":"Older run"}'::jsonb, array[$10::text])`,
       [
         OWNER_ITEM_NEWER,
         OWNER_ITEM_MUTATED,
@@ -81,6 +84,8 @@ beforeAll(async () => {
         `${ownerId}/items/newer.jpg`,
         `${ownerId}/items/mutated.jpg`,
         `${foreignId}/items/foreign.jpg`,
+        FOREIGN_ITEM_OLDER,
+        `${foreignId}/items/foreign-older.jpg`,
       ],
     );
     await database.query(
@@ -89,7 +94,8 @@ beforeAll(async () => {
        ) values
          ($1::uuid, $4, $6::uuid, 'run-history-owner-newer', '2026-07-19T18:01:00.000Z'),
          ($2::uuid, $4, $7::uuid, 'run-history-owner-mutated', '2026-07-19T17:59:00.000Z'),
-         ($3::uuid, $5, $8::uuid, 'run-history-foreign', '2026-07-19T18:02:00.000Z')`,
+         ($3::uuid, $5, $8::uuid, 'run-history-foreign', '2026-07-19T18:02:00.000Z'),
+         ($9::uuid, $5, $10::uuid, 'run-history-foreign-older', '2026-07-19T17:58:00.000Z')`,
       [
         OWNER_RUN_NEWER,
         OWNER_RUN_MUTATED,
@@ -99,6 +105,8 @@ beforeAll(async () => {
         OWNER_ITEM_NEWER,
         OWNER_ITEM_MUTATED,
         FOREIGN_ITEM,
+        FOREIGN_RUN_OLDER,
+        FOREIGN_ITEM_OLDER,
       ],
     );
     await database.query("commit");
@@ -250,6 +258,23 @@ describe.runIf(await stackReachable())(
 
     it("moves run history to the exact new tenant without old-owner visibility", async () => {
       const handle = runHistoryHandler();
+      const recipientFirstResponse = await handle(
+        new Request("http://localhost/v1/runs?limit=1", {
+          headers: { authorization: `Bearer ${foreignToken}` },
+        }),
+      );
+      expect(recipientFirstResponse.status).toBe(200);
+      const recipientFirst = await recipientFirstResponse.json() as {
+        data: {
+          entries: Array<{ run: { id: string } }>;
+          nextCursor: string | null;
+        };
+      };
+      expect(recipientFirst.data.entries.map((entry) => entry.run.id)).toEqual([
+        FOREIGN_RUN,
+      ]);
+      expect(recipientFirst.data.nextCursor).toEqual(expect.any(String));
+
       const database = new Client({ connectionString: DATABASE_URL });
       await database.connect();
       try {
@@ -310,6 +335,14 @@ describe.runIf(await stackReachable())(
         await database.end();
       }
 
+      const recipientContinuationResponse = await handle(
+        new Request(
+          `http://localhost/v1/runs?limit=1&cursor=${
+            encodeURIComponent(recipientFirst.data.nextCursor!)
+          }`,
+          { headers: { authorization: `Bearer ${foreignToken}` } },
+        ),
+      );
       const ownerResponse = await handle(
         new Request("http://localhost/v1/runs?limit=50", {
           headers: { authorization: `Bearer ${ownerToken}` },
@@ -320,14 +353,28 @@ describe.runIf(await stackReachable())(
           headers: { authorization: `Bearer ${foreignToken}` },
         }),
       );
+      expect(recipientContinuationResponse.status).toBe(200);
       expect(ownerResponse.status).toBe(200);
       expect(foreignResponse.status).toBe(200);
+      const recipientContinuation = await recipientContinuationResponse.json() as {
+        data: {
+          entries: Array<{ run: { id: string } }>;
+          nextCursor: string | null;
+        };
+      };
       const owner = await ownerResponse.json() as {
         data: { entries: Array<{ run: { id: string } }> };
       };
       const foreign = await foreignResponse.json() as {
         data: { entries: Array<{ run: { id: string } }> };
       };
+      expect(
+        recipientContinuation.data.entries.map((entry) => entry.run.id),
+      ).toEqual([FOREIGN_RUN_OLDER]);
+      expect(recipientContinuation.data.nextCursor).toBeNull();
+      expect(
+        recipientContinuation.data.entries.map((entry) => entry.run.id),
+      ).not.toContain(OWNER_RUN_MUTATED);
       expect(owner.data.entries.map((entry) => entry.run.id)).not.toContain(
         OWNER_RUN_MUTATED,
       );
@@ -346,7 +393,7 @@ describe.runIf(await stackReachable())(
           [OWNER_RUN_MUTATED],
         );
         expect(ownership.rows).toEqual([
-          { user_id: foreignId, version_count: expect.any(Number) },
+          { user_id: foreignId, version_count: 1 },
         ]);
       } finally {
         await ledger.end();

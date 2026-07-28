@@ -53,7 +53,7 @@ describe("Trophy Wall run-history snapshot migration", () => {
     );
   });
 
-  it("moves every run ordering version to the new tenant during an authorized ownership transfer", () => {
+  it("reissues one fresh recipient version without rewriting an open snapshot", () => {
     const ownershipTransfer = migration.indexOf(
       "new.user_id is distinct from old.user_id",
     );
@@ -67,7 +67,13 @@ describe("Trophy Wall run-history snapshot migration", () => {
       /new\.user_id is distinct from old\.user_id[\s\S]*unnest\(array\[old\.user_id, new\.user_id\]\)[\s\S]*order by value[\s\S]*pg_advisory_xact_lock\([\s\S]*trophy-run-order:/i,
     );
     expect(migration).toMatch(
-      /update public\.pipeline_run_history_order_versions[\s\S]*set user_id = new\.user_id[\s\S]*where run_id = new\.id[\s\S]*and user_id = old\.user_id/i,
+      /delete from public\.pipeline_run_history_order_versions[\s\S]*where run_id = new\.id[\s\S]*and user_id = old\.user_id/i,
+    );
+    expect(migration).toMatch(
+      /new\.updated_at is not distinct from old\.updated_at[\s\S]*new\.user_id is not distinct from old\.user_id[\s\S]*insert into public\.pipeline_run_history_order_versions[\s\S]*new\.user_id/i,
+    );
+    expect(migration).not.toMatch(
+      /update public\.pipeline_run_history_order_versions[\s\S]*set user_id = new\.user_id/i,
     );
   });
 

@@ -58,7 +58,8 @@ begin
     if new.user_id is distinct from old.user_id then
       -- Guest claim already serializes and transfers the owning run in one
       -- transaction. Take both tenant history locks in stable order before
-      -- moving every frozen version with that same run.
+      -- removing the prior owner's frozen versions. The insert below records
+      -- one fresh recipient-owned revision without changing an open snapshot.
       for v_lock_user in
         select value
         from unnest(array[old.user_id, new.user_id]) value
@@ -69,8 +70,7 @@ begin
         );
       end loop;
 
-      update public.pipeline_run_history_order_versions
-      set user_id = new.user_id
+      delete from public.pipeline_run_history_order_versions
       where run_id = new.id
         and user_id = old.user_id;
     elsif new.updated_at is not distinct from old.updated_at then
@@ -89,7 +89,8 @@ begin
   end if;
 
   if tg_op = 'UPDATE'
-    and new.updated_at is not distinct from old.updated_at then
+    and new.updated_at is not distinct from old.updated_at
+    and new.user_id is not distinct from old.user_id then
     return new;
   end if;
 
