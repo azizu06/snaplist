@@ -3,9 +3,13 @@
 require "json"
 
 inventory_path = File.expand_path(ARGV.fetch(0) do
-  abort "usage: validate-test-shards.rb [inventory.json]"
+  abort "usage: validate-test-shards.rb inventory.json [repository-root]"
 end)
-repository_root = File.expand_path("../..", __dir__)
+abort "too many arguments" if ARGV.length > 2
+
+repository_root = File.expand_path(
+  ARGV.fetch(1, File.expand_path("../..", __dir__))
+)
 
 begin
   inventory = JSON.parse(File.read(inventory_path))
@@ -55,7 +59,9 @@ unless duplicated_selectors.empty?
 end
 
 discovered_ui_selectors = []
-Dir.glob(File.join(repository_root, "ios/SnapListUITests/*.swift")).sort.each do |test_file|
+Dir.glob(
+  File.join(repository_root, "ios/SnapListUITests/**/*.swift")
+).sort.each do |test_file|
   current_test_class = nil
 
   File.foreach(test_file) do |line|

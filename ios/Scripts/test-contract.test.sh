@@ -29,6 +29,7 @@ job_typo_workflow_file=${temporary_directory}/job-typo-ios.yml
 job_run_scoped_workflow_file=${temporary_directory}/job-run-scoped-ios.yml
 omitted_shard_inventory_file=${temporary_directory}/omitted-test-shards.json
 duplicated_shard_inventory_file=${temporary_directory}/duplicated-test-shards.json
+nested_test_repository=${temporary_directory}/nested-test-repository
 
 mkdir -p "$fake_bin" "$target_repository"
 
@@ -239,6 +240,25 @@ assert_shard_inventory_fails_closed_on_omission_and_duplication() {
   ' "$shard_inventory_file" "$duplicated_shard_inventory_file"
 
   ! "$shard_inventory_validator" "$duplicated_shard_inventory_file" 2>/dev/null
+}
+
+assert_nested_ui_test_file_cannot_be_silently_omitted() {
+  mkdir -p "${nested_test_repository}/ios"
+  cp -R "${script_directory:h}/SnapListUITests" "${nested_test_repository}/ios/"
+  mkdir -p "${nested_test_repository}/ios/SnapListUITests/Flows"
+
+  cat > "${nested_test_repository}/ios/SnapListUITests/Flows/NewFlowTests.swift" <<'EOF'
+import XCTest
+
+final class NewFlowTests: XCTestCase {
+    func testNestedFlow() {}
+}
+EOF
+
+  ! "$shard_inventory_validator" \
+    "$shard_inventory_file" \
+    "$nested_test_repository" \
+    2>/dev/null
 }
 
 assert_declared_shard_selectors_reach_xcodebuild_once() {
@@ -497,6 +517,7 @@ for contract_case in \
   assert_focused_selector_uses_the_target_repository \
   assert_malformed_selectors_fail_before_xcodebuild \
   assert_shard_inventory_fails_closed_on_omission_and_duplication \
+  assert_nested_ui_test_file_cannot_be_silently_omitted \
   assert_declared_shard_selectors_reach_xcodebuild_once \
   assert_invalid_or_conflicting_shard_selection_fails_before_xcodebuild \
   assert_manual_dispatch_cannot_cancel_automatic_runs \
