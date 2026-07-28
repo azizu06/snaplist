@@ -194,6 +194,7 @@ enum TrophyWallCardIdentity: Hashable, Sendable {
 enum TrophyWallCardState: Hashable, Sendable {
     case pendingUpload
     case accepted
+    case workingPricing
 }
 
 struct TrophyWallOrderKey: Hashable, Comparable, Sendable {
@@ -242,6 +243,7 @@ struct TrophyWallCard: Hashable, Sendable {
     static func accepted(
         principalScope: TrophyWallPrincipalScope,
         runID: UUID,
+        state: TrophyWallCardState = .accepted,
         itemName: String? = nil,
         lastMeaningfulUpdateAt: Date
     ) -> TrophyWallCard {
@@ -251,7 +253,7 @@ struct TrophyWallCard: Hashable, Sendable {
         return TrophyWallCard(
             principalScope: principalScope,
             identity: .run(runID),
-            state: .accepted,
+            state: state,
             itemName: itemName,
             orderKey: TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
@@ -290,8 +292,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             }
             accessibilityLabel =
                 "\(itemName), pending upload. Local item, not sent yet."
-        case .accepted:
-            stateLabel = "Accepted"
+        case .accepted, .workingPricing:
             if case .run(let runID) = card.identity {
                 destination = .run(runID)
                 accessibilityIdentifier =
@@ -299,7 +300,17 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             } else {
                 return nil
             }
-            accessibilityLabel = "\(itemName), accepted."
+
+            switch card.state {
+            case .accepted:
+                stateLabel = "Accepted"
+                accessibilityLabel = "\(itemName), accepted."
+            case .workingPricing:
+                stateLabel = "Pricing"
+                accessibilityLabel = "\(itemName), working, pricing."
+            case .pendingUpload:
+                return nil
+            }
         }
     }
 }
@@ -308,6 +319,7 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
     let principalScope: TrophyWallPrincipalScope
     let runID: UUID
     let linkedLogicalIdentity: TrophyWallLogicalIdentity?
+    let state: TrophyWallCardState
     let lastMeaningfulUpdateAt: Date
     let itemName: String?
 
@@ -315,12 +327,14 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         principalScope: TrophyWallPrincipalScope,
         runID: UUID,
         linkedLogicalIdentity: TrophyWallLogicalIdentity?,
+        state: TrophyWallCardState = .accepted,
         lastMeaningfulUpdateAt: Date,
         itemName: String? = nil
     ) {
         self.principalScope = principalScope
         self.runID = runID
         self.linkedLogicalIdentity = linkedLogicalIdentity
+        self.state = state
         self.lastMeaningfulUpdateAt = lastMeaningfulUpdateAt
         self.itemName = itemName
     }
@@ -373,7 +387,8 @@ final class TrophyWallStore {
         let canonicalCard = TrophyWallCard.accepted(
             principalScope: principalScope,
             runID: acceptedRun.runID,
-            itemName: linkedItemName ?? acceptedRun.itemName ?? existingCanonicalItemName,
+            state: acceptedRun.state,
+            itemName: linkedItemName ?? existingCanonicalItemName ?? acceptedRun.itemName,
             lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt
         )
         cards.removeAll { $0.identity == canonicalCard.identity }
@@ -390,10 +405,7 @@ final class TrophyWallStore {
         guard requestedPrincipalScope == principalScope,
               acceptedRun.runID == runDetail.id,
               acceptedRun.itemID == runDetail.itemID,
-              acceptedRun.status == runDetail.status.rawValue,
-              acceptedRun.stage == runDetail.stage.rawValue,
-              runDetail.status == .queued,
-              runDetail.stage == .queued,
+              let state = Self.cardState(for: runDetail),
               let lastMeaningfulUpdateAt = Self.serverDate(
                   from: runDetail.lastMeaningfulUpdateAt
               ) else {
@@ -407,10 +419,22 @@ final class TrophyWallStore {
                 linkedLogicalIdentity: TrophyWallLogicalIdentity(
                     idempotencyKey: acceptedHandoff.idempotencyKey
                 ),
+                state: state,
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 itemName: runDetail.item?.title
             )
         )
+    }
+
+    private static func cardState(for runDetail: DurableRun) -> TrophyWallCardState? {
+        switch (runDetail.status, runDetail.stage) {
+        case (.queued, .queued):
+            .accepted
+        case (.running, .pricing):
+            .workingPricing
+        default:
+            nil
+        }
     }
 
     private static func serverDate(from value: String) -> Date? {

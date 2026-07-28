@@ -750,6 +750,51 @@ final class TrophyWallDomainTests: XCTestCase {
         }
     }
 
+    func testStoreProjectsLaterCanonicalWorkingStageFromAcceptedHandoffRunDetail() throws {
+        let fixture = TrophyWallTestFixture()
+        let laterRunDetail = try fixture.decodedRunDetail(
+            runID: fixture.runID,
+            itemID: fixture.itemID,
+            status: .running,
+            stage: .pricing
+        )
+        let store = fixture.makeStore()
+
+        for _ in 0..<2 {
+            store.ingest(
+                acceptedHandoff: fixture.acceptedHandoff,
+                runDetail: laterRunDetail,
+                principalScope: fixture.principal
+            )
+        }
+
+        XCTAssertEqual(store.cards.count, 2)
+        XCTAssertEqual(store.cards.first, fixture.initialCards[1])
+        XCTAssertEqual(
+            store.processingRows.map(\.id),
+            [.local(fixture.unrelatedLogicalID), .run(fixture.runID)]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.itemName),
+            [fixture.unrelatedItemName, fixture.matchedItemName]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.stateLabel),
+            ["Pending upload", "Pricing"]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.accessibilityLabel),
+            [
+                "\(fixture.unrelatedItemName), pending upload. Local item, not sent yet.",
+                "\(fixture.matchedItemName), working, pricing.",
+            ]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.destination),
+            [nil, .run(fixture.runID)]
+        )
+    }
+
     func testProcessingProjectionPreservesExactMergeTruthAndRunDestination() {
         let fixture = TrophyWallTestFixture()
         let acceptedRun = TrophyWallCanonicalAcceptedRun(
@@ -1130,14 +1175,19 @@ private struct TrophyWallTestFixture {
         )
     }
 
-    func decodedRunDetail(runID: UUID, itemID: UUID) throws -> DurableRun {
+    func decodedRunDetail(
+        runID: UUID,
+        itemID: UUID,
+        status: DurableRunStatus = .queued,
+        stage: DurableRunStage = .queued
+    ) throws -> DurableRun {
         let json = """
         {
           "id": "\(runID.uuidString.lowercased())",
           "itemId": "\(itemID.uuidString.lowercased())",
           "listingId": null,
-          "status": "queued",
-          "stage": "queued",
+          "status": "\(status.rawValue)",
+          "stage": "\(stage.rawValue)",
           "attemptCount": 0,
           "maxAttempts": 3,
           "schemaVersion": 1,
