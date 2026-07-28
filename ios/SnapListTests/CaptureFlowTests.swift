@@ -4748,6 +4748,82 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(presentation.draggedPhotoID)
     }
 
+    func testPhotoReviewNativeDropAutoScrollRequiresOverflowBeforeInsertionGap() throws {
+        let photos = makeDragPhotos()
+        func exerciseDrop(
+            entryContentWidth: CGFloat,
+            updateContentWidth: CGFloat
+        ) throws -> (autoScrollCount: Int, order: [StagedCapturePhoto]) {
+            let store = PhotoReviewStore(photos: photos)
+            let presentation = PhotoReviewDragPresentation()
+            var autoScrollCount = 0
+            let destination = PhotoReviewNativeDropAttachment.Coordinator(
+                store: store,
+                presentation: presentation,
+                reduceMotion: true,
+                isEnabled: true,
+                destinationIndex: { _ in 0 },
+                autoScroll: { _ in autoScrollCount += 1 }
+            )
+            let view = UIScrollView(
+                frame: CGRect(x: 0, y: 0, width: 400, height: 102)
+            )
+            view.contentSize = CGSize(width: entryContentWidth, height: 102)
+            destination.attach(to: view)
+            let interaction = try XCTUnwrap(
+                view.interactions
+                    .compactMap { $0 as? UIDropInteraction }
+                    .first
+            )
+            let session = PhotoReviewDragSessionStub()
+            session.currentLocation = CGPoint(x: 372, y: 51)
+            session.items = [
+                UIDragItem(
+                    itemProvider: PhotoReviewNativeDragContract.itemProvider(
+                        photoID: photos[2].id
+                    )
+                )
+            ]
+
+            destination.dropInteraction(interaction, sessionDidEnter: session)
+            view.contentSize = CGSize(width: updateContentWidth, height: 102)
+            XCTAssertEqual(
+                destination.dropInteraction(
+                    interaction,
+                    sessionDidUpdate: session
+                ).operation,
+                .move
+            )
+            destination.dropInteraction(interaction, sessionDidExit: session)
+            destination.dropInteraction(interaction, sessionDidEnter: session)
+            XCTAssertEqual(
+                destination.dropInteraction(
+                    interaction,
+                    sessionDidUpdate: session
+                ).operation,
+                .move
+            )
+            destination.dropInteraction(interaction, performDrop: session)
+            return (autoScrollCount, store.photos)
+        }
+
+        // The approved 62pt insertion gap turns 340pt into 402pt, but it must
+        // not create a scroll session for a strip that fit when the drag entered.
+        let fitting = try exerciseDrop(
+            entryContentWidth: 340,
+            updateContentWidth: 402
+        )
+        XCTAssertEqual(fitting.autoScrollCount, 0)
+        XCTAssertEqual(fitting.order, [photos[2], photos[0], photos[1]])
+
+        let overflowing = try exerciseDrop(
+            entryContentWidth: 520,
+            updateContentWidth: 582
+        )
+        XCTAssertEqual(overflowing.autoScrollCount, 2)
+        XCTAssertEqual(overflowing.order, [photos[2], photos[0], photos[1]])
+    }
+
     func testPhotoReviewNativeInteractionsFenceTransactionLocksAndResumeWithoutMutation() throws {
         let photos = makeDragPhotos()
         let store = PhotoReviewStore(photos: photos)

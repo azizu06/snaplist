@@ -869,6 +869,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         private var observeDrop: (PhotoReviewNativeDropEvent) -> Void
         private weak var attachedView: UIView?
         private var dropInteraction: UIDropInteraction?
+        private var sessionAllowsAutoScroll = false
+        private var autoScrollSessionIdentifier: ObjectIdentifier?
         var isInteractionAttached: Bool {
             dropInteraction != nil
         }
@@ -943,6 +945,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             }
             dropInteraction = nil
             attachedView = nil
+            sessionAllowsAutoScroll = false
+            autoScrollSessionIdentifier = nil
         }
 
         func dropInteraction(
@@ -958,6 +962,16 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         ) {
             guard isEnabled, admit(session: session) else {
                 return
+            }
+            let sessionIdentifier = ObjectIdentifier(session as AnyObject)
+            if autoScrollSessionIdentifier != sessionIdentifier {
+                autoScrollSessionIdentifier = sessionIdentifier
+                sessionAllowsAutoScroll = {
+                    guard let scrollView = interaction.view as? UIScrollView else {
+                        return false
+                    }
+                    return scrollView.contentSize.width > scrollView.bounds.width
+                }()
             }
             updateDestination(
                 at: sessionLocation(
@@ -980,7 +994,9 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
                 interaction: interaction
             )
             updateDestination(at: location)
-            autoScroll(location)
+            if sessionAllowsAutoScroll {
+                autoScroll(location)
+            }
             observeDrop(.updated)
             return UIDropProposal(operation: .move)
         }
@@ -1027,6 +1043,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             presentation.endNativeDragSession(
                 reduceMotion: reduceMotion
             )
+            sessionAllowsAutoScroll = false
+            autoScrollSessionIdentifier = nil
         }
 
         private func acceptedPhotoID(
