@@ -63,21 +63,45 @@ enum PhotoReviewStripDropGeometry {
             .index
     }
 
-    static func maximumFrameShift(
+    static func maximumPositiveWidthGrowth(
         from baseline: [StagedCapturePhoto.ID: CGRect],
         to current: [StagedCapturePhoto.ID: CGRect]
     ) -> CGFloat {
         baseline.compactMap { photoID, baselineFrame in
             current[photoID].map {
-                max(
-                    abs($0.minX - baselineFrame.minX),
-                    abs($0.width - baselineFrame.width)
-                )
+                max(0, $0.width - baselineFrame.width)
             }
         }
         .max() ?? 0
     }
 }
+
+#if DEBUG
+struct PhotoReviewRenderedInsertionGapObservation {
+    private(set) var maximumRenderedInsertionGap: CGFloat = 0
+    private var restingFrames: [StagedCapturePhoto.ID: CGRect] = [:]
+
+    mutating func observe(
+        frames: [StagedCapturePhoto.ID: CGRect],
+        isDragActive: Bool
+    ) {
+        // Preference delivery can trail performDrop, which clears drag identity.
+        // Latch rendered growth before an inactive delivery refreshes the baseline.
+        if !restingFrames.isEmpty {
+            maximumRenderedInsertionGap = max(
+                maximumRenderedInsertionGap,
+                PhotoReviewStripDropGeometry.maximumPositiveWidthGrowth(
+                    from: restingFrames,
+                    to: frames
+                )
+            )
+        }
+        if !isDragActive, !frames.isEmpty {
+            restingFrames = frames
+        }
+    }
+}
+#endif
 
 enum PhotoReviewDragTransitionDecision: String, Equatable {
     case animated
@@ -1264,9 +1288,8 @@ struct PhotoReviewView: View {
     @State private var thumbnailFrames: [StagedCapturePhoto.ID: CGRect] = [:]
     @State private var thumbnailStripViewportWidth: CGFloat = 0
 #if DEBUG
-    @State private var restingThumbnailFrames:
-        [StagedCapturePhoto.ID: CGRect] = [:]
-    @State private var observedRenderedInsertionGap: CGFloat = 0
+    @State private var renderedInsertionGapObservation =
+        PhotoReviewRenderedInsertionGapObservation()
     @State private var observedAutoScrollEdge: String?
 #endif
     @State private var pickerItems: [PhotosPickerItem] = []
@@ -1295,7 +1318,11 @@ struct PhotoReviewView: View {
 
 #if DEBUG
     private var dragObservationLabel: String {
-        let gap = Int(observedRenderedInsertionGap.rounded())
+        let gap = Int(
+            renderedInsertionGapObservation
+                .maximumRenderedInsertionGap
+                .rounded()
+        )
         let edge = observedAutoScrollEdge ?? "none"
         let transition =
             dragPresentation.lastTransitionDecision?.rawValue ?? "none"
@@ -1381,7 +1408,8 @@ struct PhotoReviewView: View {
                         .accessibilityLabel("Drag active")
                         .accessibilityIdentifier("photo-review.drag-active")
                 }
-                if observedRenderedInsertionGap > 0
+                if renderedInsertionGapObservation
+                    .maximumRenderedInsertionGap > 0
                     || observedAutoScrollEdge != nil
                     || dragPresentation.lastTransitionDecision != nil {
                     Color.clear
@@ -1568,7 +1596,10 @@ struct PhotoReviewView: View {
                 PhotoReviewThumbnailFramePreferenceKey.self
             ) { frames in
 #if DEBUG
-                observeRenderedInsertionGap(frames: frames)
+                renderedInsertionGapObservation.observe(
+                    frames: frames,
+                    isDragActive: dragPresentation.draggedPhotoID != nil
+                )
 #endif
                 thumbnailFrames = frames
             }
@@ -1684,27 +1715,6 @@ struct PhotoReviewView: View {
             .clipShape(.rect(cornerRadius: 12))
         }
     }
-
-#if DEBUG
-    private func observeRenderedInsertionGap(
-        frames: [StagedCapturePhoto.ID: CGRect]
-    ) {
-        guard dragPresentation.draggedPhotoID != nil else {
-            restingThumbnailFrames = frames
-            return
-        }
-        guard !restingThumbnailFrames.isEmpty else {
-            return
-        }
-        observedRenderedInsertionGap = max(
-            observedRenderedInsertionGap,
-            PhotoReviewStripDropGeometry.maximumFrameShift(
-                from: restingThumbnailFrames,
-                to: frames
-            )
-        )
-    }
-#endif
 
     private func autoScrollThumbnailStripIfNeeded(
         at location: CGPoint,

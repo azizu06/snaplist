@@ -4016,14 +4016,14 @@ final class CaptureFlowTests: XCTestCase {
             0
         )
         XCTAssertEqual(
-            PhotoReviewStripDropGeometry.maximumFrameShift(
+            PhotoReviewStripDropGeometry.maximumPositiveWidthGrowth(
                 from: restingFrames,
                 to: coverGapFrames
             ),
-            PhotoReviewDragLayout.insertionGap
+            0
         )
         XCTAssertEqual(
-            PhotoReviewStripDropGeometry.maximumFrameShift(
+            PhotoReviewStripDropGeometry.maximumPositiveWidthGrowth(
                 from: restingFrames,
                 to: leadingPaddedContainerFrames
             ),
@@ -4035,6 +4035,57 @@ final class CaptureFlowTests: XCTestCase {
                 photos: photos,
                 frames: coverGapFrames
             ),
+            0
+        )
+    }
+
+    func testPhotoReviewRenderedGapObservationLatchesDeferredWidthGrowthWithoutTreatingReorderAsGap() {
+        let photos = makeDragPhotos()
+        let restingFrames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 176, y: 0, width: 76, height: 98)
+        ]
+        let deferredCoverGapFrames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 138, height: 98),
+            photos[1].id: CGRect(x: 150, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 238, y: 0, width: 76, height: 98)
+        ]
+        let postDropReorderedFrames = [
+            photos[0].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 176, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 0, y: 0, width: 76, height: 98)
+        ]
+
+        var deferredGapObservation =
+            PhotoReviewRenderedInsertionGapObservation()
+        deferredGapObservation.observe(
+            frames: restingFrames,
+            isDragActive: false
+        )
+        deferredGapObservation.observe(
+            frames: deferredCoverGapFrames,
+            isDragActive: false
+        )
+
+        XCTAssertEqual(
+            deferredGapObservation.maximumRenderedInsertionGap,
+            PhotoReviewDragLayout.insertionGap
+        )
+
+        var reorderOnlyObservation =
+            PhotoReviewRenderedInsertionGapObservation()
+        reorderOnlyObservation.observe(
+            frames: restingFrames,
+            isDragActive: false
+        )
+        reorderOnlyObservation.observe(
+            frames: postDropReorderedFrames,
+            isDragActive: false
+        )
+
+        XCTAssertEqual(
+            reorderOnlyObservation.maximumRenderedInsertionGap,
             0
         )
     }
