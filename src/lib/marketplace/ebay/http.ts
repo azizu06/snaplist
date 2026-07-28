@@ -215,7 +215,14 @@ export class HttpEbayAdapter implements EbayAdapter {
         return result;
       }
       const existing = recovered?.offerId ?? existingOfferIdFrom(err);
-      if (!existing) throw err;
+      if (!existing) {
+        const conflict = err as EbayApiError;
+        throw new EbayWriteAmbiguousError(
+          "eBay reports an existing offer, but recovery could not identify it",
+          conflict.status,
+          conflict.body,
+        );
+      }
       // Update the recovered (unpublished) offer in place so price/description
       // are current, then publish.
       offerId = existing;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { HttpEbayAdapter } from "./http";
 import { MockEbayAdapter } from "./mock";
 import { publishListingToEbayAndNotify } from "./publish";
 import {
@@ -338,6 +339,58 @@ describe("publishListingToEbayAndNotify effective-price contract", () => {
         merchantLocationKey: "location-1",
       },
     });
+
+    // A same-generation recovery can learn only that eBay already has an
+    // offer, not which offer it is. That remains maybe-committed provenance.
+    listing.ebay_status = "failed";
+    listing.ebay_publish_claim_id = null;
+    const recoveryCalls: string[] = [];
+    const unresolvedConflictAdapter = new HttpEbayAdapter({
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        recoveryCalls.push(`${init?.method ?? "GET"} ${new URL(url).pathname}`);
+        if (url.includes("/inventory_item/")) {
+          return new Response(null, { status: 204 });
+        }
+        if (url.endsWith("/sell/inventory/v1/offer") && init?.method === "POST") {
+          return new Response(
+            JSON.stringify({
+              errors: [{
+                errorId: 25002,
+                message: "Offer entity already exists.",
+              }],
+            }),
+            { status: 400 },
+          );
+        }
+        if (url.includes("/sell/inventory/v1/offer?sku=")) {
+          return new Response(JSON.stringify({ offers: [] }), { status: 200 });
+        }
+        throw new Error(`unexpected fake eBay call: ${url}`);
+      }) as typeof fetch,
+      tokenProvider: {
+        getAccessToken: async () => "test-access-token",
+      },
+      env: () => ({ EBAY_BASE_URL: "https://mock-ebay.invalid" }),
+    });
+
+    const recoveryError = await publishListingToEbayAndNotify(
+      client,
+      "user-1",
+      listing.id,
+      unresolvedConflictAdapter,
+    ).catch((error: unknown) => error);
+
+    expect(recoveryCalls).toHaveLength(3);
+    expect(listing.ebay_publish_connection_generation).toBe(initialGeneration);
+    expect(listing.ebay_publish_binding).toEqual({
+      marketplaceId: "EBAY_US",
+      fulfillmentPolicyId: "fulfillment-1",
+      paymentPolicyId: "payment-1",
+      returnPolicyId: "return-1",
+      merchantLocationKey: "location-1",
+    });
+    expect(recoveryError).toBeInstanceOf(EbayWriteAmbiguousError);
 
     // Simulate claim expiry, then a reconnect that presents a new ready
     // generation. The prior maybe-committed attempt must remain pinned and the

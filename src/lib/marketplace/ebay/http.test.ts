@@ -490,7 +490,7 @@ describe("HttpEbayAdapter.publishListing", () => {
     expect(lookup?.init.body).toBeUndefined();
   });
 
-  it("rethrows the ORIGINAL 25002 conflict when the getOffers fallback also finds nothing", async () => {
+  it("keeps an unresolved 25002 recovery ambiguous when getOffers finds nothing", async () => {
     const { fetch } = fakeFetch((url, init) => {
       if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
       if (url.endsWith("/sell/inventory/v1/offer") && init.method === "POST") {
@@ -504,7 +504,7 @@ describe("HttpEbayAdapter.publishListing", () => {
     const adapter = new HttpEbayAdapter({ fetch, tokenProvider, env: () => sellerEnv });
 
     const err = await adapter.publishListing(request).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(EbayApiError);
+    expect(err).toBeInstanceOf(EbayWriteAmbiguousError);
     expect((err as EbayApiError).message).toMatch(/offer/i);
   });
 
