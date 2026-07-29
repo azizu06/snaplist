@@ -5088,6 +5088,24 @@ final class CaptureFlowTests: XCTestCase {
                 )
             )
         ]
+        func expectedLabel(perform outcome: String) -> String {
+            [
+                "attached:true",
+                "epoch:1",
+                "detached:0",
+                "detachedEpoch:0",
+                "host:88,24,320,98",
+                "content:0,0",
+                "dragInteractions:0",
+                "dropInteractions:1",
+                "canHandle:not-called",
+                "canHandleCalls:0",
+                "photo:none",
+                "entered:true",
+                "updated:true",
+                "perform:\(outcome)"
+            ].joined(separator: ",")
+        }
 
         destination.dropInteraction(
             interaction,
@@ -5102,7 +5120,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             observation.label,
-            "entered:true,updated:true,perform:not-called"
+            expectedLabel(perform: "not-called")
         )
         XCTAssertEqual(store.photos, photos)
 
@@ -5112,7 +5130,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             observation.label,
-            "entered:true,updated:true,perform:committed"
+            expectedLabel(perform: "committed")
         )
         XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
 
@@ -5133,10 +5151,190 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             observation.label,
-            "entered:true,updated:true,perform:rejected-admission"
+            expectedLabel(perform: "rejected-admission")
         )
         XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
         XCTAssertNil(presentation.draggedPhotoID)
+    }
+
+    func testPhotoReviewNativeDropObservationClassifiesAttachmentAdmissionAndEnterBoundary() throws {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        let frames = [
+            photos[0].id: CGRect(x: 0, y: 0, width: 76, height: 98),
+            photos[1].id: CGRect(x: 88, y: 0, width: 76, height: 98),
+            photos[2].id: CGRect(x: 176, y: 0, width: 76, height: 98)
+        ]
+        var observation = PhotoReviewNativeDropObservation()
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { location in
+                PhotoReviewNativeDragSourceGeometry.source(
+                    at: location,
+                    photos: photos,
+                    frames: frames
+                )
+            }
+        )
+        let destination = PhotoReviewNativeDropAttachment.Coordinator(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            destinationIndex: { _ in 0 },
+            autoScroll: { _ in },
+            observeDrop: { observation.observe($0) }
+        )
+        let host = makeNativeInteractionHost()
+        let sourceAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        let destinationAttachment =
+            PhotoReviewNativeStripInteractionAttachmentView()
+        host.stripContent.addSubview(sourceAttachment)
+        host.stripContent.addSubview(destinationAttachment)
+        defer {
+            sourceAttachment.dismantle()
+            destinationAttachment.dismantle()
+            host.cleanUp()
+        }
+
+        sourceAttachment.update(
+            shouldAttach: true,
+            attach: source.attach(to:),
+            detach: source.detach
+        )
+        destinationAttachment.update(
+            shouldAttach: true,
+            attach: destination.attach(to:),
+            detach: destination.detach
+        )
+
+        XCTAssertTrue(observation.isAttached)
+        XCTAssertEqual(observation.attachmentEpoch, 1)
+        XCTAssertEqual(observation.detachCount, 0)
+        XCTAssertEqual(observation.lastDetachedEpoch, 0)
+        XCTAssertEqual(
+            observation.hostBounds,
+            host.innerHorizontalStrip.bounds
+        )
+        XCTAssertEqual(
+            observation.hostContentSize,
+            host.innerHorizontalStrip.contentSize
+        )
+        XCTAssertEqual(observation.dragInteractionCount, 1)
+        XCTAssertEqual(observation.dropInteractionCount, 1)
+        XCTAssertEqual(observation.canHandleCallCount, 0)
+        XCTAssertEqual(observation.canHandleOutcome, "not-called")
+        XCTAssertNil(observation.canHandlePhotoID)
+
+        let sourceInteraction = try XCTUnwrap(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        let destinationInteraction = try XCTUnwrap(
+            host.innerHorizontalStrip.interactions
+                .compactMap { $0 as? UIDropInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(x: 214, y: 49)
+        session.items = source.dragInteraction(
+            sourceInteraction,
+            itemsForBeginning: session
+        )
+
+        XCTAssertEqual(
+            session.items.first.flatMap {
+                PhotoReviewNativeDragContract.photoID(
+                    from: $0.itemProvider
+                )
+            },
+            photos[2].id
+        )
+
+        let rejectedSession = PhotoReviewDragSessionStub()
+        rejectedSession.items = [
+            UIDragItem(
+                itemProvider: PhotoReviewNativeDragContract.itemProvider(
+                    photoID: UUID(
+                        uuidString: "46000000-0000-4000-8000-000000000099"
+                    )!
+                )
+            )
+        ]
+        XCTAssertFalse(
+            destination.dropInteraction(
+                destinationInteraction,
+                canHandle: rejectedSession
+            )
+        )
+        XCTAssertEqual(observation.canHandleCallCount, 1)
+        XCTAssertEqual(observation.canHandleOutcome, "rejected")
+        XCTAssertNil(observation.canHandlePhotoID)
+
+        XCTAssertTrue(
+            destination.dropInteraction(
+                destinationInteraction,
+                canHandle: session
+            )
+        )
+        XCTAssertEqual(observation.canHandleCallCount, 2)
+        XCTAssertEqual(observation.canHandleOutcome, "accepted")
+        XCTAssertEqual(observation.canHandlePhotoID, photos[2].id)
+
+        session.currentLocation = CGPoint(x: 38, y: 49)
+        destination.dropInteraction(
+            destinationInteraction,
+            sessionDidEnter: session
+        )
+        XCTAssertEqual(
+            destination.dropInteraction(
+                destinationInteraction,
+                sessionDidUpdate: session
+            ).operation,
+            .move
+        )
+        destination.dropInteraction(
+            destinationInteraction,
+            performDrop: session
+        )
+
+        XCTAssertTrue(observation.didEnter)
+        XCTAssertTrue(observation.didUpdate)
+        XCTAssertEqual(observation.performDropOutcome, "committed")
+        XCTAssertEqual(store.photos, [photos[2], photos[0], photos[1]])
+
+        destinationAttachment.dismantle()
+
+        XCTAssertFalse(observation.isAttached)
+        XCTAssertEqual(observation.attachmentEpoch, 1)
+        XCTAssertEqual(observation.detachCount, 1)
+        XCTAssertEqual(observation.lastDetachedEpoch, 1)
+
+        destinationAttachment.update(
+            shouldAttach: true,
+            attach: destination.attach(to:),
+            detach: destination.detach
+        )
+
+        XCTAssertTrue(observation.isAttached)
+        XCTAssertEqual(observation.attachmentEpoch, 2)
+        XCTAssertEqual(observation.detachCount, 1)
+        XCTAssertEqual(observation.lastDetachedEpoch, 1)
+        XCTAssertEqual(observation.dragInteractionCount, 1)
+        XCTAssertEqual(observation.dropInteractionCount, 1)
+
+        destinationAttachment.dismantle()
+
+        XCTAssertFalse(observation.isAttached)
+        XCTAssertEqual(observation.attachmentEpoch, 2)
+        XCTAssertEqual(observation.detachCount, 2)
+        XCTAssertEqual(observation.lastDetachedEpoch, 2)
     }
 
     func testPhotoReviewNativeDropAutoScrollRequiresOverflowBeforeInsertionGap() throws {
