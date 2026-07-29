@@ -907,6 +907,108 @@ final class TrophyWallDomainTests: XCTestCase {
         try assertLockedCanonicalProjection(.needsRetry)
     }
 
+    func testStoreTombstonesNewerRetryCleanupAgainstOlderRetryableReplay() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let retryablePage = try fixture.historyPage(
+            status: .failed,
+            stage: .pricing,
+            terminalOutcome: .failed,
+            retryTruth: (canRetry: true, workPreserved: true),
+            historyOrderAt: Date(timeIntervalSince1970: 5),
+            lastMeaningfulUpdateAt: "1970-01-01T00:00:05.000Z"
+        )
+        let retentionCleanedPage = try fixture.historyPage(
+            status: .failed,
+            stage: .pricing,
+            terminalOutcome: .failed,
+            retryTruth: (canRetry: false, workPreserved: false),
+            canStartNewCapture: true,
+            historyOrderAt: Date(timeIntervalSince1970: 6),
+            lastMeaningfulUpdateAt: "1970-01-01T00:00:06.000Z",
+            retentionCleanedAt: "1970-01-01T00:00:06.000Z"
+        )
+
+        store.ingest(historyPage: retryablePage, principalScope: fixture.principal)
+        XCTAssertEqual(
+            store.processingRows.map(\.stateLabel),
+            ["Pending upload", "Needs retry · Upload didn't finish."]
+        )
+
+        store.ingest(historyPage: retentionCleanedPage, principalScope: fixture.principal)
+        store.ingest(historyPage: retryablePage, principalScope: fixture.principal)
+        store.ingest(
+            acceptedHandoff: fixture.acceptedHandoff,
+            runDetail: try fixture.decodedRunDetail(
+                runID: fixture.runID,
+                itemID: fixture.itemID
+            ),
+            principalScope: fixture.principal
+        )
+
+        XCTAssertEqual(store.cards, [fixture.initialCards[1]])
+        XCTAssertEqual(
+            store.processingRows.map(\.id),
+            [.local(fixture.unrelatedLogicalID)]
+        )
+        XCTAssertEqual(store.processingRows.map(\.stateLabel), ["Pending upload"])
+        XCTAssertEqual(store.processingRows.map(\.destination), [nil])
+    }
+
+    func testStoreKeepsValidNeedsRetryCardForMalformedNewerCanonicalTruth() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let initialOrderKey = TrophyWallOrderKey(
+            lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 5),
+            stableIdentity: fixture.runID.uuidString.lowercased()
+        )
+        let olderRetryablePage = try fixture.historyPage(
+            status: .failed,
+            stage: .pricing,
+            terminalOutcome: .failed,
+            retryTruth: (canRetry: true, workPreserved: true),
+            historyOrderAt: Date(timeIntervalSince1970: 4),
+            lastMeaningfulUpdateAt: "1970-01-01T00:00:04.000Z"
+        )
+        let malformedPage = try fixture.historyPage(
+            status: .failed,
+            stage: .pricing,
+            terminalOutcome: .canceled,
+            retryTruth: (canRetry: true, workPreserved: true),
+            historyOrderAt: Date(timeIntervalSince1970: 6),
+            lastMeaningfulUpdateAt: "1970-01-01T00:00:06.000Z"
+        )
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                state: .needsRetryLocked(detail: "Upload didn't finish."),
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 5),
+                historyOrderKey: initialOrderKey,
+                itemName: nil
+            )
+        )
+        let validCards = store.cards
+        let validRows = store.processingRows
+
+        store.ingest(historyPage: malformedPage, principalScope: fixture.principal)
+        store.ingest(historyPage: malformedPage, principalScope: fixture.principal)
+        store.ingest(historyPage: olderRetryablePage, principalScope: fixture.principal)
+
+        XCTAssertEqual(store.cards, validCards)
+        XCTAssertEqual(store.processingRows, validRows)
+        XCTAssertEqual(
+            store.cards.map(\.identity),
+            [.local(fixture.unrelatedLogicalID), .run(fixture.runID)]
+        )
+        XCTAssertEqual(
+            store.cards.map(\.orderKey.lastMeaningfulUpdateAt),
+            [fixture.unrelatedUpdate, Date(timeIntervalSince1970: 5)]
+        )
+    }
+
     func testStoreConvergesRelaunchedPendingFromFrozenRunHistoryPageWithoutMutableReordering()
         throws {
         let fixture = TrophyWallTestFixture()
@@ -1496,7 +1598,10 @@ private struct TrophyWallTestFixture {
         stage: DurableRunStage,
         terminalOutcome: RunTerminalOutcome?,
         retryTruth: (canRetry: Bool, workPreserved: Bool)? = nil,
-        canStartNewCapture: Bool = false
+        canStartNewCapture: Bool = false,
+        historyOrderAt: Date? = nil,
+        lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z",
+        retentionCleanedAt: String? = nil
     ) throws -> TrophyWallRunHistoryPage {
         let run = try decodedRunDetail(
             runID: runID,
@@ -1506,14 +1611,16 @@ private struct TrophyWallTestFixture {
             stage: stage,
             terminalOutcome: terminalOutcome,
             retryTruth: retryTruth,
-            canStartNewCapture: canStartNewCapture
+            canStartNewCapture: canStartNewCapture,
+            lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
+            retentionCleanedAt: retentionCleanedAt
         )
         return TrophyWallRunHistoryPage(
             entries: [
                 TrophyWallRunHistoryEntry(
                     logicalIdentity: logicalID,
                     orderKey: TrophyWallOrderKey(
-                        lastMeaningfulUpdateAt: runDetailUpdate,
+                        lastMeaningfulUpdateAt: historyOrderAt ?? runDetailUpdate,
                         stableIdentity: run.id.uuidString.lowercased()
                     ),
                     run: run
@@ -1533,10 +1640,13 @@ private struct TrophyWallTestFixture {
         retryTruth: (canRetry: Bool, workPreserved: Bool)? = nil,
         canStartNewCapture: Bool = false,
         canOpenReview: Bool = false,
-        lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z"
+        lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z",
+        retentionCleanedAt: String? = nil
     ) throws -> DurableRun {
         let listingIDJSON = listingID.map { "\"\($0.uuidString.lowercased())\"" } ?? "null"
         let terminalOutcomeJSON = terminalOutcome.map { "\"\($0.rawValue)\"" } ?? "null"
+        let retentionCleanedAtJSON =
+            retentionCleanedAt.map { "\"\($0)\"" } ?? "null"
         let canRetry = retryTruth?.canRetry ?? false
         let safeFailureJSON = retryTruth.map {
             return """
@@ -1562,7 +1672,7 @@ private struct TrophyWallTestFixture {
             "lastAttemptedAt": null,
             "nextAttemptAt": null,
             "completedAt": null,
-            "retentionCleanedAt": null
+            "retentionCleanedAt": \(retentionCleanedAtJSON)
           },
           "item": { "title": "Server canonical title", "photoCount": 3 },
           "requiredInput": null,
@@ -1576,7 +1686,7 @@ private struct TrophyWallTestFixture {
             "canStartNewCapture": \(canStartNewCapture)
           },
           "lastMeaningfulUpdateAt": "\(lastMeaningfulUpdateAt)",
-          "retentionCleanedAt": null
+          "retentionCleanedAt": \(retentionCleanedAtJSON)
         }
         """
         return try JSONDecoder().decode(DurableRun.self, from: Data(json.utf8))
