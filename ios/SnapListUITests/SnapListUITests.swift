@@ -1121,7 +1121,7 @@ final class SnapListUITests: XCTestCase {
             thenDragTo: firstPhoto.coordinate(
                 withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
             ),
-            withVelocity: .slow,
+            withVelocity: 500,
             // Keep the native session over Cover long enough for SwiftUI to
             // render the transient production gap before performDrop clears it.
             thenHoldForDuration: 0.6
