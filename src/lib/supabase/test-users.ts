@@ -23,6 +23,20 @@ const LOCAL_JWT_SECRET =
   // The supabase CLI's fixed local development secret (public, local-only).
   "super-secret-jwt-token-with-at-least-32-characters-long";
 
+async function mintTestJwt(
+  sub: string,
+  claims: Record<string, string>,
+  lifetime: "60s" | "1h",
+): Promise<string> {
+  return new SignJWT({ role: "authenticated", ...claims })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(sub)
+    .setAudience("authenticated")
+    .setIssuedAt()
+    .setExpirationTime(lifetime)
+    .sign(new TextEncoder().encode(LOCAL_JWT_SECRET));
+}
+
 export interface ClerkTestUser {
   /** Clerk-style text id — what RLS compares against user_id. */
   id: string;
@@ -32,13 +46,50 @@ export interface ClerkTestUser {
 
 /** Sign a Supabase-acceptable JWT for a Clerk-style subject. */
 export async function mintUserJwt(sub: string): Promise<string> {
-  return new SignJWT({ role: "authenticated" })
-    .setProtectedHeader({ alg: "HS256" })
-    .setSubject(sub)
-    .setAudience("authenticated")
-    .setIssuedAt()
-    .setExpirationTime("1h")
-    .sign(new TextEncoder().encode(LOCAL_JWT_SECRET));
+  return mintTestJwt(sub, {}, "1h");
+}
+
+/** Sign the exact internal claims accepted by verified-guest DB capabilities. */
+export async function mintVerifiedGuestJwt(
+  sub: string,
+  capabilityId: string,
+): Promise<string> {
+  return mintTestJwt(
+    sub,
+    {
+      actor: "verified_guest",
+      cap_id: capabilityId,
+      snaplist_operation_channel: "verified_guest_publishable",
+    },
+    "60s",
+  );
+}
+
+/** Mint intentionally invalid claim combinations for fail-closed DB tests. */
+export async function mintInvalidVerifiedGuestJwt(
+  sub: string,
+  claims: {
+    actor?: string;
+    capabilityId?: string;
+    operationChannel?: string | null;
+  },
+): Promise<string> {
+  return mintTestJwt(
+    sub,
+    {
+      ...(claims.actor === undefined ? {} : { actor: claims.actor }),
+      ...(claims.capabilityId === undefined
+        ? {}
+        : { cap_id: claims.capabilityId }),
+      ...(claims.operationChannel === null
+        ? {}
+        : {
+            snaplist_operation_channel:
+              claims.operationChannel ?? "verified_guest_publishable",
+          }),
+    },
+    "60s",
+  );
 }
 
 /** Provision a test identity: a Clerk-style id + an RLS-scoped client for it. */

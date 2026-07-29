@@ -63,12 +63,14 @@ export interface TenantPhotoStorage {
     bytes: Uint8Array;
     mediaType: string;
   }>;
+  remove?(paths: string[]): Promise<void>;
 }
 
 export interface MobileItemSubmissionComposition {
   resolvePrincipal(bearerToken: string): Promise<SubmissionPrincipal>;
   storageFor(principal: SubmissionPrincipal): TenantPhotoStorage;
   staging: MobileItemSubmissionStaging;
+  stagingFor?(principal: SubmissionPrincipal): MobileItemSubmissionStaging;
   limits: { dailyLimit: number; perMinuteLimit: number };
 }
 
@@ -154,7 +156,8 @@ export function createMobileItemSubmissionOperations(
         throw new Error("The resolved submission principal is invalid.");
       }
 
-      const replay = await composition.staging.findSubmission({
+      const staging = composition.stagingFor?.(input.principal) ?? composition.staging;
+      const replay = await staging.findSubmission({
         userId: input.principal.userId,
         idempotencyKey: input.idempotencyKey,
         requestFingerprint: input.requestFingerprint,
@@ -174,7 +177,7 @@ export function createMobileItemSubmissionOperations(
         plannedReceipt(input.principal, batchId, photo),
       );
 
-      await composition.staging.beginSubmission({
+      await staging.beginSubmission({
         cleanupId,
         userId: input.principal.userId,
         idempotencyKey: input.idempotencyKey,
@@ -192,7 +195,7 @@ export function createMobileItemSubmissionOperations(
       const photoIdentity = canonicalizeVerifiedPhotoSet(
         photoReceipts.map((receipt) => receipt.contentSha256),
       );
-      const result = await composition.staging.commitSubmission({
+      const result = await staging.commitSubmission({
         userId: input.principal.userId,
         idempotencyKey: input.idempotencyKey,
         requestFingerprint: input.requestFingerprint,
@@ -205,11 +208,13 @@ export function createMobileItemSubmissionOperations(
         photoReceipts,
       });
 
-      try {
-        await composition.staging.resolveCleanupIntent(cleanupId);
-      } catch {
-        // Keep the exact durable intent. Retention must prove that no committed
-        // item references a path before removing an object.
+      if (input.principal.kind === "clerk") {
+        try {
+          await staging.resolveCleanupIntent(cleanupId);
+        } catch {
+          // Keep the exact durable intent. Retention must prove that no committed
+          // item references a path before removing an object.
+        }
       }
       return {
         outcome: result.outcome,

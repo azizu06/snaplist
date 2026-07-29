@@ -14,7 +14,7 @@ describe("mobile item submission OpenAPI", () => {
     expect(operation).toMatchObject({
       "x-owner-issue": 334,
       "x-implementation-status": "implemented",
-      security: [{ ClerkBearer: [] }],
+      security: [{ ClerkBearer: [] }, { GuestBearer: [] }],
       requestBody: {
         content: {
           "multipart/form-data": {
@@ -31,7 +31,7 @@ describe("mobile item submission OpenAPI", () => {
         "503": expect.any(Object),
       },
     });
-    expect(operation.security).not.toContainEqual({ GuestBearer: [] });
+    expect(operation.security).toContainEqual({ GuestBearer: [] });
     expect(serialized).not.toMatch(/user_?id|storage_?path|fingerprint/i);
     expect(contract.components.schemas.CreateItemRunMultipart).toMatchObject({
       required: ["photo"],

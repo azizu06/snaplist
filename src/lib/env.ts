@@ -134,6 +134,10 @@ const envSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  // Isolated imported ES256 signer for <=60s verified-guest operation JWTs.
+  // Production and preview use distinct key ids/private keys.
+  SUPABASE_GUEST_JWT_KEY_ID: z.string().min(1).optional(),
+  SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM: z.string().min(1).optional(),
 
   // eBay (adapter; sandbox by default — flip to production via this URL + keys)
   EBAY_BASE_URL: z.string().min(1).default("https://api.sandbox.ebay.com"),

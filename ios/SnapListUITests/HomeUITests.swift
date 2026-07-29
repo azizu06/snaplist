@@ -99,7 +99,10 @@ final class HomeUITests: XCTestCase {
                 XCTAssertTrue(app.staticTexts["Processing stopped"].exists)
                 XCTAssertFalse(app.staticTexts["You canceled this run"].exists)
             }
-            app.terminate()
+            XCTAssertTrue(
+                UIProcessTerminationBoundary().terminate(app),
+                "Run-detail fixture app did not reach a safe terminated state."
+            )
         }
     }
 
