@@ -24,13 +24,11 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(relaunched.snapshot.voice, complete.voice)
         await harness.identity.set(.init(
             verifiedClerkSubject: "user_native_intake_b",
-            persistedAppAttestKeyID: "guest-key-that-must-not-win"
-        ))
+            persistedAppAttestKeyID: "guest-key-that-must-not-win"))
         assertEmpty(try await relaunched.nextSnapshot())
         await harness.identity.set(.init(
             verifiedClerkSubject: "user_native_intake_a",
-            persistedAppAttestKeyID: "guest-key-that-must-not-win"
-        ))
+            persistedAppAttestKeyID: "guest-key-that-must-not-win"))
         let returned = try await relaunched.nextSnapshot()
         XCTAssertEqual(returned.photos, complete.photos)
         XCTAssertEqual(returned.voice, complete.voice)
@@ -52,27 +50,25 @@ final class NativeIntakeTests: XCTestCase {
         let intake = NativeIntake(applicationSupportDirectory: harness.applicationSupport, identitySource: source)
         let sessionTask = Task { try await NativeIntakeTestSession(intake) }
         await firstRead.waitUntilRequested()
-        await inputs.set(clerkSubject: "user_native_intake_gap_b",
-            appAttestKey: .init(id: "guest-principal-key", state: .pending)
-        )
+        await inputs.set(
+            clerkSubject: "user_native_intake_gap_b",
+            appAttestKey: .init(id: "guest-principal-key", state: .pending))
         await firstRead.resume()
         let session = try await sessionTask.value
         assertEmpty(session.snapshot)
         assertEmpty(try await session.nextSnapshot())
         _ = try await session.commit(.addPhotos([harness.photoInput(seed: 0)]))
-        await inputs.set(clerkSubject: nil,
-            appAttestKey: .init(id: "guest-principal-key", state: .pending)
-        )
+        await inputs.set(
+            clerkSubject: nil, appAttestKey: .init(id: "guest-principal-key", state: .pending))
         assertEmpty(try await session.nextSnapshot())
         _ = try await session.commit(.addPhotos([harness.photoInput(seed: 1)]))
-        await inputs.set(clerkSubject: nil,
-            appAttestKey: .init(id: "guest-principal-key", state: .verified)
-        )
+        await inputs.set(
+            clerkSubject: nil, appAttestKey: .init(id: "guest-principal-key", state: .verified))
         let guest = try await session.commit(.addPhotos([harness.photoInput(seed: 2)]))
         XCTAssertEqual(guest.photos.count, 2)
-        await inputs.set(clerkSubject: "user_native_intake_gap_b",
-            appAttestKey: .init(id: "guest-principal-key", state: .verified)
-        )
+        await inputs.set(
+            clerkSubject: "user_native_intake_gap_b",
+            appAttestKey: .init(id: "guest-principal-key", state: .verified))
         let returnedAuthenticated = try await session.nextSnapshot()
         XCTAssertEqual(returnedAuthenticated.photos.count, 1)
     }
@@ -104,9 +100,10 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(publicationFailure, .rejected(.storageFailure))
         assertEmpty(try await session.inspect())
         XCTAssertTrue(harness.regularFileNames().isEmpty)
-        let initial = try await session.commit(.addPhotos([inputs[0]]))
+        _ = try await session.commit(.addPhotos([inputs[0]]))
+        let initial = try await session.commit(.setVoice(voice("protected voice", duration: 3)))
         let priorFiles = harness.regularFileNames()
-        try assertProtectedAndBackupExcluded(harness.regularFileURLs())
+        try assertProtectedAndBackupExcluded(harness.ownedURLs())
         guardedFiles.failNextFileOperation = .manifestProtection
         let outcome = await session.perform(.addPhotos(Array(inputs.dropFirst())))
         XCTAssertEqual(outcome, .rejected(.storageFailure))
@@ -114,12 +111,13 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(surviving, initial)
         XCTAssertEqual(harness.regularFileNames(), priorFiles)
         let recoveredPrior = try await harness.makeSession(fileManager: guardedFiles)
-        XCTAssertEqual(recoveredPrior.snapshot, initial)
+        assertRecovered(recoveredPrior.snapshot, from: initial)
+        try assertProtectedAndBackupExcluded(harness.ownedURLs())
         let committed = try await session.commit(.addPhotos(Array(inputs.dropFirst())))
         XCTAssertEqual(committed.photos.count, 5)
         XCTAssertEqual(Set(committed.photos.map(\.id)).count, 5)
         let recovered = try await harness.makeSession()
-        XCTAssertEqual(recovered.snapshot.photos, committed.photos)
+        assertRecovered(recovered.snapshot, from: committed)
     }
     func testPrincipalRoundTripSupersedesSuspendedMutationWithoutPublication() async throws {
         try await assertPrincipalRoundTripSupersedes(.beforeSourceLoad)
@@ -132,14 +130,10 @@ final class NativeIntakeTests: XCTestCase {
         let firstSource = SuspendedNativeIntakeValue(try harness.makeJPEG(seed: 1))
         let secondSource = SuspendedNativeIntakeValue(try harness.makeJPEG(seed: 2))
         let firstOperation = Task {
-            await session.perform(
-                .addPhotos([.init(loadData: { await firstSource.load() })])
-            )
+            await session.perform(.addPhotos([.init(loadData: { await firstSource.load() })]))
         }
         let secondOperation = Task {
-            await session.perform(
-                .addPhotos([.init(loadData: { await secondSource.load() })])
-            )
+            await session.perform(.addPhotos([.init(loadData: { await secondSource.load() })]))
         }
         await firstSource.waitUntilRequested()
         await secondSource.waitUntilRequested()
@@ -174,18 +168,13 @@ final class NativeIntakeTests: XCTestCase {
         let inputs = try (0..<3).map(harness.photoInput(seed:))
         let added = try await session.commit(.addPhotos(inputs))
         let voiced = try await session.commit(.setVoice(voice("mutation voice", duration: 5)))
-        let replaced = try await session.commit(
-            .replacePhoto(
-                id: added.photos[1].id,
-                with: harness.photoInput(seed: 4)
-            )
-        )
+        let replaced = try await session.commit(.replacePhoto(
+            id: added.photos[1].id, with: harness.photoInput(seed: 4)
+        ))
         XCTAssertNotEqual(replaced.photos[1].id, added.photos[1].id)
         XCTAssertEqual(replaced.voice, voiced.voice)
         let reversedIDs = replaced.photos.map(\.id).reversed()
-        let reordered = try await session.commit(
-            .reorderPhotos(Array(reversedIDs))
-        )
+        let reordered = try await session.commit(.reorderPhotos(Array(reversedIDs)))
         XCTAssertEqual(reordered.photos.map(\.id), Array(reversedIDs))
         let removedID = reordered.photos[1].id
         let removed = try await session.commit(.removePhoto(id: removedID))
@@ -198,7 +187,7 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertNil(final.voice)
         XCTAssertFalse(files.fileExists(atPath: voiceURL.path))
         let recovered = try await harness.makeSession()
-        XCTAssertEqual(recovered.snapshot, final)
+        assertRecovered(recovered.snapshot, from: final)
     }
     func testTransitionDismissesOnlyAnActivePhotoReview() async throws {
         let (harness, session) = try await makeSession(.clerk("user_native_intake_review_a"))
@@ -214,7 +203,14 @@ final class NativeIntakeTests: XCTestCase {
         _ = try await session.nextSnapshot()
     }
     func testNoIdentityUsesProcessPrivateTemporaryStateThatReconstructionCannotRecover() async throws {
-        let (harness, first) = try await makeSession(.none)
+        let start = Date(timeIntervalSince1970: 2_000_000_000)
+        let originalClock = NativeIntakeTestClock(now: start)
+        let cleanupClock = NativeIntakeTestClock(now: start)
+        let guardedFiles = NativeIntakeTestFileManager()
+        let harness = NativeIntakeHarness(identity: .none)
+        addTeardownBlock { harness.cleanUp() }
+        let first = try await harness.makeSession(
+            fileManager: guardedFiles, now: originalClock.now, sleepUntil: originalClock.sleep)
         _ = try await first.commit(.addPhotos([harness.photoInput(seed: 4)]))
         let privateSnapshot = try await first.commit(
             .setVoice(voice("temporary voice", duration: 3))
@@ -222,9 +218,16 @@ final class NativeIntakeTests: XCTestCase {
         let privatePhotoURL = privateSnapshot.photos[0].photoURL
         XCTAssertTrue(privatePhotoURL.path.hasPrefix(files.temporaryDirectory.path))
         XCTAssertFalse(files.fileExists(atPath: harness.applicationSupport.path))
-        let reconstructed = try await harness.makeSession()
+        let reconstructed = try await harness.makeSession(
+            fileManager: guardedFiles, now: cleanupClock.now, sleepUntil: cleanupClock.sleep)
         assertEmpty(reconstructed.snapshot)
         XCTAssertTrue(files.fileExists(atPath: privatePhotoURL.path))
+        await cleanupClock.waitUntilScheduled(1)
+        let removalTarget = guardedFiles.rootRemovalAttemptCount + 1
+        cleanupClock.advance(by: NativeIntake.recoveryWindow + 1)
+        await guardedFiles.waitForRootRemovalAttempts(removalTarget)
+        XCTAssertFalse(files.fileExists(atPath: privatePhotoURL.path))
+        withExtendedLifetime(first) {}
     }
     func testScheduledExpiryDeletesDurableAndEphemeralStateButRetriesUnreadableMetadata() async throws {
         let start = Date(timeIntervalSince1970: 2_000_000_000)
@@ -241,27 +244,23 @@ final class NativeIntakeTests: XCTestCase {
         try Data("foreign".utf8).write(to: uppercaseSentinel)
         let guardedFiles = NativeIntakeTestFileManager()
         let durable = try await durableHarness.makeSession(
-            fileManager: guardedFiles, now: clock.now, sleepUntil: clock.sleep
-        )
+            fileManager: guardedFiles, now: clock.now, sleepUntil: clock.sleep)
         let ephemeral = try await ephemeralHarness.makeSession(
-            fileManager: guardedFiles, now: clock.now, sleepUntil: clock.sleep
-        )
-        let durableSnapshot = try await durable.commit(
-            .addPhotos([durableHarness.photoInput(seed: 1)])
-        )
-        let ephemeralSnapshot = try await ephemeral.commit(
-            .addPhotos([ephemeralHarness.photoInput(seed: 2)])
-        )
+            fileManager: guardedFiles, now: clock.now, sleepUntil: clock.sleep)
+        let durableSchedule = clock.scheduledCount + 1
+        let durableSnapshot = try await durable.commit(.addPhotos([durableHarness.photoInput(seed: 1)]))
+        await clock.waitUntilScheduled(durableSchedule)
+        let ephemeralSchedule = clock.scheduledCount + 1
+        let ephemeralSnapshot = try await ephemeral.commit(.addPhotos([ephemeralHarness.photoInput(seed: 2)]))
+        await clock.waitUntilScheduled(ephemeralSchedule)
+        let transitionSchedule = clock.scheduledCount + 1
         await ephemeralHarness.identity.set(.clerk("user_native_intake_ephemeral_durable"))
         assertEmpty(try await ephemeral.nextSnapshot())
+        await clock.waitUntilScheduled(transitionSchedule)
         guardedFiles.failNextFileOperation = .rootDeletions(2)
         let removalBaseline = guardedFiles.rootRemovalAttemptCount
         clock.advance(by: NativeIntake.recoveryWindow + 1)
-        for _ in 0..<100 where guardedFiles.rootRemovalAttemptCount < removalBaseline + 2 {
-            await Task.yield()
-        }
-        XCTAssertEqual(guardedFiles.rootRemovalAttemptCount, removalBaseline + 2)
-        for _ in 0..<20 { await Task.yield() }
+        await guardedFiles.waitForRootRemovalAttempts(removalBaseline + 2)
         XCTAssertEqual(guardedFiles.rootRemovalAttemptCount, removalBaseline + 2)
         XCTAssertTrue(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
         XCTAssertTrue(files.fileExists(atPath: durableSnapshot.photos[0].photoURL.path))
@@ -270,8 +269,10 @@ final class NativeIntakeTests: XCTestCase {
         assertEmpty(try await durable.nextSnapshot())
         let renewed = try await durable.commit(.addPhotos([durableHarness.photoInput(seed: 3)]))
         let renewedDeadline = clock.now().addingTimeInterval(NativeIntake.recoveryWindow)
+        let retryRemoval = guardedFiles.rootRemovalAttemptCount + 1
         clock.advance(by: NativeIntake.retentionRetryInterval)
-        await ephemeralHarness.waitForRemoval(of: ephemeralSnapshot.photos[0].photoURL)
+        await guardedFiles.waitForRootRemovalAttempts(retryRemoval)
+        XCTAssertFalse(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
         XCTAssertEqual(clock.nextDeadline, renewedDeadline)
         XCTAssertTrue(files.fileExists(atPath: renewed.photos[0].photoURL.path))
         XCTAssertTrue(files.fileExists(atPath: uppercaseSentinel.path))
@@ -294,16 +295,10 @@ final class NativeIntakeTests: XCTestCase {
         }
     }
     private func assertSymlinkFence(_ location: NativeIntakeSymlinkLocation) async throws {
-        let harness = NativeIntakeHarness(
-            identity: .clerk("user_native_intake_symlink_\(location)")
-        )
+        let harness = NativeIntakeHarness(identity: .clerk("user_native_intake_symlink_\(location)"))
         let session = try await harness.makeSession()
-        let initial = try await session.commit(
-            .addPhotos([harness.photoInput(seed: 3)])
-        )
-        let assetsRoot = try XCTUnwrap(
-            initial.photos.first?.photoURL.deletingLastPathComponent()
-        )
+        let initial = try await session.commit(.addPhotos([harness.photoInput(seed: 3)]))
+        let assetsRoot = try XCTUnwrap(initial.photos.first?.photoURL.deletingLastPathComponent())
         let principalRoot = assetsRoot
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -317,13 +312,9 @@ final class NativeIntakeTests: XCTestCase {
             target = assetsRoot
         }
         let outside = files.temporaryDirectory.appendingPathComponent(
-            "snaplist-native-intake-outside-\(UUID().uuidString)",
-            isDirectory: true
-        )
+            "snaplist-native-intake-outside-\(UUID().uuidString)", isDirectory: true)
         let parked = files.temporaryDirectory.appendingPathComponent(
-            "snaplist-native-intake-parked-\(UUID().uuidString)",
-            isDirectory: true
-        )
+            "snaplist-native-intake-parked-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock {
             harness.cleanUp()
             try? self.files.removeItem(at: outside)
@@ -333,39 +324,28 @@ final class NativeIntakeTests: XCTestCase {
         let sentinel = outside.appendingPathComponent("foreign-media")
         try Data("foreign".utf8).write(to: sentinel)
         try files.moveItem(at: target, to: parked)
-        try files.createSymbolicLink(
-            at: target,
-            withDestinationURL: outside
-        )
-        let write = await session.perform(
-            .addPhotos([try harness.photoInput(seed: 4)])
-        )
+        try files.createSymbolicLink(at: target, withDestinationURL: outside)
+        let write = await session.perform(.addPhotos([try harness.photoInput(seed: 4)]))
         XCTAssertEqual(write, .rejected(.storageFailure))
         let surviving = try await session.inspect()
         XCTAssertEqual(surviving, initial)
         let recovered = try await harness.makeSession()
         XCTAssertEqual(recovered.snapshot.recovery, .pending)
-        let discard = await session.perform(
-            .discard(expected: initial.version)
-        )
+        let discard = await session.perform(.discard(expected: initial.version))
         XCTAssertEqual(discard, .rejected(.storageFailure))
         XCTAssertEqual(try Data(contentsOf: sentinel), Data("foreign".utf8))
     }
     private func assertPrincipalRoundTripSupersedes(
         _ suspension: NativeIntakeSuspensionPoint
     ) async throws {
-        let (harness, _) = try await makeSession(
-            .clerk("user_native_intake_race_a")
-        )
+        let (harness, _) = try await makeSession(.clerk("user_native_intake_race_a"))
         let fileManager: FileManager
         let input: NativeIntake.PhotoInput
         let waitForSuspension: () async -> Void
         let resume: () async -> Void
         switch suspension {
         case .beforeSourceLoad:
-            let source = SuspendedNativeIntakeValue(
-                try harness.makeJPEG(seed: 1)
-            )
+            let source = SuspendedNativeIntakeValue(try harness.makeJPEG(seed: 1))
             fileManager = .default
             input = .init(loadData: { await source.load() })
             waitForSuspension = { await source.waitUntilRequested() }
@@ -374,9 +354,7 @@ final class NativeIntakeTests: XCTestCase {
             let manager = SuspendedNativeIntakeFileManager()
             fileManager = manager
             input = try harness.photoInput(seed: 3)
-            waitForSuspension = {
-                await manager.waitUntilPhotoAssetsAreWritten()
-            }
+            waitForSuspension = { await manager.waitUntilPhotoAssetsAreWritten() }
             resume = { manager.resumeStaging() }
         }
         let session = try await harness.makeSession(fileManager: fileManager)
@@ -393,10 +371,8 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(outcome, .superseded)
         assertEmpty(try await session.inspect())
     }
-    private func assertEmpty(
-        _ snapshot: NativeIntake.Snapshot,
-        file: StaticString = #filePath, line: UInt = #line
-    ) {
+    private func assertEmpty(_ snapshot: NativeIntake.Snapshot,
+                             file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(snapshot.photos.isEmpty, file: file, line: line)
         XCTAssertNil(snapshot.voice, file: file, line: line)
     }
@@ -421,6 +397,16 @@ final class NativeIntakeTests: XCTestCase {
                 line: line
             )
         }
+    }
+    private func assertRecovered(
+        _ recovered: NativeIntake.Snapshot,
+        from prior: NativeIntake.Snapshot
+    ) {
+        XCTAssertNotEqual(recovered.version.activationID, prior.version.activationID)
+        XCTAssertEqual(recovered.version.revision, prior.version.revision)
+        XCTAssertEqual(recovered.photos, prior.photos)
+        XCTAssertEqual(recovered.voice, prior.voice)
+        XCTAssertEqual(recovered.recovery, prior.recovery)
     }
     private func voice(_ text: String, duration: TimeInterval) -> NativeIntake.VoiceInput {
         .init(duration: duration, loadData: { Data(text.utf8) })
@@ -510,7 +496,8 @@ final class NativeIntakeHarness {
         applicationSupport: URL? = nil
     ) {
         self.applicationSupport = applicationSupport
-            ?? fileManager.temporaryDirectory.appendingPathComponent(
+            ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(
                 "snaplist-native-intake-\(UUID().uuidString)",
                 isDirectory: true
             )
@@ -522,27 +509,13 @@ final class NativeIntakeHarness {
         sleepUntil: @escaping @Sendable (Date) async throws -> Void =
             NativeIntake.sleepUntil
     ) async throws -> NativeIntakeTestSession {
-        try await NativeIntakeTestSession(
-            makeIntake(
-                fileManager: fileManager,
-                now: now,
-                sleepUntil: sleepUntil
-            )
-        )
-    }
-    func makeIntake(
-        fileManager: FileManager = .default,
-        now: @escaping @Sendable () -> Date = { Date() },
-        sleepUntil: @escaping @Sendable (Date) async throws -> Void =
-            NativeIntake.sleepUntil
-    ) -> NativeIntake {
-        NativeIntake(
+        try await NativeIntakeTestSession(NativeIntake(
             applicationSupportDirectory: applicationSupport,
             identitySource: identity.source,
             fileManager: fileManager,
             now: now,
             sleepUntil: sleepUntil
-        )
+        ))
     }
     func photoInput(seed: Int) throws -> NativeIntake.PhotoInput {
         let data = try makeJPEG(seed: seed)
@@ -567,29 +540,20 @@ final class NativeIntakeHarness {
         regularFileURLs().map(\.lastPathComponent)
     }
     func regularFileURLs() -> [URL] {
+        ownedURLs().filter {
+            (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile)
+                == true
+        }
+    }
+    func ownedURLs() -> [URL] {
         guard let enumerator = fileManager.enumerator(
             at: applicationSupport,
-            includingPropertiesForKeys: [.isRegularFileKey]
-        ) else {
-            return []
-        }
-        return enumerator.compactMap { value -> URL? in
-            guard let url = value as? URL,
-                  (try? url.resourceValues(
-                    forKeys: [.isRegularFileKey]
-                  ).isRegularFile) == true else {
-                return nil
-            }
-            return url
-        }.sorted { $0.path < $1.path }
+            includingPropertiesForKeys: nil
+        ) else { return [] }
+        return enumerator.compactMap { $0 as? URL }.sorted { $0.path < $1.path }
     }
     func cleanUp() {
         try? fileManager.removeItem(at: applicationSupport)
-    }
-    func waitForRemoval(of url: URL) async {
-        for _ in 0..<100 where fileManager.fileExists(atPath: url.path) {
-            await Task.yield()
-        }
     }
 }
 final class TestNativeIntakeIdentity:
@@ -642,7 +606,6 @@ final class TestNativeIntakeIdentity:
             return Array(self.continuations.values)
         }
         continuations.forEach { $0.yield() }
-        await Task.yield()
     }
     func load() throws -> AppAttestStoredKey? {
         lock.synchronized { key }
@@ -683,8 +646,8 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
     private let lock = NSLock()
     private var rejectsReads = false
     private var nextFailure: NativeIntakeFileFailure?
-    private var manifestReads = 0
     private var removalAttempts = 0
+    private var removalWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     fileprivate var failNextFileOperation: NativeIntakeFileFailure? {
         get { lock.synchronized { nextFailure } }
         set { lock.synchronized { nextFailure = newValue } }
@@ -697,21 +660,24 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
             }
         }
     }
-    var manifestMetadataReadCount: Int {
-        lock.synchronized { manifestReads }
-    }
     fileprivate var rootRemovalAttemptCount: Int {
         lock.synchronized { removalAttempts }
+    }
+    func waitForRootRemovalAttempts(_ expected: Int) async {
+        await withCheckedContinuation { continuation in
+            let ready = lock.synchronized {
+                guard removalAttempts < expected else { return true }
+                removalWaiters.append((expected, continuation))
+                return false
+            }
+            if ready { continuation.resume() }
+        }
     }
     override func attributesOfItem(
         atPath path: String
     ) throws -> [FileAttributeKey: Any] {
         if path.hasSuffix("/bundle.json") {
-            let reject = lock.synchronized {
-                manifestReads += 1
-                return rejectsReads
-            }
-            if reject {
+            if lock.synchronized({ rejectsReads }) {
                 throw CocoaError(.fileReadNoPermission)
             }
         }
@@ -757,6 +723,9 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
     override func removeItem(at URL: URL) throws {
         let fail = lock.synchronized {
             removalAttempts += 1
+            let ready = removalWaiters.filter { $0.0 <= removalAttempts }
+            removalWaiters.removeAll { $0.0 <= removalAttempts }
+            ready.forEach { $0.1.resume() }
             guard case .rootDeletions(let remaining) = nextFailure else {
                 return false
             }
@@ -776,6 +745,7 @@ private final class NativeIntakeTestClock: @unchecked Sendable {
     private let lock = NSLock()
     private var current: Date
     private var sleepers: [(deadline: Date, continuation: CheckedContinuation<Void, Never>)] = []
+    private var scheduleWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     init(now: Date) {
         current = now
     }
@@ -790,12 +760,28 @@ private final class NativeIntakeTestClock: @unchecked Sendable {
         await withCheckedContinuation { continuation in
             lock.synchronized {
                 sleepers.append((deadline, continuation))
+                let ready = scheduleWaiters.filter { $0.0 <= sleepers.count }
+                scheduleWaiters.removeAll { $0.0 <= sleepers.count }
+                ready.forEach { $0.1.resume() }
             }
         }
         try Task.checkCancellation()
     }
+    func waitUntilScheduled(_ count: Int) async {
+        await withCheckedContinuation { continuation in
+            let ready = lock.synchronized {
+                guard sleepers.count < count else { return true }
+                scheduleWaiters.append((count, continuation))
+                return false
+            }
+            if ready { continuation.resume() }
+        }
+    }
     var nextDeadline: Date? {
         lock.synchronized { sleepers.map(\.deadline).min() }
+    }
+    var scheduledCount: Int {
+        lock.synchronized { sleepers.count }
     }
     func advance(by interval: TimeInterval) {
         let due = lock.synchronized {

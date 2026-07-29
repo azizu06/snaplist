@@ -13,16 +13,14 @@ actor NativeIntake {
         let changes: @Sendable () -> AsyncStream<Void>
 
         static let processPrivate = IdentitySource(
-            current: {
-                Identity(verifiedClerkSubject: nil, persistedAppAttestKeyID: nil)
-            },
+            current: { Identity(verifiedClerkSubject: nil, persistedAppAttestKeyID: nil) },
             changes: { AsyncStream { _ in } }
         )
     }
 
     struct Version: Equatable, Sendable {
-        fileprivate let activationID: UUID
-        fileprivate let revision: UInt64
+        let activationID: UUID
+        let revision: UInt64
     }
 
     typealias Photo = StagedCapturePhoto
@@ -49,10 +47,8 @@ actor NativeIntake {
         let libraryTransferReceipt: LibraryPhotoTransferReceipt?
         let loadData: () async throws -> Data?
 
-        init(
-            libraryTransferReceipt: LibraryPhotoTransferReceipt? = nil,
-            loadData: @escaping () async throws -> Data?
-        ) {
+        init(libraryTransferReceipt: LibraryPhotoTransferReceipt? = nil,
+             loadData: @escaping () async throws -> Data?) {
             self.libraryTransferReceipt = libraryTransferReceipt
             self.loadData = loadData
         }
@@ -101,9 +97,7 @@ actor NativeIntake {
     static let retentionRetryInterval: TimeInterval = 5 * 60
     static let writingOptions: Data.WritingOptions = [.atomic, .completeFileProtection]
 
-    private struct Scope: Equatable {
-        let directoryComponent: String
-    }
+    private struct Scope: Equatable { let directoryComponent: String }
 
     private struct StoredBundle: Codable {
         let schemaVersion: Int
@@ -111,6 +105,11 @@ actor NativeIntake {
         let expiresAt: Date
         let photos: [Photo]
         let voice: Voice?
+    }
+
+    private struct EphemeralMarker: Codable {
+        let schemaVersion: Int
+        let createdAt: Date
     }
 
     private enum ReadResult<Value> {
@@ -130,33 +129,18 @@ actor NativeIntake {
         let voice: Voice?
         let recovery: Recovery
 
-        var version: Version {
-            Version(activationID: activationID, revision: revision)
-        }
-
+        var version: Version { Version(activationID: activationID, revision: revision) }
         var snapshot: Snapshot {
             Snapshot(version: version, photos: photos, voice: voice, recovery: recovery)
         }
-
-        var currentRoot: URL {
-            root.appendingPathComponent("Current", isDirectory: true)
-        }
-
-        var assetsRoot: URL {
-            currentRoot.appendingPathComponent("Assets", isDirectory: true)
-        }
+        var assetsRoot: URL { root.appendingPathComponent("Current/Assets", isDirectory: true) }
 
         func next(photos: [Photo], voice: Voice?, now: Date) -> ActiveBundle {
             ActiveBundle(
-                scope: scope,
-                root: root,
-                activationID: activationID,
+                scope: scope, root: root, activationID: activationID,
                 revision: revision + 1,
-                expiresAt: expiresAt
-                    ?? now.addingTimeInterval(NativeIntake.recoveryWindow),
-                photos: photos,
-                voice: voice,
-                recovery: .ready
+                expiresAt: expiresAt ?? now.addingTimeInterval(NativeIntake.recoveryWindow),
+                photos: photos, voice: voice, recovery: .ready
             )
         }
     }
@@ -164,6 +148,7 @@ actor NativeIntake {
     private let durableAnchor: URL
     private let ephemeralAnchor: URL
     private let applicationSupportRoot: URL
+    private let ephemeralRoots: URL
     private let ephemeralRoot: URL
     private let identitySource: IdentitySource
     private let fileManager: FileManager
@@ -174,26 +159,24 @@ actor NativeIntake {
     private var identityTask: Task<Void, Never>?
     private var retentionTask: Task<Void, Never>?
     private var reviewActivationID: UUID?
-    private var inactiveEphemeralExpiry: Date?
     private var deletionRetryAfter: [URL: Date] = [:]
 
     init(
-        applicationSupportDirectory: URL,
-        identitySource: IdentitySource,
+        applicationSupportDirectory: URL, identitySource: IdentitySource,
         fileManager: FileManager = .default,
         now: @escaping @Sendable () -> Date = { Date() },
-        sleepUntil: @escaping @Sendable (Date) async throws -> Void =
-            NativeIntake.sleepUntil
+        sleepUntil: @escaping @Sendable (Date) async throws -> Void = NativeIntake.sleepUntil
     ) {
         durableAnchor = applicationSupportDirectory.standardizedFileURL
-        ephemeralAnchor = fileManager.temporaryDirectory.standardizedFileURL
-        applicationSupportRoot = durableAnchor
-            .appendingPathComponent("SnapList", isDirectory: true)
+        let temporaryAnchor = fileManager.temporaryDirectory.standardizedFileURL
+        ephemeralAnchor = temporaryAnchor
+        applicationSupportRoot = durableAnchor.appendingPathComponent("SnapList", isDirectory: true)
             .appendingPathComponent("NativeIntake", isDirectory: true)
-        ephemeralRoot = ephemeralAnchor
-            .appendingPathComponent("SnapList", isDirectory: true)
+        ephemeralRoots = temporaryAnchor.appendingPathComponent("SnapList", isDirectory: true)
             .appendingPathComponent("NativeIntakeEphemeral", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        ephemeralRoot = ephemeralRoots.appendingPathComponent(
+            "v1-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())", isDirectory: true
+        )
         self.identitySource = identitySource
         self.fileManager = fileManager
         self.now = now
@@ -275,16 +258,11 @@ actor NativeIntake {
             let staged: [Photo]
             let stagingRoot: URL
             do {
-                (staged, stagingRoot) = try await stagePhotoData(
-                    data,
-                    for: active
-                )
+                (staged, stagingRoot) = try await stagePhotoData(data, for: active)
             } catch {
-                return .rejected(.storageFailure)
+                return stagingFailure(expected: expected)
             }
-            return commitMutation(expected: expected, stagingRoot: stagingRoot) {
-                ($0.photos + staged, $0.voice)
-            }
+            return commitMutation(expected: expected, stagingRoot: stagingRoot) { ($0.photos + staged, $0.voice) }
         case .replacePhoto(let id, let input):
             let data: (Data, LibraryPhotoTransferReceipt?)
             do {
@@ -301,12 +279,9 @@ actor NativeIntake {
             let staged: [Photo]
             let stagingRoot: URL
             do {
-                (staged, stagingRoot) = try await stagePhotoData(
-                    [data],
-                    for: active
-                )
+                (staged, stagingRoot) = try await stagePhotoData([data], for: active)
             } catch {
-                return .rejected(.storageFailure)
+                return stagingFailure(expected: expected)
             }
             return commitMutation(expected: expected, stagingRoot: stagingRoot) { current in
                 guard let replacement = staged.first,
@@ -351,24 +326,16 @@ actor NativeIntake {
             let staged: Voice
             let stagingRoot: URL
             do {
-                (staged, stagingRoot) = try await stageVoiceData(
-                    data,
-                    duration: input.duration,
-                    for: active
-                )
+                (staged, stagingRoot) = try await stageVoiceData(data, duration: input.duration, for: active)
             } catch {
-                return .rejected(.storageFailure)
+                return stagingFailure(expected: expected)
             }
-            return commitMutation(expected: expected, stagingRoot: stagingRoot) {
-                ($0.photos, staged)
-            }
+            return commitMutation(expected: expected, stagingRoot: stagingRoot) { ($0.photos, staged) }
         case .deleteVoice:
             guard active.voice != nil else {
                 return .unchanged
             }
-            return commitMutation(expected: expected) {
-                ($0.photos, nil)
-            }
+            return commitMutation(expected: expected) { ($0.photos, nil) }
         case .photoReviewEntered:
             guard reviewActivationID != active.activationID else {
                 return .unchanged
@@ -415,24 +382,12 @@ actor NativeIntake {
         if let active, active.scope == nextScope {
             return
         }
-        if let active, active.scope == nil, nextScope != nil {
-            inactiveEphemeralExpiry = active.expiresAt
-        } else if nextScope == nil {
-            inactiveEphemeralExpiry = nil
-        }
         let shouldDismissReview = reviewActivationID != nil && reviewActivationID == active?.activationID
         reviewActivationID = nil
         let root = nextScope.map {
-            applicationSupportRoot.appendingPathComponent(
-                $0.directoryComponent,
-                isDirectory: true
-            )
+            applicationSupportRoot.appendingPathComponent($0.directoryComponent, isDirectory: true)
         } ?? ephemeralRoot
-        active = loadBundle(
-            scope: nextScope,
-            root: root,
-            activationID: UUID()
-        )
+        active = loadBundle(scope: nextScope, root: root, activationID: UUID())
         if shouldDismissReview {
             publish(.dismissActivePhotoReview)
         }
@@ -463,7 +418,8 @@ actor NativeIntake {
         return value
     }
 
-    private func load(_ inputs: [PhotoInput]) async throws -> [(Data, LibraryPhotoTransferReceipt?)] {
+    private func load(_ inputs: [PhotoInput])
+        async throws -> [(Data, LibraryPhotoTransferReceipt?)] {
         var data: [(Data, LibraryPhotoTransferReceipt?)] = []
         data.reserveCapacity(inputs.count)
         for input in inputs {
@@ -489,11 +445,7 @@ actor NativeIntake {
             return .rejected(.invalidOperation)
         }
         do {
-            let next = current.next(
-                photos: photos,
-                voice: voice,
-                now: now()
-            )
+            let next = current.next(photos: photos, voice: voice, now: now())
             try commit(next, stagingRoot: stagingRoot)
             active = next
             publish(.snapshot(next.snapshot))
@@ -505,9 +457,13 @@ actor NativeIntake {
         }
     }
 
-    private func stagingLocations(
-        for bundle: ActiveBundle
-    ) -> (root: URL, assets: URL, published: URL, anchor: URL) {
+    private func stagingFailure(expected: Version) -> Outcome {
+        active?.version == expected ? .rejected(.storageFailure) : .superseded
+    }
+
+    private func stagingLocations(for bundle: ActiveBundle)
+        throws -> (root: URL, assets: URL, published: URL, anchor: URL) {
+        try prepareEphemeralRootIfNeeded(for: bundle)
         let stagingRoot = makeStagingRoot(for: bundle)
         return (
             stagingRoot,
@@ -517,11 +473,28 @@ actor NativeIntake {
         )
     }
 
-    private func stagePhotoData(
-        _ data: [(Data, LibraryPhotoTransferReceipt?)],
-        for bundle: ActiveBundle
-    ) async throws -> ([Photo], URL) {
-        let locations = stagingLocations(for: bundle)
+    private func prepareEphemeralRootIfNeeded(for bundle: ActiveBundle) throws {
+        guard bundle.scope == nil else {
+            return
+        }
+        let markerURL = bundle.root.appendingPathComponent(".native-intake-v1")
+        if fileManager.fileExists(atPath: markerURL.path) {
+            try Self.validateContainedPath(markerURL, under: ephemeralAnchor, fileManager: fileManager)
+            return
+        }
+        try Self.prepareRoot(bundle.root, under: ephemeralAnchor, fileManager: fileManager)
+        let marker = EphemeralMarker(schemaVersion: 1, createdAt: now())
+        try Self.write(
+            JSONEncoder().encode(marker),
+            to: markerURL,
+            under: ephemeralAnchor,
+            fileManager: fileManager
+        )
+    }
+
+    private func stagePhotoData(_ data: [(Data, LibraryPhotoTransferReceipt?)],
+                                for bundle: ActiveBundle) async throws -> ([Photo], URL) {
+        let locations = try stagingLocations(for: bundle)
         let createdAt = now()
         let fileManager = fileManager
         let photos = try await Task.detached {
@@ -537,12 +510,9 @@ actor NativeIntake {
         return (photos, locations.root)
     }
 
-    private func stageVoiceData(
-        _ data: Data,
-        duration: TimeInterval,
-        for bundle: ActiveBundle
-    ) async throws -> (Voice, URL) {
-        let locations = stagingLocations(for: bundle)
+    private func stageVoiceData(_ data: Data, duration: TimeInterval,
+                                for bundle: ActiveBundle) async throws -> (Voice, URL) {
+        let locations = try stagingLocations(for: bundle)
         let fileManager = fileManager
         let voice = try await Task.detached {
             try Self.stageVoice(
@@ -573,37 +543,22 @@ actor NativeIntake {
             }
         }
         try prepareStagingRoot(
-            stagingRoot,
-            assetsRoot: assetsRoot,
-            under: anchor,
-            fileManager: fileManager
+            stagingRoot, assetsRoot: assetsRoot, under: anchor, fileManager: fileManager
         )
         var photos: [Photo] = []
         for (bytes, receipt) in data {
             let id = UUID()
             let mediaName = "photo-\(id.uuidString).jpg"
             let thumbnailName = "thumbnail-\(id.uuidString).jpg"
-            try write(
-                bytes,
-                to: assetsRoot.appendingPathComponent(mediaName),
-                under: anchor,
-                fileManager: fileManager
-            )
-            try write(
-                bytes,
-                to: assetsRoot.appendingPathComponent(thumbnailName),
-                under: anchor,
-                fileManager: fileManager
-            )
+            try write(bytes, to: assetsRoot.appendingPathComponent(mediaName),
+                      under: anchor, fileManager: fileManager)
+            try write(bytes, to: assetsRoot.appendingPathComponent(thumbnailName),
+                      under: anchor, fileManager: fileManager)
             photos.append(
                 Photo(
                     id: id,
-                    photoURL: publishedAssetsRoot.appendingPathComponent(
-                        mediaName
-                    ),
-                    thumbnailURL: publishedAssetsRoot.appendingPathComponent(
-                        thumbnailName
-                    ),
+                    photoURL: publishedAssetsRoot.appendingPathComponent(mediaName),
+                    thumbnailURL: publishedAssetsRoot.appendingPathComponent(thumbnailName),
                     createdAt: createdAt,
                     libraryTransferReceipt: receipt
                 )
@@ -629,27 +584,18 @@ actor NativeIntake {
             }
         }
         try prepareStagingRoot(
-            stagingRoot,
-            assetsRoot: assetsRoot,
-            under: anchor,
-            fileManager: fileManager
+            stagingRoot, assetsRoot: assetsRoot, under: anchor, fileManager: fileManager
         )
         let id = UUID()
         let name = "voice-\(id.uuidString).wav"
         let stagedURL = assetsRoot.appendingPathComponent(name)
         try write(data, to: stagedURL, under: anchor, fileManager: fileManager)
         succeeded = true
-        return Voice(
-            id: id,
-            mediaURL: publishedAssetsRoot.appendingPathComponent(name),
-            duration: duration
-        )
+        return Voice(id: id, mediaURL: publishedAssetsRoot.appendingPathComponent(name),
+                     duration: duration)
     }
 
-    private func commit(
-        _ bundle: ActiveBundle,
-        stagingRoot suppliedStagingRoot: URL?
-    ) throws {
+    private func commit(_ bundle: ActiveBundle, stagingRoot suppliedStagingRoot: URL?) throws {
         let anchor = storageAnchor(for: bundle)
         let stagingRoot = suppliedStagingRoot ?? makeStagingRoot(for: bundle)
         let stagingAssetsRoot = stagingRoot.appendingPathComponent("Assets", isDirectory: true)
@@ -661,16 +607,14 @@ actor NativeIntake {
         )
         try copyRetainedAssets(for: bundle, to: stagingAssetsRoot, under: anchor)
         let stored = StoredBundle(
-            schemaVersion: 1,
-            revision: bundle.revision,
-            expiresAt: bundle.expiresAt!,
-            photos: bundle.photos,
-            voice: bundle.voice
+            schemaVersion: 1, revision: bundle.revision, expiresAt: bundle.expiresAt!,
+            photos: bundle.photos, voice: bundle.voice
         )
         let data = try JSONEncoder().encode(stored)
         let manifestURL = stagingRoot.appendingPathComponent("bundle.json")
         try Self.write(data, to: manifestURL, under: anchor, fileManager: fileManager)
-        try Self.publish(stagingRoot, as: bundle.currentRoot, under: anchor, fileManager: fileManager)
+        let currentRoot = bundle.root.appendingPathComponent("Current", isDirectory: true)
+        try Self.publish(stagingRoot, as: currentRoot, under: anchor, fileManager: fileManager)
     }
 
     private func copyRetainedAssets(
@@ -727,14 +671,8 @@ actor NativeIntake {
             return .rejected(.storageFailure)
         }
         let next = ActiveBundle(
-            scope: current.scope,
-            root: current.root,
-            activationID: current.activationID,
-            revision: current.revision + 1,
-            expiresAt: nil,
-            photos: [],
-            voice: nil,
-            recovery: .ready
+            scope: current.scope, root: current.root, activationID: current.activationID,
+            revision: current.revision + 1, expiresAt: nil, photos: [], voice: nil, recovery: .ready
         )
         active = next
         publish(.snapshot(next.snapshot))
@@ -771,9 +709,6 @@ actor NativeIntake {
                 deadlines.append(deletionRetryAfter[active.root] ?? expiresAt)
             }
         }
-        if let inactiveEphemeralExpiry {
-            deadlines.append(inactiveEphemeralExpiry)
-        }
         switch ownedDurableRoots() {
         case .value(let roots):
             for root in roots where root != active?.root {
@@ -785,6 +720,23 @@ actor NativeIntake {
                 case .transient:
                     deadlines.append(now().addingTimeInterval(Self.retentionRetryInterval))
                 case .absent:
+                    break
+                }
+            }
+        case .transient:
+            deadlines.append(now().addingTimeInterval(Self.retentionRetryInterval))
+        case .absent, .malformed:
+            break
+        }
+        switch ownedEphemeralRoots() {
+        case .value(let roots):
+            for root in roots where root != active?.root {
+                switch readEphemeralExpiry(at: root) {
+                case .value(let expiresAt):
+                    deadlines.append(deletionRetryAfter[root] ?? expiresAt)
+                case .transient:
+                    deadlines.append(now().addingTimeInterval(Self.retentionRetryInterval))
+                case .absent, .malformed:
                     break
                 }
             }
@@ -813,28 +765,11 @@ actor NativeIntake {
                   expiresAt <= currentTime {
             if removeExpiredRoot(current.root, at: currentTime) {
                 let expired = ActiveBundle(
-                    scope: current.scope,
-                    root: current.root,
-                    activationID: current.activationID,
-                    revision: current.revision + 1,
-                    expiresAt: nil,
-                    photos: [],
-                    voice: nil,
-                    recovery: .ready
+                    scope: current.scope, root: current.root, activationID: current.activationID,
+                    revision: current.revision + 1, expiresAt: nil, photos: [], voice: nil, recovery: .ready
                 )
                 active = expired
                 publish(.snapshot(expired.snapshot))
-            }
-        }
-        if let deadline = inactiveEphemeralExpiry,
-           deadline <= currentTime,
-           ephemeralRoot != active?.root {
-            if removeOwnedRoot(ephemeralRoot) {
-                inactiveEphemeralExpiry = nil
-            } else {
-                inactiveEphemeralExpiry = currentTime.addingTimeInterval(
-                    Self.retentionRetryInterval
-                )
             }
         }
         cleanupInactiveRoots(expiredAt: currentTime)
@@ -842,17 +777,25 @@ actor NativeIntake {
     }
 
     private func cleanupInactiveRoots(expiredAt currentTime: Date) {
-        guard case .value(let roots) = ownedDurableRoots() else {
-            return
+        if case .value(let roots) = ownedDurableRoots() {
+            for root in roots where root != active?.root {
+                switch readStoredBundle(at: root) {
+                case .value(let stored) where stored.expiresAt <= currentTime:
+                    _ = removeExpiredRoot(root, at: currentTime)
+                case .malformed:
+                    _ = removeExpiredRoot(root, at: currentTime)
+                case .value, .absent, .transient:
+                    break
+                }
+            }
         }
-        for root in roots where root != active?.root {
-            switch readStoredBundle(at: root) {
-            case .value(let stored) where stored.expiresAt <= currentTime:
+        if case .value(let ephemeral) = ownedEphemeralRoots() {
+            for root in ephemeral where root != active?.root {
+                guard case .value(let expiresAt) = readEphemeralExpiry(at: root),
+                      expiresAt <= currentTime else {
+                    continue
+                }
                 _ = removeExpiredRoot(root, at: currentTime)
-            case .malformed:
-                _ = removeExpiredRoot(root, at: currentTime)
-            case .value, .absent, .transient:
-                break
             }
         }
     }
@@ -866,15 +809,29 @@ actor NativeIntake {
     }
 
     private func ownedDurableRoots() -> ReadResult<[URL]> {
+        ownedRoots(at: applicationSupportRoot, under: durableAnchor,
+                   matching: Self.isOwnedScopeComponent)
+    }
+
+    private func ownedEphemeralRoots() -> ReadResult<[URL]> {
+        ownedRoots(at: ephemeralRoots, under: ephemeralAnchor,
+                   matching: Self.isOwnedEphemeralComponent)
+    }
+
+    private func ownedRoots(
+        at root: URL,
+        under anchor: URL,
+        matching predicate: (String) -> Bool
+    ) -> ReadResult<[URL]> {
         do {
-            try Self.validateContainedPath(applicationSupportRoot, under: durableAnchor, fileManager: fileManager)
-            let roots = try fileManager.contentsOfDirectory(
-                at: applicationSupportRoot,
-                includingPropertiesForKeys: nil
-            ).filter {
-                Self.isOwnedScopeComponent($0.lastPathComponent)
-            }
-            return .value(roots)
+            try Self.validateContainedPath(root, under: anchor, fileManager: fileManager)
+            return .value(
+                try fileManager.contentsOfDirectory(
+                    at: root, includingPropertiesForKeys: nil
+                ).filter {
+                    predicate($0.lastPathComponent)
+                }
+            )
         } catch {
             return Self.isMissing(error) ? .absent : .transient
         }
@@ -995,6 +952,27 @@ actor NativeIntake {
             return .value(stored)
         } catch {
             return Self.isMissing(error) ? .malformed : .transient
+        }
+    }
+
+    private func readEphemeralExpiry(
+        at root: URL
+    ) -> ReadResult<Date> {
+        guard Self.isOwnedEphemeralComponent(root.lastPathComponent) else {
+            return .malformed
+        }
+        let markerURL = root.appendingPathComponent(".native-intake-v1")
+        do {
+            try Self.validateContainedPath(markerURL, under: ephemeralAnchor, fileManager: fileManager)
+            _ = try fileManager.attributesOfItem(atPath: markerURL.path)
+            let data = try Data(contentsOf: markerURL)
+            guard let marker = try? JSONDecoder().decode(EphemeralMarker.self, from: data),
+                  marker.schemaVersion == 1 else {
+                return .malformed
+            }
+            return .value(marker.createdAt.addingTimeInterval(Self.recoveryWindow))
+        } catch {
+            return Self.isMissing(error) ? .absent : .transient
         }
     }
 
@@ -1138,7 +1116,19 @@ actor NativeIntake {
     }
 
     private static func isOwnedScopeComponent(_ component: String) -> Bool {
-        guard component.hasPrefix("v1-"), component.count == 67 else {
+        isOwnedComponent(component, hexadecimalCount: 64)
+    }
+
+    private static func isOwnedEphemeralComponent(_ component: String) -> Bool {
+        isOwnedComponent(component, hexadecimalCount: 32)
+    }
+
+    private static func isOwnedComponent(
+        _ component: String,
+        hexadecimalCount: Int
+    ) -> Bool {
+        guard component.hasPrefix("v1-"),
+              component.count == hexadecimalCount + 3 else {
             return false
         }
         return component.utf8.dropFirst(3).allSatisfy {
@@ -1192,9 +1182,11 @@ actor NativeIntake {
         under anchor: URL,
         fileManager: FileManager
     ) throws {
-        let stagingParent = stagingRoot.deletingLastPathComponent()
-        let principalRoot = stagingParent.deletingLastPathComponent()
-        for root in [principalRoot, stagingParent, stagingRoot, assetsRoot] {
+        var root = anchor.standardizedFileURL
+        for component in assetsRoot.standardizedFileURL.pathComponents.dropFirst(
+            root.pathComponents.count
+        ) {
+            root.appendPathComponent(component, isDirectory: true)
             try prepareRoot(root, under: anchor, fileManager: fileManager)
         }
     }
