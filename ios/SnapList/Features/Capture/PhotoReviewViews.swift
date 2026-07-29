@@ -392,6 +392,18 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
 }
 
 enum PhotoReviewNativeDropEvent: Equatable {
+    case attached(
+        epoch: Int,
+        hostBounds: CGRect,
+        hostContentSize: CGSize,
+        dragInteractionCount: Int,
+        dropInteractionCount: Int
+    )
+    case detached(epoch: Int)
+    case canHandle(
+        result: Bool,
+        photoID: StagedCapturePhoto.ID?
+    )
     case entered
     case updated
     case rejectedDisabled
@@ -402,20 +414,89 @@ enum PhotoReviewNativeDropEvent: Equatable {
 }
 
 struct PhotoReviewNativeDropObservation: Equatable {
+    private(set) var isAttached = false
+    private(set) var attachmentEpoch = 0
+    private(set) var detachCount = 0
+    private(set) var lastDetachedEpoch = 0
+    private(set) var hostBounds = CGRect.zero
+    private(set) var hostContentSize = CGSize.zero
+    private(set) var dragInteractionCount = 0
+    private(set) var dropInteractionCount = 0
+    private(set) var canHandleCallCount = 0
+    private(set) var canHandleOutcome = "not-called"
+    private(set) var canHandlePhotoID: StagedCapturePhoto.ID?
     private(set) var didEnter = false
     private(set) var didUpdate = false
     private(set) var performDropOutcome = "not-called"
 
     var hasActivity: Bool {
-        didEnter || didUpdate || performDropOutcome != "not-called"
+        isAttached
+            || detachCount > 0
+            || canHandleCallCount > 0
+            || didEnter
+            || didUpdate
+            || performDropOutcome != "not-called"
     }
 
     var label: String {
-        "entered:\(didEnter),updated:\(didUpdate),perform:\(performDropOutcome)"
+        let bounds = [
+            hostBounds.minX,
+            hostBounds.minY,
+            hostBounds.width,
+            hostBounds.height
+        ]
+        .map { Int($0.rounded()) }
+        .map(String.init)
+        .joined(separator: ",")
+        let content = [
+            hostContentSize.width,
+            hostContentSize.height
+        ]
+        .map { Int($0.rounded()) }
+        .map(String.init)
+        .joined(separator: ",")
+        return [
+            "attached:\(isAttached)",
+            "epoch:\(attachmentEpoch)",
+            "detached:\(detachCount)",
+            "detachedEpoch:\(lastDetachedEpoch)",
+            "host:\(bounds)",
+            "content:\(content)",
+            "dragInteractions:\(dragInteractionCount)",
+            "dropInteractions:\(dropInteractionCount)",
+            "canHandle:\(canHandleOutcome)",
+            "canHandleCalls:\(canHandleCallCount)",
+            "photo:\(canHandlePhotoID?.uuidString ?? "none")",
+            "entered:\(didEnter)",
+            "updated:\(didUpdate)",
+            "perform:\(performDropOutcome)"
+        ]
+        .joined(separator: ",")
     }
 
     mutating func observe(_ event: PhotoReviewNativeDropEvent) {
         switch event {
+        case .attached(
+            let epoch,
+            let hostBounds,
+            let hostContentSize,
+            let dragInteractionCount,
+            let dropInteractionCount
+        ):
+            isAttached = true
+            attachmentEpoch = epoch
+            self.hostBounds = hostBounds
+            self.hostContentSize = hostContentSize
+            self.dragInteractionCount = dragInteractionCount
+            self.dropInteractionCount = dropInteractionCount
+        case .detached(let epoch):
+            isAttached = false
+            detachCount += 1
+            lastDetachedEpoch = epoch
+        case .canHandle(let result, let photoID):
+            canHandleCallCount += 1
+            canHandleOutcome = result ? "accepted" : "rejected"
+            canHandlePhotoID = photoID
         case .entered:
             didEnter = true
         case .updated:
@@ -986,6 +1067,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         private var observeDrop: (PhotoReviewNativeDropEvent) -> Void
         private weak var attachedView: UIView?
         private var dropInteraction: UIDropInteraction?
+        private var attachmentEpoch = 0
         private var sessionAllowsAutoScroll = false
         private var autoScrollSessionIdentifier: ObjectIdentifier?
         var isInteractionAttached: Bool {
@@ -1054,9 +1136,25 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             view.addInteraction(interaction)
             attachedView = view
             dropInteraction = interaction
+            attachmentEpoch += 1
+            observeDrop(
+                .attached(
+                    epoch: attachmentEpoch,
+                    hostBounds: view.bounds,
+                    hostContentSize:
+                        (view as? UIScrollView)?.contentSize ?? .zero,
+                    dragInteractionCount: view.interactions
+                        .compactMap { $0 as? UIDragInteraction }
+                        .count,
+                    dropInteractionCount: view.interactions
+                        .compactMap { $0 as? UIDropInteraction }
+                        .count
+                )
+            )
         }
 
         func detach() {
+            let wasAttached = attachedView != nil
             if let dropInteraction {
                 attachedView?.removeInteraction(dropInteraction)
             }
@@ -1064,13 +1162,23 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             attachedView = nil
             sessionAllowsAutoScroll = false
             autoScrollSessionIdentifier = nil
+            if wasAttached {
+                observeDrop(.detached(epoch: attachmentEpoch))
+            }
         }
 
         func dropInteraction(
             _ interaction: UIDropInteraction,
             canHandle session: UIDropSession
         ) -> Bool {
-            isEnabled && acceptedPhotoID(session: session) != nil
+            guard isEnabled else {
+                observeDrop(.canHandle(result: false, photoID: nil))
+                return false
+            }
+            let photoID = acceptedPhotoID(session: session)
+            let result = photoID != nil
+            observeDrop(.canHandle(result: result, photoID: photoID))
+            return result
         }
 
         func dropInteraction(
