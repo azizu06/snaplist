@@ -227,7 +227,8 @@ final class NativeIntakeTests: XCTestCase {
     }
     func testScheduledExpiryDeletesDurableAndEphemeralStateButRetriesUnreadableMetadata() async throws {
         let start = Date(timeIntervalSince1970: 2_000_000_000)
-        let clock = NativeIntakeTestClock(now: start)
+        let durableClock = NativeIntakeTestClock(now: start)
+        let ephemeralClock = NativeIntakeTestClock(now: start)
         let durableHarness = NativeIntakeHarness(identity: .clerk("user_native_intake_retention_a"))
         let ephemeralHarness = NativeIntakeHarness(identity: .none)
         addTeardownBlock { durableHarness.cleanUp() }
@@ -240,22 +241,23 @@ final class NativeIntakeTests: XCTestCase {
         try Data("foreign".utf8).write(to: uppercaseSentinel)
         let guardedFiles = NativeIntakeTestFileManager()
         let durable = try await durableHarness.makeSession(
-            fileManager: guardedFiles, now: clock.now, sleepUntil: clock.sleep)
+            fileManager: guardedFiles, now: durableClock.now, sleepUntil: durableClock.sleep)
         let ephemeral = try await ephemeralHarness.makeSession(
-            fileManager: guardedFiles, now: clock.now, sleepUntil: clock.sleep)
-        let durableSchedule = clock.scheduledCount + 1
+            fileManager: guardedFiles, now: ephemeralClock.now, sleepUntil: ephemeralClock.sleep)
+        let durableSchedule = durableClock.scheduledCount + 1
         let durableSnapshot = try await durable.commit(.addPhotos([durableHarness.photoInput(seed: 1)]))
-        await clock.waitUntilScheduled(durableSchedule)
-        let ephemeralSchedule = clock.scheduledCount + 1
+        await durableClock.waitUntilScheduled(durableSchedule)
+        let ephemeralSchedule = ephemeralClock.scheduledCount + 1
         let ephemeralSnapshot = try await ephemeral.commit(.addPhotos([ephemeralHarness.photoInput(seed: 2)]))
-        await clock.waitUntilScheduled(ephemeralSchedule)
-        let transitionSchedule = clock.scheduledCount + 1
+        await ephemeralClock.waitUntilScheduled(ephemeralSchedule)
+        let transitionSchedule = ephemeralClock.scheduledCount + 1
         await ephemeralHarness.identity.set(.clerk("user_native_intake_ephemeral_durable"))
         assertEmpty(try await ephemeral.nextSnapshot())
-        await clock.waitUntilScheduled(transitionSchedule)
+        await ephemeralClock.waitUntilScheduled(transitionSchedule)
         guardedFiles.failNextFileOperation = .rootDeletions(2)
         let removalBaseline = guardedFiles.rootRemovalAttemptCount
-        clock.advance(by: NativeIntake.recoveryWindow + 1)
+        durableClock.advance(by: NativeIntake.recoveryWindow + 1)
+        ephemeralClock.advance(by: NativeIntake.recoveryWindow + 1)
         await guardedFiles.waitForRootRemovals(removalBaseline + 2)
         XCTAssertEqual(guardedFiles.rootRemovalAttemptCount, removalBaseline + 2)
         XCTAssertTrue(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
@@ -264,29 +266,30 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(discard, .committed)
         assertEmpty(try await durable.nextSnapshot())
         let renewed = try await durable.commit(.addPhotos([durableHarness.photoInput(seed: 3)]))
-        let renewedDeadline = clock.now().addingTimeInterval(NativeIntake.recoveryWindow)
+        let renewedDeadline = durableClock.now().addingTimeInterval(NativeIntake.recoveryWindow)
         let retryRemoval = guardedFiles.successfulRootRemovalCount + 1
-        clock.advance(by: NativeIntake.retentionRetryInterval)
+        ephemeralClock.advance(by: NativeIntake.retentionRetryInterval)
         await guardedFiles.waitForRootRemovals(retryRemoval, successful: true)
         XCTAssertFalse(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
-        XCTAssertEqual(clock.nextDeadline, renewedDeadline)
+        XCTAssertEqual(durableClock.nextDeadline, renewedDeadline)
         XCTAssertTrue(files.fileExists(atPath: renewed.photos[0].photoURL.path))
         XCTAssertTrue(files.fileExists(atPath: uppercaseSentinel.path))
         await durableHarness.identity.set(.clerk("user_native_intake_retention_b"))
         assertEmpty(try await durable.nextSnapshot())
         guardedFiles.rejectManifestMetadataReads = true
-        let unreadableRetrySchedule = clock.scheduledCount + 1
-        clock.advance(by: NativeIntake.recoveryWindow + 1)
-        await clock.waitUntilScheduled(unreadableRetrySchedule)
+        let unreadableRetrySchedule = durableClock.scheduledCount + 1
+        durableClock.advance(by: NativeIntake.recoveryWindow + 1)
+        await durableClock.waitUntilScheduled(unreadableRetrySchedule)
         XCTAssertTrue(files.fileExists(atPath: renewed.photos[0].photoURL.path))
-        let recoveryRetrySchedule = clock.scheduledCount + 1
+        let recoveryRetrySchedule = durableClock.scheduledCount + 1
         await durableHarness.identity.set(.clerk("user_native_intake_retention_a"))
         let pending = try await durable.nextSnapshot()
         XCTAssertEqual(pending.recovery, .pending)
-        await clock.waitUntilScheduled(recoveryRetrySchedule)
-        XCTAssertEqual(clock.nextDeadline, clock.now().addingTimeInterval(NativeIntake.retentionRetryInterval))
+        await durableClock.waitUntilScheduled(recoveryRetrySchedule)
+        XCTAssertEqual(durableClock.nextDeadline,
+                       durableClock.now().addingTimeInterval(NativeIntake.retentionRetryInterval))
         guardedFiles.rejectManifestMetadataReads = false
-        clock.advance(by: NativeIntake.retentionRetryInterval)
+        durableClock.advance(by: NativeIntake.retentionRetryInterval)
         let retried = try await durable.nextSnapshot()
         XCTAssertEqual(retried.recovery, .ready)
         XCTAssertTrue(retried.photos.isEmpty)
