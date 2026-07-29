@@ -869,6 +869,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         private var observeDrop: (PhotoReviewNativeDropEvent) -> Void
         private weak var attachedView: UIView?
         private var dropInteraction: UIDropInteraction?
+        private var sessionAllowsAutoScroll = false
+        private var autoScrollSessionIdentifier: ObjectIdentifier?
         var isInteractionAttached: Bool {
             dropInteraction != nil
         }
@@ -943,6 +945,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             }
             dropInteraction = nil
             attachedView = nil
+            sessionAllowsAutoScroll = false
+            autoScrollSessionIdentifier = nil
         }
 
         func dropInteraction(
@@ -958,6 +962,16 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         ) {
             guard isEnabled, admit(session: session) else {
                 return
+            }
+            let sessionIdentifier = ObjectIdentifier(session as AnyObject)
+            if autoScrollSessionIdentifier != sessionIdentifier {
+                autoScrollSessionIdentifier = sessionIdentifier
+                sessionAllowsAutoScroll = {
+                    guard let scrollView = interaction.view as? UIScrollView else {
+                        return false
+                    }
+                    return scrollView.contentSize.width > scrollView.bounds.width
+                }()
             }
             updateDestination(
                 at: sessionLocation(
@@ -980,7 +994,9 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
                 interaction: interaction
             )
             updateDestination(at: location)
-            autoScroll(location)
+            if sessionAllowsAutoScroll {
+                autoScroll(location)
+            }
             observeDrop(.updated)
             return UIDropProposal(operation: .move)
         }
@@ -1027,6 +1043,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             presentation.endNativeDragSession(
                 reduceMotion: reduceMotion
             )
+            sessionAllowsAutoScroll = false
+            autoScrollSessionIdentifier = nil
         }
 
         private func acceptedPhotoID(
@@ -1607,11 +1625,16 @@ struct PhotoReviewLiveFinalDeleteResult: Equatable {
 @MainActor
 final class PhotoReviewLiveSession {
     let store: PhotoReviewStore
+    let voiceNoteStore: VoiceNoteStore
     private(set) var focusedPhotoID: StagedCapturePhoto.ID?
     private var pendingDeleteAnnouncement: String?
 
-    private init(store: PhotoReviewStore) {
+    private init(
+        store: PhotoReviewStore,
+        voiceNoteStore: VoiceNoteStore
+    ) {
         self.store = store
+        self.voiceNoteStore = voiceNoteStore
     }
 
     static func start(
@@ -1623,8 +1646,49 @@ final class PhotoReviewLiveSession {
               (1...5).contains(request.photos.count) else {
             return nil
         }
+#if DEBUG
+        let launchArguments = ProcessInfo.processInfo.arguments
+        let savedNote = launchArguments.contains(
+            "--voice-note-saved-playing-fixture"
+        )
+            ? VoiceNoteAsset(
+                url: URL(
+                    fileURLWithPath:
+                        "/tmp/snaplist-voice-note-ui-fixture.wav"
+                ),
+                duration: 12
+            )
+            : nil
+#else
+        let savedNote: VoiceNoteAsset? = nil
+#endif
+        let voiceNoteStore = VoiceNoteStore(
+            savedNote: savedNote,
+            audio: AVFoundationVoiceNoteAudioClient(),
+            files: VoiceNoteLocalFileStore()
+        )
+#if DEBUG
+        if launchArguments.contains(
+            "--voice-note-take-ready-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(
+                .takeReady(duration: 7)
+            )
+        } else if launchArguments.contains(
+            "--voice-note-saved-playing-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(
+                .saved(isPlaying: true)
+            )
+        } else if launchArguments.contains(
+            "--voice-note-interrupted-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(.interrupted)
+        }
+#endif
         return PhotoReviewLiveSession(
-            store: PhotoReviewStore(photos: request.photos)
+            store: PhotoReviewStore(photos: request.photos),
+            voiceNoteStore: voiceNoteStore
         )
     }
 
@@ -1829,6 +1893,7 @@ struct PhotoReviewView: View {
     var backToCamera: (() -> Void)? = nil
     let delete: () async -> PhotoReviewDeleteApplication?
     var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
+    var voiceNoteStore: VoiceNoteStore? = nil
     /// Absent in fixtures, which stage no durable session and so cannot apply a picker
     /// result. The picker still opens; nothing lands.
     var intake: PhotoReviewIntake? = nil
@@ -1851,11 +1916,13 @@ struct PhotoReviewView: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     @State private var capacityAnnouncer = PhotoReviewCapacityAnnouncer()
+    @State private var isVoiceNotePresented = false
     @State private var submissionEffectConsumer =
         PhotoReviewSubmissionEffectConsumer()
     // Outside dismissal focus stays independent from picker cancellation focus.
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
+    @AccessibilityFocusState private var focusedVoiceNoteOpener: Bool
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     private enum PickerFocusTarget: Hashable {
@@ -1989,6 +2056,17 @@ struct PhotoReviewView: View {
             .allowsHitTesting(false)
 #endif
         }
+        .sheet(
+            isPresented: $isVoiceNotePresented,
+            onDismiss: restoreVoiceNoteOpenerFocus
+        ) {
+            if let voiceNoteStore {
+                VoiceNoteSheet(
+                    store: voiceNoteStore,
+                    forceReducedMotion: reduceMotion
+                )
+            }
+        }
     }
 
     private var reviewContent: some View {
@@ -2035,7 +2113,7 @@ struct PhotoReviewView: View {
         .accessibilityIdentifier("photo-review.screen")
         // v1.2 primary_action.position is a sticky bottom action above the home-indicator
         // safe area, and its adaptive-layout contract requires that action never cover the
-        // thumbnails, Voice context, or the home indicator. safeAreaInset pins it there and
+        // thumbnails, Voice note, or the home indicator. safeAreaInset pins it there and
         // shortens the scrollable region by exactly its height, so it covers nothing.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let openBoundary {
@@ -2454,33 +2532,83 @@ struct PhotoReviewView: View {
         }
     }
 
-    // Voice context and Start listing are typed boundaries because of scope, not authority.
-    // Photo Review v1.2 (d166d0c3) and Voice Note + Start Listing v2 (7fd7bd41) are both
-    // packaged and in force, and v1.2 keeps the voice row's interior withheld from its own
-    // package. This issue owns the two boundaries and their typed events. The recorder
-    // interior is #469, and making Photo Review the single renderer of the collapsed voice
-    // row is #490, which is blocked on a design delta that does not exist yet. So this
-    // renders the approved control names, the approved enabling rule, and the approved
-    // order of the voice row above Start listing, and nothing beyond them.
+    // The exact live-source v2.1 package controls this row and the sheet interior.
+    // #490 may later consolidate renderer ownership; this issue makes only the smallest
+    // authority correction needed to open #469's recorder.
     private func voiceRow(
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
         Button {
             openBoundary(.openVoiceNote)
+            if voiceNoteStore != nil {
+                isVoiceNotePresented = true
+            }
         } label: {
-            Text("Voice context")
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: SnapListMetrics.minimumTouchTarget
-                )
+            HStack(spacing: 12) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .background(SnapListColorToken.groupingFill.color)
+                    .clipShape(.circle)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Voice note")
+                        .snapListTypography(.rowTitle)
+                        .foregroundStyle(
+                            SnapListColorToken.inkPrimary.color
+                        )
+                    Text(voiceNoteRowSubtitle)
+                        .snapListTypography(.metadata)
+                        .foregroundStyle(
+                            SnapListColorToken.textSecondary.color
+                        )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SnapListColorToken.textTertiary.color)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 12)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: 54
+            )
+            .background(SnapListColorToken.canvas.color)
+            .clipShape(.rect(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(
+                        SnapListColorToken.hairline.color,
+                        lineWidth: 1
+                    )
+            }
         }
-        .buttonStyle(.bordered)
-        // v1.2 owns this screen and names the row "Voice context". Its optional and
-        // collapsed state is structural, so a seller who cannot see the row still learns
-        // it is skippable and not yet expanded. v2 owns the recorder interior, #469, and
-        // does not name this control.
-        .accessibilityLabel("Voice context, optional, collapsed")
+        .buttonStyle(.plain)
+        .accessibilityLabel(voiceNoteRowAccessibilityLabel)
         .accessibilityIdentifier("photo-review.voice")
+        .accessibilityFocused($focusedVoiceNoteOpener)
+    }
+
+    private var voiceNoteRowSubtitle: String {
+        guard let note = voiceNoteStore?.savedNote else {
+            return VoiceNotePresentation.emptyRowHelper
+        }
+        return VoiceNotePresentation.elapsedText(note.duration)
+    }
+
+    private var voiceNoteRowAccessibilityLabel: String {
+        guard let note = voiceNoteStore?.savedNote else {
+            return VoiceNotePresentation.emptyRowAccessibilityLabel
+        }
+        return "Voice note, \(VoiceNotePresentation.elapsedText(note.duration)), collapsed"
+    }
+
+    private func restoreVoiceNoteOpenerFocus() {
+        _ = voiceNoteStore?.consumeFocusRequest()
+        focusedVoiceNoteOpener = true
     }
 
     private func startListingControl(

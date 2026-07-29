@@ -75,9 +75,9 @@ struct AppShellView: View {
                             setReturnFocus: { pendingScanReturnFocus = $0 }
                         )
                     },
-                    // #469 still owns the Voice recorder interior, so that event stays
-                    // inert here. Start listing submits the photos in their displayed
-                    // order; only a validated receipt may clear the intake.
+                    // Photo Review consumes #469's Voice note event locally. Start
+                    // listing alone submits the photos in their displayed order; the
+                    // optional local WAV never enters this transaction.
                     openBoundary: { event in
                         if PhotoReviewSubmissionPrimaryActionConsumer.consume(
                             event,
@@ -105,6 +105,7 @@ struct AppShellView: View {
                             )
                         }
                     },
+                    voiceNoteStore: session.voiceNoteStore,
                     intake: photoReviewIntake
                 )
             } else {

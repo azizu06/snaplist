@@ -221,10 +221,9 @@ final class SnapListUITests: XCTestCase {
         let startListing = app.buttons["photo-review.start-listing"]
         XCTAssertTrue(voice.waitForExistence(timeout: 2))
         XCTAssertTrue(startListing.exists)
-        // Photo Review v1.2 owns this screen and names the row "Voice context". Its
-        // optional and collapsed state is structural truth a seller who cannot see the
-        // row still needs. v2 owns the recorder interior, which is #469, not this label.
-        XCTAssertEqual(voice.label, "Voice context, optional, collapsed")
+        // The exact live-source Voice Note v2.1 package controls the visible helper
+        // and the optional collapsed semantics.
+        XCTAssertEqual(voice.label, "Voice note, optional, collapsed")
         XCTAssertEqual(startListing.label, "Start listing")
         XCTAssertTrue(startListing.isEnabled)
         XCTAssertGreaterThanOrEqual(voice.frame.height, 44)
@@ -235,11 +234,37 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(count.label, "1 of 5")
 
         voice.tap()
+        let sheetTitle = app.staticTexts["voice-note.title"]
+        let helper = app.staticTexts["voice-note.helper"]
+        let record = app.buttons["voice-note.record"]
+        let close = app.buttons["voice-note.close"]
+        XCTAssertTrue(sheetTitle.waitForExistence(timeout: 2))
+        XCTAssertEqual(sheetTitle.label, "Voice note")
+        XCTAssertEqual(helper.label, "Add details the photos might miss.")
+        XCTAssertTrue(record.exists)
+        XCTAssertEqual(record.label, "Start recording")
+        XCTAssertGreaterThanOrEqual(record.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(record.frame.height, 44)
+        XCTAssertTrue(close.exists)
+        XCTAssertEqual(close.label, "Close")
+        XCTAssertGreaterThanOrEqual(
+            close.frame.width,
+            44,
+            "Voice note Close must expose the approved 44-point target width."
+        )
+        XCTAssertGreaterThanOrEqual(
+            close.frame.height,
+            44,
+            "Voice note Close must expose the approved 44-point target height."
+        )
+        close.tap()
+        XCTAssertTrue(voice.waitForExistence(timeout: 2))
+
         startListing.tap()
 
         XCTAssertTrue(
             screen.exists,
-            "Neither boundary owns a destination in this shell."
+            "Start listing stays in place until its canonical receipt resolves."
         )
         XCTAssertEqual(
             count.label,
@@ -261,6 +286,101 @@ final class SnapListUITests: XCTestCase {
                 "Photo Review must not claim \(claim)."
             )
         }
+    }
+
+    func testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--voice-note-take-ready-fixture"
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let voice = app.buttons["photo-review.voice"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 3))
+        voice.tap()
+
+        let cancel = app.buttons["voice-note.cancel"]
+        let elapsed = app.staticTexts["voice-note.elapsed"]
+        let save = app.buttons["voice-note.save"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 2))
+        XCTAssertTrue(elapsed.exists)
+        XCTAssertTrue(save.exists)
+
+        let orderedIdentifiers = app
+            .descendants(matching: .any)
+            .allElementsBoundByAccessibilityElement
+            .map(\.identifier)
+        let cancelIndex = try? XCTUnwrap(
+            orderedIdentifiers.firstIndex(of: "voice-note.cancel")
+        )
+        let elapsedIndex = try? XCTUnwrap(
+            orderedIdentifiers.firstIndex(of: "voice-note.elapsed")
+        )
+        let saveIndex = try? XCTUnwrap(
+            orderedIdentifiers.firstIndex(of: "voice-note.save")
+        )
+
+        XCTAssertLessThan(cancelIndex ?? .max, elapsedIndex ?? .max)
+        XCTAssertLessThan(elapsedIndex ?? .max, saveIndex ?? .max)
+    }
+
+    func testVoiceNoteSheetRejectsSwipeAndCloseRestoresStableReopenTruth() {
+        let saved = launchVoiceNoteFixture(
+            "--voice-note-saved-playing-fixture"
+        )
+        let savedClose = saved.buttons["voice-note.close"]
+        let playback = saved.buttons["voice-note.playback"]
+        XCTAssertEqual(playback.label, "Pause voice note")
+
+        attemptVoiceNoteSwipeDismiss(in: saved)
+
+        XCTAssertTrue(savedClose.exists)
+        XCTAssertEqual(playback.label, "Pause voice note")
+
+        savedClose.tap()
+        let savedRow = saved.buttons["photo-review.voice"]
+        XCTAssertTrue(savedRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(savedRow.label, "Voice note, 0:12, collapsed")
+        savedRow.tap()
+        XCTAssertEqual(
+            saved.buttons["voice-note.playback"].label,
+            "Play voice note"
+        )
+        saved.buttons["voice-note.close"].tap()
+        saved.terminate()
+
+        let interrupted = launchVoiceNoteFixture(
+            "--voice-note-interrupted-fixture"
+        )
+        let interruptedCopy = interrupted.staticTexts[
+            "Recording stopped. Nothing was saved."
+        ]
+        XCTAssertTrue(interruptedCopy.exists)
+
+        attemptVoiceNoteSwipeDismiss(in: interrupted)
+
+        XCTAssertTrue(interrupted.buttons["voice-note.close"].exists)
+        XCTAssertTrue(interruptedCopy.exists)
+
+        interrupted.buttons["voice-note.close"].tap()
+        let emptyRow = interrupted.buttons["photo-review.voice"]
+        XCTAssertTrue(emptyRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(emptyRow.label, "Voice note, optional, collapsed")
+        emptyRow.tap()
+        XCTAssertTrue(
+            interrupted.buttons["voice-note.record"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(interruptedCopy.exists)
     }
 
     func testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission() {
@@ -498,7 +618,7 @@ final class SnapListUITests: XCTestCase {
 
     // v1.2 primary_action.position is a sticky bottom action above the home-indicator
     // safe area, and its adaptive-layout contract says that action never covers the
-    // thumbnails, Voice context, or the home indicator. The hero and thumbnail strip are
+    // thumbnails, Voice note, or the home indicator. The hero and thumbnail strip are
     // fixed, so text is the only thing that lengthens this page; the largest Dynamic Type
     // is what puts the content decisively past the viewport, which is what makes the
     // scroll below real rather than a rubber-band that settles back to its start.
@@ -525,14 +645,14 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(startListing.waitForExistence(timeout: 3))
 
         // Structural truth: Start listing is pinned outside the scrolling content while
-        // Voice context stays in flow above it.
+        // Voice note stays in flow above it.
         XCTAssertFalse(
             screen.buttons["photo-review.start-listing"].exists,
             "Start listing must be a sticky action, not part of the scrolling content."
         )
         XCTAssertTrue(
             screen.buttons["photo-review.voice"].exists,
-            "Voice context stays in flow; only Start listing is sticky."
+            "Voice note stays in flow; only Start listing is sticky."
         )
 
         // Behavioural truth: the content scrolls under it and the action does not move.
@@ -1486,6 +1606,51 @@ final class SnapListUITests: XCTestCase {
         }
         app.launch()
         return app
+    }
+
+    private func launchVoiceNoteFixture(
+        _ fixtureArgument: String
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            fixtureArgument
+        ]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let voice = app.buttons["photo-review.voice"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 3))
+        voice.tap()
+        XCTAssertTrue(
+            app.buttons["voice-note.close"].waitForExistence(timeout: 2)
+        )
+        return app
+    }
+
+    private func attemptVoiceNoteSwipeDismiss(
+        in app: XCUIApplication
+    ) {
+        let sheetTitle = app.staticTexts["voice-note.title"]
+        XCTAssertTrue(sheetTitle.exists)
+        let destination = app.windows.firstMatch.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)
+        )
+        sheetTitle.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).press(
+            forDuration: 0.05,
+            thenDragTo: destination,
+            withVelocity: 1_000,
+            thenHoldForDuration: 0
+        )
     }
 
     private func addScreenshot(named name: String) {
