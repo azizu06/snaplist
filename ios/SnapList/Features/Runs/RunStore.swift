@@ -125,7 +125,11 @@ private actor FixtureRunService: RunServing {
 private extension DurableRun {
     static let loadedDetail = fixture(status: .running, stage: .pricing)
     static let refreshedDetail = fixture(status: .running, stage: .generating)
-    static let failedDetail = fixture(status: .failed, stage: .pricing)
+    static let failedDetail = fixture(
+        status: .failed,
+        stage: .pricing,
+        safeFailure: .maximumLengthFixture
+    )
     static let canceledDetail = fixture(status: .canceled, stage: .generating)
     static let completedDetail = fixture(status: .succeeded, stage: .completed)
     static let reviewableDetail = fixture(
@@ -137,6 +141,7 @@ private extension DurableRun {
     static func fixture(
         status: DurableRunStatus,
         stage: DurableRunStage,
+        safeFailure: RunSafeFailure? = nil,
         canOpenReview: Bool = false
     ) -> DurableRun {
         DurableRun(
@@ -161,10 +166,10 @@ private extension DurableRun {
             item: RunItemTruth(title: "Canon AE-1 film camera", photoCount: 3),
             requiredInput: nil,
             terminalOutcome: nil,
-            safeFailure: nil,
+            safeFailure: safeFailure,
             allowance: .reserved,
             legalActions: RunActionTruth(
-                canRetry: false,
+                canRetry: safeFailure?.retryable ?? false,
                 canCancel: false,
                 canOpenReview: canOpenReview,
                 canStartNewCapture: false
@@ -173,5 +178,29 @@ private extension DurableRun {
             retentionCleanedAt: nil
         )
     }
+}
+
+private extension RunSafeFailure {
+    static let maximumLengthFixture: RunSafeFailure = {
+        let ending = "All retry guidance is shown."
+        let repeatedGuidance = String(
+            repeating: "Keep your photos and retry from this saved item after checking your connection. ",
+            count: 10
+        )
+        let detail = String(repeatedGuidance.prefix(500 - ending.count)) + ending
+        precondition(detail.count == 500)
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "reason": "This run couldn’t finish",
+                "detail": detail,
+                "retryable": true,
+                "workPreserved": true,
+            ])
+            return try JSONDecoder().decode(RunSafeFailure.self, from: data)
+        } catch {
+            preconditionFailure("Invalid maximum-length safe-failure fixture: \(error)")
+        }
+    }()
 }
 #endif

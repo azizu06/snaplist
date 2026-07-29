@@ -59,6 +59,7 @@
       "SnapListUITests/FidelityScreenshotTests/testFoundationShellScreenshot",
       "SnapListUITests/HomeUITests/testAttentionAndCurrentRunUseTypedFutureRoutes",
       "SnapListUITests/HomeUITests/testFinalListingRowClearsTheFloatingDockWhenScrolled",
+      "SnapListUITests/HomeUITests/testFailedRunDetailKeepsMaximumSellerSafeFailureReachableAtAccessibilityType",
       "SnapListUITests/HomeUITests/testHomeRemainsReachableAtAccessibilityTypeWithReducedMotion",
       "SnapListUITests/HomeUITests/testRun02RouteShellReflowsAtAccessibility3WithReducedMotion",
       "SnapListUITests/HomeUITests/testRunDetailShowsFactualUnavailableState",

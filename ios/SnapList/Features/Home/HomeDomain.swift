@@ -204,6 +204,7 @@ enum TrophyWallCardState: Hashable, Sendable {
     case workingPricing
     case workingPersisting
     case readyToReviewLocked
+    case needsRetryLocked(detail: String)
 }
 
 struct TrophyWallOrderKey: Hashable, Comparable, Sendable {
@@ -321,7 +322,8 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
              .workingGenerating,
              .workingPricing,
              .workingPersisting,
-             .readyToReviewLocked:
+             .readyToReviewLocked,
+             .needsRetryLocked:
             if case .run(let runID) = card.identity {
                 destination = .run(runID)
                 accessibilityIdentifier =
@@ -350,6 +352,9 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
                 stateLabel = "Ready to review"
                 accessibilityLabel =
                     "\(itemName), ready to review. Review is not available yet."
+            case .needsRetryLocked(let detail):
+                stateLabel = "Needs retry · \(detail)"
+                accessibilityLabel = "\(itemName), needs retry. \(detail)"
             case .pendingUpload:
                 return nil
             }
@@ -402,8 +407,21 @@ protocol TrophyWallRepository: Sendable {
 
 @MainActor
 final class TrophyWallStore {
+    private enum CanonicalHistoryState {
+        case visible(TrophyWallOrderKey)
+        case tombstone(TrophyWallOrderKey)
+
+        var orderKey: TrophyWallOrderKey {
+            switch self {
+            case .visible(let orderKey), .tombstone(let orderKey):
+                orderKey
+            }
+        }
+    }
+
     let principalScope: TrophyWallPrincipalScope
     private(set) var cards: [TrophyWallCard]
+    private var canonicalHistoryStates: [UUID: CanonicalHistoryState]
 
     var processingRows: [TrophyWallProcessingRow] {
         cards.compactMap(TrophyWallProcessingRow.init(card:))
@@ -417,10 +435,29 @@ final class TrophyWallStore {
         cards = repository.initialCards(for: principalScope)
             .filter { $0.principalScope == principalScope }
             .sorted { $0.orderKey > $1.orderKey }
+        canonicalHistoryStates = cards.reduce(into: [:]) { states, card in
+            guard case .run(let runID) = card.identity else {
+                return
+            }
+            if let existingState = states[runID],
+               existingState.orderKey >= card.orderKey {
+                return
+            }
+            states[runID] = .visible(card.orderKey)
+        }
     }
 
     func ingest(_ acceptedRun: TrophyWallCanonicalAcceptedRun) {
         guard acceptedRun.principalScope == principalScope else {
+            return
+        }
+        if let historyOrderKey = acceptedRun.historyOrderKey {
+            if let currentState = canonicalHistoryStates[acceptedRun.runID],
+               historyOrderKey <= currentState.orderKey {
+                return
+            }
+            canonicalHistoryStates[acceptedRun.runID] = .visible(historyOrderKey)
+        } else if canonicalHistoryStates[acceptedRun.runID] != nil {
             return
         }
 
@@ -464,10 +501,21 @@ final class TrophyWallStore {
         for entry in historyPage.entries {
             let runDetail = entry.run
             guard entry.orderKey.matches(runID: runDetail.id),
-                  let state = Self.cardState(for: runDetail),
                   let lastMeaningfulUpdateAt = TrophyWallServerDate.parse(
                       runDetail.lastMeaningfulUpdateAt
                   ) else {
+                continue
+            }
+            if let currentState = canonicalHistoryStates[runDetail.id],
+               entry.orderKey <= currentState.orderKey {
+                continue
+            }
+            guard let state = Self.cardState(for: runDetail) else {
+                guard Self.isExplicitRetryCleanup(runDetail) else {
+                    continue
+                }
+                canonicalHistoryStates[runDetail.id] = .tombstone(entry.orderKey)
+                cards.removeAll { $0.identity == .run(runDetail.id) }
                 continue
             }
             ingest(
@@ -514,6 +562,20 @@ final class TrophyWallStore {
         )
     }
 
+    private static func isExplicitRetryCleanup(_ runDetail: DurableRun) -> Bool {
+        guard runDetail.status == .failed,
+              runDetail.terminalOutcome == .failed,
+              runDetail.retentionCleanedAt != nil,
+              let safeFailure = runDetail.safeFailure else {
+            return false
+        }
+        return !safeFailure.retryable
+            && !safeFailure.workPreserved
+            && !runDetail.legalActions.canRetry
+            && !runDetail.legalActions.canCancel
+            && !runDetail.legalActions.canOpenReview
+    }
+
     private static func cardState(for runDetail: DurableRun) -> TrophyWallCardState? {
         switch (runDetail.status, runDetail.stage) {
         case (.queued, .queued):
@@ -531,6 +593,16 @@ final class TrophyWallStore {
                 && runDetail.listingID != nil
                 && !runDetail.legalActions.canOpenReview:
             .readyToReviewLocked
+        case (.failed, _)
+            where runDetail.terminalOutcome == .failed
+                && runDetail.safeFailure?.retryable == true
+                && runDetail.safeFailure?.workPreserved == true
+                && runDetail.legalActions.canRetry
+                && !runDetail.legalActions.canCancel
+                && !runDetail.legalActions.canOpenReview:
+            runDetail.safeFailure.map {
+                .needsRetryLocked(detail: $0.detail)
+            }
         default:
             nil
         }

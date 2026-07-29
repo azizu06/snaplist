@@ -99,10 +99,31 @@ final class RunStoreTests: XCTestCase {
         XCTAssertEqual(requests.map(\.runID), [first.id, second.id])
     }
 
+    func testFailedRunDetailDisclosesFullSellerSafeFailure() throws {
+        let detail = String(String(repeating: "Retry detail remains visible. ", count: 18).prefix(500))
+        let safeFailure = try JSONDecoder().decode(
+            RunSafeFailure.self,
+            from: JSONSerialization.data(withJSONObject: [
+                "reason": "This run couldn’t finish",
+                "detail": detail,
+                "retryable": true,
+                "workPreserved": true,
+            ])
+        )
+        let run = Self.makeRun(
+            status: .failed,
+            stage: .pricing,
+            safeFailure: safeFailure
+        )
+
+        XCTAssertEqual(run.sellerFacingDetail, detail)
+    }
+
     private static func makeRun(
         id: UUID = UUID(uuidString: "31700000-0000-4000-8000-000000000010")!,
         status: DurableRunStatus = .running,
         stage: DurableRunStage = .generating,
+        safeFailure: RunSafeFailure? = nil,
         canOpenReview: Bool = false
     ) -> DurableRun {
         DurableRun(
@@ -127,10 +148,10 @@ final class RunStoreTests: XCTestCase {
             item: RunItemTruth(title: "Canon AE-1 film camera", photoCount: 3),
             requiredInput: nil,
             terminalOutcome: nil,
-            safeFailure: nil,
+            safeFailure: safeFailure,
             allowance: .reserved,
             legalActions: RunActionTruth(
-                canRetry: false,
+                canRetry: safeFailure?.retryable ?? false,
                 canCancel: false,
                 canOpenReview: canOpenReview,
                 canStartNewCapture: false

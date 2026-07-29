@@ -106,6 +106,58 @@ final class HomeUITests: XCTestCase {
         }
     }
 
+    func testFailedRunDetailKeepsMaximumSellerSafeFailureReachableAtAccessibilityType() {
+        let app = launch(
+            "HOME-01",
+            extraArguments: [
+                "--run-detail-fixture=failed",
+                "--dynamic-type=accessibility5",
+            ]
+        )
+        let opener = app.buttons["home.run.20800000-0000-4000-8000-000000000020"]
+        XCTAssertTrue(opener.waitForExistence(timeout: 3))
+        opener.tap()
+
+        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
+        let scroll = app.scrollViews["run.detail.scroll"]
+        XCTAssertTrue(
+            scroll.waitForExistence(timeout: 3),
+            "Run Detail must expose vertically reachable content."
+        )
+
+        let detail = app.staticTexts.matching(
+            NSPredicate(
+                format: "label BEGINSWITH %@ AND label ENDSWITH %@",
+                "Keep your photos",
+                "All retry guidance is shown."
+            )
+        ).firstMatch
+        XCTAssertTrue(detail.waitForExistence(timeout: 3))
+        XCTAssertEqual(detail.label.count, 500)
+
+        let initialMaximumY = detail.frame.maxY
+        let viewport = app.windows.firstMatch.frame.insetBy(dx: 0, dy: 8)
+        for _ in 0..<12 where detail.frame.maxY > viewport.maxY {
+            scroll.swipeUp()
+        }
+
+        XCTAssertLessThan(
+            detail.frame.maxY,
+            initialMaximumY,
+            "Maximum-length detail must move through the Run Detail viewport."
+        )
+        XCTAssertGreaterThan(detail.frame.maxY, viewport.minY)
+        XCTAssertLessThanOrEqual(
+            detail.frame.maxY,
+            viewport.maxY,
+            "The final line of the complete seller-safe detail must be reachable."
+        )
+
+        app.buttons["Back"].tap()
+        XCTAssertTrue(opener.waitForExistence(timeout: 2))
+        XCTAssertTrue(opener.isHittable)
+    }
+
     func testCompletedRunOffersReviewCopyOnlyWhenServerAllowsIt() {
         let unavailable = launch(
             "HOME-01",

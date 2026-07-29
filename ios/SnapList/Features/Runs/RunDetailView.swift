@@ -6,26 +6,29 @@ struct RunDetailView: View {
     @Bindable var store: RunDetailStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SnapListMetrics.screenGutter) {
-            switch store.state {
-            case .idle, .loading:
-                ProgressView("Checking your run…")
-            case .unavailable:
-                ContentUnavailableView(
-                    "Run unavailable",
-                    systemImage: "exclamationmark.circle",
-                    description: Text("We couldn’t load this run.")
-                )
-            case .loaded(let run):
-                loadedContent(run)
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: SnapListMetrics.screenGutter) {
+                switch store.state {
+                case .idle, .loading:
+                    ProgressView("Checking your run…")
+                case .unavailable:
+                    ContentUnavailableView(
+                        "Run unavailable",
+                        systemImage: "exclamationmark.circle",
+                        description: Text("We couldn’t load this run.")
+                    )
+                case .loaded(let run):
+                    loadedContent(run)
+                }
 
-            Spacer()
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(SnapListMetrics.screenGutter)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("run.detail")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(SnapListMetrics.screenGutter)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("run.detail")
+        .accessibilityIdentifier("run.detail.scroll")
         .navigationTitle("Run status")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -92,7 +95,9 @@ private extension DurableRun {
         case .canceled: "Run canceled"
         }
     }
+}
 
+extension DurableRun {
     var sellerFacingDetail: String {
         switch status {
         case .queued, .running, .retrying:
@@ -100,7 +105,7 @@ private extension DurableRun {
         case .succeeded:
             legalActions.canOpenReview ? "Ready to review" : "Review unavailable"
         case .failed:
-            "Couldn’t finish"
+            safeFailure?.detail ?? "Couldn’t finish"
         case .canceled:
             "Processing stopped"
         }
