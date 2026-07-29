@@ -305,7 +305,18 @@ enum PhotoReviewNativeDragSourceEvent: Equatable {
     case rejectedNoSource
     case rejectedPresentation
     case provided(photoID: StagedCapturePhoto.ID)
-    case sessionWillBegin(location: CGPoint?)
+    case willAnimateLift(
+        location: CGPoint?,
+        scrollPanState: UIGestureRecognizer.State?
+    )
+    case liftAnimationCompleted(
+        position: UIViewAnimatingPosition,
+        scrollPanState: UIGestureRecognizer.State?
+    )
+    case sessionWillBegin(
+        location: CGPoint?,
+        scrollPanState: UIGestureRecognizer.State?
+    )
     case willEnd(
         operation: UIDropOperation,
         location: CGPoint?,
@@ -328,8 +339,14 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
     private(set) var hostContentSize = CGSize.zero
     private(set) var beginOutcome = "not-called"
     private(set) var photoID: StagedCapturePhoto.ID?
+    private(set) var didWillAnimateLift = false
+    private(set) var willAnimateLiftLocation: CGPoint?
+    private(set) var willAnimateLiftPanState: UIGestureRecognizer.State?
+    private(set) var liftAnimationCompletionPosition: UIViewAnimatingPosition?
+    private(set) var liftAnimationCompletionPanState: UIGestureRecognizer.State?
     private(set) var didSessionWillBegin = false
     private(set) var sessionWillBeginLocation: CGPoint?
+    private(set) var sessionWillBeginPanState: UIGestureRecognizer.State?
     private(set) var sessionDidMoveCount = 0
     private(set) var lastSessionDidMoveLocation: CGPoint?
     private(set) var willEndOperation: UIDropOperation?
@@ -367,8 +384,14 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
             "photo:\(photoID?.uuidString ?? "none")",
             "host:\(bounds)",
             "content:\(content)",
+            "willAnimateLift:\(didWillAnimateLift)",
+            "willAnimateLiftLocation:\(Self.pointLabel(willAnimateLiftLocation))",
+            "willAnimateLiftPan:\(Self.gestureStateLabel(willAnimateLiftPanState))",
+            "liftCompletion:\(Self.animatingPositionLabel(liftAnimationCompletionPosition))",
+            "liftCompletionPan:\(Self.gestureStateLabel(liftAnimationCompletionPanState))",
             "willBegin:\(didSessionWillBegin)",
             "willBeginLocation:\(Self.pointLabel(sessionWillBeginLocation))",
+            "willBeginPan:\(Self.gestureStateLabel(sessionWillBeginPanState))",
             "moves:\(sessionDidMoveCount)",
             "lastMove:\(Self.pointLabel(lastSessionDidMoveLocation))",
             "willEnd:\(Self.operationLabel(willEndOperation))",
@@ -399,8 +422,14 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
             self.isEnabled = isEnabled
             beginOutcome = "requested"
             photoID = nil
+            didWillAnimateLift = false
+            willAnimateLiftLocation = nil
+            willAnimateLiftPanState = nil
+            liftAnimationCompletionPosition = nil
+            liftAnimationCompletionPanState = nil
             didSessionWillBegin = false
             sessionWillBeginLocation = nil
+            sessionWillBeginPanState = nil
             sessionDidMoveCount = 0
             lastSessionDidMoveLocation = nil
             willEndOperation = nil
@@ -421,9 +450,17 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
         case .provided(let photoID):
             beginOutcome = "provided"
             self.photoID = photoID
-        case .sessionWillBegin(let location):
+        case .willAnimateLift(let location, let scrollPanState):
+            didWillAnimateLift = true
+            willAnimateLiftLocation = location
+            willAnimateLiftPanState = scrollPanState
+        case .liftAnimationCompleted(let position, let scrollPanState):
+            liftAnimationCompletionPosition = position
+            liftAnimationCompletionPanState = scrollPanState
+        case .sessionWillBegin(let location, let scrollPanState):
             didSessionWillBegin = true
             sessionWillBeginLocation = location
+            sessionWillBeginPanState = scrollPanState
         case .willEnd(
             let operation,
             let location,
@@ -459,6 +496,46 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
         .map { Int($0.rounded()) }
         .map(String.init)
         .joined(separator: ",")
+    }
+
+    private static func gestureStateLabel(
+        _ state: UIGestureRecognizer.State?
+    ) -> String {
+        switch state {
+        case .possible:
+            "possible"
+        case .began:
+            "began"
+        case .changed:
+            "changed"
+        case .ended:
+            "ended"
+        case .cancelled:
+            "cancelled"
+        case .failed:
+            "failed"
+        case nil:
+            "none"
+        @unknown default:
+            "unknown"
+        }
+    }
+
+    private static func animatingPositionLabel(
+        _ position: UIViewAnimatingPosition?
+    ) -> String {
+        switch position {
+        case .start:
+            "start"
+        case .current:
+            "current"
+        case .end:
+            "end"
+        case nil:
+            "not-called"
+        @unknown default:
+            "unknown"
+        }
     }
 
     private static func operationLabel(
@@ -949,6 +1026,33 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
 
     func dragInteraction(
         _ interaction: UIDragInteraction,
+        willAnimateLiftWith animator: any UIDragAnimating,
+        session: UIDragSession
+    ) {
+        observeSource(
+            .willAnimateLift(
+                location: hostNormalizedLocation(
+                    for: session,
+                    interaction: interaction
+                ),
+                scrollPanState: scrollPanState(for: interaction)
+            )
+        )
+        animator.addCompletion { [weak self, weak interaction] position in
+            guard let self else {
+                return
+            }
+            self.observeSource(
+                .liftAnimationCompleted(
+                    position: position,
+                    scrollPanState: self.scrollPanState(for: interaction)
+                )
+            )
+        }
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
         sessionWillBegin session: UIDragSession
     ) {
         observeSource(
@@ -956,7 +1060,8 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
                 location: hostNormalizedLocation(
                     for: session,
                     interaction: interaction
-                )
+                ),
+                scrollPanState: scrollPanState(for: interaction)
             )
         )
     }
@@ -1031,6 +1136,12 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
             x: sourceLocation.x - sourceView.bounds.minX,
             y: sourceLocation.y - sourceView.bounds.minY
         )
+    }
+
+    private func scrollPanState(
+        for interaction: UIDragInteraction?
+    ) -> UIGestureRecognizer.State? {
+        (interaction?.view as? UIScrollView)?.panGestureRecognizer.state
     }
 }
 
