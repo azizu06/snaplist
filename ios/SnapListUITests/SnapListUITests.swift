@@ -564,7 +564,6 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(hero.exists)
         XCTAssertFalse(thumbnail.exists)
         XCTAssertFalse(addPhoto.exists)
-        XCTAssertFalse(app.staticTexts["photo-review.cover"].exists)
         XCTAssertFalse(app.buttons["scan.library"].exists)
         XCTAssertFalse(app.buttons["scan.choose-library"].exists)
 
@@ -672,8 +671,18 @@ final class SnapListUITests: XCTestCase {
             "Start listing must stay pinned while the content scrolls."
         )
 
-        let window = app.windows.firstMatch.frame
-        XCTAssertLessThanOrEqual(startListing.frame.maxY, window.maxY)
+        let window = app.windows.firstMatch
+        XCTAssertEqual(window.frame.width, 402, accuracy: 1)
+        XCTAssertEqual(window.frame.height, 874, accuracy: 1)
+        let homeIndicatorSafeAreaHeight: CGFloat = 34
+        let safeAreaTolerance: CGFloat = 1
+        XCTAssertLessThanOrEqual(
+            startListing.frame.maxY,
+            window.frame.maxY
+                - homeIndicatorSafeAreaHeight
+                + safeAreaTolerance,
+            "Start listing must clear the exact-device home-indicator safe area."
+        )
         XCTAssertGreaterThanOrEqual(startListing.frame.height, 44)
     }
 
@@ -720,6 +729,7 @@ final class SnapListUITests: XCTestCase {
             app.staticTexts["scan.photo-count"].exists,
             "The deleted photo must leave the Scan intake, not only Photo Review."
         )
+        addScreenshot(named: "ZERO-402x874.png")
     }
 
     // v1.2 top_bar sets `minimum_target_points: [44, 44]` and its Dynamic Type rule
@@ -769,6 +779,22 @@ final class SnapListUITests: XCTestCase {
             let back = app.buttons["photo-review.back"].frame
             let count = app.staticTexts["photo-review.count"].frame
             let hero = app.buttons["photo-review.hero"].frame
+            XCTAssertEqual(
+                app.buttons["photo-review.back"].label,
+                "Back to camera"
+            )
+            XCTAssertFalse(
+                app.staticTexts["Back to camera"].exists,
+                "The approved header renders a chevron-only Back control."
+            )
+            if typeSize != "accessibility3" {
+                XCTAssertEqual(
+                    app.staticTexts["Review photos"].frame.midX,
+                    app.windows.firstMatch.frame.midX,
+                    accuracy: 1,
+                    "The baseline title stays centered at \(typeSize)."
+                )
+            }
             XCTAssertLessThanOrEqual(back.maxX, count.minX, "order at \(typeSize)")
             XCTAssertLessThanOrEqual(
                 count.maxY,
@@ -863,6 +889,121 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(recoveryLibrary.label, "Choose from library")
     }
 
+    func testPhotoReviewREV02UsesCanonicalAdaptiveHeroAt402x874() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-02"])
+        let window = app.windows.firstMatch
+        let hero = app.buttons["photo-review.hero"]
+
+        XCTAssertTrue(window.waitForExistence(timeout: 3))
+        XCTAssertEqual(window.frame.size.width, 402, accuracy: 0.5)
+        XCTAssertEqual(window.frame.size.height, 874, accuracy: 0.5)
+        XCTAssertTrue(hero.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            hero.frame.height,
+            420,
+            accuracy: 1,
+            "Photo Review v1.4 caps the shared-v7 adaptive hero at 420 points."
+        )
+    }
+
+    func testPhotoReviewREV01RendersOneSelectedCoverPhotoWithProgressiveActions() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-01"])
+        let screen = app.scrollViews["photo-review.screen"]
+        let hero = app.buttons["photo-review.hero"]
+        let firstPhoto = app.buttons["photo-review.thumbnail.1"]
+
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "1 of 5")
+        XCTAssertTrue(hero.exists)
+        assertPhotoReviewThumbnailCatalog(app, state: "REV-01")
+        XCTAssertFalse(app.buttons["photo-review.thumbnail.2"].exists)
+        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
+        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        addScreenshot(named: "REV-01-402x874.png")
+
+        hero.tap()
+
+        XCTAssertTrue(app.buttons["photo-review.replace"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
+        XCTAssertTrue(firstPhoto.isSelected)
+    }
+
+    func testPhotoReviewREV04RendersSecondPhotoSelectedWithActionsInFlow() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-04"])
+        let screen = app.scrollViews["photo-review.screen"]
+        let secondPhoto = app.buttons["photo-review.thumbnail.2"]
+        let replace = app.buttons["photo-review.replace"]
+        let delete = app.buttons["photo-review.delete"]
+
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "3 of 5")
+        assertPhotoReviewThumbnailCatalog(app, state: "REV-04")
+        XCTAssertTrue(replace.exists)
+        XCTAssertTrue(delete.exists)
+        XCTAssertGreaterThanOrEqual(replace.frame.minY, secondPhoto.frame.maxY)
+        XCTAssertGreaterThanOrEqual(delete.frame.minY, secondPhoto.frame.maxY)
+        addScreenshot(named: "REV-04-402x874.png")
+    }
+
+    func testPhotoReviewHardwareKeyboardControlLeftMovesSelectedSecondPhotoToCoverWithReducedMotion() {
+        let app = launch(extraArguments: [
+            "--photo-review-state=REV-04",
+            "--reduced-motion",
+            "--photo-review-fixture-order-probe"
+        ])
+        let screen = app.scrollViews["photo-review.screen"]
+        let order = app.staticTexts["photo-review.fixture-order"]
+        let secondPhoto = app.buttons["photo-review.thumbnail.2"]
+        let initialOrder = [
+            "45500000-0000-4000-8000-000000000001",
+            "45500000-0000-4000-8000-000000000002",
+            "45500000-0000-4000-8000-000000000003"
+        ].joined(separator: "|")
+        let reordered = [
+            "45500000-0000-4000-8000-000000000002",
+            "45500000-0000-4000-8000-000000000001",
+            "45500000-0000-4000-8000-000000000003"
+        ].joined(separator: "|")
+
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertTrue(order.waitForExistence(timeout: 2))
+        XCTAssertEqual(order.label, initialOrder)
+        XCTAssertTrue(
+            app.otherElements["photo-review.motion-reduced"].exists,
+            "The hardware-keyboard proof must use the Reduced Motion path."
+        )
+        XCTAssertTrue(secondPhoto.exists)
+
+        secondPhoto.tap()
+
+        XCTAssertTrue(secondPhoto.isSelected)
+        app.typeKey(.leftArrow, modifierFlags: .control)
+
+        let reorderedExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", reordered),
+            object: order
+        )
+        let result = XCTWaiter.wait(
+            for: [reorderedExpectation],
+            timeout: 3
+        )
+        addScreenshot(named: "reduced-motion-REV-04-402x874.png")
+        XCTAssertEqual(
+            result,
+            .completed,
+            "One Control+Left must commit exactly one move from A/B/C to B/A/C."
+        )
+        XCTAssertEqual(order.label, reordered)
+
+        let movedPhoto = app.buttons["photo-review.thumbnail.1"]
+        XCTAssertTrue(movedPhoto.exists)
+        XCTAssertEqual(
+            movedPhoto.label,
+            "Photo 1 of 3, Cover, selected. Actions: Replace, Delete, Move later."
+        )
+        XCTAssertTrue(movedPhoto.isSelected)
+    }
+
     func testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionCoverAndProgressiveActions() {
         let app = launch(extraArguments: ["--photo-review-state=REV-02"])
         let screen = app.scrollViews["photo-review.screen"]
@@ -877,28 +1018,33 @@ final class SnapListUITests: XCTestCase {
             app.staticTexts.matching(identifier: "photo-review.visible-ordinal").count,
             0
         )
+        XCTAssertFalse(
+            app.staticTexts["photo-review.fixture-order"].exists,
+            "Stable identity diagnostics must not enter ordinary accessibility order."
+        )
 
+        let hero = app.buttons["photo-review.hero"]
         let firstPhoto = app.buttons["photo-review.thumbnail.1"]
         let secondPhoto = app.buttons["photo-review.thumbnail.2"]
-        let thirdPhoto = app.buttons["photo-review.thumbnail.3"]
-        for thumbnail in [firstPhoto, secondPhoto, thirdPhoto] {
-            XCTAssertTrue(thumbnail.exists)
-        }
-
-        XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
-        XCTAssertTrue(firstPhoto.label.contains("Cover"))
-        XCTAssertTrue(firstPhoto.isSelected)
-        XCTAssertTrue(secondPhoto.label.contains("Photo 2 of 3"))
-        XCTAssertFalse(secondPhoto.label.contains("Cover"))
-        XCTAssertFalse(secondPhoto.isSelected)
-        XCTAssertTrue(thirdPhoto.label.contains("Photo 3 of 3"))
-
-        let cover = app.staticTexts["photo-review.cover"]
-        XCTAssertEqual(app.staticTexts.matching(identifier: "photo-review.cover").count, 1)
-        XCTAssertGreaterThanOrEqual(cover.frame.minY, firstPhoto.frame.maxY)
+        XCTAssertEqual(
+            hero.label,
+            "Photo 2 of 3, selected. Actions: Replace, Delete."
+        )
+        assertPhotoReviewThumbnailCatalog(app, state: "REV-02")
+        let back = app.buttons["photo-review.back"]
+        let voice = app.buttons["photo-review.voice"]
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(back.exists)
+        XCTAssertGreaterThanOrEqual(back.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 44)
+        XCTAssertTrue(voice.exists)
+        XCTAssertEqual(voice.label, "Voice note, optional, collapsed")
+        XCTAssertTrue(startListing.exists)
+        XCTAssertEqual(startListing.label, "Start listing")
 
         XCTAssertFalse(app.buttons["photo-review.replace"].exists)
         XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        addScreenshot(named: "REV-02-402x874.png")
 
         secondPhoto.tap()
 
@@ -935,7 +1081,8 @@ final class SnapListUITests: XCTestCase {
     func testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion() {
         let app = launch(extraArguments: [
             "--photo-review-state=REV-02",
-            "--reduced-motion"
+            "--reduced-motion",
+            "--photo-review-fixture-order-probe"
         ])
         let screen = app.scrollViews["photo-review.screen"]
 
@@ -1010,6 +1157,7 @@ final class SnapListUITests: XCTestCase {
             dragObservation.label.contains("transition=suppressed"),
             "Reduced Motion must suppress the production drag transition decision."
         )
+        addScreenshot(named: "drag-drop-complete-402x874.png")
 
         let outside = app.coordinate(
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)
@@ -1037,7 +1185,8 @@ final class SnapListUITests: XCTestCase {
 
         let edgeApp = launch(extraArguments: [
             "--photo-review-state=REV-03",
-            "--reduced-motion"
+            "--reduced-motion",
+            "--photo-review-fixture-order-probe"
         ])
         XCTAssertTrue(
             edgeApp.scrollViews["photo-review.screen"].waitForExistence(
@@ -1101,6 +1250,7 @@ final class SnapListUITests: XCTestCase {
             "The approved REV-03 fixture must render the public screen."
         )
         XCTAssertEqual(app.staticTexts["photo-review.count"].label, "5 of 5")
+        assertPhotoReviewThumbnailCatalog(app, state: "REV-03")
 
         let add = app.buttons["photo-review.add"]
         // REV-03 keeps Add visible so the strip does not reflow at the limit. It stops
@@ -1111,6 +1261,7 @@ final class SnapListUITests: XCTestCase {
             add.label,
             "Add photos, unavailable at five photo limit"
         )
+        addScreenshot(named: "REV-03-402x874.png")
 
         // A disabled control has no activation point at all: XCUITest cannot even
         // evaluate its hittability, and tapping it raises rather than doing nothing. That
@@ -1139,20 +1290,9 @@ final class SnapListUITests: XCTestCase {
         )
 
         let count = app.staticTexts["photo-review.count"]
-        let firstPhoto = app.buttons["photo-review.thumbnail.1"]
-        let secondPhoto = app.buttons["photo-review.thumbnail.2"]
-        let thirdPhoto = app.buttons["photo-review.thumbnail.3"]
 
         XCTAssertEqual(count.label, "3 of 5")
-        XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
-        XCTAssertTrue(firstPhoto.label.contains("Cover"))
-        XCTAssertTrue(firstPhoto.isSelected)
-        XCTAssertTrue(secondPhoto.label.contains("Photo 2 of 3"))
-        XCTAssertFalse(secondPhoto.label.contains("Cover"))
-        XCTAssertFalse(secondPhoto.isSelected)
-        XCTAssertTrue(thirdPhoto.label.contains("Photo 3 of 3"))
-        XCTAssertFalse(thirdPhoto.label.contains("Cover"))
-        XCTAssertFalse(thirdPhoto.isSelected)
+        assertPhotoReviewThumbnailCatalog(app, state: "REV-02")
         XCTAssertFalse(app.buttons["photo-review.replace"].exists)
         XCTAssertFalse(app.buttons["photo-review.delete"].exists)
 
@@ -1169,15 +1309,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.buttons["photo-review.replace"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["photo-review.delete"].exists)
         XCTAssertEqual(count.label, "3 of 5")
-        XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
-        XCTAssertTrue(firstPhoto.label.contains("Cover"))
-        XCTAssertTrue(firstPhoto.isSelected)
-        XCTAssertTrue(secondPhoto.label.contains("Photo 2 of 3"))
-        XCTAssertFalse(secondPhoto.label.contains("Cover"))
-        XCTAssertFalse(secondPhoto.isSelected)
-        XCTAssertTrue(thirdPhoto.label.contains("Photo 3 of 3"))
-        XCTAssertFalse(thirdPhoto.label.contains("Cover"))
-        XCTAssertFalse(thirdPhoto.isSelected)
+        assertPhotoReviewThumbnailCatalog(app, state: "REV-02")
     }
 
     func testScanCameraKeepsNamedControlsReachableAtAccessibilityTypeAndReducedMotion() {
@@ -1583,6 +1715,77 @@ final class SnapListUITests: XCTestCase {
             .completed
         )
         return app
+    }
+
+    private func assertPhotoReviewThumbnailCatalog(
+        _ app: XCUIApplication,
+        state: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expected: [(label: String, isSelected: Bool)]
+        switch state {
+        case "REV-01":
+            expected = [(
+                "Photo 1 of 1, Cover, selected. Actions: Replace, Delete.",
+                true
+            )]
+        case "REV-02", "REV-04":
+            expected = [
+                (
+                    "Photo 1 of 3, Cover. Actions: Replace, Delete, Move later.",
+                    false
+                ),
+                (
+                    "Photo 2 of 3, selected. Actions: Replace, Delete, Move earlier, Move later, Make cover.",
+                    true
+                ),
+                (
+                    "Photo 3 of 3. Actions: Replace, Delete, Move earlier, Make cover.",
+                    false
+                )
+            ]
+        case "REV-03":
+            expected = [
+                (
+                    "Photo 1 of 5, Cover, selected. Actions: Replace, Delete, Move later.",
+                    true
+                ),
+                (
+                    "Photo 2 of 5. Actions: Replace, Delete, Move earlier, Move later, Make cover.",
+                    false
+                ),
+                (
+                    "Photo 3 of 5. Actions: Replace, Delete, Move earlier, Move later, Make cover.",
+                    false
+                ),
+                (
+                    "Photo 4 of 5. Actions: Replace, Delete, Move earlier, Move later, Make cover.",
+                    false
+                ),
+                (
+                    "Photo 5 of 5. Actions: Replace, Delete, Move earlier, Make cover.",
+                    false
+                )
+            ]
+        default:
+            XCTFail("Unknown Photo Review catalog state \(state).", file: file, line: line)
+            return
+        }
+
+        for (offset, entry) in expected.enumerated() {
+            let thumbnail = app.buttons[
+                "photo-review.thumbnail.\(offset + 1)"
+            ]
+            XCTAssertTrue(thumbnail.exists, "\(state) photo \(offset + 1)", file: file, line: line)
+            XCTAssertEqual(thumbnail.label, entry.label, file: file, line: line)
+            XCTAssertEqual(
+                thumbnail.isSelected,
+                entry.isSelected,
+                file: file,
+                line: line
+            )
+        }
     }
 
     private func launchOnboarding(

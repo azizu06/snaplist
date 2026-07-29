@@ -6,6 +6,7 @@ enum SnapListColorToken: String, CaseIterable {
     case textSecondary = "#55585C"
     case textTertiary = "#8A8D92"
     case canvas = "#FFFFFF"
+    case quietFill = "#F3F4F6"
     case groupingFill = "#F7F7F7"
     case hairline = "#ECEDEF"
     case divider = "#F1F2F4"
