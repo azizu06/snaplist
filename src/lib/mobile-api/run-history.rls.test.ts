@@ -15,6 +15,7 @@ const SUPABASE_URL =
   ?? process.env.NEXT_PUBLIC_SUPABASE_URL
   ?? "http://127.0.0.1:54321";
 const SECRET_API_KEY = resolveTenantServerTestApiKey();
+const CURSOR_SIGNING_SECRET = "offline-run-history-cursor-signing-secret";
 const DATABASE_URL = resolveLocalTestDatabaseUrl(
   process.env.SUPABASE_TEST_DB_URL
     ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
@@ -137,6 +138,7 @@ function runHistoryHandler() {
   const operations = createConfiguredSupabaseMobileRunOperations({
     supabaseURL: SUPABASE_URL,
     anonKey: SECRET_API_KEY!,
+    cursorSigningSecret: CURSOR_SIGNING_SECRET,
   });
   return createMobileApiHandler({
     async authenticate(token) {

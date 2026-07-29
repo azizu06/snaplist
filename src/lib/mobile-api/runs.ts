@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { itemLabel } from "@/lib/ui/item-label";
@@ -93,6 +94,7 @@ const historyRequestSchema = z
 
 const cursorPayloadSchema = z
   .object({
+    userId: z.string().min(1),
     snapshotRevision: z.string().regex(/^[1-9][0-9]*$/u),
     lastMeaningfulUpdateAt: z.string().datetime({ offset: true }),
     runId: z.string().uuid(),
@@ -108,18 +110,63 @@ const runHistoryRowSchema = z
   })
   .strict();
 
-function encodeCursor(payload: z.infer<typeof cursorPayloadSchema>): string {
-  return btoa(JSON.stringify(cursorPayloadSchema.parse(payload)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/u, "");
+const canonicalBase64UrlPattern = /^[A-Za-z0-9_-]+$/u;
+const cursorSignatureContext = "snaplist:mobile-run-history-cursor:v1\0";
+
+function cursorSignature(payload: string, signingSecret: string): Buffer {
+  return createHmac("sha256", signingSecret)
+    .update(cursorSignatureContext)
+    .update(payload)
+    .digest();
 }
 
-function decodeCursor(cursor: string): z.infer<typeof cursorPayloadSchema> {
+function decodeCanonicalBase64Url(value: string): Buffer | null {
+  if (!canonicalBase64UrlPattern.test(value)) return null;
+  const decoded = Buffer.from(value, "base64url");
+  return decoded.toString("base64url") === value ? decoded : null;
+}
+
+function encodeCursor(
+  payload: z.infer<typeof cursorPayloadSchema>,
+  signingSecret: string,
+): string {
+  const encodedPayload = Buffer.from(
+    JSON.stringify(cursorPayloadSchema.parse(payload)),
+  ).toString("base64url");
+  const authenticatedPayload = `v1.${encodedPayload}`;
+  const signature = cursorSignature(authenticatedPayload, signingSecret)
+    .toString("base64url");
+  return `${authenticatedPayload}.${signature}`;
+}
+
+function decodeCursor(
+  cursor: string,
+  signingSecret: string,
+): z.infer<typeof cursorPayloadSchema> {
+  const [version, encodedPayload, encodedSignature, ...rest] = cursor.split(".");
+  const payload = encodedPayload
+    ? decodeCanonicalBase64Url(encodedPayload)
+    : null;
+  const signature = encodedSignature
+    ? decodeCanonicalBase64Url(encodedSignature)
+    : null;
+  const authenticatedPayload = `v1.${encodedPayload ?? ""}`;
+  const expectedSignature = cursorSignature(
+    authenticatedPayload,
+    signingSecret,
+  );
+  if (
+    version !== "v1"
+    || rest.length > 0
+    || !payload
+    || !signature
+    || signature.length !== expectedSignature.length
+    || !timingSafeEqual(signature, expectedSignature)
+  ) {
+    throw new MobileRunInvalidCursorError();
+  }
   try {
-    const base64 = cursor.replaceAll("-", "+").replaceAll("_", "/");
-    const padding = "=".repeat((4 - (base64.length % 4)) % 4);
-    return cursorPayloadSchema.parse(JSON.parse(atob(base64 + padding)));
+    return cursorPayloadSchema.parse(JSON.parse(payload.toString("utf8")));
   } catch {
     throw new MobileRunInvalidCursorError();
   }
@@ -284,11 +331,18 @@ function durableMutationFailure(data: unknown): void {
 
 export function createMobileRunOperations(
   clientForBearer: (bearerToken: string) => MobileRunDataClient | Promise<MobileRunDataClient>,
+  cursorSigningSecret: string,
 ): MobileRunOperations & MobileRunHistoryReader {
+  const signingSecret = z.string().min(32).parse(cursorSigningSecret);
   return {
     async list(rawInput) {
       const input = historyRequestSchema.parse(rawInput);
-      const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
+      const cursor = input.cursor
+        ? decodeCursor(input.cursor, signingSecret)
+        : undefined;
+      if (cursor && cursor.userId !== input.userId) {
+        throw new MobileRunInvalidCursorError();
+      }
       const client = await clientForBearer(input.bearerToken);
       const rawRows = requireData(
         "run history",
@@ -338,10 +392,11 @@ export function createMobileRunOperations(
         })),
         nextCursor: boundary && snapshotRevision
           ? encodeCursor({
+              userId: input.userId,
               snapshotRevision,
               lastMeaningfulUpdateAt: boundary.last_meaningful_update_at,
               runId: boundary.run_id,
-            })
+            }, signingSecret)
           : null,
       });
     },
@@ -448,13 +503,16 @@ export function createSupabaseMobileRunDataClient(
 export function createConfiguredSupabaseMobileRunOperations(input: {
   supabaseURL: string;
   anonKey: string;
+  cursorSigningSecret: string;
 }): MobileRunOperations & MobileRunHistoryReader {
-  return createMobileRunOperations((bearerToken) =>
-    createSupabaseMobileRunDataClient(
-      createClient(input.supabaseURL, input.anonKey, {
-        accessToken: async () => bearerToken,
-        auth: { persistSession: false, autoRefreshToken: false },
-      }),
-    ),
+  return createMobileRunOperations(
+    (bearerToken) =>
+      createSupabaseMobileRunDataClient(
+        createClient(input.supabaseURL, input.anonKey, {
+          accessToken: async () => bearerToken,
+          auth: { persistSession: false, autoRefreshToken: false },
+        }),
+      ),
+    input.cursorSigningSecret,
   );
 }

@@ -19,6 +19,9 @@ describe("Trophy Wall run-history snapshot migration", () => {
     );
 
     const transaction = migration.indexOf("\nbegin;\n");
+    const ledger = migration.indexOf(
+      "create table public.pipeline_run_history_order_versions",
+    );
     const lock = migration.indexOf(
       "lock table public.pipeline_runs in share row exclusive mode;",
     );
@@ -29,13 +32,25 @@ describe("Trophy Wall run-history snapshot migration", () => {
     const trigger = migration.indexOf(
       "create trigger pipeline_runs_record_history_order_version",
     );
-    const commit = migration.indexOf("\ncommit;\n", trigger);
+    const publicRpc = migration.indexOf(
+      "create or replace function public.list_mobile_run_history_page",
+    );
+    const authenticatedGrant = migration.indexOf(
+      "grant execute on function public.list_mobile_run_history_page",
+    );
+    const commit = migration.indexOf("\ncommit;\n");
 
     expect(transaction).toBeGreaterThan(-1);
+    expect([...migration.matchAll(/\nbegin;\n/gu)]).toHaveLength(1);
+    expect([...migration.matchAll(/\ncommit;\n/gu)]).toHaveLength(1);
+    expect(ledger).toBeGreaterThan(transaction);
     expect(lock).toBeGreaterThan(transaction);
     expect(backfill).toBeGreaterThan(lock);
     expect(trigger).toBeGreaterThan(backfill);
-    expect(commit).toBeGreaterThan(trigger);
+    expect(publicRpc).toBeGreaterThan(trigger);
+    expect(authenticatedGrant).toBeGreaterThan(publicRpc);
+    expect(commit).toBeGreaterThan(authenticatedGrant);
+    expect(migration.slice(commit + "\ncommit;\n".length).trim()).toBe("");
   });
 
   it("keeps ledger reads tenant-owned without granting mutation authority", () => {

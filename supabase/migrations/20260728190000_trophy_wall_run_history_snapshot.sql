@@ -5,6 +5,8 @@
 -- revision visible to its tenant. Canonical run detail is still read from the
 -- current pipeline_runs row by the existing mobile adapter.
 
+begin;
+
 create table public.pipeline_run_history_order_versions (
   revision bigint generated always as identity primary key,
   run_id uuid not null
@@ -115,8 +117,6 @@ revoke all on function private.record_pipeline_run_history_order_version()
 -- Keep the backfill and trigger installation atomic with respect to run
 -- inserts/updates, so every durable run has exactly one committed frontier
 -- before post-migration versions can be recorded.
-begin;
-
 lock table public.pipeline_runs in share row exclusive mode;
 
 insert into public.pipeline_run_history_order_versions (
@@ -134,8 +134,6 @@ create trigger pipeline_runs_record_history_order_version
   after insert or update on public.pipeline_runs
   for each row
   execute function private.record_pipeline_run_history_order_version();
-
-commit;
 
 create or replace function public.list_mobile_run_history_page(
   p_limit integer,
@@ -248,3 +246,5 @@ grant execute on function public.list_mobile_run_history_page(
   timestamptz,
   uuid
 ) to authenticated;
+
+commit;

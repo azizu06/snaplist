@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   MobileRunConflictError,
+  MobileRunInvalidCursorError,
   MobileRunNotFoundError,
   MobileRunUnavailableError,
   createMobileRunOperations,
@@ -13,6 +14,7 @@ const ITEM_ID = "24100000-0000-4000-8000-000000000002";
 const OLDER_RUN_ID = "24100000-0000-4000-8000-000000000003";
 const LOGICAL_KEY = "24100000-0000-4000-8000-000000000004";
 const OLDER_LOGICAL_KEY = "24100000-0000-4000-8000-000000000005";
+const CURSOR_SIGNING_SECRET = "offline-run-history-cursor-signing-secret";
 
 function runRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -61,6 +63,12 @@ function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunData
   };
 }
 
+function mobileRunOperations(
+  clientForBearer: Parameters<typeof createMobileRunOperations>[0],
+) {
+  return createMobileRunOperations(clientForBearer, CURSOR_SIGNING_SECRET);
+}
+
 describe("mobile durable-run operations", () => {
   it("continues a frozen tenant run snapshot when an unseen run updates", async () => {
     let olderUpdatedAt = "2026-07-19T17:59:00.000Z";
@@ -104,7 +112,7 @@ describe("mobile durable-run operations", () => {
         error: null,
       })),
     });
-    const operations = createMobileRunOperations(async () => ({
+    const operations = mobileRunOperations(async () => ({
       ...client,
       listRunHistoryPage,
     }));
@@ -146,6 +154,68 @@ describe("mobile durable-run operations", () => {
     expect(second.entries[0]?.run.lastMeaningfulUpdateAt).toBe(
       "2026-07-19T18:02:00.000Z",
     );
+  });
+
+  it("rejects a run-history cursor issued to another authenticated principal", async () => {
+    const listRunHistoryPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          {
+            run_id: RUN_ID,
+            logical_idempotency_key: LOGICAL_KEY,
+            last_meaningful_update_at: "2026-07-19T18:01:00.000Z",
+            snapshot_revision: "7",
+          },
+          {
+            run_id: OLDER_RUN_ID,
+            logical_idempotency_key: OLDER_LOGICAL_KEY,
+            last_meaningful_update_at: "2026-07-19T17:59:00.000Z",
+            snapshot_revision: "7",
+          },
+        ],
+        error: null,
+      })
+      .mockResolvedValue({ data: [], error: null });
+    const operations = mobileRunOperations(async () => ({
+      ...dataClient(),
+      listRunHistoryPage,
+    }));
+    const first = await operations.list({
+      userId: "user_native",
+      bearerToken: "tenant-a-jwt",
+      limit: 1,
+    });
+
+    await expect(
+      operations.list({
+        userId: "tenant_b",
+        bearerToken: "tenant-b-jwt",
+        limit: 1,
+        cursor: first.nextCursor!,
+      }),
+    ).rejects.toBeInstanceOf(MobileRunInvalidCursorError);
+
+    const [version, encodedPayload, signature] = first.nextCursor!.split(".");
+    const payload = JSON.parse(
+      Buffer.from(encodedPayload!, "base64url").toString("utf8"),
+    ) as Record<string, unknown>;
+    const reboundCursor = [
+      version,
+      Buffer.from(
+        JSON.stringify({ ...payload, userId: "tenant_b" }),
+      ).toString("base64url"),
+      signature,
+    ].join(".");
+    await expect(
+      operations.list({
+        userId: "tenant_b",
+        bearerToken: "tenant-b-jwt",
+        limit: 1,
+        cursor: reboundCursor,
+      }),
+    ).rejects.toBeInstanceOf(MobileRunInvalidCursorError);
+    expect(listRunHistoryPage).toHaveBeenCalledTimes(1);
   });
 
   it("maps the authenticated RLS row into the full provider-neutral run detail", async () => {
@@ -190,7 +260,7 @@ describe("mobile durable-run operations", () => {
       cancelRun: vi.fn(),
     };
     const clientForBearer = vi.fn().mockResolvedValue(client);
-    const operations = createMobileRunOperations(clientForBearer);
+    const operations = mobileRunOperations(clientForBearer);
 
     await expect(
       operations.get({
@@ -270,7 +340,7 @@ describe("mobile durable-run operations", () => {
         }),
       });
 
-      const result = await createMobileRunOperations(async () => client).get({
+      const result = await mobileRunOperations(async () => client).get({
         runId: RUN_ID,
         userId: "user_native",
         bearerToken: "signed-jwt",
@@ -320,7 +390,7 @@ describe("mobile durable-run operations", () => {
         return { data: { runId: RUN_ID, status: "canceled" }, error: null };
       }),
     });
-    const operations = createMobileRunOperations(async () => client);
+    const operations = mobileRunOperations(async () => client);
     const retryInput = {
       runId: RUN_ID,
       userId: "user_native",
@@ -368,7 +438,7 @@ describe("mobile durable-run operations", () => {
       });
 
       await expect(
-        createMobileRunOperations(async () => client).get({
+        mobileRunOperations(async () => client).get({
           runId: RUN_ID,
           userId: "user_native",
           bearerToken: "signed-jwt",
@@ -396,7 +466,7 @@ describe("mobile durable-run operations", () => {
     });
 
     await expect(
-      createMobileRunOperations(async () => client).retry({
+      mobileRunOperations(async () => client).retry({
         runId: RUN_ID,
         userId: "user_native",
         bearerToken: "signed-jwt",
@@ -419,7 +489,7 @@ describe("mobile durable-run operations", () => {
     });
 
     await expect(
-      createMobileRunOperations(async () => client).retry({
+      mobileRunOperations(async () => client).retry({
         runId: RUN_ID,
         userId: "user_native",
         bearerToken: "signed-jwt",
@@ -438,7 +508,7 @@ describe("mobile durable-run operations", () => {
     });
 
     await expect(
-      createMobileRunOperations(async () => client).get({
+      mobileRunOperations(async () => client).get({
         runId: RUN_ID,
         userId: "user_native",
         bearerToken: "signed-jwt",

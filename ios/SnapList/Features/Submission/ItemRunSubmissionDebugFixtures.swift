@@ -4,7 +4,7 @@ import Foundation
 
 struct DelayedItemRunSubmissionFixture {
     func complete() async {
-        try? await Task.sleep(for: .seconds(2))
+        try? await Task.sleep(for: .seconds(8))
     }
 }
 

@@ -18,6 +18,7 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const CURSOR_SIGNING_SECRET = "offline-run-history-cursor-signing-secret";
 const DATABASE_URL = resolveLocalTestDatabaseUrl(
   process.env.SUPABASE_TEST_DB_URL
     ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
@@ -133,10 +134,12 @@ describe("mobile durable-run RLS adapter", () => {
     const owner = createConfiguredSupabaseMobileRunOperations({
       supabaseURL: SUPABASE_URL,
       anonKey: ANON_KEY!,
+      cursorSigningSecret: CURSOR_SIGNING_SECRET,
     });
     const foreign = createConfiguredSupabaseMobileRunOperations({
       supabaseURL: SUPABASE_URL,
       anonKey: ANON_KEY!,
+      cursorSigningSecret: CURSOR_SIGNING_SECRET,
     });
 
     await expect(owner.get({
@@ -182,6 +185,7 @@ describe("mobile durable-run RLS adapter", () => {
     const operations = createConfiguredSupabaseMobileRunOperations({
       supabaseURL: SUPABASE_URL,
       anonKey: ANON_KEY!,
+      cursorSigningSecret: CURSOR_SIGNING_SECRET,
     });
     const base = { runId: runA, userId: userAId, bearerToken: userAToken };
     const cancelKey = crypto.randomUUID();
@@ -378,6 +382,7 @@ describe("mobile durable-run RLS adapter", () => {
       const operations = createConfiguredSupabaseMobileRunOperations({
         supabaseURL: SUPABASE_URL,
         anonKey: ANON_KEY!,
+        cursorSigningSecret: CURSOR_SIGNING_SECRET,
       });
       await expect(operations.get({
         runId,
