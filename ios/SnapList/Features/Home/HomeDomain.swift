@@ -203,6 +203,7 @@ enum TrophyWallCardState: Hashable, Sendable {
     case workingGenerating
     case workingPricing
     case workingPersisting
+    case readyToReviewLocked
 }
 
 struct TrophyWallOrderKey: Hashable, Comparable, Sendable {
@@ -319,7 +320,8 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
              .workingIdentifying,
              .workingGenerating,
              .workingPricing,
-             .workingPersisting:
+             .workingPersisting,
+             .readyToReviewLocked:
             if case .run(let runID) = card.identity {
                 destination = .run(runID)
                 accessibilityIdentifier =
@@ -344,6 +346,10 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             case .workingPersisting:
                 stateLabel = "Saving"
                 accessibilityLabel = "\(itemName), working, saving."
+            case .readyToReviewLocked:
+                stateLabel = "Ready to review"
+                accessibilityLabel =
+                    "\(itemName), ready to review. Review is not available yet."
             case .pendingUpload:
                 return nil
             }
@@ -520,6 +526,11 @@ final class TrophyWallStore {
             .workingPricing
         case (.running, .persisting), (.retrying, .persisting):
             .workingPersisting
+        case (.succeeded, .completed)
+            where runDetail.terminalOutcome == .succeeded
+                && runDetail.listingID != nil
+                && !runDetail.legalActions.canOpenReview:
+            .readyToReviewLocked
         default:
             nil
         }

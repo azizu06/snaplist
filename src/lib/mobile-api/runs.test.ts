@@ -396,6 +396,40 @@ describe("mobile durable-run operations", () => {
     expect(client.readRun).toHaveBeenCalledWith(RUN_ID);
   });
 
+  it("withholds Review capability until a succeeded listing has a coherent review contract", async () => {
+    const listingId = "24100000-0000-4000-8000-000000000005";
+    const client = dataClient({
+      readRun: vi.fn().mockResolvedValue({
+        data: runRow({
+          listing_id: listingId,
+          status: "succeeded",
+          stage: "completed",
+          completed_at: "2026-07-19T18:02:00.000Z",
+        }),
+        error: null,
+      }),
+      readRetryProjection: vi.fn().mockResolvedValue({
+        data: { effective_allowance: "settled", can_retry: false },
+        error: null,
+      }),
+    });
+
+    const result = await mobileRunOperations(async () => client).get({
+      runId: RUN_ID,
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+    });
+
+    expect(result).toMatchObject({
+      listingId,
+      status: "succeeded",
+      terminalOutcome: "succeeded",
+      legalActions: {
+        canOpenReview: false,
+      },
+    });
+  });
+
   it.each([
     ["queued", "queued", false, true, null],
     ["running", "identifying", false, true, null],
