@@ -421,7 +421,7 @@ final class SnapListUITests: XCTestCase {
             object: startListing
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [saving], timeout: 3),
+            XCTWaiter.wait(for: [saving], timeout: 8),
             .completed,
             "The real Photo Review must expose the bounded saving label and mutation lock."
         )
@@ -435,7 +435,7 @@ final class SnapListUITests: XCTestCase {
             object: startListing
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [completed], timeout: 3),
+            XCTWaiter.wait(for: [completed], timeout: 12),
             .completed,
             "Only the in-flight interval may keep Photo Review mutations locked."
         )

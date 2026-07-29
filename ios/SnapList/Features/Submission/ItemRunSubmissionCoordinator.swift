@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum ItemRunSubmissionPresentationEvent: Equatable, Sendable {
-    case itemSaved(eventID: UUID, acceptedRun: AcceptedItemRun)
+    case itemSaved(eventID: UUID, handoff: AcceptedItemRunHandoff)
     case submissionRejected(
         eventID: UUID,
         retention: ItemRunSubmissionRetention
@@ -300,13 +300,17 @@ final class ItemRunSubmissionHost {
             clearedIntake = false
 
             let eventID = UUID()
+            let handoff = AcceptedItemRunHandoff(
+                idempotencyKey: submission.attempt.idempotencyKey,
+                acceptedRun: submission.acceptedRun
+            )
             let gate = ItemRunSubmissionPresentationAcknowledgmentGate(
                 eventID: eventID
             )
             presentationAcknowledgmentGate = gate
             pendingPresentationEvent = .itemSaved(
                 eventID: eventID,
-                acceptedRun: submission.acceptedRun
+                handoff: handoff
             )
 
             let acknowledged = await gate.wait()
@@ -316,7 +320,7 @@ final class ItemRunSubmissionHost {
             guard acknowledged, !Task.isCancelled else {
                 if pendingPresentationEvent == .itemSaved(
                     eventID: eventID,
-                    acceptedRun: submission.acceptedRun
+                    handoff: handoff
                 ) {
                     pendingPresentationEvent = nil
                 }
@@ -328,7 +332,7 @@ final class ItemRunSubmissionHost {
             if !acceptance.clearedIntake,
                pendingPresentationEvent == .itemSaved(
                    eventID: eventID,
-                   acceptedRun: submission.acceptedRun
+                   handoff: handoff
                ) {
                 pendingPresentationEvent = nil
             }

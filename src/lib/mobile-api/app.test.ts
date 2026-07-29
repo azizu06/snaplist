@@ -11,8 +11,13 @@ import { buildPipelinePersistencePayload } from "@/lib/pipeline/persist";
 import type { PipelineResult } from "@/lib/pipeline/types";
 import { buildPricingEvidenceProjection } from "@/lib/pricing-evidence";
 import { createMobileEbayOauthOperations } from "@/lib/marketplace/ebay/mobile-oauth";
-import { MobileRunConflictError, MobileRunNotFoundError } from "./runs";
+import {
+  MobileRunConflictError,
+  MobileRunNotFoundError,
+  createMobileRunOperations,
+} from "./runs";
 import { createMobileApiHandler } from "./app";
+import { runHistoryProjectionRow } from "./run-history.test-fixtures";
 
 const summary = {
   claimed: 0,
@@ -104,6 +109,138 @@ describe("mobile API v1 provider-neutral handler", () => {
       data: { userId: "user_native" },
       meta: { requestId: "req_test" },
     });
+  });
+
+  it("lists one tenant run snapshot from the verified bearer principal", async () => {
+    const list = vi.fn().mockResolvedValue({
+      entries: [],
+      nextCursor: "opaque-next-page",
+    });
+
+    const response = await handler({ runHistory: { list } })(
+      new Request("http://localhost/v1/runs?limit=2&cursor=opaque-page", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(list).toHaveBeenCalledWith({
+      userId: "user_smoke",
+      bearerToken: "signed-jwt",
+      limit: 2,
+      cursor: "opaque-page",
+    });
+    await expect(response.json()).resolves.toEqual({
+      data: { entries: [], nextCursor: "opaque-next-page" },
+      meta: { requestId: "req_test" },
+    });
+  });
+
+  it("rejects another authenticated principal's run-history cursor before the RLS adapter", async () => {
+    const runId = "24100000-0000-4000-8000-000000000001";
+    const itemId = "24100000-0000-4000-8000-000000000002";
+    const listRunHistoryPage = vi.fn().mockResolvedValue({
+      data: [
+        runHistoryProjectionRow({
+          runId,
+          itemId,
+          logicalKey: "24100000-0000-4000-8000-000000000003",
+          frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+          snapshotRevision: "7",
+          userId: "tenant_a",
+          status: "queued",
+          stage: "queued",
+          photos: ["tenant_a/items/front.jpg"],
+        }),
+        runHistoryProjectionRow({
+          runId: "24100000-0000-4000-8000-000000000004",
+          itemId,
+          logicalKey: "24100000-0000-4000-8000-000000000005",
+          frozenUpdatedAt: "2026-07-19T17:59:00.000Z",
+          snapshotRevision: "7",
+          userId: "tenant_a",
+          status: "queued",
+          stage: "queued",
+          photos: ["tenant_a/items/front.jpg"],
+        }),
+      ],
+      error: null,
+    });
+    const clientForBearer = vi.fn().mockResolvedValue({
+      listRunHistoryPage,
+      readRun: vi.fn().mockResolvedValue({
+        data: {
+          id: runId,
+          user_id: "tenant_a",
+          item_id: itemId,
+          listing_id: null,
+          status: "queued",
+          stage: "queued",
+          schema_version: 1,
+          attempt_count: 0,
+          max_attempts: 3,
+          safe_failure_message: null,
+          created_at: "2026-07-19T18:00:00.000Z",
+          updated_at: "2026-07-19T18:01:00.000Z",
+          enqueued_at: "2026-07-19T18:00:01.000Z",
+          started_at: null,
+          last_attempted_at: null,
+          next_attempt_at: null,
+          completed_at: null,
+          retention_cleaned_at: null,
+        },
+        error: null,
+      }),
+      readItem: vi.fn().mockResolvedValue({
+        data: {
+          id: itemId,
+          user_id: "tenant_a",
+          attributes: { brand: "Canon", model: "AE-1" },
+          photos: ["tenant_a/items/front.jpg"],
+        },
+        error: null,
+      }),
+      readRetryProjection: vi.fn().mockResolvedValue({
+        data: { effective_allowance: "reserved", can_retry: false },
+        error: null,
+      }),
+      retryRun: vi.fn(),
+      cancelRun: vi.fn(),
+    });
+    const runHistory = createMobileRunOperations(
+      clientForBearer,
+      "offline-run-history-cursor-signing-secret",
+    );
+    const authenticate = vi.fn(async (token: string) => ({
+      userId: token === "tenant-a-jwt" ? "tenant_a" : "tenant_b",
+    }));
+    const handle = handler({ authenticate, runHistory });
+
+    const first = await handle(
+      new Request("http://localhost/v1/runs?limit=1", {
+        headers: { authorization: "Bearer tenant-a-jwt" },
+      }),
+    );
+    const firstBody = await first.json();
+    const reusedCursor = firstBody.data.nextCursor as string;
+    const reused = await handle(
+      new Request(
+        `http://localhost/v1/runs?limit=1&cursor=${encodeURIComponent(reusedCursor)}`,
+        { headers: { authorization: "Bearer tenant-b-jwt" } },
+      ),
+    );
+
+    expect(first.status).toBe(200);
+    expect(reused.status).toBe(400);
+    await expect(reused.json()).resolves.toEqual({
+      error: {
+        code: "invalid_request",
+        message: "The run-history cursor is invalid.",
+        requestId: "req_test",
+      },
+    });
+    expect(clientForBearer).toHaveBeenCalledTimes(1);
+    expect(listRunHistoryPage).toHaveBeenCalledTimes(1);
   });
 
   it("creates one tenant-bound eBay Sandbox OAuth session through the authenticated mobile seam", async () => {

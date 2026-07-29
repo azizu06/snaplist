@@ -1199,6 +1199,122 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Live Start listing boundary
 
+    func testAcceptedPresentationEventCarriesPersistedLogicalIdentityAndCanonicalRun() async throws {
+        let cases: [(
+            name: String,
+            outcome: (
+                MobileItemSubmissionEnvelope.DataPayload
+            ) -> ItemRunSubmissionTransportOutcome
+        )] = [
+            ("created", { .created($0) }),
+            ("replayed", { .replayed($0) }),
+        ]
+
+        for testCase in cases {
+            let intake = SubmissionIntakeFixture(
+                photoCount: 2,
+                seed: testCase.name
+            )
+            let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+            let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+            let receipt = Self.receipt(for: intake)
+            let submitter = RecordingItemRunSubmitter(
+                outcomes: [testCase.outcome(receipt)],
+                attemptStore: attemptStore
+            )
+            let keySequence = KeySequence(keys: [Self.firstKey])
+            let submissionHost = ItemRunSubmissionHost(
+                coordinator: ItemRunSubmissionCoordinator(
+                    submitter: submitter,
+                    attemptStore: attemptStore,
+                    draftStore: draftStore,
+                    tokenProvider: TestBearerTokenProvider {
+                        "clerk-session-token"
+                    },
+                    readData: intake.read,
+                    newIdempotencyKey: { keySequence.next() }
+                )
+            )
+
+            let submission = Task {
+                await submissionHost.startListing(photos: intake.photos)
+            }
+            guard let savedEvent =
+                await waitForPendingAcceptedItemRunHandoff(on: submissionHost)
+            else {
+                submission.cancel()
+                continue
+            }
+            let expectedRun = AcceptedItemRun(
+                runID: receipt.runId,
+                itemID: receipt.itemId,
+                status: receipt.status,
+                stage: receipt.stage
+            )
+
+            XCTAssertEqual(
+                savedEvent.handoff,
+                AcceptedItemRunHandoff(
+                    idempotencyKey: Self.firstKey,
+                    acceptedRun: expectedRun
+                ),
+                testCase.name
+            )
+            XCTAssertEqual(submissionHost.acceptedRun, expectedRun)
+            let visibleAttempt = await submitter.attemptVisibleAtFirstCall
+            let persistedAttemptBeforeAcknowledgment =
+                try await attemptStore.loadAttempt()
+            let durablePhotosBeforeAcknowledgment =
+                try await draftStore.loadPhotos()
+            XCTAssertEqual(
+                visibleAttempt?.idempotencyKey,
+                Self.firstKey,
+                testCase.name
+            )
+            XCTAssertEqual(
+                persistedAttemptBeforeAcknowledgment?.idempotencyKey,
+                Self.firstKey,
+                testCase.name
+            )
+            XCTAssertEqual(
+                durablePhotosBeforeAcknowledgment,
+                intake.photos,
+                testCase.name
+            )
+            XCTAssertFalse(submissionHost.clearedIntake, testCase.name)
+
+            submissionHost.acknowledgePresentation(
+                eventID: savedEvent.eventID
+            )
+            await submission.value
+
+            let persistedAttemptAfterAcknowledgment =
+                try await attemptStore.loadAttempt()
+            let durablePhotosAfterAcknowledgment =
+                try await draftStore.loadPhotos()
+            XCTAssertTrue(submissionHost.clearedIntake, testCase.name)
+            XCTAssertNil(
+                persistedAttemptAfterAcknowledgment,
+                testCase.name
+            )
+            XCTAssertTrue(
+                durablePhotosAfterAcknowledgment.isEmpty,
+                testCase.name
+            )
+            if case .itemSaved(
+                let eventID,
+                let handoff
+            )? = submissionHost.pendingPresentationEvent {
+                XCTAssertEqual(eventID, savedEvent.eventID, testCase.name)
+                XCTAssertEqual(handoff, savedEvent.handoff, testCase.name)
+            } else {
+                XCTFail(
+                    "The accepted \(testCase.name) handoff retired before routing."
+                )
+            }
+        }
+    }
+
     func testValidatedAcceptanceWaitsForMatchingSavedPresentationAcknowledgmentBeforeExactClear() async {
         let intake = SubmissionIntakeFixture(photoCount: 2)
         let eventRecorder = AcceptedPathEventRecorder()
@@ -1293,11 +1409,14 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(persistedAttempt, persistedAttemptBeforeAcknowledgment)
         if case .itemSaved(
             let stillPendingEventID,
-            let stillPendingAcceptedRun
+            let stillPendingHandoff
         )? =
             submissionHost.pendingPresentationEvent {
             XCTAssertEqual(stillPendingEventID, eventID)
-            XCTAssertEqual(stillPendingAcceptedRun, savedEvent.acceptedRun)
+            XCTAssertEqual(
+                stillPendingHandoff.acceptedRun,
+                savedEvent.acceptedRun
+            )
         } else {
             XCTFail("A stale acknowledgment removed the pending saved event.")
         }
@@ -1547,10 +1666,10 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertTrue(submissionHost.clearedIntake)
         if case .itemSaved(
             let pendingEventID,
-            let pendingAcceptedRun
+            let pendingHandoff
         )? = submissionHost.pendingPresentationEvent {
             XCTAssertEqual(pendingEventID, secondSavedEvent.eventID)
-            XCTAssertEqual(pendingAcceptedRun, expectedRun)
+            XCTAssertEqual(pendingHandoff.acceptedRun, expectedRun)
         } else {
             XCTFail("The shell-owned saved presentation retired before routing.")
         }
@@ -1659,10 +1778,13 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(firstAttemptClearCount, 0)
         XCTAssertEqual(firstPayloads.count, 1)
         XCTAssertTrue(firstHost.isSubmitting)
-        if case .itemSaved(let eventID, let acceptedRun)? =
+        if case .itemSaved(let eventID, let handoff)? =
             firstHost.pendingPresentationEvent {
             XCTAssertEqual(eventID, firstSavedEvent.eventID)
-            XCTAssertEqual(acceptedRun, firstSavedEvent.acceptedRun)
+            XCTAssertEqual(
+                handoff.acceptedRun,
+                firstSavedEvent.acceptedRun
+            )
         } else {
             XCTFail("A wrong acknowledgment consumed the saved event.")
         }
@@ -1944,7 +2066,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             host.pendingPresentationEvent,
             .itemSaved(
                 eventID: savedEvent.eventID,
-                acceptedRun: savedEvent.acceptedRun
+                handoff: savedEvent.handoff
             )
         )
         XCTAssertTrue(host.isSubmitting)
@@ -1990,7 +2112,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             host.pendingPresentationEvent,
             .itemSaved(
                 eventID: savedEvent.eventID,
-                acceptedRun: savedEvent.acceptedRun
+                handoff: savedEvent.handoff
             )
         )
 
@@ -2003,7 +2125,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             host.pendingPresentationEvent,
             .itemSaved(
                 eventID: savedEvent.eventID,
-                acceptedRun: savedEvent.acceptedRun
+                handoff: savedEvent.handoff
             )
         )
 
@@ -2142,26 +2264,45 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     private func waitForPendingItemSavedEvent(
         on host: ItemRunSubmissionHost
-    ) async -> (eventID: UUID, acceptedRun: AcceptedItemRun)? {
-        if case .itemSaved(let eventID, let acceptedRun)? =
-            host.pendingPresentationEvent {
-            return (eventID, acceptedRun)
+    ) async -> (
+        eventID: UUID,
+        handoff: AcceptedItemRunHandoff,
+        acceptedRun: AcceptedItemRun
+    )? {
+        guard let savedEvent =
+            await waitForPendingAcceptedItemRunHandoff(on: host)
+        else {
+            return nil
         }
-        let itemSavedPublished = expectation(
-            description: "Item saved presentation event published"
+        return (
+            savedEvent.eventID,
+            savedEvent.handoff,
+            savedEvent.handoff.acceptedRun
+        )
+    }
+
+    private func waitForPendingAcceptedItemRunHandoff(
+        on host: ItemRunSubmissionHost
+    ) async -> (eventID: UUID, handoff: AcceptedItemRunHandoff)? {
+        if case .itemSaved(let eventID, let handoff)? =
+            host.pendingPresentationEvent {
+            return (eventID, handoff)
+        }
+        let handoffPublished = expectation(
+            description: "Accepted item-run handoff published"
         )
         withObservationTracking {
             _ = host.pendingPresentationEvent
         } onChange: {
-            itemSavedPublished.fulfill()
+            handoffPublished.fulfill()
         }
-        await fulfillment(of: [itemSavedPublished], timeout: 3)
-        guard case .itemSaved(let eventID, let acceptedRun)? =
+        await fulfillment(of: [handoffPublished], timeout: 3)
+        guard case .itemSaved(let eventID, let handoff)? =
             host.pendingPresentationEvent else {
-            XCTFail("Expected one pending item-saved presentation event.")
+            XCTFail("Expected one pending accepted item-run handoff.")
             return nil
         }
-        return (eventID, acceptedRun)
+        return (eventID, handoff)
     }
 }
 

@@ -11,6 +11,24 @@ protocol HomeRepository: Sendable {
     func updates() async -> AsyncThrowingStream<HomeModel, Error>
 }
 
+protocol TrophyWallRunHistoryRepository: Sendable {
+    func fetchPage(limit: Int, cursor: String?) async throws -> TrophyWallRunHistoryPage
+}
+
+struct AuthenticatedTrophyWallRunHistoryRepository: TrophyWallRunHistoryRepository {
+    let service: any TrophyWallRunHistoryServing
+    let tokenProvider: any BearerTokenProviding
+
+    func fetchPage(limit: Int, cursor: String?) async throws -> TrophyWallRunHistoryPage {
+        let bearerToken = try await tokenProvider.bearerToken()
+        return try await service.fetchRunHistoryPage(
+            limit: limit,
+            cursor: cursor,
+            bearerToken: bearerToken
+        )
+    }
+}
+
 enum HomeRepositoryFactory {
     static func make(
         configuration: LaunchConfiguration,

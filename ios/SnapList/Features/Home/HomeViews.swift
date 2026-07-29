@@ -800,6 +800,153 @@ private struct HomeHowItWorksStep: View {
     }
 }
 
+// MARK: - Trophy Wall Processing
+
+struct TrophyWallProcessingView: View {
+    private static let smallestSupportedHeight: CGFloat = 667
+    private static let compactRowLimit = 3
+    private static let smallestHeightRowLimit = 2
+
+    @ScaledMetric(relativeTo: .title2) private var titleSize = 24
+
+    let rows: [TrophyWallProcessingRow]
+    let onBack: () -> Void
+    let openRoute: (HomeRoute) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            let visibleRows = Self.visibleRows(
+                from: rows,
+                availableHeight: proxy.size.height
+            )
+
+            VStack(spacing: 0) {
+                HStack(spacing: 4) {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(
+                                width: SnapListMetrics.minimumTouchTarget,
+                                height: SnapListMetrics.minimumTouchTarget
+                            )
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .accessibilityLabel("Back to Trophy Wall")
+                    .accessibilityIdentifier("trophy.processing.back")
+
+                    Text("Processing")
+                        .font(.system(size: titleSize, weight: .bold))
+                        .tracking(-0.5)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 10)
+
+                if !visibleRows.isEmpty {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(visibleRows) { row in
+                                TrophyWallProcessingRowView(
+                                    row: row,
+                                    openRoute: openRoute
+                                )
+
+                                if row.id != visibleRows.last?.id {
+                                    Divider()
+                                        .foregroundStyle(SnapListColorToken.hairline.color)
+                                        .padding(.leading, 69)
+                                }
+                            }
+                        }
+                        .background(SnapListColorToken.canvas.color)
+                        .clipShape(.rect(cornerRadius: 14))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.top, 8)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .background(SnapListColorToken.canvas.color)
+        .accessibilityIdentifier("trophy.processing")
+    }
+
+    static func visibleRows(
+        from rows: [TrophyWallProcessingRow],
+        availableHeight: CGFloat
+    ) -> [TrophyWallProcessingRow] {
+        let limit = availableHeight <= smallestSupportedHeight
+            ? smallestHeightRowLimit
+            : compactRowLimit
+        return Array(rows.prefix(limit))
+    }
+}
+
+private struct TrophyWallProcessingRowView: View {
+    let row: TrophyWallProcessingRow
+    let openRoute: (HomeRoute) -> Void
+
+    var body: some View {
+        Group {
+            if let destination = row.destination {
+                Button {
+                    openRoute(destination)
+                } label: {
+                    content
+                }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(row.accessibilityLabel)
+            } else {
+                content
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(row.accessibilityLabel)
+            }
+        }
+        .accessibilityIdentifier(row.accessibilityIdentifier)
+    }
+
+    private var content: some View {
+        HStack(spacing: 11) {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(SnapListColorToken.hairline.color)
+                .frame(width: 44, height: 44)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.itemName)
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(row.stateLabel)
+                    .snapListTypography(.status)
+                    .foregroundStyle(
+                        row.destination == nil
+                            ? SnapListColorToken.textSecondary.color
+                            : SnapListColorToken.inkPrimary.color
+                    )
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(minHeight: 66)
+        .contentShape(.rect)
+    }
+}
+
 struct HomeRouteBoundaryView: View {
     let route: HomeRoute
 

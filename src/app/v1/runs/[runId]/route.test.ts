@@ -94,6 +94,7 @@ describe("production mobile durable-run route composition", () => {
     expect(createConfiguredSupabaseMobileRunOperations).toHaveBeenCalledWith({
       supabaseURL: "https://project.supabase.co",
       anonKey: "sb_publishable_release",
+      cursorSigningSecret: "sk_test_release",
     });
     expect(get).toHaveBeenCalledWith({
       runId: "24100000-0000-4000-8000-000000000001",

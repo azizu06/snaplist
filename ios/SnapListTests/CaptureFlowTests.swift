@@ -542,7 +542,7 @@ final class CaptureFlowTests: XCTestCase {
         defer { transaction.cancel() }
 
         await fulfillment(of: [savedStateObserved], timeout: 3)
-        guard case .itemSaved(let eventID, let eventRun)? =
+        guard case .itemSaved(let eventID, let handoff)? =
             submissionHost.pendingPresentationEvent else {
             return XCTFail("Expected one typed pending item-saved event.")
         }
@@ -556,7 +556,7 @@ final class CaptureFlowTests: XCTestCase {
             host: submissionHost
         )
 
-        XCTAssertEqual(eventRun, expectedRun)
+        XCTAssertEqual(handoff.acceptedRun, expectedRun)
         XCTAssertEqual(submissionHost.acceptedRun, expectedRun)
         XCTAssertEqual(savedPresentation.primaryActionLabel, "Item saved")
         XCTAssertEqual(
@@ -785,7 +785,7 @@ final class CaptureFlowTests: XCTestCase {
         defer { transaction.cancel() }
 
         await fulfillment(of: [savedStateObserved], timeout: 3)
-        guard case .itemSaved(let eventID, let eventRun)? =
+        guard case .itemSaved(let eventID, let handoff)? =
             submissionHost.pendingPresentationEvent else {
             return XCTFail("Expected the canonical item-saved presentation.")
         }
@@ -803,7 +803,7 @@ final class CaptureFlowTests: XCTestCase {
             persistedAttemptBeforeAcknowledgment
         )
 
-        XCTAssertEqual(eventRun, expectedRun)
+        XCTAssertEqual(handoff.acceptedRun, expectedRun)
         XCTAssertEqual(submissionHost.acceptedRun, expectedRun)
         XCTAssertEqual(savedPresentation.primaryActionLabel, "Item saved")
         XCTAssertEqual(

@@ -139,6 +139,38 @@ export const mobileRunEnvelopeSchema = z
   .object({ data: mobileRunSchema, meta: apiMetaSchema })
   .strict();
 
+export const mobileRunHistoryOrderKeySchema = z
+  .object({
+    lastMeaningfulUpdateAt: z.string().datetime({ offset: true }),
+    runId: z.string().uuid(),
+  })
+  .strict();
+
+export const mobileRunCollectionEntrySchema = z
+  .object({
+    run: mobileRunSchema,
+    logicalIdentity: z
+      .object({
+        idempotencyKey: z.string().min(1).max(128),
+      })
+      .strict(),
+    orderKey: mobileRunHistoryOrderKeySchema,
+  })
+  .strict();
+
+export const mobileRunCollectionSchema = z
+  .object({
+    entries: z.array(mobileRunCollectionEntrySchema),
+    nextCursor: z.string().min(1).nullable(),
+  })
+  .strict();
+
+export type MobileRunCollection = z.infer<typeof mobileRunCollectionSchema>;
+
+export const mobileRunCollectionEnvelopeSchema = z
+  .object({ data: mobileRunCollectionSchema, meta: apiMetaSchema })
+  .strict();
+
 export const pricingEvidenceEnvelopeSchema = z
   .object({ data: pricingEvidenceProjectionSchema, meta: apiMetaSchema })
   .strict();

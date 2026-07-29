@@ -1,15 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   MobileRunConflictError,
+  MobileRunInvalidCursorError,
   MobileRunNotFoundError,
   MobileRunUnavailableError,
   createMobileRunOperations,
   createSupabaseMobileRunDataClient,
   type MobileRunDataClient,
 } from "./runs";
+import { runHistoryProjectionRow } from "./run-history.test-fixtures";
 
 const RUN_ID = "24100000-0000-4000-8000-000000000001";
 const ITEM_ID = "24100000-0000-4000-8000-000000000002";
+const OLDER_RUN_ID = "24100000-0000-4000-8000-000000000003";
+const LOGICAL_KEY = "24100000-0000-4000-8000-000000000004";
+const OLDER_LOGICAL_KEY = "24100000-0000-4000-8000-000000000005";
+const CURSOR_SIGNING_SECRET = "offline-run-history-cursor-signing-secret";
 
 function runRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -37,6 +43,7 @@ function runRow(overrides: Record<string, unknown> = {}) {
 
 function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunDataClient {
   return {
+    listRunHistoryPage: vi.fn().mockResolvedValue({ data: [], error: null }),
     readRun: vi.fn().mockResolvedValue({ data: runRow(), error: null }),
     readItem: vi.fn().mockResolvedValue({
       data: {
@@ -57,7 +64,251 @@ function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunData
   };
 }
 
+function mobileRunOperations(
+  clientForBearer: Parameters<typeof createMobileRunOperations>[0],
+) {
+  return createMobileRunOperations(clientForBearer, CURSOR_SIGNING_SECRET);
+}
+
 describe("mobile durable-run operations", () => {
+  it("continues a frozen tenant run snapshot when an unseen run updates", async () => {
+    let olderUpdatedAt = "2026-07-19T17:59:00.000Z";
+    const listRunHistoryPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          runHistoryProjectionRow({
+            runId: RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: LOGICAL_KEY,
+            frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+            snapshotRevision: "7",
+          }),
+          runHistoryProjectionRow({
+            runId: OLDER_RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: OLDER_LOGICAL_KEY,
+            frozenUpdatedAt: olderUpdatedAt,
+            snapshotRevision: "7",
+          }),
+        ],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [
+          runHistoryProjectionRow({
+            runId: OLDER_RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: OLDER_LOGICAL_KEY,
+            frozenUpdatedAt: "2026-07-19T17:59:00.000Z",
+            currentUpdatedAt: "2026-07-19T18:02:00.000Z",
+            snapshotRevision: "7",
+          }),
+        ],
+        error: null,
+      });
+    const client = dataClient({
+      readRun: vi.fn(async (runId: string) => ({
+        data: runRow(
+          runId === OLDER_RUN_ID
+            ? { id: runId, updated_at: olderUpdatedAt }
+            : { id: runId },
+        ),
+        error: null,
+      })),
+    });
+    const operations = mobileRunOperations(async () => ({
+      ...client,
+      listRunHistoryPage,
+    }));
+
+    const first = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 1,
+    });
+    olderUpdatedAt = "2026-07-19T18:02:00.000Z";
+    const second = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 1,
+      cursor: first.nextCursor!,
+    });
+
+    expect([
+      ...first.entries.map((entry) => entry.run.id),
+      ...second.entries.map((entry) => entry.run.id),
+    ]).toEqual([RUN_ID, OLDER_RUN_ID]);
+    expect(second.entries[0]?.orderKey).toEqual({
+      lastMeaningfulUpdateAt: "2026-07-19T17:59:00.000Z",
+      runId: OLDER_RUN_ID,
+    });
+    expect(second.entries[0]?.logicalIdentity).toEqual({
+      idempotencyKey: OLDER_LOGICAL_KEY,
+    });
+    expect(listRunHistoryPage).toHaveBeenNthCalledWith(1, { limit: 2 });
+    expect(listRunHistoryPage).toHaveBeenNthCalledWith(2, {
+      limit: 2,
+      snapshotRevision: "7",
+      before: {
+        lastMeaningfulUpdateAt: "2026-07-19T18:01:00.000Z",
+        runId: RUN_ID,
+      },
+    });
+    expect(second.nextCursor).toBeNull();
+    expect(second.entries[0]?.run.lastMeaningfulUpdateAt).toBe(
+      "2026-07-19T18:02:00.000Z",
+    );
+  });
+
+  it("rejects a run-history cursor issued to another authenticated principal", async () => {
+    const listRunHistoryPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          runHistoryProjectionRow({
+            runId: RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: LOGICAL_KEY,
+            frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+            snapshotRevision: "7",
+          }),
+          runHistoryProjectionRow({
+            runId: OLDER_RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: OLDER_LOGICAL_KEY,
+            frozenUpdatedAt: "2026-07-19T17:59:00.000Z",
+            snapshotRevision: "7",
+          }),
+        ],
+        error: null,
+      })
+      .mockResolvedValue({ data: [], error: null });
+    const operations = mobileRunOperations(async () => ({
+      ...dataClient(),
+      listRunHistoryPage,
+    }));
+    const first = await operations.list({
+      userId: "user_native",
+      bearerToken: "tenant-a-jwt",
+      limit: 1,
+    });
+
+    await expect(
+      operations.list({
+        userId: "tenant_b",
+        bearerToken: "tenant-b-jwt",
+        limit: 1,
+        cursor: first.nextCursor!,
+      }),
+    ).rejects.toBeInstanceOf(MobileRunInvalidCursorError);
+
+    const [version, encodedPayload, signature] = first.nextCursor!.split(".");
+    const payload = JSON.parse(
+      Buffer.from(encodedPayload!, "base64url").toString("utf8"),
+    ) as Record<string, unknown>;
+    const reboundCursor = [
+      version,
+      Buffer.from(
+        JSON.stringify({ ...payload, userId: "tenant_b" }),
+      ).toString("base64url"),
+      signature,
+    ].join(".");
+    await expect(
+      operations.list({
+        userId: "tenant_b",
+        bearerToken: "tenant-b-jwt",
+        limit: 1,
+        cursor: reboundCursor,
+      }),
+    ).rejects.toBeInstanceOf(MobileRunInvalidCursorError);
+    expect(listRunHistoryPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects the supported 50-row history page without per-entry data calls", async () => {
+    const runIds = Array.from(
+      { length: 50 },
+      (_, index) =>
+        `24100000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+    );
+    const itemIds = Array.from(
+      { length: 50 },
+      (_, index) =>
+        `24200000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+    );
+    const logicalKeys = Array.from(
+      { length: 50 },
+      (_, index) =>
+        `24300000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+    );
+    const listRunHistoryPage = vi.fn().mockResolvedValue({
+      data: runIds.map((runId, index) =>
+        runHistoryProjectionRow({
+          runId,
+          itemId: itemIds[index]!,
+          logicalKey: logicalKeys[index]!,
+          frozenUpdatedAt: `2026-07-19T18:00:${String(
+            49 - index,
+          ).padStart(2, "0")}.000Z`,
+          snapshotRevision: "57",
+          attributes: { title: `Item ${index}` },
+          photos: [`user_native/items/${itemIds[index]}.jpg`],
+        })
+      ),
+      error: null,
+    });
+    const readRun = vi.fn(async (runId: string) => {
+      const index = runIds.indexOf(runId);
+      return {
+        data: runRow({
+          id: runId,
+          item_id: itemIds[index],
+          updated_at: `2026-07-19T18:00:${String(49 - index).padStart(2, "0")}.000Z`,
+        }),
+        error: null,
+      };
+    });
+    const readItem = vi.fn(async (itemId: string) => ({
+      data: {
+        id: itemId,
+        user_id: "user_native",
+        attributes: { title: `Item ${itemIds.indexOf(itemId)}` },
+        photos: [`user_native/items/${itemId}.jpg`],
+      },
+      error: null,
+    }));
+    const readRetryProjection = vi.fn().mockResolvedValue({
+      data: { effective_allowance: "reserved", can_retry: false },
+      error: null,
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage,
+        readRun,
+        readItem,
+        readRetryProjection,
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 50,
+    });
+
+    expect(page.entries.map((entry) => entry.run.id)).toEqual(runIds);
+    expect(page.entries.map((entry) => entry.run.itemId)).toEqual(itemIds);
+    expect(
+      page.entries.map((entry) => entry.logicalIdentity.idempotencyKey),
+    ).toEqual(logicalKeys);
+    expect(page.entries.map((entry) => entry.orderKey.runId)).toEqual(runIds);
+    expect(page.nextCursor).toBeNull();
+    expect(listRunHistoryPage).toHaveBeenCalledExactlyOnceWith({ limit: 51 });
+    expect(readRun).not.toHaveBeenCalled();
+    expect(readItem).not.toHaveBeenCalled();
+    expect(readRetryProjection).not.toHaveBeenCalled();
+  });
+
   it("maps the authenticated RLS row into the full provider-neutral run detail", async () => {
     const client = {
       readRun: vi.fn().mockResolvedValue({
@@ -100,7 +351,7 @@ describe("mobile durable-run operations", () => {
       cancelRun: vi.fn(),
     };
     const clientForBearer = vi.fn().mockResolvedValue(client);
-    const operations = createMobileRunOperations(clientForBearer);
+    const operations = mobileRunOperations(clientForBearer);
 
     await expect(
       operations.get({
@@ -180,7 +431,7 @@ describe("mobile durable-run operations", () => {
         }),
       });
 
-      const result = await createMobileRunOperations(async () => client).get({
+      const result = await mobileRunOperations(async () => client).get({
         runId: RUN_ID,
         userId: "user_native",
         bearerToken: "signed-jwt",
@@ -230,7 +481,7 @@ describe("mobile durable-run operations", () => {
         return { data: { runId: RUN_ID, status: "canceled" }, error: null };
       }),
     });
-    const operations = createMobileRunOperations(async () => client);
+    const operations = mobileRunOperations(async () => client);
     const retryInput = {
       runId: RUN_ID,
       userId: "user_native",
@@ -278,7 +529,7 @@ describe("mobile durable-run operations", () => {
       });
 
       await expect(
-        createMobileRunOperations(async () => client).get({
+        mobileRunOperations(async () => client).get({
           runId: RUN_ID,
           userId: "user_native",
           bearerToken: "signed-jwt",
@@ -306,7 +557,7 @@ describe("mobile durable-run operations", () => {
     });
 
     await expect(
-      createMobileRunOperations(async () => client).retry({
+      mobileRunOperations(async () => client).retry({
         runId: RUN_ID,
         userId: "user_native",
         bearerToken: "signed-jwt",
@@ -329,7 +580,7 @@ describe("mobile durable-run operations", () => {
     });
 
     await expect(
-      createMobileRunOperations(async () => client).retry({
+      mobileRunOperations(async () => client).retry({
         runId: RUN_ID,
         userId: "user_native",
         bearerToken: "signed-jwt",
@@ -348,7 +599,7 @@ describe("mobile durable-run operations", () => {
     });
 
     await expect(
-      createMobileRunOperations(async () => client).get({
+      mobileRunOperations(async () => client).get({
         runId: RUN_ID,
         userId: "user_native",
         bearerToken: "signed-jwt",

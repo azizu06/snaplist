@@ -74,6 +74,12 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
 - **Pipeline run** — the tenant-owned durable execution record for one listing-preparation attempt.
   It owns status/stage/attempt/idempotency/recovery truth. Seller UI maps it to plain language and
   never exposes queue, worker, lease, or provider terminology.
+- **Logical run identity** — the persisted tenant-owned idempotency key that links one recoverable
+  local intake to its canonical pipeline run. Trophy Wall convergence uses this exact key, never
+  title, time, position, or fuzzy matching.
+- **Trophy Wall history order key** — the frozen snapshot timestamp plus run ID used for stable
+  collection membership and pagination. It remains distinct from the canonical run detail's current
+  `lastMeaningfulUpdateAt`, which may advance as truthful processing state changes.
 - **Pipeline queue envelope** — internal `{ run_id, schema_version }` wake-up data. It contains no
   photo URL, tenant claim, secret, seller copy, or authorization. It is never seller-facing.
 - **AI-item credit** — one logical entitlement reservation for one complete run. Reserve before

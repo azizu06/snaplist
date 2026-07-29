@@ -1,7 +1,13 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { itemLabel } from "@/lib/ui/item-label";
-import { mobileRunSchema, type MobileRun } from "./contract";
+import {
+  mobileRunCollectionSchema,
+  mobileRunSchema,
+  type MobileRun,
+  type MobileRunCollection,
+} from "./contract";
 
 export interface MobileRunRequest {
   runId: string;
@@ -13,11 +19,22 @@ export interface MobileRunMutationRequest extends MobileRunRequest {
   idempotencyKey: string;
 }
 
+export interface MobileRunHistoryRequest {
+  userId: string;
+  bearerToken: string;
+  limit: number;
+  cursor?: string;
+}
+
 /** Tenant-scoped adapter over the canonical #161 durable-run operations. */
 export interface MobileRunOperations {
   get(input: MobileRunRequest): Promise<MobileRun | null>;
   retry(input: MobileRunMutationRequest): Promise<MobileRun>;
   cancel(input: MobileRunMutationRequest): Promise<MobileRun>;
+}
+
+export interface MobileRunHistoryReader {
+  list(input: MobileRunHistoryRequest): Promise<MobileRunCollection>;
 }
 
 export interface MobileRunDataError {
@@ -31,6 +48,11 @@ interface MobileRunDataResult<T> {
 }
 
 export interface MobileRunDataClient {
+  listRunHistoryPage(input: {
+    limit: number;
+    snapshotRevision?: string;
+    before?: { lastMeaningfulUpdateAt: string; runId: string };
+  }): PromiseLike<MobileRunDataResult<unknown[]>>;
   readRun(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readItem(itemId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readRetryProjection(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
@@ -47,6 +69,7 @@ export interface MobileRunDataClient {
 export class MobileRunNotFoundError extends Error {}
 export class MobileRunConflictError extends Error {}
 export class MobileRunUnavailableError extends Error {}
+export class MobileRunInvalidCursorError extends Error {}
 
 const requestSchema = z
   .object({
@@ -59,6 +82,86 @@ const requestSchema = z
 const mutationRequestSchema = requestSchema.extend({
   idempotencyKey: z.string().uuid(),
 }).strict();
+
+const historyRequestSchema = z
+  .object({
+    userId: z.string().min(1),
+    bearerToken: z.string().min(1),
+    limit: z.number().int().min(1).max(50),
+    cursor: z.string().min(1).optional(),
+  })
+  .strict();
+
+const cursorPayloadSchema = z
+  .object({
+    userId: z.string().min(1),
+    snapshotRevision: z.string().regex(/^[1-9][0-9]*$/u),
+    lastMeaningfulUpdateAt: z.string().datetime({ offset: true }),
+    runId: z.string().uuid(),
+  })
+  .strict();
+
+const canonicalBase64UrlPattern = /^[A-Za-z0-9_-]+$/u;
+const cursorSignatureContext = "snaplist:mobile-run-history-cursor:v1\0";
+
+function cursorSignature(payload: string, signingSecret: string): Buffer {
+  return createHmac("sha256", signingSecret)
+    .update(cursorSignatureContext)
+    .update(payload)
+    .digest();
+}
+
+function decodeCanonicalBase64Url(value: string): Buffer | null {
+  if (!canonicalBase64UrlPattern.test(value)) return null;
+  const decoded = Buffer.from(value, "base64url");
+  return decoded.toString("base64url") === value ? decoded : null;
+}
+
+function encodeCursor(
+  payload: z.infer<typeof cursorPayloadSchema>,
+  signingSecret: string,
+): string {
+  const encodedPayload = Buffer.from(
+    JSON.stringify(cursorPayloadSchema.parse(payload)),
+  ).toString("base64url");
+  const authenticatedPayload = `v1.${encodedPayload}`;
+  const signature = cursorSignature(authenticatedPayload, signingSecret)
+    .toString("base64url");
+  return `${authenticatedPayload}.${signature}`;
+}
+
+function decodeCursor(
+  cursor: string,
+  signingSecret: string,
+): z.infer<typeof cursorPayloadSchema> {
+  const [version, encodedPayload, encodedSignature, ...rest] = cursor.split(".");
+  const payload = encodedPayload
+    ? decodeCanonicalBase64Url(encodedPayload)
+    : null;
+  const signature = encodedSignature
+    ? decodeCanonicalBase64Url(encodedSignature)
+    : null;
+  const authenticatedPayload = `v1.${encodedPayload ?? ""}`;
+  const expectedSignature = cursorSignature(
+    authenticatedPayload,
+    signingSecret,
+  );
+  if (
+    version !== "v1"
+    || rest.length > 0
+    || !payload
+    || !signature
+    || signature.length !== expectedSignature.length
+    || !timingSafeEqual(signature, expectedSignature)
+  ) {
+    throw new MobileRunInvalidCursorError();
+  }
+  try {
+    return cursorPayloadSchema.parse(JSON.parse(payload.toString("utf8")));
+  } catch {
+    throw new MobileRunInvalidCursorError();
+  }
+}
 
 const runRowSchema = z
   .object({
@@ -99,6 +202,18 @@ const retryProjectionRowSchema = z
   })
   .strict();
 
+const runHistoryRowSchema = z
+  .object({
+    run_id: z.string().uuid(),
+    logical_idempotency_key: z.string().min(1).max(128),
+    last_meaningful_update_at: z.string().datetime({ offset: true }),
+    snapshot_revision: z.string().regex(/^[1-9][0-9]*$/u),
+    run_projection: runRowSchema,
+    item_projection: itemRowSchema,
+    retry_projection: retryProjectionRowSchema,
+  })
+  .strict();
+
 const mutationRejectionSchema = z
   .object({
     mobileRunOperationError: z
@@ -120,33 +235,18 @@ function requireData<T>(
   return result.data;
 }
 
-async function readCanonicalRun(
-  client: MobileRunDataClient,
-  runId: string,
+function projectCanonicalRun(
+  run: z.infer<typeof runRowSchema>,
+  item: z.infer<typeof itemRowSchema>,
+  retryProjection: z.infer<typeof retryProjectionRowSchema>,
   userId: string,
-): Promise<MobileRun | null> {
-  const rawRun = requireData("run detail", await client.readRun(runId));
-  if (!rawRun) return null;
-  const run = runRowSchema.parse(rawRun);
+): MobileRun {
   if (run.user_id !== userId) {
     throw new MobileRunUnavailableError("Run detail crossed the verified tenant boundary");
   }
-
-  const [rawItemResult, rawProjectionResult] = await Promise.all([
-    client.readItem(run.item_id),
-    client.readRetryProjection(run.id),
-  ]);
-  const rawItem = requireData("run item", rawItemResult);
-  if (!rawItem) throw new MobileRunUnavailableError("Run item was unavailable");
-  const item = itemRowSchema.parse(rawItem);
   if (item.id !== run.item_id || item.user_id !== userId) {
     throw new MobileRunUnavailableError("Run item crossed the verified tenant boundary");
   }
-  const rawProjection = requireData("run retry projection", rawProjectionResult);
-  if (!rawProjection) {
-    throw new MobileRunUnavailableError("Run retry projection was unavailable");
-  }
-  const retryProjection = retryProjectionRowSchema.parse(rawProjection);
   const allowance = retryProjection.effective_allowance;
   const expired = run.retention_cleaned_at !== null;
   const terminalOutcome = ["succeeded", "failed", "canceled"].includes(run.status)
@@ -204,6 +304,33 @@ async function readCanonicalRun(
   });
 }
 
+async function readCanonicalRun(
+  client: MobileRunDataClient,
+  runId: string,
+  userId: string,
+): Promise<MobileRun | null> {
+  const rawRun = requireData("run detail", await client.readRun(runId));
+  if (!rawRun) return null;
+  const run = runRowSchema.parse(rawRun);
+  const [rawItemResult, rawProjectionResult] = await Promise.all([
+    client.readItem(run.item_id),
+    client.readRetryProjection(run.id),
+  ]);
+  const rawItem = requireData("run item", rawItemResult);
+  if (!rawItem) throw new MobileRunUnavailableError("Run item was unavailable");
+  const rawProjection = requireData("run retry projection", rawProjectionResult);
+  if (!rawProjection) {
+    throw new MobileRunUnavailableError("Run retry projection was unavailable");
+  }
+
+  return projectCanonicalRun(
+    run,
+    itemRowSchema.parse(rawItem),
+    retryProjectionRowSchema.parse(rawProjection),
+    userId,
+  );
+}
+
 function mutationFailure(error: MobileRunDataError): never {
   if (error.code === "P0002") throw new MobileRunNotFoundError();
   if (error.code === "P0001" || error.code === "55000" || error.code === "23514") {
@@ -219,8 +346,78 @@ function durableMutationFailure(data: unknown): void {
 
 export function createMobileRunOperations(
   clientForBearer: (bearerToken: string) => MobileRunDataClient | Promise<MobileRunDataClient>,
-): MobileRunOperations {
+  cursorSigningSecret: string,
+): MobileRunOperations & MobileRunHistoryReader {
+  const signingSecret = z.string().min(32).parse(cursorSigningSecret);
   return {
+    async list(rawInput) {
+      const input = historyRequestSchema.parse(rawInput);
+      const cursor = input.cursor
+        ? decodeCursor(input.cursor, signingSecret)
+        : undefined;
+      if (cursor && cursor.userId !== input.userId) {
+        throw new MobileRunInvalidCursorError();
+      }
+      const client = await clientForBearer(input.bearerToken);
+      const rawRows = requireData(
+        "run history",
+        await client.listRunHistoryPage({
+          limit: input.limit + 1,
+          ...(cursor
+            ? {
+                snapshotRevision: cursor.snapshotRevision,
+                before: {
+                  lastMeaningfulUpdateAt: cursor.lastMeaningfulUpdateAt,
+                  runId: cursor.runId,
+                },
+              }
+            : {}),
+        }),
+      );
+      if (!rawRows) {
+        throw new MobileRunUnavailableError("Run history was unavailable");
+      }
+      const rows = z.array(runHistoryRowSchema).parse(rawRows);
+      const pageRows = rows.slice(0, input.limit);
+      const snapshotRevision = rows[0]?.snapshot_revision;
+      if (
+        rows.some((row) => row.snapshot_revision !== snapshotRevision)
+        || (cursor && snapshotRevision && snapshotRevision !== cursor.snapshotRevision)
+      ) {
+        throw new MobileRunUnavailableError("Run history snapshot changed");
+      }
+      const runs = pageRows.map((row) =>
+        projectCanonicalRun(
+          row.run_projection,
+          row.item_projection,
+          row.retry_projection,
+          input.userId,
+        )
+      );
+      const boundary = rows.length > input.limit ? pageRows.at(-1) : undefined;
+
+      return mobileRunCollectionSchema.parse({
+        entries: pageRows.map((row, index) => ({
+          run: runs[index],
+          logicalIdentity: {
+            idempotencyKey: row.logical_idempotency_key,
+          },
+          orderKey: {
+            lastMeaningfulUpdateAt: row.last_meaningful_update_at,
+            runId: row.run_id,
+          },
+        })),
+        nextCursor: boundary && snapshotRevision
+          ? encodeCursor({
+              userId: input.userId,
+              snapshotRevision,
+              lastMeaningfulUpdateAt: boundary.last_meaningful_update_at,
+              runId: boundary.run_id,
+            }, signingSecret)
+          : null,
+      });
+    },
+
     async get(rawInput) {
       const input = requestSchema.parse(rawInput);
       const client = await clientForBearer(input.bearerToken);
@@ -276,6 +473,14 @@ export function createSupabaseMobileRunDataClient(
   client: SupabaseClient,
 ): MobileRunDataClient {
   return {
+    listRunHistoryPage(input) {
+      return client.rpc("list_mobile_run_history_page", {
+        p_limit: input.limit,
+        p_snapshot_revision: input.snapshotRevision ?? null,
+        p_before_updated_at: input.before?.lastMeaningfulUpdateAt ?? null,
+        p_before_run_id: input.before?.runId ?? null,
+      });
+    },
     readRun(runId) {
       return client
         .from("pipeline_runs")
@@ -315,13 +520,16 @@ export function createSupabaseMobileRunDataClient(
 export function createConfiguredSupabaseMobileRunOperations(input: {
   supabaseURL: string;
   anonKey: string;
-}): MobileRunOperations {
-  return createMobileRunOperations((bearerToken) =>
-    createSupabaseMobileRunDataClient(
-      createClient(input.supabaseURL, input.anonKey, {
-        accessToken: async () => bearerToken,
-        auth: { persistSession: false, autoRefreshToken: false },
-      }),
-    ),
+  cursorSigningSecret: string;
+}): MobileRunOperations & MobileRunHistoryReader {
+  return createMobileRunOperations(
+    (bearerToken) =>
+      createSupabaseMobileRunDataClient(
+        createClient(input.supabaseURL, input.anonKey, {
+          accessToken: async () => bearerToken,
+          auth: { persistSession: false, autoRefreshToken: false },
+        }),
+      ),
+    input.cursorSigningSecret,
   );
 }

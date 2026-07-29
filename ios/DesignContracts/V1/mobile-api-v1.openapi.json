@@ -109,6 +109,24 @@
         }
       }
     },
+    "/v1/runs": {
+      "get": {
+        "operationId": "listRunHistory",
+        "x-owner-issue": 375,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "parameters": [
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 } },
+          { "name": "cursor", "in": "query", "required": false, "schema": { "type": "string", "minLength": 1 }, "description": "Opaque continuation token for the frozen tenant snapshot." }
+        ],
+        "responses": {
+          "200": { "description": "Tenant-scoped snapshot-stable run history page with logical convergence identity and frozen ordering truth", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunCollectionEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
     "/v1/runs/{runId}": {
       "parameters": [{ "$ref": "#/components/parameters/RunId" }],
       "get": {
@@ -268,6 +286,11 @@
       "RunRequiredInput": { "type": ["object", "null"], "additionalProperties": false, "required": ["reason", "destination"], "properties": { "reason": { "type": "string", "minLength": 1 }, "destination": { "type": "string", "enum": ["identity", "photos", "listing"] } } },
       "RunSafeFailure": { "type": ["object", "null"], "additionalProperties": false, "required": ["reason", "detail", "retryable", "workPreserved"], "properties": { "reason": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "retryable": { "type": "boolean" }, "workPreserved": { "type": "boolean" } } },
       "RunLegalActions": { "type": "object", "additionalProperties": false, "required": ["canRetry", "canCancel", "canOpenReview", "canStartNewCapture"], "properties": { "canRetry": { "type": "boolean" }, "canCancel": { "type": "boolean" }, "canOpenReview": { "type": "boolean" }, "canStartNewCapture": { "type": "boolean" } } },
+      "RunHistoryLogicalIdentity": { "type": "object", "additionalProperties": false, "required": ["idempotencyKey"], "properties": { "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 128 } } },
+      "RunHistoryOrderKey": { "type": "object", "additionalProperties": false, "required": ["lastMeaningfulUpdateAt", "runId"], "properties": { "lastMeaningfulUpdateAt": { "type": "string", "format": "date-time" }, "runId": { "type": "string", "format": "uuid" } } },
+      "RunCollectionEntry": { "type": "object", "additionalProperties": false, "required": ["run", "logicalIdentity", "orderKey"], "properties": { "run": { "$ref": "#/components/schemas/PipelineRun" }, "logicalIdentity": { "$ref": "#/components/schemas/RunHistoryLogicalIdentity" }, "orderKey": { "$ref": "#/components/schemas/RunHistoryOrderKey" } } },
+      "RunCollection": { "type": "object", "additionalProperties": false, "required": ["entries", "nextCursor"], "properties": { "entries": { "type": "array", "items": { "$ref": "#/components/schemas/RunCollectionEntry" } }, "nextCursor": { "type": ["string", "null"], "minLength": 1 } } },
+      "RunCollectionEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/RunCollection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "RunEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/PipelineRun" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "PipelineRun": { "type": "object", "additionalProperties": false, "required": ["id", "itemId", "listingId", "status", "stage", "attemptCount", "maxAttempts", "schemaVersion", "timestamps", "requiredInput", "terminalOutcome", "safeFailure", "allowance", "legalActions", "lastMeaningfulUpdateAt", "retentionCleanedAt"], "properties": { "id": { "type": "string", "format": "uuid" }, "itemId": { "type": "string", "format": "uuid" }, "listingId": { "type": ["string", "null"], "format": "uuid" }, "status": { "type": "string", "enum": ["queued", "running", "retrying", "succeeded", "failed", "canceled"] }, "stage": { "type": "string", "enum": ["queued", "identifying", "pricing", "generating", "persisting", "completed"] }, "attemptCount": { "type": "integer", "minimum": 0 }, "maxAttempts": { "type": "integer", "minimum": 1 }, "schemaVersion": { "const": 1 }, "timestamps": { "$ref": "#/components/schemas/RunTimestamps" }, "item": { "oneOf": [{ "$ref": "#/components/schemas/RunItem" }, { "type": "null" }] }, "requiredInput": { "$ref": "#/components/schemas/RunRequiredInput" }, "terminalOutcome": { "type": ["string", "null"], "enum": ["succeeded", "failed", "canceled", null] }, "safeFailure": { "$ref": "#/components/schemas/RunSafeFailure" }, "allowance": { "type": "string", "enum": ["reserved", "settled", "restored", "unchanged"] }, "legalActions": { "$ref": "#/components/schemas/RunLegalActions" }, "lastMeaningfulUpdateAt": { "type": "string", "format": "date-time" }, "retentionCleanedAt": { "type": ["string", "null"], "format": "date-time" } } },
       "WorkerSummaryEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/WorkerSummary" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },

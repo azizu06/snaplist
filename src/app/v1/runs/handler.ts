@@ -14,10 +14,15 @@ const unavailableWorker: PipelineWorker = {
 function configuredRunOperations() {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  if (!supabaseURL || !anonKey) {
+  const cursorSigningSecret = process.env.CLERK_SECRET_KEY?.trim();
+  if (!supabaseURL || !anonKey || !cursorSigningSecret) {
     throw new Error("The mobile RLS run adapter is not configured.");
   }
-  return createConfiguredSupabaseMobileRunOperations({ supabaseURL, anonKey });
+  return createConfiguredSupabaseMobileRunOperations({
+    supabaseURL,
+    anonKey,
+    cursorSigningSecret,
+  });
 }
 
 const handler = createMobileApiHandler({
@@ -43,6 +48,11 @@ const handler = createMobileApiHandler({
     },
     cancel(input) {
       return configuredRunOperations().cancel(input);
+    },
+  },
+  runHistory: {
+    list(input) {
+      return configuredRunOperations().list(input);
     },
   },
   worker: unavailableWorker,
