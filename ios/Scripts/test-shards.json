@@ -48,7 +48,8 @@
       "SnapListUITests/SnapListUITests/testRestoredDraftResumesBeforeTheFreshLauncherCanOverwriteIt",
       "SnapListUITests/SnapListUITests/testScanCameraFlashControlMatchesTheApprovedFortyEightPointCircle",
       "SnapListUITests/SnapListUITests/testScanLibraryUsesExactLiveAndRecoveryLabels",
-      "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachCAP01"
+      "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachCAP01",
+      "SnapListUITests/SnapListUITests/testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave"
     ],
     "ui-2": [
       "SnapListUITests/FidelityScreenshotTests/testFoundationShellScreenshot",
@@ -79,6 +80,7 @@
       "SnapListUITests/SnapListUITests/testRateLimitedSubmissionRendersExactRetainedMessageInLivePhotoReview",
       "SnapListUITests/SnapListUITests/testScanCameraKeepsNamedControlsReachableAtAccessibilityTypeAndReducedMotion",
       "SnapListUITests/SnapListUITests/testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable",
+      "SnapListUITests/SnapListUITests/testVoiceNoteSheetRejectsSwipeAndCloseRestoresStableReopenTruth",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessThatSuspendsAfterHomeStillTerminatesAndVerifiesExit",
