@@ -899,6 +899,100 @@ final class TrophyWallDomainTests: XCTestCase {
         }
     }
 
+    func testStoreProjectsSucceededRunWithoutReviewActionAsLockedReadyCard() throws {
+        let fixture = TrophyWallTestFixture()
+        func page(terminalOutcome: RunTerminalOutcome?) throws -> TrophyWallRunHistoryPage {
+            TrophyWallRunHistoryPage(
+                entries: [
+                    TrophyWallRunHistoryEntry(
+                        logicalIdentity: fixture.logicalID,
+                        orderKey: TrophyWallOrderKey(
+                            lastMeaningfulUpdateAt: fixture.runDetailUpdate,
+                            stableIdentity: fixture.runID.uuidString.lowercased()
+                        ),
+                        run: try fixture.decodedRunDetail(
+                            runID: fixture.runID,
+                            itemID: fixture.itemID,
+                            listingID: fixture.listingID,
+                            status: .succeeded,
+                            stage: .completed,
+                            terminalOutcome: terminalOutcome,
+                            canOpenReview: false
+                        )
+                    ),
+                ],
+                nextCursor: nil
+            )
+        }
+
+        let succeededPage = try page(terminalOutcome: .succeeded)
+        let store = fixture.makeStore()
+
+        store.ingest(
+            historyPage: succeededPage,
+            principalScope: fixture.principal
+        )
+        let firstCards = store.cards
+        let firstRows = store.processingRows
+        store.ingest(
+            historyPage: succeededPage,
+            principalScope: fixture.principal
+        )
+
+        XCTAssertEqual(store.cards.count, 2)
+        XCTAssertEqual(
+            store.cards.map(\.identity),
+            [.local(fixture.unrelatedLogicalID), .run(fixture.runID)]
+        )
+        XCTAssertEqual(
+            store.cards.map(\.orderKey.lastMeaningfulUpdateAt),
+            [fixture.unrelatedUpdate, fixture.runDetailUpdate]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.itemName),
+            [fixture.unrelatedItemName, fixture.matchedItemName]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.stateLabel),
+            ["Pending upload", "Ready to review"]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.accessibilityLabel),
+            [
+                "\(fixture.unrelatedItemName), pending upload. Local item, not sent yet.",
+                "\(fixture.matchedItemName), ready to review. Review is not available yet.",
+            ]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.destination),
+            [nil, .run(fixture.runID)]
+        )
+        XCTAssertEqual(store.cards, firstCards)
+        XCTAssertEqual(store.processingRows, firstRows)
+
+        let inconsistentOutcomes: [(name: String, value: RunTerminalOutcome?)] = [
+            ("missing terminal outcome", nil),
+            ("failed terminal outcome", .failed),
+            ("canceled terminal outcome", .canceled),
+        ]
+        for testCase in inconsistentOutcomes {
+            let inconsistentStore = fixture.makeStore()
+            let initialCards = inconsistentStore.cards
+            inconsistentStore.ingest(
+                historyPage: try page(terminalOutcome: testCase.value),
+                principalScope: fixture.principal
+            )
+
+            XCTAssertEqual(inconsistentStore.cards, initialCards, testCase.name)
+            XCTAssertFalse(
+                inconsistentStore.processingRows.contains {
+                    $0.stateLabel == "Ready to review"
+                },
+                testCase.name
+            )
+        }
+    }
+
     func testStoreConvergesRelaunchedPendingFromFrozenRunHistoryPageWithoutMutableReordering()
         throws {
         let fixture = TrophyWallTestFixture()
@@ -1280,6 +1374,7 @@ private struct TrophyWallTestFixture {
     let runDetailUpdate = Date(timeIntervalSince1970: 5)
     let itemID = UUID(uuidString: "37500000-0000-4000-8000-000000000007")!
     let otherItemID = UUID(uuidString: "37500000-0000-4000-8000-000000000008")!
+    let listingID = UUID(uuidString: "37500000-0000-4000-8000-000000000009")!
 
     var logicalID: TrophyWallLogicalIdentity {
         TrophyWallLogicalIdentity(idempotencyKey: idempotencyKey)
@@ -1358,15 +1453,20 @@ private struct TrophyWallTestFixture {
     func decodedRunDetail(
         runID: UUID,
         itemID: UUID,
+        listingID: UUID? = nil,
         status: DurableRunStatus = .queued,
         stage: DurableRunStage = .queued,
+        terminalOutcome: RunTerminalOutcome? = nil,
+        canOpenReview: Bool = false,
         lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z"
     ) throws -> DurableRun {
+        let listingIDJSON = listingID.map { "\"\($0.uuidString.lowercased())\"" } ?? "null"
+        let terminalOutcomeJSON = terminalOutcome.map { "\"\($0.rawValue)\"" } ?? "null"
         let json = """
         {
           "id": "\(runID.uuidString.lowercased())",
           "itemId": "\(itemID.uuidString.lowercased())",
-          "listingId": null,
+          "listingId": \(listingIDJSON),
           "status": "\(status.rawValue)",
           "stage": "\(stage.rawValue)",
           "attemptCount": 0,
@@ -1384,13 +1484,13 @@ private struct TrophyWallTestFixture {
           },
           "item": { "title": "Server canonical title", "photoCount": 3 },
           "requiredInput": null,
-          "terminalOutcome": null,
+          "terminalOutcome": \(terminalOutcomeJSON),
           "safeFailure": null,
           "allowance": "reserved",
           "legalActions": {
             "canRetry": false,
             "canCancel": false,
-            "canOpenReview": false,
+            "canOpenReview": \(canOpenReview),
             "canStartNewCapture": false
           },
           "lastMeaningfulUpdateAt": "\(lastMeaningfulUpdateAt)",

@@ -296,7 +296,7 @@ function projectCanonicalRun(
     legalActions: {
       canRetry,
       canCancel,
-      canOpenReview: run.status === "succeeded" && run.listing_id !== null,
+      canOpenReview: false,
       canStartNewCapture: expired && terminalOutcome !== null,
     },
     lastMeaningfulUpdateAt: run.updated_at,
