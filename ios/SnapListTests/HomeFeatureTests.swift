@@ -1623,6 +1623,13 @@ private final class TrophyWallProcessingTestHost {
         }
 
         var result = [object]
+        for case let element as NSObject in object.automationElements ?? [] {
+            result += accessibilityObjects(
+                from: element,
+                visited: &visited
+            )
+        }
+
         let explicitElements = object.accessibilityElements ?? []
         if explicitElements.isEmpty {
             let count = object.accessibilityElementCount()
