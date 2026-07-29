@@ -244,7 +244,24 @@ struct AppShellView: View {
         }
     }
 
+    @ViewBuilder
     private var homeFeature: some View {
+#if DEBUG
+        if configuration.fixture == .trophyProcessing {
+            TrophyWallProcessingView(
+                rows: TrophyWallProcessingLaunchFixture.rows,
+                onBack: {},
+                openRoute: { router.navigate(to: .home($0)) }
+            )
+        } else {
+            sellerHomeFeature
+        }
+#else
+        sellerHomeFeature
+#endif
+    }
+
+    private var sellerHomeFeature: some View {
         HomeFeatureView(
             store: homeStore,
             visualState: configuration.visualState,
@@ -316,6 +333,79 @@ struct AppShellView: View {
         }
     }
 }
+
+#if DEBUG
+@MainActor
+private enum TrophyWallProcessingLaunchFixture {
+    private static let principal = TrophyWallPrincipalScope(
+        opaqueValue: "trophy-processing-fixture"
+    )
+
+    static var rows: [TrophyWallProcessingRow] {
+        TrophyWallStore(
+            principalScope: principal,
+            repository: Repository(
+                cards: [
+                    .accepted(
+                        principalScope: principal,
+                        runID: UUID(
+                            uuidString: "37500000-0000-4000-8000-000000000003"
+                        )!,
+                        itemName: "Vintage Pyrex bowl set",
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 30)
+                    ),
+                    .pending(
+                        principalScope: principal,
+                        logicalIdentity: TrophyWallLogicalIdentity(
+                            idempotencyKey: UUID(
+                                uuidString: "37500000-0000-4000-8000-000000000002"
+                            )!
+                        ),
+                        itemName: "Nintendo Game Boy",
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 10)
+                    ),
+                    .accepted(
+                        principalScope: principal,
+                        runID: UUID(
+                            uuidString: "37500000-0000-4000-8000-000000000004"
+                        )!,
+                        itemName: "Canon AE-1 film camera",
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 9)
+                    ),
+                    .accepted(
+                        principalScope: principal,
+                        runID: UUID(
+                            uuidString: "37500000-0000-4000-8000-000000000005"
+                        )!,
+                        itemName: "Hidden accepted row",
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 8)
+                    ),
+                    .pending(
+                        principalScope: principal,
+                        logicalIdentity: TrophyWallLogicalIdentity(
+                            idempotencyKey: UUID(
+                                uuidString: "37500000-0000-4000-8000-000000000006"
+                            )!
+                        ),
+                        itemName: "Hidden pending row",
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 7)
+                    ),
+                ]
+            )
+        ).processingRows
+    }
+
+    private struct Repository: TrophyWallRepository {
+        let cards: [TrophyWallCard]
+
+        func initialCards(
+            for principalScope: TrophyWallPrincipalScope
+        ) -> [TrophyWallCard] {
+            cards
+        }
+    }
+}
+#endif
 
 @MainActor
 enum AppShellPhotoReviewBackTransaction {

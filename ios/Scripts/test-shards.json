@@ -26,6 +26,7 @@
       "SnapListUITests/HomeUITests/testExactCustomRunDeepLinkOpensDetailAndBackReturnsHome",
       "SnapListUITests/HomeUITests/testFocusedSearchFiltersRealListingModelsAndHidesDockForKeyboard",
       "SnapListUITests/HomeUITests/testNewSellerStartsTheExistingCaptureFlow",
+      "SnapListUITests/HomeUITests/testProcessingDisclosureExpandsAndCollapsesWithoutRouting",
       "SnapListUITests/HomeUITests/testRun02VisualStateUsesTheCanonicalDetailRouteShell",
       "SnapListUITests/HomeUITests/testRunDetailRefreshIsAccessibleAndReplacesServerTruth",
       "SnapListUITests/HomeUITests/testRunDetailShowsLoadedItemAndStageTruth",

@@ -83,6 +83,7 @@ enum ApprovedVisualStateID: String, CaseIterable, Codable, Identifiable {
 enum FoundationFixture: String, CaseIterable {
     case onboarding
     case home
+    case trophyProcessing = "trophy-processing"
     case listings
     case inbox
     case insights
@@ -92,7 +93,7 @@ enum FoundationFixture: String, CaseIterable {
 
     var initialTab: PrimaryTab {
         switch self {
-        case .onboarding, .home, .account, .activity, .capture: .home
+        case .onboarding, .home, .trophyProcessing, .account, .activity, .capture: .home
         case .listings: .listings
         case .inbox: .inbox
         case .insights: .insights
@@ -103,7 +104,9 @@ enum FoundationFixture: String, CaseIterable {
         switch self {
         case .account: .account
         case .activity: .activity
-        case .onboarding, .home, .listings, .inbox, .insights, .capture: nil
+        case .onboarding, .home, .trophyProcessing,
+             .listings, .inbox, .insights, .capture:
+            nil
         }
     }
 

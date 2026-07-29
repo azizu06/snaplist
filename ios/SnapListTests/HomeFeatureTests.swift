@@ -1117,6 +1117,88 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(store.processingRows, firstProjection)
     }
 
+    func testProcessingViewDisclosesClampedRowsWithoutRouting() {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate
+            )
+        )
+        let allRowIdentifiers = store.processingRows.map(\.accessibilityIdentifier)
+        let scenarios = [
+            (
+                name: "standard",
+                size: CGSize(width: 390, height: 844),
+                collapsedVisualLabel: "Show 2 more",
+                collapsedLabel: "Show 2 more items",
+                collapsedRowIdentifiers: Array(allRowIdentifiers.prefix(3))
+            ),
+            (
+                name: "smallest",
+                size: CGSize(width: 375, height: 667),
+                collapsedVisualLabel: "Show more",
+                collapsedLabel: "Show more items",
+                collapsedRowIdentifiers: Array(allRowIdentifiers.prefix(2))
+            ),
+        ]
+
+        for scenario in scenarios {
+            let collapsed = TrophyWallProcessingView.presentation(
+                from: store.processingRows,
+                availableHeight: scenario.size.height,
+                isExpanded: false
+            )
+            XCTAssertEqual(collapsed.disclosureLabel, scenario.collapsedVisualLabel)
+            XCTAssertEqual(
+                collapsed.disclosureAccessibilityLabel,
+                scenario.collapsedLabel
+            )
+            XCTAssertEqual(
+                collapsed.visibleRows.map(\.accessibilityIdentifier),
+                scenario.collapsedRowIdentifiers
+            )
+
+            let expansion = TrophyWallProcessingView.disclosureTransition(
+                from: false
+            )
+            XCTAssertTrue(expansion.isExpanded)
+            XCTAssertEqual(expansion.announcement, "Expanded")
+            let expanded = TrophyWallProcessingView.presentation(
+                from: store.processingRows,
+                availableHeight: scenario.size.height,
+                isExpanded: expansion.isExpanded
+            )
+            XCTAssertEqual(expanded.disclosureLabel, "Show less")
+            XCTAssertEqual(
+                expanded.disclosureAccessibilityLabel,
+                "Show fewer items"
+            )
+            XCTAssertEqual(
+                expanded.visibleRows.map(\.accessibilityIdentifier),
+                allRowIdentifiers
+            )
+
+            let collapse = TrophyWallProcessingView.disclosureTransition(
+                from: expansion.isExpanded
+            )
+            XCTAssertFalse(collapse.isExpanded)
+            XCTAssertEqual(collapse.announcement, "Collapsed")
+            let recollapsed = TrophyWallProcessingView.presentation(
+                from: store.processingRows,
+                availableHeight: scenario.size.height,
+                isExpanded: collapse.isExpanded
+            )
+            XCTAssertEqual(
+                recollapsed.visibleRows.map(\.accessibilityIdentifier),
+                scenario.collapsedRowIdentifiers
+            )
+        }
+    }
+
     func testProcessingViewRendersApprovedMergedRowsAtPhoneWidth() async {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: fixture.processingInitialCards)
@@ -1346,38 +1428,73 @@ private func captureHostedTrophyWallProcessingView(
     dynamicTypeSize: DynamicTypeSize,
     openRoute: @escaping (HomeRoute) -> Void
 ) async -> UIImage {
-    let hostingController = UIHostingController(
-        rootView: TrophyWallProcessingView(
-            rows: rows,
-            onBack: {},
-            openRoute: openRoute
-        )
-        .dynamicTypeSize(dynamicTypeSize)
-        .background(Color.white)
+    let host = TrophyWallProcessingTestHost(
+        rows: rows,
+        size: size,
+        dynamicTypeSize: dynamicTypeSize,
+        openRoute: openRoute
     )
-    let window = UIWindow(frame: CGRect(origin: .zero, size: size))
-    window.backgroundColor = .white
-    window.isOpaque = true
-    window.rootViewController = hostingController
-    hostingController.loadViewIfNeeded()
-    hostingController.view.frame = window.bounds
-    hostingController.view.backgroundColor = .white
-    hostingController.view.isOpaque = true
-    window.makeKeyAndVisible()
-
-    await Task.yield()
-    window.setNeedsLayout()
-    window.layoutIfNeeded()
-    hostingController.view.setNeedsLayout()
-    hostingController.view.layoutIfNeeded()
-    hostingController.view.setNeedsDisplay()
-    hostingController.view.layer.displayIfNeeded()
-
-    let image = renderOpaqueRGBA8(view: hostingController.view, size: size)
-
-    window.isHidden = true
-    withExtendedLifetime(window) {}
+    await host.settle()
+    let image = host.captureImage()
+    host.close()
     return image
+}
+
+@MainActor
+private final class TrophyWallProcessingTestHost {
+    private let hostingController: UIHostingController<AnyView>
+    private let window: UIWindow
+    private let size: CGSize
+
+    init(
+        rows: [TrophyWallProcessingRow],
+        size: CGSize,
+        dynamicTypeSize: DynamicTypeSize,
+        openRoute: @escaping (HomeRoute) -> Void
+    ) {
+        self.size = size
+        hostingController = UIHostingController(
+            rootView: AnyView(
+                TrophyWallProcessingView(
+                    rows: rows,
+                    onBack: {},
+                    openRoute: openRoute
+                )
+                .dynamicTypeSize(dynamicTypeSize)
+                .background(Color.white)
+            )
+        )
+        window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.backgroundColor = .white
+        window.isOpaque = true
+        window.rootViewController = hostingController
+        hostingController.loadViewIfNeeded()
+        hostingController.view.frame = window.bounds
+        hostingController.view.backgroundColor = .white
+        hostingController.view.isOpaque = true
+        window.makeKeyAndVisible()
+    }
+
+    func settle() async {
+        for _ in 0..<2 {
+            await Task.yield()
+            window.setNeedsLayout()
+            window.layoutIfNeeded()
+            hostingController.view.setNeedsLayout()
+            hostingController.view.layoutIfNeeded()
+        }
+        hostingController.view.setNeedsDisplay()
+        hostingController.view.layer.displayIfNeeded()
+    }
+
+    func captureImage() -> UIImage {
+        renderOpaqueRGBA8(view: hostingController.view, size: size)
+    }
+
+    func close() {
+        window.isHidden = true
+        withExtendedLifetime(window) {}
+    }
 }
 
 private func renderOpaqueRGBA8(view: UIView, size: CGSize) -> UIImage {
