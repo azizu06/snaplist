@@ -1079,6 +1079,10 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion() {
+        XCTAssertTrue(
+            UIProcessTerminationBoundary().terminate(XCUIApplication()),
+            "Photo Review drag requires a fully stopped prior fixture process."
+        )
         let app = launch(extraArguments: [
             "--photo-review-state=REV-02",
             "--reduced-motion",
