@@ -971,7 +971,7 @@ struct TrophyWallProcessingView: View {
             return Presentation(
                 visibleRows: rows,
                 disclosureLabel: "Show less",
-                disclosureAccessibilityLabel: "Show fewer items, button"
+                disclosureAccessibilityLabel: "Show fewer items"
             )
         }
 
@@ -979,8 +979,8 @@ struct TrophyWallProcessingView: View {
             visibleRows: clampedRows,
             disclosureLabel: hiddenCount == 2 ? "Show 2 more" : "Show more",
             disclosureAccessibilityLabel: hiddenCount == 2
-                ? "Show 2 more items, button"
-                : "Show more items, button"
+                ? "Show 2 more items"
+                : "Show more items"
         )
     }
 

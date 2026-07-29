@@ -1134,14 +1134,14 @@ final class TrophyWallDomainTests: XCTestCase {
                 name: "standard",
                 size: CGSize(width: 390, height: 844),
                 collapsedVisualLabel: "Show 2 more",
-                collapsedLabel: "Show 2 more items, button",
+                collapsedLabel: "Show 2 more items",
                 collapsedRowIdentifiers: Array(allRowIdentifiers.prefix(3))
             ),
             (
                 name: "smallest",
                 size: CGSize(width: 375, height: 667),
                 collapsedVisualLabel: "Show more",
-                collapsedLabel: "Show more items, button",
+                collapsedLabel: "Show more items",
                 collapsedRowIdentifiers: Array(allRowIdentifiers.prefix(2))
             ),
         ]
@@ -1175,7 +1175,7 @@ final class TrophyWallDomainTests: XCTestCase {
             XCTAssertEqual(expanded.disclosureLabel, "Show less")
             XCTAssertEqual(
                 expanded.disclosureAccessibilityLabel,
-                "Show fewer items, button"
+                "Show fewer items"
             )
             XCTAssertEqual(
                 expanded.visibleRows.map(\.accessibilityIdentifier),

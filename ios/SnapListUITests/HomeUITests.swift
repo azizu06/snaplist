@@ -326,7 +326,7 @@ final class HomeUITests: XCTestCase {
 
         let disclosure = app.buttons["trophy.processing.disclosure"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
-        XCTAssertEqual(disclosure.label, "Show 2 more items, button")
+        XCTAssertEqual(disclosure.label, "Show 2 more items")
         XCTAssertEqual(disclosure.value as? String, "Collapsed")
         XCTAssertGreaterThanOrEqual(disclosure.frame.height, 44)
         disclosure.tap()
@@ -338,7 +338,7 @@ final class HomeUITests: XCTestCase {
         }
 
         let expandedDisclosure = app.buttons["trophy.processing.disclosure"]
-        XCTAssertEqual(expandedDisclosure.label, "Show fewer items, button")
+        XCTAssertEqual(expandedDisclosure.label, "Show fewer items")
         XCTAssertEqual(expandedDisclosure.value as? String, "Expanded")
         XCTAssertFalse(app.otherElements["run.detail"].exists)
         expandedDisclosure.tap()
