@@ -253,13 +253,19 @@ final class NativeIntakeTests: XCTestCase {
         let ephemeralSnapshot = try await ephemeral.commit(.addPhotos([ephemeralHarness.photoInput(seed: 2)]))
         await ephemeralClock.waitUntilLiveSleeper(
             after: ephemeralRegistration, deadline: initialDeadline)
+        let durableRoot = intakeRoot(containing: durableSnapshot.photos[0].photoURL)
+        let ephemeralRoot = intakeRoot(containing: ephemeralSnapshot.photos[0].photoURL)
         let transitionRegistration = ephemeralClock.latestRegistration
         await ephemeralHarness.identity.set(.clerk("user_native_intake_ephemeral_durable"))
         assertEmpty(try await ephemeral.nextSnapshot())
         await ephemeralClock.waitUntilLiveSleeper(
             after: transitionRegistration, deadline: initialDeadline)
-        guardedFiles.failNextFileOperation = .rootDeletions(2)
-        let removalBaseline = guardedFiles.rootRemovalAttemptCount
+        let durableFailureBaseline = guardedFiles.rootDeletionFailureCount(at: durableRoot)
+        let ephemeralFailureBaseline = guardedFiles.rootDeletionFailureCount(at: ephemeralRoot)
+        guardedFiles.failNextFileOperation = .rootDeletions([
+            durableRoot.standardizedFileURL.path,
+            ephemeralRoot.standardizedFileURL.path,
+        ])
         let durableRetryRegistration = durableClock.latestRegistration
         let ephemeralRetryRegistration = ephemeralClock.latestRegistration
         durableClock.advance(by: NativeIntake.recoveryWindow + 1)
@@ -268,14 +274,17 @@ final class NativeIntakeTests: XCTestCase {
             .addingTimeInterval(NativeIntake.retentionRetryInterval)
         let ephemeralRetryDeadline = ephemeralClock.now()
             .addingTimeInterval(NativeIntake.retentionRetryInterval)
-        await guardedFiles.waitForRootRemovals(removalBaseline + 2)
         await durableClock.waitUntilLiveSleeper(
             after: durableRetryRegistration, deadline: durableRetryDeadline)
         await ephemeralClock.waitUntilLiveSleeper(
             after: ephemeralRetryRegistration, deadline: ephemeralRetryDeadline)
-        XCTAssertEqual(guardedFiles.rootRemovalAttemptCount, removalBaseline + 2)
+        XCTAssertEqual(guardedFiles.rootDeletionFailureCount(at: durableRoot), durableFailureBaseline + 1)
+        XCTAssertEqual(guardedFiles.rootDeletionFailureCount(at: ephemeralRoot), ephemeralFailureBaseline + 1)
         XCTAssertTrue(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
         XCTAssertTrue(files.fileExists(atPath: durableSnapshot.photos[0].photoURL.path))
+        guardedFiles.failNextFileOperation = .rootDeletions([
+            ephemeralRoot.standardizedFileURL.path
+        ])
         let discard = await durable.perform(.discard(expected: durableSnapshot.version))
         XCTAssertEqual(discard, .committed)
         assertEmpty(try await durable.nextSnapshot())
@@ -285,6 +294,7 @@ final class NativeIntakeTests: XCTestCase {
         await durableClock.waitUntilLiveSleeper(
             after: renewedRegistration, deadline: renewedDeadline)
         let retryRemoval = guardedFiles.successfulRootRemovalCount + 1
+        guardedFiles.failNextFileOperation = nil
         ephemeralClock.advance(by: NativeIntake.retentionRetryInterval)
         await guardedFiles.waitForRootRemovals(retryRemoval, successful: true)
         XCTAssertFalse(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
@@ -320,6 +330,11 @@ final class NativeIntakeTests: XCTestCase {
         for location in NativeIntakeSymlinkLocation.allCases {
             try await assertSymlinkFence(location)
         }
+    }
+    private func intakeRoot(containing asset: URL) -> URL {
+        asset.deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
     private func assertSymlinkFence(_ location: NativeIntakeSymlinkLocation) async throws {
         let harness = NativeIntakeHarness(identity: .clerk("user_native_intake_symlink_\(location)"))
@@ -628,13 +643,13 @@ fileprivate enum NativeIntakeFileFailure: Equatable {
     case assetProtection
     case manifestProtection
     case generationPublication
-    case rootDeletions(Int)
+    case rootDeletions(Set<String>)
 }
 final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
     private let lock = NSLock()
     private var rejectsReads = false
     private var nextFailure: NativeIntakeFileFailure?
-    private var removalAttempts = 0
+    private var failedRootDeletionPaths = Set<String>()
     private var completedRemovalAttempts = 0
     private var successfulRemovals = 0
     private typealias RemovalWaiter = (expected: Int, successful: Bool,
@@ -649,7 +664,9 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
         get { lock.synchronized { rejectsReads } }
         set { lock.synchronized { rejectsReads = newValue } }
     }
-    fileprivate var rootRemovalAttemptCount: Int { lock.synchronized { removalAttempts } }
+    fileprivate func rootDeletionFailureCount(at root: URL) -> Int {
+        lock.synchronized { failedRootDeletionPaths.contains(root.standardizedFileURL.path) ? 1 : 0 }
+    }
     fileprivate var successfulRootRemovalCount: Int { lock.synchronized { successfulRemovals } }
     fileprivate var didRequestCompleteProtection: Bool { lock.synchronized { requestedCompleteProtection } }
     func waitForRootRemovals(_ expected: Int, successful: Bool = false) async {
@@ -718,12 +735,11 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
         try super.moveItem(at: sourceURL, to: destinationURL)
     }
     override func removeItem(at URL: URL) throws {
+        let path = URL.standardizedFileURL.path
         let fail = lock.synchronized {
-            removalAttempts += 1
-            guard case .rootDeletions(let remaining) = nextFailure else {
-                return false
-            }
-            nextFailure = remaining > 1 ? .rootDeletions(remaining - 1) : nil
+            guard case .rootDeletions(let paths) = nextFailure else { return false }
+            guard paths.contains(path) else { return false }
+            failedRootDeletionPaths.insert(path)
             return true
         }
         do {
