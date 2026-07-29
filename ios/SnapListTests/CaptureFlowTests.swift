@@ -4641,6 +4641,134 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(observation.hostContentSize, sourceView.contentSize)
     }
 
+    func testPhotoReviewNativeSourceObservationClassifiesFullLiftMovementAndEndLocation() throws {
+        let photos = makeDragPhotos()
+        let frames = Dictionary(
+            uniqueKeysWithValues: photos.enumerated().map { index, photo in
+                (
+                    photo.id,
+                    CGRect(
+                        x: CGFloat(index) * 88,
+                        y: 0,
+                        width: 76,
+                        height: 98
+                    )
+                )
+            }
+        )
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        var observation = PhotoReviewNativeDragSourceObservation()
+        let sourceView = UIScrollView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
+        )
+        sourceView.contentSize = CGSize(width: 440, height: 98)
+        sourceView.bounds.origin.x = 44
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { location in
+                PhotoReviewNativeDragSourceGeometry.source(
+                    at: location,
+                    photos: photos,
+                    frames: frames
+                )
+            },
+            observeSource: { observation.observe($0) }
+        )
+        source.attach(to: sourceView)
+        let interaction = try XCTUnwrap(
+            sourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(
+            x: try XCTUnwrap(frames[photos[2].id]).midX
+                + sourceView.bounds.minX,
+            y: 49
+        )
+        session.items = source.dragInteraction(
+            interaction,
+            itemsForBeginning: session
+        )
+        XCTAssertEqual(
+            PhotoReviewNativeDragContract.photoID(
+                from: try XCTUnwrap(session.items.first).itemProvider
+            ),
+            photos[2].id
+        )
+
+        source.dragInteraction(
+            interaction,
+            sessionWillBegin: session
+        )
+        session.currentLocation = CGPoint(
+            x: try XCTUnwrap(frames[photos[1].id]).midX
+                + sourceView.bounds.minX,
+            y: 49
+        )
+        source.dragInteraction(
+            interaction,
+            sessionDidMove: session
+        )
+        session.currentLocation = CGPoint(
+            x: try XCTUnwrap(frames[photos[0].id]).midX
+                + sourceView.bounds.minX,
+            y: 49
+        )
+        source.dragInteraction(
+            interaction,
+            sessionDidMove: session
+        )
+        XCTAssertEqual(observation.sessionDidMoveCount, 0)
+        XCTAssertNil(observation.lastSessionDidMoveLocation)
+        source.dragInteraction(
+            interaction,
+            session: session,
+            willEndWith: .cancel
+        )
+        source.dragInteraction(
+            interaction,
+            session: session,
+            didEndWith: .cancel
+        )
+
+        XCTAssertTrue(observation.didSessionWillBegin)
+        XCTAssertEqual(
+            observation.sessionWillBeginLocation,
+            CGPoint(x: 214, y: 49)
+        )
+        XCTAssertEqual(observation.sessionDidMoveCount, 2)
+        XCTAssertEqual(
+            observation.lastSessionDidMoveLocation,
+            CGPoint(x: 38, y: 49)
+        )
+        XCTAssertEqual(observation.willEndOperation, .cancel)
+        XCTAssertEqual(
+            observation.willEndLocation,
+            CGPoint(x: 38, y: 49)
+        )
+        XCTAssertTrue(observation.didEnd)
+        XCTAssertEqual(observation.didEndOperation, .cancel)
+        XCTAssertEqual(
+            observation.didEndLocation,
+            CGPoint(x: 38, y: 49)
+        )
+        XCTAssertTrue(
+            observation.label.contains(
+                "willBegin:true,willBeginLocation:214,49,"
+                    + "moves:2,lastMove:38,49,"
+                    + "willEnd:cancel,willEndLocation:38,49,"
+                    + "ended:true,endOperation:cancel,"
+                    + "endLocation:38,49"
+            ),
+            observation.label
+        )
+    }
+
     func testPhotoReviewNativeAttachmentsResolveNestedHorizontalStripHostInsteadOfOuterScreenScroll() {
         let photos = makeDragPhotos()
         let store = PhotoReviewStore(photos: photos)

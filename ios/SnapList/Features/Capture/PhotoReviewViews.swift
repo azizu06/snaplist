@@ -305,7 +305,19 @@ enum PhotoReviewNativeDragSourceEvent: Equatable {
     case rejectedNoSource
     case rejectedPresentation
     case provided(photoID: StagedCapturePhoto.ID)
-    case ended
+    case sessionWillBegin(location: CGPoint?)
+    case willEnd(
+        operation: UIDropOperation,
+        location: CGPoint?,
+        sessionDidMoveCount: Int,
+        lastSessionDidMoveLocation: CGPoint?
+    )
+    case ended(
+        operation: UIDropOperation,
+        location: CGPoint?,
+        sessionDidMoveCount: Int,
+        lastSessionDidMoveLocation: CGPoint?
+    )
 }
 
 struct PhotoReviewNativeDragSourceObservation: Equatable {
@@ -316,7 +328,15 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
     private(set) var hostContentSize = CGSize.zero
     private(set) var beginOutcome = "not-called"
     private(set) var photoID: StagedCapturePhoto.ID?
+    private(set) var didSessionWillBegin = false
+    private(set) var sessionWillBeginLocation: CGPoint?
+    private(set) var sessionDidMoveCount = 0
+    private(set) var lastSessionDidMoveLocation: CGPoint?
+    private(set) var willEndOperation: UIDropOperation?
+    private(set) var willEndLocation: CGPoint?
     private(set) var didEnd = false
+    private(set) var didEndOperation: UIDropOperation?
+    private(set) var didEndLocation: CGPoint?
 
     var hasActivity: Bool {
         isAttached || beginOutcome != "not-called"
@@ -347,7 +367,15 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
             "photo:\(photoID?.uuidString ?? "none")",
             "host:\(bounds)",
             "content:\(content)",
-            "ended:\(didEnd)"
+            "willBegin:\(didSessionWillBegin)",
+            "willBeginLocation:\(Self.pointLabel(sessionWillBeginLocation))",
+            "moves:\(sessionDidMoveCount)",
+            "lastMove:\(Self.pointLabel(lastSessionDidMoveLocation))",
+            "willEnd:\(Self.operationLabel(willEndOperation))",
+            "willEndLocation:\(Self.pointLabel(willEndLocation))",
+            "ended:\(didEnd)",
+            "endOperation:\(Self.operationLabel(didEndOperation))",
+            "endLocation:\(Self.pointLabel(didEndLocation))"
         ]
         .joined(separator: ",")
     }
@@ -371,7 +399,15 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
             self.isEnabled = isEnabled
             beginOutcome = "requested"
             photoID = nil
+            didSessionWillBegin = false
+            sessionWillBeginLocation = nil
+            sessionDidMoveCount = 0
+            lastSessionDidMoveLocation = nil
+            willEndOperation = nil
+            willEndLocation = nil
             didEnd = false
+            didEndOperation = nil
+            didEndLocation = nil
         case .resolving(let frameCount):
             self.frameCount = frameCount
         case .rejectedMissingView:
@@ -385,8 +421,63 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
         case .provided(let photoID):
             beginOutcome = "provided"
             self.photoID = photoID
-        case .ended:
+        case .sessionWillBegin(let location):
+            didSessionWillBegin = true
+            sessionWillBeginLocation = location
+        case .willEnd(
+            let operation,
+            let location,
+            let sessionDidMoveCount,
+            let lastSessionDidMoveLocation
+        ):
+            willEndOperation = operation
+            willEndLocation = location
+            self.sessionDidMoveCount = sessionDidMoveCount
+            self.lastSessionDidMoveLocation = lastSessionDidMoveLocation
+        case .ended(
+            let operation,
+            let location,
+            let sessionDidMoveCount,
+            let lastSessionDidMoveLocation
+        ):
             didEnd = true
+            didEndOperation = operation
+            didEndLocation = location
+            self.sessionDidMoveCount = sessionDidMoveCount
+            self.lastSessionDidMoveLocation = lastSessionDidMoveLocation
+        }
+    }
+
+    private static func pointLabel(_ point: CGPoint?) -> String {
+        guard let point else {
+            return "none"
+        }
+        return [
+            point.x,
+            point.y
+        ]
+        .map { Int($0.rounded()) }
+        .map(String.init)
+        .joined(separator: ",")
+    }
+
+    private static func operationLabel(
+        _ operation: UIDropOperation?
+    ) -> String {
+        guard let operation else {
+            return "not-called"
+        }
+        switch operation {
+        case .cancel:
+            return "cancel"
+        case .forbidden:
+            return "forbidden"
+        case .copy:
+            return "copy"
+        case .move:
+            return "move"
+        @unknown default:
+            return "unknown-\(operation.rawValue)"
         }
     }
 }
@@ -684,6 +775,8 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
     private var observeSource:
         (PhotoReviewNativeDragSourceEvent) -> Void
     private var activeSource: PhotoReviewNativeDragSource?
+    private var sessionDidMoveCount = 0
+    private var lastSessionDidMoveLocation: CGPoint?
     private weak var attachedView: UIView?
     private var dragInteraction: UIDragInteraction?
 
@@ -773,6 +866,8 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
             observeSource(.rejectedMissingView)
             return []
         }
+        sessionDidMoveCount = 0
+        lastSessionDidMoveLocation = nil
         observeSource(
             .beginRequested(
                 hostBounds: sourceView.bounds,
@@ -854,16 +949,88 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
 
     func dragInteraction(
         _ interaction: UIDragInteraction,
+        sessionWillBegin session: UIDragSession
+    ) {
+        observeSource(
+            .sessionWillBegin(
+                location: hostNormalizedLocation(
+                    for: session,
+                    interaction: interaction
+                )
+            )
+        )
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        sessionDidMove session: UIDragSession
+    ) {
+        sessionDidMoveCount += 1
+        lastSessionDidMoveLocation = hostNormalizedLocation(
+            for: session,
+            interaction: interaction
+        )
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
+        session: UIDragSession,
+        willEndWith operation: UIDropOperation
+    ) {
+        observeSource(
+            .willEnd(
+                operation: operation,
+                location: hostNormalizedLocation(
+                    for: session,
+                    interaction: interaction
+                ),
+                sessionDidMoveCount: sessionDidMoveCount,
+                lastSessionDidMoveLocation:
+                    lastSessionDidMoveLocation
+            )
+        )
+    }
+
+    func dragInteraction(
+        _ interaction: UIDragInteraction,
         session: UIDragSession,
         didEndWith operation: UIDropOperation
     ) {
+        let location = hostNormalizedLocation(
+            for: session,
+            interaction: interaction
+        )
         // This source callback is delivered after both accepted and cancelled
         // sessions, even when the drag never reaches this app's drop owner.
         presentation.endNativeDragSession(
             reduceMotion: reduceMotion
         )
         activeSource = nil
-        observeSource(.ended)
+        observeSource(
+            .ended(
+                operation: operation,
+                location: location,
+                sessionDidMoveCount: sessionDidMoveCount,
+                lastSessionDidMoveLocation:
+                    lastSessionDidMoveLocation
+            )
+        )
+        sessionDidMoveCount = 0
+        lastSessionDidMoveLocation = nil
+    }
+
+    private func hostNormalizedLocation(
+        for session: UIDragSession,
+        interaction: UIDragInteraction
+    ) -> CGPoint? {
+        guard let sourceView = interaction.view else {
+            return nil
+        }
+        let sourceLocation = session.location(in: sourceView)
+        return CGPoint(
+            x: sourceLocation.x - sourceView.bounds.minX,
+            y: sourceLocation.y - sourceView.bounds.minY
+        )
     }
 }
 
