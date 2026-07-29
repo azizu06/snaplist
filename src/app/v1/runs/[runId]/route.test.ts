@@ -1,8 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { verifyToken, createConfiguredSupabaseMobileRunOperations, get, retry, cancel } = vi.hoisted(() => ({
+const {
+  verifyToken,
+  createConfiguredSupabaseMobileRunOperations,
+  createConfiguredSupabaseListingReviewReader,
+  createConfiguredVerifiedGuestPrincipalResolver,
+  resolveGuest,
+  mintOperationToken,
+  readListingReview,
+  get,
+  retry,
+  cancel,
+} = vi.hoisted(() => ({
   verifyToken: vi.fn(),
   createConfiguredSupabaseMobileRunOperations: vi.fn(),
+  createConfiguredSupabaseListingReviewReader: vi.fn(),
+  createConfiguredVerifiedGuestPrincipalResolver: vi.fn(),
+  resolveGuest: vi.fn(),
+  mintOperationToken: vi.fn(),
+  readListingReview: vi.fn(),
   get: vi.fn(),
   retry: vi.fn(),
   cancel: vi.fn(),
@@ -12,6 +28,13 @@ vi.mock("@clerk/nextjs/server", () => ({ verifyToken }));
 vi.mock("@/lib/mobile-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/mobile-api")>()),
   createConfiguredSupabaseMobileRunOperations,
+}));
+vi.mock("@/lib/listing-review", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/listing-review")>()),
+  createConfiguredSupabaseListingReviewReader,
+}));
+vi.mock("@/lib/guest-capability/configured", () => ({
+  createConfiguredVerifiedGuestPrincipalResolver,
 }));
 
 import { GET } from "./route";
@@ -23,6 +46,9 @@ const environmentKeys = [
   "CLERK_AUTHORIZED_PARTIES",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+  "SUPABASE_SECRET_KEY",
+  "SUPABASE_GUEST_JWT_KEY_ID",
+  "SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM",
 ] as const;
 
 beforeEach(() => {
@@ -30,7 +56,27 @@ beforeEach(() => {
   process.env.CLERK_AUTHORIZED_PARTIES = "https://snaplist.example";
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_release";
+  process.env.SUPABASE_SECRET_KEY = "sb_secret_release";
+  process.env.SUPABASE_GUEST_JWT_KEY_ID = "guest-key-release";
+  process.env.SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM = "guest-private-key";
   verifyToken.mockResolvedValue({ sub: "user_release" });
+  mintOperationToken
+    .mockResolvedValueOnce("guest-run-jwt")
+    .mockResolvedValueOnce("guest-review-jwt")
+    .mockResolvedValueOnce("guest-photo-jwt");
+  resolveGuest.mockResolvedValue({
+    capabilityId: "24100000-0000-4000-8000-000000000009",
+    kind: "verifiedGuest",
+    mintOperationToken,
+    userId: "guest_release",
+  });
+  createConfiguredVerifiedGuestPrincipalResolver.mockReturnValue({
+    resolve: resolveGuest,
+  });
+  readListingReview.mockResolvedValue(null);
+  createConfiguredSupabaseListingReviewReader.mockReturnValue({
+    forRun: readListingReview,
+  });
   get.mockResolvedValue({
     id: "24100000-0000-4000-8000-000000000001",
     itemId: "24100000-0000-4000-8000-000000000002",
@@ -100,6 +146,47 @@ describe("production mobile durable-run route composition", () => {
       runId: "24100000-0000-4000-8000-000000000001",
       userId: "user_release",
       bearerToken: "signed-release-jwt",
+    });
+  });
+
+  it("resolves GuestBearer once and preserves per-operation mint authority", async () => {
+    get.mockResolvedValueOnce({
+      ...(await get()),
+      listingId: "24100000-0000-4000-8000-000000000005",
+      status: "succeeded",
+      stage: "completed",
+      terminalOutcome: "succeeded",
+    });
+
+    const response = await GET(
+      new Request(
+        "https://snaplist.example/v1/runs/24100000-0000-4000-8000-000000000001",
+        { headers: { authorization: "Bearer guestcap_abcdefghijklmnopqrstuvwxyzABCDEFGH123456789" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(verifyToken).not.toHaveBeenCalled();
+    expect(createConfiguredVerifiedGuestPrincipalResolver).toHaveBeenCalledWith({
+      keyId: "guest-key-release",
+      privateKeyPem: "guest-private-key",
+      secretKey: "sb_secret_release",
+      supabaseURL: "https://project.supabase.co",
+    });
+    expect(resolveGuest).toHaveBeenCalledWith(
+      "guestcap_abcdefghijklmnopqrstuvwxyzABCDEFGH123456789",
+    );
+    expect(mintOperationToken).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenLastCalledWith({
+      runId: "24100000-0000-4000-8000-000000000001",
+      userId: "guest_release",
+      bearerToken: "guest-run-jwt",
+    });
+    expect(readListingReview).toHaveBeenCalledWith({
+      runId: "24100000-0000-4000-8000-000000000001",
+      userId: "guest_release",
+      bearerToken: "guestcap_abcdefghijklmnopqrstuvwxyzABCDEFGH123456789",
+      mintOperationToken,
     });
   });
 

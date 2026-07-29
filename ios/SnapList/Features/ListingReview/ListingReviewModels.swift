@@ -1,6 +1,6 @@
 import Foundation
 
-enum ListingReviewCopy {
+private enum ListingReviewCopy {
     static let startingPriceEstimate = "Starting price estimate"
     static let noVerifiedSoldMatches = "No verified sold matches found."
 }
@@ -28,18 +28,19 @@ struct ListingReviewBinding: Decodable, Equatable, Sendable {
 }
 
 struct ListingReviewPhoto: Decodable, Equatable, Sendable {
-    let id: UUID
+    let ordinal: Int
     let url: URL
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case id
+        case ordinal
         case url
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.runContractContainer(keyedBy: CodingKeys.self)
-        id = try values.decode(UUID.self, forKey: .id)
+        ordinal = try values.decode(Int.self, forKey: .ordinal)
         url = try values.decode(URL.self, forKey: .url)
+        try values.require((0...4).contains(ordinal), forKey: .ordinal)
         try values.require(
             url.scheme?.lowercased() == "https" && url.host != nil,
             forKey: .url
@@ -96,10 +97,34 @@ struct ListingReviewSpecific: Decodable, Equatable, Sendable {
     }
 }
 
+enum ListingReviewCondition: String, Decodable, Equatable, Sendable {
+    case new
+    case likeNew = "like-new"
+    case veryGood = "very-good"
+    case good
+    case acceptable
+    case fair
+    case poor
+    case forParts = "for-parts"
+
+    var sellerLabel: String {
+        switch self {
+        case .new: "New"
+        case .likeNew: "Like New"
+        case .veryGood: "Very Good"
+        case .good: "Good"
+        case .acceptable: "Acceptable"
+        case .fair: "Fair"
+        case .poor: "Poor"
+        case .forParts: "For Parts"
+        }
+    }
+}
+
 struct ListingReviewListing: Decodable, Equatable, Sendable {
     let title: String
     let description: String
-    let condition: String
+    let condition: ListingReviewCondition
     let specifics: [ListingReviewSpecific]
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
@@ -113,19 +138,13 @@ struct ListingReviewListing: Decodable, Equatable, Sendable {
         let values = try decoder.runContractContainer(keyedBy: CodingKeys.self)
         title = try values.decode(String.self, forKey: .title)
         description = try values.decode(String.self, forKey: .description)
-        condition = try values.decode(String.self, forKey: .condition)
+        condition = try values.decode(ListingReviewCondition.self, forKey: .condition)
         specifics = try values.decode([ListingReviewSpecific].self, forKey: .specifics)
-        try values.require(
-            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            forKey: .title
-        )
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        try values.require(!normalizedTitle.isEmpty && title.utf16.count <= 80, forKey: .title)
         try values.require(
             !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             forKey: .description
-        )
-        try values.require(
-            !condition.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            forKey: .condition
         )
         try values.require(
             Set(specifics.map { $0.name.lowercased() }).count == specifics.count,
@@ -210,33 +229,63 @@ struct ListingReviewPricing: Decodable, Equatable, Sendable {
 }
 
 struct ListingReviewSoldMatch: Decodable, Equatable, Sendable {
-    let id: UUID
-    let title: String
-    let soldPrice: Decimal
-    let soldAt: String
+    let id: String
     let sourceURL: URL
+    let title: String?
+    let soldPrice: Decimal
+    let currency: String
+    let condition: String?
+    let soldAt: Int?
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id
+        case sourceURL
         case title
         case soldPrice
+        case currency
+        case condition
         case soldAt
-        case sourceURL
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.runContractContainer(keyedBy: CodingKeys.self)
-        id = try values.decode(UUID.self, forKey: .id)
-        title = try values.decode(String.self, forKey: .title)
-        soldPrice = try values.decode(Decimal.self, forKey: .soldPrice)
-        soldAt = try values.decode(String.self, forKey: .soldAt)
+        id = try values.decode(String.self, forKey: .id)
         sourceURL = try values.decode(URL.self, forKey: .sourceURL)
+        title = try values.decodeRequiredIfPresent(String.self, forKey: .title)
+        soldPrice = try values.decode(Decimal.self, forKey: .soldPrice)
+        currency = try values.decode(String.self, forKey: .currency)
+        condition = try values.decodeRequiredIfPresent(String.self, forKey: .condition)
+        soldAt = try values.decodeRequiredIfPresent(Int.self, forKey: .soldAt)
         try values.require(
-            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-            forKey: .title
+            !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && id.utf16.count <= 2_048,
+            forKey: .id
         )
         try values.require(soldPrice.isPositiveCurrency, forKey: .soldPrice)
-        try values.validateDateTime(soldAt, forKey: .soldAt)
+        try values.require(
+            currency.range(of: #"^[A-Z]{3}$"#, options: .regularExpression) != nil,
+            forKey: .currency
+        )
+        if let title {
+            try values.require(
+                !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && title.utf16.count <= 500,
+                forKey: .title
+            )
+        }
+        if let condition {
+            try values.require(
+                !condition.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && condition.utf16.count <= 120,
+                forKey: .condition
+            )
+        }
+        if let soldAt {
+            try values.require(
+                (0...9_007_199_254_740_991).contains(soldAt),
+                forKey: .soldAt
+            )
+        }
         try values.require(
             sourceURL.scheme?.lowercased() == "https" && sourceURL.host != nil,
             forKey: .sourceURL
@@ -253,14 +302,8 @@ struct ListingReviewResult: Decodable, Equatable, Sendable {
     let pricing: ListingReviewPricing
     let evidenceAsOf: String
     let verifiedSoldMatches: [ListingReviewSoldMatch]
-
-    var startingPriceCopy: String {
-        ListingReviewCopy.startingPriceEstimate
-    }
-
-    var soldEvidenceCopy: String? {
-        verifiedSoldMatches.isEmpty ? ListingReviewCopy.noVerifiedSoldMatches : nil
-    }
+    let startingPriceCopy: String
+    let soldEvidenceCopy: String?
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion
@@ -271,6 +314,8 @@ struct ListingReviewResult: Decodable, Equatable, Sendable {
         case pricing
         case evidenceAsOf
         case verifiedSoldMatches
+        case startingPriceCopy
+        case soldEvidenceCopy
     }
 
     init(from decoder: Decoder) throws {
@@ -286,11 +331,16 @@ struct ListingReviewResult: Decodable, Equatable, Sendable {
             [ListingReviewSoldMatch].self,
             forKey: .verifiedSoldMatches
         )
+        startingPriceCopy = try values.decode(String.self, forKey: .startingPriceCopy)
+        soldEvidenceCopy = try values.decodeRequiredIfPresent(
+            String.self,
+            forKey: .soldEvidenceCopy
+        )
 
         try values.require(schemaVersion == 1, forKey: .schemaVersion)
         try values.require((1...5).contains(photos.count), forKey: .photos)
         try values.require(
-            Set(photos.map(\.id)).count == photos.count,
+            photos.map(\.ordinal) == Array(0..<photos.count),
             forKey: .photos
         )
         try values.validateDateTime(evidenceAsOf, forKey: .evidenceAsOf)
@@ -299,24 +349,18 @@ struct ListingReviewResult: Decodable, Equatable, Sendable {
                 && Set(verifiedSoldMatches.map(\.id)).count == verifiedSoldMatches.count,
             forKey: .verifiedSoldMatches
         )
-    }
-}
-
-struct ListingReviewDraft: Equatable, Sendable {
-    var title: String
-    var description: String
-    var condition: String
-    var specifics: [ListingReviewSpecific]
-    var sellerPriceOverride: Decimal?
-    let sourceReviewRevision: UUID
-
-    init(review: ListingReviewResult) {
-        title = review.listing.title
-        description = review.listing.description
-        condition = review.listing.condition
-        specifics = review.listing.specifics
-        sellerPriceOverride = review.pricing.sellerPriceOverride
-        sourceReviewRevision = review.binding.reviewRevision
+        try values.require(
+            startingPriceCopy == ListingReviewCopy.startingPriceEstimate,
+            forKey: .startingPriceCopy
+        )
+        try values.require(
+            soldEvidenceCopy == (
+                verifiedSoldMatches.isEmpty
+                    ? ListingReviewCopy.noVerifiedSoldMatches
+                    : nil
+            ),
+            forKey: .soldEvidenceCopy
+        )
     }
 }
 
