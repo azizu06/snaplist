@@ -299,6 +299,67 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["header.account"].exists)
     }
 
+    func testProcessingDisclosureExpandsAndCollapsesWithoutRouting() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+        ]
+        app.launch()
+
+        let processing = app.otherElements["trophy.processing"]
+        XCTAssertTrue(processing.waitForExistence(timeout: 3))
+
+        let rowIdentifiers = [
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000003",
+            "trophy.processing.row.local.37500000-0000-4000-8000-000000000002",
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000004",
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000005",
+            "trophy.processing.row.local.37500000-0000-4000-8000-000000000006",
+        ]
+        let rows = rowIdentifiers.map {
+            app.descendants(matching: .any)[$0]
+        }
+        XCTAssertTrue(rows[0].waitForExistence(timeout: 3))
+        XCTAssertTrue(rows[1].exists)
+        XCTAssertTrue(rows[2].exists)
+        XCTAssertFalse(rows[3].exists)
+        XCTAssertFalse(rows[4].exists)
+
+        let disclosure = app.buttons["trophy.processing.disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
+        XCTAssertEqual(disclosure.label, "Show 2 more items, button")
+        XCTAssertEqual(disclosure.value as? String, "Collapsed")
+        XCTAssertGreaterThanOrEqual(disclosure.frame.height, 44)
+        disclosure.tap()
+
+        XCTAssertTrue(rows[3].waitForExistence(timeout: 3))
+        XCTAssertTrue(rows[4].waitForExistence(timeout: 3))
+        for (earlier, later) in zip(rows, rows.dropFirst()) {
+            XCTAssertLessThan(earlier.frame.minY, later.frame.minY)
+        }
+
+        let expandedDisclosure = app.buttons["trophy.processing.disclosure"]
+        XCTAssertEqual(expandedDisclosure.label, "Show fewer items, button")
+        XCTAssertEqual(expandedDisclosure.value as? String, "Expanded")
+        XCTAssertTrue(processing.exists)
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+        expandedDisclosure.tap()
+
+        XCTAssertTrue(rows[3].waitForNonExistence(timeout: 3))
+        XCTAssertTrue(rows[4].waitForNonExistence(timeout: 3))
+        XCTAssertTrue(rows[0].exists)
+        XCTAssertTrue(rows[1].exists)
+        XCTAssertTrue(rows[2].exists)
+        XCTAssertEqual(
+            app.buttons["trophy.processing.disclosure"].value as? String,
+            "Collapsed"
+        )
+        XCTAssertTrue(processing.exists)
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+    }
+
     func testFinalListingRowClearsTheFloatingDockWhenScrolled() {
         let app = launch("HOME-01")
         let scroll = app.scrollViews["home.active"]
