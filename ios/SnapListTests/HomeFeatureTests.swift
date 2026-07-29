@@ -797,26 +797,7 @@ final class TrophyWallDomainTests: XCTestCase {
 
     func testStoreProjectsRemainingCanonicalWorkingStagesFromAcceptedHandoffRunDetail() throws {
         let fixture = TrophyWallTestFixture()
-        let cases = [
-            (
-                name: "identifying",
-                stage: DurableRunStage.identifying,
-                stateLabel: "Identifying",
-                accessibilityFact: "identifying"
-            ),
-            (
-                name: "generating",
-                stage: DurableRunStage.generating,
-                stateLabel: "Writing listing",
-                accessibilityFact: "writing listing"
-            ),
-            (
-                name: "persisting",
-                stage: DurableRunStage.persisting,
-                stateLabel: "Saving",
-                accessibilityFact: "saving"
-            ),
-        ]
+        let cases = fixture.workingStageCases.filter { $0.stage != .pricing }
 
         for testCase in cases {
             let store = fixture.makeStore()
@@ -870,6 +851,51 @@ final class TrophyWallDomainTests: XCTestCase {
                 [nil, .run(fixture.runID)],
                 testCase.name
             )
+        }
+    }
+
+    func testStoreProjectsRetryingCanonicalWorkingStagesFromRunHistoryPage() throws {
+        let fixture = TrophyWallTestFixture()
+
+        for testCase in fixture.workingStageCases {
+            let store = fixture.makeStore()
+            let page = TrophyWallRunHistoryPage(
+                entries: [
+                    TrophyWallRunHistoryEntry(
+                        logicalIdentity: fixture.logicalID,
+                        orderKey: TrophyWallOrderKey(
+                            lastMeaningfulUpdateAt: fixture.runDetailUpdate,
+                            stableIdentity: fixture.runID.uuidString.lowercased()
+                        ),
+                        run: try fixture.decodedRunDetail(
+                            runID: fixture.runID,
+                            itemID: fixture.itemID,
+                            status: .retrying,
+                            stage: testCase.stage
+                        )
+                    ),
+                ],
+                nextCursor: nil
+            )
+
+            for _ in 0..<2 {
+                store.ingest(
+                    historyPage: page,
+                    principalScope: fixture.principal
+                )
+            }
+
+            XCTAssertEqual(store.cards.count, 2, testCase.name)
+            XCTAssertEqual(store.cards.first, fixture.initialCards[1], testCase.name)
+            XCTAssertEqual(store.processingRows.count, 2, testCase.name)
+            let canonicalRow = store.processingRows.last
+            XCTAssertEqual(canonicalRow?.id, .run(fixture.runID), testCase.name)
+            XCTAssertEqual(canonicalRow?.itemName, fixture.matchedItemName, testCase.name)
+            XCTAssertEqual(canonicalRow?.stateLabel, testCase.stateLabel, testCase.name)
+            XCTAssertEqual(canonicalRow?.accessibilityLabel,
+                           "\(fixture.matchedItemName), working, \(testCase.accessibilityFact).",
+                           testCase.name)
+            XCTAssertEqual(canonicalRow?.destination, .run(fixture.runID), testCase.name)
         }
     }
 
@@ -1226,6 +1252,13 @@ private struct TrophyWallRunDetailConvergenceCase {
     let expectedDestinations: [HomeRoute?]
 }
 
+private struct TrophyWallWorkingStageCase {
+    let name: String
+    let stage: DurableRunStage
+    let stateLabel: String
+    let accessibilityFact: String
+}
+
 private struct TrophyWallTestFixture {
     let principal = TrophyWallPrincipalScope(opaqueValue: "principal-a")
     let otherPrincipal = TrophyWallPrincipalScope(opaqueValue: "principal-b")
@@ -1262,6 +1295,16 @@ private struct TrophyWallTestFixture {
                 stage: "queued"
             )
         )
+    }
+
+    var workingStageCases: [TrophyWallWorkingStageCase] {
+        [
+            .init(name: "identifying", stage: .identifying, stateLabel: "Identifying", accessibilityFact: "identifying"),
+            .init(name: "pricing", stage: .pricing, stateLabel: "Pricing", accessibilityFact: "pricing"),
+            .init(name: "generating", stage: .generating, stateLabel: "Writing listing",
+                  accessibilityFact: "writing listing"),
+            .init(name: "persisting", stage: .persisting, stateLabel: "Saving", accessibilityFact: "saving"),
+        ]
     }
 
     var initialCards: [TrophyWallCard] {

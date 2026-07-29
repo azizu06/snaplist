@@ -17,6 +17,7 @@ import {
   createMobileRunOperations,
 } from "./runs";
 import { createMobileApiHandler } from "./app";
+import { runHistoryProjectionRow } from "./run-history.test-fixtures";
 
 const summary = {
   claimed: 0,
@@ -140,18 +141,28 @@ describe("mobile API v1 provider-neutral handler", () => {
     const itemId = "24100000-0000-4000-8000-000000000002";
     const listRunHistoryPage = vi.fn().mockResolvedValue({
       data: [
-        {
-          run_id: runId,
-          logical_idempotency_key: "24100000-0000-4000-8000-000000000003",
-          last_meaningful_update_at: "2026-07-19T18:01:00.000Z",
-          snapshot_revision: "7",
-        },
-        {
-          run_id: "24100000-0000-4000-8000-000000000004",
-          logical_idempotency_key: "24100000-0000-4000-8000-000000000005",
-          last_meaningful_update_at: "2026-07-19T17:59:00.000Z",
-          snapshot_revision: "7",
-        },
+        runHistoryProjectionRow({
+          runId,
+          itemId,
+          logicalKey: "24100000-0000-4000-8000-000000000003",
+          frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+          snapshotRevision: "7",
+          userId: "tenant_a",
+          status: "queued",
+          stage: "queued",
+          photos: ["tenant_a/items/front.jpg"],
+        }),
+        runHistoryProjectionRow({
+          runId: "24100000-0000-4000-8000-000000000004",
+          itemId,
+          logicalKey: "24100000-0000-4000-8000-000000000005",
+          frozenUpdatedAt: "2026-07-19T17:59:00.000Z",
+          snapshotRevision: "7",
+          userId: "tenant_a",
+          status: "queued",
+          stage: "queued",
+          photos: ["tenant_a/items/front.jpg"],
+        }),
       ],
       error: null,
     });

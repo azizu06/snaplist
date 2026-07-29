@@ -119,4 +119,22 @@ describe("Trophy Wall run-history snapshot migration", () => {
       /revoke all on function public\.list_mobile_run_history_page[\s\S]*from public, anon, service_role[\s\S]*grant execute on function public\.list_mobile_run_history_page[\s\S]*to authenticated/i,
     );
   });
+
+  it("returns bounded canonical projection inputs inside the tenant-owned page RPC", () => {
+    expect(migration).toMatch(
+      /returns table \([\s\S]*run_projection jsonb,[\s\S]*item_projection jsonb,[\s\S]*retry_projection jsonb/i,
+    );
+    expect(migration).toMatch(
+      /jsonb_build_object\([\s\S]*'user_id', run\.user_id,[\s\S]*'item_id', run\.item_id,[\s\S]*'status', run\.status,[\s\S]*'stage', run\.stage[\s\S]*\) as run_projection/i,
+    );
+    expect(migration).toMatch(
+      /jsonb_build_object\([\s\S]*'user_id', item\.user_id,[\s\S]*'attributes', item\.attributes,[\s\S]*'photos', item\.photos[\s\S]*\) as item_projection/i,
+    );
+    expect(migration).toMatch(
+      /join public\.items as item[\s\S]*item\.user_id = v_user_id[\s\S]*cross join lateral public\.get_pipeline_run_retry_projection\(run\.id\) as retry/i,
+    );
+    expect(migration).not.toMatch(
+      /grant (select|all) on (table )?public\.(pipeline_runs|items)/i,
+    );
+  });
 });

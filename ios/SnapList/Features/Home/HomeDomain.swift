@@ -512,13 +512,13 @@ final class TrophyWallStore {
         switch (runDetail.status, runDetail.stage) {
         case (.queued, .queued):
             .accepted
-        case (.running, .identifying):
+        case (.running, .identifying), (.retrying, .identifying):
             .workingIdentifying
-        case (.running, .generating):
+        case (.running, .generating), (.retrying, .generating):
             .workingGenerating
-        case (.running, .pricing):
+        case (.running, .pricing), (.retrying, .pricing):
             .workingPricing
-        case (.running, .persisting):
+        case (.running, .persisting), (.retrying, .persisting):
             .workingPersisting
         default:
             nil

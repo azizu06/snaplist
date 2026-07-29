@@ -8,6 +8,7 @@ import {
   createSupabaseMobileRunDataClient,
   type MobileRunDataClient,
 } from "./runs";
+import { runHistoryProjectionRow } from "./run-history.test-fixtures";
 
 const RUN_ID = "24100000-0000-4000-8000-000000000001";
 const ITEM_ID = "24100000-0000-4000-8000-000000000002";
@@ -76,29 +77,33 @@ describe("mobile durable-run operations", () => {
       .fn()
       .mockResolvedValueOnce({
         data: [
-          {
-            run_id: RUN_ID,
-            logical_idempotency_key: LOGICAL_KEY,
-            last_meaningful_update_at: "2026-07-19T18:01:00.000Z",
-            snapshot_revision: "7",
-          },
-          {
-            run_id: OLDER_RUN_ID,
-            logical_idempotency_key: OLDER_LOGICAL_KEY,
-            last_meaningful_update_at: olderUpdatedAt,
-            snapshot_revision: "7",
-          },
+          runHistoryProjectionRow({
+            runId: RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: LOGICAL_KEY,
+            frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+            snapshotRevision: "7",
+          }),
+          runHistoryProjectionRow({
+            runId: OLDER_RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: OLDER_LOGICAL_KEY,
+            frozenUpdatedAt: olderUpdatedAt,
+            snapshotRevision: "7",
+          }),
         ],
         error: null,
       })
       .mockResolvedValueOnce({
         data: [
-          {
-            run_id: OLDER_RUN_ID,
-            logical_idempotency_key: OLDER_LOGICAL_KEY,
-            last_meaningful_update_at: "2026-07-19T17:59:00.000Z",
-            snapshot_revision: "7",
-          },
+          runHistoryProjectionRow({
+            runId: OLDER_RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: OLDER_LOGICAL_KEY,
+            frozenUpdatedAt: "2026-07-19T17:59:00.000Z",
+            currentUpdatedAt: "2026-07-19T18:02:00.000Z",
+            snapshotRevision: "7",
+          }),
         ],
         error: null,
       });
@@ -161,18 +166,20 @@ describe("mobile durable-run operations", () => {
       .fn()
       .mockResolvedValueOnce({
         data: [
-          {
-            run_id: RUN_ID,
-            logical_idempotency_key: LOGICAL_KEY,
-            last_meaningful_update_at: "2026-07-19T18:01:00.000Z",
-            snapshot_revision: "7",
-          },
-          {
-            run_id: OLDER_RUN_ID,
-            logical_idempotency_key: OLDER_LOGICAL_KEY,
-            last_meaningful_update_at: "2026-07-19T17:59:00.000Z",
-            snapshot_revision: "7",
-          },
+          runHistoryProjectionRow({
+            runId: RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: LOGICAL_KEY,
+            frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+            snapshotRevision: "7",
+          }),
+          runHistoryProjectionRow({
+            runId: OLDER_RUN_ID,
+            itemId: ITEM_ID,
+            logicalKey: OLDER_LOGICAL_KEY,
+            frozenUpdatedAt: "2026-07-19T17:59:00.000Z",
+            snapshotRevision: "7",
+          }),
         ],
         error: null,
       })
@@ -216,6 +223,90 @@ describe("mobile durable-run operations", () => {
       }),
     ).rejects.toBeInstanceOf(MobileRunInvalidCursorError);
     expect(listRunHistoryPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects the supported 50-row history page without per-entry data calls", async () => {
+    const runIds = Array.from(
+      { length: 50 },
+      (_, index) =>
+        `24100000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+    );
+    const itemIds = Array.from(
+      { length: 50 },
+      (_, index) =>
+        `24200000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+    );
+    const logicalKeys = Array.from(
+      { length: 50 },
+      (_, index) =>
+        `24300000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+    );
+    const listRunHistoryPage = vi.fn().mockResolvedValue({
+      data: runIds.map((runId, index) =>
+        runHistoryProjectionRow({
+          runId,
+          itemId: itemIds[index]!,
+          logicalKey: logicalKeys[index]!,
+          frozenUpdatedAt: `2026-07-19T18:00:${String(
+            49 - index,
+          ).padStart(2, "0")}.000Z`,
+          snapshotRevision: "57",
+          attributes: { title: `Item ${index}` },
+          photos: [`user_native/items/${itemIds[index]}.jpg`],
+        })
+      ),
+      error: null,
+    });
+    const readRun = vi.fn(async (runId: string) => {
+      const index = runIds.indexOf(runId);
+      return {
+        data: runRow({
+          id: runId,
+          item_id: itemIds[index],
+          updated_at: `2026-07-19T18:00:${String(49 - index).padStart(2, "0")}.000Z`,
+        }),
+        error: null,
+      };
+    });
+    const readItem = vi.fn(async (itemId: string) => ({
+      data: {
+        id: itemId,
+        user_id: "user_native",
+        attributes: { title: `Item ${itemIds.indexOf(itemId)}` },
+        photos: [`user_native/items/${itemId}.jpg`],
+      },
+      error: null,
+    }));
+    const readRetryProjection = vi.fn().mockResolvedValue({
+      data: { effective_allowance: "reserved", can_retry: false },
+      error: null,
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage,
+        readRun,
+        readItem,
+        readRetryProjection,
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 50,
+    });
+
+    expect(page.entries.map((entry) => entry.run.id)).toEqual(runIds);
+    expect(page.entries.map((entry) => entry.run.itemId)).toEqual(itemIds);
+    expect(
+      page.entries.map((entry) => entry.logicalIdentity.idempotencyKey),
+    ).toEqual(logicalKeys);
+    expect(page.entries.map((entry) => entry.orderKey.runId)).toEqual(runIds);
+    expect(page.nextCursor).toBeNull();
+    expect(listRunHistoryPage).toHaveBeenCalledExactlyOnceWith({ limit: 51 });
+    expect(readRun).not.toHaveBeenCalled();
+    expect(readItem).not.toHaveBeenCalled();
+    expect(readRetryProjection).not.toHaveBeenCalled();
   });
 
   it("maps the authenticated RLS row into the full provider-neutral run detail", async () => {

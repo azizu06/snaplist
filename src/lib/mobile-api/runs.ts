@@ -101,15 +101,6 @@ const cursorPayloadSchema = z
   })
   .strict();
 
-const runHistoryRowSchema = z
-  .object({
-    run_id: z.string().uuid(),
-    logical_idempotency_key: z.string().min(1).max(128),
-    last_meaningful_update_at: z.string().datetime({ offset: true }),
-    snapshot_revision: z.string().regex(/^[1-9][0-9]*$/u),
-  })
-  .strict();
-
 const canonicalBase64UrlPattern = /^[A-Za-z0-9_-]+$/u;
 const cursorSignatureContext = "snaplist:mobile-run-history-cursor:v1\0";
 
@@ -211,6 +202,18 @@ const retryProjectionRowSchema = z
   })
   .strict();
 
+const runHistoryRowSchema = z
+  .object({
+    run_id: z.string().uuid(),
+    logical_idempotency_key: z.string().min(1).max(128),
+    last_meaningful_update_at: z.string().datetime({ offset: true }),
+    snapshot_revision: z.string().regex(/^[1-9][0-9]*$/u),
+    run_projection: runRowSchema,
+    item_projection: itemRowSchema,
+    retry_projection: retryProjectionRowSchema,
+  })
+  .strict();
+
 const mutationRejectionSchema = z
   .object({
     mobileRunOperationError: z
@@ -232,33 +235,18 @@ function requireData<T>(
   return result.data;
 }
 
-async function readCanonicalRun(
-  client: MobileRunDataClient,
-  runId: string,
+function projectCanonicalRun(
+  run: z.infer<typeof runRowSchema>,
+  item: z.infer<typeof itemRowSchema>,
+  retryProjection: z.infer<typeof retryProjectionRowSchema>,
   userId: string,
-): Promise<MobileRun | null> {
-  const rawRun = requireData("run detail", await client.readRun(runId));
-  if (!rawRun) return null;
-  const run = runRowSchema.parse(rawRun);
+): MobileRun {
   if (run.user_id !== userId) {
     throw new MobileRunUnavailableError("Run detail crossed the verified tenant boundary");
   }
-
-  const [rawItemResult, rawProjectionResult] = await Promise.all([
-    client.readItem(run.item_id),
-    client.readRetryProjection(run.id),
-  ]);
-  const rawItem = requireData("run item", rawItemResult);
-  if (!rawItem) throw new MobileRunUnavailableError("Run item was unavailable");
-  const item = itemRowSchema.parse(rawItem);
   if (item.id !== run.item_id || item.user_id !== userId) {
     throw new MobileRunUnavailableError("Run item crossed the verified tenant boundary");
   }
-  const rawProjection = requireData("run retry projection", rawProjectionResult);
-  if (!rawProjection) {
-    throw new MobileRunUnavailableError("Run retry projection was unavailable");
-  }
-  const retryProjection = retryProjectionRowSchema.parse(rawProjection);
   const allowance = retryProjection.effective_allowance;
   const expired = run.retention_cleaned_at !== null;
   const terminalOutcome = ["succeeded", "failed", "canceled"].includes(run.status)
@@ -316,6 +304,33 @@ async function readCanonicalRun(
   });
 }
 
+async function readCanonicalRun(
+  client: MobileRunDataClient,
+  runId: string,
+  userId: string,
+): Promise<MobileRun | null> {
+  const rawRun = requireData("run detail", await client.readRun(runId));
+  if (!rawRun) return null;
+  const run = runRowSchema.parse(rawRun);
+  const [rawItemResult, rawProjectionResult] = await Promise.all([
+    client.readItem(run.item_id),
+    client.readRetryProjection(run.id),
+  ]);
+  const rawItem = requireData("run item", rawItemResult);
+  if (!rawItem) throw new MobileRunUnavailableError("Run item was unavailable");
+  const rawProjection = requireData("run retry projection", rawProjectionResult);
+  if (!rawProjection) {
+    throw new MobileRunUnavailableError("Run retry projection was unavailable");
+  }
+
+  return projectCanonicalRun(
+    run,
+    itemRowSchema.parse(rawItem),
+    retryProjectionRowSchema.parse(rawProjection),
+    userId,
+  );
+}
+
 function mutationFailure(error: MobileRunDataError): never {
   if (error.code === "P0002") throw new MobileRunNotFoundError();
   if (error.code === "P0001" || error.code === "55000" || error.code === "23514") {
@@ -371,12 +386,14 @@ export function createMobileRunOperations(
       ) {
         throw new MobileRunUnavailableError("Run history snapshot changed");
       }
-      const runs = await Promise.all(
-        pageRows.map((row) => readCanonicalRun(client, row.run_id, input.userId)),
+      const runs = pageRows.map((row) =>
+        projectCanonicalRun(
+          row.run_projection,
+          row.item_projection,
+          row.retry_projection,
+          input.userId,
+        )
       );
-      if (runs.some((run) => run === null)) {
-        throw new MobileRunUnavailableError("Run history changed during projection");
-      }
       const boundary = rows.length > input.limit ? pageRows.at(-1) : undefined;
 
       return mobileRunCollectionSchema.parse({

@@ -145,7 +145,10 @@ returns table (
   run_id uuid,
   logical_idempotency_key text,
   last_meaningful_update_at timestamptz,
-  snapshot_revision text
+  snapshot_revision text,
+  run_projection jsonb,
+  item_projection jsonb,
+  retry_projection jsonb
 )
 language plpgsql
 stable
@@ -218,11 +221,45 @@ begin
     frozen.run_id,
     run.idempotency_key,
     frozen.last_meaningful_update_at,
-    v_snapshot_revision::text
+    v_snapshot_revision::text,
+    jsonb_build_object(
+      'id', run.id,
+      'user_id', run.user_id,
+      'item_id', run.item_id,
+      'listing_id', run.listing_id,
+      'status', run.status,
+      'stage', run.stage,
+      'schema_version', run.schema_version,
+      'attempt_count', run.attempt_count,
+      'max_attempts', run.max_attempts,
+      'safe_failure_message', run.safe_failure_message,
+      'created_at', run.created_at,
+      'updated_at', run.updated_at,
+      'enqueued_at', run.enqueued_at,
+      'started_at', run.started_at,
+      'last_attempted_at', run.last_attempted_at,
+      'next_attempt_at', run.next_attempt_at,
+      'completed_at', run.completed_at,
+      'retention_cleaned_at', run.retention_cleaned_at
+    ) as run_projection,
+    jsonb_build_object(
+      'id', item.id,
+      'user_id', item.user_id,
+      'attributes', item.attributes,
+      'photos', item.photos
+    ) as item_projection,
+    jsonb_build_object(
+      'effective_allowance', retry.effective_allowance,
+      'can_retry', retry.can_retry
+    ) as retry_projection
   from frozen_run_order as frozen
   join public.pipeline_runs as run
     on run.id = frozen.run_id
    and run.user_id = v_user_id
+  join public.items as item
+    on item.id = run.item_id
+   and item.user_id = v_user_id
+  cross join lateral public.get_pipeline_run_retry_projection(run.id) as retry
   where p_before_updated_at is null
     or frozen.last_meaningful_update_at < p_before_updated_at
     or (
