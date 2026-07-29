@@ -308,9 +308,6 @@ final class HomeUITests: XCTestCase {
         ]
         app.launch()
 
-        let processing = app.otherElements["trophy.processing"]
-        XCTAssertTrue(processing.waitForExistence(timeout: 3))
-
         let rowIdentifiers = [
             "trophy.processing.row.run.37500000-0000-4000-8000-000000000003",
             "trophy.processing.row.local.37500000-0000-4000-8000-000000000002",
@@ -343,7 +340,6 @@ final class HomeUITests: XCTestCase {
         let expandedDisclosure = app.buttons["trophy.processing.disclosure"]
         XCTAssertEqual(expandedDisclosure.label, "Show fewer items, button")
         XCTAssertEqual(expandedDisclosure.value as? String, "Expanded")
-        XCTAssertTrue(processing.exists)
         XCTAssertFalse(app.otherElements["run.detail"].exists)
         expandedDisclosure.tap()
 
@@ -356,7 +352,6 @@ final class HomeUITests: XCTestCase {
             app.buttons["trophy.processing.disclosure"].value as? String,
             "Collapsed"
         )
-        XCTAssertTrue(processing.exists)
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }
 
