@@ -420,7 +420,7 @@ actor NativeIntake {
         } else if nextScope == nil {
             inactiveEphemeralExpiry = nil
         }
-        let shouldDismissReview = reviewActivationID == active?.activationID
+        let shouldDismissReview = reviewActivationID != nil && reviewActivationID == active?.activationID
         reviewActivationID = nil
         let root = nextScope.map {
             applicationSupportRoot.appendingPathComponent(
