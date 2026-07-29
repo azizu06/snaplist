@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor
 struct HomeFeatureView: View {
@@ -803,11 +804,25 @@ private struct HomeHowItWorksStep: View {
 // MARK: - Trophy Wall Processing
 
 struct TrophyWallProcessingView: View {
+    struct Presentation: Equatable {
+        let visibleRows: [TrophyWallProcessingRow]
+        let disclosureLabel: String?
+        let disclosureAccessibilityLabel: String?
+    }
+
+    struct DisclosureTransition: Equatable {
+        let isExpanded: Bool
+        let announcement: String
+    }
+
     private static let smallestSupportedHeight: CGFloat = 667
     private static let compactRowLimit = 3
     private static let smallestHeightRowLimit = 2
 
     @ScaledMetric(relativeTo: .title2) private var titleSize = 24
+    @ScaledMetric(relativeTo: .callout) private var disclosureSize = 14
+    @AccessibilityFocusState private var isDisclosureFocused: Bool
+    @State private var isExpanded = false
 
     let rows: [TrophyWallProcessingRow]
     let onBack: () -> Void
@@ -815,9 +830,10 @@ struct TrophyWallProcessingView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let visibleRows = Self.visibleRows(
+            let presentation = Self.presentation(
                 from: rows,
-                availableHeight: proxy.size.height
+                availableHeight: proxy.size.height,
+                isExpanded: isExpanded
             )
 
             VStack(spacing: 0) {
@@ -846,20 +862,63 @@ struct TrophyWallProcessingView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 10)
 
-                if !visibleRows.isEmpty {
+                if !presentation.visibleRows.isEmpty {
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(visibleRows) { row in
+                            ForEach(presentation.visibleRows) { row in
                                 TrophyWallProcessingRowView(
                                     row: row,
                                     openRoute: openRoute
                                 )
 
-                                if row.id != visibleRows.last?.id {
+                                if row.id != presentation.visibleRows.last?.id {
                                     Divider()
                                         .foregroundStyle(SnapListColorToken.hairline.color)
                                         .padding(.leading, 69)
                                 }
+                            }
+
+                            if let disclosureLabel = presentation.disclosureLabel,
+                               let disclosureAccessibilityLabel =
+                                   presentation.disclosureAccessibilityLabel {
+                                Divider()
+                                    .foregroundStyle(SnapListColorToken.divider.color)
+
+                                Button {
+                                    let transition = Self.disclosureTransition(
+                                        from: isExpanded
+                                    )
+                                    isExpanded = transition.isExpanded
+                                    isDisclosureFocused = true
+                                    UIAccessibility.post(
+                                        notification: .announcement,
+                                        argument: transition.announcement
+                                    )
+                                } label: {
+                                    Text(disclosureLabel)
+                                        .font(
+                                            .system(
+                                                size: disclosureSize,
+                                                weight: .semibold
+                                            )
+                                        )
+                                        .foregroundStyle(SnapListColorToken.action.color)
+                                        .lineLimit(1)
+                                        .frame(
+                                            maxWidth: .infinity,
+                                            minHeight: SnapListMetrics.minimumTouchTarget
+                                        )
+                                        .contentShape(.rect)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(disclosureAccessibilityLabel)
+                                .accessibilityValue(
+                                    isExpanded ? "Expanded" : "Collapsed"
+                                )
+                                .accessibilityIdentifier(
+                                    "trophy.processing.disclosure"
+                                )
+                                .accessibilityFocused($isDisclosureFocused)
                             }
                         }
                         .background(SnapListColorToken.canvas.color)
@@ -888,6 +947,51 @@ struct TrophyWallProcessingView: View {
             ? smallestHeightRowLimit
             : compactRowLimit
         return Array(rows.prefix(limit))
+    }
+
+    static func presentation(
+        from rows: [TrophyWallProcessingRow],
+        availableHeight: CGFloat,
+        isExpanded: Bool
+    ) -> Presentation {
+        let clampedRows = visibleRows(
+            from: rows,
+            availableHeight: availableHeight
+        )
+        let hiddenCount = rows.count - clampedRows.count
+        guard hiddenCount > 0 else {
+            return Presentation(
+                visibleRows: rows,
+                disclosureLabel: nil,
+                disclosureAccessibilityLabel: nil
+            )
+        }
+
+        if isExpanded {
+            return Presentation(
+                visibleRows: rows,
+                disclosureLabel: "Show less",
+                disclosureAccessibilityLabel: "Show fewer items, button"
+            )
+        }
+
+        return Presentation(
+            visibleRows: clampedRows,
+            disclosureLabel: hiddenCount == 2 ? "Show 2 more" : "Show more",
+            disclosureAccessibilityLabel: hiddenCount == 2
+                ? "Show 2 more items, button"
+                : "Show more items, button"
+        )
+    }
+
+    static func disclosureTransition(
+        from isExpanded: Bool
+    ) -> DisclosureTransition {
+        let nextExpanded = !isExpanded
+        return DisclosureTransition(
+            isExpanded: nextExpanded,
+            announcement: nextExpanded ? "Expanded" : "Collapsed"
+        )
     }
 }
 

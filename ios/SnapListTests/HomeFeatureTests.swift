@@ -1117,6 +1117,142 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(store.processingRows, firstProjection)
     }
 
+    func testProcessingViewDisclosesClampedRowsWithoutRouting() async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate
+            )
+        )
+        let allRowIdentifiers = store.processingRows.map(\.accessibilityIdentifier)
+        let scenarios = [
+            (
+                name: "standard",
+                size: CGSize(width: 390, height: 844),
+                collapsedVisualLabel: "Show 2 more",
+                collapsedLabel: "Show 2 more items, button",
+                collapsedRowIdentifiers: Array(allRowIdentifiers.prefix(3))
+            ),
+            (
+                name: "smallest",
+                size: CGSize(width: 375, height: 667),
+                collapsedVisualLabel: "Show more",
+                collapsedLabel: "Show more items, button",
+                collapsedRowIdentifiers: Array(allRowIdentifiers.prefix(2))
+            ),
+        ]
+
+        for scenario in scenarios {
+            var openedRoutes: [HomeRoute] = []
+            let host = TrophyWallProcessingTestHost(
+                rows: store.processingRows,
+                size: scenario.size,
+                dynamicTypeSize: .accessibility2,
+                openRoute: { openedRoutes.append($0) }
+            )
+            await host.settle()
+
+            let collapsedControl = try XCTUnwrap(
+                host.accessibilityElement(
+                    identifier: TrophyWallProcessingTestHost.disclosureIdentifier
+                ),
+                scenario.name
+            )
+            XCTAssertEqual(collapsedControl.accessibilityLabel, scenario.collapsedLabel)
+            XCTAssertEqual(collapsedControl.accessibilityValue, "Collapsed")
+            XCTAssertEqual(
+                TrophyWallProcessingView.presentation(
+                    from: store.processingRows,
+                    availableHeight: scenario.size.height,
+                    isExpanded: false
+                ).disclosureLabel,
+                scenario.collapsedVisualLabel,
+                scenario.name
+            )
+            XCTAssertEqual(host.processingRowIdentifiers(), scenario.collapsedRowIdentifiers)
+            assertDisclosureFrame(
+                host.localAccessibilityFrame(for: collapsedControl),
+                inside: scenario.size,
+                scenario: scenario.name
+            )
+
+            XCTAssertTrue(
+                collapsedControl.accessibilityActivate(),
+                "The rendered disclosure accessibility control must activate."
+            )
+            await host.settle()
+
+            let expandedControl = try XCTUnwrap(
+                host.accessibilityElement(
+                    identifier: TrophyWallProcessingTestHost.disclosureIdentifier
+                ),
+                scenario.name
+            )
+            XCTAssertEqual(
+                expandedControl.accessibilityIdentifier,
+                collapsedControl.accessibilityIdentifier,
+                "Disclosure focus must retain the same stable element."
+            )
+            XCTAssertEqual(expandedControl.accessibilityLabel, "Show fewer items, button")
+            XCTAssertEqual(expandedControl.accessibilityValue, "Expanded")
+            XCTAssertEqual(
+                TrophyWallProcessingView.presentation(
+                    from: store.processingRows,
+                    availableHeight: scenario.size.height,
+                    isExpanded: true
+                ).disclosureLabel,
+                "Show less",
+                scenario.name
+            )
+            XCTAssertEqual(host.processingRowIdentifiers(), allRowIdentifiers)
+            XCTAssertEqual(
+                TrophyWallProcessingView.disclosureTransition(
+                    from: false
+                ).announcement,
+                "Expanded"
+            )
+            XCTAssertTrue(openedRoutes.isEmpty, scenario.name)
+            assertDisclosureFrame(
+                host.localAccessibilityFrame(for: expandedControl),
+                inside: scenario.size,
+                scenario: scenario.name
+            )
+
+            XCTAssertTrue(
+                expandedControl.accessibilityActivate(),
+                "The rendered disclosure accessibility control must collapse."
+            )
+            await host.settle()
+
+            let recollapsedControl = try XCTUnwrap(
+                host.accessibilityElement(
+                    identifier: TrophyWallProcessingTestHost.disclosureIdentifier
+                ),
+                scenario.name
+            )
+            XCTAssertEqual(
+                recollapsedControl.accessibilityIdentifier,
+                expandedControl.accessibilityIdentifier,
+                "Collapse must retain the same stable disclosure element."
+            )
+            XCTAssertEqual(recollapsedControl.accessibilityValue, "Collapsed")
+            XCTAssertEqual(host.processingRowIdentifiers(), scenario.collapsedRowIdentifiers)
+            XCTAssertEqual(
+                TrophyWallProcessingView.disclosureTransition(
+                    from: true
+                ).announcement,
+                "Collapsed"
+            )
+            XCTAssertTrue(openedRoutes.isEmpty, scenario.name)
+
+            host.close()
+        }
+    }
+
     func testProcessingViewRendersApprovedMergedRowsAtPhoneWidth() async {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: fixture.processingInitialCards)
@@ -1346,38 +1482,180 @@ private func captureHostedTrophyWallProcessingView(
     dynamicTypeSize: DynamicTypeSize,
     openRoute: @escaping (HomeRoute) -> Void
 ) async -> UIImage {
-    let hostingController = UIHostingController(
-        rootView: TrophyWallProcessingView(
-            rows: rows,
-            onBack: {},
-            openRoute: openRoute
-        )
-        .dynamicTypeSize(dynamicTypeSize)
-        .background(Color.white)
+    let host = TrophyWallProcessingTestHost(
+        rows: rows,
+        size: size,
+        dynamicTypeSize: dynamicTypeSize,
+        openRoute: openRoute
     )
-    let window = UIWindow(frame: CGRect(origin: .zero, size: size))
-    window.backgroundColor = .white
-    window.isOpaque = true
-    window.rootViewController = hostingController
-    hostingController.loadViewIfNeeded()
-    hostingController.view.frame = window.bounds
-    hostingController.view.backgroundColor = .white
-    hostingController.view.isOpaque = true
-    window.makeKeyAndVisible()
-
-    await Task.yield()
-    window.setNeedsLayout()
-    window.layoutIfNeeded()
-    hostingController.view.setNeedsLayout()
-    hostingController.view.layoutIfNeeded()
-    hostingController.view.setNeedsDisplay()
-    hostingController.view.layer.displayIfNeeded()
-
-    let image = renderOpaqueRGBA8(view: hostingController.view, size: size)
-
-    window.isHidden = true
-    withExtendedLifetime(window) {}
+    await host.settle()
+    let image = host.captureImage()
+    host.close()
     return image
+}
+
+private func assertDisclosureFrame(
+    _ frame: CGRect,
+    inside size: CGSize,
+    scenario: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    XCTAssertEqual(
+        frame.height,
+        SnapListMetrics.minimumTouchTarget,
+        accuracy: 1,
+        "Accessibility Dynamic Type must keep disclosure text on one line.",
+        file: file,
+        line: line
+    )
+    XCTAssertGreaterThanOrEqual(frame.minX, -1, scenario, file: file, line: line)
+    XCTAssertLessThanOrEqual(
+        frame.maxX,
+        size.width + 1,
+        "Disclosure must not overflow horizontally.",
+        file: file,
+        line: line
+    )
+}
+
+@MainActor
+private final class TrophyWallProcessingTestHost {
+    static let disclosureIdentifier = "trophy.processing.disclosure"
+
+    private let hostingController: UIHostingController<AnyView>
+    private let window: UIWindow
+    private let size: CGSize
+
+    init(
+        rows: [TrophyWallProcessingRow],
+        size: CGSize,
+        dynamicTypeSize: DynamicTypeSize,
+        openRoute: @escaping (HomeRoute) -> Void
+    ) {
+        self.size = size
+        hostingController = UIHostingController(
+            rootView: AnyView(
+                TrophyWallProcessingView(
+                    rows: rows,
+                    onBack: {},
+                    openRoute: openRoute
+                )
+                .dynamicTypeSize(dynamicTypeSize)
+                .background(Color.white)
+            )
+        )
+        window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.backgroundColor = .white
+        window.isOpaque = true
+        window.rootViewController = hostingController
+        hostingController.loadViewIfNeeded()
+        hostingController.view.frame = window.bounds
+        hostingController.view.backgroundColor = .white
+        hostingController.view.isOpaque = true
+        window.makeKeyAndVisible()
+    }
+
+    func settle() async {
+        for _ in 0..<2 {
+            await Task.yield()
+            window.setNeedsLayout()
+            window.layoutIfNeeded()
+            hostingController.view.setNeedsLayout()
+            hostingController.view.layoutIfNeeded()
+        }
+        hostingController.view.setNeedsDisplay()
+        hostingController.view.layer.displayIfNeeded()
+    }
+
+    func accessibilityElement(
+        identifier: String
+    ) -> (NSObject & UIAccessibilityIdentification)? {
+        identifiedAccessibilityObjects().first {
+            $0.accessibilityIdentifier == identifier
+        }
+    }
+
+    func processingRowIdentifiers() -> [String] {
+        identifiedAccessibilityObjects().compactMap {
+            $0.accessibilityIdentifier
+        }.filter {
+            $0.hasPrefix("trophy.processing.row.")
+        }
+    }
+
+    func localAccessibilityFrame(
+        for element: NSObject & UIAccessibilityIdentification
+    ) -> CGRect {
+        window.convert(element.accessibilityFrame, from: nil)
+    }
+
+    func captureImage() -> UIImage {
+        renderOpaqueRGBA8(view: hostingController.view, size: size)
+    }
+
+    func close() {
+        window.isHidden = true
+        withExtendedLifetime(window) {}
+    }
+
+    private func accessibilityObjects() -> [NSObject] {
+        var visited: Set<ObjectIdentifier> = []
+        return accessibilityObjects(
+            from: hostingController.view,
+            visited: &visited
+        )
+    }
+
+    private func identifiedAccessibilityObjects()
+        -> [NSObject & UIAccessibilityIdentification] {
+        accessibilityObjects().compactMap {
+            $0 as? (NSObject & UIAccessibilityIdentification)
+        }
+    }
+
+    private func accessibilityObjects(
+        from object: NSObject,
+        visited: inout Set<ObjectIdentifier>
+    ) -> [NSObject] {
+        guard visited.insert(ObjectIdentifier(object)).inserted else {
+            return []
+        }
+
+        var result = [object]
+        let explicitElements = object.accessibilityElements ?? []
+        if explicitElements.isEmpty {
+            let count = object.accessibilityElementCount()
+            if count > 0 {
+                for index in 0..<count {
+                    if let element = object.accessibilityElement(at: index)
+                        as? NSObject {
+                        result += accessibilityObjects(
+                            from: element,
+                            visited: &visited
+                        )
+                    }
+                }
+            }
+        } else {
+            for case let element as NSObject in explicitElements {
+                result += accessibilityObjects(
+                    from: element,
+                    visited: &visited
+                )
+            }
+        }
+
+        if let view = object as? UIView {
+            for subview in view.subviews {
+                result += accessibilityObjects(
+                    from: subview,
+                    visited: &visited
+                )
+            }
+        }
+        return result
+    }
 }
 
 private func renderOpaqueRGBA8(view: UIView, size: CGSize) -> UIImage {
