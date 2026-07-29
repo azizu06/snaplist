@@ -143,16 +143,33 @@ struct SubmissionAcknowledgmentNotificationName: Equatable {
 }
 
 enum PhotoReviewVisualStateID: String, Equatable {
+    case onePhoto = "REV-01"
     case resting = "REV-02"
     case fivePhotos = "REV-03"
+    case actionsOpen = "REV-04"
 
     var photoCount: Int {
         switch self {
-        case .resting:
+        case .onePhoto:
+            1
+        case .resting, .actionsOpen:
             3
         case .fivePhotos:
             PhotoReviewCapacityPolicy.photoLimit
         }
+    }
+
+    var selectedPhotoIndex: Int {
+        switch self {
+        case .resting, .actionsOpen:
+            1
+        case .onePhoto, .fivePhotos:
+            0
+        }
+    }
+
+    var presentsActions: Bool {
+        self == .actionsOpen
     }
 }
 

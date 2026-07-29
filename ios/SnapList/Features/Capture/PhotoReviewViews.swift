@@ -6,6 +6,123 @@ import UniformTypeIdentifiers
 import ImageIO
 #endif
 
+enum PhotoReviewV14VisualContract {
+    static let heroMinimumHeight: CGFloat = 196
+    static let heroMaximumHeight: CGFloat = 420
+    static let headerMinimumHeight: CGFloat = 56
+    static let backTargetSize: CGFloat = 44
+    static let countFillHex = SnapListColorToken.quietFill.rawValue
+    static let countRadius: CGFloat = 8
+    static let coverFillHex = SnapListColorToken.quietFill.rawValue
+    static let coverColumnGap: CGFloat = 6
+    static let coverRadius: CGFloat = 5
+    static let coverVerticalPadding: CGFloat = 1
+    static let coverHorizontalPadding: CGFloat = 7
+    static let coverHasOutline = false
+}
+
+enum PhotoReviewV14AdaptiveLayout {
+    private static let actionRowHeight: CGFloat = 55
+    private static let maximumCapEntryAllowance: CGFloat = 4
+
+    /// The native middle-column proofs leave approximately 224 points
+    /// for padding, the thumbnail strip, its margins, and the Voice note row.
+    /// Accessibility text increases that fixed share to approximately 274 points.
+    /// The approved REV-04 action row consumes another 55 points of the native
+    /// middle-column share at the canonical 390 x 844 package canvas.
+    /// The hero receives the remaining finite viewport height, matching CSS
+    /// `flex: 1 1 auto` without turning the 420-point cap into a fixed height.
+    static func heroHeight(
+        availableMiddleHeight: CGFloat,
+        dynamicTypeSize: DynamicTypeSize,
+        presentsActions: Bool = false
+    ) -> CGFloat {
+        var fixedContentHeight: CGFloat =
+            dynamicTypeSize.isAccessibilitySize ? 274 : 224
+        if presentsActions {
+            fixedContentHeight += actionRowHeight
+        }
+        let flexibleHeight = availableMiddleHeight - fixedContentHeight
+        // The exact 402 x 874 native viewport reports four fewer flexible
+        // points than the package canvas at the max-height boundary. Entering
+        // the cap within that measured allowance preserves the CSS max while
+        // leaving every sub-cap adaptive and action-open anchor unchanged.
+        if flexibleHeight
+            >= PhotoReviewV14VisualContract.heroMaximumHeight
+                - maximumCapEntryAllowance {
+            return PhotoReviewV14VisualContract.heroMaximumHeight
+        }
+        return max(
+            flexibleHeight,
+            PhotoReviewV14VisualContract.heroMinimumHeight
+        )
+    }
+}
+
+enum PhotoReviewLayoutLandmark: Hashable {
+    case header
+    case back
+    case title
+    case countPill
+    case hero
+    case thumbnailStrip
+    case addPhoto
+    case coverPill
+    case actionRow
+    case voiceNote
+    case footer
+    case startListing
+}
+
+struct PhotoReviewLayoutObservation: Equatable {
+    let frames: [PhotoReviewLayoutLandmark: CGRect]
+
+    func frame(for landmark: PhotoReviewLayoutLandmark) -> CGRect {
+        frames[landmark] ?? .zero
+    }
+}
+
+private struct PhotoReviewLayoutPreferenceKey: PreferenceKey {
+    static let defaultValue: [PhotoReviewLayoutLandmark: CGRect] = [:]
+
+    static func reduce(
+        value: inout [PhotoReviewLayoutLandmark: CGRect],
+        nextValue: () -> [PhotoReviewLayoutLandmark: CGRect]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+private extension View {
+    func photoReviewLayoutLandmark(
+        _ landmark: PhotoReviewLayoutLandmark
+    ) -> some View {
+        background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: PhotoReviewLayoutPreferenceKey.self,
+                    value: [
+                        landmark: geometry.frame(in: .global)
+                    ]
+                )
+            }
+        }
+    }
+}
+
+extension PhotoReviewReorderAction {
+    var accessibilityLabel: String {
+        switch self {
+        case .moveEarlier:
+            "Move earlier"
+        case .moveLater:
+            "Move later"
+        case .makeCover:
+            "Make cover"
+        }
+    }
+}
+
 enum PhotoReviewNativeDragContract {
     static let contentType = UTType(
         exportedAs: "dev.snaplist.photo-review-photo"
@@ -1427,36 +1544,55 @@ final class PhotoReviewIntake {
 struct PhotoReviewFixtureView: View {
     @State private var store: PhotoReviewStore
     private let forceReducedMotion: Bool
+    private let onLayoutObservation: ((PhotoReviewLayoutObservation) -> Void)?
+    private let projectsFixtureOrder: Bool
 
     init(
         state: PhotoReviewVisualStateID,
-        forceReducedMotion: Bool = false
+        forceReducedMotion: Bool = false,
+        onLayoutObservation:
+            ((PhotoReviewLayoutObservation) -> Void)? = nil
     ) {
-        _store = State(
-            initialValue: PhotoReviewStore(
-                photos: Self.photos(for: state)
+        let photos = Self.photos(for: state)
+        let store = PhotoReviewStore(photos: photos)
+        if photos.indices.contains(state.selectedPhotoIndex) {
+            store.selectPhotoForActions(
+                id: photos[state.selectedPhotoIndex].id
             )
-        )
+            if !state.presentsActions {
+                store.dismissActions()
+            }
+        }
+        _store = State(initialValue: store)
         self.forceReducedMotion = forceReducedMotion
+        self.onLayoutObservation = onLayoutObservation
+        projectsFixtureOrder = ProcessInfo.processInfo.arguments.contains(
+            "--photo-review-fixture-order-probe"
+        )
     }
 
     var body: some View {
-        // REV-02 is a fixture-only state: it stages no live session, so delete is inert.
+        // REV fixtures stage no live session, so delete is inert.
         PhotoReviewView(
             store: store,
             forceReducedMotion: forceReducedMotion,
-            delete: { nil }
+            backToCamera: {},
+            delete: { nil },
+            openBoundary: { _ in },
+            onLayoutObservation: onLayoutObservation
         )
         .overlay(alignment: .topLeading) {
-            Text(store.photos.map(\.id.uuidString).joined(separator: "|"))
-                .font(.system(size: 1))
-                .foregroundStyle(.clear)
-                .frame(width: 1, height: 1)
-                .allowsHitTesting(false)
-                .accessibilityLabel(
-                    store.photos.map(\.id.uuidString).joined(separator: "|")
-                )
-                .accessibilityIdentifier("photo-review.fixture-order")
+            if projectsFixtureOrder {
+                Text(store.photos.map(\.id.uuidString).joined(separator: "|"))
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(
+                        store.photos.map(\.id.uuidString).joined(separator: "|")
+                    )
+                    .accessibilityIdentifier("photo-review.fixture-order")
+            }
         }
     }
 
@@ -1472,7 +1608,8 @@ struct PhotoReviewFixtureView: View {
             )
         } catch {
             preconditionFailure(
-                "REV-02 fixture directory could not be created at \(rootDirectory.path): \(error)"
+                "\(state.rawValue) Photo Review fixture directory could not "
+                    + "be created at \(rootDirectory.path): \(error)"
             )
         }
 
@@ -1493,6 +1630,7 @@ struct PhotoReviewFixtureView: View {
         for (offset, descriptor) in descriptors.enumerated() {
             materializeImages(
                 at: [descriptor.photoURL, descriptor.thumbnailURL],
+                state: state,
                 ordinal: offset + 1
             )
         }
@@ -1509,6 +1647,7 @@ struct PhotoReviewFixtureView: View {
 
     private static func materializeImages(
         at urls: [URL],
+        state: PhotoReviewVisualStateID,
         ordinal: Int
     ) {
         guard urls.contains(where: { !isValidFixtureImage(at: $0) }) else {
@@ -1547,12 +1686,13 @@ struct PhotoReviewFixtureView: View {
                 try data.write(to: url, options: .atomic)
             } catch {
                 preconditionFailure(
-                    "REV-02 fixture image could not be written at \(url.path): \(error)"
+                    "\(state.rawValue) Photo Review fixture image could not "
+                        + "be written at \(url.path): \(error)"
                 )
             }
             precondition(
                 isValidFixtureImage(at: url),
-                "REV-02 fixture image is invalid at \(url.path)"
+                "\(state.rawValue) Photo Review fixture image is invalid at \(url.path)"
             )
         }
     }
@@ -1897,6 +2037,9 @@ struct PhotoReviewView: View {
     /// Absent in fixtures, which stage no durable session and so cannot apply a picker
     /// result. The picker still opens; nothing lands.
     var intake: PhotoReviewIntake? = nil
+    /// Read-only qualification output. Production callers leave this nil.
+    var onLayoutObservation:
+        ((PhotoReviewLayoutObservation) -> Void)? = nil
 
     @State private var actionPresentation = PhotoReviewActionPresentation()
     @State private var accessibilityActionPresentation =
@@ -1920,10 +2063,16 @@ struct PhotoReviewView: View {
     @State private var submissionEffectConsumer =
         PhotoReviewSubmissionEffectConsumer()
     // Outside dismissal focus stays independent from picker cancellation focus.
+    @FocusState private var hardwareFocusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
     @AccessibilityFocusState private var focusedVoiceNoteOpener: Bool
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .headline)
+    private var reviewTitleSize: CGFloat = 17
+    @ScaledMetric(relativeTo: .caption)
+    private var reviewCountSize: CGFloat = 13
 
     private enum PickerFocusTarget: Hashable {
         case addButton
@@ -2070,91 +2219,196 @@ struct PhotoReviewView: View {
     }
 
     private var reviewContent: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                topBar
-                if let visibleMessage = submissionPresentation.visibleMessage {
-                    Text(visibleMessage)
-                        .snapListTypography(.body)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier(
-                            "photo-review.submission-message"
-                        )
+        VStack(spacing: 0) {
+            topBar
+                .photoReviewLayoutLandmark(.header)
+
+            GeometryReader { viewport in
+                let heroHeight =
+                    PhotoReviewV14AdaptiveLayout.heroHeight(
+                        availableMiddleHeight: viewport.size.height,
+                        dynamicTypeSize: dynamicTypeSize,
+                        presentsActions: store.actionsPhotoID != nil
+                    )
+                ScrollView {
+                    VStack(spacing: 16) {
+                        if let visibleMessage = submissionPresentation.visibleMessage {
+                            Text(visibleMessage)
+                                .snapListTypography(.body)
+                                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityIdentifier(
+                                    "photo-review.submission-message"
+                                )
+                        }
+                        if submissionPresentation.rendersSubmittedMedia {
+                            hero(height: heroHeight)
+                            thumbnailStrip
+
+                            if let recovery = intake?.recovery {
+                                Text(recovery.message)
+                                    .snapListTypography(.metadata)
+                                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .accessibilityIdentifier("photo-review.intake-recovery")
+                            }
+
+                            if store.actionsPhotoID != nil {
+                                actionRow
+                                    .photoReviewLayoutLandmark(.actionRow)
+                            }
+
+                            if let openBoundary {
+                                voiceRow(openBoundary)
+                                    .photoReviewLayoutLandmark(.voiceNote)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+                    // The v1.4 hero is the only flexible child. Giving the content
+                    // the real scroll viewport lets it absorb available height until
+                    // its declared 420pt cap, while compact screens fall back to the
+                    // 196pt floor and remain scrollable.
+                    .frame(minHeight: viewport.size.height, alignment: .top)
                 }
-                if submissionPresentation.rendersSubmittedMedia {
-                    hero
-                    thumbnailStrip
-
-                    if let recovery = intake?.recovery {
-                        Text(recovery.message)
-                            .snapListTypography(.metadata)
-                            .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityIdentifier("photo-review.intake-recovery")
-                    }
-
-                    if store.actionsPhotoID != nil {
-                        actionRow
-                    }
-
-                    if let openBoundary {
-                        voiceRow(openBoundary)
-                    }
-                }
+                // The screen identity stays on the scrolling region itself, so the
+                // sticky action below is genuinely outside the scrollable content.
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("photo-review.screen")
             }
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.vertical, 16)
-        }
-        // The screen identity stays on the scrolling region itself, so the sticky action
-        // below is genuinely outside the scrollable content rather than merely painted
-        // over it.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("photo-review.screen")
-        // v1.2 primary_action.position is a sticky bottom action above the home-indicator
-        // safe area, and its adaptive-layout contract requires that action never cover the
-        // thumbnails, Voice note, or the home indicator. safeAreaInset pins it there and
-        // shortens the scrollable region by exactly its height, so it covers nothing.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+
             if let openBoundary {
                 startListingControl(openBoundary)
+                    .photoReviewLayoutLandmark(.startListing)
                     .padding(.horizontal, SnapListMetrics.screenGutter)
                     .padding(.vertical, 12)
+                    .photoReviewLayoutLandmark(.footer)
             }
         }
-    }
-
-    private var topBar: some View {
-        HStack(alignment: .firstTextBaseline) {
-            if let backToCamera {
-                // v1.2 top_bar requires a 44pt minimum target, and its Dynamic Type rule
-                // expects this row to grow rather than clip. A fixed vertical padding
-                // cannot hold that floor, because the padded height follows the text: at
-                // xSmall it measured 40.33pt. Sizing from the floor itself holds at every
-                // type size, and matches every other control on this screen.
-                Button(action: backToCamera) {
-                    Text("Back to camera")
-                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("photo-review.back")
-            }
-
-            Text("Review photos")
-                .snapListTypography(.sectionHeader)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-
-            Spacer(minLength: 12)
-
-            Text("\(store.photos.count) of 5")
-                .snapListTypography(.metadata)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .accessibilityIdentifier("photo-review.count")
+        .onPreferenceChange(
+            PhotoReviewLayoutPreferenceKey.self
+        ) { frames in
+            onLayoutObservation?(
+                PhotoReviewLayoutObservation(frames: frames)
+            )
         }
     }
 
     @ViewBuilder
-    private var hero: some View {
+    private var topBar: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 0) {
+                    backControl
+                    Spacer(minLength: 12)
+                    countPill
+                }
+                reviewTitle
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.top, 6)
+            .padding(.trailing, 10)
+            .padding(.bottom, 8)
+            .padding(.leading, 6)
+            .frame(minHeight: 103)
+            .background(SnapListColorToken.canvas.color)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(SnapListColorToken.hairline.color)
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+            }
+        } else {
+            ZStack {
+                reviewTitle
+                HStack(spacing: 0) {
+                    backControl
+                    Spacer(minLength: 12)
+                    countPill
+                }
+                .padding(.leading, 8)
+                .padding(.trailing, 12)
+            }
+            .frame(
+                minHeight:
+                    PhotoReviewV14VisualContract.headerMinimumHeight
+            )
+            .background(SnapListColorToken.canvas.color)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(SnapListColorToken.hairline.color)
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var backControl: some View {
+        if let backToCamera {
+            Button(action: backToCamera) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .frame(
+                        width:
+                            PhotoReviewV14VisualContract.backTargetSize,
+                        height:
+                            PhotoReviewV14VisualContract.backTargetSize
+                    )
+                    .contentShape(Rectangle())
+                    .accessibilityHidden(true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to camera")
+            .accessibilityIdentifier("photo-review.back")
+            .photoReviewLayoutLandmark(.back)
+        }
+    }
+
+    private var reviewTitle: some View {
+        Text("Review photos")
+            .font(
+                .system(
+                    size: reviewTitleSize,
+                    weight: .bold,
+                    design: .default
+                )
+            )
+            .tracking(-0.2)
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .photoReviewLayoutLandmark(.title)
+    }
+
+    private var countPill: some View {
+        Text("\(store.photos.count) of 5")
+            .font(
+                .system(
+                    size: reviewCountSize,
+                    weight: .semibold,
+                    design: .default
+                )
+            )
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 9)
+            .background(
+                SnapListColorToken.quietFill.color,
+                in: RoundedRectangle(
+                    cornerRadius:
+                        PhotoReviewV14VisualContract.countRadius
+                )
+            )
+            .fixedSize()
+            .frame(minWidth: 52, minHeight: 44, alignment: .trailing)
+            .accessibilityIdentifier("photo-review.count")
+            .photoReviewLayoutLandmark(.countPill)
+    }
+
+    @ViewBuilder
+    private func hero(height: CGFloat) -> some View {
         if let selectedPhoto,
            let selectedIndex = store.photos.firstIndex(where: { $0.id == selectedPhoto.id }) {
             Button {
@@ -2165,17 +2419,25 @@ struct PhotoReviewView: View {
                     maximumPixelSize: 1_200
                 )
                 .scaledToFill()
-                .frame(maxWidth: .infinity)
-                .frame(height: 300)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: height,
+                    maxHeight: height
+                )
                 .clipped()
                 .clipShape(.rect(cornerRadius: 18))
                 .accessibilityHidden(true)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(
-                thumbnailAccessibilityLabel(index: selectedIndex, isSelected: true)
+                photoAccessibilityLabel(
+                    index: selectedIndex,
+                    isSelected: true,
+                    includesThumbnailActions: false
+                )
             )
             .accessibilityIdentifier("photo-review.hero")
+            .photoReviewLayoutLandmark(.hero)
         }
     }
 
@@ -2277,6 +2539,7 @@ struct PhotoReviewView: View {
             ) { width in
                 thumbnailStripViewportWidth = width
             }
+            .photoReviewLayoutLandmark(.thumbnailStrip)
         }
     }
 
@@ -2290,9 +2553,12 @@ struct PhotoReviewView: View {
             at: index,
             store: store
         )
-        return VStack(spacing: 6) {
+        return VStack(
+            spacing: PhotoReviewV14VisualContract.coverColumnGap
+        ) {
             Button {
                 store.selectPhotoForActions(id: photo.id)
+                hardwareFocusedThumbnailID = photo.id
             } label: {
                 LocalCaptureImage(
                     url: photo.thumbnailURL,
@@ -2313,10 +2579,25 @@ struct PhotoReviewView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(
-                thumbnailAccessibilityLabel(index: index, isSelected: isSelected)
+                photoAccessibilityLabel(
+                    index: index,
+                    isSelected: isSelected,
+                    includesThumbnailActions: true
+                )
             )
             .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilityIdentifier("photo-review.thumbnail.\(index + 1)")
+            .focusable()
+            .focused(
+                $hardwareFocusedThumbnailID,
+                equals: photo.id
+            )
+            .onKeyPress(
+                keys: [.leftArrow, .rightArrow],
+                phases: .down
+            ) { press in
+                handleThumbnailKeyPress(press, photoID: photo.id)
+            }
             .accessibilityFocused(
                 $focusedThumbnailID,
                 equals: photo.id
@@ -2327,17 +2608,26 @@ struct PhotoReviewView: View {
                     in: store
                 )
                 if actions.contains(.moveEarlier) {
-                    Button("Move earlier") {
+                    Button(
+                        PhotoReviewReorderAction.moveEarlier
+                            .accessibilityLabel
+                    ) {
                         performAccessibilityAction(.moveEarlier, photoID: photo.id)
                     }
                 }
                 if actions.contains(.moveLater) {
-                    Button("Move later") {
+                    Button(
+                        PhotoReviewReorderAction.moveLater
+                            .accessibilityLabel
+                    ) {
                         performAccessibilityAction(.moveLater, photoID: photo.id)
                     }
                 }
                 if actions.contains(.makeCover) {
-                    Button("Make cover") {
+                    Button(
+                        PhotoReviewReorderAction.makeCover
+                            .accessibilityLabel
+                    ) {
                         performAccessibilityAction(.makeCover, photoID: photo.id)
                     }
                 }
@@ -2348,7 +2638,24 @@ struct PhotoReviewView: View {
                     .snapListTypography(.metadata)
                     .fontWeight(.semibold)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .accessibilityIdentifier("photo-review.cover")
+                    .padding(
+                        .vertical,
+                        PhotoReviewV14VisualContract.coverVerticalPadding
+                    )
+                    .padding(
+                        .horizontal,
+                        PhotoReviewV14VisualContract.coverHorizontalPadding
+                    )
+                    .background(
+                        SnapListColorToken.quietFill.color,
+                        in: RoundedRectangle(
+                            cornerRadius:
+                                PhotoReviewV14VisualContract.coverRadius
+                        )
+                    )
+                    .fixedSize()
+                    .accessibilityHidden(true)
+                    .photoReviewLayoutLandmark(.coverPill)
             }
         }
         // v1.2 interaction.drag.insertion_gap_px. This exists only while a native
@@ -2429,9 +2736,10 @@ struct PhotoReviewView: View {
         }
     }
 
-    private func thumbnailAccessibilityLabel(
+    private func photoAccessibilityLabel(
         index: Int,
-        isSelected: Bool
+        isSelected: Bool,
+        includesThumbnailActions: Bool
     ) -> String {
         var truths = ["Photo \(index + 1) of \(store.photos.count)"]
         if index == 0 {
@@ -2440,7 +2748,20 @@ struct PhotoReviewView: View {
         if isSelected {
             truths.append("selected")
         }
-        return truths.joined(separator: ", ")
+
+        var actions = ["Replace", "Delete"]
+        if includesThumbnailActions,
+           store.photos.indices.contains(index) {
+            actions.append(
+                contentsOf: accessibilityActionPresentation.availableActions(
+                    for: store.photos[index].id,
+                    in: store
+                ).map(\.accessibilityLabel)
+            )
+        }
+
+        return "\(truths.joined(separator: ", ")). Actions: "
+            + "\(actions.joined(separator: ", "))."
     }
 
     private var isAddEnabled: Bool {
@@ -2501,6 +2822,7 @@ struct PhotoReviewView: View {
             )
         )
         .accessibilityIdentifier("photo-review.add")
+        .photoReviewLayoutLandmark(.addPhoto)
         .accessibilityFocused(
             $focusedPickerOpener,
             equals: .addButton
@@ -2733,6 +3055,7 @@ struct PhotoReviewView: View {
             return
         }
 
+        hardwareFocusedThumbnailID = result.photoID
         focusedThumbnailID = result.photoID
         guard let announcement =
                 accessibilityActionPresentation.consumeAnnouncement() else {
@@ -2742,6 +3065,35 @@ struct PhotoReviewView: View {
             notification: .announcement,
             argument: announcement
         )
+    }
+
+    private func handleThumbnailKeyPress(
+        _ press: KeyPress,
+        photoID: StagedCapturePhoto.ID
+    ) -> KeyPress.Result {
+        guard press.modifiers == .control else {
+            return .ignored
+        }
+
+        let action: PhotoReviewReorderAction
+        switch press.key {
+        case .leftArrow:
+            action = .moveEarlier
+        case .rightArrow:
+            action = .moveLater
+        default:
+            return .ignored
+        }
+
+        guard accessibilityActionPresentation.availableActions(
+            for: photoID,
+            in: store
+        ).contains(action) else {
+            return .ignored
+        }
+
+        performAccessibilityAction(action, photoID: photoID)
+        return .handled
     }
 
     private func restorePickerCancellationFocus(
