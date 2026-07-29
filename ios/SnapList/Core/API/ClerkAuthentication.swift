@@ -102,4 +102,67 @@ enum ClerkAuthenticationComposition {
         Clerk.configure(publishableKey: publishableKey)
         return ClerkBearerTokenProvider(session: LiveClerkSessionTokenProvider())
     }
+
+    @MainActor
+    static func makeNativeIntakeIdentitySource(
+        keyStore: any AppAttestKeyIDStoring = KeychainAppAttestKeyIDStore(),
+        verifiedClerkSubject: @escaping @Sendable () async -> String? = {
+            await MainActor.run { Clerk.shared.user?.id }
+        },
+        clerkChanges: @escaping @MainActor @Sendable () -> AsyncStream<Void> = {
+            liveClerkChanges()
+        },
+        appAttestChanges: @escaping @MainActor @Sendable () -> AsyncStream<Void> = {
+            liveAppAttestChanges()
+        }
+    ) -> NativeIntake.IdentitySource {
+        let streams = [clerkChanges(), appAttestChanges()]
+        return NativeIntake.identitySource(
+            verifiedClerkSubject: verifiedClerkSubject,
+            persistedAppAttestKey: {
+                try? keyStore.load()
+            },
+            changes: {
+                AsyncStream { continuation in
+                    let tasks = streams.map { stream in
+                        Task {
+                            for await _ in stream {
+                                continuation.yield()
+                            }
+                        }
+                    }
+                    continuation.onTermination = { _ in
+                        tasks.forEach { $0.cancel() }
+                    }
+                }
+            }
+        )
+    }
+
+    @MainActor
+    private static func liveClerkChanges() -> AsyncStream<Void> {
+        let events = Clerk.shared.auth.events
+        return AsyncStream { continuation in
+            let task = Task {
+                for await _ in events {
+                    continuation.yield()
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private static func liveAppAttestChanges() -> AsyncStream<Void> {
+        let notifications = NotificationCenter.default.notifications(
+            named: KeychainAppAttestKeyIDStore.didChange
+        )
+        return AsyncStream { continuation in
+            let task = Task {
+                for await _ in notifications {
+                    continuation.yield()
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }

@@ -101,6 +101,10 @@ protocol AppAttestKeyIDStoring: Sendable {
 }
 
 struct KeychainAppAttestKeyIDStore: AppAttestKeyIDStoring {
+    static let didChange = Notification.Name(
+        "dev.snaplist.ios.app-attest-key-id-did-change"
+    )
+
     private let account = "verified-app-attest-key-id"
     private let service = "dev.snaplist.ios.app-attest"
 
@@ -126,7 +130,10 @@ struct KeychainAppAttestKeyIDStore: AppAttestKeyIDStoring {
         }
         let attributes = [kSecValueData as String: data]
         let updateStatus = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecSuccess { return }
+        if updateStatus == errSecSuccess {
+            NotificationCenter.default.post(name: Self.didChange, object: nil)
+            return
+        }
         guard updateStatus == errSecItemNotFound else {
             throw KeychainError(status: updateStatus)
         }
@@ -136,6 +143,7 @@ struct KeychainAppAttestKeyIDStore: AppAttestKeyIDStoring {
         guard insertStatus == errSecSuccess else {
             throw KeychainError(status: insertStatus)
         }
+        NotificationCenter.default.post(name: Self.didChange, object: nil)
     }
 
     func remove() throws {
@@ -143,6 +151,7 @@ struct KeychainAppAttestKeyIDStore: AppAttestKeyIDStoring {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError(status: status)
         }
+        NotificationCenter.default.post(name: Self.didChange, object: nil)
     }
 
     private var baseQuery: [String: Any] {

@@ -131,7 +131,7 @@ struct CaptureFrame {
     let orientation: CGImagePropertyOrientation
 }
 
-struct LibraryPhotoTransferReceipt: Codable, Equatable {
+struct LibraryPhotoTransferReceipt: Codable, Equatable, Sendable {
     let sourcePhotoFingerprints: [String]
     let sourceIndex: Int
     let transferredDigest: String
@@ -216,7 +216,7 @@ enum LocalPhotoFingerprint {
     }
 }
 
-struct StagedCapturePhoto: Codable, Equatable, Identifiable {
+struct StagedCapturePhoto: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     let photoURL: URL
     let thumbnailURL: URL
