@@ -43,7 +43,6 @@
       "SnapListUITests/SnapListUITests/testOnboardingAccessibilityAtLargeDynamicTypeKeepsTargetsAndSafeAreas",
       "SnapListUITests/SnapListUITests/testPhotoReviewHardwareKeyboardControlLeftMovesSelectedSecondPhotoToCoverWithReducedMotion",
       "SnapListUITests/SnapListUITests/testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity",
-      "SnapListUITests/SnapListUITests/testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion",
       "SnapListUITests/SnapListUITests/testPhotoReviewNativeDragSourcePreservesNonCoverThumbnailTapActions",
       "SnapListUITests/SnapListUITests/testPhotoReviewREV01RendersOneSelectedCoverPhotoWithProgressiveActions",
       "SnapListUITests/SnapListUITests/testPhotoReviewREV02UsesCanonicalAdaptiveHeroAt402x874",
@@ -95,6 +94,9 @@
       "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testPositiveForegroundExitWitnessAllowsStaleForegroundTargetTermination",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest"
+    ],
+    "ui-drag": [
+      "SnapListUITests/SnapListUITests/testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion"
     ]
   }
 }

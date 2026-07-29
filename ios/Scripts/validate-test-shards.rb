@@ -22,7 +22,7 @@ abort "test shard inventory schema_version must be 1" unless inventory["schema_v
 shards = inventory.fetch("shards") do
   abort "test shard inventory must define shards"
 end
-expected_shards = %w[unit ui-1 ui-2]
+expected_shards = %w[unit ui-1 ui-2 ui-drag]
 unless shards.keys.sort == expected_shards.sort
   abort "test shard inventory must define exactly: #{expected_shards.join(", ")}"
 end

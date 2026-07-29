@@ -60,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit, ui-1, ui-2]
+        shard: [unit, ui-1, ui-2, ui-drag]
     steps:
       - uses: actions/checkout@v4
         with:

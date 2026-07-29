@@ -132,9 +132,9 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       shard_job.fetch("runs-on") == "macos-26"
     abort "all shard failures must remain visible" unless
       shard_job.fetch("strategy").fetch("fail-fast") == false
-    abort "automatic suite must define exactly three deterministic shards" unless
+    abort "automatic suite must define exactly four deterministic shards" unless
       shard_job.fetch("strategy").fetch("matrix").fetch("shard") ==
-        ["unit", "ui-1", "ui-2"]
+        ["unit", "ui-1", "ui-2", "ui-drag"]
 
     checkout_step = shard_job.fetch("steps").find do |step|
       step["uses"] == "actions/checkout@v4"
@@ -242,6 +242,23 @@ assert_shard_inventory_fails_closed_on_omission_and_duplication() {
   ! "$shard_inventory_validator" "$duplicated_shard_inventory_file" 2>/dev/null
 }
 
+assert_native_photo_review_drag_has_one_dedicated_shard() {
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    shards = inventory.fetch("shards")
+    selector =
+      "SnapListUITests/SnapListUITests/" \
+      "testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion"
+
+    abort "native Photo Review drag must be absent from ui-1" if
+      shards.fetch("ui-1").include?(selector)
+    abort "native Photo Review drag must be the sole ui-drag selector" unless
+      shards.fetch("ui-drag") == [selector]
+    abort "native Photo Review drag must be assigned exactly once" unless
+      shards.values.flatten.count(selector) == 1
+  ' "$shard_inventory_file"
+}
+
 assert_nested_ui_test_file_cannot_be_silently_omitted() {
   local validation_error_file=${temporary_directory}/nested-test-validation-error
 
@@ -284,7 +301,7 @@ assert_declared_shard_selectors_reach_xcodebuild_once() {
   local shard
   local expected_arguments_file=${temporary_directory}/expected-xcodebuild-arguments
 
-  for shard in unit ui-1 ui-2; do
+  for shard in unit ui-1 ui-2 ui-drag; do
     : > "$arguments_file"
     : > "$expected_arguments_file"
 
@@ -536,6 +553,7 @@ for contract_case in \
   assert_focused_selector_uses_the_target_repository \
   assert_malformed_selectors_fail_before_xcodebuild \
   assert_shard_inventory_fails_closed_on_omission_and_duplication \
+  assert_native_photo_review_drag_has_one_dedicated_shard \
   assert_nested_ui_test_file_cannot_be_silently_omitted \
   assert_declared_shard_selectors_reach_xcodebuild_once \
   assert_invalid_or_conflicting_shard_selection_fails_before_xcodebuild \
