@@ -900,97 +900,11 @@ final class TrophyWallDomainTests: XCTestCase {
     }
 
     func testStoreProjectsSucceededRunWithoutReviewActionAsLockedReadyCard() throws {
-        let fixture = TrophyWallTestFixture()
-        func page(terminalOutcome: RunTerminalOutcome?) throws -> TrophyWallRunHistoryPage {
-            TrophyWallRunHistoryPage(
-                entries: [
-                    TrophyWallRunHistoryEntry(
-                        logicalIdentity: fixture.logicalID,
-                        orderKey: TrophyWallOrderKey(
-                            lastMeaningfulUpdateAt: fixture.runDetailUpdate,
-                            stableIdentity: fixture.runID.uuidString.lowercased()
-                        ),
-                        run: try fixture.decodedRunDetail(
-                            runID: fixture.runID,
-                            itemID: fixture.itemID,
-                            listingID: fixture.listingID,
-                            status: .succeeded,
-                            stage: .completed,
-                            terminalOutcome: terminalOutcome,
-                            canOpenReview: false
-                        )
-                    ),
-                ],
-                nextCursor: nil
-            )
-        }
+        try assertLockedCanonicalProjection(.readyToReview)
+    }
 
-        let succeededPage = try page(terminalOutcome: .succeeded)
-        let store = fixture.makeStore()
-
-        store.ingest(
-            historyPage: succeededPage,
-            principalScope: fixture.principal
-        )
-        let firstCards = store.cards
-        let firstRows = store.processingRows
-        store.ingest(
-            historyPage: succeededPage,
-            principalScope: fixture.principal
-        )
-
-        XCTAssertEqual(store.cards.count, 2)
-        XCTAssertEqual(
-            store.cards.map(\.identity),
-            [.local(fixture.unrelatedLogicalID), .run(fixture.runID)]
-        )
-        XCTAssertEqual(
-            store.cards.map(\.orderKey.lastMeaningfulUpdateAt),
-            [fixture.unrelatedUpdate, fixture.runDetailUpdate]
-        )
-        XCTAssertEqual(
-            store.processingRows.map(\.itemName),
-            [fixture.unrelatedItemName, fixture.matchedItemName]
-        )
-        XCTAssertEqual(
-            store.processingRows.map(\.stateLabel),
-            ["Pending upload", "Ready to review"]
-        )
-        XCTAssertEqual(
-            store.processingRows.map(\.accessibilityLabel),
-            [
-                "\(fixture.unrelatedItemName), pending upload. Local item, not sent yet.",
-                "\(fixture.matchedItemName), ready to review. Review is not available yet.",
-            ]
-        )
-        XCTAssertEqual(
-            store.processingRows.map(\.destination),
-            [nil, .run(fixture.runID)]
-        )
-        XCTAssertEqual(store.cards, firstCards)
-        XCTAssertEqual(store.processingRows, firstRows)
-
-        let inconsistentOutcomes: [(name: String, value: RunTerminalOutcome?)] = [
-            ("missing terminal outcome", nil),
-            ("failed terminal outcome", .failed),
-            ("canceled terminal outcome", .canceled),
-        ]
-        for testCase in inconsistentOutcomes {
-            let inconsistentStore = fixture.makeStore()
-            let initialCards = inconsistentStore.cards
-            inconsistentStore.ingest(
-                historyPage: try page(terminalOutcome: testCase.value),
-                principalScope: fixture.principal
-            )
-
-            XCTAssertEqual(inconsistentStore.cards, initialCards, testCase.name)
-            XCTAssertFalse(
-                inconsistentStore.processingRows.contains {
-                    $0.stateLabel == "Ready to review"
-                },
-                testCase.name
-            )
-        }
+    func testStoreProjectsFailedRunWithoutRetryClientAsLockedNeedsRetryCard() throws {
+        try assertLockedCanonicalProjection(.needsRetry)
     }
 
     func testStoreConvergesRelaunchedPendingFromFrozenRunHistoryPageWithoutMutableReordering()
@@ -1200,6 +1114,127 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertTrue(openedRoutes.isEmpty)
     }
+
+    private func assertLockedCanonicalProjection(
+        _ scenario: TrophyWallLockedProjectionScenario
+    ) throws {
+        let fixture = TrophyWallTestFixture()
+        let page: TrophyWallRunHistoryPage
+        let expectedStateLabel: String
+        let expectedAccessibilityLabel: String
+        let inconsistentCases: [(name: String, page: TrophyWallRunHistoryPage)]
+
+        switch scenario {
+        case .readyToReview:
+            page = try fixture.historyPage(
+                listingID: fixture.listingID,
+                status: .succeeded,
+                stage: .completed,
+                terminalOutcome: .succeeded
+            )
+            expectedStateLabel = "Ready to review"
+            expectedAccessibilityLabel =
+                "\(fixture.matchedItemName), ready to review. Review is not available yet."
+            let outcomes: [(String, RunTerminalOutcome?)] = [
+                ("missing terminal outcome", nil),
+                ("failed terminal outcome", .failed),
+                ("canceled terminal outcome", .canceled),
+            ]
+            inconsistentCases = try outcomes.map { name, outcome in
+                (
+                    name,
+                    try fixture.historyPage(
+                        listingID: fixture.listingID,
+                        status: .succeeded,
+                        stage: .completed,
+                        terminalOutcome: outcome
+                    )
+                )
+            }
+        case .needsRetry:
+            page = try fixture.historyPage(
+                status: .failed,
+                stage: .pricing,
+                terminalOutcome: .failed,
+                retryTruth: (canRetry: true, workPreserved: true),
+                canStartNewCapture: true
+            )
+            expectedStateLabel = "Needs retry · Upload didn't finish."
+            expectedAccessibilityLabel =
+                "\(fixture.matchedItemName), needs retry. Upload didn't finish."
+            inconsistentCases = [
+                (
+                    "nonretryable failure",
+                    try fixture.historyPage(
+                        status: .failed,
+                        stage: .pricing,
+                        terminalOutcome: .failed,
+                        retryTruth: (canRetry: false, workPreserved: true)
+                    )
+                ),
+                (
+                    "work not preserved",
+                    try fixture.historyPage(
+                        status: .failed,
+                        stage: .pricing,
+                        terminalOutcome: .failed,
+                        retryTruth: (canRetry: true, workPreserved: false)
+                    )
+                ),
+                (
+                    "inconsistent terminal outcome",
+                    try fixture.historyPage(
+                        status: .failed,
+                        stage: .pricing,
+                        terminalOutcome: .canceled,
+                        retryTruth: (canRetry: true, workPreserved: true)
+                    )
+                ),
+            ]
+        }
+
+        let store = fixture.makeStore()
+        store.ingest(historyPage: page, principalScope: fixture.principal)
+        let firstCards = store.cards
+        let firstRows = store.processingRows
+        store.ingest(historyPage: page, principalScope: fixture.principal)
+
+        XCTAssertEqual(
+            store.cards.map(\.identity),
+            [.local(fixture.unrelatedLogicalID), .run(fixture.runID)]
+        )
+        XCTAssertEqual(
+            store.cards.map(\.orderKey.lastMeaningfulUpdateAt),
+            [fixture.unrelatedUpdate, fixture.runDetailUpdate]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.stateLabel),
+            ["Pending upload", expectedStateLabel]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.accessibilityLabel),
+            [
+                "\(fixture.unrelatedItemName), pending upload. Local item, not sent yet.",
+                expectedAccessibilityLabel,
+            ]
+        )
+        XCTAssertEqual(
+            store.processingRows.map(\.destination),
+            [nil, .run(fixture.runID)]
+        )
+        XCTAssertEqual(store.cards, firstCards)
+        XCTAssertEqual(store.processingRows, firstRows)
+
+        for testCase in inconsistentCases {
+            let inconsistentStore = fixture.makeStore()
+            let initialCards = inconsistentStore.cards
+            inconsistentStore.ingest(
+                historyPage: testCase.page,
+                principalScope: fixture.principal
+            )
+            XCTAssertEqual(inconsistentStore.cards, initialCards, testCase.name)
+        }
+    }
 }
 
 @MainActor
@@ -1353,6 +1388,11 @@ private struct TrophyWallWorkingStageCase {
     let accessibilityFact: String
 }
 
+private enum TrophyWallLockedProjectionScenario {
+    case readyToReview
+    case needsRetry
+}
+
 private struct TrophyWallTestFixture {
     let principal = TrophyWallPrincipalScope(opaqueValue: "principal-a")
     let otherPrincipal = TrophyWallPrincipalScope(opaqueValue: "principal-b")
@@ -1450,6 +1490,39 @@ private struct TrophyWallTestFixture {
         )
     }
 
+    func historyPage(
+        listingID: UUID? = nil,
+        status: DurableRunStatus,
+        stage: DurableRunStage,
+        terminalOutcome: RunTerminalOutcome?,
+        retryTruth: (canRetry: Bool, workPreserved: Bool)? = nil,
+        canStartNewCapture: Bool = false
+    ) throws -> TrophyWallRunHistoryPage {
+        let run = try decodedRunDetail(
+            runID: runID,
+            itemID: itemID,
+            listingID: listingID,
+            status: status,
+            stage: stage,
+            terminalOutcome: terminalOutcome,
+            retryTruth: retryTruth,
+            canStartNewCapture: canStartNewCapture
+        )
+        return TrophyWallRunHistoryPage(
+            entries: [
+                TrophyWallRunHistoryEntry(
+                    logicalIdentity: logicalID,
+                    orderKey: TrophyWallOrderKey(
+                        lastMeaningfulUpdateAt: runDetailUpdate,
+                        stableIdentity: run.id.uuidString.lowercased()
+                    ),
+                    run: run
+                ),
+            ],
+            nextCursor: nil
+        )
+    }
+
     func decodedRunDetail(
         runID: UUID,
         itemID: UUID,
@@ -1457,11 +1530,20 @@ private struct TrophyWallTestFixture {
         status: DurableRunStatus = .queued,
         stage: DurableRunStage = .queued,
         terminalOutcome: RunTerminalOutcome? = nil,
+        retryTruth: (canRetry: Bool, workPreserved: Bool)? = nil,
+        canStartNewCapture: Bool = false,
         canOpenReview: Bool = false,
         lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z"
     ) throws -> DurableRun {
         let listingIDJSON = listingID.map { "\"\($0.uuidString.lowercased())\"" } ?? "null"
         let terminalOutcomeJSON = terminalOutcome.map { "\"\($0.rawValue)\"" } ?? "null"
+        let canRetry = retryTruth?.canRetry ?? false
+        let safeFailureJSON = retryTruth.map {
+            return """
+            {"reason":"This run couldn’t finish","detail":"Upload didn't finish.",\
+            "retryable":\(canRetry),"workPreserved":\($0.workPreserved)}
+            """
+        } ?? "null"
         let json = """
         {
           "id": "\(runID.uuidString.lowercased())",
@@ -1485,13 +1567,13 @@ private struct TrophyWallTestFixture {
           "item": { "title": "Server canonical title", "photoCount": 3 },
           "requiredInput": null,
           "terminalOutcome": \(terminalOutcomeJSON),
-          "safeFailure": null,
+          "safeFailure": \(safeFailureJSON),
           "allowance": "reserved",
           "legalActions": {
-            "canRetry": false,
+            "canRetry": \(canRetry),
             "canCancel": false,
             "canOpenReview": \(canOpenReview),
-            "canStartNewCapture": false
+            "canStartNewCapture": \(canStartNewCapture)
           },
           "lastMeaningfulUpdateAt": "\(lastMeaningfulUpdateAt)",
           "retentionCleanedAt": null

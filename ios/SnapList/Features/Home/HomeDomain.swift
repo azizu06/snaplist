@@ -204,6 +204,7 @@ enum TrophyWallCardState: Hashable, Sendable {
     case workingPricing
     case workingPersisting
     case readyToReviewLocked
+    case needsRetryLocked(detail: String)
 }
 
 struct TrophyWallOrderKey: Hashable, Comparable, Sendable {
@@ -321,7 +322,8 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
              .workingGenerating,
              .workingPricing,
              .workingPersisting,
-             .readyToReviewLocked:
+             .readyToReviewLocked,
+             .needsRetryLocked:
             if case .run(let runID) = card.identity {
                 destination = .run(runID)
                 accessibilityIdentifier =
@@ -350,6 +352,9 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
                 stateLabel = "Ready to review"
                 accessibilityLabel =
                     "\(itemName), ready to review. Review is not available yet."
+            case .needsRetryLocked(let detail):
+                stateLabel = "Needs retry · \(detail)"
+                accessibilityLabel = "\(itemName), needs retry. \(detail)"
             case .pendingUpload:
                 return nil
             }
@@ -531,6 +536,16 @@ final class TrophyWallStore {
                 && runDetail.listingID != nil
                 && !runDetail.legalActions.canOpenReview:
             .readyToReviewLocked
+        case (.failed, _)
+            where runDetail.terminalOutcome == .failed
+                && runDetail.safeFailure?.retryable == true
+                && runDetail.safeFailure?.workPreserved == true
+                && runDetail.legalActions.canRetry
+                && !runDetail.legalActions.canCancel
+                && !runDetail.legalActions.canOpenReview:
+            runDetail.safeFailure.map {
+                .needsRetryLocked(detail: $0.detail)
+            }
         default:
             nil
         }
