@@ -266,10 +266,7 @@ actor NativeIntake {
         case .replacePhoto(let id, let input):
             let data: (Data, LibraryPhotoTransferReceipt?)
             do {
-                guard let bytes = try await input.loadData() else {
-                    return .rejected(.sourceUnavailable)
-                }
-                data = (bytes, input.libraryTransferReceipt)
+                data = try await load(input)
             } catch {
                 return .rejected(.sourceUnavailable)
             }
@@ -423,12 +420,18 @@ actor NativeIntake {
         var data: [(Data, LibraryPhotoTransferReceipt?)] = []
         data.reserveCapacity(inputs.count)
         for input in inputs {
-            guard let bytes = try await input.loadData() else {
-                throw CocoaError(.fileReadCorruptFile)
-            }
-            data.append((bytes, input.libraryTransferReceipt))
+            data.append(try await load(input))
         }
         return data
+    }
+
+    private func load(_ input: PhotoInput) async throws
+        -> (Data, LibraryPhotoTransferReceipt?) {
+        guard let bytes = try await input.loadData(),
+              input.libraryTransferReceipt?.matchesTransferredPhoto(bytes) != false else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return (bytes, input.libraryTransferReceipt)
     }
 
     private func commitMutation(
@@ -737,7 +740,7 @@ actor NativeIntake {
                 case .transient:
                     deadlines.append(now().addingTimeInterval(Self.retentionRetryInterval))
                 case .absent, .malformed:
-                    break
+                    deadlines.append(deletionRetryAfter[root] ?? now())
                 }
             }
         case .transient:
@@ -791,11 +794,14 @@ actor NativeIntake {
         }
         if case .value(let ephemeral) = ownedEphemeralRoots() {
             for root in ephemeral where root != active?.root {
-                guard case .value(let expiresAt) = readEphemeralExpiry(at: root),
-                      expiresAt <= currentTime else {
-                    continue
+                switch readEphemeralExpiry(at: root) {
+                case .value(let expiresAt) where expiresAt <= currentTime:
+                    _ = removeExpiredRoot(root, at: currentTime)
+                case .absent, .malformed:
+                    _ = removeExpiredRoot(root, at: currentTime)
+                case .value, .transient:
+                    break
                 }
-                _ = removeExpiredRoot(root, at: currentTime)
             }
         }
     }
