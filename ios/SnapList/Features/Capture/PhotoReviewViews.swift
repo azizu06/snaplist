@@ -715,12 +715,22 @@ final class PhotoReviewDragPresentation {
     private(set) var lastTransitionDecision:
         PhotoReviewDragTransitionDecision?
 
+    static func canBegin(
+        photoID: StagedCapturePhoto.ID,
+        photos: [StagedCapturePhoto]
+    ) -> Bool {
+        photos.count > 1
+            && photos.contains(where: { $0.id == photoID })
+    }
+
     func begin(
         photoID: StagedCapturePhoto.ID,
         store: PhotoReviewStore
     ) -> Bool {
-        guard store.photos.count > 1,
-              store.photos.contains(where: { $0.id == photoID }) else {
+        guard Self.canBegin(
+            photoID: photoID,
+            photos: store.photos
+        ) else {
             return false
         }
         pendingFocusPhotoID = nil
@@ -966,9 +976,9 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
             observeSource(.rejectedNoSource)
             return []
         }
-        guard presentation.begin(
+        guard PhotoReviewDragPresentation.canBegin(
             photoID: source.photoID,
-            store: store
+            photos: store.photos
         ) else {
             observeSource(.rejectedPresentation)
             return []
@@ -1055,6 +1065,15 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         _ interaction: UIDragInteraction,
         sessionWillBegin session: UIDragSession
     ) {
+        guard let activeSource,
+              presentation.begin(
+                photoID: activeSource.photoID,
+                store: store
+              ) else {
+            self.activeSource = nil
+            observeSource(.rejectedPresentation)
+            return
+        }
         observeSource(
             .sessionWillBegin(
                 location: hostNormalizedLocation(
