@@ -4994,6 +4994,119 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
+    func testPhotoReviewNativeSourceObservationClassifiesAttachmentStabilityThroughLiftCompletion() throws {
+        let photos = makeDragPhotos()
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        var observation = PhotoReviewNativeDragSourceObservation()
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in
+                PhotoReviewNativeDragSource(
+                    photoID: photos[2].id,
+                    thumbnailURL: photos[2].thumbnailURL,
+                    frame: CGRect(x: 176, y: 0, width: 76, height: 98)
+                )
+            },
+            observeSource: { observation.observe($0) }
+        )
+        let host = makeNativeInteractionHost()
+        let sourceView = host.innerHorizontalStrip
+        defer { host.cleanUp() }
+
+        source.attach(to: sourceView)
+        source.attach(to: sourceView)
+        let interaction = try XCTUnwrap(
+            sourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(x: 258, y: 49)
+        session.items = source.dragInteraction(
+            interaction,
+            itemsForBeginning: session
+        )
+        XCTAssertEqual(session.items.count, 1)
+
+        let animator = PhotoReviewDragAnimatorStub()
+        source.dragInteraction(
+            interaction,
+            willAnimateLiftWith: animator,
+            session: session
+        )
+        animator.complete(at: .start)
+
+        let expectedInteractionID = ObjectIdentifier(interaction)
+        let expectedHostID = ObjectIdentifier(sourceView)
+        let expectedWindowID = ObjectIdentifier(host.window)
+
+        XCTAssertEqual(observation.attachmentEpoch, 1)
+        XCTAssertEqual(observation.detachCount, 0)
+        XCTAssertEqual(
+            observation.redundantSameHostAttachmentCount,
+            1
+        )
+        XCTAssertEqual(
+            observation.itemsForBeginningIdentity?.interactionID,
+            expectedInteractionID
+        )
+        XCTAssertEqual(
+            observation.itemsForBeginningIdentity?.hostID,
+            expectedHostID
+        )
+        XCTAssertEqual(
+            observation.itemsForBeginningIdentity?.windowID,
+            expectedWindowID
+        )
+        XCTAssertEqual(
+            observation.willAnimateLiftIdentity,
+            observation.itemsForBeginningIdentity
+        )
+        XCTAssertEqual(
+            observation.liftCompletionIdentity,
+            observation.itemsForBeginningIdentity
+        )
+        XCTAssertTrue(
+            observation.label.contains(
+                "epoch:1,detached:0,reused:1,"
+                    + "interactionIdentity:stable,"
+                    + "hostIdentity:stable,windowIdentity:stable"
+            ),
+            observation.label
+        )
+
+        source.detach()
+
+        XCTAssertFalse(observation.isAttached)
+        XCTAssertEqual(observation.attachmentEpoch, 1)
+        XCTAssertEqual(observation.detachCount, 1)
+        XCTAssertTrue(
+            sourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .isEmpty
+        )
+
+        source.attach(to: sourceView)
+
+        XCTAssertTrue(observation.isAttached)
+        XCTAssertEqual(observation.attachmentEpoch, 2)
+        XCTAssertEqual(observation.detachCount, 1)
+        XCTAssertEqual(
+            observation.redundantSameHostAttachmentCount,
+            1
+        )
+        XCTAssertEqual(
+            sourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .count,
+            1
+        )
+    }
+
     func testPhotoReviewNativeAttachmentsResolveNestedHorizontalStripHostInsteadOfOuterScreenScroll() {
         let photos = makeDragPhotos()
         let store = PhotoReviewStore(photos: photos)

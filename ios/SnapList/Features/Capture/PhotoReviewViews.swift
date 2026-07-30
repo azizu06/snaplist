@@ -290,14 +290,33 @@ enum PhotoReviewNativeInteractionPolicy {
     }
 }
 
+struct PhotoReviewNativeDragSourceIdentity: Equatable {
+    let interactionID: ObjectIdentifier?
+    let hostID: ObjectIdentifier?
+    let windowID: ObjectIdentifier?
+}
+
+struct PhotoReviewNativeDragSourceAttachmentSnapshot: Equatable {
+    let epoch: Int
+    let detachCount: Int
+    let redundantSameHostAttachmentCount: Int
+    let identity: PhotoReviewNativeDragSourceIdentity
+}
+
 enum PhotoReviewNativeDragSourceEvent: Equatable {
-    case attached(isEnabled: Bool)
-    case detached
+    case attached(
+        isEnabled: Bool,
+        attachment: PhotoReviewNativeDragSourceAttachmentSnapshot
+    )
+    case detached(
+        attachment: PhotoReviewNativeDragSourceAttachmentSnapshot
+    )
     case enabled(Bool)
     case beginRequested(
         hostBounds: CGRect,
         hostContentSize: CGSize,
-        isEnabled: Bool
+        isEnabled: Bool,
+        attachment: PhotoReviewNativeDragSourceAttachmentSnapshot
     )
     case resolving(frameCount: Int)
     case rejectedMissingView
@@ -307,11 +326,13 @@ enum PhotoReviewNativeDragSourceEvent: Equatable {
     case provided(photoID: StagedCapturePhoto.ID)
     case willAnimateLift(
         location: CGPoint?,
-        scrollPanState: UIGestureRecognizer.State?
+        scrollPanState: UIGestureRecognizer.State?,
+        attachment: PhotoReviewNativeDragSourceAttachmentSnapshot
     )
     case liftAnimationCompleted(
         position: UIViewAnimatingPosition,
-        scrollPanState: UIGestureRecognizer.State?
+        scrollPanState: UIGestureRecognizer.State?,
+        attachment: PhotoReviewNativeDragSourceAttachmentSnapshot
     )
     case sessionWillBegin(
         location: CGPoint?,
@@ -334,6 +355,15 @@ enum PhotoReviewNativeDragSourceEvent: Equatable {
 struct PhotoReviewNativeDragSourceObservation: Equatable {
     private(set) var isAttached = false
     private(set) var isEnabled = false
+    private(set) var attachmentEpoch = 0
+    private(set) var detachCount = 0
+    private(set) var redundantSameHostAttachmentCount = 0
+    private(set) var itemsForBeginningIdentity:
+        PhotoReviewNativeDragSourceIdentity?
+    private(set) var willAnimateLiftIdentity:
+        PhotoReviewNativeDragSourceIdentity?
+    private(set) var liftCompletionIdentity:
+        PhotoReviewNativeDragSourceIdentity?
     private(set) var frameCount = 0
     private(set) var hostBounds = CGRect.zero
     private(set) var hostContentSize = CGSize.zero
@@ -379,6 +409,12 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
         return [
             "attached:\(isAttached)",
             "enabled:\(isEnabled)",
+            "epoch:\(attachmentEpoch)",
+            "detached:\(detachCount)",
+            "reused:\(redundantSameHostAttachmentCount)",
+            "interactionIdentity:\(identityStabilityLabel(\.interactionID))",
+            "hostIdentity:\(identityStabilityLabel(\.hostID))",
+            "windowIdentity:\(identityStabilityLabel(\.windowID))",
             "frames:\(frameCount)",
             "begin:\(beginOutcome)",
             "photo:\(photoID?.uuidString ?? "none")",
@@ -405,28 +441,35 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
 
     mutating func observe(_ event: PhotoReviewNativeDragSourceEvent) {
         switch event {
-        case .attached(let isEnabled):
+        case .attached(let isEnabled, let attachment):
             isAttached = true
             self.isEnabled = isEnabled
-        case .detached:
+            apply(attachment)
+        case .detached(let attachment):
             isAttached = false
+            apply(attachment)
         case .enabled(let isEnabled):
             self.isEnabled = isEnabled
         case .beginRequested(
             let hostBounds,
             let hostContentSize,
-            let isEnabled
+            let isEnabled,
+            let attachment
         ):
+            apply(attachment)
             self.hostBounds = hostBounds
             self.hostContentSize = hostContentSize
             self.isEnabled = isEnabled
             beginOutcome = "requested"
             photoID = nil
+            itemsForBeginningIdentity = attachment.identity
             didWillAnimateLift = false
             willAnimateLiftLocation = nil
             willAnimateLiftPanState = nil
+            willAnimateLiftIdentity = nil
             liftAnimationCompletionPosition = nil
             liftAnimationCompletionPanState = nil
+            liftCompletionIdentity = nil
             didSessionWillBegin = false
             sessionWillBeginLocation = nil
             sessionWillBeginPanState = nil
@@ -450,13 +493,25 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
         case .provided(let photoID):
             beginOutcome = "provided"
             self.photoID = photoID
-        case .willAnimateLift(let location, let scrollPanState):
+        case .willAnimateLift(
+            let location,
+            let scrollPanState,
+            let attachment
+        ):
+            apply(attachment)
             didWillAnimateLift = true
             willAnimateLiftLocation = location
             willAnimateLiftPanState = scrollPanState
-        case .liftAnimationCompleted(let position, let scrollPanState):
+            willAnimateLiftIdentity = attachment.identity
+        case .liftAnimationCompleted(
+            let position,
+            let scrollPanState,
+            let attachment
+        ):
+            apply(attachment)
             liftAnimationCompletionPosition = position
             liftAnimationCompletionPanState = scrollPanState
+            liftCompletionIdentity = attachment.identity
         case .sessionWillBegin(let location, let scrollPanState):
             didSessionWillBegin = true
             sessionWillBeginLocation = location
@@ -483,6 +538,38 @@ struct PhotoReviewNativeDragSourceObservation: Equatable {
             self.sessionDidMoveCount = sessionDidMoveCount
             self.lastSessionDidMoveLocation = lastSessionDidMoveLocation
         }
+    }
+
+    private mutating func apply(
+        _ attachment: PhotoReviewNativeDragSourceAttachmentSnapshot
+    ) {
+        attachmentEpoch = attachment.epoch
+        detachCount = attachment.detachCount
+        redundantSameHostAttachmentCount =
+            attachment.redundantSameHostAttachmentCount
+    }
+
+    private func identityStabilityLabel(
+        _ keyPath:
+            KeyPath<PhotoReviewNativeDragSourceIdentity, ObjectIdentifier?>
+    ) -> String {
+        guard let itemsForBeginningIdentity,
+              let willAnimateLiftIdentity,
+              let liftCompletionIdentity else {
+            return "pending"
+        }
+        let values = [
+            itemsForBeginningIdentity[keyPath: keyPath],
+            willAnimateLiftIdentity[keyPath: keyPath],
+            liftCompletionIdentity[keyPath: keyPath]
+        ]
+        guard let first = values[0],
+              values.dropFirst().allSatisfy({ $0 != nil }) else {
+            return "missing"
+        }
+        return values.dropFirst().allSatisfy({ $0 == first })
+            ? "stable"
+            : "changed"
     }
 
     private static func pointLabel(_ point: CGPoint?) -> String {
@@ -866,6 +953,9 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
     private var lastSessionDidMoveLocation: CGPoint?
     private weak var attachedView: UIView?
     private var dragInteraction: UIDragInteraction?
+    private var attachmentEpoch = 0
+    private var detachCount = 0
+    private var redundantSameHostAttachmentCount = 0
 
     init(
         store: PhotoReviewStore,
@@ -921,6 +1011,7 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
 
     func attach(to view: UIView) {
         guard attachedView !== view else {
+            redundantSameHostAttachmentCount += 1
             dragInteraction?.isEnabled = isEnabled
             return
         }
@@ -930,18 +1021,32 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         view.addInteraction(interaction)
         attachedView = view
         dragInteraction = interaction
-        observeSource(.attached(isEnabled: isEnabled))
+        attachmentEpoch += 1
+        observeSource(
+            .attached(
+                isEnabled: isEnabled,
+                attachment: attachmentSnapshot(for: interaction)
+            )
+        )
     }
 
     func detach() {
         let wasAttached = attachedView != nil
+        let detachedIdentity = attachmentIdentity(for: dragInteraction)
         if let dragInteraction {
             attachedView?.removeInteraction(dragInteraction)
         }
         dragInteraction = nil
         attachedView = nil
         if wasAttached {
-            observeSource(.detached)
+            detachCount += 1
+            observeSource(
+                .detached(
+                    attachment: attachmentSnapshot(
+                        identity: detachedIdentity
+                    )
+                )
+            )
         }
     }
 
@@ -960,7 +1065,8 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
                 hostBounds: sourceView.bounds,
                 hostContentSize:
                     (sourceView as? UIScrollView)?.contentSize ?? .zero,
-                isEnabled: isEnabled
+                isEnabled: isEnabled,
+                attachment: attachmentSnapshot(for: interaction)
             )
         )
         guard isEnabled else {
@@ -1045,7 +1151,8 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
                     for: session,
                     interaction: interaction
                 ),
-                scrollPanState: scrollPanState(for: interaction)
+                scrollPanState: scrollPanState(for: interaction),
+                attachment: attachmentSnapshot(for: interaction)
             )
         )
         animator.addCompletion { [weak self, weak interaction] position in
@@ -1055,7 +1162,10 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
             self.observeSource(
                 .liftAnimationCompleted(
                     position: position,
-                    scrollPanState: self.scrollPanState(for: interaction)
+                    scrollPanState: self.scrollPanState(for: interaction),
+                    attachment: self.attachmentSnapshot(
+                        for: interaction
+                    )
                 )
             )
         }
@@ -1141,6 +1251,44 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         )
         sessionDidMoveCount = 0
         lastSessionDidMoveLocation = nil
+    }
+
+    private func attachmentSnapshot(
+        for interaction: UIDragInteraction?
+    ) -> PhotoReviewNativeDragSourceAttachmentSnapshot {
+        attachmentSnapshot(
+            identity: attachmentIdentity(for: interaction)
+        )
+    }
+
+    private func attachmentSnapshot(
+        identity: PhotoReviewNativeDragSourceIdentity
+    ) -> PhotoReviewNativeDragSourceAttachmentSnapshot {
+        PhotoReviewNativeDragSourceAttachmentSnapshot(
+            epoch: attachmentEpoch,
+            detachCount: detachCount,
+            redundantSameHostAttachmentCount:
+                redundantSameHostAttachmentCount,
+            identity: identity
+        )
+    }
+
+    private func attachmentIdentity(
+        for interaction: UIDragInteraction?
+    ) -> PhotoReviewNativeDragSourceIdentity {
+        guard let interaction,
+              let host = interaction.view else {
+            return PhotoReviewNativeDragSourceIdentity(
+                interactionID: nil,
+                hostID: nil,
+                windowID: nil
+            )
+        }
+        return PhotoReviewNativeDragSourceIdentity(
+            interactionID: ObjectIdentifier(interaction),
+            hostID: ObjectIdentifier(host),
+            windowID: host.window.map { ObjectIdentifier($0) }
+        )
     }
 
     private func hostNormalizedLocation(
