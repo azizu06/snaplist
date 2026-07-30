@@ -86,8 +86,8 @@ struct AppShellView: View {
                         )
                     },
                     // Photo Review consumes #469's Voice note event locally. Start
-                    // listing alone submits the photos in their displayed order; the
-                    // optional local WAV never enters this transaction.
+                    // listing submits the committed NativeIntake snapshot: displayed
+                    // photo order plus #541's optional recovered WAV under one key.
                     openBoundary: { event in
                         if PhotoReviewSubmissionPrimaryActionConsumer.consume(
                             event,

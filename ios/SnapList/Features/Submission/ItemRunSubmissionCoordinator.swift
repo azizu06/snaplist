@@ -757,6 +757,7 @@ enum ItemRunSubmissionHostFactory {
 final class ItemRunSubmissionCoordinator {
     fileprivate struct CapturedContext {
         let photos: [StagedCapturePhoto]
+        let voice: NativeIntake.Voice?
         let scopeProof: ItemRunSubmissionPrincipalScopeProof?
         let attemptStore: any ItemRunSubmissionAttemptStoring
         let validateFilesystemContext:
@@ -802,6 +803,7 @@ final class ItemRunSubmissionCoordinator {
     private let draftStore: any CaptureDraftStoring
     private let tokenProvider: any BearerTokenProviding
     private let readData: @Sendable (URL) throws -> Data
+    private let voiceLocaleHint: @Sendable () -> String?
     private let newIdempotencyKey: @Sendable () -> UUID
 
     init(
@@ -812,6 +814,9 @@ final class ItemRunSubmissionCoordinator {
         readData: @escaping @Sendable (URL) throws -> Data = {
             try Data(contentsOf: $0)
         },
+        voiceLocaleHint: @escaping @Sendable () -> String? = {
+            Locale.preferredLanguages.first
+        },
         newIdempotencyKey: @escaping @Sendable () -> UUID = { UUID() }
     ) {
         self.submitter = submitter
@@ -819,6 +824,7 @@ final class ItemRunSubmissionCoordinator {
         self.draftStore = draftStore
         self.tokenProvider = tokenProvider
         self.readData = readData
+        self.voiceLocaleHint = voiceLocaleHint
         self.newIdempotencyKey = newIdempotencyKey
     }
 
@@ -841,6 +847,7 @@ final class ItemRunSubmissionCoordinator {
         return await prepareSubmission(
             context: CapturedContext(
                 photos: photos,
+                voice: nil,
                 scopeProof: nil,
                 attemptStore: attemptStore,
                 validateFilesystemContext: { true },
@@ -871,6 +878,7 @@ final class ItemRunSubmissionCoordinator {
         await prepareSubmission(
             context: CapturedContext(
                 photos: principalContext.photos,
+                voice: principalContext.voice,
                 scopeProof: principalContext.scopeProof,
                 attemptStore: principalContext.attemptStore,
                 validateFilesystemContext: {
@@ -910,6 +918,7 @@ final class ItemRunSubmissionCoordinator {
         }
 
         let readData = readData
+        let voiceLocaleHint = voiceLocaleHint()
         let intake: ItemRunSubmissionSnapshot.Result
         do {
             // Up to five full-size photos get read and hashed here. Doing that on the
@@ -917,6 +926,8 @@ final class ItemRunSubmissionCoordinator {
             intake = try await Task.detached(priority: .userInitiated) {
                 try ItemRunSubmissionSnapshot.make(
                     for: context.photos,
+                    voice: context.voice,
+                    localeHint: voiceLocaleHint,
                     readData: readData
                 )
             }.value
@@ -970,13 +981,31 @@ final class ItemRunSubmissionCoordinator {
         } catch {
             return .retained(.attemptNotPersisted)
         }
+        if let storedAttempt,
+           storedAttempt.voiceContext != nil,
+           intake.voiceContext == nil,
+           storedAttempt.photos.map(\.fingerprint)
+               == snapshot.map(\.fingerprint),
+           storedAttempt.hasSameVoiceReference(as: context.voice) {
+            // An ambiguous voice-bearing request may already have committed. If the
+            // same local asset can no longer reproduce its exact bytes, replacing its
+            // key with a photo-only request could buy a duplicate run. Preserve the
+            // attempt and whole intake until the bytes become readable or #545 expiry
+            // authority resolves the bundle.
+            return .retained(.intakeUnavailable)
+        }
         let attempt: ItemRunSubmissionAttempt
-        if let storedAttempt, storedAttempt.standsFor(snapshot) {
+        if let storedAttempt,
+           storedAttempt.standsFor(
+               snapshot,
+               voiceContext: intake.voiceContext
+           ) {
             attempt = storedAttempt
         } else {
             attempt = ItemRunSubmissionAttempt(
                 idempotencyKey: newIdempotencyKey(),
-                photos: snapshot
+                photos: snapshot,
+                voiceContext: intake.voiceContext
             )
         }
         if attempt != storedAttempt {
@@ -992,7 +1021,8 @@ final class ItemRunSubmissionCoordinator {
         }
         let payload = ItemRunSubmissionPayload(
             attempt: attempt,
-            photoData: intake.photoData
+            photoData: intake.photoData,
+            voiceData: intake.voiceData
         )
         // Resolve again beside dispatch. Comparing only the earlier proof cannot see
         // an authentication switch whose NativeIntake event has not reached AppShell.
@@ -1156,10 +1186,10 @@ final class ItemRunSubmissionCoordinator {
         let attempt = payload.attempt
         switch outcome {
         case .created(let receipt), .replayed(let receipt):
-            // The receipt has to account for what was actually sent before any photo is
-            // deleted. A receipt describing another submission is not permission to
-            // clear this one.
-            guard attempt.matches(receipt: receipt) else {
+            // Exact ordered photos establish the canonical item/run. Optional voice
+            // acceptance is a narrower cleanup authority: null or mismatched voice
+            // still surfaces the photo run while retaining the whole local bundle.
+            guard attempt.matchesPhotos(receipt: receipt) else {
                 return .retained(.receiptMismatch)
             }
             return .accepted(
@@ -1173,7 +1203,11 @@ final class ItemRunSubmissionCoordinator {
                     ),
                     submittedPhotos: submittedPhotos,
                     attempt: attempt,
-                    canClearSubmittedIntake: canClearSubmittedIntake
+                    canClearSubmittedIntake:
+                        canClearSubmittedIntake
+                        && attempt.permitsWholeIntakeCleanup(
+                            receipt: receipt
+                        )
                 )
             )
         case .rejected:

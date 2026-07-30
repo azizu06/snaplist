@@ -374,6 +374,44 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(remaining, intake.photos)
     }
 
+    func testUnreadableOrUnsupportedVoiceFailsOpenToTheExactPhotoPayload()
+        throws {
+        let intake = SubmissionIntakeFixture(photoCount: 2)
+        let voiceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unavailable-voice.wav")
+        let voice = NativeIntake.Voice(
+            id: UUID(),
+            mediaURL: voiceURL,
+            duration: 1
+        )
+        let readPhoto = intake.read
+
+        for unsupportedVoice in [false, true] {
+            let snapshot = try ItemRunSubmissionSnapshot.make(
+                for: intake.photos,
+                voice: voice,
+                localeHint: "en-US",
+                readData: { url in
+                    guard url == voiceURL else {
+                        return try readPhoto(url)
+                    }
+                    if unsupportedVoice {
+                        return Data("not a wave file".utf8)
+                    }
+                    throw CocoaError(.fileNoSuchFile)
+                }
+            )
+
+            XCTAssertEqual(
+                snapshot.photos.map(\.contentSha256),
+                intake.expectedDigests
+            )
+            XCTAssertEqual(snapshot.photoData, intake.expectedBytes)
+            XCTAssertNil(snapshot.voiceContext)
+            XCTAssertNil(snapshot.voiceData)
+        }
+    }
+
     /// An intake outside the one-to-five photo contract never becomes a request. The
     /// server would reject it, and the seller would have paid the round trip to find out.
     func testAnIntakeOutsideOneToFivePhotosIsNeverSubmitted() async {
@@ -903,6 +941,181 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(acceptance.run.runID, Self.canonicalRunID)
     }
 
+    func testRelaunchReusesStoredVoiceLocaleAndKeyWhenLocalePreferenceDrifts()
+        async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "submission-voice-locale-relaunch-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let photoData = SubmissionIntakeFixture.jpeg(
+            filling: "voice-locale-relaunch",
+            repeated: 1
+        )
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: root,
+            verifiedClerkSubject: "user_voice_locale_relaunch",
+            photoData: photoData,
+            voiceData: Self.fixedVoiceWAV()
+        )
+        let scopeRoot = native.snapshot.photos[0].photoURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let scopeProof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                filesystemRoot: scopeRoot
+            )
+        )
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.ambiguous, .ambiguous]
+        )
+        let firstHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof: scopeProof
+                ) {
+                    "clerk-session-token"
+                },
+                voiceLocaleHint: { "en-US" },
+                newIdempotencyKey: { Self.firstKey }
+            )
+        )
+        firstHost.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        await firstHost.startListing(photos: native.snapshot.photos)
+
+        let relaunchedHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof: scopeProof
+                ) {
+                    "clerk-session-token-refreshed"
+                },
+                voiceLocaleHint: { "EN-us" },
+                newIdempotencyKey: { Self.secondKey }
+            )
+        )
+        relaunchedHost.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        await relaunchedHost.startListing(photos: native.snapshot.photos)
+
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 2)
+        XCTAssertEqual(
+            payloads.map(\.attempt.idempotencyKey),
+            [Self.firstKey, Self.firstKey]
+        )
+        XCTAssertEqual(
+            payloads.map(\.attempt.voiceContext?.localeHint),
+            ["en-US", "en-US"]
+        )
+        XCTAssertEqual(payloads[0].voiceData, payloads[1].voiceData)
+    }
+
+    func testUnreadableDurableVoiceAttemptKeepsItsKeyAndStopsBeforeTransport()
+        async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "submission-unreadable-durable-voice-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let photoData = SubmissionIntakeFixture.jpeg(
+            filling: "unreadable-durable-voice",
+            repeated: 1
+        )
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: root,
+            verifiedClerkSubject: "user_unreadable_durable_voice",
+            photoData: photoData,
+            voiceData: Self.fixedVoiceWAV()
+        )
+        let voiceURL = try XCTUnwrap(native.snapshot.voice?.mediaURL)
+        let scopeRoot = native.snapshot.photos[0].photoURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let scopeProof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                filesystemRoot: scopeRoot
+            )
+        )
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let firstHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof: scopeProof
+                ) {
+                    "clerk-session-token"
+                },
+                voiceLocaleHint: { "en-US" },
+                newIdempotencyKey: { Self.firstKey }
+            )
+        )
+        firstHost.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        await firstHost.startListing(photos: native.snapshot.photos)
+
+        let relaunchedHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof: scopeProof
+                ) {
+                    "clerk-session-token-refreshed"
+                },
+                readData: { url in
+                    if url == voiceURL {
+                        throw CocoaError(.fileReadNoSuchFile)
+                    }
+                    return try Data(contentsOf: url)
+                },
+                voiceLocaleHint: { "en-US" },
+                newIdempotencyKey: { Self.secondKey }
+            )
+        )
+        relaunchedHost.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        await relaunchedHost.startListing(photos: native.snapshot.photos)
+
+        XCTAssertEqual(relaunchedHost.retention, .intakeUnavailable)
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(payloads.first?.attempt.idempotencyKey, Self.firstKey)
+        let stored = try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: scopeRoot
+        ).loadAttempt()
+        XCTAssertEqual(stored?.idempotencyKey, Self.firstKey)
+        XCTAssertNotNil(stored?.voiceContext)
+    }
+
     func testADifferentIntakeNeverInheritsTheStoredKey() async {
         let submitted = SubmissionIntakeFixture(photoCount: 2, seed: "first")
         let replaced = SubmissionIntakeFixture(photoCount: 2, seed: "second")
@@ -979,6 +1192,89 @@ final class ItemRunSubmissionTests: XCTestCase {
         // Presence and shape only. A test that knows the token value is a test that leaks it.
         XCTAssertEqual(tokenLengths.count, 1)
         XCTAssertGreaterThan(tokenLengths.first ?? 0, 0)
+    }
+
+    func testNullVoiceReceiptAcceptsRunButPreservesBundleAndAttempt()
+        async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "submission-null-voice-receipt-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let photoData = SubmissionIntakeFixture.jpeg(
+            filling: "null-voice-receipt",
+            repeated: 1
+        )
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: root,
+            verifiedClerkSubject: "user_null_voice_receipt",
+            photoData: photoData,
+            voiceData: Self.fixedVoiceWAV()
+        )
+        let scopeRoot = native.snapshot.photos[0].photoURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let scopeProof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                filesystemRoot: scopeRoot
+            )
+        )
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [
+                .created(
+                    Self.receipt(
+                        photos: Self.receiptPhotos(for: [photoData])
+                    )
+                )
+            ]
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof: scopeProof
+                ) {
+                    "clerk-session-token"
+                },
+                voiceLocaleHint: { "en-US" },
+                newIdempotencyKey: { Self.firstKey }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+
+        let submission = Task {
+            await host.startListing(photos: native.snapshot.photos)
+        }
+        let pendingSavedEvent = await waitForPendingItemSavedEvent(on: host)
+        let savedEvent = try XCTUnwrap(pendingSavedEvent)
+        host.acknowledgePresentation(eventID: savedEvent.eventID)
+        await submission.value
+
+        XCTAssertEqual(host.acceptedRun?.runID, Self.canonicalRunID)
+        XCTAssertFalse(host.clearedIntake)
+        let storedAttempt = try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: scopeRoot
+        ).loadAttempt()
+        XCTAssertEqual(storedAttempt?.idempotencyKey, Self.firstKey)
+        XCTAssertNotNil(storedAttempt?.voiceContext)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: native.snapshot.photos[0].photoURL.path
+            )
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: try XCTUnwrap(native.snapshot.voice).mediaURL.path
+            )
+        )
     }
 
     /// Photo Review's non-final delete is memory-only: the edited set reaches disk
@@ -1293,6 +1589,103 @@ final class ItemRunSubmissionTests: XCTestCase {
         try await relaunched.clearAttempt(attempt)
         let cleared = try await relaunched.loadAttempt()
         XCTAssertNil(cleared)
+    }
+
+    func testStoredVoiceAttemptSurvivesRelaunchAndOnlyAnExactReceiptMatches()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("voice-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let intake = SubmissionIntakeFixture(photoCount: 1)
+        let photoSnapshot = try ItemRunSubmissionSnapshot.make(
+            for: intake.photos,
+            readData: intake.read
+        ).photos
+        let voice = ItemRunSubmissionVoice(
+            assetID: UUID(
+                uuidString: "54160000-0000-4000-8000-000000000004"
+            )!,
+            mediaURL: root
+                .appendingPathComponent("Current/Assets/voice.wav"),
+            contentSha256: String(repeating: "d", count: 64),
+            byteLength: 364,
+            durationMilliseconds: 10,
+            localeHint: "en-US"
+        )
+        let attempt = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: photoSnapshot,
+            voiceContext: voice
+        )
+
+        try await LocalItemRunSubmissionAttemptStore(rootDirectory: root)
+            .saveAttempt(attempt)
+        let restored = try await LocalItemRunSubmissionAttemptStore(
+            rootDirectory: root
+        ).loadAttempt()
+
+        XCTAssertEqual(restored, attempt)
+        XCTAssertEqual(restored?.voiceContext?.mediaURL, voice.mediaURL)
+        XCTAssertEqual(restored?.voiceContext?.localeHint, "en-US")
+
+        let photo = try XCTUnwrap(photoSnapshot.first)
+        func receipt(
+            voiceReceipt: MobileItemSubmissionEnvelope.VoiceReceipt?
+        ) -> MobileItemSubmissionEnvelope.DataPayload {
+            .init(
+                itemId: UUID(),
+                runId: UUID(),
+                status: "queued",
+                stage: "queued",
+                photoIdentity: .init(
+                    kind: "content_sha256_set_v1",
+                    fingerprint: String(repeating: "a", count: 64)
+                ),
+                photos: [
+                    .init(
+                        ordinal: photo.ordinal,
+                        contentSha256: photo.contentSha256,
+                        byteLength: photo.byteLength,
+                        mediaType: photo.mediaType.rawValue
+                    )
+                ],
+                voiceContext: voiceReceipt
+            )
+        }
+        let exact = MobileItemSubmissionEnvelope.VoiceReceipt(
+            version: 1,
+            contentSha256: voice.contentSha256,
+            byteLength: voice.byteLength,
+            durationMs: voice.durationMilliseconds,
+            mediaType: ItemRunSubmissionVoice.mediaType
+        )
+
+        XCTAssertTrue(
+            attempt.matchesPhotos(receipt: receipt(voiceReceipt: exact))
+        )
+        XCTAssertTrue(
+            attempt.permitsWholeIntakeCleanup(
+                receipt: receipt(voiceReceipt: exact)
+            )
+        )
+        XCTAssertFalse(
+            attempt.permitsWholeIntakeCleanup(
+                receipt: receipt(voiceReceipt: nil)
+            )
+        )
+        XCTAssertFalse(
+            attempt.permitsWholeIntakeCleanup(
+                receipt: receipt(
+                    voiceReceipt: .init(
+                        version: exact.version,
+                        contentSha256: String(repeating: "e", count: 64),
+                        byteLength: exact.byteLength,
+                        durationMs: exact.durationMs,
+                        mediaType: exact.mediaType
+                    )
+                )
+            )
+        )
     }
 
     func testPrincipalAttemptStoreRejectsEverySymlinkEscapeIntoForeignScope()
@@ -1751,6 +2144,53 @@ final class ItemRunSubmissionTests: XCTestCase {
         ).loadAttempt()
 
         XCTAssertNil(restored)
+    }
+
+    func testSchemaOnePhotoOnlyAttemptKeepsItsOriginalKeyOnRetry()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("submission-attempt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        let intake = SubmissionIntakeFixture(photoCount: 1)
+        let legacy = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: try ItemRunSubmissionSnapshot.make(
+                for: intake.photos,
+                readData: intake.read
+            ).photos,
+            schemaVersion: 1
+        )
+        try Data(JSONEncoder().encode(legacy)).write(
+            to: root.appendingPathComponent("attempt.json")
+        )
+        let store = LocalItemRunSubmissionAttemptStore(rootDirectory: root)
+        let restored = try await store.loadAttempt()
+
+        XCTAssertEqual(restored?.idempotencyKey, Self.firstKey)
+        XCTAssertEqual(restored?.schemaVersion, 1)
+        XCTAssertNil(restored?.voiceContext)
+
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let coordinator = ItemRunSubmissionCoordinator(
+            submitter: submitter,
+            attemptStore: store,
+            draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+            tokenProvider: TestBearerTokenProvider {
+                "clerk-session-token"
+            },
+            readData: intake.read,
+            newIdempotencyKey: { Self.secondKey }
+        )
+
+        _ = await coordinator.submit(photos: intake.photos)
+
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.first?.attempt.idempotencyKey, Self.firstKey)
+        XCTAssertEqual(payloads.first?.attempt.schemaVersion, 1)
     }
 
     func testAnAttemptFromAnotherSchemaVersionIsDiscardedRatherThanBlocking() async throws {
@@ -2811,10 +3251,22 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
     }
 
+    private static func fixedVoiceWAV() -> Data {
+        Data([
+            0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00,
+            0x57, 0x41, 0x56, 0x45, 0x66, 0x6D, 0x74, 0x20,
+            0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+            0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00,
+            0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61,
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ])
+    }
+
     private func makeNativePrincipalIntake(
         applicationSupport: URL,
         verifiedClerkSubject: String,
-        photoData: Data
+        photoData: Data,
+        voiceData: Data? = nil
     ) async throws -> (
         intake: NativeIntake,
         snapshot: NativeIntake.Snapshot
@@ -2847,9 +3299,23 @@ final class ItemRunSubmissionTests: XCTestCase {
         guard outcome == .committed else {
             throw CocoaError(.fileWriteUnknown)
         }
+        if let voiceData {
+            let voiceOutcome = await intake.perform(
+                .setVoice(
+                    NativeIntake.VoiceInput(
+                        duration: 0.001,
+                        loadData: { voiceData }
+                    )
+                )
+            )
+            guard voiceOutcome == .committed else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
         while let event = await iterator.next() {
             if case .snapshot(let snapshot) = event,
-               snapshot.photos.count == 1 {
+               snapshot.photos.count == 1,
+               snapshot.voice != nil || voiceData == nil {
                 return (intake, snapshot)
             }
         }

@@ -24,6 +24,31 @@ export const fiveJpegs = Array.from(
   (_, ordinal) => new Uint8Array([...jpeg, ordinal]),
 );
 
+export function fixedWavBytes(sampleSeed = 0): Uint8Array {
+  const samples = 160;
+  const bytes = new Uint8Array(44 + samples * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      bytes[offset + index] = value.charCodeAt(index);
+    }
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, bytes.byteLength - 8, true);
+  ascii(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16_000, true);
+  view.setUint32(28, 32_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, "data");
+  view.setUint32(40, samples * 2, true);
+  view.setInt16(44, sampleSeed, true);
+  return bytes;
+}
+
 export function singlePhotoMultipart(costBasis = "12.50"): FormData {
   const body = new FormData();
   body.append(
@@ -55,6 +80,7 @@ export function fivePhotoMultipart(
   costBasis = "12.50",
   order = [0, 1, 2, 3, 4],
   changedOrdinal: number | null = null,
+  voice?: { bytes: Uint8Array; locale: string },
 ): FormData {
   const body = new FormData();
   const photos = [
@@ -73,6 +99,17 @@ export function fivePhotoMultipart(
     body.append("photo", new File([bytes.buffer], name, { type }));
   }
   body.append("costBasis", costBasis);
+  if (voice) {
+    body.append(
+      "voiceContext",
+      new File(
+        [Uint8Array.from(voice.bytes).buffer],
+        "seller-context.wav",
+        { type: "audio/wav" },
+      ),
+    );
+    body.append("voiceContextLocale", voice.locale);
+  }
   return body;
 }
 

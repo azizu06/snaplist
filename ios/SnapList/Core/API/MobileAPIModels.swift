@@ -36,6 +36,14 @@ struct MobileItemSubmissionEnvelope: Codable, Equatable {
         let mediaType: String
     }
 
+    struct VoiceReceipt: Codable, Equatable {
+        let version: Int
+        let contentSha256: String
+        let byteLength: Int
+        let durationMs: Int
+        let mediaType: String
+    }
+
     struct DataPayload: Codable, Equatable {
         let itemId: UUID
         let runId: UUID
@@ -43,6 +51,25 @@ struct MobileItemSubmissionEnvelope: Codable, Equatable {
         let stage: String
         let photoIdentity: PhotoIdentity
         let photos: [PhotoReceipt]
+        let voiceContext: VoiceReceipt?
+
+        init(
+            itemId: UUID,
+            runId: UUID,
+            status: String,
+            stage: String,
+            photoIdentity: PhotoIdentity,
+            photos: [PhotoReceipt],
+            voiceContext: VoiceReceipt? = nil
+        ) {
+            self.itemId = itemId
+            self.runId = runId
+            self.status = status
+            self.stage = stage
+            self.photoIdentity = photoIdentity
+            self.photos = photos
+            self.voiceContext = voiceContext
+        }
     }
 
     let data: DataPayload

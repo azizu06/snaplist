@@ -91,6 +91,36 @@ final class ItemRunSubmissionClientTests: XCTestCase {
         XCTAssertTrue(text.hasSuffix("--snaplist-boundary--\r\n"))
     }
 
+    func testMultipartBodyCarriesTheExactRecoveredVoiceAndLocaleUnderTheSameAttempt()
+        throws {
+        let payload = Self.payload(photoCount: 1, voice: true)
+
+        let body = ItemRunSubmissionMultipart.body(
+            for: payload,
+            boundary: "snaplist-boundary"
+        )
+        let text = try XCTUnwrap(String(data: body, encoding: .isoLatin1))
+
+        XCTAssertEqual(
+            text.components(separatedBy: "name=\"voiceContext\"").count - 1,
+            1
+        )
+        XCTAssertEqual(
+            text.components(
+                separatedBy: "name=\"voiceContextLocale\""
+            ).count - 1,
+            1
+        )
+        XCTAssertTrue(text.contains("Content-Type: audio/wav"))
+        XCTAssertTrue(text.contains("en-US"))
+        let voiceData = try XCTUnwrap(payload.voiceData)
+        XCTAssertTrue(body.range(of: voiceData) != nil)
+        XCTAssertEqual(
+            payload.attempt.voiceContext?.contentSha256,
+            LocalPhotoFingerprint.digest(of: voiceData)
+        )
+    }
+
     func testStatusCodesMapToTheirTypedOutcome() async throws {
         let expectations: [(Int, String, ItemRunSubmissionTransportOutcome)] = [
             (202, Self.receiptJSON, .created(Self.expectedReceipt)),
@@ -181,11 +211,30 @@ final class ItemRunSubmissionClientTests: XCTestCase {
         )!
     }
 
-    private static func payload(photoCount: Int) -> ItemRunSubmissionPayload {
+    private static func payload(
+        photoCount: Int,
+        voice: Bool = false
+    ) -> ItemRunSubmissionPayload {
         let photoData = (0..<photoCount).map { index in
             var data = Data([0xFF, 0xD8, 0xFF])
             data.append(Data("PHOTOBYTES\(index)".utf8))
             return data
+        }
+        let voiceData = voice ? fixedWAV() : nil
+        let voiceContext = voiceData.map {
+            ItemRunSubmissionVoice(
+                assetID: UUID(
+                    uuidString: "54150000-0000-4000-8000-000000000004"
+                )!,
+                mediaURL: URL(
+                    fileURLWithPath:
+                        "/fixture/Current/Assets/seller-context.wav"
+                ),
+                contentSha256: LocalPhotoFingerprint.digest(of: $0),
+                byteLength: $0.count,
+                durationMilliseconds: 10,
+                localeHint: "en-US"
+            )
         }
         return ItemRunSubmissionPayload(
             attempt: ItemRunSubmissionAttempt(
@@ -200,10 +249,40 @@ final class ItemRunSubmissionClientTests: XCTestCase {
                         byteLength: data.count,
                         mediaType: .jpeg
                     )
-                }
+                },
+                voiceContext: voiceContext
             ),
-            photoData: photoData
+            photoData: photoData,
+            voiceData: voiceData
         )
+    }
+
+    private static func fixedWAV() -> Data {
+        let sampleCount = 160
+        var data = Data()
+        func appendASCII(_ value: String) {
+            data.append(Data(value.utf8))
+        }
+        func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+            var littleEndian = value.littleEndian
+            withUnsafeBytes(of: &littleEndian) {
+                data.append(contentsOf: $0)
+            }
+        }
+        appendASCII("RIFF")
+        appendLittleEndian(UInt32(36 + sampleCount * 2))
+        appendASCII("WAVEfmt ")
+        appendLittleEndian(UInt32(16))
+        appendLittleEndian(UInt16(1))
+        appendLittleEndian(UInt16(1))
+        appendLittleEndian(UInt32(16_000))
+        appendLittleEndian(UInt32(32_000))
+        appendLittleEndian(UInt16(2))
+        appendLittleEndian(UInt16(16))
+        appendASCII("data")
+        appendLittleEndian(UInt32(sampleCount * 2))
+        data.append(Data(repeating: 0, count: sampleCount * 2))
+        return data
     }
 
     private static let expectedReceipt = MobileItemSubmissionEnvelope.DataPayload(
@@ -222,7 +301,8 @@ final class ItemRunSubmissionClientTests: XCTestCase {
                 byteLength: 4,
                 mediaType: "image/jpeg"
             )
-        ]
+        ],
+        voiceContext: nil
     )
 
     private static let receiptJSON = #"""
@@ -243,7 +323,8 @@ final class ItemRunSubmissionClientTests: XCTestCase {
             "byteLength": 4,
             "mediaType": "image/jpeg"
           }
-        ]
+        ],
+        "voiceContext": null
       },
       "meta": { "requestId": "req_test" }
     }

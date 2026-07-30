@@ -8,6 +8,10 @@ import {
   type PreparedMobileSubmissionPhoto,
   type SubmissionPrincipal,
 } from "./contract";
+import {
+  MOBILE_ITEM_VOICE_MEDIA_TYPE,
+  type PreparedMobileSubmissionVoice,
+} from "./voice";
 
 export interface StoredMobileSubmissionPhotoReceipt {
   ordinal: number;
@@ -17,25 +21,39 @@ export interface StoredMobileSubmissionPhotoReceipt {
   mediaType: MobileSubmissionMediaType;
 }
 
+export interface StoredMobileSubmissionVoiceReceipt {
+  storagePath: string;
+  contentSha256: string;
+  byteLength: number;
+  durationMs: number;
+  locale: string | null;
+  mediaType: typeof MOBILE_ITEM_VOICE_MEDIA_TYPE;
+  version: 1;
+}
+
 export interface MobileItemSubmissionStaging {
   findSubmission(input: {
     userId: string;
     idempotencyKey: string;
+    legacyRequestFingerprint: string | null;
     requestFingerprint: string;
   }): Promise<MobileItemSubmissionReceipt | null>;
   beginSubmission(input: {
     cleanupId: string;
     userId: string;
     idempotencyKey: string;
+    legacyRequestFingerprint: string | null;
     requestFingerprint: string;
     batchId: string;
     costBasis: number | null;
     photoReceipts: StoredMobileSubmissionPhotoReceipt[];
+    voiceReceipt: StoredMobileSubmissionVoiceReceipt | null;
   }): Promise<boolean | void>;
   resolveCleanupIntent(cleanupId: string): Promise<boolean | void>;
   commitSubmission(input: {
     userId: string;
     idempotencyKey: string;
+    legacyRequestFingerprint: string | null;
     requestFingerprint: string;
     batchId: string;
     cleanupId: string;
@@ -47,6 +65,7 @@ export interface MobileItemSubmissionStaging {
       fingerprint: string;
     };
     photoReceipts: StoredMobileSubmissionPhotoReceipt[];
+    voiceReceipt: StoredMobileSubmissionVoiceReceipt | null;
   }): Promise<{
     outcome: "created" | "replayed";
     receipt: MobileItemSubmissionReceipt;
@@ -57,7 +76,7 @@ export interface TenantPhotoStorage {
   upload(
     path: string,
     bytes: Uint8Array,
-    mediaType: MobileSubmissionMediaType,
+    mediaType: MobileSubmissionMediaType | typeof MOBILE_ITEM_VOICE_MEDIA_TYPE,
   ): Promise<void>;
   download(path: string): Promise<{
     bytes: Uint8Array;
@@ -108,13 +127,35 @@ function plannedReceipt(
   };
 }
 
+function plannedVoiceReceipt(
+  principal: SubmissionPrincipal,
+  batchId: string,
+  voice: PreparedMobileSubmissionVoice,
+): StoredMobileSubmissionVoiceReceipt {
+  return {
+    storagePath: [
+      principal.userId,
+      "pipeline-staging",
+      batchId,
+      "0",
+      `voice-${voice.contentSha256}.wav`,
+    ].join("/"),
+    contentSha256: voice.contentSha256,
+    byteLength: voice.byteLength,
+    durationMs: voice.durationMs,
+    locale: voice.locale,
+    mediaType: voice.mediaType,
+    version: voice.version,
+  };
+}
+
 async function writeAndVerify(
   storage: TenantPhotoStorage,
-  photo: PreparedMobileSubmissionPhoto,
-  receipt: StoredMobileSubmissionPhotoReceipt,
+  asset: PreparedMobileSubmissionPhoto | PreparedMobileSubmissionVoice,
+  receipt: StoredMobileSubmissionPhotoReceipt | StoredMobileSubmissionVoiceReceipt,
 ): Promise<void> {
   try {
-    await storage.upload(receipt.storagePath, photo.bytes, photo.mediaType);
+    await storage.upload(receipt.storagePath, asset.bytes, asset.mediaType);
   } catch (uploadError) {
     // An identical concurrent/recovery attempt uses the same server path. It is
     // safe to continue only when an independent read proves the exact object.
@@ -160,12 +201,16 @@ export function createMobileItemSubmissionOperations(
       const replay = await staging.findSubmission({
         userId: input.principal.userId,
         idempotencyKey: input.idempotencyKey,
+        legacyRequestFingerprint: input.legacyRequestFingerprint,
         requestFingerprint: input.requestFingerprint,
       });
       if (replay) {
         return {
           outcome: "replayed",
-          receipt: mobileItemSubmissionReceiptSchema.parse(replay),
+          receipt: mobileItemSubmissionReceiptSchema.parse({
+            ...replay,
+            voiceContext: replay.voiceContext ?? null,
+          }),
         };
       }
 
@@ -176,20 +221,30 @@ export function createMobileItemSubmissionOperations(
       const photoReceipts = input.photos.map((photo) =>
         plannedReceipt(input.principal, batchId, photo),
       );
+      const voice = input.voice ?? null;
+      const voiceReceipt =
+        voice === null
+          ? null
+          : plannedVoiceReceipt(input.principal, batchId, voice);
 
       await staging.beginSubmission({
         cleanupId,
         userId: input.principal.userId,
         idempotencyKey: input.idempotencyKey,
+        legacyRequestFingerprint: input.legacyRequestFingerprint,
         requestFingerprint: input.requestFingerprint,
         batchId,
         costBasis: input.costBasis,
         photoReceipts,
+        voiceReceipt,
       });
 
       const storage = composition.storageFor(input.principal);
       for (const [index, photo] of input.photos.entries()) {
         await writeAndVerify(storage, photo, photoReceipts[index]);
+      }
+      if (voice && voiceReceipt) {
+        await writeAndVerify(storage, voice, voiceReceipt);
       }
 
       const photoIdentity = canonicalizeVerifiedPhotoSet(
@@ -198,6 +253,7 @@ export function createMobileItemSubmissionOperations(
       const result = await staging.commitSubmission({
         userId: input.principal.userId,
         idempotencyKey: input.idempotencyKey,
+        legacyRequestFingerprint: input.legacyRequestFingerprint,
         requestFingerprint: input.requestFingerprint,
         batchId,
         cleanupId,
@@ -206,6 +262,7 @@ export function createMobileItemSubmissionOperations(
         perMinuteLimit: composition.limits.perMinuteLimit,
         photoIdentity,
         photoReceipts,
+        voiceReceipt,
       });
 
       if (input.principal.kind === "clerk") {
@@ -218,7 +275,10 @@ export function createMobileItemSubmissionOperations(
       }
       return {
         outcome: result.outcome,
-        receipt: mobileItemSubmissionReceiptSchema.parse(result.receipt),
+        receipt: mobileItemSubmissionReceiptSchema.parse({
+          ...result.receipt,
+          voiceContext: result.receipt.voiceContext ?? null,
+        }),
       };
     },
   };

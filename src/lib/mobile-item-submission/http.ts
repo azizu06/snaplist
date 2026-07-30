@@ -6,9 +6,12 @@ import {
   prepareMobileItemSubmission,
   type MobileItemSubmissionOperations,
 } from "./contract";
+import { parseBoundedMobileItemSubmissionMultipart } from "./bounded-multipart";
 
 export interface MobileItemSubmissionHttpDependencies {
   itemSubmission: MobileItemSubmissionOperations;
+  /** Defaults on for contract tests; production composition must opt in after #386. */
+  acceptVoiceContext?: () => boolean;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
 }
@@ -68,7 +71,12 @@ export function createMobileItemSubmissionHandler(
 
     let prepared;
     try {
-      prepared = await prepareMobileItemSubmission(await request.formData());
+      prepared = await prepareMobileItemSubmission(
+        await parseBoundedMobileItemSubmissionMultipart(request),
+        {
+          acceptVoiceContext: dependencies.acceptVoiceContext?.() ?? true,
+        },
+      );
     } catch {
       return errorResponse(
         requestId,
@@ -82,13 +90,18 @@ export function createMobileItemSubmissionHandler(
       const result = await dependencies.itemSubmission.submit({
         principal,
         idempotencyKey: idempotencyKey.data,
+        legacyRequestFingerprint: prepared.legacyRequestFingerprint,
         requestFingerprint: prepared.requestFingerprint,
         costBasis: prepared.costBasis,
         photos: prepared.photos,
+        voice: prepared.voice,
       });
       return json(
         mobileItemSubmissionEnvelopeSchema.parse({
-          data: result.receipt,
+          data: {
+            ...result.receipt,
+            voiceContext: result.receipt.voiceContext ?? null,
+          },
           meta: { requestId },
         }),
         result.outcome === "created" ? 202 : 200,

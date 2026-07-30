@@ -16,6 +16,10 @@ function supabaseConfiguration() {
 }
 
 const handler = createMobileItemSubmissionHandler({
+  // #386 owns the terminal deletion proof. Release deployments remain
+  // photos-only until the operator deliberately enables this after that gate.
+  acceptVoiceContext: () =>
+    process.env.MOBILE_VOICE_SUBMISSION_ENABLED?.trim().toLowerCase() === "true",
   itemSubmission: {
     async resolvePrincipal(bearerToken) {
       if (bearerToken.startsWith("guestcap_")) {

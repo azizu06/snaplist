@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { parseCostBasis } from "@/lib/pipeline/autopilot";
+import {
+  MAX_MOBILE_ITEM_VOICE_BYTES,
+  MAX_MOBILE_ITEM_VOICE_DURATION_MS,
+  MOBILE_ITEM_VOICE_MEDIA_TYPE,
+  prepareMobileSubmissionVoice,
+  type PreparedMobileSubmissionVoice,
+} from "./voice";
 
 export const MAX_MOBILE_ITEM_PHOTO_BYTES = 50 * 1024 * 1024;
 export const MAX_MOBILE_ITEM_PHOTOS = 5;
@@ -43,9 +50,25 @@ export interface PreparedMobileSubmissionPhoto {
 
 export interface PreparedMobileItemSubmission {
   costBasis: number | null;
+  legacyRequestFingerprint: string | null;
   photos: PreparedMobileSubmissionPhoto[];
   requestFingerprint: string;
+  voice: PreparedMobileSubmissionVoice | null;
 }
+
+export const mobileSubmissionVoiceReceiptSchema = z
+  .object({
+    version: z.literal(1),
+    contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
+    byteLength: z.number().int().positive().max(MAX_MOBILE_ITEM_VOICE_BYTES),
+    durationMs: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_MOBILE_ITEM_VOICE_DURATION_MS),
+    mediaType: z.literal(MOBILE_ITEM_VOICE_MEDIA_TYPE),
+  })
+  .strict();
 
 export const mobileItemSubmissionReceiptSchema = z
   .object({
@@ -72,6 +95,7 @@ export const mobileItemSubmissionReceiptSchema = z
       )
       .min(1)
       .max(MAX_MOBILE_ITEM_PHOTOS),
+    voiceContext: mobileSubmissionVoiceReceiptSchema.nullable(),
   })
   .strict();
 
@@ -91,9 +115,11 @@ export interface MobileItemSubmissionOperations {
   submit(input: {
     principal: SubmissionPrincipal;
     idempotencyKey: string;
+    legacyRequestFingerprint: string | null;
     requestFingerprint: string;
     costBasis: number | null;
     photos: PreparedMobileSubmissionPhoto[];
+    voice: PreparedMobileSubmissionVoice | null;
   }): Promise<{
     outcome: "created" | "replayed";
     receipt: MobileItemSubmissionReceipt;
@@ -190,6 +216,38 @@ function sniffMediaType(bytes: Uint8Array): MobileSubmissionMediaType | null {
 function requestFingerprint(
   photos: readonly PreparedMobileSubmissionPhoto[],
   costBasis: number | null,
+  voice: PreparedMobileSubmissionVoice | null,
+): string {
+  const hash = createHash("sha256");
+  hash.update("snaplist-mobile-item-submission-v2\0", "utf8");
+  hash.update(
+    JSON.stringify({
+      costBasisCents: costBasis == null ? null : Math.round(costBasis * 100),
+      photoCount: photos.length,
+      voice:
+        voice === null
+          ? null
+          : {
+              version: voice.version,
+              contentSha256: voice.contentSha256,
+              byteLength: voice.byteLength,
+              durationMs: voice.durationMs,
+              mediaType: voice.mediaType,
+              locale: voice.locale,
+            },
+    }),
+    "utf8",
+  );
+  for (const photo of photos) {
+    hash.update(`\0${photo.ordinal}:${photo.byteLength}:`, "utf8");
+    hash.update(photo.bytes);
+  }
+  return hash.digest("hex");
+}
+
+function legacyPhotoOnlyRequestFingerprint(
+  photos: readonly PreparedMobileSubmissionPhoto[],
+  costBasis: number | null,
 ): string {
   const hash = createHash("sha256");
   hash.update("snaplist-mobile-item-submission-v1\0", "utf8");
@@ -209,8 +267,14 @@ function requestFingerprint(
 
 export async function prepareMobileItemSubmission(
   formData: FormData,
+  options: { acceptVoiceContext?: boolean } = {},
 ): Promise<PreparedMobileItemSubmission> {
-  const allowedFields = new Set(["photo", "costBasis"]);
+  const allowedFields = new Set([
+    "photo",
+    "costBasis",
+    "voiceContext",
+    "voiceContextLocale",
+  ]);
   for (const key of formData.keys()) {
     if (!allowedFields.has(key)) {
       throw new Error("The multipart request contains an unsupported field.");
@@ -224,8 +288,21 @@ export async function prepareMobileItemSubmission(
   if (formData.getAll("costBasis").length > 1) {
     throw new Error("Submit cost basis at most once.");
   }
+  if (formData.getAll("voiceContext").length > 1) {
+    throw new Error("Submit voice context at most once.");
+  }
+  if (formData.getAll("voiceContextLocale").length > 1) {
+    throw new Error("Submit voice locale at most once.");
+  }
 
   const costBasis = parseCostBasis(formData.get("costBasis"));
+  const voice =
+    options.acceptVoiceContext === false
+      ? null
+      : await prepareMobileSubmissionVoice(
+          formData.get("voiceContext"),
+          formData.get("voiceContextLocale"),
+        );
   const photos: PreparedMobileSubmissionPhoto[] = [];
   for (const [ordinal, value] of photoValues.entries()) {
     if (!(value instanceof File) || value.size < 1) {
@@ -254,7 +331,12 @@ export async function prepareMobileItemSubmission(
 
   return {
     costBasis,
+    legacyRequestFingerprint:
+      voice === null
+        ? legacyPhotoOnlyRequestFingerprint(photos, costBasis)
+        : null,
     photos,
-    requestFingerprint: requestFingerprint(photos, costBasis),
+    requestFingerprint: requestFingerprint(photos, costBasis, voice),
+    voice,
   };
 }

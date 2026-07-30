@@ -62,8 +62,25 @@ struct ItemRunSubmissionPhoto: Codable, Equatable, Sendable {
     }
 }
 
+/// The exact recovered WAV asset bound to one durable submission attempt.
+///
+/// The URL stays inside #540's opaque principal vault. It is a durable bytes
+/// reference, not a server path or an authorization capability.
+struct ItemRunSubmissionVoice: Codable, Equatable, Sendable {
+    static let mediaType = "audio/wav"
+    static let maximumByteLength = 512 * 1024
+    static let maximumDurationMilliseconds = 15_000
+
+    let assetID: UUID
+    let mediaURL: URL
+    let contentSha256: String
+    let byteLength: Int
+    let durationMilliseconds: Int
+    let localeHint: String?
+}
+
 /// One logical submission: the key the server deduplicates on, bound to the exact
-/// ordered photo identity it was minted for.
+/// ordered photo identity and optional recovered voice it was minted for.
 ///
 /// The key is persisted with its snapshot rather than generated per network attempt.
 /// A key regenerated on retry would let the server treat an exact replay as a second
@@ -72,11 +89,24 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
     /// Bumped when the persisted shape changes. A record written by another version is
     /// recognisably stale rather than corrupt, so it can be discarded instead of
     /// blocking the seller.
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     let idempotencyKey: UUID
     let photos: [ItemRunSubmissionPhoto]
+    let voiceContext: ItemRunSubmissionVoice?
     var schemaVersion = ItemRunSubmissionAttempt.currentSchemaVersion
+
+    init(
+        idempotencyKey: UUID,
+        photos: [ItemRunSubmissionPhoto],
+        voiceContext: ItemRunSubmissionVoice? = nil,
+        schemaVersion: Int = ItemRunSubmissionAttempt.currentSchemaVersion
+    ) {
+        self.idempotencyKey = idempotencyKey
+        self.photos = photos
+        self.voiceContext = voiceContext
+        self.schemaVersion = schemaVersion
+    }
 
     /// Just enough of a stored record to tell a different shape from a broken one. A
     /// synthesised decode of the whole attempt cannot: a renamed or removed field and
@@ -86,22 +116,79 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
     }
 
     /// True when this attempt stands for the same submission the server would see.
-    func standsFor(_ photos: [ItemRunSubmissionPhoto]) -> Bool {
+    func standsFor(
+        _ photos: [ItemRunSubmissionPhoto],
+        voiceContext: ItemRunSubmissionVoice? = nil
+    ) -> Bool {
         self.photos.map(\.fingerprint) == photos.map(\.fingerprint)
+            && sameVoiceAsset(as: voiceContext)
+    }
+
+    /// The current locale preference is not request identity after an attempt is
+    /// durable. Exact recovered bytes reuse the locale and key captured on that
+    /// attempt; a different local asset or different bytes do not.
+    private func sameVoiceAsset(as candidate: ItemRunSubmissionVoice?) -> Bool {
+        switch (voiceContext, candidate) {
+        case (nil, nil):
+            return true
+        case let (stored?, current?):
+            return stored.assetID == current.assetID
+                && stored.mediaURL == current.mediaURL
+                && stored.contentSha256 == current.contentSha256
+                && stored.byteLength == current.byteLength
+                && stored.durationMilliseconds == current.durationMilliseconds
+        case (nil, _?), (_?, nil):
+            return false
+        }
+    }
+
+    /// Identifies the same committed NativeIntake voice reference without claiming
+    /// its bytes are still readable. This is only a fail-closed guard for a durable
+    /// voice-bearing attempt; it never makes an unreadable asset submittable.
+    func hasSameVoiceReference(as candidate: NativeIntake.Voice?) -> Bool {
+        guard let stored = voiceContext, let candidate else {
+            return false
+        }
+        return stored.assetID == candidate.id
+            && stored.mediaURL == candidate.mediaURL
     }
 
     /// True when the receipt accounts for every submitted photo, in order, byte for
-    /// byte. Anything less means the server is describing a different submission and
-    /// the seller's intake must survive.
-    func matches(receipt: MobileItemSubmissionEnvelope.DataPayload) -> Bool {
+    /// byte. Voice acceptance is deliberately separate: a null or mismatched voice
+    /// receipt still describes the canonical photo run but cannot authorize local
+    /// voice cleanup.
+    func matchesPhotos(
+        receipt: MobileItemSubmissionEnvelope.DataPayload
+    ) -> Bool {
         guard receipt.photos.count == photos.count else {
             return false
         }
-        return zip(photos, receipt.photos).allSatisfy { submitted, received in
+        return zip(photos, receipt.photos).allSatisfy {
+            submitted, received in
             received.ordinal == submitted.ordinal
                 && received.contentSha256 == submitted.contentSha256
                 && received.byteLength == submitted.byteLength
                 && received.mediaType == submitted.mediaType.rawValue
+        }
+    }
+
+    /// Whole-bundle deletion is safe only when the nullable voice receipt accounts
+    /// for the exact optional local asset. A rejected voice remains under #545's
+    /// explicit discard and recovery-expiry authority.
+    func permitsWholeIntakeCleanup(
+        receipt: MobileItemSubmissionEnvelope.DataPayload
+    ) -> Bool {
+        switch (voiceContext, receipt.voiceContext) {
+        case (nil, nil):
+            return true
+        case let (submitted?, received?):
+            return received.version == 1
+                && received.contentSha256 == submitted.contentSha256
+                && received.byteLength == submitted.byteLength
+                && received.durationMs == submitted.durationMilliseconds
+                && received.mediaType == ItemRunSubmissionVoice.mediaType
+        case (nil, _?), (_?, nil):
+            return false
         }
     }
 }
@@ -110,6 +197,17 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
 struct ItemRunSubmissionPayload: Equatable, Sendable {
     let attempt: ItemRunSubmissionAttempt
     let photoData: [Data]
+    let voiceData: Data?
+
+    init(
+        attempt: ItemRunSubmissionAttempt,
+        photoData: [Data],
+        voiceData: Data? = nil
+    ) {
+        self.attempt = attempt
+        self.photoData = photoData
+        self.voiceData = voiceData
+    }
 }
 
 /// The canonical durable run identity a validated receipt carries. It makes no claim
@@ -141,7 +239,7 @@ enum ItemRunSubmissionTransportOutcome: Equatable, Sendable {
     case authenticationRequired
     /// `403` — AI-item credit policy denied this submission.
     case creditDenied(reason: String?)
-    /// `409` — the key is bound to different bytes, order, or cost basis.
+    /// `409` — the key is bound to different photos, cost, voice, or locale.
     case conflict
     /// `429` — submission capacity was reached.
     case rateLimited(reason: String?)
@@ -211,6 +309,8 @@ enum ItemRunSubmissionSnapshot {
     struct Result: Equatable {
         let photos: [ItemRunSubmissionPhoto]
         let photoData: [Data]
+        let voiceContext: ItemRunSubmissionVoice?
+        let voiceData: Data?
     }
 
     /// Reads the seller's ordered photos once into both the logical identity the
@@ -221,6 +321,8 @@ enum ItemRunSubmissionSnapshot {
     /// fingerprinted, and the request would then describe photos it did not send.
     static func make(
         for staged: [StagedCapturePhoto],
+        voice: NativeIntake.Voice? = nil,
+        localeHint: String? = nil,
         readData: (URL) throws -> Data
     ) throws -> Result {
         guard photoCountLimits.contains(staged.count) else {
@@ -252,6 +354,110 @@ enum ItemRunSubmissionSnapshot {
             )
             photoData.append(data)
         }
-        return Result(photos: photos, photoData: photoData)
+        let preparedVoice: (ItemRunSubmissionVoice, Data)?
+        if let voice {
+            if let data = try? readData(voice.mediaURL),
+               let durationMilliseconds = voiceDurationMilliseconds(data) {
+                preparedVoice = (
+                    ItemRunSubmissionVoice(
+                        assetID: voice.id,
+                        mediaURL: voice.mediaURL,
+                        contentSha256: LocalPhotoFingerprint.digest(of: data),
+                        byteLength: data.count,
+                        durationMilliseconds: durationMilliseconds,
+                        localeHint: localeHint
+                    ),
+                    data
+                )
+            } else {
+                preparedVoice = nil
+            }
+        } else {
+            preparedVoice = nil
+        }
+        return Result(
+            photos: photos,
+            photoData: photoData,
+            voiceContext: preparedVoice?.0,
+            voiceData: preparedVoice?.1
+        )
+    }
+
+    private static func voiceDurationMilliseconds(_ data: Data) -> Int? {
+        guard data.count >= 44,
+              data.count <= ItemRunSubmissionVoice.maximumByteLength,
+              Data(data.prefix(4)) == Data("RIFF".utf8),
+              data.subdata(in: 8..<12) == Data("WAVE".utf8),
+              integer(in: data, at: 4, byteCount: 4) == data.count - 8
+        else {
+            return nil
+        }
+
+        var offset = 12
+        var foundFormat = false
+        var dataByteLength = 0
+        while offset + 8 <= data.count {
+            let chunkID = data.subdata(in: offset..<(offset + 4))
+            guard let chunkLength = integer(
+                in: data,
+                at: offset + 4,
+                byteCount: 4
+            ) else {
+                return nil
+            }
+            let chunkStart = offset + 8
+            let chunkEnd = chunkStart + chunkLength
+            guard chunkEnd <= data.count else {
+                return nil
+            }
+            if chunkID == Data("fmt ".utf8), !foundFormat {
+                guard chunkLength >= 16,
+                      integer(in: data, at: chunkStart, byteCount: 2) == 1,
+                      integer(in: data, at: chunkStart + 2, byteCount: 2) == 1,
+                      integer(in: data, at: chunkStart + 4, byteCount: 4) == 16_000,
+                      integer(in: data, at: chunkStart + 8, byteCount: 4) == 32_000,
+                      integer(in: data, at: chunkStart + 12, byteCount: 2) == 2,
+                      integer(in: data, at: chunkStart + 14, byteCount: 2) == 16
+                else {
+                    return nil
+                }
+                foundFormat = true
+            } else if chunkID == Data("data".utf8) {
+                dataByteLength += chunkLength
+            }
+            offset = chunkEnd + chunkLength % 2
+        }
+
+        guard offset == data.count,
+              foundFormat,
+              dataByteLength > 0,
+              dataByteLength.isMultiple(of: 2)
+        else {
+            return nil
+        }
+        let duration = Int(
+            ceil(Double(dataByteLength / 2) / 16_000 * 1_000)
+        )
+        guard duration <= ItemRunSubmissionVoice.maximumDurationMilliseconds
+        else {
+            return nil
+        }
+        return duration
+    }
+
+    private static func integer(
+        in data: Data,
+        at offset: Int,
+        byteCount: Int
+    ) -> Int? {
+        guard byteCount > 0, byteCount <= 4, offset + byteCount <= data.count
+        else {
+            return nil
+        }
+        return data[offset..<(offset + byteCount)]
+            .enumerated()
+            .reduce(0) { result, pair in
+                result | Int(pair.element) << (pair.offset * 8)
+            }
     }
 }

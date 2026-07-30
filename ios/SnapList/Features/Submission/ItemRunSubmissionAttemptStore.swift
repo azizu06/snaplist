@@ -55,6 +55,7 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
     let generation: UUID
     let scopeProof: ItemRunSubmissionPrincipalScopeProof
     let photos: [StagedCapturePhoto]
+    let voice: NativeIntake.Voice?
     let attemptStore: any ItemRunSubmissionAttemptStoring
 
     private let validateFilesystemContext:
@@ -65,6 +66,7 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
         generation: UUID,
         scopeProof: ItemRunSubmissionPrincipalScopeProof,
         photos: [StagedCapturePhoto],
+        voice: NativeIntake.Voice?,
         attemptStore: any ItemRunSubmissionAttemptStoring,
         validateFilesystemContext:
             @escaping @Sendable () async throws -> Void,
@@ -73,6 +75,7 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
         self.generation = generation
         self.scopeProof = scopeProof
         self.photos = photos
+        self.voice = voice
         self.attemptStore = attemptStore
         self.validateFilesystemContext = validateFilesystemContext
         self.discardCommittedIntake = discardCommittedIntake
@@ -84,7 +87,10 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
         fileManager: FileManager = .default
     ) {
         guard snapshot.recovery == .ready,
-              let filesystemRoot = Self.filesystemRoot(for: snapshot.photos),
+              let filesystemRoot = Self.filesystemRoot(
+                  for: snapshot.photos,
+                  voice: snapshot.voice
+              ),
               LocalItemRunSubmissionAttemptStore
                   .trustedApplicationSupportAnchor(
                       forPrincipalRoot: filesystemRoot
@@ -103,6 +109,7 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
             generation: snapshot.version.activationID,
             scopeProof: scopeProof,
             photos: snapshot.photos,
+            voice: snapshot.voice,
             attemptStore: attemptStore,
             validateFilesystemContext: {
                 try await attemptStore.validatePrincipalScope()
@@ -131,7 +138,8 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
     /// Translate that public committed path back to the immutable opaque root and
     /// reject mixed or malformed roots rather than guessing principal ownership.
     private static func filesystemRoot(
-        for photos: [StagedCapturePhoto]
+        for photos: [StagedCapturePhoto],
+        voice: NativeIntake.Voice?
     ) -> URL? {
         guard let first = photos.first,
               let root = filesystemRoot(for: first.photoURL)
@@ -147,7 +155,13 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
                 == assetsRoot
                 && $0.thumbnailURL.deletingLastPathComponent()
                     .standardizedFileURL == assetsRoot
-        }) else {
+        }),
+              (
+                  voice == nil
+                      || voice?.mediaURL.deletingLastPathComponent()
+                          .standardizedFileURL == assetsRoot
+              )
+        else {
             return nil
         }
         return root
@@ -269,11 +283,18 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
             ItemRunSubmissionAttempt.StoredVersion.self,
             from: data
         )
-        guard version?.schemaVersion == ItemRunSubmissionAttempt.currentSchemaVersion,
-              let stored = try? decoder.decode(
-                  ItemRunSubmissionAttempt.self,
-                  from: data
-              ) else {
+        guard let stored = try? decoder.decode(
+            ItemRunSubmissionAttempt.self,
+            from: data
+        ) else {
+            return try discardUnusableAttempt()
+        }
+        let isCurrent =
+            version?.schemaVersion
+                == ItemRunSubmissionAttempt.currentSchemaVersion
+        let isCompatiblePhotoOnlyV1 =
+            version?.schemaVersion == 1 && stored.voiceContext == nil
+        guard isCurrent || isCompatiblePhotoOnlyV1 else {
             return try discardUnusableAttempt()
         }
         return stored

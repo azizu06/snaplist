@@ -1,8 +1,8 @@
 import Foundation
 
-/// Builds the `multipart/form-data` body `POST /v1/items/runs` accepts: the `photo`
-/// field repeated once per photo, in display order, and nothing else. Ordinals are the
-/// part order, so the body is the only place display order is expressed.
+/// Builds the one `multipart/form-data` mutation `POST /v1/items/runs` accepts.
+/// Photos remain in display order; an exact recovered WAV and its locale hint travel
+/// under the same persisted idempotency key.
 enum ItemRunSubmissionMultipart {
     static func body(
         for payload: ItemRunSubmissionPayload,
@@ -23,6 +23,37 @@ enum ItemRunSubmissionMultipart {
             body.append(Data("Content-Type: \(photo.mediaType.rawValue)\r\n\r\n".utf8))
             body.append(data)
             body.append(Data("\r\n".utf8))
+        }
+        if let voice = payload.attempt.voiceContext,
+           let voiceData = payload.voiceData {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(
+                Data(
+                    """
+                    Content-Disposition: form-data; name="voiceContext"; \
+                    filename="seller-context.wav"\r\n
+                    """.utf8
+                )
+            )
+            body.append(
+                Data(
+                    "Content-Type: \(ItemRunSubmissionVoice.mediaType)\r\n\r\n"
+                        .utf8
+                )
+            )
+            body.append(voiceData)
+            body.append(Data("\r\n".utf8))
+            if let localeHint = voice.localeHint {
+                body.append(Data("--\(boundary)\r\n".utf8))
+                body.append(
+                    Data(
+                        "Content-Disposition: form-data; name=\"voiceContextLocale\"\r\n\r\n"
+                            .utf8
+                    )
+                )
+                body.append(Data(localeHint.utf8))
+                body.append(Data("\r\n".utf8))
+            }
         }
         body.append(Data("--\(boundary)--\r\n".utf8))
         return body

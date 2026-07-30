@@ -6,6 +6,8 @@ import {
   type ExclusiveTestResourceLease,
 } from "@/test/exclusive-resource-lock";
 import { cleanupClerkTestUsers, mintUserJwt } from "@/lib/supabase/test-users";
+import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
+import { prepareMobileItemSubmission } from "./contract";
 import { createMobileItemSubmissionHandler } from "./http";
 import { createMobileItemSubmissionOperations } from "./service";
 import { createSupabaseMobileItemSubmissionStaging } from "./store";
@@ -17,6 +19,7 @@ import {
   SECRET_KEY,
   SUPABASE_URL,
   connectDatabase,
+  fixedWavBytes,
   fiveJpegs,
   fivePhotoMultipart,
   jpeg,
@@ -37,6 +40,7 @@ let abandonedId = "";
 let preparationFirstId = "";
 let replayFirstId = "";
 let concurrentId = "";
+let legacyReplayId = "";
 let ownerToken = "";
 let foreignToken = "";
 let recoveryToken = "";
@@ -44,6 +48,7 @@ let abandonedToken = "";
 let preparationFirstToken = "";
 let replayFirstToken = "";
 let concurrentToken = "";
+let legacyReplayToken = "";
 let itemId = "";
 let runId = "";
 let queueMessageId = "";
@@ -288,6 +293,7 @@ beforeAll(async () => {
   preparationFirstId = `user_test_mobile_submit_prepare_first_${Date.now()}`;
   replayFirstId = `user_test_mobile_submit_replay_first_${Date.now()}`;
   concurrentId = `user_test_mobile_submit_concurrent_${Date.now()}`;
+  legacyReplayId = `user_test_mobile_submit_legacy_replay_${Date.now()}`;
   [
     ownerToken,
     foreignToken,
@@ -296,6 +302,7 @@ beforeAll(async () => {
     preparationFirstToken,
     replayFirstToken,
     concurrentToken,
+    legacyReplayToken,
   ] = await Promise.all([
     mintUserJwt(ownerId),
     mintUserJwt(foreignId),
@@ -304,6 +311,7 @@ beforeAll(async () => {
     mintUserJwt(preparationFirstId),
     mintUserJwt(replayFirstId),
     mintUserJwt(concurrentId),
+    mintUserJwt(legacyReplayId),
   ]);
   reachable = true;
 });
@@ -326,6 +334,7 @@ afterAll(async () => {
       preparationFirstId,
       replayFirstId,
       concurrentId,
+      legacyReplayId,
     ]],
   );
   const messageIds = new Set([
@@ -350,8 +359,14 @@ afterAll(async () => {
     preparationFirstId,
     replayFirstId,
     concurrentId,
+    legacyReplayId,
   ];
   await cleanupClerkTestUsers(admin, testUserIds);
+  await database.query(
+    `delete from private.mobile_item_submission_voice_handoffs
+     where user_id = any($1::text[])`,
+    [testUserIds],
+  );
   await database.query(
     `delete from private.pipeline_staging_cleanup_intents
      where user_id = any($1::text[])`,
@@ -963,7 +978,175 @@ describe("authenticated mobile item submission against local Supabase", () => {
     }
   });
 
-  it("recovers an ambiguous response with one atomic reservation and queue message", async () => {
+  it("replays one committed photo-only v1 binding through the current v2 public handler", async () => {
+    if (!reachable) return;
+    const key = crypto.randomUUID();
+    const prepared = await prepareMobileItemSubmission(multipart());
+    expect(prepared.voice).toBeNull();
+    expect(prepared.legacyRequestFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    const cleanupId = crypto.randomUUID();
+    const photoReceipts = prepared.photos.map((photo) => ({
+      ordinal: photo.ordinal,
+      storage_path: [
+        legacyReplayId,
+        "pipeline-staging",
+        key,
+        "0",
+        `${photo.ordinal}-${photo.contentSha256}.${
+          photo.mediaType === "image/png" ? "png" : "jpg"
+        }`,
+      ].join("/"),
+      content_sha256: photo.contentSha256,
+      byte_length: photo.byteLength,
+      media_type: photo.mediaType,
+    }));
+    const began = await admin.rpc("begin_mobile_item_submission", {
+      p_user_id: legacyReplayId,
+      p_idempotency_key: key,
+      p_request_fingerprint: prepared.legacyRequestFingerprint!,
+      p_batch_id: key,
+      p_cleanup_id: cleanupId,
+      p_cost_basis: prepared.costBasis,
+      p_photo_receipts: photoReceipts,
+    });
+    expect(began).toMatchObject({ data: true, error: null });
+
+    const tenant = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
+      accessToken: async () => legacyReplayToken,
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    for (const [index, receipt] of photoReceipts.entries()) {
+      const uploaded = await tenant.storage.from("photos").upload(
+        receipt.storage_path,
+        prepared.photos[index]!.bytes,
+        {
+          contentType: receipt.media_type,
+          upsert: false,
+        },
+      );
+      expect(uploaded.error).toBeNull();
+    }
+
+    const photoIdentity = canonicalizeVerifiedPhotoSet(
+      prepared.photos.map((photo) => photo.contentSha256),
+    );
+    const commitThenLoseResponse = async (): Promise<never> => {
+      const committed = await admin.rpc("commit_mobile_item_submission", {
+        p_user_id: legacyReplayId,
+        p_idempotency_key: key,
+        p_request_fingerprint: prepared.legacyRequestFingerprint!,
+        p_batch_id: key,
+        p_cleanup_id: cleanupId,
+        p_cost_basis: prepared.costBasis,
+        p_daily_limit: 15,
+        p_per_minute_limit: 20,
+        p_photo_identity: photoIdentity,
+        p_photo_receipts: photoReceipts,
+      });
+      if (committed.error) throw committed.error;
+      throw new Error("response lost after durable v1 commit");
+    };
+    await expect(commitThenLoseResponse()).rejects.toThrow(
+      "response lost after durable v1 commit",
+    );
+
+    const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
+    const submitter = createConfiguredMobileItemSubmissionOperations({
+      supabaseURL: SUPABASE_URL,
+      publishableKey: PUBLISHABLE_KEY!,
+      secretKey: SECRET_KEY!,
+    });
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => crypto.randomUUID(),
+      itemSubmission: {
+        async resolvePrincipal(token) {
+          if (token !== legacyReplayToken) {
+            throw new Error("invalid test principal");
+          }
+          return {
+            kind: "clerk",
+            userId: legacyReplayId,
+            bearerToken: token,
+          };
+        },
+        submit: submitter.submit,
+      },
+    });
+    const replay = await handler(request(legacyReplayToken, key, multipart()));
+    expect(replay.status).toBe(200);
+    const envelope = await replay.json();
+    expect(envelope.data.voiceContext).toBeNull();
+
+    const durable = await database.query<{
+      bound_key: string;
+      item_id: string;
+      run_id: string;
+      request_fingerprint: string;
+      items: number;
+      runs: number;
+      queue_messages: number;
+      credit_reservations: number;
+      usage_reservations: number;
+      ledger_rows: number;
+      storage_objects: number;
+      storage_paths: string[];
+      item_photo_paths: string[];
+    }>(
+      `select
+         submission.idempotency_key::text bound_key,
+         submission.item_id::text,
+         submission.run_id::text,
+         submission.request_fingerprint,
+         (select count(*)::integer from public.items item
+          where item.id = submission.item_id and item.user_id = submission.user_id) items,
+         (select count(*)::integer from public.pipeline_runs run
+          where run.id = submission.run_id and run.user_id = submission.user_id) runs,
+         (select count(*)::integer from pgmq.q_pipeline_jobs message
+          where message.message->>'run_id' = submission.run_id::text) queue_messages,
+         (select count(*)::integer from public.ai_item_credit_reservations reservation
+          where reservation.pipeline_run_id = submission.run_id) credit_reservations,
+         (select count(*)::integer from private.pipeline_run_usage_reservations reservation
+          where reservation.run_id = submission.run_id) usage_reservations,
+         (select count(*)::integer from private.mobile_item_submissions ledger
+          where ledger.user_id = submission.user_id
+            and ledger.idempotency_key = submission.idempotency_key) ledger_rows,
+         (select count(*)::integer from storage.objects object
+          where object.bucket_id = 'photos'
+            and split_part(object.name, '/', 1) = submission.user_id) storage_objects,
+         (select array_agg(object.name order by object.name)
+          from storage.objects object
+          where object.bucket_id = 'photos'
+            and split_part(object.name, '/', 1) = submission.user_id) storage_paths,
+         (select item.photos from public.items item
+          where item.id = submission.item_id) item_photo_paths
+       from private.mobile_item_submissions submission
+       where submission.user_id = $1
+         and submission.idempotency_key = $2::uuid`,
+      [legacyReplayId, key],
+    );
+    expect(durable.rows).toHaveLength(1);
+    expect(durable.rows[0]).toMatchObject({
+      bound_key: key,
+      item_id: envelope.data.itemId,
+      run_id: envelope.data.runId,
+      request_fingerprint: prepared.legacyRequestFingerprint,
+      items: 1,
+      runs: 1,
+      queue_messages: 1,
+      credit_reservations: 1,
+      usage_reservations: 1,
+      ledger_rows: 1,
+      storage_objects: 2,
+    });
+    expect(durable.rows[0]!.storage_paths).toEqual(
+      photoReceipts.map((receipt) => receipt.storage_path).sort(),
+    );
+    expect(durable.rows[0]!.item_photo_paths).toEqual(
+      photoReceipts.map((receipt) => receipt.storage_path),
+    );
+  });
+
+  it("returns one canonical run and matching voice receipt after ambiguous v2 replay", async () => {
     if (!reachable) return;
     const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
     const submitter = createConfiguredMobileItemSubmissionOperations({
@@ -990,14 +1173,30 @@ describe("authenticated mobile item submission against local Supabase", () => {
       },
     });
     const key = crypto.randomUUID();
+    const voice = { bytes: fixedWavBytes(541), locale: "EN-us" };
 
-    expect((await handler(request(ownerToken, key, fivePhotoMultipart()))).status).toBe(503);
-    const replay = await handler(request(ownerToken, key, fivePhotoMultipart()));
+    expect((await handler(request(
+      ownerToken,
+      key,
+      fivePhotoMultipart("12.50", [0, 1, 2, 3, 4], null, voice),
+    ))).status).toBe(503);
+    const replay = await handler(request(
+      ownerToken,
+      key,
+      fivePhotoMultipart("12.50", [0, 1, 2, 3, 4], null, voice),
+    ));
     expect(replay.status).toBe(200);
     const envelope = await replay.json();
     itemId = envelope.data.itemId;
     runId = envelope.data.runId;
     expect(runId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(envelope.data.voiceContext).toMatchObject({
+      version: 1,
+      byteLength: voice.bytes.byteLength,
+      durationMs: 10,
+      mediaType: "audio/wav",
+      contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     expect(envelope.data).not.toHaveProperty("userId");
     expect(JSON.stringify(envelope.data)).not.toContain("pipeline-staging");
 
@@ -1012,6 +1211,26 @@ describe("authenticated mobile item submission against local Supabase", () => {
       key,
       fivePhotoMultipart("12.50", [0, 1, 2, 3, 4], 2),
     ))).status).toBe(409);
+    expect((await handler(request(
+      ownerToken,
+      key,
+      fivePhotoMultipart(
+        "12.50",
+        [0, 1, 2, 3, 4],
+        null,
+        { bytes: fixedWavBytes(542), locale: "en-US" },
+      ),
+    ))).status).toBe(409);
+    expect((await handler(request(
+      ownerToken,
+      key,
+      fivePhotoMultipart(
+        "12.50",
+        [0, 1, 2, 3, 4],
+        null,
+        { bytes: voice.bytes, locale: "fr-FR" },
+      ),
+    ))).status).toBe(409);
 
     const durable = await database.query<{
       items: number;
@@ -1024,6 +1243,16 @@ describe("authenticated mobile item submission against local Supabase", () => {
       storage_objects: number;
       queue_message_id: string;
       photo_paths: string[];
+      request_fingerprint: string;
+      voice_cleanup_bounded: boolean;
+      voice_handoffs: number;
+      voice_receipt: {
+        storage_path: string;
+        content_sha256: string;
+        locale: string;
+      };
+      voice_state: string;
+      queue_message: Record<string, unknown>;
     }>(
       `select
          (select count(*)::integer from public.items where id = $2::uuid and user_id = $1) items,
@@ -1036,6 +1265,24 @@ describe("authenticated mobile item submission against local Supabase", () => {
          (select count(*)::integer from storage.objects object
           where object.bucket_id = 'photos' and split_part(object.name, '/', 1) = $1) storage_objects,
          (select queue_message_id::text from private.mobile_item_submissions where user_id = $1 and idempotency_key = $4::uuid) queue_message_id,
+         (select request_fingerprint from private.mobile_item_submissions where user_id = $1 and idempotency_key = $4::uuid) request_fingerprint,
+         (select message from pgmq.q_pipeline_jobs
+          where msg_id = (
+            select queue_message_id from private.mobile_item_submissions
+            where user_id = $1 and idempotency_key = $4::uuid
+          )) queue_message,
+         (select count(*)::integer
+          from private.mobile_item_submission_voice_handoffs
+          where user_id = $1 and idempotency_key = $4::uuid) voice_handoffs,
+         (select state
+          from private.mobile_item_submission_voice_handoffs
+          where user_id = $1 and idempotency_key = $4::uuid) voice_state,
+         (select receipt
+          from private.mobile_item_submission_voice_handoffs
+          where user_id = $1 and idempotency_key = $4::uuid) voice_receipt,
+         (select cleanup_after <= created_at + interval '24 hours'
+          from private.mobile_item_submission_voice_handoffs
+          where user_id = $1 and idempotency_key = $4::uuid) voice_cleanup_bounded,
          (select photos from public.items where id = $2::uuid) photo_paths`,
       [ownerId, itemId, runId, key],
     );
@@ -1047,8 +1294,19 @@ describe("authenticated mobile item submission against local Supabase", () => {
       queue_messages: 1,
       cleanup_intents: 0,
       ledger_rows: 1,
-      storage_objects: 5,
+      storage_objects: 6,
+      voice_handoffs: 1,
+      voice_state: "accepted",
+      voice_cleanup_bounded: true,
     });
+    expect(durable.rows[0]!.voice_receipt).toMatchObject({
+      content_sha256: envelope.data.voiceContext.contentSha256,
+      locale: "en-US",
+    });
+    expect(Object.keys(durable.rows[0]!.queue_message).sort()).toEqual([
+      "run_id",
+      "schema_version",
+    ]);
     queueMessageId = durable.rows[0]!.queue_message_id;
     storagePaths = durable.rows[0]!.photo_paths;
     expect(storagePaths).toHaveLength(5);
@@ -1066,6 +1324,22 @@ describe("authenticated mobile item submission against local Supabase", () => {
     ]);
     expect(foreignItems.data).toEqual([]);
     expect(foreignRuns.data).toEqual([]);
+    const foreignReplay = await foreign.rpc("find_mobile_item_submission_v2", {
+      p_idempotency_key: key,
+      p_legacy_request_fingerprint: null,
+      p_request_fingerprint: durable.rows[0]!.request_fingerprint,
+    });
+    expect(foreignReplay.data).toBeNull();
+    expect(foreignReplay.error).toMatchObject({
+      code: "42501",
+      message: "Active verified guest capability is required",
+    });
+    const [foreignItemsAfterDenial, foreignRunsAfterDenial] = await Promise.all([
+      foreign.from("items").select("id").eq("id", itemId),
+      foreign.from("pipeline_runs").select("id").eq("id", runId),
+    ]);
+    expect(foreignItemsAfterDenial.data).toEqual([]);
+    expect(foreignRunsAfterDenial.data).toEqual([]);
 
     const owner = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
       accessToken: async () => ownerToken,
@@ -1086,5 +1360,16 @@ describe("authenticated mobile item submission against local Supabase", () => {
     );
     expect(foreignWrite.data).toBeNull();
     expect(foreignWrite.error).not.toBeNull();
+    const voicePath = durable.rows[0]!.voice_receipt.storage_path;
+    const ownerVoice = await owner.storage.from("photos").download(voicePath);
+    expect(ownerVoice.error).toBeNull();
+    expect(new Uint8Array(await ownerVoice.data!.arrayBuffer())).toEqual(
+      voice.bytes,
+    );
+    const foreignVoice = await foreign.storage.from("photos").download(
+      voicePath,
+    );
+    expect(foreignVoice.data).toBeNull();
+    expect(foreignVoice.error).not.toBeNull();
   });
 });

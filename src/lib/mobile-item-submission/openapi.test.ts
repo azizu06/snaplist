@@ -42,12 +42,45 @@ describe("mobile item submission OpenAPI", () => {
           maxItems: 5,
           items: { type: "string", format: "binary" },
         },
+        voiceContext: {
+          type: "string",
+          format: "binary",
+        },
+        voiceContextLocale: {
+          type: "string",
+          maxLength: 255,
+        },
       },
     });
     expect(contract.components.schemas.MobileItemSubmissionReceipt).toMatchObject({
-      required: expect.arrayContaining(["runId", "photoIdentity", "photos"]),
-      properties: { photos: { minItems: 1, maxItems: 5 } },
+      required: expect.arrayContaining([
+        "runId",
+        "photoIdentity",
+        "photos",
+        "voiceContext",
+      ]),
+      properties: {
+        photos: { minItems: 1, maxItems: 5 },
+        voiceContext: {
+          oneOf: expect.arrayContaining([{ type: "null" }]),
+        },
+      },
     });
+    expect(contract.components.schemas.MobileItemSubmissionVoiceReceipt)
+      .toMatchObject({
+        required: [
+          "version",
+          "contentSha256",
+          "byteLength",
+          "durationMs",
+          "mediaType",
+        ],
+        properties: {
+          byteLength: { maximum: 524288 },
+          durationMs: { maximum: 15000 },
+          mediaType: { const: "audio/wav" },
+        },
+      });
     expect(contract.components.schemas.MobileItemSubmissionPhoto).toMatchObject({
       properties: { ordinal: { minimum: 0, maximum: 4 } },
     });
@@ -70,6 +103,7 @@ describe("mobile item submission OpenAPI", () => {
     expect(nativeModels).toContain("struct MobileItemSubmissionEnvelope");
     expect(fixture.data.runId).toMatch(/^[0-9a-f-]{36}$/);
     expect(fixture.data.photoIdentity.kind).toBe("content_sha256_set_v1");
+    expect(fixture.data.voiceContext).toBeNull();
     expect(fixture.data.photos.map((photo: { ordinal: number }) => photo.ordinal)).toEqual([
       0, 1, 2, 3, 4,
     ]);
