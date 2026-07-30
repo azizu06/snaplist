@@ -15,18 +15,23 @@ final class ListingReviewStoreTests: XCTestCase {
         )
         let store = makeStore(service: service)
 
-        XCTAssertTrue(await store.open(snapshot))
-        XCTAssertEqual(await store.done(), .dismissedWithoutWrite)
-        XCTAssertEqual((await service.saveRequests).count, 0)
+        let opened = await store.open(snapshot)
+        let cleanOutcome = await store.done()
+        let cleanRequests = await service.recordedSaveRequests()
+
+        XCTAssertTrue(opened)
+        XCTAssertEqual(cleanOutcome, .dismissedWithoutWrite)
+        XCTAssertEqual(cleanRequests.count, 0)
 
         await store.setTitle("Sony WH-1000XM4 headphones with case")
-        XCTAssertEqual(await store.done(), .stayed)
+        let failedOutcome = await store.done()
+        XCTAssertEqual(failedOutcome, .stayed)
         XCTAssertEqual(store.phase, .failed)
 
         let result = await store.retrySave()
 
         XCTAssertEqual(result, .saved(Self.receipt(for: snapshot)))
-        let requests = await service.saveRequests
+        let requests = await service.recordedSaveRequests()
         XCTAssertEqual(requests.count, 2)
         XCTAssertEqual(requests[0].idempotencyKey, requests[1].idempotencyKey)
         XCTAssertEqual(requests[0].expectedRevision, snapshot.binding.reviewRevision)
@@ -38,19 +43,23 @@ final class ListingReviewStoreTests: XCTestCase {
         let service = ListingReviewRecordingService(saves: [], reloads: [])
         let first = makeStore(service: service, persistence: persistence)
 
-        XCTAssertTrue(await first.open(snapshot))
+        let firstOpened = await first.open(snapshot)
+        XCTAssertTrue(firstOpened)
         await first.setDescription("Locally staged description")
         XCTAssertTrue(first.isDirty)
 
         let relaunched = makeStore(service: service, persistence: persistence)
-        XCTAssertTrue(await relaunched.open(snapshot))
+        let relaunchedOpened = await relaunched.open(snapshot)
+        XCTAssertTrue(relaunchedOpened)
         XCTAssertEqual(relaunched.draft?.description, "Locally staged description")
         XCTAssertTrue(relaunched.isDirty)
 
         await relaunched.setDescription(snapshot.listing.description)
+        let revertedOutcome = await relaunched.done()
+        let saveRequests = await service.recordedSaveRequests()
         XCTAssertFalse(relaunched.isDirty)
-        XCTAssertEqual(await relaunched.done(), .dismissedWithoutWrite)
-        XCTAssertEqual((await service.saveRequests).count, 0)
+        XCTAssertEqual(revertedOutcome, .dismissedWithoutWrite)
+        XCTAssertEqual(saveRequests.count, 0)
     }
 
     func testConflictKeepsDraftUntilExplicitDiscardReloadSucceeds() async throws {
@@ -65,9 +74,11 @@ final class ListingReviewStoreTests: XCTestCase {
         )
         let store = makeStore(service: service)
 
-        XCTAssertTrue(await store.open(snapshot))
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
         await store.setTitle("My local title")
-        XCTAssertEqual(await store.done(), .stayed)
+        let saveOutcome = await store.done()
+        XCTAssertEqual(saveOutcome, .stayed)
         XCTAssertEqual(store.phase, .conflict)
 
         await store.requestReload()
@@ -221,5 +232,9 @@ private actor ListingReviewRecordingService: ListingReviewServing {
     ) async throws -> ListingReviewResult {
         guard !reloads.isEmpty else { throw ListingReviewClientError.unavailable }
         return try reloads.removeFirst().get()
+    }
+
+    func recordedSaveRequests() -> [SaveRequest] {
+        saveRequests
     }
 }
