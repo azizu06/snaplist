@@ -46,6 +46,8 @@ const snapshot = {
     category: "electronics",
     condition: "good",
   },
+  title: intent.title,
+  description: intent.description,
   specifics: {
     Brand: "Sony",
     Model: "WH-1000XM4",

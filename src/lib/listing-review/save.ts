@@ -136,6 +136,7 @@ export const listingReviewSaveIntentSchema = z
           })
           .strict(),
       )
+      .min(1)
       .max(50),
     sellerPriceOverride: sellerPriceOverrideSchema,
   })
@@ -191,6 +192,8 @@ export type ListingReviewSaveReceipt = z.infer<
 export interface ListingReviewSaveSnapshot {
   itemId: string;
   attributes: unknown;
+  title: string;
+  description: string;
   specifics: Record<string, string>;
 }
 
@@ -198,6 +201,8 @@ const listingReviewSaveSnapshotSchema = z
   .object({
     itemId: z.string().uuid(),
     attributes: z.unknown(),
+    title: z.string(),
+    description: z.string(),
     specifics: z.record(z.string(), z.string()),
   })
   .strict();

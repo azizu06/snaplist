@@ -522,7 +522,13 @@ describe("mobile Listing Review save RLS authority", () => {
       /v_normalized_current_specifics is distinct from v_requested_specifics/i,
     );
     expect(migration).toMatch(
-      /'snapshot', jsonb_build_object\([\s\S]*'specifics', v_current_specifics/i,
+      /jsonb_array_length\(p_specifics\) = 0/i,
+    );
+    expect(migration).toMatch(
+      /'snapshot', jsonb_build_object\([\s\S]*'title', v_listing\.title[\s\S]*'description', v_listing\.description[\s\S]*'specifics', v_current_specifics/i,
+    );
+    expect(migration).toMatch(
+      /v_listing_title := case[\s\S]*v_state = 'finalize'[\s\S]*btrim\(p_title\) is not distinct from\s+v_claim #>> '\{snapshot,title\}'[\s\S]*then v_listing\.title[\s\S]*else btrim\(p_title\)[\s\S]*v_listing_description := case[\s\S]*btrim\(p_description\) is not distinct from\s+v_claim #>> '\{snapshot,description\}'[\s\S]*then v_listing\.description[\s\S]*else btrim\(p_description\)/i,
     );
     expect(migration).not.toMatch(
       /where lower\(btrim\(entry\.value->>'name'\)\) in \(\s*'brand', 'model', 'category', 'isbn', 'upc'/i,
@@ -569,7 +575,7 @@ describe("mobile Listing Review save RLS authority", () => {
           title: "Seller title",
           description: "Seller description.",
           condition: "good",
-          specifics: [],
+          specifics: [{ name: "Brand", value: "Sony" }],
           sellerPriceOverride: 179.995,
         },
         userId: "user_test_review_save_direct",
@@ -653,6 +659,20 @@ describe("mobile Listing Review save RLS authority", () => {
         };
 
         const beforeForeign = await durableState(database, fixture);
+        const emptySpecifics = await owner.rpc(
+          "save_mobile_listing_review",
+          {
+            ...rpcArguments(
+              fixture,
+              crypto.randomUUID(),
+              normalizedBaseIntent,
+            ),
+            p_specifics: [],
+          },
+        );
+        expect(emptySpecifics.error?.code).toBe("22023");
+        expect(await durableState(database, fixture)).toEqual(beforeForeign);
+
         const foreignSave = await foreign.rpc(
           "save_mobile_listing_review",
           rpcArguments(fixture, crypto.randomUUID(), normalizedBaseIntent),
@@ -766,6 +786,73 @@ describe("mobile Listing Review save RLS authority", () => {
         await dataClient.release(
           directOperation(activeRegenerationOperation),
         );
+
+        const unchangedFixture = await seedReview(
+          admin,
+          foreignId,
+          `${principalKind.toLowerCase()}-unchanged-copy`,
+        );
+        fixtures.push(unchangedFixture);
+        const unchangedDataClient = createListingReviewSaveDataClient(
+          () => foreign,
+        );
+        const unchangedCopyKey = crypto.randomUUID();
+        const unchangedCopyIntent: ListingReviewSaveIntent = {
+          expectedReviewRevision: unchangedFixture.reviewRevision,
+          title: BASE_RESULT.listing.title,
+          description: BASE_RESULT.listing.description,
+          condition: "good",
+          specifics: [
+            { name: "Brand", value: "Sony" },
+            { name: "Model", value: "WH-1000XM5" },
+          ],
+          sellerPriceOverride: 220,
+        };
+        const unchangedProviderWork = vi.fn(async () => {
+          await completeMockedCorrection({
+            admin,
+            fixture: unchangedFixture,
+            owner: foreign,
+            key: unchangedCopyKey,
+            expectedReviewRevision: unchangedFixture.reviewRevision,
+          });
+        });
+        const unchangedCopySaver = createListingReviewSaver(
+          unchangedDataClient,
+          { regenerate: unchangedProviderWork },
+        );
+        const unchangedCopyReceipt = await unchangedCopySaver.save({
+          runId: unchangedFixture.runId,
+          idempotencyKey: unchangedCopyKey,
+          intent: unchangedCopyIntent,
+          userId: foreignId,
+          bearerToken: foreignToken,
+        });
+        expect(unchangedCopyReceipt.reviewRevision).toBe(unchangedCopyKey);
+        expect(unchangedProviderWork).toHaveBeenCalledOnce();
+        const unchangedCopy = await database.query<{
+          description: string;
+          model: string;
+          review_revision: string;
+          title: string;
+        }>(
+          `select item.attributes->>'model' as model,
+                  item.review_revision::text,
+                  listing.title,
+                  listing.description
+           from public.items item
+           join public.listings listing
+             on listing.id = $2::uuid
+            and listing.item_id = item.id
+           where item.id = $1::uuid`,
+          [unchangedFixture.itemId, unchangedFixture.listingId],
+        );
+        expect(unchangedCopy.rows[0]).toEqual({
+          description: "Generated coherent correction copy.",
+          model: "WH-1000XM5",
+          review_revision: unchangedCopyKey,
+          title: "Generated Sony WH-1000XM5",
+        });
 
         for (const authoritative of [
           { ebay_status: "publishing" },

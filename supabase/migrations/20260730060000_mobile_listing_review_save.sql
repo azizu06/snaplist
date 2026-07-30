@@ -12,6 +12,8 @@ create table private.mobile_listing_review_saves (
   run_id uuid not null references public.pipeline_runs(id) on delete cascade,
   expected_review_revision uuid not null,
   intent jsonb not null,
+  pre_regeneration_title text,
+  pre_regeneration_description text,
   state text not null default 'pending',
   lease_expires_at timestamptz
     default (statement_timestamp() + interval '5 minutes'),
@@ -254,6 +256,7 @@ begin
       'acceptable', 'fair', 'poor', 'for-parts'
     )
     or jsonb_typeof(p_specifics) is distinct from 'array'
+    or jsonb_array_length(p_specifics) = 0
     or jsonb_array_length(p_specifics) > 50
     or octet_length(p_specifics::text) > 32768
     or (
@@ -400,7 +403,13 @@ begin
   end if;
 
   if v_item.review_revision is not distinct from p_idempotency_key then
-    return jsonb_build_object('state', 'finalize');
+    return jsonb_build_object(
+      'state', 'finalize',
+      'snapshot', jsonb_build_object(
+        'title', v_save.pre_regeneration_title,
+        'description', v_save.pre_regeneration_description
+      )
+    );
   end if;
   if v_item.review_revision is distinct from p_expected_review_revision then
     raise exception using
@@ -455,6 +464,14 @@ begin
     update private.mobile_listing_review_saves
     set state = 'pending',
         lease_expires_at = statement_timestamp() + interval '5 minutes',
+        pre_regeneration_title = case
+          when v_mode = 'regeneration' then v_listing.title
+          else null
+        end,
+        pre_regeneration_description = case
+          when v_mode = 'regeneration' then v_listing.description
+          else null
+        end,
         receipt = null
     where user_id = v_user_id
       and idempotency_key = p_idempotency_key;
@@ -464,13 +481,17 @@ begin
       idempotency_key,
       run_id,
       expected_review_revision,
-      intent
+      intent,
+      pre_regeneration_title,
+      pre_regeneration_description
     ) values (
       v_user_id,
       p_idempotency_key,
       p_run_id,
       p_expected_review_revision,
-      v_intent
+      v_intent,
+      case when v_mode = 'regeneration' then v_listing.title else null end,
+      case when v_mode = 'regeneration' then v_listing.description else null end
     );
   end if;
 
@@ -479,6 +500,8 @@ begin
     'snapshot', jsonb_build_object(
       'itemId', v_item.id,
       'attributes', v_item.attributes,
+      'title', v_listing.title,
+      'description', v_listing.description,
       'specifics', v_current_specifics
     )
   );
@@ -516,6 +539,8 @@ declare
   v_specifics jsonb;
   v_copy jsonb;
   v_expected_revision uuid;
+  v_listing_title text;
+  v_listing_description text;
 begin
   v_claim := public.claim_mobile_listing_review_save(
     'prepare',
@@ -560,6 +585,20 @@ begin
     when v_state = 'finalize' then p_idempotency_key
     else p_expected_review_revision
   end;
+  v_listing_title := case
+    when v_state = 'finalize'
+      and btrim(p_title) is not distinct from
+        v_claim #>> '{snapshot,title}'
+    then v_listing.title
+    else btrim(p_title)
+  end;
+  v_listing_description := case
+    when v_state = 'finalize'
+      and btrim(p_description) is not distinct from
+        v_claim #>> '{snapshot,description}'
+    then v_listing.description
+    else btrim(p_description)
+  end;
   perform public.save_review_edits(
     v_item.id,
     v_listing.id,
@@ -569,8 +608,8 @@ begin
     v_item.condition,
     p_price_override,
     v_item.cost_basis,
-    btrim(p_title),
-    btrim(p_description)
+    v_listing_title,
+    v_listing_description
   );
 
   select coalesce(

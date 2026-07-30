@@ -188,6 +188,7 @@ describe("SwiftUI mobile HTTP contract", () => {
         },
         specifics: {
           type: "array",
+          minItems: 1,
           maxItems: 50,
           items: {
             additionalProperties: false,

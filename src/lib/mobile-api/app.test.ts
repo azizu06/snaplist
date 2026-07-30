@@ -180,6 +180,7 @@ describe("mobile API v1 provider-neutral handler", () => {
   it("rejects invalid reserved specifics before the Listing Review saver", async () => {
     const save = vi.fn();
     const invalidSpecifics = [
+      [],
       [
         { name: "Type", value: "electronics" },
         { name: "Category", value: "audio" },
