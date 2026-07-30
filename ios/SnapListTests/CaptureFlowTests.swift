@@ -4372,6 +4372,133 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
+    func testPhotoReviewNativeSourceDefersPresentationUntilSessionWillBegin() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-native-session-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let fixturePhotos = PhotoReviewFixtureView.photos(
+            for: .resting,
+            rootDirectory: root
+        )
+        let photos = zip(makeDragPhotos(), fixturePhotos).map { pair in
+            let (photo, fixturePhoto) = pair
+            return StagedCapturePhoto(
+                id: photo.id,
+                photoURL: fixturePhoto.photoURL,
+                thumbnailURL: fixturePhoto.thumbnailURL,
+                createdAt: photo.createdAt,
+                libraryTransferReceipt: photo.libraryTransferReceipt
+            )
+        }
+        let store = PhotoReviewStore(photos: photos)
+        let presentation = PhotoReviewDragPresentation()
+        let sourceFrame = CGRect(x: 176, y: 0, width: 76, height: 98)
+        let source = PhotoReviewNativeDragSourceDelegate(
+            store: store,
+            presentation: presentation,
+            reduceMotion: true,
+            isEnabled: true,
+            sourceAtLocation: { _ in
+                PhotoReviewNativeDragSource(
+                    photoID: photos[2].id,
+                    thumbnailURL: photos[2].thumbnailURL,
+                    frame: sourceFrame
+                )
+            }
+        )
+        let host = makeNativeInteractionHost()
+        let sourceView = host.innerHorizontalStrip
+        defer { host.cleanUp() }
+        sourceView.bounds = CGRect(
+            x: 44,
+            y: 0,
+            width: 320,
+            height: 98
+        )
+        source.attach(to: sourceView)
+        let interaction = try XCTUnwrap(
+            sourceView.interactions
+                .compactMap { $0 as? UIDragInteraction }
+                .first
+        )
+        let session = PhotoReviewDragSessionStub()
+        session.currentLocation = CGPoint(x: 258, y: 49)
+
+        let items = source.dragInteraction(
+            interaction,
+            itemsForBeginning: session
+        )
+        let item = try XCTUnwrap(items.first)
+
+        XCTAssertEqual(
+            PhotoReviewNativeDragContract.photoID(
+                from: item.itemProvider
+            ),
+            photos[2].id
+        )
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertNil(presentation.insertionIndex)
+
+        let preview = try XCTUnwrap(
+            source.dragInteraction(
+                interaction,
+                previewForLifting: item,
+                session: session
+            )
+        )
+        XCTAssertNotNil((preview.view as? UIImageView)?.image)
+        XCTAssertTrue(preview.target.container === sourceView)
+        XCTAssertEqual(
+            preview.target.center.x,
+            sourceFrame.midX + sourceView.bounds.minX,
+            accuracy: 0.001
+        )
+
+        source.dragInteraction(
+            interaction,
+            sessionWillBegin: session
+        )
+
+        XCTAssertEqual(presentation.draggedPhotoID, photos[2].id)
+        XCTAssertEqual(presentation.insertionIndex, 2)
+
+        source.dragInteraction(
+            interaction,
+            session: session,
+            didEndWith: .cancel
+        )
+        XCTAssertEqual(presentation.consumeFocusPhotoID(), photos[2].id)
+
+        let invalidatedSession = PhotoReviewDragSessionStub()
+        invalidatedSession.currentLocation = session.currentLocation
+        let invalidatedItem = try XCTUnwrap(
+            source.dragInteraction(
+                interaction,
+                itemsForBeginning: invalidatedSession
+            ).first
+        )
+        XCTAssertTrue(store.deletePhoto(id: photos[2].id))
+
+        source.dragInteraction(
+            interaction,
+            sessionWillBegin: invalidatedSession
+        )
+
+        XCTAssertNil(presentation.draggedPhotoID)
+        XCTAssertNil(presentation.insertionIndex)
+        XCTAssertNil(
+            source.dragInteraction(
+                interaction,
+                previewForLifting: invalidatedItem,
+                session: invalidatedSession
+            )
+        )
+    }
+
     func testPhotoReviewNativeSourceMapsFivePhotoTouchToExactIdentity() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(
@@ -4468,7 +4595,6 @@ final class CaptureFlowTests: XCTestCase {
                 ),
                 photo.id
             )
-            XCTAssertEqual(presentation.draggedPhotoID, photo.id)
 
             let preview = try XCTUnwrap(
                 source.dragInteraction(
@@ -4499,6 +4625,12 @@ final class CaptureFlowTests: XCTestCase {
                 frame.midY,
                 accuracy: 0.001
             )
+
+            source.dragInteraction(
+                interaction,
+                sessionWillBegin: session
+            )
+            XCTAssertEqual(presentation.draggedPhotoID, photo.id)
 
             source.dragInteraction(
                 interaction,
@@ -5167,6 +5299,10 @@ final class CaptureFlowTests: XCTestCase {
             },
             photos[2].id
         )
+        outsideSource.dragInteraction(
+            outsideInteraction,
+            sessionWillBegin: outsideSession
+        )
         outside.updateInsertion(
             to: 0,
             store: outsideStore,
@@ -5239,6 +5375,10 @@ final class CaptureFlowTests: XCTestCase {
                 )
             },
             photos[2].id
+        )
+        committedSource.dragInteraction(
+            committedInteraction,
+            sessionWillBegin: committedSession
         )
         committed.updateInsertion(
             to: 0,
@@ -5714,6 +5854,10 @@ final class CaptureFlowTests: XCTestCase {
             itemsForBeginning: session
         )
         XCTAssertEqual(session.items.count, 1)
+        source.dragInteraction(
+            sourceInteraction,
+            sessionWillBegin: session
+        )
         presentation.updateInsertion(
             to: 0,
             store: store,
@@ -5811,6 +5955,10 @@ final class CaptureFlowTests: XCTestCase {
         session.items = source.dragInteraction(
             sourceInteraction,
             itemsForBeginning: session
+        )
+        source.dragInteraction(
+            sourceInteraction,
+            sessionWillBegin: session
         )
         destination.update(
             store: store,
