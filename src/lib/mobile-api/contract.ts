@@ -4,6 +4,7 @@ import { pipelineConsumerSummarySchema } from "./worker-summary";
 import { guestClaimTerminalOutcomeSchema } from "@/lib/guest-recovery/service";
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import { listingReviewProjectionSchema } from "@/lib/listing-review";
+import { listingReviewSaveReceiptSchema } from "@/lib/listing-review/save";
 
 export const MOBILE_API_VERSION = "v1" as const;
 
@@ -139,6 +140,10 @@ export type MobileRun = z.infer<typeof mobileRunSchema>;
 
 export const mobileRunEnvelopeSchema = z
   .object({ data: mobileRunSchema, meta: apiMetaSchema })
+  .strict();
+
+export const listingReviewSaveEnvelopeSchema = z
+  .object({ data: listingReviewSaveReceiptSchema, meta: apiMetaSchema })
   .strict();
 
 export const mobileRunHistoryOrderKeySchema = z

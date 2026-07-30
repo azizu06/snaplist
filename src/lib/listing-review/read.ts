@@ -49,14 +49,10 @@ const rawReviewSchema = z
         description: z.string().trim().min(1),
         copy: z
           .object({
-            fields: z
-              .object({
-                itemSpecifics: z.record(
-                  z.string().trim().min(1),
-                  z.string().trim().min(1),
-                ),
-              })
-              .passthrough(),
+            itemSpecifics: z.record(
+              z.string().trim().min(1),
+              z.string().trim().min(1),
+            ),
           })
           .passthrough(),
       })
@@ -296,7 +292,7 @@ function projectReview(
       title: listing.title,
       description: listing.description,
       condition: item.condition,
-      specifics: Object.entries(listing.copy.fields.itemSpecifics)
+      specifics: Object.entries(listing.copy.itemSpecifics)
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([name, value]) => ({ name, value })),
     },

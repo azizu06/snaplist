@@ -77,11 +77,9 @@ function rawReview(userId = USER_ID) {
       title: "Sony WH-1000XM4 Noise-Canceling Headphones",
       description: "Clean, fully working headphones with case and charging cable.",
       copy: {
-        fields: {
-          itemSpecifics: {
-            Brand: "Sony",
-            Model: "WH-1000XM4",
-          },
+        itemSpecifics: {
+          Brand: "Sony",
+          Model: "WH-1000XM4",
         },
       },
     },

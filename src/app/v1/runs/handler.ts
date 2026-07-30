@@ -1,6 +1,10 @@
 import { verifyToken } from "@clerk/nextjs/server";
 import { createConfiguredVerifiedGuestPrincipalResolver } from "@/lib/guest-capability/configured";
-import { createConfiguredSupabaseListingReviewReader } from "@/lib/listing-review";
+import {
+  createConfiguredSupabaseListingReviewReader,
+  createConfiguredSupabaseListingReviewSaver,
+} from "@/lib/listing-review";
+import { createInternalGuidedCorrectionCompletionRpcClient } from "@/lib/pipeline/guided-correction-internal";
 import {
   createConfiguredSupabaseMobileRunOperations,
   createMobileApiHandler,
@@ -38,6 +42,20 @@ function configuredListingReview() {
   return createConfiguredSupabaseListingReviewReader({
     publishableKey,
     supabaseURL,
+  });
+}
+
+function configuredListingReviewSave() {
+  const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY?.trim()
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!supabaseURL || !publishableKey) {
+    throw new Error("The mobile Listing Review save adapter is not configured.");
+  }
+  return createConfiguredSupabaseListingReviewSaver({
+    publishableKey,
+    supabaseURL,
+    completionClient: createInternalGuidedCorrectionCompletionRpcClient(),
   });
 }
 
@@ -93,6 +111,11 @@ const handler = createMobileApiHandler({
   listingReview: {
     forRun(input) {
       return configuredListingReview().forRun(input);
+    },
+  },
+  listingReviewSave: {
+    save(input) {
+      return configuredListingReviewSave().save(input);
     },
   },
   worker: unavailableWorker,
