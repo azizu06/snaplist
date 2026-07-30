@@ -748,6 +748,10 @@ final class ItemRunSubmissionTests: XCTestCase {
                 "v1-\(String(repeating: "f", count: 64))",
                 isDirectory: true
             )
+        try FileManager.default.createDirectory(
+            at: foreignRoot.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         let foreignStore = LocalItemRunSubmissionAttemptStore(
             principalRootDirectory: foreignRoot
         )
