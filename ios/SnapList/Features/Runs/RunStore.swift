@@ -78,7 +78,15 @@ enum RunDetailStoreFactory {
             case .completed:
                 FixtureRunService(runs: [.completedDetail])
             case .reviewable:
-                FixtureRunService(runs: [.reviewableDetail])
+                FixtureRunService(
+                    runs: [
+                        .reviewableDetail(
+                            review:
+                                (configuration.listingReviewFixture ?? .loaded)
+                                    .review
+                        )
+                    ]
+                )
             case .unavailable, .none:
                 UnavailableRunService()
             }
@@ -132,22 +140,28 @@ private extension DurableRun {
     )
     static let canceledDetail = fixture(status: .canceled, stage: .generating)
     static let completedDetail = fixture(status: .succeeded, stage: .completed)
-    static let reviewableDetail = fixture(
-        status: .succeeded,
-        stage: .completed,
-        canOpenReview: true
-    )
+    static func reviewableDetail(
+        review: ListingReviewResult
+    ) -> DurableRun {
+        fixture(
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            review: review
+        )
+    }
 
     static func fixture(
         status: DurableRunStatus,
         stage: DurableRunStage,
         safeFailure: RunSafeFailure? = nil,
-        canOpenReview: Bool = false
+        canOpenReview: Bool = false,
+        review: ListingReviewResult? = nil
     ) -> DurableRun {
         DurableRun(
             id: UUID(uuidString: "20800000-0000-4000-8000-000000000020")!,
             itemID: UUID(uuidString: "20800000-0000-4000-8000-000000000021")!,
-            listingID: nil,
+            listingID: review?.binding.listingID,
             status: status,
             stage: stage,
             attemptCount: 1,
@@ -175,7 +189,8 @@ private extension DurableRun {
                 canStartNewCapture: false
             ),
             lastMeaningfulUpdateAt: "2026-07-20T12:01:00.000Z",
-            retentionCleanedAt: nil
+            retentionCleanedAt: nil,
+            review: review
         )
     }
 }
