@@ -742,16 +742,16 @@ final class ItemRunSubmissionTests: XCTestCase {
             )
         )
         let foreignRoot = root
+            .appendingPathComponent(
+                "ForeignApplicationSupport",
+                isDirectory: true
+            )
             .appendingPathComponent("SnapList", isDirectory: true)
             .appendingPathComponent("NativeIntake", isDirectory: true)
             .appendingPathComponent(
                 "v1-\(String(repeating: "f", count: 64))",
                 isDirectory: true
             )
-        try FileManager.default.createDirectory(
-            at: foreignRoot.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
         let foreignStore = LocalItemRunSubmissionAttemptStore(
             principalRootDirectory: foreignRoot
         )
