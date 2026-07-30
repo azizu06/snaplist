@@ -1,6 +1,6 @@
 import SwiftUI
 
-private struct ListingReviewSpecificDestination: Identifiable {
+private struct ListingReviewSpecificDestination: Hashable, Identifiable {
     let id: String
     let value: String
 }
