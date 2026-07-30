@@ -303,6 +303,11 @@ final class ListingReviewStoreTests: XCTestCase {
             runID: snapshot.binding.runID
         )
         XCTAssertTrue(localActivated)
+        let missingRecord = try await local.load(
+            runID: snapshot.binding.runID,
+            token: localToken
+        )
+        XCTAssertNil(missingRecord)
         let record = PersistedListingReviewDraft(
             snapshot: snapshot,
             draft: ListingReviewDraft(snapshot: snapshot),
