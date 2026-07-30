@@ -365,8 +365,39 @@ final class ListingReviewUITests: XCTestCase {
             line: line
         )
         reviewOpener.tap()
+
+        let anyReviewRoot = anyElement(
+            "listing-review",
+            in: app
+        ).waitForExistence(timeout: 3)
+        let otherReviewRoot = app.otherElements["listing-review"].exists
+        let reviewBack = app.buttons["listing-review.back"].exists
+        let reviewTitle = app.buttons["listing-review.title"].exists
+        let reviewNavigationTitle =
+            app.navigationBars["Listing review"].exists
+        let openFailed = anyElement(
+            "run.review.open-failed",
+            in: app
+        ).exists
+        let openerRemains = reviewOpener.exists
+        let diagnostic = """
+        [LREV-OPEN-DIAGNOSTIC] \
+        anyIdentifier=\(anyReviewRoot) \
+        otherElement=\(otherReviewRoot) \
+        back=\(reviewBack) \
+        title=\(reviewTitle) \
+        navigationTitle=\(reviewNavigationTitle) \
+        openFailed=\(openFailed) \
+        openerRemains=\(openerRemains)
+        """
+        print(diagnostic)
+        let attachment = XCTAttachment(string: diagnostic)
+        attachment.name = "LREV-open-review-diagnostic.txt"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         XCTAssertTrue(
-            app.otherElements["listing-review"].waitForExistence(timeout: 3),
+            otherReviewRoot,
+            diagnostic,
             file: file,
             line: line
         )
