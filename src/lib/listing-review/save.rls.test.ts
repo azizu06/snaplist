@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -52,6 +53,7 @@ const DATABASE_URL = resolveLocalTestDatabaseUrl();
 interface ReviewFixture {
   itemId: string;
   listingId: string;
+  photoPath: string;
   queueMessageId: string;
   reviewRevision: string;
   runId: string;
@@ -126,6 +128,7 @@ async function seedReview(
 ): Promise<ReviewFixture> {
   const batchId = crypto.randomUUID();
   const idempotencyKey = `listing-review-save-${label}-${batchId}`;
+  const photoPath = `${userId}/items/${batchId}/front.jpg`;
   const staged = await admin.rpc("stage_pipeline_batch", {
     p_user_id: userId,
     p_batch_id: batchId,
@@ -133,7 +136,7 @@ async function seedReview(
       idempotency_key: idempotencyKey,
       source: "single",
       autopilot_enabled: false,
-      photo_paths: [`${userId}/items/${batchId}/front.jpg`],
+      photo_paths: [photoPath],
       cost_basis: null,
     }],
     p_daily_limit: 10,
@@ -212,6 +215,7 @@ async function seedReview(
   return {
     itemId: row.item_id,
     listingId: completion.listingId,
+    photoPath,
     queueMessageId: String(row.queue_message_id),
     reviewRevision,
     runId: row.run_id,
@@ -407,6 +411,12 @@ describe("mobile Listing Review save RLS authority", () => {
 
   it("keeps replay receipts private and grants only fixed RPCs", () => {
     const migration = readFileSync(migrationPath, "utf8");
+    const pricingEvidenceGuard = migration.match(
+      /create or replace function private\.prevent_pricing_evidence_snapshot_update\(\)[\s\S]*?\n\$\$;/i,
+    )?.[0];
+    const guestClaimTransfer = migration.match(
+      /create or replace function private\.transfer_mobile_listing_review_saves_for_guest_claim\(\)[\s\S]*?\n\$\$;/i,
+    )?.[0];
 
     expect(migration).toMatch(
       /create table private\.mobile_listing_review_saves/i,
@@ -422,6 +432,86 @@ describe("mobile Listing Review save RLS authority", () => {
     );
     expect(migration).toMatch(
       /revoke all on function public\.save_mobile_listing_review\([\s\S]*from public, anon, service_role/i,
+    );
+    const claimChildren = [
+      {
+        table: "private.mobile_item_submissions",
+        constraints: [
+          "mobile_item_submissions_item_owner_fkey",
+          "mobile_item_submissions_run_owner_fkey",
+        ],
+        updatePattern:
+          /update private\.mobile_item_submissions submission[\s\S]*set user_id = new\.user_id[\s\S]*submission\.item_id = old\.id[\s\S]*submission\.run_id = v_recovery\.pipeline_run_id[\s\S]*submission\.user_id = old\.user_id/i,
+      },
+      {
+        table: "private.guided_correction_completion_capabilities",
+        constraints: [
+          "guided_correction_capability_reservation_fkey",
+          "guided_correction_capability_listing_fkey",
+        ],
+        updatePattern:
+          /update private\.guided_correction_completion_capabilities capability[\s\S]*set user_id = new\.user_id[\s\S]*capability\.item_id = old\.id[\s\S]*capability\.listing_id = v_recovery\.draft_id[\s\S]*capability\.reservation_id = v_recovery\.reservation_id[\s\S]*capability\.user_id = old\.user_id/i,
+      },
+      {
+        table: "public.pricing_evidence_snapshots",
+        constraints: [
+          "pricing_evidence_snapshots_run_fkey",
+          "pricing_evidence_snapshots_prediction_fkey",
+          "pricing_evidence_snapshots_listing_fkey",
+        ],
+        updatePattern:
+          /update public\.pricing_evidence_snapshots evidence[\s\S]*set user_id = new\.user_id[\s\S]*evidence\.user_id = old\.user_id[\s\S]*evidence\.item_id = old\.id[\s\S]*evidence\.pipeline_run_id = v_recovery\.pipeline_run_id[\s\S]*evidence\.listing_id = v_recovery\.draft_id/i,
+      },
+    ];
+    for (const child of claimChildren) {
+      const tablePattern = child.table.replace(".", "\\.");
+      const alteration = migration.match(
+        new RegExp(`alter table ${tablePattern}[\\s\\S]*?;`, "i"),
+      )?.[0];
+      for (const constraint of child.constraints) {
+        expect(alteration ?? "").toMatch(
+          new RegExp(
+            `alter constraint ${constraint}\\s+deferrable initially immediate`,
+            "i",
+          ),
+        );
+        expect(guestClaimTransfer).toContain(
+          `${child.table.split(".")[0]}.${constraint}`,
+        );
+      }
+      expect(guestClaimTransfer).toMatch(child.updatePattern);
+    }
+    expect(guestClaimTransfer).toMatch(
+      /current_setting\(\s*'snaplist\.guest_claim_recovery_id', true\s*\)[\s\S]*current_setting\(\s*'snaplist\.guest_claim_lease_token', true\s*\)[\s\S]*recovery\.item_id = old\.id[\s\S]*recovery\.guest_user_id = old\.user_id[\s\S]*recovery\.claim_target_user_id = new\.user_id[\s\S]*update private\.mobile_listing_review_saves[\s\S]*set user_id = new\.user_id[\s\S]*where run_id = v_recovery\.pipeline_run_id[\s\S]*and user_id = old\.user_id/i,
+    );
+    expect(migration).toMatch(
+      /create trigger transfer_mobile_listing_review_saves_for_guest_claim[\s\S]*before update of user_id on public\.items[\s\S]*execute function private\.transfer_mobile_listing_review_saves_for_guest_claim\(\)/i,
+    );
+    expect(pricingEvidenceGuard).toMatch(
+      /new\.user_id is distinct from old\.user_id/i,
+    );
+    for (const column of [
+      "run_id",
+      "pipeline_run_id",
+      "run_kind",
+      "item_id",
+      "prediction_id",
+      "listing_id",
+      "schema_version",
+      "item",
+      "price_result",
+      "evidence",
+      "evidence_as_of",
+    ]) {
+      expect(pricingEvidenceGuard).toContain(
+        `new.${column} is not distinct from old.${column}`,
+      );
+    }
+    expect(pricingEvidenceGuard).toMatch(
+      /current_setting\(\s*'snaplist\.guest_claim_recovery_id', true\s*\)[\s\S]*current_setting\(\s*'snaplist\.guest_claim_lease_token', true\s*\)[\s\S]*recovery\.guest_user_id = old\.user_id[\s\S]*recovery\.claim_target_user_id = new\.user_id[\s\S]*recovery\.draft_id = old\.listing_id[\s\S]*recovery\.state = 'copying'[\s\S]*recovery\.claim_lease_expires_at > statement_timestamp\(\)[\s\S]*if found then\s*return new;\s*end if;[\s\S]*errcode = '55000'[\s\S]*message = 'Pricing evidence snapshots are immutable'/i,
+    );
+    expect(migration).toMatch(
+      /revoke all on function private\.prevent_pricing_evidence_snapshot_update\(\)\s+from public, anon, authenticated, service_role/i,
     );
   });
 
@@ -509,6 +599,7 @@ describe("mobile Listing Review save RLS authority", () => {
     const database = new Client({ connectionString: DATABASE_URL });
     const userIds: string[] = [];
     const fixtures: ReviewFixture[] = [];
+    const recoveryIds: string[] = [];
     await database.connect();
     try {
       for (const principalKind of ["ClerkBearer", "GuestBearer"] as const) {
@@ -864,8 +955,148 @@ describe("mobile Listing Review save RLS authority", () => {
           source_review_revision: regenerationKey,
           title: "Staged Sony WH-1000XM5",
         });
+
+        if (principalKind === "GuestBearer") {
+          const accountId =
+            `user_test_review_save_claim_${crypto.randomUUID()}`;
+          const accountToken = await mintUserJwt(accountId);
+          userIds.push(accountId);
+          const recoveryId = crypto.randomUUID();
+          recoveryIds.push(recoveryId);
+          const recoveryTokenHash = "b".repeat(64);
+          const registered = await admin.rpc("register_guest_draft_recovery", {
+            p_recovery_id: recoveryId,
+            p_guest_user_id: ownerId,
+            p_pipeline_run_id: fixture.runId,
+            p_recovery_token_hash: recoveryTokenHash,
+            p_encrypted_artifact: {
+              version: 1,
+              algorithm: "aes-256-gcm",
+              keyId: "listing-review-claim-test",
+              keyEnvelope: Buffer.alloc(1, 1).toString("base64"),
+              nonce: Buffer.alloc(12, 2).toString("base64"),
+              tag: Buffer.alloc(16, 3).toString("base64"),
+              ciphertext: Buffer.from("encrypted-review").toString("base64"),
+            },
+            p_storage_manifest: [{
+              sourcePath: fixture.photoPath,
+              sha256: "a".repeat(64),
+              byteLength: 1,
+              encryption: {
+                algorithm: "aes-256-gcm",
+                keyId: "listing-review-claim-test",
+                nonce: Buffer.alloc(12, 4).toString("base64"),
+                tag: Buffer.alloc(16, 5).toString("base64"),
+              },
+            }],
+          });
+          expect(registered.error).toBeNull();
+          expect(registered.data).toMatchObject({ outcome: "recoverable" });
+
+          const claimStarted = await admin.rpc("begin_guest_draft_claim", {
+            p_recovery_id: recoveryId,
+            p_guest_user_id: ownerId,
+            p_recovery_token_hash: recoveryTokenHash,
+            p_target_user_id: accountId,
+            p_idempotency_key: crypto.randomUUID(),
+            p_claim_lease_seconds: 300,
+          });
+          expect(claimStarted.error).toBeNull();
+          const claimPlan = claimStarted.data as {
+            claimLeaseToken: string;
+            objects: Array<{
+              byteLength: number;
+              destinationPath: string;
+              encryption: Record<string, unknown>;
+              sha256: string;
+              sourcePath: string;
+            }>;
+            outcome: string;
+          };
+          expect(claimPlan.outcome).toBe("copy_required");
+
+          const beforeClaim = await database.query<{
+            review_revision: string;
+          }>(
+            "select review_revision::text from public.items where id = $1::uuid",
+            [fixture.itemId],
+          );
+          const claimCompleted = await admin.rpc("complete_guest_draft_claim", {
+            p_recovery_id: recoveryId,
+            p_recovery_token_hash: recoveryTokenHash,
+            p_target_user_id: accountId,
+            p_claim_lease_token: claimPlan.claimLeaseToken,
+            p_verified_objects: claimPlan.objects.map((object) => ({
+              byteLength: object.byteLength,
+              destinationPath: object.destinationPath,
+              encryption: object.encryption,
+              sha256: object.sha256,
+            })),
+          });
+          expect(claimCompleted.error).toBeNull();
+          expect(claimCompleted.data).toMatchObject({ outcome: "claimed" });
+
+          const claimedState = await database.query<{
+            item_user_id: string;
+            review_revision: string;
+            run_user_id: string;
+            save_users: string[];
+          }>(
+            `select item.user_id as item_user_id,
+                    item.review_revision::text,
+                    run.user_id as run_user_id,
+                    array(
+                      select distinct save.user_id
+                      from private.mobile_listing_review_saves save
+                      where save.run_id = run.id
+                      order by save.user_id
+                    ) as save_users
+             from public.items item
+             join public.pipeline_runs run
+               on run.id = $2::uuid
+              and run.item_id = item.id
+             where item.id = $1::uuid`,
+            [fixture.itemId, fixture.runId],
+          );
+          expect(claimedState.rows[0]).toEqual({
+            item_user_id: accountId,
+            review_revision: beforeClaim.rows[0]?.review_revision,
+            run_user_id: accountId,
+            save_users: [accountId],
+          });
+
+          const claimedProviderWork = vi.fn();
+          const accountSaver = createListingReviewSaver(
+            createListingReviewSaveDataClient(() => rlsClient(accountToken)),
+            { regenerate: claimedProviderWork },
+          );
+          const claimedReplay = await accountSaver.save({
+            ...responseLossOperation,
+            userId: accountId,
+            bearerToken: accountToken,
+          });
+          expect(claimedReplay).toEqual(recoveredReceipt);
+          expect(claimedProviderWork).not.toHaveBeenCalled();
+          const afterReplay = await database.query<{
+            review_revision: string;
+          }>(
+            "select review_revision::text from public.items where id = $1::uuid",
+            [fixture.itemId],
+          );
+          expect(afterReplay.rows[0]).toEqual(beforeClaim.rows[0]);
+        }
       }
     } finally {
+      if (recoveryIds.length > 0) {
+        await database.query(
+          "delete from private.pipeline_storage_cleanup_jobs where source_id = any($1::uuid[])",
+          [recoveryIds],
+        );
+        await database.query(
+          "delete from private.guest_draft_recoveries where id = any($1::uuid[])",
+          [recoveryIds],
+        );
+      }
       await Promise.all(
         fixtures.map((fixture) =>
           admin.rpc("ack_pipeline_message", {

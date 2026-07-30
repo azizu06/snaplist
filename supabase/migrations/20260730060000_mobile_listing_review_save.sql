@@ -36,6 +36,172 @@ create table private.mobile_listing_review_saves (
 revoke all on table private.mobile_listing_review_saves
   from public, anon, authenticated;
 
+alter table private.mobile_item_submissions
+  alter constraint mobile_item_submissions_item_owner_fkey
+    deferrable initially immediate,
+  alter constraint mobile_item_submissions_run_owner_fkey
+    deferrable initially immediate;
+
+alter table private.guided_correction_completion_capabilities
+  alter constraint guided_correction_capability_reservation_fkey
+    deferrable initially immediate,
+  alter constraint guided_correction_capability_listing_fkey
+    deferrable initially immediate;
+
+alter table public.pricing_evidence_snapshots
+  alter constraint pricing_evidence_snapshots_run_fkey
+    deferrable initially immediate,
+  alter constraint pricing_evidence_snapshots_prediction_fkey
+    deferrable initially immediate,
+  alter constraint pricing_evidence_snapshots_listing_fkey
+    deferrable initially immediate;
+
+create or replace function private.prevent_pricing_evidence_snapshot_update()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_recovery_id text := current_setting(
+    'snaplist.guest_claim_recovery_id', true
+  );
+  v_claim_lease_token text := current_setting(
+    'snaplist.guest_claim_lease_token', true
+  );
+begin
+  if new.user_id is distinct from old.user_id
+    and new.run_id is not distinct from old.run_id
+    and new.pipeline_run_id is not distinct from old.pipeline_run_id
+    and new.run_kind is not distinct from old.run_kind
+    and new.item_id is not distinct from old.item_id
+    and new.prediction_id is not distinct from old.prediction_id
+    and new.listing_id is not distinct from old.listing_id
+    and new.schema_version is not distinct from old.schema_version
+    and new.item is not distinct from old.item
+    and new.price_result is not distinct from old.price_result
+    and new.evidence is not distinct from old.evidence
+    and new.evidence_as_of is not distinct from old.evidence_as_of
+    and coalesce(v_recovery_id, '') ~
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    and coalesce(v_claim_lease_token, '') ~
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
+    perform 1
+    from private.guest_draft_recoveries recovery
+    where recovery.id = v_recovery_id::uuid
+      and recovery.guest_user_id = old.user_id
+      and recovery.claim_target_user_id = new.user_id
+      and recovery.item_id = old.item_id
+      and recovery.draft_id = old.listing_id
+      and (
+        old.pipeline_run_id is null
+        or recovery.pipeline_run_id = old.pipeline_run_id
+      )
+      and recovery.claim_lease_token = v_claim_lease_token::uuid
+      and recovery.state = 'copying'
+      and recovery.claim_lease_expires_at > statement_timestamp();
+    if found then
+      return new;
+    end if;
+  end if;
+
+  raise exception using
+    errcode = '55000',
+    message = 'Pricing evidence snapshots are immutable';
+end;
+$$;
+
+revoke all on function private.prevent_pricing_evidence_snapshot_update()
+  from public, anon, authenticated, service_role;
+
+create or replace function private.transfer_mobile_listing_review_saves_for_guest_claim()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_recovery_id uuid := nullif(current_setting(
+    'snaplist.guest_claim_recovery_id', true
+  ), '')::uuid;
+  v_claim_lease_token uuid := nullif(current_setting(
+    'snaplist.guest_claim_lease_token', true
+  ), '')::uuid;
+  v_recovery private.guest_draft_recoveries%rowtype;
+begin
+  if v_recovery_id is null and v_claim_lease_token is null then
+    return new;
+  end if;
+  if v_recovery_id is null or v_claim_lease_token is null then
+    raise exception using
+      errcode = '42501',
+      message = 'Guest claim review save transfer authorization is required.';
+  end if;
+
+  select recovery.* into v_recovery
+  from private.guest_draft_recoveries recovery
+  where recovery.id = v_recovery_id
+    and recovery.item_id = old.id
+    and recovery.guest_user_id = old.user_id
+    and recovery.claim_target_user_id = new.user_id
+    and recovery.claim_lease_token = v_claim_lease_token
+    and recovery.state = 'copying'
+    and recovery.claim_lease_expires_at > statement_timestamp();
+  if not found then
+    raise exception using
+      errcode = '42501',
+      message = 'Guest claim review save transfer authorization is required.';
+  end if;
+
+  set constraints
+    private.mobile_item_submissions_item_owner_fkey,
+    private.mobile_item_submissions_run_owner_fkey,
+    private.guided_correction_capability_reservation_fkey,
+    private.guided_correction_capability_listing_fkey,
+    public.pricing_evidence_snapshots_run_fkey,
+    public.pricing_evidence_snapshots_prediction_fkey,
+    public.pricing_evidence_snapshots_listing_fkey
+  deferred;
+
+  update private.mobile_item_submissions submission
+  set user_id = new.user_id
+  where submission.item_id = old.id
+    and submission.run_id = v_recovery.pipeline_run_id
+    and submission.user_id = old.user_id;
+
+  update private.guided_correction_completion_capabilities capability
+  set user_id = new.user_id
+  where capability.item_id = old.id
+    and capability.listing_id = v_recovery.draft_id
+    and capability.reservation_id = v_recovery.reservation_id
+    and capability.user_id = old.user_id;
+
+  update public.pricing_evidence_snapshots evidence
+  set user_id = new.user_id
+  where evidence.user_id = old.user_id
+    and evidence.item_id = old.id
+    and (
+      evidence.pipeline_run_id = v_recovery.pipeline_run_id
+      or evidence.listing_id = v_recovery.draft_id
+    );
+
+  update private.mobile_listing_review_saves
+  set user_id = new.user_id
+  where run_id = v_recovery.pipeline_run_id
+    and user_id = old.user_id;
+  return new;
+end;
+$$;
+
+revoke all on function private.transfer_mobile_listing_review_saves_for_guest_claim()
+  from public, anon, authenticated, service_role;
+
+create trigger transfer_mobile_listing_review_saves_for_guest_claim
+before update of user_id on public.items
+for each row
+when (old.user_id is distinct from new.user_id)
+execute function private.transfer_mobile_listing_review_saves_for_guest_claim();
+
 create or replace function public.claim_mobile_listing_review_save(
   p_action text,
   p_run_id uuid,
