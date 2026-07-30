@@ -59,7 +59,9 @@ struct SnapListApp: App {
         self.dependencies = AppDependencies.make(
             configuration: configuration,
             apiOrigin: apiOrigin,
-            tokenProvider: tokenProvider
+            tokenProvider: tokenProvider,
+            nativeIntakeIdentitySource:
+                ClerkAuthenticationComposition.makeNativeIntakeIdentitySource()
         )
         _router = State(
             initialValue: AppRouter(
@@ -90,7 +92,7 @@ struct SnapListApp: App {
             initialValue: CaptureFlowModel(
                 camera: dependencies.captureCamera,
                 evaluator: dependencies.framingEvaluator,
-                store: dependencies.captureDraftStore
+                intake: dependencies.nativeIntake
             )
         )
         _homeStore = State(

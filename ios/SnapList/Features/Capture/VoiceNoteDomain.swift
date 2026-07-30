@@ -131,6 +131,12 @@ enum VoiceNoteFileStoreError: Error {
     case fileTooLarge
 }
 
+@MainActor
+struct VoiceNoteCommitAuthority {
+    let save: (URL, TimeInterval) async -> VoiceNoteAsset?
+    let delete: () async -> Bool
+}
+
 final class VoiceNoteLocalFileStore: VoiceNoteFileStoring {
     static let maximumBytes = 524_288
     static let recoveryCeiling: TimeInterval = 24 * 60 * 60
@@ -271,6 +277,7 @@ final class VoiceNoteStore {
 
     private let audio: VoiceNoteAudioClient
     private let files: VoiceNoteFileStoring
+    private let authority: VoiceNoteCommitAuthority?
     private var provisionalURL: URL?
     private var provisionalDuration: TimeInterval?
     private var pendingFocusRequest: VoiceNoteFocusRequest?
@@ -278,11 +285,13 @@ final class VoiceNoteStore {
     init(
         savedNote: VoiceNoteAsset? = nil,
         audio: VoiceNoteAudioClient,
-        files: VoiceNoteFileStoring
+        files: VoiceNoteFileStoring,
+        authority: VoiceNoteCommitAuthority? = nil
     ) {
         self.savedNote = savedNote
         self.audio = audio
         self.files = files
+        self.authority = authority
         phase = savedNote == nil ? .ready : .saved(isPlaying: false)
         audio.interruptionHandler = { [weak self] in
             self?.handleInterruption()
@@ -405,6 +414,30 @@ final class VoiceNoteStore {
             return
         }
 
+        if let authority {
+            Task {
+                let committed = await authority.save(
+                    provisionalURL,
+                    provisionalDuration
+                )
+                guard self.provisionalURL == provisionalURL else {
+                    try? files.discardProvisional(at: provisionalURL)
+                    return
+                }
+                if let committed {
+                    self.savedNote = committed
+                    self.provisionalURL = nil
+                    self.provisionalDuration = nil
+                    try? files.discardProvisional(at: provisionalURL)
+                    phase = .saved(isPlaying: false)
+                    pendingFocusRequest = .savedNoteSummary
+                } else {
+                    phase = .saveFailed
+                }
+            }
+            return
+        }
+
         do {
             let savedNote = try files.commit(
                 provisionalURL: provisionalURL,
@@ -510,6 +543,21 @@ final class VoiceNoteStore {
             return true
         }
         audio.stopPlaying()
+        if let authority {
+            Task {
+                guard await authority.delete() else {
+                    phase = .saved(isPlaying: false)
+                    return
+                }
+                if self.savedNote == savedNote || self.savedNote == nil {
+                    self.savedNote = nil
+                    phase = .ready
+                } else {
+                    phase = .saved(isPlaying: false)
+                }
+            }
+            return true
+        }
         do {
             try files.delete(savedNote)
             self.savedNote = nil
@@ -539,6 +587,20 @@ final class VoiceNoteStore {
     func consumeFocusRequest() -> VoiceNoteFocusRequest? {
         defer { pendingFocusRequest = nil }
         return pendingFocusRequest
+    }
+
+    func publishCommittedVoice(_ voice: NativeIntake.Voice?) {
+        audio.stopPlaying()
+        savedNote = voice.map {
+            VoiceNoteAsset(url: $0.mediaURL, duration: $0.duration)
+        }
+        if case .recording = phase {
+            return
+        }
+        if case .takeReady = phase {
+            return
+        }
+        phase = savedNote == nil ? .ready : .saved(isPlaying: false)
     }
 
 #if DEBUG

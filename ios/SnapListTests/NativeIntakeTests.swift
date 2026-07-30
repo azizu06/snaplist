@@ -200,7 +200,11 @@ final class NativeIntakeTests: XCTestCase {
         _ = try await session.nextSnapshot()
         await harness.identity.set(.clerk("user_native_intake_review_a"))
         _ = try await session.nextSnapshot()
-        let entered = await session.perform(.photoReviewEntered)
+        let entered = await session.perform(
+            .photoReviewEntered(
+                activationID: session.snapshot.version.activationID
+            )
+        )
         XCTAssertEqual(entered, .committed)
         await harness.identity.set(.clerk("user_native_intake_review_b"))
         let dismissal = await session.nextEvent()

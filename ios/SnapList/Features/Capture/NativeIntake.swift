@@ -18,7 +18,7 @@ actor NativeIntake {
         )
     }
 
-    struct Version: Equatable, Sendable {
+    struct Version: Hashable, Sendable {
         let activationID: UUID
         let revision: UInt64
     }
@@ -67,8 +67,8 @@ actor NativeIntake {
         case setVoice(VoiceInput)
         case deleteVoice
         case discard(expected: Version)
-        case photoReviewEntered
-        case photoReviewLeft
+        case photoReviewEntered(activationID: UUID)
+        case photoReviewLeft(activationID: UUID)
     }
 
     enum Rejection: Equatable, Sendable {
@@ -333,13 +333,19 @@ actor NativeIntake {
                 return .unchanged
             }
             return commitMutation(expected: expected) { ($0.photos, nil) }
-        case .photoReviewEntered:
+        case .photoReviewEntered(let activationID):
+            guard activationID == active.activationID else {
+                return .superseded
+            }
             guard reviewActivationID != active.activationID else {
                 return .unchanged
             }
             reviewActivationID = active.activationID
             return .committed
-        case .photoReviewLeft:
+        case .photoReviewLeft(let activationID):
+            guard activationID == active.activationID else {
+                return .superseded
+            }
             guard reviewActivationID == active.activationID else {
                 return .unchanged
             }

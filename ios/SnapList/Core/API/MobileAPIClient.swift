@@ -152,6 +152,9 @@ struct AppDependencies {
     let guestAllowance: any GuestAllowanceCapability
     let captureCamera: any CaptureCamera
     let framingEvaluator: any FramingEvaluating
+    let nativeIntake: NativeIntake
+    // #543 still reads the legacy submission draft until its principal-generation
+    // fence lands. Production Scan and Photo Review never receive this store.
     let captureDraftStore: any CaptureDraftStoring
     let subscriptionClient: any SubscriptionClient
     let analyticsClient: any AnalyticsClient
@@ -159,7 +162,9 @@ struct AppDependencies {
     static func make(
         configuration: LaunchConfiguration,
         apiOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
-        tokenProvider: any BearerTokenProviding = UnavailableBearerTokenProvider()
+        tokenProvider: any BearerTokenProviding = UnavailableBearerTokenProvider(),
+        nativeIntakeIdentitySource: NativeIntake.IdentitySource = .processPrivate,
+        nativeIntakeApplicationSupportDirectory: URL? = nil
     ) -> AppDependencies {
         let cameraAuthorization: any CameraAuthorizationProviding
         if let fixtureStatus = configuration.cameraAuthorizationFixture {
@@ -169,6 +174,16 @@ struct AppDependencies {
         }
         let captureDraftStore = makeCaptureDraftStore(configuration: configuration)
         let captureCamera = makeCaptureCamera(configuration: configuration)
+        let nativeIntake = NativeIntake(
+            applicationSupportDirectory:
+                nativeIntakeApplicationSupportDirectory
+                ?? FileManager.default.urls(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask
+                ).first
+                ?? FileManager.default.temporaryDirectory,
+            identitySource: nativeIntakeIdentitySource
+        )
         if configuration.usesZeroNetworkFixtures {
             let client = ZeroNetworkMobileAPIClient()
             return AppDependencies(
@@ -180,6 +195,7 @@ struct AppDependencies {
                 guestAllowance: DeferredGuestAllowanceCapability(),
                 captureCamera: captureCamera,
                 framingEvaluator: VisionObjectFramingEvaluator(),
+                nativeIntake: nativeIntake,
                 captureDraftStore: captureDraftStore,
                 subscriptionClient: FixtureSubscriptionClient(),
                 analyticsClient: NoOpAnalyticsClient()
@@ -200,6 +216,7 @@ struct AppDependencies {
             guestAllowance: DeferredGuestAllowanceCapability(),
             captureCamera: captureCamera,
             framingEvaluator: VisionObjectFramingEvaluator(),
+            nativeIntake: nativeIntake,
             captureDraftStore: captureDraftStore,
             subscriptionClient: RevenueCatSubscriptionClient(),
             analyticsClient: NoOpAnalyticsClient()
