@@ -129,7 +129,8 @@ struct ListingReviewAPIClient: ListingReviewServing {
             )
             guard run.id == runID,
                   run.legalActions.canOpenReview,
-                  let review = run.review else {
+                  let review = run.review,
+                  review.binding.runID == runID else {
                 throw ListingReviewClientError.invalidResponse
             }
             return review

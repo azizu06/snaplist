@@ -5,6 +5,9 @@ enum ListingReviewCopy {
     static let noVerifiedSoldMatches = "No verified sold matches found."
     static let staleReview = "This review changed. Reload and try again."
     static let saveFailed = "Failed to save changes. Please try again."
+    static let draftPersistenceFailed =
+        "Couldn’t save changes on this phone. Please try again."
+    static let openFailed = "Failed to load this review. Please try again."
     static let reloadFailed =
         "Couldn’t reload. Your changes are still here."
 }

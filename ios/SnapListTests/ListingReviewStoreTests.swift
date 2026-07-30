@@ -11,7 +11,7 @@ final class ListingReviewStoreTests: XCTestCase {
                 .failure(ListingReviewClientError.unavailable),
                 .success(Self.receipt(for: snapshot)),
             ],
-            reloads: []
+            reloads: [.success(snapshot)]
         )
         let store = makeStore(service: service)
 
@@ -35,12 +35,64 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
         XCTAssertEqual(requests[0].idempotencyKey, requests[1].idempotencyKey)
         XCTAssertEqual(requests[0].expectedRevision, snapshot.binding.reviewRevision)
+
+        var invalidDraft = ListingReviewDraft(snapshot: snapshot)
+        invalidDraft.specifics = []
+        XCTAssertFalse(invalidDraft.hasRequiredCopy)
+        invalidDraft.specifics = (0...50).map {
+            ListingReviewSpecific(name: "Field \($0)", value: "Value")
+        }
+        XCTAssertFalse(invalidDraft.hasRequiredCopy)
+        invalidDraft.specifics = [
+            ListingReviewSpecific(
+                name: String(repeating: "N", count: 66),
+                value: "Value"
+            ),
+        ]
+        XCTAssertFalse(invalidDraft.hasRequiredCopy)
+        invalidDraft.specifics = [
+            ListingReviewSpecific(
+                name: "Field",
+                value: String(repeating: "V", count: 501)
+            ),
+        ]
+        XCTAssertFalse(invalidDraft.hasRequiredCopy)
+        invalidDraft.specifics = [
+            ListingReviewSpecific(name: "Type", value: "Headphones"),
+            ListingReviewSpecific(name: "Category", value: "Audio"),
+        ]
+        XCTAssertFalse(invalidDraft.hasRequiredCopy)
+
+        let failingPersistence = ListingReviewTogglePersistence()
+        let durabilityService = ListingReviewRecordingService(
+            saves: [.success(Self.receipt(for: snapshot))],
+            reloads: [.success(snapshot)]
+        )
+        let durabilityStore = makeStore(
+            service: durabilityService,
+            persistence: failingPersistence
+        )
+        let durabilityOpened = await durabilityStore.open(snapshot)
+        XCTAssertTrue(durabilityOpened)
+        await durabilityStore.setTitle("Durably staged title")
+        await failingPersistence.failSaves()
+
+        let durabilityOutcome = await durabilityStore.done()
+        let durabilityRequests =
+            await durabilityService.recordedSaveRequests()
+
+        XCTAssertEqual(durabilityOutcome, .stayed)
+        XCTAssertEqual(durabilityStore.phase, .failed)
+        XCTAssertEqual(durabilityRequests.count, 0)
     }
 
     func testSemanticRevertBecomesCleanAndRelaunchRestoresDirtyDraft() async throws {
         let snapshot = try Self.makeSnapshot()
         let persistence = MemoryListingReviewDraftPersistence()
-        let service = ListingReviewRecordingService(saves: [], reloads: [])
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot), .success(snapshot)]
+        )
         let first = makeStore(service: service, persistence: persistence)
 
         let firstOpened = await first.open(snapshot)
@@ -60,6 +112,69 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertFalse(relaunched.isDirty)
         XCTAssertEqual(revertedOutcome, .dismissedWithoutWrite)
         XCTAssertEqual(saveRequests.count, 0)
+
+        XCTAssertTrue(
+            LocalListingReviewDraftPersistence.writingOptions
+                .contains(.atomic)
+        )
+        XCTAssertTrue(
+            LocalListingReviewDraftPersistence.writingOptions
+                .contains(.completeFileProtection)
+        )
+        let localRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: localRoot) }
+        let local = LocalListingReviewDraftPersistence(
+            rootDirectory: localRoot
+        )
+        let record = PersistedListingReviewDraft(
+            snapshot: snapshot,
+            draft: ListingReviewDraft(snapshot: snapshot),
+            pendingSave: nil,
+            expiresAt: Date(timeIntervalSince1970: 1_800_086_400)
+        )
+        try await local.save(record, runID: snapshot.binding.runID)
+        let recordURL = localRoot.appendingPathComponent(
+            snapshot.binding.runID.uuidString.lowercased() + ".json"
+        )
+        try Data("{".utf8).write(to: recordURL, options: .atomic)
+
+        let corruptRecord = try await local.load(
+            runID: snapshot.binding.runID
+        )
+        XCTAssertNil(corruptRecord)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recordURL.path))
+
+        let principalProvider = ListingReviewTestBearerProvider(
+            subject: "listing-review-principal-a"
+        )
+        let principalPersistence = MemoryListingReviewDraftPersistence()
+        let principalService = ListingReviewRecordingService(
+            saves: [],
+            reloads: [
+                .success(snapshot),
+                .failure(ListingReviewClientError.unavailable),
+            ]
+        )
+        let principalStore = makeStore(
+            service: principalService,
+            persistence: principalPersistence,
+            tokenProvider: principalProvider
+        )
+        let principalOpened = await principalStore.open(snapshot)
+        XCTAssertTrue(principalOpened)
+        await principalStore.setTitle("Principal A draft")
+        await principalProvider.setSubject("listing-review-principal-b")
+        let switchedStore = makeStore(
+            service: principalService,
+            persistence: principalPersistence,
+            tokenProvider: principalProvider
+        )
+
+        let switchedOpened = await switchedStore.open(snapshot)
+        XCTAssertFalse(switchedOpened)
+        XCTAssertNil(switchedStore.snapshot)
+        XCTAssertNil(switchedStore.draft)
     }
 
     func testConflictKeepsDraftUntilExplicitDiscardReloadSucceeds() async throws {
@@ -70,7 +185,7 @@ final class ListingReviewStoreTests: XCTestCase {
         )
         let service = ListingReviewRecordingService(
             saves: [.failure(ListingReviewClientError.conflict)],
-            reloads: [.success(current)]
+            reloads: [.success(snapshot), .success(current)]
         )
         let store = makeStore(service: service)
 
@@ -86,6 +201,16 @@ final class ListingReviewStoreTests: XCTestCase {
         store.keepEditing()
         XCTAssertEqual(store.draft?.title, "My local title")
         XCTAssertTrue(store.isDirty)
+        let requestsBeforeStaleDone =
+            await service.recordedSaveRequests()
+        let staleOutcome = await store.done()
+        let requestsAfterStaleDone =
+            await service.recordedSaveRequests()
+        XCTAssertEqual(staleOutcome, .stayed)
+        XCTAssertEqual(
+            requestsAfterStaleDone.count,
+            requestsBeforeStaleDone.count
+        )
 
         await store.requestReload()
         await store.discardChangesAndReload()
@@ -98,12 +223,14 @@ final class ListingReviewStoreTests: XCTestCase {
     private func makeStore(
         service: ListingReviewRecordingService,
         persistence: any ListingReviewDraftPersisting =
-            MemoryListingReviewDraftPersistence()
+            MemoryListingReviewDraftPersistence(),
+        tokenProvider: any BearerTokenProviding =
+            ListingReviewTestBearerProvider()
     ) -> ListingReviewStore {
         ListingReviewStore(
             service: service,
             persistence: persistence,
-            tokenProvider: ListingReviewTestBearerProvider(),
+            tokenProvider: tokenProvider,
             now: { Date(timeIntervalSince1970: 1_800_000_000) },
             makeID: {
                 UUID(uuidString: "55000000-0000-4000-8000-000000000050")!
@@ -174,7 +301,17 @@ final class ListingReviewStoreTests: XCTestCase {
     }
 }
 
-private struct ListingReviewTestBearerProvider: BearerTokenProviding {
+private actor ListingReviewTestBearerProvider: BearerTokenProviding {
+    private var subject: String
+
+    init(subject: String = "listing-review-test-user") {
+        self.subject = subject
+    }
+
+    func setSubject(_ value: String) {
+        subject = value
+    }
+
     func bearerToken() async throws -> String {
         "listing-review-test-bearer"
     }
@@ -183,9 +320,37 @@ private struct ListingReviewTestBearerProvider: BearerTokenProviding {
         PrincipalBoundBearer(
             bearerToken: "listing-review-test-bearer",
             scopeProof: ItemRunSubmissionPrincipalScopeProof(
-                verifiedClerkSubject: "listing-review-test-user"
+                verifiedClerkSubject: subject
             )!
         )
+    }
+}
+
+private actor ListingReviewTogglePersistence:
+    ListingReviewDraftPersisting {
+    private var record: PersistedListingReviewDraft?
+    private var shouldFailSaves = false
+
+    func failSaves() {
+        shouldFailSaves = true
+    }
+
+    func load(runID: UUID) -> PersistedListingReviewDraft? {
+        record
+    }
+
+    func save(
+        _ record: PersistedListingReviewDraft,
+        runID: UUID
+    ) throws {
+        if shouldFailSaves {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        self.record = record
+    }
+
+    func remove(runID: UUID) {
+        record = nil
     }
 }
 

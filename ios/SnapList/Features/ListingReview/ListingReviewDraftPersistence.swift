@@ -21,14 +21,43 @@ struct ListingReviewDraft: Codable, Equatable, Sendable {
     }
 
     var hasRequiredCopy: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && title.utf16.count <= 80
-            && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && description.utf16.count <= 20_000
-            && specifics.allSatisfy {
-                !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = description.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !title.isEmpty,
+              title.utf16.count <= 80,
+              !description.isEmpty,
+              description.utf16.count <= 20_000,
+              (1...50).contains(specifics.count) else {
+            return false
+        }
+        var names = Set<String>()
+        return specifics.allSatisfy { specific in
+            let name = specific.name.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            let value = specific.value.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            let key = Self.saveContractKey(for: name)
+            return !name.isEmpty
+                && name.utf16.count <= 65
+                && !value.isEmpty
+                && value.utf16.count <= 500
+                && names.insert(key).inserted
+        }
+    }
+
+    private static func saveContractKey(for name: String) -> String {
+        switch name.lowercased() {
+        case "brand", "model", "condition", "isbn", "upc":
+            "reserved:\(name.lowercased())"
+        case "category", "type":
+            "reserved:category"
+        default:
+            name.lowercased()
+        }
     }
 }
 
@@ -44,21 +73,18 @@ struct PersistedListingReviewDraft: Codable, Equatable, Sendable {
     let snapshot: ListingReviewResult
     let draft: ListingReviewDraft
     let pendingSave: ListingReviewPendingSave?
-    let correctionAvailable: Bool
     let expiresAt: Date
 
     init(
         snapshot: ListingReviewResult,
         draft: ListingReviewDraft,
         pendingSave: ListingReviewPendingSave?,
-        correctionAvailable: Bool,
         expiresAt: Date
     ) {
         schemaVersion = Self.schemaVersion
         self.snapshot = snapshot
         self.draft = draft
         self.pendingSave = pendingSave
-        self.correctionAvailable = correctionAvailable
         self.expiresAt = expiresAt
     }
 }
@@ -79,6 +105,11 @@ protocol ListingReviewDraftPersisting: Sendable {
 }
 
 actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
+    static let writingOptions: Data.WritingOptions = [
+        .atomic,
+        .completeFileProtection,
+    ]
+
     private let rootDirectory: URL
     private let fileManager: FileManager
     private let encoder: JSONEncoder
@@ -101,13 +132,27 @@ actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
 
     func load(runID: UUID) throws -> PersistedListingReviewDraft? {
         let url = recordURL(runID: runID)
-        guard fileManager.fileExists(atPath: url.path) else { return nil }
-        let record = try decoder.decode(
-            PersistedListingReviewDraft.self,
-            from: Data(contentsOf: url, options: .mappedIfSafe)
-        )
+        let attributes: [FileAttributeKey: Any]
+        do {
+            attributes = try fileManager.attributesOfItem(atPath: url.path)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            return nil
+        }
+        guard attributes[.type] as? FileAttributeType == .typeRegular else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let record: PersistedListingReviewDraft
+        do {
+            record = try decoder.decode(
+                PersistedListingReviewDraft.self,
+                from: Data(contentsOf: url, options: .mappedIfSafe)
+            )
+        } catch is DecodingError {
+            try fileManager.removeItem(at: url)
+            return nil
+        }
         guard record.schemaVersion == PersistedListingReviewDraft.schemaVersion else {
-            try? fileManager.removeItem(at: url)
+            try fileManager.removeItem(at: url)
             return nil
         }
         return record
@@ -123,13 +168,16 @@ actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
         )
         let data = try encoder.encode(record)
         let url = recordURL(runID: runID)
-        try data.write(to: url, options: [.atomic, .completeFileProtection])
+        try data.write(to: url, options: Self.writingOptions)
     }
 
     func remove(runID: UUID) throws {
         let url = recordURL(runID: runID)
-        guard fileManager.fileExists(atPath: url.path) else { return }
-        try fileManager.removeItem(at: url)
+        do {
+            try fileManager.removeItem(at: url)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            return
+        }
     }
 
     private func recordURL(runID: UUID) -> URL {

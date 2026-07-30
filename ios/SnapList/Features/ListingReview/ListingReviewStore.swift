@@ -24,7 +24,6 @@ final class ListingReviewStore {
     private(set) var phase: ListingReviewPhase = .idle
     private(set) var snapshot: ListingReviewResult?
     private(set) var draft: ListingReviewDraft?
-    private(set) var correctionAvailable = true
     private(set) var isStale = false
     private(set) var announcement = ""
 
@@ -63,28 +62,37 @@ final class ListingReviewStore {
     var canSave: Bool {
         draft?.hasRequiredCopy == true
             && draft?.hasValidPrice == true
+            && !isStale
             && phase != .saving
     }
 
-    var effectivePrice: Decimal? {
-        guard let snapshot, let draft else { return nil }
-        return draft.sellerPriceOverride ?? snapshot.pricing.suggestedPrice
-    }
-
     @discardableResult
-    func open(_ canonical: ListingReviewResult) async -> Bool {
-        phase = .idle
-        isStale = false
-        announcement = ""
-
+    func open(_ requested: ListingReviewResult) async -> Bool {
+        resetForOpen()
+        let bearer: PrincipalBoundBearer
+        let canonical: ListingReviewResult
         do {
-            let bearer = try await tokenProvider.principalBoundBearer()
-            activeScope = bearer.scopeProof
+            bearer = try await tokenProvider.principalBoundBearer()
+            canonical = try await service.fetchReview(
+                runID: requested.binding.runID,
+                bearerToken: bearer.bearerToken
+            )
+            guard canonical.binding.runID == requested.binding.runID else {
+                throw ListingReviewClientError.invalidResponse
+            }
+        } catch {
+            failOpen()
+            return false
+        }
+
+        activeScope = bearer.scopeProof
+        do {
             let persisted = try await persistence.load(
                 runID: canonical.binding.runID
             )
             if let persisted,
                persisted.expiresAt > now(),
+               persisted.expiresAt <= now().addingTimeInterval(retention),
                persisted.snapshot.binding.runID == canonical.binding.runID,
                persisted.snapshot.binding.itemID == canonical.binding.itemID,
                persisted.snapshot.binding.listingID == canonical.binding.listingID {
@@ -106,21 +114,15 @@ final class ListingReviewStore {
                 }
             } else {
                 if persisted != nil {
-                    try? await persistence.remove(runID: canonical.binding.runID)
+                    try await persistence.remove(runID: canonical.binding.runID)
                 }
                 adoptFresh(canonical)
             }
             phase = .ready
-            await persistCurrent()
             return true
         } catch {
-            // The canonical RLS response is still safe to display. Saving and
-            // durable staging stay unavailable until a principal-bound bearer
-            // can be acquired; no cross-principal fallback store is invented.
-            activeScope = nil
-            adoptFresh(canonical)
-            phase = .ready
-            return true
+            failOpen()
+            return false
         }
     }
 
@@ -150,7 +152,10 @@ final class ListingReviewStore {
               let index = draft.specifics.firstIndex(where: {
                   $0.name.caseInsensitiveCompare(name) == .orderedSame
               }),
-              !isIdentitySpecific(draft.specifics[index].name) else {
+              !["brand", "model", "type", "category", "isbn", "upc"]
+                .contains(draft.specifics[index].name
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()) else {
             return
         }
         let suggested = snapshot?.listing.specifics.first(where: {
@@ -179,7 +184,14 @@ final class ListingReviewStore {
     }
 
     func done() async -> ListingReviewDoneOutcome {
-        guard let snapshot, let draft, canSave else {
+        guard let snapshot, let draft else {
+            return .stayed
+        }
+        guard !isStale else {
+            announcement = ListingReviewCopy.staleReview
+            return .stayed
+        }
+        guard canSave else {
             announcement = "Enter a price above $0 to continue."
             return .stayed
         }
@@ -193,21 +205,26 @@ final class ListingReviewStore {
             return .stayed
         }
 
-        let operation = pendingSave?.draft == draft
-            ? pendingSave!
-            : ListingReviewPendingSave(
-                idempotencyKey: makeID(),
-                draft: draft
-            )
-        pendingSave = operation
-        phase = .saving
-        announcement = "Saving your changes."
-        await persistCurrent()
-
         do {
             let bearer = try await tokenProvider.principalBoundBearer()
             guard bearer.scopeProof == scope else {
                 throw ListingReviewClientError.unavailable
+            }
+            let operation = pendingSave?.draft == draft
+                ? pendingSave!
+                : ListingReviewPendingSave(
+                    idempotencyKey: makeID(),
+                    draft: draft
+                )
+            pendingSave = operation
+            phase = .saving
+            announcement = "Saving your changes."
+            guard await persistCurrent(
+                validating: bearer.scopeProof
+            ) else {
+                phase = .failed
+                announcement = ListingReviewCopy.draftPersistenceFailed
+                return .stayed
             }
             let receipt = try await service.save(
                 runID: snapshot.binding.runID,
@@ -237,7 +254,6 @@ final class ListingReviewStore {
             phase = .failed
             announcement = ListingReviewCopy.saveFailed
         }
-        await persistCurrent()
         return .stayed
     }
 
@@ -266,49 +282,6 @@ final class ListingReviewStore {
         await reloadReplacingDraft()
     }
 
-    func retryReload() async {
-        await reloadReplacingDraft()
-    }
-
-    func openCorrectionBoundary() {
-        announcement = "Opened guided correction. Your photos and edits are kept."
-    }
-
-    func applyCoherentCorrection(_ corrected: ListingReviewResult) async {
-        guard let snapshot,
-              corrected.binding.runID == snapshot.binding.runID,
-              corrected.binding.itemID == snapshot.binding.itemID,
-              corrected.binding.listingID == snapshot.binding.listingID else {
-            return
-        }
-        let preservedOverride = draft?.sellerPriceOverride
-        self.snapshot = corrected
-        var correctedDraft = ListingReviewDraft(snapshot: corrected)
-        correctedDraft.sellerPriceOverride = preservedOverride
-        draft = correctedDraft
-        correctionAvailable = false
-        pendingSave = nil
-        isStale = false
-        phase = .ready
-        announcement =
-            "Applied a coherent correction. Identity and recommendation updated; any set price is preserved."
-        await persistCurrent()
-    }
-
-    func focusEditDetails() {
-        announcement = "Edit any detail below."
-    }
-
-    func isIdentitySpecific(_ name: String) -> Bool {
-        switch name.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased() {
-        case "brand", "model", "type", "category", "isbn", "upc":
-            true
-        default:
-            false
-        }
-    }
-
     private func stage(
         _ changedDraft: ListingReviewDraft,
         announcement: String
@@ -322,14 +295,16 @@ final class ListingReviewStore {
             }
             self.announcement = announcement
         }
-        await persistCurrent()
+        if !(await persistCurrent()) {
+            phase = .failed
+            self.announcement = ListingReviewCopy.draftPersistenceFailed
+        }
     }
 
     private func adoptFresh(_ canonical: ListingReviewResult) {
         snapshot = canonical
         draft = ListingReviewDraft(snapshot: canonical)
         pendingSave = nil
-        correctionAvailable = true
         isStale = false
         expiresAt = now().addingTimeInterval(retention)
     }
@@ -338,26 +313,42 @@ final class ListingReviewStore {
         snapshot = persisted.snapshot
         draft = persisted.draft
         pendingSave = persisted.pendingSave
-        correctionAvailable = persisted.correctionAvailable
         expiresAt = persisted.expiresAt
     }
 
-    private func persistCurrent() async {
-        guard activeScope != nil,
+    private func persistCurrent(
+        validating freshScope: ItemRunSubmissionPrincipalScopeProof? = nil
+    ) async -> Bool {
+        guard let activeScope,
               let snapshot,
-              let draft else { return }
+              let draft else { return false }
+        let validatedScope: ItemRunSubmissionPrincipalScopeProof
+        do {
+            validatedScope = if let freshScope {
+                freshScope
+            } else {
+                try await tokenProvider.principalBoundBearer().scopeProof
+            }
+        } catch {
+            return false
+        }
+        guard validatedScope == activeScope else { return false }
         let expiry = expiresAt ?? now().addingTimeInterval(retention)
         expiresAt = expiry
-        try? await persistence.save(
-            PersistedListingReviewDraft(
-                snapshot: snapshot,
-                draft: draft,
-                pendingSave: pendingSave,
-                correctionAvailable: correctionAvailable,
-                expiresAt: expiry
-            ),
-            runID: snapshot.binding.runID
-        )
+        do {
+            try await persistence.save(
+                PersistedListingReviewDraft(
+                    snapshot: snapshot,
+                    draft: draft,
+                    pendingSave: pendingSave,
+                    expiresAt: expiry
+                ),
+                runID: snapshot.binding.runID
+            )
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func reloadReplacingDraft() async {
@@ -380,53 +371,30 @@ final class ListingReviewStore {
                   current.binding.listingID == snapshot.binding.listingID else {
                 throw ListingReviewClientError.invalidResponse
             }
+            try await persistence.remove(runID: snapshot.binding.runID)
             adoptFresh(current)
             phase = .ready
             announcement = "Reloaded the current review."
-            await persistCurrent()
         } catch {
             phase = .reloadFailed
             announcement = ListingReviewCopy.reloadFailed
-            await persistCurrent()
         }
     }
-}
 
-@MainActor
-enum ListingReviewStoreFactory {
-    static func make(
-        configuration: LaunchConfiguration,
-        apiOrigin: URL?,
-        tokenProvider: any BearerTokenProviding,
-        session: URLSession
-    ) -> ListingReviewStore {
-        return ListingReviewStore(
-            service: apiOrigin.map {
-                ListingReviewAPIClient(baseURL: $0, session: session)
-            } ?? UnavailableListingReviewService(),
-            persistence: configuration.usesZeroNetworkFixtures
-                ? MemoryListingReviewDraftPersistence()
-                : LocalListingReviewDraftPersistence(),
-            tokenProvider: tokenProvider
-        )
-    }
-}
-
-private struct UnavailableListingReviewService: ListingReviewServing {
-    func save(
-        runID: UUID,
-        draft: ListingReviewDraft,
-        expectedReviewRevision: UUID,
-        idempotencyKey: UUID,
-        bearerToken: String
-    ) async throws -> ListingReviewSaveReceipt {
-        throw ListingReviewClientError.unavailable
+    private func resetForOpen() {
+        phase = .idle
+        snapshot = nil
+        draft = nil
+        activeScope = nil
+        pendingSave = nil
+        expiresAt = nil
+        isStale = false
+        announcement = ""
     }
 
-    func fetchReview(
-        runID: UUID,
-        bearerToken: String
-    ) async throws -> ListingReviewResult {
-        throw ListingReviewClientError.unavailable
+    private func failOpen() {
+        resetForOpen()
+        phase = .failed
+        announcement = ListingReviewCopy.openFailed
     }
 }
