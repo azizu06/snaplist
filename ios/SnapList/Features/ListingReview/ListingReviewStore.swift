@@ -33,12 +33,20 @@ final class ListingReviewStore {
     private let now: @Sendable () -> Date
     private let makeID: @Sendable () -> UUID
     private let retention: TimeInterval
+    private let persistenceSessionID = UUID()
 
     private var activeScope: ItemRunSubmissionPrincipalScopeProof?
     private var pendingSave: ListingReviewPendingSave?
     private var expiresAt: Date?
     private var draftGeneration: UInt = 0
     private var openGeneration: UInt = 0
+
+    private var persistenceToken: ListingReviewDraftPersistenceToken {
+        ListingReviewDraftPersistenceToken(
+            sessionID: persistenceSessionID,
+            generation: draftGeneration
+        )
+    }
 
     init(
         service: any ListingReviewServing,
@@ -93,8 +101,17 @@ final class ListingReviewStore {
         }
 
         do {
+            let token = persistenceToken
+            guard generation == openGeneration,
+                  await persistence.activate(
+                      token,
+                      runID: canonical.binding.runID
+                  ) else {
+                return false
+            }
             let persisted = try await persistence.load(
-                runID: canonical.binding.runID
+                runID: canonical.binding.runID,
+                token: token
             )
             guard generation == openGeneration,
                   await confirmOpen(
@@ -135,8 +152,12 @@ final class ListingReviewStore {
                 }
             }
             if persisted != nil {
-                try await persistence.remove(runID: canonical.binding.runID)
-                guard generation == openGeneration,
+                let removed = try await persistence.remove(
+                    runID: canonical.binding.runID,
+                    token: token
+                )
+                guard removed,
+                      generation == openGeneration,
                       await confirmOpen(
                           generation: generation,
                           scope: bearer.scopeProof
@@ -234,6 +255,7 @@ final class ListingReviewStore {
         }
 
         let generation = draftGeneration
+        let token = persistenceToken
         phase = .saving
         announcement = "Saving your changes."
         do {
@@ -252,6 +274,7 @@ final class ListingReviewStore {
             pendingSave = operation
             guard await persistCurrent(
                 generation: generation,
+                token: token,
                 validating: bearer.scopeProof
             ) else {
                 guard generation == draftGeneration,
@@ -283,7 +306,17 @@ final class ListingReviewStore {
                   activeScope == scope else {
                 throw ListingReviewClientError.invalidResponse
             }
-            try await persistence.remove(runID: snapshot.binding.runID)
+            let removed = try await persistence.remove(
+                runID: snapshot.binding.runID,
+                token: token
+            )
+            guard removed,
+                  generation == draftGeneration,
+                  token == persistenceToken,
+                  phase == .saving,
+                  activeScope == scope else {
+                return .stayed
+            }
             pendingSave = nil
             phase = .ready
             announcement = "Saved. Back to Processing review."
@@ -355,7 +388,11 @@ final class ListingReviewStore {
             self.announcement = announcement
         }
         let generation = draftGeneration
-        if !(await persistCurrent(generation: generation)),
+        let token = persistenceToken
+        if !(await persistCurrent(
+            generation: generation,
+            token: token
+        )),
            generation == draftGeneration {
             phase = .failed
             self.announcement = ListingReviewCopy.draftPersistenceFailed
@@ -381,9 +418,11 @@ final class ListingReviewStore {
 
     private func persistCurrent(
         generation: UInt,
+        token: ListingReviewDraftPersistenceToken,
         validating freshScope: ItemRunSubmissionPrincipalScopeProof? = nil
     ) async -> Bool {
         guard generation == draftGeneration,
+              token == persistenceToken,
               let activeScope,
               let snapshot,
               let draft else { return false }
@@ -398,22 +437,26 @@ final class ListingReviewStore {
             return false
         }
         guard generation == draftGeneration,
+              token == persistenceToken,
               validatedScope == activeScope else {
             return false
         }
         let expiry = expiresAt ?? now().addingTimeInterval(retention)
         expiresAt = expiry
         do {
-            try await persistence.save(
+            let committed = try await persistence.save(
                 PersistedListingReviewDraft(
                     snapshot: snapshot,
                     draft: draft,
                     pendingSave: pendingSave,
                     expiresAt: expiry
                 ),
-                runID: snapshot.binding.runID
+                runID: snapshot.binding.runID,
+                token: token
             )
-            return generation == draftGeneration
+            return committed
+                && generation == draftGeneration
+                && token == persistenceToken
         } catch {
             return false
         }
@@ -426,6 +469,7 @@ final class ListingReviewStore {
             return
         }
         let generation = draftGeneration
+        let token = persistenceToken
         do {
             let bearer = try await tokenProvider.principalBoundBearer()
             guard generation == draftGeneration,
@@ -442,9 +486,14 @@ final class ListingReviewStore {
                   current.binding.listingID == snapshot.binding.listingID else {
                 throw ListingReviewClientError.invalidResponse
             }
-            try await persistence.remove(runID: snapshot.binding.runID)
+            let removed = try await persistence.remove(
+                runID: snapshot.binding.runID,
+                token: token
+            )
             let confirmed = try await tokenProvider.principalBoundBearer()
-            guard generation == draftGeneration,
+            guard removed,
+                  generation == draftGeneration,
+                  token == persistenceToken,
                   confirmed.scopeProof == scope else {
                 throw ListingReviewClientError.unavailable
             }

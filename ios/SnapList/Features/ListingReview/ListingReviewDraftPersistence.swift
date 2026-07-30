@@ -93,22 +93,83 @@ struct PersistedListingReviewDraft: Codable, Equatable, Sendable {
     }
 }
 
+struct ListingReviewDraftPersistenceToken: Equatable, Sendable {
+    let sessionID: UUID
+    let generation: UInt
+
+    fileprivate func canActivate(
+        after current: ListingReviewDraftPersistenceToken?
+    ) -> Bool {
+        current?.sessionID != sessionID
+            || (current?.generation ?? 0) <= generation
+    }
+
+    fileprivate func canCommit(
+        after current: ListingReviewDraftPersistenceToken?
+    ) -> Bool {
+        current?.sessionID == sessionID
+            && (current?.generation ?? .max) <= generation
+    }
+}
+
+enum ListingReviewDraftPersistenceError: Error {
+    case staleToken
+}
+
 protocol ListingReviewDraftPersisting: Sendable {
     /// Records are keyed by the server-owned, high-entropy run identity. A
     /// caller may read one only after it has fetched the same canonical run
     /// through RLS for the current principal. The persistence layer never
     /// enumerates records and never accepts a client-selected item/listing.
-    func load(runID: UUID) async throws -> PersistedListingReviewDraft?
+    func activate(
+        _ token: ListingReviewDraftPersistenceToken,
+        runID: UUID
+    ) async -> Bool
+
+    func load(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> PersistedListingReviewDraft?
 
     func save(
         _ record: PersistedListingReviewDraft,
-        runID: UUID
-    ) async throws
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> Bool
 
-    func remove(runID: UUID) async throws
+    func remove(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> Bool
 }
 
-actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
+protocol ListingReviewDraftTokenAuthorizing:
+    Actor, ListingReviewDraftPersisting {
+    var tokens: [UUID: ListingReviewDraftPersistenceToken] { get set }
+}
+
+extension ListingReviewDraftTokenAuthorizing {
+    func activate(
+        _ token: ListingReviewDraftPersistenceToken,
+        runID: UUID
+    ) -> Bool {
+        guard token.canActivate(after: tokens[runID]) else { return false }
+        tokens[runID] = token
+        return true
+    }
+
+    func commit(
+        _ token: ListingReviewDraftPersistenceToken,
+        runID: UUID
+    ) -> Bool {
+        guard token.canCommit(after: tokens[runID]) else { return false }
+        tokens[runID] = token
+        return true
+    }
+}
+
+actor LocalListingReviewDraftPersistence:
+    ListingReviewDraftTokenAuthorizing {
     static let writingOptions: Data.WritingOptions = [
         .atomic,
         .completeFileProtection,
@@ -118,6 +179,7 @@ actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    var tokens: [UUID: ListingReviewDraftPersistenceToken] = [:]
 
     init(
         rootDirectory: URL? = nil,
@@ -134,7 +196,13 @@ actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
         decoder.dateDecodingStrategy = .iso8601
     }
 
-    func load(runID: UUID) throws -> PersistedListingReviewDraft? {
+    func load(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) throws -> PersistedListingReviewDraft? {
+        guard tokens[runID] == token else {
+            throw ListingReviewDraftPersistenceError.staleToken
+        }
         let url = recordURL(runID: runID)
         let attributes: [FileAttributeKey: Any]
         do {
@@ -164,8 +232,10 @@ actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
 
     func save(
         _ record: PersistedListingReviewDraft,
-        runID: UUID
-    ) throws {
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) throws -> Bool {
+        guard commit(token, runID: runID) else { return false }
         try fileManager.createDirectory(
             at: rootDirectory,
             withIntermediateDirectories: true
@@ -173,15 +243,21 @@ actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
         let data = try encoder.encode(record)
         let url = recordURL(runID: runID)
         try data.write(to: url, options: Self.writingOptions)
+        return true
     }
 
-    func remove(runID: UUID) throws {
+    func remove(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) throws -> Bool {
+        guard commit(token, runID: runID) else { return false }
         let url = recordURL(runID: runID)
         do {
             try fileManager.removeItem(at: url)
         } catch let error as CocoaError where error.code == .fileNoSuchFile {
-            return
+            return true
         }
+        return true
     }
 
     private func recordURL(runID: UUID) -> URL {
@@ -192,22 +268,38 @@ actor LocalListingReviewDraftPersistence: ListingReviewDraftPersisting {
     }
 }
 
-actor MemoryListingReviewDraftPersistence: ListingReviewDraftPersisting {
+actor MemoryListingReviewDraftPersistence:
+    ListingReviewDraftTokenAuthorizing {
     private var records: [UUID: PersistedListingReviewDraft] = [:]
+    var tokens: [UUID: ListingReviewDraftPersistenceToken] = [:]
 
-    func load(runID: UUID) -> PersistedListingReviewDraft? {
+    func load(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) throws -> PersistedListingReviewDraft? {
+        guard tokens[runID] == token else {
+            throw ListingReviewDraftPersistenceError.staleToken
+        }
         records[runID]
     }
 
     func save(
         _ record: PersistedListingReviewDraft,
-        runID: UUID
-    ) {
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) -> Bool {
+        guard commit(token, runID: runID) else { return false }
         records[runID] = record
+        return true
     }
 
-    func remove(runID: UUID) {
+    func remove(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) -> Bool {
+        guard commit(token, runID: runID) else { return false }
         records.removeValue(forKey: runID)
+        return true
     }
 }
 

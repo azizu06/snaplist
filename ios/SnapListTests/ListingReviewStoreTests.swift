@@ -92,29 +92,27 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertEqual(durabilityStore.phase, .failed)
         XCTAssertEqual(durabilityRequests.count, 0)
 
-        let overlapProvider = ListingReviewGateBearerProvider(
-            blockedCall: 3
+        let overlapPersistence = ListingReviewCommitGatePersistence(
+            gate: .save(title: "Older edit")
         )
-        let overlapPersistence = MemoryListingReviewDraftPersistence()
         let overlapService = ListingReviewRecordingService(
             saves: [],
             reloads: [.success(snapshot)]
         )
         let overlapStore = makeStore(
             service: overlapService,
-            persistence: overlapPersistence,
-            tokenProvider: overlapProvider
+            persistence: overlapPersistence
         )
         let overlapOpened = await overlapStore.open(snapshot)
         XCTAssertTrue(overlapOpened)
         let olderEdit = Task { @MainActor in
             await overlapStore.setTitle("Older edit")
         }
-        await overlapProvider.waitUntilBlocked()
+        await overlapPersistence.waitUntilBlocked()
         await overlapStore.setTitle("Newest edit")
-        await overlapProvider.release()
+        await overlapPersistence.release()
         await olderEdit.value
-        let overlapRecord = try await overlapPersistence.load(
+        let overlapRecord = try await overlapPersistence.loadCurrent(
             runID: snapshot.binding.runID
         )
         XCTAssertEqual(overlapStore.draft?.title, "Newest edit")
@@ -150,6 +148,40 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertEqual(
             frozenRequests.first?.draft.description,
             snapshot.listing.description
+        )
+
+        let removePersistence = ListingReviewCommitGatePersistence(
+            gate: .remove
+        )
+        let removeService = ListingReviewRecordingService(
+            saves: [.success(Self.receipt(for: snapshot))],
+            reloads: [.success(snapshot), .success(snapshot)]
+        )
+        let removeStore = makeStore(
+            service: removeService,
+            persistence: removePersistence
+        )
+        let removeOpened = await removeStore.open(snapshot)
+        XCTAssertTrue(removeOpened)
+        await removeStore.setTitle("Old saved draft")
+        let removeTask = Task { @MainActor in
+            await removeStore.done()
+        }
+        await removePersistence.waitUntilBlocked()
+        let removeReopened = await removeStore.open(snapshot)
+        XCTAssertTrue(removeReopened)
+        await removeStore.setTitle("Newest draft after reopen")
+        await removePersistence.release()
+        let staleRemoveOutcome = await removeTask.value
+        let newestRecord = try await removePersistence.loadCurrent(
+            runID: snapshot.binding.runID
+        )
+        XCTAssertEqual(staleRemoveOutcome, .stayed)
+        XCTAssertEqual(removeStore.phase, .ready)
+        XCTAssertEqual(removeStore.draft?.title, "Newest draft after reopen")
+        XCTAssertEqual(
+            newestRecord?.draft.title,
+            "Newest draft after reopen"
         )
     }
 
@@ -194,20 +226,35 @@ final class ListingReviewStoreTests: XCTestCase {
         let local = LocalListingReviewDraftPersistence(
             rootDirectory: localRoot
         )
+        let localToken = ListingReviewDraftPersistenceToken(
+            sessionID: UUID(),
+            generation: 1
+        )
+        let localActivated = await local.activate(
+            localToken,
+            runID: snapshot.binding.runID
+        )
+        XCTAssertTrue(localActivated)
         let record = PersistedListingReviewDraft(
             snapshot: snapshot,
             draft: ListingReviewDraft(snapshot: snapshot),
             pendingSave: nil,
             expiresAt: Date(timeIntervalSince1970: 1_800_086_400)
         )
-        try await local.save(record, runID: snapshot.binding.runID)
+        let localSaved = try await local.save(
+            record,
+            runID: snapshot.binding.runID,
+            token: localToken
+        )
+        XCTAssertTrue(localSaved)
         let recordURL = localRoot.appendingPathComponent(
             snapshot.binding.runID.uuidString.lowercased() + ".json"
         )
         try Data("{".utf8).write(to: recordURL, options: .atomic)
 
         let corruptRecord = try await local.load(
-            runID: snapshot.binding.runID
+            runID: snapshot.binding.runID,
+            token: localToken
         )
         XCTAssertNil(corruptRecord)
         XCTAssertFalse(FileManager.default.fileExists(atPath: recordURL.path))
@@ -417,29 +464,132 @@ private actor ListingReviewTestBearerProvider: BearerTokenProviding {
 
 private actor ListingReviewTogglePersistence:
     ListingReviewDraftPersisting {
-    private var record: PersistedListingReviewDraft?
+    private let base = MemoryListingReviewDraftPersistence()
     private var shouldFailSaves = false
 
     func failSaves() {
         shouldFailSaves = true
     }
 
-    func load(runID: UUID) -> PersistedListingReviewDraft? {
-        record
+    func activate(
+        _ token: ListingReviewDraftPersistenceToken,
+        runID: UUID
+    ) async -> Bool {
+        await base.activate(token, runID: runID)
+    }
+
+    func load(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> PersistedListingReviewDraft? {
+        try await base.load(runID: runID, token: token)
     }
 
     func save(
         _ record: PersistedListingReviewDraft,
-        runID: UUID
-    ) throws {
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> Bool {
         if shouldFailSaves {
             throw CocoaError(.fileWriteUnknown)
         }
-        self.record = record
+        return try await base.save(record, runID: runID, token: token)
     }
 
-    func remove(runID: UUID) {
-        record = nil
+    func remove(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> Bool {
+        try await base.remove(runID: runID, token: token)
+    }
+}
+
+private actor ListingReviewCommitGatePersistence:
+    ListingReviewDraftPersisting {
+    enum Gate {
+        case save(title: String)
+        case remove
+    }
+
+    private let gate: Gate
+    private let base = MemoryListingReviewDraftPersistence()
+    private var didBlock = false
+    private var isBlocked = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    init(gate: Gate) {
+        self.gate = gate
+    }
+
+    func activate(
+        _ token: ListingReviewDraftPersistenceToken,
+        runID: UUID
+    ) async -> Bool {
+        await base.activate(token, runID: runID)
+    }
+
+    func load(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> PersistedListingReviewDraft? {
+        try await base.load(runID: runID, token: token)
+    }
+
+    func save(
+        _ record: PersistedListingReviewDraft,
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> Bool {
+        if case let .save(title) = gate,
+           record.draft.title == title {
+            await blockOnce()
+        }
+        return try await base.save(record, runID: runID, token: token)
+    }
+
+    func remove(
+        runID: UUID,
+        token: ListingReviewDraftPersistenceToken
+    ) async throws -> Bool {
+        if case .remove = gate {
+            await blockOnce()
+        }
+        return try await base.remove(runID: runID, token: token)
+    }
+
+    func waitUntilBlocked() async {
+        guard !isBlocked else { return }
+        await withCheckedContinuation {
+            blockedWaiters.append($0)
+        }
+    }
+
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
+    func loadCurrent(
+        runID: UUID
+    ) async throws -> PersistedListingReviewDraft? {
+        let token = ListingReviewDraftPersistenceToken(
+            sessionID: UUID(),
+            generation: 0
+        )
+        guard await base.activate(token, runID: runID) else { return nil }
+        return try await base.load(runID: runID, token: token)
+    }
+
+    private func blockOnce() async {
+        guard !didBlock else { return }
+        didBlock = true
+        isBlocked = true
+        blockedWaiters.forEach { $0.resume() }
+        blockedWaiters.removeAll()
+        await withCheckedContinuation {
+            releaseContinuation = $0
+        }
     }
 }
 
