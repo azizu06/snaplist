@@ -49,6 +49,10 @@ struct ListingReviewDraft: Codable, Equatable, Sendable {
         }
     }
 
+    static func isIdentitySpecificName(_ name: String) -> Bool {
+        saveContractKey(for: name).hasPrefix("reserved:")
+    }
+
     private static func saveContractKey(for name: String) -> String {
         switch name.lowercased() {
         case "brand", "model", "condition", "isbn", "upc":

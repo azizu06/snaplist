@@ -22,6 +22,13 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertTrue(opened)
         XCTAssertEqual(cleanOutcome, .dismissedWithoutWrite)
         XCTAssertEqual(cleanRequests.count, 0)
+        await store.setSpecific(name: "Condition", value: "poor")
+        XCTAssertEqual(
+            store.draft?.specifics.first(where: {
+                $0.name == "Condition"
+            })?.value,
+            "very-good"
+        )
 
         await store.setTitle("Sony WH-1000XM4 headphones with case")
         let failedOutcome = await store.done()
@@ -84,6 +91,66 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertEqual(durabilityOutcome, .stayed)
         XCTAssertEqual(durabilityStore.phase, .failed)
         XCTAssertEqual(durabilityRequests.count, 0)
+
+        let overlapProvider = ListingReviewGateBearerProvider(
+            blockedCall: 3
+        )
+        let overlapPersistence = MemoryListingReviewDraftPersistence()
+        let overlapService = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let overlapStore = makeStore(
+            service: overlapService,
+            persistence: overlapPersistence,
+            tokenProvider: overlapProvider
+        )
+        let overlapOpened = await overlapStore.open(snapshot)
+        XCTAssertTrue(overlapOpened)
+        let olderEdit = Task { @MainActor in
+            await overlapStore.setTitle("Older edit")
+        }
+        await overlapProvider.waitUntilBlocked()
+        await overlapStore.setTitle("Newest edit")
+        await overlapProvider.release()
+        await olderEdit.value
+        let overlapRecord = try await overlapPersistence.load(
+            runID: snapshot.binding.runID
+        )
+        XCTAssertEqual(overlapStore.draft?.title, "Newest edit")
+        XCTAssertEqual(overlapRecord?.draft.title, "Newest edit")
+
+        let savingProvider = ListingReviewGateBearerProvider(
+            blockedCall: 4
+        )
+        let savingService = ListingReviewRecordingService(
+            saves: [.success(Self.receipt(for: snapshot))],
+            reloads: [.success(snapshot)]
+        )
+        let savingStore = makeStore(
+            service: savingService,
+            persistence: MemoryListingReviewDraftPersistence(),
+            tokenProvider: savingProvider
+        )
+        let savingOpened = await savingStore.open(snapshot)
+        XCTAssertTrue(savingOpened)
+        await savingStore.setTitle("Frozen save")
+        let saveTask = Task { @MainActor in
+            await savingStore.done()
+        }
+        await savingProvider.waitUntilBlocked()
+        await savingStore.setDescription("Must not enter the active save")
+        await savingProvider.release()
+        let frozenOutcome = await saveTask.value
+        let frozenRequests = await savingService.recordedSaveRequests()
+        XCTAssertEqual(
+            frozenOutcome,
+            .saved(Self.receipt(for: snapshot))
+        )
+        XCTAssertEqual(
+            frozenRequests.first?.draft.description,
+            snapshot.listing.description
+        )
     }
 
     func testSemanticRevertBecomesCleanAndRelaunchRestoresDirtyDraft() async throws {
@@ -175,6 +242,27 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertFalse(switchedOpened)
         XCTAssertNil(switchedStore.snapshot)
         XCTAssertNil(switchedStore.draft)
+
+        let newer = try Self.makeSnapshot(
+            revision: "55000000-0000-4000-8000-000000000088",
+            title: "Newer concurrent open"
+        )
+        let openService = ListingReviewOpenGateService(
+            first: snapshot,
+            second: newer
+        )
+        let openStore = makeStore(service: openService)
+        let olderOpen = Task { @MainActor in
+            await openStore.open(snapshot)
+        }
+        await openService.waitUntilFirstFetchBlocked()
+        let newerOpened = await openStore.open(newer)
+        await openService.releaseFirstFetch()
+        let olderOpened = await olderOpen.value
+
+        XCTAssertTrue(newerOpened)
+        XCTAssertFalse(olderOpened)
+        XCTAssertEqual(openStore.snapshot?.listing.title, newer.listing.title)
     }
 
     func testConflictKeepsDraftUntilExplicitDiscardReloadSucceeds() async throws {
@@ -221,7 +309,7 @@ final class ListingReviewStoreTests: XCTestCase {
     }
 
     private func makeStore(
-        service: ListingReviewRecordingService,
+        service: any ListingReviewServing,
         persistence: any ListingReviewDraftPersisting =
             MemoryListingReviewDraftPersistence(),
         tokenProvider: any BearerTokenProviding =
@@ -279,6 +367,7 @@ final class ListingReviewStoreTests: XCTestCase {
                 "specifics": [
                     ["name": "Brand", "value": "Sony"],
                     ["name": "Model", "value": "WH-1000XM4"],
+                    ["name": "Condition", "value": "very-good"],
                     ["name": "Color", "value": "Black"],
                 ],
             ],
@@ -351,6 +440,105 @@ private actor ListingReviewTogglePersistence:
 
     func remove(runID: UUID) {
         record = nil
+    }
+}
+
+private actor ListingReviewGateBearerProvider: BearerTokenProviding {
+    private let blockedCall: Int
+    private var callCount = 0
+    private var isBlocked = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    init(blockedCall: Int) {
+        self.blockedCall = blockedCall
+    }
+
+    func bearerToken() async throws -> String {
+        "listing-review-gate-bearer"
+    }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        callCount += 1
+        if callCount == blockedCall {
+            isBlocked = true
+            blockedWaiters.forEach { $0.resume() }
+            blockedWaiters.removeAll()
+            await withCheckedContinuation {
+                releaseContinuation = $0
+            }
+        }
+        return PrincipalBoundBearer(
+            bearerToken: "listing-review-gate-bearer",
+            scopeProof: ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "listing-review-gate-user"
+            )!
+        )
+    }
+
+    func waitUntilBlocked() async {
+        guard !isBlocked else { return }
+        await withCheckedContinuation {
+            blockedWaiters.append($0)
+        }
+    }
+
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+private actor ListingReviewOpenGateService: ListingReviewServing {
+    private let first: ListingReviewResult
+    private let second: ListingReviewResult
+    private var fetchCount = 0
+    private var isBlocked = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    init(first: ListingReviewResult, second: ListingReviewResult) {
+        self.first = first
+        self.second = second
+    }
+
+    func save(
+        runID: UUID,
+        draft: ListingReviewDraft,
+        expectedReviewRevision: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewSaveReceipt {
+        throw ListingReviewClientError.unavailable
+    }
+
+    func fetchReview(
+        runID: UUID,
+        bearerToken: String
+    ) async throws -> ListingReviewResult {
+        fetchCount += 1
+        if fetchCount == 1 {
+            isBlocked = true
+            blockedWaiters.forEach { $0.resume() }
+            blockedWaiters.removeAll()
+            await withCheckedContinuation {
+                releaseContinuation = $0
+            }
+            return first
+        }
+        return second
+    }
+
+    func waitUntilFirstFetchBlocked() async {
+        guard !isBlocked else { return }
+        await withCheckedContinuation {
+            blockedWaiters.append($0)
+        }
+    }
+
+    func releaseFirstFetch() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
     }
 }
 
