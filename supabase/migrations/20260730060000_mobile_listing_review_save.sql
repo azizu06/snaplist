@@ -58,6 +58,7 @@ declare
   v_item public.items%rowtype;
   v_listing public.listings%rowtype;
   v_save private.mobile_listing_review_saves%rowtype;
+  v_save_found boolean;
   v_intent jsonb;
   v_current_specifics jsonb;
   v_requested_specifics jsonb;
@@ -170,7 +171,8 @@ begin
   where save.user_id = v_user_id
     and save.idempotency_key = p_idempotency_key
   for update;
-  if found and (
+  v_save_found := found;
+  if v_save_found and (
     v_save.run_id is distinct from p_run_id
     or v_save.intent is distinct from v_intent
   ) then
@@ -178,7 +180,7 @@ begin
       errcode = 'P0003',
       message = 'This Idempotency-Key is already bound to different review edits.';
   end if;
-  if p_action = 'prepare' and found and v_save.state = 'completed' then
+  if p_action = 'prepare' and v_save_found and v_save.state = 'completed' then
     return jsonb_build_object('state', 'completed', 'receipt', v_save.receipt);
   end if;
   if v_listing.status is not distinct from 'published'
@@ -191,7 +193,7 @@ begin
   end if;
 
   if p_action = 'fail' then
-    if not found or v_save.state = 'completed' then
+    if not v_save_found or v_save.state = 'completed' then
       return jsonb_build_object('state', 'unchanged');
     end if;
     if v_item.review_revision is not distinct from p_idempotency_key then
@@ -208,7 +210,7 @@ begin
   end if;
 
   if p_action = 'complete' then
-    if not found
+    if not v_save_found
       or v_save.state <> 'pending'
       or v_item.review_revision is distinct from p_idempotency_key then
       raise exception using
@@ -239,33 +241,6 @@ begin
       errcode = 'P0002',
       message = 'This review changed. Reload and try again.';
   end if;
-  if found
-    and v_save.state = 'pending'
-    and v_save.lease_expires_at > statement_timestamp() then
-    return jsonb_build_object('state', 'in_progress');
-  end if;
-  if found then
-    update private.mobile_listing_review_saves
-    set state = 'pending',
-        lease_expires_at = statement_timestamp() + interval '5 minutes',
-        receipt = null
-    where user_id = v_user_id
-      and idempotency_key = p_idempotency_key;
-  else
-    insert into private.mobile_listing_review_saves (
-      user_id,
-      idempotency_key,
-      run_id,
-      expected_review_revision,
-      intent
-    ) values (
-      v_user_id,
-      p_idempotency_key,
-      p_run_id,
-      p_expected_review_revision,
-      v_intent
-    );
-  end if;
 
   v_current_specifics := coalesce(
     v_listing.copy #> '{itemSpecifics}',
@@ -292,6 +267,46 @@ begin
     then 'regeneration'
     else 'ordinary'
   end;
+
+  if v_save_found
+    and v_save.state = 'pending'
+    and v_save.lease_expires_at > statement_timestamp() then
+    return jsonb_build_object('state', 'in_progress');
+  end if;
+  if v_mode = 'regeneration' and exists (
+    select 1
+    from private.mobile_listing_review_saves competing
+    where competing.user_id = v_user_id
+      and competing.run_id = p_run_id
+      and competing.expected_review_revision = p_expected_review_revision
+      and competing.idempotency_key is distinct from p_idempotency_key
+      and competing.state = 'pending'
+      and competing.lease_expires_at > statement_timestamp()
+  ) then
+    return jsonb_build_object('state', 'in_progress');
+  end if;
+  if v_save_found then
+    update private.mobile_listing_review_saves
+    set state = 'pending',
+        lease_expires_at = statement_timestamp() + interval '5 minutes',
+        receipt = null
+    where user_id = v_user_id
+      and idempotency_key = p_idempotency_key;
+  else
+    insert into private.mobile_listing_review_saves (
+      user_id,
+      idempotency_key,
+      run_id,
+      expected_review_revision,
+      intent
+    ) values (
+      v_user_id,
+      p_idempotency_key,
+      p_run_id,
+      p_expected_review_revision,
+      v_intent
+    );
+  end if;
 
   return jsonb_build_object(
     'state', v_mode,

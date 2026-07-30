@@ -3,6 +3,7 @@ import {
   createListingReviewSaveDataClient,
   createListingReviewSaveRegenerator,
   createListingReviewSaver,
+  listingReviewSaveIntentSchema,
   ListingReviewIdempotencyConflictError,
   ListingReviewNotEditableError,
   ListingReviewSaveInProgressError,
@@ -290,6 +291,58 @@ describe("ListingReviewSaver", () => {
       expect.objectContaining({ randomUUID: expect.any(Function) }),
     );
     expect(dependencies?.randomUUID()).toBe(idempotencyKey);
+  });
+
+  it("normalizes reserved specifics before coherent regeneration", async () => {
+    const regenerate = vi.fn().mockResolvedValue({});
+    const regenerator = createListingReviewSaveRegenerator({
+      clientForBearer: vi.fn(() => ({}) as never),
+      completionClient: { rpc: vi.fn() },
+      regenerate,
+    });
+    const normalizedIntent = listingReviewSaveIntentSchema.parse({
+      ...intent,
+      condition: "very-good",
+      specifics: [
+        { name: "Brand", value: "Sony" },
+        { name: "Category", value: "portable audio" },
+        { name: "Condition", value: "good" },
+        { name: "Color", value: "Black" },
+      ],
+    });
+
+    expect(normalizedIntent.specifics).toEqual([
+      { name: "Brand", value: "Sony" },
+      { name: "Type", value: "portable audio" },
+      { name: "Condition", value: "very-good" },
+      { name: "Color", value: "Black" },
+    ]);
+
+    await regenerator.regenerate({
+      ...operation,
+      intent: normalizedIntent,
+      snapshot: {
+        ...snapshot,
+        specifics: {
+          ...snapshot.specifics,
+          Type: "electronics",
+          Condition: "good",
+          Color: "Black",
+        },
+      },
+    });
+
+    expect(regenerate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        corrections: expect.objectContaining({
+          category: "portable audio",
+          condition: "very-good",
+          specs: ["Color: Black"],
+        }),
+      }),
+      expect.any(Object),
+    );
   });
 
   it("treats staged specifics as a complete identity replacement", async () => {

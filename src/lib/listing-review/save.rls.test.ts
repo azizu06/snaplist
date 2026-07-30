@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 import {
@@ -28,6 +28,7 @@ import {
   listingReviewSaveIntentSchema,
   ListingReviewIdempotencyConflictError,
   ListingReviewNotEditableError,
+  ListingReviewSaveInProgressError,
   ListingReviewStaleError,
   type ListingReviewSaveIntent,
   type ListingReviewSaveOperation,
@@ -446,7 +447,7 @@ describe("mobile Listing Review save RLS authority", () => {
 
     expect(privateClaim).toBeDefined();
     expect(privateClaim).toMatch(
-      /select save\.\* into v_save[\s\S]*if p_action = 'prepare' and found and v_save\.state = 'completed' then[\s\S]*return jsonb_build_object\('state', 'completed', 'receipt', v_save\.receipt\);[\s\S]*if v_listing\.status is not distinct from 'published'/i,
+      /select save\.\* into v_save[\s\S]*v_save_found := found;[\s\S]*if p_action = 'prepare' and v_save_found and v_save\.state = 'completed' then[\s\S]*return jsonb_build_object\('state', 'completed', 'receipt', v_save\.receipt\);[\s\S]*if v_listing\.status is not distinct from 'published'/i,
     );
   });
 
@@ -462,6 +463,9 @@ describe("mobile Listing Review save RLS authority", () => {
     );
     expect(migration).toMatch(
       /set state = 'completed',[\s\S]*lease_expires_at = null,[\s\S]*receipt = v_receipt/i,
+    );
+    expect(migration).toMatch(
+      /v_mode = 'regeneration'[\s\S]*from private\.mobile_listing_review_saves competing[\s\S]*competing\.run_id = p_run_id[\s\S]*competing\.expected_review_revision = p_expected_review_revision[\s\S]*competing\.idempotency_key is distinct from p_idempotency_key[\s\S]*competing\.state = 'pending'[\s\S]*competing\.lease_expires_at > statement_timestamp\(\)[\s\S]*return jsonb_build_object\('state', 'in_progress'\)/i,
     );
   });
 
@@ -630,6 +634,47 @@ describe("mobile Listing Review save RLS authority", () => {
           state: "completed",
           receipt: recoveredReceipt,
         });
+
+        const activeRegenerationKey = crypto.randomUUID();
+        const competingRegenerationKey = crypto.randomUUID();
+        const competingIntent: ListingReviewSaveIntent = {
+          ...baseIntent,
+          expectedReviewRevision: responseLossKey,
+          specifics: [
+            ...baseIntent.specifics,
+            { name: "Storage Capacity", value: "512 GB" },
+          ],
+        };
+        const activeRegenerationOperation: ListingReviewSaveOperation = {
+          ...ordinaryOperation,
+          idempotencyKey: activeRegenerationKey,
+          intent: competingIntent,
+        };
+        await expect(
+          dataClient.execute(directOperation(activeRegenerationOperation)),
+        ).resolves.toMatchObject({
+          state: "regeneration",
+          snapshot: { itemId: fixture.itemId },
+        });
+        const losingProviderWork = vi.fn();
+        const competingSaver = createListingReviewSaver(dataClient, {
+          regenerate: losingProviderWork,
+        });
+        await expect(
+          competingSaver.save({
+            ...activeRegenerationOperation,
+            idempotencyKey: competingRegenerationKey,
+          }),
+        ).rejects.toBeInstanceOf(ListingReviewSaveInProgressError);
+        expect(losingProviderWork).not.toHaveBeenCalled();
+        const competingState = JSON.stringify(
+          await durableState(database, fixture),
+        );
+        expect(competingState).toContain(activeRegenerationKey);
+        expect(competingState).not.toContain(competingRegenerationKey);
+        await dataClient.release(
+          directOperation(activeRegenerationOperation),
+        );
 
         for (const authoritative of [
           { ebay_status: "publishing" },

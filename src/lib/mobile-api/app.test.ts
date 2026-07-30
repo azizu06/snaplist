@@ -84,7 +84,9 @@ const listingReviewSaveIntent = {
   sellerPriceOverride: 179.99,
 };
 
-function listingReviewSaveRequest(): Request {
+function listingReviewSaveRequest(
+  intent: typeof listingReviewSaveIntent = listingReviewSaveIntent,
+): Request {
   return new Request(
     "http://localhost/v1/runs/54900000-0000-4000-8000-000000000001/review",
     {
@@ -94,7 +96,7 @@ function listingReviewSaveRequest(): Request {
         "content-type": "application/json",
         "idempotency-key": "54900000-0000-4000-8000-000000000005",
       },
-      body: JSON.stringify(listingReviewSaveIntent),
+      body: JSON.stringify(intent),
     },
   );
 }
@@ -173,6 +175,37 @@ describe("mobile API v1 provider-neutral handler", () => {
       },
       meta: { requestId: "req_test" },
     });
+  });
+
+  it("rejects invalid reserved specifics before the Listing Review saver", async () => {
+    const save = vi.fn();
+    const invalidSpecifics = [
+      [
+        { name: "Type", value: "electronics" },
+        { name: "Category", value: "audio" },
+      ],
+      [{ name: "Brand", value: "x".repeat(121) }],
+      [{ name: "ISBN", value: "not-an-isbn" }],
+      [{ name: "UPC", value: "036000291453" }],
+    ];
+
+    for (const specifics of invalidSpecifics) {
+      const response = await handler({ listingReviewSave: { save } })(
+        listingReviewSaveRequest({
+          ...listingReviewSaveIntent,
+          specifics,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "invalid_request",
+          message: "A valid Listing Review save is required.",
+        },
+      });
+    }
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("returns the exact stale-review conflict without losing it behind a server error", async () => {

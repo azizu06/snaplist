@@ -33,6 +33,79 @@ export interface ListingReviewSaveIntent {
 const trimmedText = (maximum: number) =>
   z.string().trim().min(1).max(maximum);
 
+type ReservedSpecificKey =
+  | "brand"
+  | "model"
+  | "category"
+  | "condition"
+  | "isbn"
+  | "upc";
+
+function reservedSpecificKey(name: string): ReservedSpecificKey | null {
+  switch (name.toLocaleLowerCase("en-US")) {
+    case "brand":
+      return "brand";
+    case "model":
+      return "model";
+    case "category":
+    case "type":
+      return "category";
+    case "condition":
+      return "condition";
+    case "isbn":
+      return "isbn";
+    case "upc":
+      return "upc";
+    default:
+      return null;
+  }
+}
+
+function canonicalReservedSpecificName(key: ReservedSpecificKey): string {
+  switch (key) {
+    case "brand":
+      return "Brand";
+    case "model":
+      return "Model";
+    case "category":
+      return "Type";
+    case "condition":
+      return "Condition";
+    case "isbn":
+      return "ISBN";
+    case "upc":
+      return "UPC";
+  }
+}
+
+function normalizeReservedSpecifics(
+  intent: ListingReviewSaveIntent,
+): ListingReviewSaveIntent {
+  const identity = parseIdentityCorrections({
+    brand: specificValue(intent.specifics, "brand") ?? "",
+    model: specificValue(intent.specifics, "model") ?? "",
+    category: specificValue(intent.specifics, "category") ?? "",
+    condition: intent.condition,
+    isbn: specificValue(intent.specifics, "isbn") ?? "",
+    upc: specificValue(intent.specifics, "upc") ?? "",
+    specifications: "",
+  });
+  return {
+    ...intent,
+    specifics: intent.specifics.map((specific) => {
+      const key = reservedSpecificKey(specific.name);
+      if (!key) return specific;
+      const value = key === "condition"
+        ? intent.condition
+        : identity[key] ?? specific.value;
+      return {
+        name: canonicalReservedSpecificName(key),
+        value,
+      };
+    }),
+  };
+}
+
 const sellerPriceOverrideSchema = z.unknown().transform((value, context) => {
   try {
     return parsePriceOverride(value);
@@ -70,16 +143,35 @@ export const listingReviewSaveIntentSchema = z
   .superRefine((intent, context) => {
     const names = new Set<string>();
     intent.specifics.forEach((specific, index) => {
-      const name = specific.name.toLocaleLowerCase("en-US");
+      const reservedKey = reservedSpecificKey(specific.name);
+      const name = reservedKey
+        ? `reserved:${reservedKey}`
+        : specific.name.toLocaleLowerCase("en-US");
       if (names.has(name)) {
         context.addIssue({
           code: "custom",
-          message: "Item-specific names must be unique.",
+          message: reservedKey
+            ? "Reserved item-specific aliases cannot be combined."
+            : "Item-specific names must be unique.",
           path: ["specifics", index, "name"],
         });
       }
       names.add(name);
     });
+  })
+  .transform((intent, context) => {
+    try {
+      return normalizeReservedSpecifics(intent);
+    } catch (error) {
+      context.addIssue({
+        code: "custom",
+        message: error instanceof Error
+          ? error.message
+          : "Reserved item specifics are invalid.",
+        path: ["specifics"],
+      });
+      return z.NEVER;
+    }
   });
 
 export const listingReviewSaveReceiptSchema = z
@@ -313,9 +405,11 @@ function specificValue(
   const entries = Array.isArray(specifics)
     ? specifics.map(({ name: key, value }) => [key, value] as const)
     : Object.entries(specifics);
+  const reservedKey = reservedSpecificKey(name);
   return entries.find(
-    ([key]) =>
-      key.localeCompare(name, "en-US", { sensitivity: "base" }) === 0,
+    ([key]) => reservedKey
+      ? reservedSpecificKey(key) === reservedKey
+      : key.localeCompare(name, "en-US", { sensitivity: "base" }) === 0,
   )?.[1];
 }
 
@@ -359,18 +453,11 @@ export function createListingReviewSaveRegenerator(
             (value): value is string => typeof value === "string",
           )
         : [];
-      const identityNames = new Set([
-        "brand",
-        "model",
-        "category",
-        "isbn",
-        "upc",
-      ]);
       const stagedSpecs = operation.intent.specifics
-        .filter(({ name }) => !identityNames.has(name.toLocaleLowerCase("en-US")))
+        .filter(({ name }) => reservedSpecificKey(name) === null)
         .map(({ name, value }) => `${name}: ${value}`);
       const hadVisibleSpecs = Object.keys(operation.snapshot.specifics).some(
-        (name) => !identityNames.has(name.toLocaleLowerCase("en-US")),
+        (name) => reservedSpecificKey(name) === null,
       );
       const corrections = {
         ...parseIdentityCorrections({
