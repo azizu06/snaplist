@@ -1249,9 +1249,15 @@ final class CaptureFlowModel {
     }
 
     func applyPhotoReviewScanReturn(
-        _ request: PhotoReviewScanReturn
+        _ request: PhotoReviewScanReturn,
+        expectedActivationID: UUID? = nil
     ) async -> PhotoReviewScanFocus? {
         if intake != nil {
+            guard expectedActivationID == nil
+                    || expectedActivationID
+                        == intakeSnapshot?.version.activationID else {
+                return nil
+            }
             guard request.photos.map(\.id) == intakeSnapshot?.photos.map(\.id) else {
                 return nil
             }
@@ -1584,6 +1590,7 @@ final class CaptureFlowModel {
 
     func addPhotoReviewPhotos<Photo: CaptureLibraryPhotoLoading>(
         _ photos: [Photo],
+        expectedActivationID: UUID,
         while requestIsActive: @escaping @MainActor @Sendable () -> Bool
     ) async -> NativeIntake.Snapshot? {
         guard let intake, requestIsActive() else { return nil }
@@ -1592,65 +1599,84 @@ final class CaptureFlowModel {
             guardedPhotoInput($0, while: requestIsActive)
         }
         guard !inputs.isEmpty else { return nil }
-        return await committedSnapshot(
+        return await committedPhotoReviewSnapshot(
             for: .addPhotos(inputs),
-            using: intake
+            using: intake,
+            expectedActivationID: expectedActivationID
         )
     }
 
     func replacePhotoReviewPhoto<Photo: CaptureLibraryPhotoLoading>(
         id: StagedCapturePhoto.ID,
         with photo: Photo,
+        expectedActivationID: UUID,
         while requestIsActive: @escaping @MainActor @Sendable () -> Bool
     ) async -> NativeIntake.Snapshot? {
         guard let intake, requestIsActive() else { return nil }
         let input = guardedPhotoInput(photo, while: requestIsActive)
-        return await committedSnapshot(
+        return await committedPhotoReviewSnapshot(
             for: .replacePhoto(id: id, with: input),
-            using: intake
+            using: intake,
+            expectedActivationID: expectedActivationID
         )
     }
 
     func removePhotoReviewPhoto(
-        id: StagedCapturePhoto.ID
+        id: StagedCapturePhoto.ID,
+        expectedActivationID: UUID
     ) async -> NativeIntake.Snapshot? {
         guard let intake else { return nil }
-        return await committedSnapshot(
+        return await committedPhotoReviewSnapshot(
             for: .removePhoto(id: id),
-            using: intake
+            using: intake,
+            expectedActivationID: expectedActivationID
         )
     }
 
     func reorderPhotoReviewPhotos(
-        _ ids: [StagedCapturePhoto.ID]
+        _ ids: [StagedCapturePhoto.ID],
+        expectedActivationID: UUID
     ) async -> NativeIntake.Snapshot? {
         guard let intake else { return nil }
-        return await committedSnapshot(
+        return await committedPhotoReviewSnapshot(
             for: .reorderPhotos(ids),
             using: intake,
+            expectedActivationID: expectedActivationID,
             acceptsUnchanged: true
         )
     }
 
     func saveVoiceNote(
         provisionalURL: URL,
-        duration: TimeInterval
-    ) async -> NativeIntake.Voice? {
-        guard let intake else { return nil }
-        let input = NativeIntake.VoiceInput(duration: duration) {
-            try Data(contentsOf: provisionalURL)
+        duration: TimeInterval,
+        expectedActivationID: UUID,
+        while requestIsActive: @escaping @MainActor @Sendable () -> Bool = {
+            true
         }
-        return await committedSnapshot(
+    ) async -> NativeIntake.Voice? {
+        guard let intake, requestIsActive() else { return nil }
+        let input = NativeIntake.VoiceInput(
+            duration: duration,
+            isActive: {
+                await MainActor.run(body: requestIsActive)
+            },
+            loadData: {
+                try Data(contentsOf: provisionalURL)
+            }
+        )
+        return await committedPhotoReviewSnapshot(
             for: .setVoice(input),
-            using: intake
+            using: intake,
+            expectedActivationID: expectedActivationID
         )?.voice
     }
 
-    func deleteVoiceNote() async -> Bool {
+    func deleteVoiceNote(expectedActivationID: UUID) async -> Bool {
         guard let intake else { return false }
-        return await committedSnapshot(
+        return await committedPhotoReviewSnapshot(
             for: .deleteVoice,
             using: intake,
+            expectedActivationID: expectedActivationID,
             acceptsUnchanged: true
         )?.voice == nil
     }
@@ -1878,6 +1904,23 @@ final class CaptureFlowModel {
             return nil
         }
         return intakeSnapshot
+    }
+
+    private func committedPhotoReviewSnapshot(
+        for operation: NativeIntake.Operation,
+        using intake: NativeIntake,
+        expectedActivationID: UUID,
+        acceptsUnchanged: Bool = false
+    ) async -> NativeIntake.Snapshot? {
+        let result = await intake.performReturningSnapshot(
+            operation,
+            expectedActivationID: expectedActivationID
+        )
+        guard result.outcome == .committed
+                || (acceptsUnchanged && result.outcome == .unchanged) else {
+            return nil
+        }
+        return result.snapshot
     }
 
     private func finishLibraryIntake(

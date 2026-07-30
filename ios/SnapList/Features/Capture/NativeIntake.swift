@@ -56,7 +56,18 @@ actor NativeIntake {
 
     struct VoiceInput: Sendable {
         let duration: TimeInterval
+        let isActive: @Sendable () async -> Bool
         let loadData: @Sendable () async throws -> Data
+
+        init(
+            duration: TimeInterval,
+            isActive: @escaping @Sendable () async -> Bool = { true },
+            loadData: @escaping @Sendable () async throws -> Data
+        ) {
+            self.duration = duration
+            self.isActive = isActive
+            self.loadData = loadData
+        }
     }
 
     enum Operation: Sendable {
@@ -86,6 +97,11 @@ actor NativeIntake {
         case unchanged
         case superseded
         case rejected(Rejection)
+    }
+
+    struct OperationResult: Equatable, Sendable {
+        let outcome: Outcome
+        let snapshot: Snapshot?
     }
 
     enum Event: Equatable, Sendable {
@@ -228,10 +244,17 @@ actor NativeIntake {
         return pair.stream
     }
 
-    func perform(_ operation: Operation) async -> Outcome {
+    func perform(
+        _ operation: Operation,
+        expectedActivationID: UUID? = nil
+    ) async -> Outcome {
         await activateIfNeeded()
         guard let active else {
             return .rejected(.storageFailure)
+        }
+        guard expectedActivationID == nil
+                || expectedActivationID == active.activationID else {
+            return .superseded
         }
         guard active.recovery == .ready else {
             return .rejected(.recoveryPending)
@@ -314,11 +337,17 @@ actor NativeIntake {
                   input.duration <= VoiceNotePresentation.maximumDuration else {
                 return .rejected(.invalidVoice)
             }
+            guard await input.isActive() else {
+                return .superseded
+            }
             let data: Data
             do {
                 data = try await input.loadData()
             } catch {
                 return .rejected(.sourceUnavailable)
+            }
+            guard await input.isActive() else {
+                return .superseded
             }
             let staged: Voice
             let stagingRoot: URL
@@ -354,6 +383,26 @@ actor NativeIntake {
         case .discard(let expected):
             return discard(expected: expected)
         }
+    }
+
+    /// Returns the snapshot produced by this exact operation before another actor
+    /// transaction can run. Event consumers still project the same committed snapshot;
+    /// this result only lets the initiating Photo Review transaction correlate its
+    /// focus and announcement with its own durable write.
+    func performReturningSnapshot(
+        _ operation: Operation,
+        expectedActivationID: UUID
+    ) async -> OperationResult {
+        let outcome = await perform(
+            operation,
+            expectedActivationID: expectedActivationID
+        )
+        guard outcome == .committed || outcome == .unchanged,
+              let active,
+              active.activationID == expectedActivationID else {
+            return OperationResult(outcome: outcome, snapshot: nil)
+        }
+        return OperationResult(outcome: outcome, snapshot: active.snapshot)
     }
 
     private func startIdentityObservation() {

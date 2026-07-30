@@ -1887,15 +1887,21 @@ final class PhotoReviewIntake {
     private(set) var recovery: PhotoReviewIntakeRecovery?
     private let captureFlow: CaptureFlowModel?
     private let draftStore: (any CaptureDraftStoring)?
+    private let expectedActivationID: UUID?
 
-    init(captureFlow: CaptureFlowModel) {
+    init(
+        captureFlow: CaptureFlowModel,
+        expectedActivationID: UUID
+    ) {
         self.captureFlow = captureFlow
+        self.expectedActivationID = expectedActivationID
         draftStore = nil
     }
 
 #if DEBUG
     init(draftStore: any CaptureDraftStoring) {
         captureFlow = nil
+        expectedActivationID = nil
         self.draftStore = draftStore
     }
 #endif
@@ -1908,12 +1914,13 @@ final class PhotoReviewIntake {
         guard let request = store.activePickerRequest, let firstItem = items.first else {
             return .inert
         }
-        if let captureFlow {
+        if let captureFlow, let expectedActivationID {
             return await applyThroughNativeIntake(
                 items,
                 firstItem: firstItem,
                 request: request,
                 captureFlow: captureFlow,
+                expectedActivationID: expectedActivationID,
                 store: store
             )
         }
@@ -2007,6 +2014,7 @@ final class PhotoReviewIntake {
         firstItem: Item,
         request: PhotoReviewPickerRequest,
         captureFlow: CaptureFlowModel,
+        expectedActivationID: UUID,
         store: PhotoReviewStore
     ) async -> PhotoReviewIntakeOutcome {
         let priorPhotos = store.photos
@@ -2015,12 +2023,14 @@ final class PhotoReviewIntake {
         case .add:
             snapshot = await captureFlow.addPhotoReviewPhotos(
                 items,
+                expectedActivationID: expectedActivationID,
                 while: { store.activePickerRequest == request }
             )
         case .replace(let photoID):
             snapshot = await captureFlow.replacePhotoReviewPhoto(
                 id: photoID,
                 with: firstItem,
+                expectedActivationID: expectedActivationID,
                 while: { store.activePickerRequest == request }
             )
         }
@@ -2064,6 +2074,10 @@ final class PhotoReviewIntake {
         _ request: PhotoReviewPickerRequest,
         in store: PhotoReviewStore
     ) -> PhotoReviewIntakeOutcome {
+        guard store.activePickerRequest == request else {
+            recovery = nil
+            return .inert
+        }
         store.cancelPickerRequest()
         recovery = PhotoReviewIntakeRecovery(
             message: request.failureMessage,
@@ -2423,12 +2437,20 @@ final class PhotoReviewLiveSession {
             .appendingPathComponent("SnapList", isDirectory: true)
             .appendingPathComponent("VoiceNoteProvisional", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let authority = captureFlow.map { captureFlow in
-            VoiceNoteCommitAuthority(
-                save: { [weak captureFlow] url, duration in
+        let intakeActivationID =
+            captureFlow?.intakeSnapshot?.version.activationID
+        let authority: VoiceNoteCommitAuthority? = captureFlow.flatMap {
+            captureFlow -> VoiceNoteCommitAuthority? in
+            guard let intakeActivationID else {
+                return nil
+            }
+            return VoiceNoteCommitAuthority(
+                save: { [weak captureFlow] url, duration, isActive in
                     guard let voice = await captureFlow?.saveVoiceNote(
                         provisionalURL: url,
-                        duration: duration
+                        duration: duration,
+                        expectedActivationID: intakeActivationID,
+                        while: isActive
                     ) else {
                         return nil
                     }
@@ -2438,7 +2460,9 @@ final class PhotoReviewLiveSession {
                     )
                 },
                 delete: { [weak captureFlow] in
-                    await captureFlow?.deleteVoiceNote() ?? false
+                    await captureFlow?.deleteVoiceNote(
+                        expectedActivationID: intakeActivationID
+                    ) ?? false
                 }
             )
         }
@@ -2470,8 +2494,7 @@ final class PhotoReviewLiveSession {
         return PhotoReviewLiveSession(
             store: PhotoReviewStore(photos: request.photos),
             voiceNoteStore: voiceNoteStore,
-            intakeActivationID:
-                captureFlow?.intakeSnapshot?.version.activationID
+            intakeActivationID: intakeActivationID
         )
     }
 
@@ -2551,12 +2574,18 @@ final class PhotoReviewLiveSession {
         destinationIndex: Int,
         captureFlow: CaptureFlowModel
     ) async -> PhotoReviewReorderResult? {
+        guard let intakeActivationID else {
+            return nil
+        }
         let priorIDs = store.photos.map(\.id)
         guard let proposedIDs = store.proposedPhotoOrder(
             moving: photoID,
             to: destinationIndex
         ),
-        let snapshot = await captureFlow.reorderPhotoReviewPhotos(proposedIDs),
+        let snapshot = await captureFlow.reorderPhotoReviewPhotos(
+            proposedIDs,
+            expectedActivationID: intakeActivationID
+        ),
         [priorIDs, proposedIDs].contains(store.photos.map(\.id)),
         snapshot.photos.map(\.id) == proposedIDs else {
             return nil
@@ -2736,7 +2765,8 @@ enum PhotoReviewBackCoordinator {
     ) async -> PhotoReviewBackOutcome {
         let request = session.scanReturn()
         guard let focus = await captureFlow.applyPhotoReviewScanReturn(
-            request
+            request,
+            expectedActivationID: session.intakeActivationID
         ) else {
             return .persistenceRejected
         }

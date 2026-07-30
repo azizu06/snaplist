@@ -136,9 +136,15 @@ struct AppShellView: View {
             ) else { return }
             // A new session gets a new intake, so a recovery the seller already resolved
             // cannot reappear on the next item they review.
-            photoReviewIntake = PhotoReviewIntake(captureFlow: captureFlow)
-            let activationID =
-                photoReviewHost.session?.intakeActivationID
+            let activationID = photoReviewHost.session?.intakeActivationID
+            if let activationID {
+                photoReviewIntake = PhotoReviewIntake(
+                    captureFlow: captureFlow,
+                    expectedActivationID: activationID
+                )
+            } else {
+                photoReviewIntake = nil
+            }
             Task {
                 guard let activationID else { return }
                 _ = await captureFlow.markPhotoReviewEntered(
@@ -632,7 +638,11 @@ enum AppShellPhotoReviewDeleteTransaction {
         guard let removedIndex = priorIDs.firstIndex(of: photoID) else {
             return nil
         }
-        guard let snapshot = await captureFlow.removePhotoReviewPhoto(id: photoID),
+        guard let activationID = session.intakeActivationID,
+              let snapshot = await captureFlow.removePhotoReviewPhoto(
+                  id: photoID,
+                  expectedActivationID: activationID
+              ),
               host.session === session,
               [priorIDs, snapshot.photos.map(\.id)]
                 .contains(session.store.photos.map(\.id)) else {

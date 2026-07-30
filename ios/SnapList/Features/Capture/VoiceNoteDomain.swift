@@ -133,7 +133,12 @@ enum VoiceNoteFileStoreError: Error {
 
 @MainActor
 struct VoiceNoteCommitAuthority {
-    let save: (URL, TimeInterval) async -> VoiceNoteAsset?
+    let save:
+        (
+            URL,
+            TimeInterval,
+            @escaping @MainActor @Sendable () -> Bool
+        ) async -> VoiceNoteAsset?
     let delete: () async -> Bool
 }
 
@@ -281,6 +286,7 @@ final class VoiceNoteStore {
     private var provisionalURL: URL?
     private var provisionalDuration: TimeInterval?
     private var pendingFocusRequest: VoiceNoteFocusRequest?
+    private var authorityMutationID: UUID?
 
     init(
         savedNote: VoiceNoteAsset? = nil,
@@ -415,15 +421,22 @@ final class VoiceNoteStore {
         }
 
         if let authority {
+            let mutationID = UUID()
+            authorityMutationID = mutationID
             Task {
                 let committed = await authority.save(
                     provisionalURL,
-                    provisionalDuration
+                    provisionalDuration,
+                    { [weak self] in
+                        self?.authorityMutationID == mutationID
+                    }
                 )
-                guard self.provisionalURL == provisionalURL else {
+                guard authorityMutationID == mutationID,
+                      self.provisionalURL == provisionalURL else {
                     try? files.discardProvisional(at: provisionalURL)
                     return
                 }
+                authorityMutationID = nil
                 if let committed {
                     self.savedNote = committed
                     self.provisionalURL = nil
@@ -464,6 +477,7 @@ final class VoiceNoteStore {
         guard provisionalURL != nil else {
             return true
         }
+        authorityMutationID = nil
         prepareProvisionalForCleanup()
         phase = authoritativePhase
         if savedNote != nil {
@@ -544,8 +558,15 @@ final class VoiceNoteStore {
         }
         audio.stopPlaying()
         if let authority {
+            let mutationID = UUID()
+            authorityMutationID = mutationID
             Task {
-                guard await authority.delete() else {
+                let deleted = await authority.delete()
+                guard authorityMutationID == mutationID else {
+                    return
+                }
+                authorityMutationID = nil
+                guard deleted else {
                     phase = .saved(isPlaying: false)
                     return
                 }
@@ -572,6 +593,7 @@ final class VoiceNoteStore {
     @discardableResult
     func dismiss() -> Bool {
         audio.stopPlaying()
+        authorityMutationID = nil
         if provisionalURL != nil {
             prepareProvisionalForCleanup()
             phase = authoritativePhase
@@ -617,6 +639,7 @@ final class VoiceNoteStore {
         guard provisionalURL != nil else {
             return true
         }
+        authorityMutationID = nil
         prepareProvisionalForCleanup()
         phase = authoritativePhase
         return discardPendingProvisional()

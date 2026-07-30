@@ -120,7 +120,11 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         XCTAssertEqual(capture.stagedPhotos, reorderedA.photos)
 
         let removedID = try XCTUnwrap(session.store.photos.last?.id)
-        let removalResult = await capture.removePhotoReviewPhoto(id: removedID)
+        let activationID = try XCTUnwrap(session.intakeActivationID)
+        let removalResult = await capture.removePhotoReviewPhoto(
+            id: removedID,
+            expectedActivationID: activationID
+        )
         let removedA = try XCTUnwrap(removalResult)
         guard case .snapshot(let removalEvent)? = await iterator.next() else {
             return XCTFail("A committed delete must publish one snapshot.")
@@ -137,7 +141,8 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         try Data("bounded voice".utf8).write(to: voiceURL)
         let voiceResult = await capture.saveVoiceNote(
             provisionalURL: voiceURL,
-            duration: 4
+            duration: 4,
+            expectedActivationID: activationID
         )
         let committedVoice = try XCTUnwrap(voiceResult)
         guard case .snapshot(let voicedA)? = await iterator.next() else {
@@ -147,13 +152,110 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         session.publishCommittedSnapshot(voicedA)
         XCTAssertEqual(session.voiceNoteStore.savedNote?.url, committedVoice.mediaURL)
 
-        let suspended = NativeIntakeAdoptionSuspendedPhoto(
+        let restoredDependencies = AppDependencies.make(
+            configuration: .preview,
+            nativeIntakeIdentitySource: identity.source,
+            nativeIntakeApplicationSupportDirectory: root
+        )
+        let restoredCapture = CaptureFlowModel(
+            camera: restoredDependencies.captureCamera,
+            evaluator: restoredDependencies.framingEvaluator,
+            intake: restoredDependencies.nativeIntake
+        )
+        let restoredResult = await restoredCapture.restore()
+        XCTAssertEqual(restoredResult, .stagedPhoto)
+        XCTAssertEqual(restoredCapture.intakeSnapshot?.photos, voicedA.photos)
+        XCTAssertEqual(restoredCapture.intakeSnapshot?.voice, voicedA.voice)
+
+        let photoReviewIntake = PhotoReviewIntake(
+            captureFlow: capture,
+            expectedActivationID: activationID
+        )
+        session.store.beginPickerRequest(.add)
+        let suspendedPhoto = NativeIntakeAdoptionSuspendedPhoto(
             data: try makeJPEG(seed: 7)
         )
         let stalePicker = Task {
-            await capture.stageLibraryPhotos([suspended])
+            await photoReviewIntake.apply(
+                [suspendedPhoto],
+                to: session.store
+            )
         }
-        await suspended.waitUntilRequested()
+        await suspendedPhoto.waitUntilRequested()
+
+        let reorderGate = NativeIntakeAdoptionGate()
+        let staleReorderPhotoID = try XCTUnwrap(
+            session.store.photos.last?.id
+        )
+        let staleReorder = Task {
+            await reorderGate.suspend()
+            return await session.commitReorder(
+                photoID: staleReorderPhotoID,
+                destinationIndex: 0,
+                captureFlow: capture
+            )
+        }
+        await reorderGate.waitUntilRequested()
+
+        let voiceGate = NativeIntakeAdoptionGate()
+        let voiceFiles = NativeIntakeAdoptionVoiceFiles(root: root)
+        let voiceAudio = NativeIntakeAdoptionVoiceAudio()
+        let staleVoiceStore = VoiceNoteStore(
+            audio: voiceAudio,
+            files: voiceFiles,
+            authority: VoiceNoteCommitAuthority(
+                save: { url, duration, isActive in
+                    await voiceGate.suspend()
+                    guard let voice = await capture.saveVoiceNote(
+                        provisionalURL: url,
+                        duration: duration,
+                        expectedActivationID: activationID,
+                        while: isActive
+                    ) else {
+                        voiceGate.finish()
+                        return nil
+                    }
+                    voiceGate.finish()
+                    return VoiceNoteAsset(
+                        url: voice.mediaURL,
+                        duration: voice.duration
+                    )
+                },
+                delete: {
+                    await capture.deleteVoiceNote(
+                        expectedActivationID: activationID
+                    )
+                }
+            )
+        )
+        await staleVoiceStore.startRecording()
+        voiceAudio.recordingSnapshot = .init(
+            elapsed: 4,
+            averagePower: -20
+        )
+        staleVoiceStore.save()
+        await voiceGate.waitUntilRequested()
+        XCTAssertTrue(staleVoiceStore.dismiss())
+        voiceGate.resume()
+        await voiceGate.waitUntilFinished()
+        await Task.yield()
+        XCTAssertNil(staleVoiceStore.savedNote)
+        XCTAssertEqual(staleVoiceStore.phase, .ready)
+        XCTAssertEqual(
+            capture.intakeSnapshot?.voice,
+            committedVoice,
+            "Cancel must invalidate an uncommitted Voice Note save."
+        )
+
+        let voiceDeleteGate = NativeIntakeAdoptionGate()
+        let staleVoiceDelete = Task {
+            await voiceDeleteGate.suspend()
+            return await capture.deleteVoiceNote(
+                expectedActivationID: activationID
+            )
+        }
+        await voiceDeleteGate.waitUntilRequested()
+
         identity.set(
             .init(
                 verifiedClerkSubject: "user_native_intake_adoption_b",
@@ -161,17 +263,83 @@ final class NativeIntakeAdoptionTests: XCTestCase {
             )
         )
         guard case .snapshot(let returnedB)? = await iterator.next() else {
-            return XCTFail("The principal change must publish B before picker completion.")
+            return XCTFail(
+                "The principal change must publish B before stale completions."
+            )
         }
-        suspended.resume()
-        let staleAdded = await stalePicker.value
-        XCTAssertEqual(staleAdded, 0)
         await waitUntil { capture.intakeSnapshot?.version == returnedB.version }
+
+        let newerRequest = PhotoReviewPickerRequest.replace(
+            photoID: try XCTUnwrap(session.store.photos.first?.id)
+        )
+        session.store.beginPickerRequest(newerRequest)
+        suspendedPhoto.resume()
+        reorderGate.resume()
+        voiceDeleteGate.resume()
+
+        let stalePickerOutcome = await stalePicker.value
+        let staleReorderOutcome = await staleReorder.value
+        let staleVoiceDeleteOutcome = await staleVoiceDelete.value
+        XCTAssertEqual(stalePickerOutcome, .inert)
+        XCTAssertNil(staleReorderOutcome)
+        XCTAssertFalse(staleVoiceDeleteOutcome)
+        XCTAssertEqual(session.store.activePickerRequest, newerRequest)
+        XCTAssertNil(photoReviewIntake.recovery)
         XCTAssertEqual(
             capture.stagedPhotos,
             populatedB.photos,
-            "A stale picker completion cannot publish into principal B."
+            "Stale Photo Review and Voice Note completions cannot publish into B."
         )
+        XCTAssertNil(capture.intakeSnapshot?.voice)
+    }
+
+    func testConcurrentPhotoReviewReordersReturnTheirOwnCommittedSnapshots()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let identity = NativeIntakeAdoptionIdentity(
+            .init(
+                verifiedClerkSubject: "user_native_intake_reorder",
+                persistedAppAttestKeyID: nil
+            )
+        )
+        let dependencies = AppDependencies.make(
+            configuration: .preview,
+            nativeIntakeIdentitySource: identity.source,
+            nativeIntakeApplicationSupportDirectory: root
+        )
+        let capture = CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            intake: dependencies.nativeIntake
+        )
+        _ = await capture.restore()
+        let added = await capture.stageLibraryPhotos(
+            try (1...3).map {
+                NativeIntakeAdoptionPhoto(data: try makeJPEG(seed: $0))
+            }
+        )
+        XCTAssertEqual(added, 3)
+        let activationID = try XCTUnwrap(
+            capture.intakeSnapshot?.version.activationID
+        )
+        let ids = capture.stagedPhotos.map(\.id)
+        let firstOrder = Array(ids.reversed())
+        let secondOrder = [ids[1], ids[2], ids[0]]
+
+        async let first = capture.reorderPhotoReviewPhotos(
+            firstOrder,
+            expectedActivationID: activationID
+        )
+        async let second = capture.reorderPhotoReviewPhotos(
+            secondOrder,
+            expectedActivationID: activationID
+        )
+        let (firstSnapshot, secondSnapshot) = await (first, second)
+
+        XCTAssertEqual(firstSnapshot?.photos.map(\.id), firstOrder)
+        XCTAssertEqual(secondSnapshot?.photos.map(\.id), secondOrder)
     }
 
     private func makeJPEG(seed: Int) throws -> Data {
@@ -195,6 +363,101 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         }
         XCTAssertTrue(condition())
     }
+}
+
+@MainActor
+private final class NativeIntakeAdoptionGate {
+    private var requested = false
+    private var finished = false
+    private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+    private var finishWaiters: [CheckedContinuation<Void, Never>] = []
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func suspend() async {
+        requested = true
+        requestWaiters.forEach { $0.resume() }
+        requestWaiters = []
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilRequested() async {
+        if requested { return }
+        await withCheckedContinuation { continuation in
+            requestWaiters.append(continuation)
+        }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func finish() {
+        finished = true
+        finishWaiters.forEach { $0.resume() }
+        finishWaiters = []
+    }
+
+    func waitUntilFinished() async {
+        if finished { return }
+        await withCheckedContinuation { continuation in
+            finishWaiters.append(continuation)
+        }
+    }
+}
+
+@MainActor
+private final class NativeIntakeAdoptionVoiceAudio: VoiceNoteAudioClient {
+    var permission: VoiceNoteMicrophonePermission = .allowed
+    var recordingSnapshot = VoiceNoteRecordingSnapshot(
+        elapsed: 0,
+        averagePower: -60
+    )
+    var interruptionHandler: (() -> Void)?
+    var routeChangeHandler: (() -> Void)?
+    var playbackFinishedHandler: (() -> Void)?
+    var recordingFinishedHandler: ((VoiceNoteRecordingCompletion) -> Void)?
+
+    func requestPermission() async -> VoiceNoteMicrophonePermission {
+        permission
+    }
+
+    func startRecording(to _: URL) throws {}
+    func stopRecording() {}
+    func startPlaying(_: URL) throws {}
+    func pausePlaying() {}
+    func stopPlaying() {}
+}
+
+private final class NativeIntakeAdoptionVoiceFiles: VoiceNoteFileStoring {
+    private let url: URL
+
+    init(root: URL) {
+        url = root.appendingPathComponent(
+            "stale-voice-\(UUID().uuidString).wav"
+        )
+    }
+
+    func makeProvisionalURL() throws -> URL {
+        try Data("stale voice".utf8).write(to: url)
+        return url
+    }
+
+    func commit(
+        provisionalURL: URL,
+        duration: TimeInterval,
+        replacing _: VoiceNoteAsset?
+    ) throws -> VoiceNoteAsset {
+        VoiceNoteAsset(url: provisionalURL, duration: duration)
+    }
+
+    func discardProvisional(at url: URL) throws {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func delete(_: VoiceNoteAsset) throws {}
 }
 
 private struct NativeIntakeAdoptionPhoto: CaptureLibraryPhotoLoading {
