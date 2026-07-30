@@ -192,10 +192,19 @@ struct AppShellView: View {
                 switch event {
                 case .snapshot(let snapshot):
                     await captureFlow.awaitPublishedSnapshot(snapshot)
+#if DEBUG
+                    if !configuration.usesRestoredCaptureFixture {
+                        submissionHost.synchronizePrincipal(
+                            snapshot: snapshot,
+                            intake: dependencies.nativeIntake
+                        )
+                    }
+#else
                     submissionHost.synchronizePrincipal(
                         snapshot: snapshot,
                         intake: dependencies.nativeIntake
                     )
+#endif
                     let activeReviewDeparted =
                         photoReviewHost.session?.intakeActivationID
                         .map { $0 != snapshot.version.activationID }

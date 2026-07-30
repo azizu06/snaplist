@@ -1,4 +1,7 @@
 import Foundation
+#if DEBUG
+import UIKit
+#endif
 
 protocol MobileAPIClient {
     func getHealth() async throws -> HealthEnvelope
@@ -247,6 +250,63 @@ struct AppDependencies {
 }
 
 #if DEBUG
+extension AppDependencies {
+    @MainActor
+    func seedRestoredCaptureFixtureIfNeeded(
+        configuration: LaunchConfiguration
+    ) async {
+        guard configuration.usesRestoredCaptureFixture else {
+            return
+        }
+
+        let events = await nativeIntake.events()
+        var iterator = events.makeAsyncIterator()
+        guard case .snapshot(let initialSnapshot) = await iterator.next()
+        else {
+            return
+        }
+        if !initialSnapshot.photos.isEmpty
+            || initialSnapshot.voice != nil {
+            guard await nativeIntake.perform(
+                .discard(expected: initialSnapshot.version)
+            ) == .committed else {
+                return
+            }
+        }
+
+        let renderer = UIGraphicsImageRenderer(
+            size: CGSize(width: 16, height: 16)
+        )
+        let photoData = renderer.jpegData(
+            withCompressionQuality: 0.9
+        ) { context in
+            UIColor.systemTeal.setFill()
+            context.fill(
+                CGRect(x: 0, y: 0, width: 16, height: 16)
+            )
+        }
+        let result = await nativeIntake.performReturningSnapshot(
+            .addPhotos([
+                NativeIntake.PhotoInput {
+                    photoData
+                }
+            ]),
+            expectedActivationID:
+                initialSnapshot.version.activationID
+        )
+        guard result.outcome == .committed,
+              let snapshot = result.snapshot,
+              let submissionStore =
+                captureDraftStore as? RestoredCaptureFixtureStore
+        else {
+            return
+        }
+        await submissionStore.retainLegacySubmissionFixture(
+            snapshot.photos
+        )
+    }
+}
+
 private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
     private var photos = [
         StagedCapturePhoto(
@@ -259,6 +319,12 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
 
     func load() async throws -> StagedCapturePhoto? { photos.first }
     func loadPhotos() async throws -> [StagedCapturePhoto] { photos }
+
+    func retainLegacySubmissionFixture(
+        _ committedPhotos: [StagedCapturePhoto]
+    ) {
+        photos = committedPhotos
+    }
 
     // The fixture has no image pipeline, so it cannot turn `imageData` into a staged
     // artifact and will not invent one. Handing back the photo it already holds would

@@ -145,6 +145,12 @@ struct SnapListApp: App {
             )
                 .environment(\.appDependencies, dependencies)
                 .task {
+#if DEBUG
+                    await dependencies
+                        .seedRestoredCaptureFixtureIfNeeded(
+                            configuration: configuration
+                        )
+#endif
                     async let restoration = captureFlow.restore()
                     async let homeLoad: Void = homeStore.load()
                     router.handleCaptureRestoration(await restoration)
