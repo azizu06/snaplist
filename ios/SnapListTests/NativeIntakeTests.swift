@@ -82,12 +82,12 @@ final class NativeIntakeTests: XCTestCase {
         }
         let mismatched = NativeIntake.PhotoInput(
             libraryTransferReceipt: receipts[0], loadData: { photoData[1] })
-        XCTAssertEqual(
-            await session.perform(.addPhotos([mismatched])), .rejected(.sourceUnavailable))
+        let mismatchedAdd = await session.perform(.addPhotos([mismatched]))
+        XCTAssertEqual(mismatchedAdd, .rejected(.sourceUnavailable))
         assertEmpty(try await session.inspect())
-        let inputs = photoData.indices.map {
+        let inputs = photoData.indices.map { index in
             NativeIntake.PhotoInput(
-                libraryTransferReceipt: receipts[$0], loadData: { photoData[$0] })
+                libraryTransferReceipt: receipts[index], loadData: { photoData[index] })
         }
         guardedFiles.failNextFileOperation = .assetProtection
         let assetFailure = await session.perform(.addPhotos(inputs))
@@ -116,9 +116,10 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(committed.photos.count, 5)
         XCTAssertEqual(Set(committed.photos.map(\.id)).count, 5)
         XCTAssertEqual(committed.photos.map(\.libraryTransferReceipt), receipts)
-        XCTAssertEqual(await session.perform(
-            .replacePhoto(id: committed.photos[0].id, with: mismatched)), .rejected(.sourceUnavailable))
-        XCTAssertEqual(try await session.inspect(), committed)
+        let mismatchedReplace = await session.perform(.replacePhoto(id: committed.photos[0].id, with: mismatched))
+        XCTAssertEqual(mismatchedReplace, .rejected(.sourceUnavailable))
+        let unchangedAfterMismatch = try await session.inspect()
+        XCTAssertEqual(unchangedAfterMismatch, committed)
         let replaced = try await session.commit(.replacePhoto(id: committed.photos[0].id, with: inputs[0]))
         XCTAssertEqual(replaced.photos[0].libraryTransferReceipt, receipts[0])
         let recovered = try await harness.makeSession()
