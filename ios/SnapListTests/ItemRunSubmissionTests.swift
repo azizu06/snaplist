@@ -436,6 +436,406 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Ambiguous outcome and exact retry
 
+    func testSubmissionNeverCombinesPriorPrincipalPayloadWithCurrentPrincipalBearer()
+        async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "snaplist-principal-generation-fence-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pair = PrincipalGenerationPair(
+            caseRoot: root,
+            aSeed: "principal-a",
+            bSeed: "principal-b"
+        )
+        let principalA = pair.principalA
+        let principalB = pair.principalB
+        let reader = PrincipalPhotoReadRecorder(
+            fixtures: [principalA, principalB]
+        )
+        let attemptA = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: try ItemRunSubmissionSnapshot.make(
+                for: principalA.photos,
+                readData: reader.read
+            ).photos
+        )
+        let attemptStoreA = LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: principalA.root
+        )
+        let attemptStoreB = LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: principalB.root
+        )
+        try await attemptStoreA.saveAttempt(attemptA)
+        reader.reset()
+
+        let bearerGate = SubmissionResponseGate()
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let coordinator = ItemRunSubmissionCoordinator(
+            submitter: submitter,
+            attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+            draftStore: RecordingCaptureDraftStore(
+                photos: principalA.photos
+            ),
+            tokenProvider: TestBearerTokenProvider(
+                principalScopeProof:
+                    ItemRunSubmissionPrincipalScopeProof(
+                        filesystemRoot: principalB.root
+                    )
+            ) {
+                await bearerGate.hold()
+                return "current-session-bearer"
+            },
+            readData: reader.read,
+            newIdempotencyKey: { Self.secondKey }
+        )
+        let host = ItemRunSubmissionHost(coordinator: coordinator)
+        host.synchronizePrincipal(
+            snapshot: principalA.snapshot,
+            intake: pair.intake
+        )
+
+        let submission = Task {
+            await host.startListing(photos: principalA.photos)
+        }
+        defer { submission.cancel() }
+        await bearerGate.waitUntilHeld()
+
+        XCTAssertEqual(
+            reader.readCount,
+            0,
+            "Principal-sensitive photo or attempt work started before bearer acquisition."
+        )
+
+        // Authentication has already changed to B, but the separate NativeIntake
+        // event is deliberately delayed. Cached UI generation still says A.
+        await bearerGate.release()
+        await submission.value
+
+        let payloads = await submitter.payloads
+        XCTAssertTrue(
+            payloads.isEmpty,
+            "Principal A payload reached transport with B's atomic bearer authority."
+        )
+        let storedAttemptA = try await attemptStoreA.loadAttempt()
+        let storedAttemptB = try await attemptStoreB.loadAttempt()
+        XCTAssertEqual(storedAttemptA, attemptA)
+        XCTAssertNil(storedAttemptB)
+        XCTAssertEqual(reader.readCount, 0)
+
+        host.synchronizePrincipal(
+            snapshot: principalB.snapshot,
+            intake: pair.intake
+        )
+        XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.acceptedRun)
+        XCTAssertNil(host.retention)
+        XCTAssertNil(host.pendingPresentationEvent)
+    }
+
+    func testPrincipalSwitchAfterHashingStopsBeforeAttemptOrDispatch()
+        async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "submission-principal-post-hash-fence-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pair = PrincipalGenerationPair(
+            caseRoot: root,
+            aSeed: "post-hash-a",
+            bSeed: "post-hash-b"
+        )
+        let principalA = pair.principalA
+        let principalB = pair.principalB
+        let attemptURL = principalA.root
+            .appendingPathComponent(
+                "ItemRunSubmission",
+                isDirectory: true
+            )
+            .appendingPathComponent("attempt.json")
+        try FileManager.default.createDirectory(
+            at: attemptURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let sentinelAttemptBytes = Data("departed-attempt".utf8)
+        try sentinelAttemptBytes.write(to: attemptURL)
+
+        let bearerGate = SubmissionResponseGate()
+        let reader = PrincipalPhotoReadRecorder(
+            fixtures: [principalA, principalB]
+        )
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: principalA.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof:
+                        ItemRunSubmissionPrincipalScopeProof(
+                            filesystemRoot: principalA.root
+                        )
+                ) {
+                    await bearerGate.hold(onCall: 2)
+                    return "principal-a-bearer"
+                },
+                readData: reader.read,
+                newIdempotencyKey: { Self.firstKey }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: principalA.snapshot,
+            intake: pair.intake
+        )
+
+        let submission = Task {
+            await host.startListing(photos: principalA.photos)
+        }
+        defer { submission.cancel() }
+        await bearerGate.waitUntilHeld()
+
+        host.synchronizePrincipal(
+            snapshot: principalB.snapshot,
+            intake: pair.intake
+        )
+        await bearerGate.release()
+        await submission.value
+
+        XCTAssertEqual(
+            try Data(contentsOf: attemptURL),
+            sentinelAttemptBytes,
+            "A departed generation read, discarded, or overwrote its attempt."
+        )
+        XCTAssertEqual(reader.readCount, 1)
+        let payloads = await submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+        XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.acceptedRun)
+        XCTAssertNil(host.retention)
+        XCTAssertNil(host.pendingPresentationEvent)
+    }
+
+    func testPrincipalSwitchDuringTransportPreservesAttemptAndSuppressesResult()
+        async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "submission-principal-transport-fence-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pair = PrincipalGenerationPair(
+            caseRoot: root,
+            aSeed: "transport-a",
+            bSeed: "transport-b"
+        )
+        let principalA = pair.principalA
+        let principalB = pair.principalB
+        let reader = PrincipalPhotoReadRecorder(
+            fixtures: [principalA, principalB]
+        )
+        let attemptA = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: try ItemRunSubmissionSnapshot.make(
+                for: principalA.photos,
+                readData: reader.read
+            ).photos
+        )
+        let attemptB = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.secondKey,
+            photos: try ItemRunSubmissionSnapshot.make(
+                for: principalB.photos,
+                readData: reader.read
+            ).photos
+        )
+        let attemptStoreA = LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: principalA.root
+        )
+        let attemptStoreB = LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: principalB.root
+        )
+        try await attemptStoreA.saveAttempt(attemptA)
+        try await attemptStoreB.saveAttempt(attemptB)
+        reader.reset()
+
+        let transportGate = SubmissionResponseGate()
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.conflict],
+            beforeResponse: {
+                await transportGate.hold()
+            }
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: principalA.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof:
+                        ItemRunSubmissionPrincipalScopeProof(
+                            filesystemRoot: principalA.root
+                        )
+                ) {
+                    "principal-a-bearer"
+                },
+                readData: reader.read,
+                newIdempotencyKey: { Self.firstKey }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: principalA.snapshot,
+            intake: pair.intake
+        )
+
+        let submission = Task {
+            await host.startListing(photos: principalA.photos)
+        }
+        defer { submission.cancel() }
+        await transportGate.waitUntilHeld()
+
+        host.synchronizePrincipal(
+            snapshot: principalB.snapshot,
+            intake: pair.intake
+        )
+        await transportGate.release()
+        await submission.value
+
+        let payloads = await submitter.payloads
+        let storedAttemptA = try await attemptStoreA.loadAttempt()
+        let storedAttemptB = try await attemptStoreB.loadAttempt()
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(storedAttemptA, attemptA)
+        XCTAssertEqual(storedAttemptB, attemptB)
+        XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.acceptedRun)
+        XCTAssertNil(host.retention)
+        XCTAssertNil(host.pendingPresentationEvent)
+        XCTAssertFalse(host.retryAmbiguousSubmission(eventID: UUID()))
+    }
+
+    func testPrincipalAmbiguousReplayAndAcceptedCleanupStayInCapturedScope()
+        async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "submission-principal-replay-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let subject = "user_submission_principal_replay"
+        let photoData = SubmissionIntakeFixture.jpeg(
+            filling: "principal-replay",
+            repeated: 1
+        )
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: root,
+            verifiedClerkSubject: subject,
+            photoData: photoData
+        )
+        let scopeRoot = native.snapshot.photos[0].photoURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let scopeProof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                filesystemRoot: scopeRoot
+            )
+        )
+        let foreignRoot = root
+            .appendingPathComponent(
+                "ForeignApplicationSupport",
+                isDirectory: true
+            )
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent("NativeIntake", isDirectory: true)
+            .appendingPathComponent(
+                "v1-\(String(repeating: "f", count: 64))",
+                isDirectory: true
+            )
+        let foreignStore = LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: foreignRoot
+        )
+        let foreignAttempt = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.secondKey,
+            photos: try ItemRunSubmissionSnapshot.make(
+                for: native.snapshot.photos,
+                readData: { _ in photoData }
+            ).photos
+        )
+        try await foreignStore.saveAttempt(foreignAttempt)
+
+        let receipt = Self.receipt(
+            photos: Self.receiptPhotos(for: [photoData])
+        )
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.ambiguous, .replayed(receipt)]
+        )
+        let tokens = TokenSequence(
+            tokens: ["principal-token", "principal-token-refreshed"]
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof: scopeProof
+                ) {
+                    tokens.next()
+                },
+                newIdempotencyKey: { Self.firstKey }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+
+        await host.startListing(photos: native.snapshot.photos)
+
+        guard case .submissionRejected(
+            eventID: let eventID,
+            retention: .ambiguous
+        )? = host.pendingPresentationEvent else {
+            return XCTFail("Expected one principal-scoped ambiguous retry.")
+        }
+        XCTAssertTrue(host.retryAmbiguousSubmission(eventID: eventID))
+
+        let replay = Task {
+            await host.startListing(photos: native.snapshot.photos)
+        }
+        defer { replay.cancel() }
+        guard let savedEvent = await waitForPendingItemSavedEvent(on: host)
+        else {
+            return
+        }
+        host.acknowledgePresentation(eventID: savedEvent.eventID)
+        await replay.value
+
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 2)
+        XCTAssertEqual(
+            payloads.map(\.attempt.idempotencyKey),
+            [Self.firstKey, Self.firstKey]
+        )
+        XCTAssertEqual(payloads[0].photoData, payloads[1].photoData)
+        XCTAssertEqual(payloads[1].photoData, [photoData])
+        let principalStore = LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: scopeRoot
+        )
+        let remainingPrincipalAttempt =
+            try await principalStore.loadAttempt()
+        let remainingForeignAttempt =
+            try await foreignStore.loadAttempt()
+        let bearerTokenLengths = await submitter.bearerTokenLengths
+        XCTAssertNil(remainingPrincipalAttempt)
+        XCTAssertEqual(remainingForeignAttempt, foreignAttempt)
+        XCTAssertTrue(host.clearedIntake)
+        XCTAssertEqual(bearerTokenLengths.count, 2)
+    }
+
     func testAbsentSessionStopsBeforeRunSubmissionTransport() async {
         let intake = SubmissionIntakeFixture(photoCount: 1)
         let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
@@ -893,6 +1293,192 @@ final class ItemRunSubmissionTests: XCTestCase {
         try await relaunched.clearAttempt(attempt)
         let cleared = try await relaunched.loadAttempt()
         XCTAssertNil(cleared)
+    }
+
+    func testPrincipalAttemptStoreRejectsEverySymlinkEscapeIntoForeignScope()
+        async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "submission-attempt-symlink-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let intake = SubmissionIntakeFixture(photoCount: 1)
+        let snapshot = try ItemRunSubmissionSnapshot.make(
+            for: intake.photos,
+            readData: intake.read
+        ).photos
+        let attemptA = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: snapshot
+        )
+        let attemptB = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.secondKey,
+            photos: snapshot
+        )
+        enum Escape: Equatable {
+            case nativeIntakeAncestor
+            case principalRoot
+            case childStore
+        }
+        let cases: [(name: String, escape: Escape)] = [
+            ("native-intake-ancestor", .nativeIntakeAncestor),
+            ("principal-root", .principalRoot),
+            ("child-store", .childStore),
+        ]
+
+        for testCase in cases {
+            let caseRoot = root.appendingPathComponent(
+                testCase.name,
+                isDirectory: true
+            )
+            let trustedAnchor = caseRoot.appendingPathComponent(
+                "ApplicationSupport",
+                isDirectory: true
+            )
+            let nativeIntakeRoot = trustedAnchor
+                .appendingPathComponent("SnapList", isDirectory: true)
+                .appendingPathComponent("NativeIntake", isDirectory: true)
+            let principalARoot = nativeIntakeRoot.appendingPathComponent(
+                "v1-\(String(repeating: "a", count: 64))",
+                isDirectory: true
+            )
+            let foreignAnchor = caseRoot.appendingPathComponent(
+                "ForeignApplicationSupport",
+                isDirectory: true
+            )
+            let foreignNativeIntakeRoot = foreignAnchor
+                .appendingPathComponent("SnapList", isDirectory: true)
+                .appendingPathComponent("NativeIntake", isDirectory: true)
+            let foreignPrincipalRoot = foreignNativeIntakeRoot
+                .appendingPathComponent(
+                    testCase.escape == .nativeIntakeAncestor
+                        ? "v1-\(String(repeating: "a", count: 64))"
+                        : "v1-\(String(repeating: "b", count: 64))",
+                    isDirectory: true
+                )
+            let foreignStore = LocalItemRunSubmissionAttemptStore(
+                principalRootDirectory: foreignPrincipalRoot
+            )
+            try await foreignStore.saveAttempt(attemptB)
+
+            switch testCase.escape {
+            case .nativeIntakeAncestor:
+                try FileManager.default.createDirectory(
+                    at: trustedAnchor.appendingPathComponent(
+                        "SnapList",
+                        isDirectory: true
+                    ),
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.createSymbolicLink(
+                    at: nativeIntakeRoot,
+                    withDestinationURL: foreignNativeIntakeRoot
+                )
+            case .principalRoot:
+                try FileManager.default.createDirectory(
+                    at: nativeIntakeRoot,
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.createSymbolicLink(
+                    at: principalARoot,
+                    withDestinationURL: foreignPrincipalRoot
+                )
+            case .childStore:
+                try FileManager.default.createDirectory(
+                    at: principalARoot,
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.createSymbolicLink(
+                    at: principalARoot.appendingPathComponent(
+                        "ItemRunSubmission",
+                        isDirectory: true
+                    ),
+                    withDestinationURL:
+                        foreignPrincipalRoot.appendingPathComponent(
+                            "ItemRunSubmission",
+                            isDirectory: true
+                        )
+                )
+            }
+
+            let storeA = LocalItemRunSubmissionAttemptStore(
+                principalRootDirectory: principalARoot
+            )
+            do {
+                _ = try await storeA.loadAttempt()
+                XCTFail(
+                    "\(testCase.name) let A read foreign attempt bytes."
+                )
+            } catch {}
+            do {
+                try await storeA.saveAttempt(attemptA)
+                XCTFail(
+                    "\(testCase.name) let A overwrite foreign attempt bytes."
+                )
+            } catch {}
+            do {
+                try await storeA.clearAttempt(attemptB)
+                XCTFail(
+                    "\(testCase.name) let A delete foreign attempt bytes."
+                )
+            } catch {}
+
+            let principalA = PrincipalSubmissionFixture(
+                root: principalARoot,
+                seed: testCase.name
+            )
+            let reader = PrincipalPhotoReadRecorder(
+                fixtures: [principalA]
+            )
+            let submitter = RecordingItemRunSubmitter(
+                outcomes: [.ambiguous]
+            )
+            let host = ItemRunSubmissionHost(
+                coordinator: ItemRunSubmissionCoordinator(
+                    submitter: submitter,
+                    attemptStore:
+                        InMemoryItemRunSubmissionAttemptStore(),
+                    draftStore: RecordingCaptureDraftStore(
+                        photos: principalA.photos
+                    ),
+                    tokenProvider: TestBearerTokenProvider(
+                        principalScopeProof:
+                            ItemRunSubmissionPrincipalScopeProof(
+                                filesystemRoot: principalARoot
+                            )
+                    ) {
+                        "principal-a-bearer"
+                    },
+                    readData: reader.read,
+                    newIdempotencyKey: { Self.firstKey }
+                )
+            )
+            host.synchronizePrincipal(
+                snapshot: principalA.snapshot,
+                intake: NativeIntake(
+                    applicationSupportDirectory: caseRoot,
+                    identitySource: .processPrivate
+                )
+            )
+
+            await host.startListing(photos: principalA.photos)
+
+            let payloads = await submitter.payloads
+            let survivingAttemptB =
+                try await foreignStore.loadAttempt()
+            XCTAssertTrue(payloads.isEmpty, testCase.name)
+            XCTAssertEqual(reader.readCount, 0, testCase.name)
+            XCTAssertEqual(
+                host.retention,
+                .attemptNotPersisted,
+                testCase.name
+            )
+            XCTAssertEqual(
+                survivingAttemptB,
+                attemptB,
+                testCase.name
+            )
+        }
     }
 
     func testUnreadableStoredAttemptIsDiscardedSoStartListingCannotDieForever() async throws {
@@ -2225,6 +2811,51 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
     }
 
+    private func makeNativePrincipalIntake(
+        applicationSupport: URL,
+        verifiedClerkSubject: String,
+        photoData: Data
+    ) async throws -> (
+        intake: NativeIntake,
+        snapshot: NativeIntake.Snapshot
+    ) {
+        let intake = NativeIntake(
+            applicationSupportDirectory: applicationSupport,
+            identitySource: NativeIntake.IdentitySource(
+                current: {
+                    NativeIntake.Identity(
+                        verifiedClerkSubject: verifiedClerkSubject,
+                        persistedAppAttestKeyID: nil
+                    )
+                },
+                changes: { AsyncStream { _ in } }
+            )
+        )
+        let events = await intake.events()
+        var iterator = events.makeAsyncIterator()
+        guard let initialEvent = await iterator.next(),
+              case .snapshot(_) = initialEvent else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        let outcome = await intake.perform(
+            .addPhotos([
+                NativeIntake.PhotoInput {
+                    photoData
+                },
+            ])
+        )
+        guard outcome == .committed else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        while let event = await iterator.next() {
+            if case .snapshot(let snapshot) = event,
+               snapshot.photos.count == 1 {
+                return (intake, snapshot)
+            }
+        }
+        throw CocoaError(.fileReadUnknown)
+    }
+
     private func makeCoordinator(
         intake: SubmissionIntakeFixture,
         attemptStore: InMemoryItemRunSubmissionAttemptStore,
@@ -2314,14 +2945,141 @@ private enum SavedPresentationEffectObservation: Equatable {
 }
 
 private struct TestBearerTokenProvider: BearerTokenProviding {
+    let principalScopeProof: ItemRunSubmissionPrincipalScopeProof?
     let resolve: @Sendable () async throws -> String
 
-    init(resolve: @escaping @Sendable () async throws -> String) {
+    init(
+        principalScopeProof:
+            ItemRunSubmissionPrincipalScopeProof? = nil,
+        resolve: @escaping @Sendable () async throws -> String
+    ) {
+        self.principalScopeProof = principalScopeProof
         self.resolve = resolve
     }
 
     func bearerToken() async throws -> String {
         try await resolve()
+    }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        guard let principalScopeProof else {
+            throw BearerTokenProviderError.principalBindingUnavailable
+        }
+        return PrincipalBoundBearer(
+            bearerToken: try await resolve(),
+            scopeProof: principalScopeProof
+        )
+    }
+}
+
+private struct PrincipalSubmissionFixture: Sendable {
+    let root: URL
+    let photos: [StagedCapturePhoto]
+    let bytesByPath: [String: Data]
+    let snapshot: NativeIntake.Snapshot
+
+    init(root: URL, seed: String) {
+        self.root = root.standardizedFileURL
+        let assetsRoot = root
+            .appendingPathComponent("Current", isDirectory: true)
+            .appendingPathComponent("Assets", isDirectory: true)
+        let photoID = UUID()
+        let photo = StagedCapturePhoto(
+            id: photoID,
+            photoURL: assetsRoot.appendingPathComponent(
+                "photo-\(photoID.uuidString).jpg"
+            ),
+            thumbnailURL: assetsRoot.appendingPathComponent(
+                "thumbnail-\(photoID.uuidString).jpg"
+            ),
+            createdAt: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+        let bytes = SubmissionIntakeFixture.jpeg(
+            filling: seed,
+            repeated: 1
+        )
+        photos = [photo]
+        bytesByPath = [photo.photoURL.path: bytes]
+        snapshot = NativeIntake.Snapshot(
+            version: NativeIntake.Version(
+                activationID: UUID(),
+                revision: 1
+            ),
+            photos: [photo],
+            voice: nil,
+            recovery: .ready
+        )
+    }
+}
+
+private struct PrincipalGenerationPair {
+    let principalA: PrincipalSubmissionFixture
+    let principalB: PrincipalSubmissionFixture
+    let intake: NativeIntake
+
+    init(caseRoot: URL, aSeed: String, bSeed: String) {
+        let applicationSupport = caseRoot.appendingPathComponent(
+            "ApplicationSupport",
+            isDirectory: true
+        )
+        let nativeIntakeRoot = applicationSupport
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent("NativeIntake", isDirectory: true)
+        principalA = PrincipalSubmissionFixture(
+            root: nativeIntakeRoot.appendingPathComponent(
+                "v1-\(String(repeating: "a", count: 64))",
+                isDirectory: true
+            ),
+            seed: aSeed
+        )
+        principalB = PrincipalSubmissionFixture(
+            root: nativeIntakeRoot.appendingPathComponent(
+                "v1-\(String(repeating: "b", count: 64))",
+                isDirectory: true
+            ),
+            seed: bSeed
+        )
+        intake = NativeIntake(
+            applicationSupportDirectory: applicationSupport,
+            identitySource: .processPrivate
+        )
+    }
+}
+
+private final class PrincipalPhotoReadRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let bytesByPath: [String: Data]
+    private var count = 0
+
+    init(fixtures: [PrincipalSubmissionFixture]) {
+        bytesByPath = fixtures.reduce(into: [:]) { result, fixture in
+            result.merge(fixture.bytesByPath) { _, new in new }
+        }
+    }
+
+    var read: @Sendable (URL) throws -> Data {
+        { [self] url in
+            lock.lock()
+            count += 1
+            let bytes = bytesByPath[url.path]
+            lock.unlock()
+            guard let bytes else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return bytes
+        }
+    }
+
+    var readCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func reset() {
+        lock.lock()
+        count = 0
+        lock.unlock()
     }
 }
 
