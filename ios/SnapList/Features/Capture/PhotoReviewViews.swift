@@ -2388,6 +2388,9 @@ final class PhotoReviewLiveSession {
     let intakeActivationID: UUID?
     private(set) var focusedPhotoID: StagedCapturePhoto.ID?
     private var pendingDeleteAnnouncement: String?
+    private var isReorderCommitActive = false
+    private var reorderCommitWaiters:
+        [CheckedContinuation<Void, Never>] = []
 
     private init(
         store: PhotoReviewStore,
@@ -2574,10 +2577,11 @@ final class PhotoReviewLiveSession {
         destinationIndex: Int,
         captureFlow: CaptureFlowModel
     ) async -> PhotoReviewReorderResult? {
+        await acquireReorderCommit()
+        defer { releaseReorderCommit() }
         guard let intakeActivationID else {
             return nil
         }
-        let priorIDs = store.photos.map(\.id)
         guard let proposedIDs = store.proposedPhotoOrder(
             moving: photoID,
             to: destinationIndex
@@ -2586,7 +2590,6 @@ final class PhotoReviewLiveSession {
             proposedIDs,
             expectedActivationID: intakeActivationID
         ),
-        [priorIDs, proposedIDs].contains(store.photos.map(\.id)),
         snapshot.photos.map(\.id) == proposedIDs else {
             return nil
         }
@@ -2595,6 +2598,24 @@ final class PhotoReviewLiveSession {
             photoID: photoID,
             destinationIndex: destinationIndex
         )
+    }
+
+    private func acquireReorderCommit() async {
+        guard isReorderCommitActive else {
+            isReorderCommitActive = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            reorderCommitWaiters.append(continuation)
+        }
+    }
+
+    private func releaseReorderCommit() {
+        guard !reorderCommitWaiters.isEmpty else {
+            isReorderCommitActive = false
+            return
+        }
+        reorderCommitWaiters.removeFirst().resume()
     }
 }
 

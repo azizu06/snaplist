@@ -1368,7 +1368,12 @@ final class CaptureFlowModel {
         if let intake {
             let outcome = await performAndAwaitSnapshot(
                 .addPhotos([
-                    NativeIntake.PhotoInput { [weak self] in
+                    NativeIntake.PhotoInput(
+                        isActive: { [weak self] in
+                            self?.activeCaptureID == captureID
+                                && self?.activeIntakeID == captureID
+                        }
+                    ) { [weak self] in
                         guard await MainActor.run(body: {
                             self?.activeCaptureID == captureID
                                 && self?.activeIntakeID == captureID
@@ -1431,8 +1436,12 @@ final class CaptureFlowModel {
         if let intake {
             let outcome = await performAndAwaitSnapshot(
                 .addPhotos([
-                    NativeIntake.PhotoInput(libraryTransferReceipt: transferReceipt) {
-                        [weak self] in
+                    NativeIntake.PhotoInput(
+                        libraryTransferReceipt: transferReceipt,
+                        isActive: { [weak self] in
+                            self?.activeIntakeID == intakeID
+                        }
+                    ) { [weak self] in
                         await MainActor.run {
                             guard self?.activeIntakeID == intakeID else {
                                 return nil
@@ -1488,7 +1497,11 @@ final class CaptureFlowModel {
         let remainingCapacity = max(0, 5 - stagedPhotos.count)
         if let intake {
             let inputs = imageData.prefix(remainingCapacity).map { data in
-                NativeIntake.PhotoInput { [weak self] in
+                NativeIntake.PhotoInput(
+                    isActive: { [weak self] in
+                        self?.activeIntakeID == intakeID
+                    }
+                ) { [weak self] in
                     await MainActor.run {
                         guard self?.activeIntakeID == intakeID else {
                             return nil
@@ -1535,7 +1548,11 @@ final class CaptureFlowModel {
         let remainingCapacity = max(0, 5 - stagedPhotos.count)
         if let intake {
             let inputs = photos.prefix(remainingCapacity).map { photo in
-                NativeIntake.PhotoInput { [weak self] in
+                NativeIntake.PhotoInput(
+                    isActive: { [weak self] in
+                        self?.activeIntakeID == intakeID
+                    }
+                ) { [weak self] in
                     guard await MainActor.run(body: {
                         self?.activeIntakeID == intakeID
                     }) else {
@@ -1657,9 +1674,7 @@ final class CaptureFlowModel {
         guard let intake, requestIsActive() else { return nil }
         let input = NativeIntake.VoiceInput(
             duration: duration,
-            isActive: {
-                await MainActor.run(body: requestIsActive)
-            },
+            isActive: requestIsActive,
             loadData: {
                 try Data(contentsOf: provisionalURL)
             }
@@ -1827,7 +1842,9 @@ final class CaptureFlowModel {
         _ photo: Photo,
         while requestIsActive: @escaping @MainActor @Sendable () -> Bool
     ) -> NativeIntake.PhotoInput {
-        NativeIntake.PhotoInput {
+        NativeIntake.PhotoInput(
+            isActive: requestIsActive
+        ) {
             guard await MainActor.run(body: requestIsActive) else {
                 return nil
             }

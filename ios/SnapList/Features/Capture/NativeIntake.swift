@@ -45,23 +45,28 @@ actor NativeIntake {
 
     struct PhotoInput: @unchecked Sendable {
         let libraryTransferReceipt: LibraryPhotoTransferReceipt?
+        let isActive: @MainActor @Sendable () -> Bool
         let loadData: () async throws -> Data?
 
-        init(libraryTransferReceipt: LibraryPhotoTransferReceipt? = nil,
-             loadData: @escaping () async throws -> Data?) {
+        init(
+            libraryTransferReceipt: LibraryPhotoTransferReceipt? = nil,
+            isActive: @escaping @MainActor @Sendable () -> Bool = { true },
+            loadData: @escaping () async throws -> Data?
+        ) {
             self.libraryTransferReceipt = libraryTransferReceipt
+            self.isActive = isActive
             self.loadData = loadData
         }
     }
 
     struct VoiceInput: Sendable {
         let duration: TimeInterval
-        let isActive: @Sendable () async -> Bool
+        let isActive: @MainActor @Sendable () -> Bool
         let loadData: @Sendable () async throws -> Data
 
         init(
             duration: TimeInterval,
-            isActive: @escaping @Sendable () async -> Bool = { true },
+            isActive: @escaping @MainActor @Sendable () -> Bool = { true },
             loadData: @escaping @Sendable () async throws -> Data
         ) {
             self.duration = duration
@@ -172,6 +177,7 @@ actor NativeIntake {
     private let sleeper: @Sendable (Date) async throws -> Void
     private var active: ActiveBundle?
     private var observers: [UUID: AsyncStream<Event>.Continuation] = [:]
+    private var operationSnapshots: [UUID: Snapshot] = [:]
     private var identityTask: Task<Void, Never>?
     private var retentionTask: Task<Void, Never>?
     private var reviewActivationID: UUID?
@@ -248,6 +254,18 @@ actor NativeIntake {
         _ operation: Operation,
         expectedActivationID: UUID? = nil
     ) async -> Outcome {
+        await perform(
+            operation,
+            expectedActivationID: expectedActivationID,
+            snapshotKey: nil
+        )
+    }
+
+    private func perform(
+        _ operation: Operation,
+        expectedActivationID: UUID?,
+        snapshotKey: UUID?
+    ) async -> Outcome {
         await activateIfNeeded()
         guard let active else {
             return .rejected(.storageFailure)
@@ -285,7 +303,17 @@ actor NativeIntake {
             } catch {
                 return stagingFailure(expected: expected)
             }
-            return commitMutation(expected: expected, stagingRoot: stagingRoot) { ($0.photos + staged, $0.voice) }
+            guard await inputsAreActive(inputs) else {
+                removeStagingRoot(stagingRoot)
+                return .superseded
+            }
+            return commitMutation(
+                expected: expected,
+                stagingRoot: stagingRoot,
+                snapshotKey: snapshotKey
+            ) {
+                ($0.photos + staged, $0.voice)
+            }
         case .replacePhoto(let id, let input):
             let data: (Data, LibraryPhotoTransferReceipt?)
             do {
@@ -303,7 +331,15 @@ actor NativeIntake {
             } catch {
                 return stagingFailure(expected: expected)
             }
-            return commitMutation(expected: expected, stagingRoot: stagingRoot) { current in
+            guard await input.isActive() else {
+                removeStagingRoot(stagingRoot)
+                return .superseded
+            }
+            return commitMutation(
+                expected: expected,
+                stagingRoot: stagingRoot,
+                snapshotKey: snapshotKey
+            ) { current in
                 guard let replacement = staged.first,
                       let index = current.photos.firstIndex(where: { $0.id == id }) else {
                     return nil
@@ -313,7 +349,10 @@ actor NativeIntake {
                 return (photos, current.voice)
             }
         case .removePhoto(let id):
-            return commitMutation(expected: expected) { current in
+            return commitMutation(
+                expected: expected,
+                snapshotKey: snapshotKey
+            ) { current in
                 guard current.photos.contains(where: { $0.id == id }) else {
                     return nil
                 }
@@ -321,9 +360,13 @@ actor NativeIntake {
             }
         case .reorderPhotos(let ids):
             guard ids != active.photos.map(\.id) else {
+                recordSnapshot(active.snapshot, for: snapshotKey)
                 return .unchanged
             }
-            return commitMutation(expected: expected) { current in
+            return commitMutation(
+                expected: expected,
+                snapshotKey: snapshotKey
+            ) { current in
                 let byID = Dictionary(uniqueKeysWithValues: current.photos.map { ($0.id, $0) })
                 guard ids.count == current.photos.count,
                       Set(ids).count == ids.count,
@@ -356,12 +399,28 @@ actor NativeIntake {
             } catch {
                 return stagingFailure(expected: expected)
             }
-            return commitMutation(expected: expected, stagingRoot: stagingRoot) { ($0.photos, staged) }
+            guard await input.isActive() else {
+                removeStagingRoot(stagingRoot)
+                return .superseded
+            }
+            return commitMutation(
+                expected: expected,
+                stagingRoot: stagingRoot,
+                snapshotKey: snapshotKey
+            ) {
+                ($0.photos, staged)
+            }
         case .deleteVoice:
             guard active.voice != nil else {
+                recordSnapshot(active.snapshot, for: snapshotKey)
                 return .unchanged
             }
-            return commitMutation(expected: expected) { ($0.photos, nil) }
+            return commitMutation(
+                expected: expected,
+                snapshotKey: snapshotKey
+            ) {
+                ($0.photos, nil)
+            }
         case .photoReviewEntered(let activationID):
             guard activationID == active.activationID else {
                 return .superseded
@@ -393,16 +452,16 @@ actor NativeIntake {
         _ operation: Operation,
         expectedActivationID: UUID
     ) async -> OperationResult {
+        let snapshotKey = UUID()
         let outcome = await perform(
             operation,
-            expectedActivationID: expectedActivationID
+            expectedActivationID: expectedActivationID,
+            snapshotKey: snapshotKey
         )
-        guard outcome == .committed || outcome == .unchanged,
-              let active,
-              active.activationID == expectedActivationID else {
-            return OperationResult(outcome: outcome, snapshot: nil)
-        }
-        return OperationResult(outcome: outcome, snapshot: active.snapshot)
+        return OperationResult(
+            outcome: outcome,
+            snapshot: operationSnapshots.removeValue(forKey: snapshotKey)
+        )
     }
 
     private func startIdentityObservation() {
@@ -492,6 +551,7 @@ actor NativeIntake {
     private func commitMutation(
         expected: Version,
         stagingRoot: URL? = nil,
+        snapshotKey: UUID? = nil,
         change: (ActiveBundle) -> ([Photo], Voice?)?
     ) -> Outcome {
         guard let current = active, current.version == expected else {
@@ -506,6 +566,7 @@ actor NativeIntake {
             let next = current.next(photos: photos, voice: voice, now: now())
             try commit(next, stagingRoot: stagingRoot)
             active = next
+            recordSnapshot(next.snapshot, for: snapshotKey)
             publish(.snapshot(next.snapshot))
             rescheduleRetention()
             return .committed
@@ -517,6 +578,18 @@ actor NativeIntake {
 
     private func stagingFailure(expected: Version) -> Outcome {
         active?.version == expected ? .rejected(.storageFailure) : .superseded
+    }
+
+    private func inputsAreActive(_ inputs: [PhotoInput]) async -> Bool {
+        for input in inputs where !(await input.isActive()) {
+            return false
+        }
+        return true
+    }
+
+    private func recordSnapshot(_ snapshot: Snapshot, for key: UUID?) {
+        guard let key else { return }
+        operationSnapshots[key] = snapshot
     }
 
     private func stagingLocations(for bundle: ActiveBundle)

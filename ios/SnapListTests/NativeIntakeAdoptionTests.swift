@@ -325,21 +325,45 @@ final class NativeIntakeAdoptionTests: XCTestCase {
             capture.intakeSnapshot?.version.activationID
         )
         let ids = capture.stagedPhotos.map(\.id)
-        let firstOrder = Array(ids.reversed())
-        let secondOrder = [ids[1], ids[2], ids[0]]
-
-        async let first = capture.reorderPhotoReviewPhotos(
-            firstOrder,
-            expectedActivationID: activationID
+        let session = try XCTUnwrap(
+            PhotoReviewLiveSession.start(
+                from: CaptureBoundaryRequest(
+                    destination: .photoReview,
+                    photos: capture.stagedPhotos,
+                    opener: .reviewButton
+                ),
+                captureFlow: capture
+            )
         )
-        async let second = capture.reorderPhotoReviewPhotos(
-            secondOrder,
-            expectedActivationID: activationID
-        )
-        let (firstSnapshot, secondSnapshot) = await (first, second)
 
-        XCTAssertEqual(firstSnapshot?.photos.map(\.id), firstOrder)
-        XCTAssertEqual(secondSnapshot?.photos.map(\.id), secondOrder)
+        async let first = session.commitReorder(
+            photoID: ids[2],
+            destinationIndex: 0,
+            captureFlow: capture
+        )
+        async let second = session.commitReorder(
+            photoID: ids[0],
+            destinationIndex: 2,
+            captureFlow: capture
+        )
+        let (firstResult, secondResult) = await (first, second)
+        let finalOrder = [ids[2], ids[1], ids[0]]
+
+        XCTAssertEqual(firstResult?.photoID, ids[2])
+        XCTAssertEqual(
+            firstResult?.announcement,
+            "Moved to photo 1 of 3. Cover."
+        )
+        XCTAssertEqual(secondResult?.photoID, ids[0])
+        XCTAssertEqual(secondResult?.announcement, "Moved to photo 3 of 3.")
+        XCTAssertEqual(session.store.photos.map(\.id), finalOrder)
+        await waitUntil {
+            capture.intakeSnapshot?.photos.map(\.id) == finalOrder
+        }
+        XCTAssertEqual(
+            capture.intakeSnapshot?.version.activationID,
+            activationID
+        )
     }
 
     private func makeJPEG(seed: Int) throws -> Data {
