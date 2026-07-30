@@ -226,25 +226,30 @@ final class RunAPIClientTests: XCTestCase {
         let runID = UUID(uuidString: "37600000-0000-4000-8000-000000000001")!
         let payload = Self.reviewEnvelope.replacingOccurrences(
             of: #"""
-          "verifiedSoldMatches": [],
-          "startingPriceCopy": "Starting price estimate",
-          "soldEvidenceCopy": "No verified sold matches found."
+                "verifiedSoldMatches": [],
+                "startingPriceCopy": "Starting price estimate",
+                "soldEvidenceCopy": "No verified sold matches found."
           """#,
             with: #"""
-          "verifiedSoldMatches": [
-            {
-              "id": "ebay-sold-376",
-              "sourceURL": "https://www.ebay.com/itm/376",
-              "title": "Sony WH-1000XM4 Headphones",
-              "soldPrice": 142.5,
-              "currency": "USD",
-              "condition": "Used",
-              "soldAt": 1785283200
-            }
-          ],
-          "startingPriceCopy": "Starting price estimate",
-          "soldEvidenceCopy": null
+                "verifiedSoldMatches": [
+                  {
+                    "id": "ebay-sold-376",
+                    "sourceURL": "https://www.ebay.com/itm/376",
+                    "title": "Sony WH-1000XM4 Headphones",
+                    "soldPrice": 142.5,
+                    "currency": "USD",
+                    "condition": "Used",
+                    "soldAt": 1785283200
+                  }
+                ],
+                "startingPriceCopy": "Starting price estimate",
+                "soldEvidenceCopy": null
           """#
+        )
+        XCTAssertNotEqual(
+            payload,
+            Self.reviewEnvelope,
+            "Positive sold-match fixture must replace the zero-match review."
         )
         let client = RunAPIClient(
             baseURL: URL(string: "https://api.snaplist.dev")!,
