@@ -13,7 +13,7 @@ final class ListingReviewUITests: XCTestCase {
 
         XCTAssertTrue(reviewOpener.waitForExistence(timeout: 3))
         XCTAssertTrue(reviewOpener.isHittable)
-        XCTAssertFalse(app.otherElements["listing-review"].exists)
+        XCTAssertFalse(anyElement("listing-review", in: app).exists)
     }
 
     func testDirtyBackAndRelaunchRestoreDraftBeforeOneGuardedDoneSave() {
@@ -84,7 +84,7 @@ final class ListingReviewUITests: XCTestCase {
 
         XCTAssertFalse(discardAlert.waitForExistence(timeout: 2))
         XCTAssertFalse(anyElement("listing-review.unsaved", in: app).exists)
-        XCTAssertTrue(app.otherElements["listing-review"].exists)
+        XCTAssertTrue(anyElement("listing-review", in: app).exists)
     }
 
     func testFailedAndOfflineSavesKeepTheLastUsableDirtyDraft() {
@@ -366,38 +366,11 @@ final class ListingReviewUITests: XCTestCase {
         )
         reviewOpener.tap()
 
-        let anyReviewRoot = anyElement(
-            "listing-review",
-            in: app
-        ).waitForExistence(timeout: 3)
-        let otherReviewRoot = app.otherElements["listing-review"].exists
-        let reviewBack = app.buttons["listing-review.back"].exists
-        let reviewTitle = app.buttons["listing-review.title"].exists
-        let reviewNavigationTitle =
-            app.navigationBars["Listing review"].exists
-        let openFailed = anyElement(
-            "run.review.open-failed",
-            in: app
-        ).exists
-        let openerRemains = reviewOpener.exists
-        let diagnostic = """
-        [LREV-OPEN-DIAGNOSTIC] \
-        anyIdentifier=\(anyReviewRoot) \
-        otherElement=\(otherReviewRoot) \
-        back=\(reviewBack) \
-        title=\(reviewTitle) \
-        navigationTitle=\(reviewNavigationTitle) \
-        openFailed=\(openFailed) \
-        openerRemains=\(openerRemains)
-        """
-        print(diagnostic)
-        let attachment = XCTAttachment(string: diagnostic)
-        attachment.name = "LREV-open-review-diagnostic.txt"
-        attachment.lifetime = .keepAlways
-        add(attachment)
         XCTAssertTrue(
-            otherReviewRoot,
-            diagnostic,
+            anyElement(
+                "listing-review",
+                in: app
+            ).waitForExistence(timeout: 3),
             file: file,
             line: line
         )
