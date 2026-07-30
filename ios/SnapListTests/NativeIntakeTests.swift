@@ -260,10 +260,11 @@ final class NativeIntakeTests: XCTestCase {
         try files.createDirectory(at: uppercaseScope, withIntermediateDirectories: true)
         let uppercaseSentinel = uppercaseScope.appendingPathComponent("foreign")
         try Data("foreign".utf8).write(to: uppercaseSentinel)
-        let guardedFiles = NativeIntakeTestFileManager()
-        let durable = try await durableHarness.makeSession(fileManager: guardedFiles, now: durableClock.now, sleepUntil: durableClock.sleep)
+        let durableFiles = NativeIntakeTestFileManager()
+        let ephemeralFiles = NativeIntakeTestFileManager()
+        let durable = try await durableHarness.makeSession(fileManager: durableFiles, now: durableClock.now, sleepUntil: durableClock.sleep)
         let ephemeral = try await ephemeralHarness.makeSession(
-            fileManager: guardedFiles, now: ephemeralClock.now, sleepUntil: ephemeralClock.sleep)
+            fileManager: ephemeralFiles, now: ephemeralClock.now, sleepUntil: ephemeralClock.sleep)
         let durableRegistration = durableClock.latestRegistration
         let durableSnapshot = try await durable.commit(.addPhotos([durableHarness.photoInput(seed: 1)]))
         await durableClock.waitUntilLiveSleeper(after: durableRegistration, deadline: initialDeadline)
@@ -276,12 +277,10 @@ final class NativeIntakeTests: XCTestCase {
         await ephemeralHarness.identity.set(.clerk("user_native_intake_ephemeral_durable"))
         assertEmpty(try await ephemeral.nextSnapshot())
         await ephemeralClock.waitUntilLiveSleeper(after: transitionRegistration, deadline: initialDeadline)
-        let durableFailureBaseline = guardedFiles.rootDeletionFailureCount(at: durableRoot)
-        let ephemeralFailureBaseline = guardedFiles.rootDeletionFailureCount(at: ephemeralRoot)
-        guardedFiles.failNextFileOperation = .rootDeletions([
-            durableRoot.standardizedFileURL.path,
-            ephemeralRoot.standardizedFileURL.path,
-        ])
+        let durableFailureBaseline = durableFiles.rootDeletionFailureCount(at: durableRoot)
+        let ephemeralFailureBaseline = ephemeralFiles.rootDeletionFailureCount(at: ephemeralRoot)
+        durableFiles.failNextFileOperation = .rootDeletions([durableRoot.standardizedFileURL.path])
+        ephemeralFiles.failNextFileOperation = .rootDeletions([ephemeralRoot.standardizedFileURL.path])
         let durableRetryRegistration = durableClock.latestRegistration
         let ephemeralRetryRegistration = ephemeralClock.latestRegistration
         durableClock.advance(by: NativeIntake.recoveryWindow + 1)
@@ -292,13 +291,11 @@ final class NativeIntakeTests: XCTestCase {
             .addingTimeInterval(NativeIntake.retentionRetryInterval)
         await durableClock.waitUntilLiveSleeper(after: durableRetryRegistration, deadline: durableRetryDeadline)
         await ephemeralClock.waitUntilLiveSleeper(after: ephemeralRetryRegistration, deadline: ephemeralRetryDeadline)
-        XCTAssertEqual(guardedFiles.rootDeletionFailureCount(at: durableRoot), durableFailureBaseline + 1)
-        XCTAssertEqual(guardedFiles.rootDeletionFailureCount(at: ephemeralRoot), ephemeralFailureBaseline + 1)
+        XCTAssertEqual(durableFiles.rootDeletionFailureCount(at: durableRoot), durableFailureBaseline + 1)
+        XCTAssertEqual(ephemeralFiles.rootDeletionFailureCount(at: ephemeralRoot), ephemeralFailureBaseline + 1)
         XCTAssertTrue(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
         XCTAssertTrue(files.fileExists(atPath: durableSnapshot.photos[0].photoURL.path))
-        guardedFiles.failNextFileOperation = .rootDeletions([
-            ephemeralRoot.standardizedFileURL.path
-        ])
+        durableFiles.failNextFileOperation = nil
         let discard = await durable.perform(.discard(expected: durableSnapshot.version))
         XCTAssertEqual(discard, .committed)
         assertEmpty(try await durable.nextSnapshot())
@@ -306,10 +303,11 @@ final class NativeIntakeTests: XCTestCase {
         let renewed = try await durable.commit(.addPhotos([durableHarness.photoInput(seed: 3)]))
         let renewedDeadline = durableClock.now().addingTimeInterval(NativeIntake.recoveryWindow)
         await durableClock.waitUntilLiveSleeper(after: renewedRegistration, deadline: renewedDeadline)
-        let retryRemoval = guardedFiles.successfulRootRemovalCount + 1
-        guardedFiles.failNextFileOperation = nil
+        XCTAssertTrue(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
+        let retryRemoval = ephemeralFiles.successfulRootRemovalCount + 1
+        ephemeralFiles.failNextFileOperation = nil
         ephemeralClock.advance(by: NativeIntake.retentionRetryInterval)
-        await guardedFiles.waitForRootRemovals(retryRemoval, successful: true)
+        await ephemeralFiles.waitForRootRemovals(retryRemoval, successful: true)
         XCTAssertFalse(files.fileExists(atPath: ephemeralSnapshot.photos[0].photoURL.path))
         XCTAssertEqual(durableClock.nextDeadline, renewedDeadline)
         XCTAssertTrue(files.fileExists(atPath: renewed.photos[0].photoURL.path))
@@ -318,7 +316,7 @@ final class NativeIntakeTests: XCTestCase {
         await durableHarness.identity.set(.clerk("user_native_intake_retention_b"))
         assertEmpty(try await durable.nextSnapshot())
         await durableClock.waitUntilLiveSleeper(after: durableTransitionRegistration, deadline: renewedDeadline)
-        guardedFiles.rejectManifestMetadataReads = true
+        durableFiles.rejectManifestMetadataReads = true
         let unreadableRetryRegistration = durableClock.latestRegistration
         durableClock.advance(by: NativeIntake.recoveryWindow + 1)
         let unreadableRetryDeadline = durableClock.now()
@@ -331,7 +329,7 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(pending.recovery, .pending)
         await durableClock.waitUntilLiveSleeper(after: recoveryRetryRegistration, deadline: unreadableRetryDeadline)
         XCTAssertEqual(durableClock.nextDeadline, unreadableRetryDeadline)
-        guardedFiles.rejectManifestMetadataReads = false
+        durableFiles.rejectManifestMetadataReads = false
         durableClock.advance(by: NativeIntake.retentionRetryInterval)
         let retried = try await durable.nextSnapshot()
         XCTAssertEqual(retried.recovery, .ready)
@@ -651,6 +649,9 @@ fileprivate enum NativeIntakeFileFailure: Equatable {
 }
 final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
     private let lock = NSLock()
+    private let isolatedTemporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("snaplist-native-intake-\(UUID().uuidString)", isDirectory: true)
+    override var temporaryDirectory: URL { isolatedTemporaryDirectory }
     private var rejectsReads = false
     private var nextFailure: NativeIntakeFileFailure?
     private var failedRootDeletionPaths = Set<String>()
@@ -796,7 +797,6 @@ private final class NativeIntakeTestClock: @unchecked Sendable {
     private var pendingSleeperIDs = Set<UUID>()
     private var cancelledSleeperIDs = Set<UUID>()
     private var scheduleRegistrations = 0
-    private var scheduleWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     private var liveSleeperWaiters: [LiveSleeperWaiter] = []
     init(now: Date) { current = now }
     func now() -> Date { lock.synchronized { current } }
@@ -807,23 +807,17 @@ private final class NativeIntakeTestClock: @unchecked Sendable {
             await withCheckedContinuation {
                 (continuation: CheckedContinuation<Void, Never>) in
                 let ready = lock.synchronized { () -> (
-                    scheduled: [CheckedContinuation<Void, Never>],
+                    wake: CheckedContinuation<Void, Never>?,
                     live: [(CheckedContinuation<LiveSleeperMatch, Never>, LiveSleeperMatch)]
                 ) in
                     pendingSleeperIDs.remove(id)
                     let cancelled = cancelledSleeperIDs.remove(id) != nil
                     guard current < deadline, !cancelled, !Task.isCancelled else {
-                        return ([continuation], [])
+                        return (continuation, [])
                     }
                     scheduleRegistrations += 1
                     let registration = scheduleRegistrations
                     sleepers.append((id, registration, deadline, continuation))
-                    let scheduled = scheduleWaiters.filter {
-                        $0.0 <= scheduleRegistrations
-                    }
-                    scheduleWaiters.removeAll {
-                        $0.0 <= scheduleRegistrations
-                    }
                     let live = liveSleeperWaiters.filter {
                         $0.after < registration && $0.deadline == deadline
                     }
@@ -832,11 +826,11 @@ private final class NativeIntakeTestClock: @unchecked Sendable {
                     }
                     let match = LiveSleeperMatch(id: id, registration: registration)
                     return (
-                        scheduled.map(\.1),
+                        nil,
                         live.map { ($0.continuation, match) }
                     )
                 }
-                ready.scheduled.forEach { $0.resume() }
+                ready.wake?.resume()
                 ready.live.forEach { $0.0.resume(returning: $0.1) }
             }
             try Task.checkCancellation()
@@ -853,16 +847,6 @@ private final class NativeIntakeTestClock: @unchecked Sendable {
                 return self.sleepers.remove(at: index).continuation
             }
             continuation?.resume()
-        }
-    }
-    func waitUntilScheduled(_ count: Int) async {
-        await withCheckedContinuation { continuation in
-            let ready = lock.synchronized {
-                guard scheduleRegistrations < count else { return true }
-                scheduleWaiters.append((count, continuation))
-                return false
-            }
-            if ready { continuation.resume() }
         }
     }
     func waitUntilLiveSleeper(after registration: Int, deadline: Date) async {
@@ -900,7 +884,6 @@ private final class NativeIntakeTestClock: @unchecked Sendable {
         }
     }
     var nextDeadline: Date? { lock.synchronized { sleepers.map(\.deadline).min() } }
-    var scheduledCount: Int { lock.synchronized { scheduleRegistrations } }
     var latestRegistration: Int { lock.synchronized { scheduleRegistrations } }
     func advance(by interval: TimeInterval) {
         let due = lock.synchronized {
