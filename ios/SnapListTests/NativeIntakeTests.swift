@@ -131,6 +131,59 @@ final class NativeIntakeTests: XCTestCase {
     func testPrincipalRoundTripSupersedesPostStagingMutationWithoutPublication() async throws {
         try await assertPrincipalRoundTripSupersedes(.afterStaging)
     }
+    func testCancellationAfterDetachedStagingSupersedesPhotoAndVoicePublication()
+        async throws {
+        let photoHarness = NativeIntakeHarness(
+            identity: .clerk("user_native_intake_cancel_photo")
+        )
+        addTeardownBlock { photoHarness.cleanUp() }
+        let photoFiles = SuspendedNativeIntakeFileManager()
+        let photoActivity = NativeIntakeOperationActivity()
+        let photoSession = try await photoHarness.makeSession(
+            fileManager: photoFiles
+        )
+        let photoData = try photoHarness.makeJPEG(seed: 4)
+        let photoInput = NativeIntake.PhotoInput(
+            isActive: { photoActivity.isActive },
+            loadData: { photoData }
+        )
+        let photoOperation = Task {
+            await photoSession.perform(.addPhotos([photoInput]))
+        }
+        await photoFiles.waitUntilTargetAssetsAreWritten()
+        photoActivity.cancel()
+        photoFiles.resumeStaging()
+        let photoOutcome = await photoOperation.value
+        XCTAssertEqual(photoOutcome, .superseded)
+        assertEmpty(try await photoSession.inspect())
+
+        let voiceHarness = NativeIntakeHarness(
+            identity: .clerk("user_native_intake_cancel_voice")
+        )
+        addTeardownBlock { voiceHarness.cleanUp() }
+        let voiceFiles = SuspendedNativeIntakeFileManager(
+            assetExtension: "wav",
+            writesBeforeSuspension: 1
+        )
+        let voiceActivity = NativeIntakeOperationActivity()
+        let voiceSession = try await voiceHarness.makeSession(
+            fileManager: voiceFiles
+        )
+        let voiceInput = NativeIntake.VoiceInput(
+            duration: 4,
+            isActive: { voiceActivity.isActive },
+            loadData: { Data("cancelled voice".utf8) }
+        )
+        let voiceOperation = Task {
+            await voiceSession.perform(.setVoice(voiceInput))
+        }
+        await voiceFiles.waitUntilTargetAssetsAreWritten()
+        voiceActivity.cancel()
+        voiceFiles.resumeStaging()
+        let voiceOutcome = await voiceOperation.value
+        XCTAssertEqual(voiceOutcome, .superseded)
+        assertEmpty(try await voiceSession.inspect())
+    }
     func testConcurrentSameRevisionKeepsFirstCommitAndSupersedesSecond() async throws {
         let (harness, session) = try await makeSession(.clerk("user_native_intake_concurrent"))
         let firstSource = SuspendedNativeIntakeValue(try harness.makeJPEG(seed: 1))
@@ -200,7 +253,11 @@ final class NativeIntakeTests: XCTestCase {
         _ = try await session.nextSnapshot()
         await harness.identity.set(.clerk("user_native_intake_review_a"))
         _ = try await session.nextSnapshot()
-        let entered = await session.perform(.photoReviewEntered)
+        let entered = await session.perform(
+            .photoReviewEntered(
+                activationID: session.snapshot.version.activationID
+            )
+        )
         XCTAssertEqual(entered, .committed)
         await harness.identity.set(.clerk("user_native_intake_review_b"))
         let dismissal = await session.nextEvent()
@@ -898,20 +955,33 @@ private final class NativeIntakeTestClock: @unchecked Sendable {
 private final class SuspendedNativeIntakeFileManager: FileManager, @unchecked Sendable {
     private let lock = NSLock()
     private let release = DispatchSemaphore(value: 0)
-    private var photoWriteCount = 0
+    private let assetExtension: String
+    private let writesBeforeSuspension: Int
+    private var assetWriteCount = 0
     private var writeWaiters: [CheckedContinuation<Void, Never>] = []
     private var didSuspend = false
+
+    init(
+        assetExtension: String = "jpg",
+        writesBeforeSuspension: Int = 2
+    ) {
+        self.assetExtension = assetExtension
+        self.writesBeforeSuspension = writesBeforeSuspension
+        super.init()
+    }
+
     override func setAttributes(
         _ attributes: [FileAttributeKey: Any],
         ofItemAtPath path: String
     ) throws {
         try super.setAttributes(attributes, ofItemAtPath: path)
-        guard path.contains("/Assets/"), path.hasSuffix(".jpg") else {
+        guard path.contains("/Assets/"),
+              path.hasSuffix(".\(assetExtension)") else {
             return
         }
         let shouldSuspend = lock.synchronized {
-            photoWriteCount += 1
-            guard photoWriteCount == 2 else {
+            assetWriteCount += 1
+            guard assetWriteCount == writesBeforeSuspension else {
                 return false
             }
             didSuspend = true
@@ -923,7 +993,8 @@ private final class SuspendedNativeIntakeFileManager: FileManager, @unchecked Se
             release.wait()
         }
     }
-    func waitUntilPhotoAssetsAreWritten() async {
+
+    func waitUntilTargetAssetsAreWritten() async {
         let alreadyWritten = lock.synchronized { didSuspend }
         guard !alreadyWritten else {
             return
@@ -934,8 +1005,23 @@ private final class SuspendedNativeIntakeFileManager: FileManager, @unchecked Se
             }
         }
     }
+
+    func waitUntilPhotoAssetsAreWritten() async {
+        await waitUntilTargetAssetsAreWritten()
+    }
+
     func resumeStaging() { release.signal() }
 }
+
+@MainActor
+private final class NativeIntakeOperationActivity {
+    private(set) var isActive = true
+
+    func cancel() {
+        isActive = false
+    }
+}
+
 private extension NSLock {
     func synchronized<Value>(_ operation: () -> Value) -> Value {
         lock()

@@ -233,13 +233,15 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
 
         files.deleteError = .removalFailed
-        XCTAssertFalse(store.deleteSavedNote())
+        let firstDelete = await store.deleteSavedNote()
+        XCTAssertFalse(firstDelete)
         XCTAssertEqual(store.savedNote, prior)
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
         XCTAssertEqual(files.deletedAssets, [])
 
         files.deleteError = nil
-        XCTAssertTrue(store.deleteSavedNote())
+        let secondDelete = await store.deleteSavedNote()
+        XCTAssertTrue(secondDelete)
         XCTAssertNil(store.savedNote)
         XCTAssertEqual(store.phase, .ready)
         XCTAssertEqual(files.deletedAssets, [prior])
@@ -373,7 +375,7 @@ final class VoiceNoteTests: XCTestCase {
         XCTAssertEqual(store.phase, .saved(isPlaying: false))
         XCTAssertEqual(audio.pauseCount, 1)
 
-        store.deleteSavedNote()
+        await store.deleteSavedNote()
         XCTAssertNil(store.savedNote)
         XCTAssertEqual(store.phase, .ready)
         XCTAssertEqual(files.deletedAssets, [replacement])

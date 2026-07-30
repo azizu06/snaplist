@@ -67,10 +67,7 @@ struct CaptureLauncherSheet: View {
         .onChange(of: libraryItem) { _, item in
             guard let item else { return }
             Task {
-                guard let data = try? await item.loadTransferable(type: Data.self) else {
-                    return
-                }
-                if await flow.stageLibraryPhoto(data) {
+                if await flow.stageLibraryPhotos([item]) == 1 {
                     showCapturedPhoto()
                     dismiss()
                 }

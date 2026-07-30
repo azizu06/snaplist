@@ -9,8 +9,24 @@ actor NativeIntake {
     }
 
     struct IdentitySource: Sendable {
+        enum AnonymousScopePersistence: Sendable {
+            case processPrivate
+            case installation
+        }
+
         let current: @Sendable () async -> Identity
         let changes: @Sendable () -> AsyncStream<Void>
+        let anonymousScopePersistence: AnonymousScopePersistence
+
+        init(
+            current: @escaping @Sendable () async -> Identity,
+            changes: @escaping @Sendable () -> AsyncStream<Void>,
+            anonymousScopePersistence: AnonymousScopePersistence = .processPrivate
+        ) {
+            self.current = current
+            self.changes = changes
+            self.anonymousScopePersistence = anonymousScopePersistence
+        }
 
         static let processPrivate = IdentitySource(
             current: { Identity(verifiedClerkSubject: nil, persistedAppAttestKeyID: nil) },
@@ -18,7 +34,7 @@ actor NativeIntake {
         )
     }
 
-    struct Version: Equatable, Sendable {
+    struct Version: Hashable, Sendable {
         let activationID: UUID
         let revision: UInt64
     }
@@ -45,18 +61,34 @@ actor NativeIntake {
 
     struct PhotoInput: @unchecked Sendable {
         let libraryTransferReceipt: LibraryPhotoTransferReceipt?
+        let isActive: @MainActor @Sendable () -> Bool
         let loadData: () async throws -> Data?
 
-        init(libraryTransferReceipt: LibraryPhotoTransferReceipt? = nil,
-             loadData: @escaping () async throws -> Data?) {
+        init(
+            libraryTransferReceipt: LibraryPhotoTransferReceipt? = nil,
+            isActive: @escaping @MainActor @Sendable () -> Bool = { true },
+            loadData: @escaping () async throws -> Data?
+        ) {
             self.libraryTransferReceipt = libraryTransferReceipt
+            self.isActive = isActive
             self.loadData = loadData
         }
     }
 
     struct VoiceInput: Sendable {
         let duration: TimeInterval
+        let isActive: @MainActor @Sendable () -> Bool
         let loadData: @Sendable () async throws -> Data
+
+        init(
+            duration: TimeInterval,
+            isActive: @escaping @MainActor @Sendable () -> Bool = { true },
+            loadData: @escaping @Sendable () async throws -> Data
+        ) {
+            self.duration = duration
+            self.isActive = isActive
+            self.loadData = loadData
+        }
     }
 
     enum Operation: Sendable {
@@ -67,8 +99,8 @@ actor NativeIntake {
         case setVoice(VoiceInput)
         case deleteVoice
         case discard(expected: Version)
-        case photoReviewEntered
-        case photoReviewLeft
+        case photoReviewEntered(activationID: UUID)
+        case photoReviewLeft(activationID: UUID)
     }
 
     enum Rejection: Equatable, Sendable {
@@ -86,6 +118,11 @@ actor NativeIntake {
         case unchanged
         case superseded
         case rejected(Rejection)
+    }
+
+    struct OperationResult: Equatable, Sendable {
+        let outcome: Outcome
+        let snapshot: Snapshot?
     }
 
     enum Event: Equatable, Sendable {
@@ -110,6 +147,11 @@ actor NativeIntake {
     private struct EphemeralMarker: Codable {
         let schemaVersion: Int
         let createdAt: Date
+    }
+
+    private struct AnonymousInstallationIdentity: Codable {
+        let schemaVersion: Int
+        let id: UUID
     }
 
     private enum ReadResult<Value> {
@@ -156,9 +198,11 @@ actor NativeIntake {
     private let sleeper: @Sendable (Date) async throws -> Void
     private var active: ActiveBundle?
     private var observers: [UUID: AsyncStream<Event>.Continuation] = [:]
+    private var operationSnapshots: [UUID: Snapshot] = [:]
     private var identityTask: Task<Void, Never>?
     private var retentionTask: Task<Void, Never>?
     private var reviewActivationID: UUID?
+    private var anonymousIdentityUnavailable = false
     private var deletionRetryAfter: [URL: Date] = [:]
 
     init(
@@ -203,7 +247,8 @@ actor NativeIntake {
                     persistedAppAttestKeyID: persistedAppAttestKey()?.id
                 )
             },
-            changes: changes
+            changes: changes,
+            anonymousScopePersistence: .installation
         )
     }
 
@@ -228,10 +273,29 @@ actor NativeIntake {
         return pair.stream
     }
 
-    func perform(_ operation: Operation) async -> Outcome {
+    func perform(
+        _ operation: Operation,
+        expectedActivationID: UUID? = nil
+    ) async -> Outcome {
+        await perform(
+            operation,
+            expectedActivationID: expectedActivationID,
+            snapshotKey: nil
+        )
+    }
+
+    private func perform(
+        _ operation: Operation,
+        expectedActivationID: UUID?,
+        snapshotKey: UUID?
+    ) async -> Outcome {
         await activateIfNeeded()
         guard let active else {
             return .rejected(.storageFailure)
+        }
+        guard expectedActivationID == nil
+                || expectedActivationID == active.activationID else {
+            return .superseded
         }
         guard active.recovery == .ready else {
             return .rejected(.recoveryPending)
@@ -262,7 +326,17 @@ actor NativeIntake {
             } catch {
                 return stagingFailure(expected: expected)
             }
-            return commitMutation(expected: expected, stagingRoot: stagingRoot) { ($0.photos + staged, $0.voice) }
+            guard await inputsAreActive(inputs) else {
+                removeStagingRoot(stagingRoot)
+                return .superseded
+            }
+            return commitMutation(
+                expected: expected,
+                stagingRoot: stagingRoot,
+                snapshotKey: snapshotKey
+            ) {
+                ($0.photos + staged, $0.voice)
+            }
         case .replacePhoto(let id, let input):
             let data: (Data, LibraryPhotoTransferReceipt?)
             do {
@@ -280,7 +354,15 @@ actor NativeIntake {
             } catch {
                 return stagingFailure(expected: expected)
             }
-            return commitMutation(expected: expected, stagingRoot: stagingRoot) { current in
+            guard await input.isActive() else {
+                removeStagingRoot(stagingRoot)
+                return .superseded
+            }
+            return commitMutation(
+                expected: expected,
+                stagingRoot: stagingRoot,
+                snapshotKey: snapshotKey
+            ) { current in
                 guard let replacement = staged.first,
                       let index = current.photos.firstIndex(where: { $0.id == id }) else {
                     return nil
@@ -290,7 +372,10 @@ actor NativeIntake {
                 return (photos, current.voice)
             }
         case .removePhoto(let id):
-            return commitMutation(expected: expected) { current in
+            return commitMutation(
+                expected: expected,
+                snapshotKey: snapshotKey
+            ) { current in
                 guard current.photos.contains(where: { $0.id == id }) else {
                     return nil
                 }
@@ -298,9 +383,13 @@ actor NativeIntake {
             }
         case .reorderPhotos(let ids):
             guard ids != active.photos.map(\.id) else {
+                recordSnapshot(active.snapshot, for: snapshotKey)
                 return .unchanged
             }
-            return commitMutation(expected: expected) { current in
+            return commitMutation(
+                expected: expected,
+                snapshotKey: snapshotKey
+            ) { current in
                 let byID = Dictionary(uniqueKeysWithValues: current.photos.map { ($0.id, $0) })
                 guard ids.count == current.photos.count,
                       Set(ids).count == ids.count,
@@ -314,11 +403,17 @@ actor NativeIntake {
                   input.duration <= VoiceNotePresentation.maximumDuration else {
                 return .rejected(.invalidVoice)
             }
+            guard await input.isActive() else {
+                return .superseded
+            }
             let data: Data
             do {
                 data = try await input.loadData()
             } catch {
                 return .rejected(.sourceUnavailable)
+            }
+            guard await input.isActive() else {
+                return .superseded
             }
             let staged: Voice
             let stagingRoot: URL
@@ -327,19 +422,41 @@ actor NativeIntake {
             } catch {
                 return stagingFailure(expected: expected)
             }
-            return commitMutation(expected: expected, stagingRoot: stagingRoot) { ($0.photos, staged) }
+            guard await input.isActive() else {
+                removeStagingRoot(stagingRoot)
+                return .superseded
+            }
+            return commitMutation(
+                expected: expected,
+                stagingRoot: stagingRoot,
+                snapshotKey: snapshotKey
+            ) {
+                ($0.photos, staged)
+            }
         case .deleteVoice:
             guard active.voice != nil else {
+                recordSnapshot(active.snapshot, for: snapshotKey)
                 return .unchanged
             }
-            return commitMutation(expected: expected) { ($0.photos, nil) }
-        case .photoReviewEntered:
+            return commitMutation(
+                expected: expected,
+                snapshotKey: snapshotKey
+            ) {
+                ($0.photos, nil)
+            }
+        case .photoReviewEntered(let activationID):
+            guard activationID == active.activationID else {
+                return .superseded
+            }
             guard reviewActivationID != active.activationID else {
                 return .unchanged
             }
             reviewActivationID = active.activationID
             return .committed
-        case .photoReviewLeft:
+        case .photoReviewLeft(let activationID):
+            guard activationID == active.activationID else {
+                return .superseded
+            }
             guard reviewActivationID == active.activationID else {
                 return .unchanged
             }
@@ -348,6 +465,32 @@ actor NativeIntake {
         case .discard(let expected):
             return discard(expected: expected)
         }
+    }
+
+    /// Returns the snapshot produced by this exact operation before another actor
+    /// transaction can run. Event consumers still project the same committed snapshot;
+    /// this result only lets the initiating Photo Review transaction correlate its
+    /// focus and announcement with its own durable write.
+    func performReturningSnapshot(
+        _ operation: Operation,
+        expectedActivationID: UUID,
+        while requestIsActive: @escaping @MainActor @Sendable () -> Bool = {
+            true
+        }
+    ) async -> OperationResult {
+        guard await requestIsActive() else {
+            return OperationResult(outcome: .superseded, snapshot: nil)
+        }
+        let snapshotKey = UUID()
+        let outcome = await perform(
+            operation,
+            expectedActivationID: expectedActivationID,
+            snapshotKey: snapshotKey
+        )
+        return OperationResult(
+            outcome: outcome,
+            snapshot: operationSnapshots.removeValue(forKey: snapshotKey)
+        )
     }
 
     private func startIdentityObservation() {
@@ -375,8 +518,34 @@ actor NativeIntake {
 
     private func reconcileIdentity() async {
         let identity = await identitySource.current()
-        let nextScope = Self.resolveScope(identity)
-        if let active, active.scope == nextScope {
+        let nextScope: Scope?
+        do {
+            nextScope = try resolveScope(identity)
+        } catch {
+            let shouldDismissReview =
+                reviewActivationID != nil
+                && reviewActivationID == active?.activationID
+            reviewActivationID = nil
+            anonymousIdentityUnavailable = true
+            let unavailable = blankBundle(
+                scope: nil,
+                root: ephemeralRoot,
+                activationID: UUID(),
+                recovery: .pending
+            )
+            active = unavailable
+            if shouldDismissReview {
+                publish(.dismissActivePhotoReview)
+            }
+            publish(.snapshot(unavailable.snapshot))
+            rescheduleRetention()
+            return
+        }
+        let wasAnonymousIdentityUnavailable = anonymousIdentityUnavailable
+        anonymousIdentityUnavailable = false
+        if let active,
+           active.scope == nextScope,
+           !wasAnonymousIdentityUnavailable {
             return
         }
         let shouldDismissReview = reviewActivationID != nil && reviewActivationID == active?.activationID
@@ -392,20 +561,116 @@ actor NativeIntake {
         rescheduleRetention()
     }
 
-    private static func resolveScope(_ identity: Identity) -> Scope? {
-        let authenticated = usable(identity.verifiedClerkSubject)
-        let guest = usable(identity.persistedAppAttestKeyID)
+    private func resolveScope(_ identity: Identity) throws -> Scope? {
+        let authenticated = Self.usable(identity.verifiedClerkSubject)
+        let guest = Self.usable(identity.persistedAppAttestKeyID)
         let taggedIdentity = authenticated.map { ("clerk-subject", $0) }
             ?? guest.map { ("app-attest-key-id", $0) }
-        guard let (tag, value) = taggedIdentity else {
-            return nil
+        if let (tag, value) = taggedIdentity {
+            return Self.scope(tag: tag, value: value)
         }
+        switch identitySource.anonymousScopePersistence {
+        case .processPrivate:
+            return nil
+        case .installation:
+            let identity = try loadOrCreateAnonymousInstallationIdentity()
+            return Self.scope(
+                tag: "anonymous-installation-id",
+                value: identity.id.uuidString.lowercased()
+            )
+        }
+    }
+
+    private static func scope(tag: String, value: String) -> Scope {
         let tagged = ["dev.snaplist.native-intake-principal", "v1", tag, value]
             .joined(separator: "\u{0}")
         let digest = SHA256.hash(data: Data(tagged.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
         return Scope(directoryComponent: "v1-\(digest)")
+    }
+
+    private func loadOrCreateAnonymousInstallationIdentity() throws
+        -> AnonymousInstallationIdentity {
+        try Self.prepareRoot(
+            applicationSupportRoot,
+            under: durableAnchor,
+            fileManager: fileManager
+        )
+        let url = applicationSupportRoot.appendingPathComponent(
+            "anonymous-installation-v1.json"
+        )
+        if let existing = try readAnonymousInstallationIdentity(at: url) {
+            try Self.protect(url, fileManager: fileManager)
+            return existing
+        }
+
+        let created = AnonymousInstallationIdentity(
+            schemaVersion: 1,
+            id: UUID()
+        )
+        let data = try JSONEncoder().encode(created)
+        let pendingURL = applicationSupportRoot.appendingPathComponent(
+            ".anonymous-installation-\(UUID().uuidString).pending"
+        )
+        try Self.write(
+            data,
+            to: pendingURL,
+            under: durableAnchor,
+            fileManager: fileManager
+        )
+        defer {
+            Self.removeIfContained(
+                pendingURL,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+        }
+        do {
+            try Self.validateContainedPath(
+                url,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+            try fileManager.linkItem(at: pendingURL, to: url)
+            try Self.protect(url, fileManager: fileManager)
+            return created
+        } catch {
+            guard Self.isFileAlreadyPresent(error),
+                  let existing = try readAnonymousInstallationIdentity(
+                    at: url
+                  ) else {
+                throw error
+            }
+            try Self.protect(url, fileManager: fileManager)
+            return existing
+        }
+    }
+
+    private func readAnonymousInstallationIdentity(
+        at url: URL
+    ) throws -> AnonymousInstallationIdentity? {
+        do {
+            try Self.validateContainedPath(
+                url,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+            let data = try Data(contentsOf: url)
+            let identity = try JSONDecoder().decode(
+                AnonymousInstallationIdentity.self,
+                from: data
+            )
+            guard identity.schemaVersion == 1 else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            return identity
+        } catch {
+            guard Self.isMissing(error) else {
+                throw error
+            }
+            return nil
+        }
     }
 
     private static func usable(_ value: String?) -> String? {
@@ -437,6 +702,7 @@ actor NativeIntake {
     private func commitMutation(
         expected: Version,
         stagingRoot: URL? = nil,
+        snapshotKey: UUID? = nil,
         change: (ActiveBundle) -> ([Photo], Voice?)?
     ) -> Outcome {
         guard let current = active, current.version == expected else {
@@ -451,6 +717,7 @@ actor NativeIntake {
             let next = current.next(photos: photos, voice: voice, now: now())
             try commit(next, stagingRoot: stagingRoot)
             active = next
+            recordSnapshot(next.snapshot, for: snapshotKey)
             publish(.snapshot(next.snapshot))
             rescheduleRetention()
             return .committed
@@ -462,6 +729,18 @@ actor NativeIntake {
 
     private func stagingFailure(expected: Version) -> Outcome {
         active?.version == expected ? .rejected(.storageFailure) : .superseded
+    }
+
+    private func inputsAreActive(_ inputs: [PhotoInput]) async -> Bool {
+        for input in inputs where !(await input.isActive()) {
+            return false
+        }
+        return true
+    }
+
+    private func recordSnapshot(_ snapshot: Snapshot, for key: UUID?) {
+        guard let key else { return }
+        operationSnapshots[key] = snapshot
     }
 
     private func stagingLocations(for bundle: ActiveBundle)
@@ -751,7 +1030,11 @@ actor NativeIntake {
         return deadlines.min()
     }
 
-    private func retentionDeadlineReached() {
+    private func retentionDeadlineReached() async {
+        if anonymousIdentityUnavailable {
+            await reconcileIdentity()
+            return
+        }
         let currentTime = now()
         if let current = active, current.recovery == .pending {
             let recovered = loadBundle(
@@ -1145,6 +1428,11 @@ actor NativeIntake {
     private static func isMissing(_ error: Error) -> Bool {
         let cocoa = CocoaError.Code(rawValue: (error as NSError).code)
         return cocoa == .fileNoSuchFile || cocoa == .fileReadNoSuchFile
+    }
+
+    private static func isFileAlreadyPresent(_ error: Error) -> Bool {
+        CocoaError.Code(rawValue: (error as NSError).code)
+            == .fileWriteFileExists
     }
 
     private func storageAnchor(for bundle: ActiveBundle) -> URL {

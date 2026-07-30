@@ -780,6 +780,32 @@ final class PhotoReviewDragPresentation {
         return result
     }
 
+    func beginCommittedReorder(
+        to destinationIndex: Int,
+        store: PhotoReviewStore,
+        reduceMotion: Bool
+    ) -> StagedCapturePhoto.ID? {
+        guard let photoID = draggedPhotoID,
+              store.proposedPhotoOrder(
+                moving: photoID,
+                to: destinationIndex
+              ) != nil else {
+            return nil
+        }
+        withAnimation(transitionAnimation(reduceMotion: reduceMotion)) {
+            draggedPhotoID = nil
+            insertionIndex = nil
+        }
+        pendingFocusPhotoID = nil
+        pendingAnnouncement = nil
+        return photoID
+    }
+
+    func publishCommittedReorder(_ result: PhotoReviewReorderResult) {
+        pendingFocusPhotoID = result.photoID
+        pendingAnnouncement = result.announcement
+    }
+
     func endNativeDragSession(reduceMotion: Bool) {
         cancel(reduceMotion: reduceMotion)
     }
@@ -1300,7 +1326,30 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
     let isEnabled: Bool
     let destinationIndex: (CGPoint) -> Int?
     let autoScroll: (CGPoint) -> Void
+    let commitReorder:
+        ((StagedCapturePhoto.ID, Int) async -> PhotoReviewReorderResult?)?
     let observeDrop: (PhotoReviewNativeDropEvent) -> Void
+
+    init(
+        store: PhotoReviewStore,
+        presentation: PhotoReviewDragPresentation,
+        reduceMotion: Bool,
+        isEnabled: Bool,
+        destinationIndex: @escaping (CGPoint) -> Int?,
+        autoScroll: @escaping (CGPoint) -> Void,
+        commitReorder:
+            ((StagedCapturePhoto.ID, Int) async -> PhotoReviewReorderResult?)? = nil,
+        observeDrop: @escaping (PhotoReviewNativeDropEvent) -> Void = { _ in }
+    ) {
+        self.store = store
+        self.presentation = presentation
+        self.reduceMotion = reduceMotion
+        self.isEnabled = isEnabled
+        self.destinationIndex = destinationIndex
+        self.autoScroll = autoScroll
+        self.commitReorder = commitReorder
+        self.observeDrop = observeDrop
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -1310,6 +1359,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             isEnabled: isEnabled,
             destinationIndex: destinationIndex,
             autoScroll: autoScroll,
+            commitReorder: commitReorder,
             observeDrop: observeDrop
         )
     }
@@ -1337,6 +1387,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             isEnabled: isEnabled,
             destinationIndex: destinationIndex,
             autoScroll: autoScroll,
+            commitReorder: commitReorder,
             observeDrop: observeDrop
         )
         uiView.update(
@@ -1361,6 +1412,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
         private(set) var isEnabled: Bool
         private var destinationIndex: (CGPoint) -> Int?
         private var autoScroll: (CGPoint) -> Void
+        private var commitReorder:
+            ((StagedCapturePhoto.ID, Int) async -> PhotoReviewReorderResult?)?
         private var observeDrop: (PhotoReviewNativeDropEvent) -> Void
         private weak var attachedView: UIView?
         private var dropInteraction: UIDropInteraction?
@@ -1378,6 +1431,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             isEnabled: Bool,
             destinationIndex: @escaping (CGPoint) -> Int?,
             autoScroll: @escaping (CGPoint) -> Void,
+            commitReorder:
+                ((StagedCapturePhoto.ID, Int) async -> PhotoReviewReorderResult?)? = nil,
             observeDrop: @escaping
                 (PhotoReviewNativeDropEvent) -> Void = { _ in }
         ) {
@@ -1387,6 +1442,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             self.isEnabled = isEnabled
             self.destinationIndex = destinationIndex
             self.autoScroll = autoScroll
+            self.commitReorder = commitReorder
             self.observeDrop = observeDrop
             if !isEnabled {
                 presentation.suspendNativeDragSessionForInteractionLock(
@@ -1402,6 +1458,8 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             isEnabled: Bool,
             destinationIndex: @escaping (CGPoint) -> Int?,
             autoScroll: @escaping (CGPoint) -> Void,
+            commitReorder:
+                ((StagedCapturePhoto.ID, Int) async -> PhotoReviewReorderResult?)? = nil,
             observeDrop: @escaping
                 (PhotoReviewNativeDropEvent) -> Void = { _ in }
         ) {
@@ -1411,6 +1469,7 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
             self.isEnabled = isEnabled
             self.destinationIndex = destinationIndex
             self.autoScroll = autoScroll
+            self.commitReorder = commitReorder
             self.observeDrop = observeDrop
             if !isEnabled {
                 presentation.suspendNativeDragSessionForInteractionLock(
@@ -1548,12 +1607,34 @@ struct PhotoReviewNativeDropAttachment: UIViewRepresentable {
                 observeDrop(.rejectedDestination)
                 return
             }
-            let result = presentation.commit(
-                to: destinationIndex,
-                store: store,
-                reduceMotion: reduceMotion
-            )
-            observeDrop(result == nil ? .rejectedCommit : .committed)
+            if let commitReorder {
+                guard let photoID = presentation.beginCommittedReorder(
+                    to: destinationIndex,
+                    store: store,
+                    reduceMotion: reduceMotion
+                ) else {
+                    observeDrop(.rejectedCommit)
+                    return
+                }
+                Task {
+                    guard let result = await commitReorder(
+                        photoID,
+                        destinationIndex
+                    ) else {
+                        observeDrop(.rejectedCommit)
+                        return
+                    }
+                    presentation.publishCommittedReorder(result)
+                    observeDrop(.committed)
+                }
+            } else {
+                let result = presentation.commit(
+                    to: destinationIndex,
+                    store: store,
+                    reduceMotion: reduceMotion
+                )
+                observeDrop(result == nil ? .rejectedCommit : .committed)
+            }
         }
 
         func dropInteraction(
@@ -1804,11 +1885,26 @@ struct PhotoReviewIntakeRecovery: Equatable {
 @Observable
 final class PhotoReviewIntake {
     private(set) var recovery: PhotoReviewIntakeRecovery?
-    private let draftStore: any CaptureDraftStoring
+    private let captureFlow: CaptureFlowModel?
+    private let draftStore: (any CaptureDraftStoring)?
+    private let expectedActivationID: UUID?
 
+    init(
+        captureFlow: CaptureFlowModel,
+        expectedActivationID: UUID
+    ) {
+        self.captureFlow = captureFlow
+        self.expectedActivationID = expectedActivationID
+        draftStore = nil
+    }
+
+#if DEBUG
     init(draftStore: any CaptureDraftStoring) {
+        captureFlow = nil
+        expectedActivationID = nil
         self.draftStore = draftStore
     }
+#endif
 
     @discardableResult
     func apply<Item: CaptureLibraryPhotoLoading>(
@@ -1816,6 +1912,20 @@ final class PhotoReviewIntake {
         to store: PhotoReviewStore
     ) async -> PhotoReviewIntakeOutcome {
         guard let request = store.activePickerRequest, let firstItem = items.first else {
+            return .inert
+        }
+        if let captureFlow, let expectedActivationID {
+            return await applyThroughNativeIntake(
+                items,
+                firstItem: firstItem,
+                request: request,
+                captureFlow: captureFlow,
+                expectedActivationID: expectedActivationID,
+                store: store
+            )
+        }
+#if DEBUG
+        guard let draftStore else {
             return .inert
         }
 
@@ -1885,17 +1995,98 @@ final class PhotoReviewIntake {
             recovery = nil
             return .applied(appliedPhotos: [staged])
         }
+#else
+        return .inert
+#endif
     }
 
     // New seller-facing strings. The approved Photo Review copy catalog covers the
     // resting screen and its announcements but names no intake failure, so these say
     // only what is true: this photo did not land, and nothing the seller already had
     // moved or disappeared.
-    private static let additionFailureMessage =
+    fileprivate static let additionFailureMessage =
         "Photo could not be added. Nothing else changed."
-    private static let replacementFailureMessage =
+    fileprivate static let replacementFailureMessage =
         "Photo could not be replaced. Nothing else changed."
 
+    private func applyThroughNativeIntake<Item: CaptureLibraryPhotoLoading>(
+        _ items: [Item],
+        firstItem: Item,
+        request: PhotoReviewPickerRequest,
+        captureFlow: CaptureFlowModel,
+        expectedActivationID: UUID,
+        store: PhotoReviewStore
+    ) async -> PhotoReviewIntakeOutcome {
+        let priorPhotos = store.photos
+        let snapshot: NativeIntake.Snapshot?
+        switch request {
+        case .add:
+            snapshot = await captureFlow.addPhotoReviewPhotos(
+                items,
+                expectedActivationID: expectedActivationID,
+                while: { store.activePickerRequest == request }
+            )
+        case .replace(let photoID):
+            snapshot = await captureFlow.replacePhotoReviewPhoto(
+                id: photoID,
+                with: firstItem,
+                expectedActivationID: expectedActivationID,
+                while: { store.activePickerRequest == request }
+            )
+        }
+
+        guard let snapshot,
+              store.activePickerRequest == request
+                || store.photos == snapshot.photos else {
+            return reject(request, in: store)
+        }
+
+        let priorIDs = Set(priorPhotos.map(\.id))
+        switch request {
+        case .add:
+            let additions = snapshot.photos.filter { !priorIDs.contains($0.id) }
+            guard !additions.isEmpty else {
+                return reject(request, in: store)
+            }
+            store.publishCommittedPhotos(
+                snapshot.photos,
+                preferredSelection: additions.last?.id
+            )
+            recovery = nil
+            return .applied(appliedPhotos: additions)
+        case .replace(let photoID):
+            guard let priorIndex = priorPhotos.firstIndex(where: { $0.id == photoID }),
+                  snapshot.photos.indices.contains(priorIndex) else {
+                return reject(request, in: store)
+            }
+            let replacement = snapshot.photos[priorIndex]
+            store.publishCommittedPhotos(
+                snapshot.photos,
+                replacing: (photoID, replacement.id),
+                preferredSelection: replacement.id
+            )
+            recovery = nil
+            return .applied(appliedPhotos: [replacement])
+        }
+    }
+
+    private func reject(
+        _ request: PhotoReviewPickerRequest,
+        in store: PhotoReviewStore
+    ) -> PhotoReviewIntakeOutcome {
+        guard store.activePickerRequest == request else {
+            recovery = nil
+            return .inert
+        }
+        store.cancelPickerRequest()
+        recovery = PhotoReviewIntakeRecovery(
+            message: request.failureMessage,
+            focus: request.opener
+        )
+        return .inert
+    }
+
+#if DEBUG
     /// Why a run of additions stopped before it ran out of items.
     private enum AdditionStop {
         case completed
@@ -1922,7 +2113,8 @@ final class PhotoReviewIntake {
             guard store.activePickerRequest == request else {
                 return (stagedPhotos, .abandoned)
             }
-            guard let staged = try? await draftStore.append(
+            guard let draftStore,
+                  let staged = try? await draftStore.append(
                 imageData: imageData,
                 libraryTransferReceipt: nil
             ).appendedPhoto else {
@@ -1940,7 +2132,29 @@ final class PhotoReviewIntake {
         guard !staged.isEmpty else {
             return
         }
-        try? await draftStore.replacePhotos(with: photos)
+        try? await draftStore?.replacePhotos(with: photos)
+    }
+#endif
+}
+
+@MainActor
+private extension PhotoReviewPickerRequest {
+    var opener: PhotoReviewPickerOpener {
+        switch self {
+        case .add:
+            .addButton
+        case .replace(let photoID):
+            .replaceButton(photoID: photoID)
+        }
+    }
+
+    var failureMessage: String {
+        switch self {
+        case .add:
+            PhotoReviewIntake.additionFailureMessage
+        case .replace:
+            PhotoReviewIntake.replacementFailureMessage
+        }
     }
 }
 
@@ -2171,19 +2385,26 @@ struct PhotoReviewLiveFinalDeleteResult: Equatable {
 final class PhotoReviewLiveSession {
     let store: PhotoReviewStore
     let voiceNoteStore: VoiceNoteStore
+    let intakeActivationID: UUID?
     private(set) var focusedPhotoID: StagedCapturePhoto.ID?
     private var pendingDeleteAnnouncement: String?
+    private var isReorderCommitActive = false
+    private var reorderCommitWaiters:
+        [CheckedContinuation<Void, Never>] = []
 
     private init(
         store: PhotoReviewStore,
-        voiceNoteStore: VoiceNoteStore
+        voiceNoteStore: VoiceNoteStore,
+        intakeActivationID: UUID?
     ) {
         self.store = store
         self.voiceNoteStore = voiceNoteStore
+        self.intakeActivationID = intakeActivationID
     }
 
     static func start(
-        from request: CaptureBoundaryRequest?
+        from request: CaptureBoundaryRequest?,
+        captureFlow: CaptureFlowModel? = nil
     ) -> PhotoReviewLiveSession? {
         guard let request,
               request.destination == .photoReview,
@@ -2191,9 +2412,13 @@ final class PhotoReviewLiveSession {
               (1...5).contains(request.photos.count) else {
             return nil
         }
+        if let captureFlow,
+           captureFlow.intakeSnapshot?.photos != request.photos {
+            return nil
+        }
 #if DEBUG
         let launchArguments = ProcessInfo.processInfo.arguments
-        let savedNote = launchArguments.contains(
+        let fixtureSavedNote = launchArguments.contains(
             "--voice-note-saved-playing-fixture"
         )
             ? VoiceNoteAsset(
@@ -2205,12 +2430,51 @@ final class PhotoReviewLiveSession {
             )
             : nil
 #else
-        let savedNote: VoiceNoteAsset? = nil
+        let fixtureSavedNote: VoiceNoteAsset? = nil
 #endif
+        let committedVoice = captureFlow?.intakeSnapshot?.voice
+        let savedNote = committedVoice.map {
+            VoiceNoteAsset(url: $0.mediaURL, duration: $0.duration)
+        } ?? fixtureSavedNote
+        let provisionalRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent("VoiceNoteProvisional", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let intakeActivationID =
+            captureFlow?.intakeSnapshot?.version.activationID
+        let authority: VoiceNoteCommitAuthority? = captureFlow.flatMap {
+            captureFlow -> VoiceNoteCommitAuthority? in
+            guard let intakeActivationID else {
+                return nil
+            }
+            return VoiceNoteCommitAuthority(
+                save: { [weak captureFlow] url, duration, isActive in
+                    guard let voice = await captureFlow?.saveVoiceNote(
+                        provisionalURL: url,
+                        duration: duration,
+                        expectedActivationID: intakeActivationID,
+                        while: isActive
+                    ) else {
+                        return nil
+                    }
+                    return VoiceNoteAsset(
+                        url: voice.mediaURL,
+                        duration: voice.duration
+                    )
+                },
+                delete: { [weak captureFlow] isActive in
+                    await captureFlow?.deleteVoiceNote(
+                        expectedActivationID: intakeActivationID,
+                        while: isActive
+                    ) ?? false
+                }
+            )
+        }
         let voiceNoteStore = VoiceNoteStore(
             savedNote: savedNote,
             audio: AVFoundationVoiceNoteAudioClient(),
-            files: VoiceNoteLocalFileStore()
+            files: VoiceNoteLocalFileStore(rootDirectory: provisionalRoot),
+            authority: authority
         )
 #if DEBUG
         if launchArguments.contains(
@@ -2233,7 +2497,8 @@ final class PhotoReviewLiveSession {
 #endif
         return PhotoReviewLiveSession(
             store: PhotoReviewStore(photos: request.photos),
-            voiceNoteStore: voiceNoteStore
+            voiceNoteStore: voiceNoteStore,
+            intakeActivationID: intakeActivationID
         )
     }
 
@@ -2273,6 +2538,86 @@ final class PhotoReviewLiveSession {
         defer { pendingDeleteAnnouncement = nil }
         return pendingDeleteAnnouncement
     }
+
+    func publishCommittedSnapshot(_ snapshot: NativeIntake.Snapshot) {
+        if store.activePickerRequest == nil {
+            store.publishCommittedPhotos(snapshot.photos)
+        }
+        voiceNoteStore.publishCommittedVoice(snapshot.voice)
+    }
+
+    func publishCommittedDelete(
+        id: StagedCapturePhoto.ID,
+        removedIndex: Int,
+        snapshot: NativeIntake.Snapshot
+    ) -> PhotoReviewLiveDeleteResult? {
+        guard !snapshot.photos.contains(where: { $0.id == id }),
+              store.photos.contains(where: { $0.id == id })
+                || store.photos == snapshot.photos else {
+            return nil
+        }
+        let focusPhotoID = snapshot.photos.indices.contains(removedIndex)
+            ? snapshot.photos[removedIndex].id
+            : snapshot.photos.last?.id
+        store.publishCommittedPhotos(
+            snapshot.photos,
+            preferredSelection: focusPhotoID
+        )
+        guard let focusPhotoID else { return nil }
+        let announcement = "Photo removed. \(snapshot.photos.count) of 5."
+        self.focusedPhotoID = focusPhotoID
+        pendingDeleteAnnouncement = announcement
+        return PhotoReviewLiveDeleteResult(
+            focus: .photo(focusPhotoID),
+            announcement: announcement
+        )
+    }
+
+    func commitReorder(
+        photoID: StagedCapturePhoto.ID,
+        destinationIndex: Int,
+        captureFlow: CaptureFlowModel
+    ) async -> PhotoReviewReorderResult? {
+        await acquireReorderCommit()
+        defer { releaseReorderCommit() }
+        guard let intakeActivationID else {
+            return nil
+        }
+        guard let proposedIDs = store.proposedPhotoOrder(
+            moving: photoID,
+            to: destinationIndex
+        ),
+        let snapshot = await captureFlow.reorderPhotoReviewPhotos(
+            proposedIDs,
+            expectedActivationID: intakeActivationID
+        ),
+        snapshot.photos.map(\.id) == proposedIDs else {
+            return nil
+        }
+        return store.publishCommittedReorder(
+            snapshot.photos,
+            photoID: photoID,
+            destinationIndex: destinationIndex
+        )
+    }
+
+    private func acquireReorderCommit() async {
+        guard isReorderCommitActive else {
+            isReorderCommitActive = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            reorderCommitWaiters.append(continuation)
+        }
+    }
+
+    private func releaseReorderCommit() {
+        guard !reorderCommitWaiters.isEmpty else {
+            isReorderCommitActive = false
+            return
+        }
+        reorderCommitWaiters.removeFirst().resume()
+    }
 }
 
 @MainActor
@@ -2302,7 +2647,8 @@ final class PhotoReviewLiveHost {
 
     @discardableResult
     func consume(
-        _ request: CaptureBoundaryRequest?
+        _ request: CaptureBoundaryRequest?,
+        captureFlow: CaptureFlowModel? = nil
     ) -> Bool {
         guard let request else {
             return false
@@ -2310,7 +2656,10 @@ final class PhotoReviewLiveHost {
         if activeRequest == request, session != nil {
             return false
         }
-        guard let session = PhotoReviewLiveSession.start(from: request) else {
+        guard let session = PhotoReviewLiveSession.start(
+            from: request,
+            captureFlow: captureFlow
+        ) else {
             return false
         }
         activeRequest = request
@@ -2347,6 +2696,29 @@ final class PhotoReviewLiveHost {
         )
     }
 
+    func completeCommittedFinalDelete(
+        from returningSession: PhotoReviewLiveSession,
+        using router: AppRouter
+    ) -> PhotoReviewLiveFinalDeleteResult? {
+        guard session === returningSession,
+              returningSession.store.photos.isEmpty else {
+            return nil
+        }
+        let scanReturn = PhotoReviewScanReturn(
+            photos: [],
+            focus: .addPhotoButton
+        )
+        let announcement = "Photo removed. No photos remain."
+        router.returnFromPhotoReview(scanReturn)
+        session = nil
+        activeRequest = nil
+        pendingFinalDeleteAnnouncement = announcement
+        return PhotoReviewLiveFinalDeleteResult(
+            scanReturn: scanReturn,
+            announcement: announcement
+        )
+    }
+
     /// Leaves Photo Review because the intake it was editing is gone.
     ///
     /// Submission clears the draft on a validated receipt, and the same rule the final
@@ -2360,6 +2732,18 @@ final class PhotoReviewLiveHost {
         using router: AppRouter
     ) -> Bool {
         guard session === returningSession else {
+            return false
+        }
+        router.returnFromPhotoReview(
+            PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+        )
+        session = nil
+        activeRequest = nil
+        return true
+    }
+
+    func leaveForDepartedIntake(using router: AppRouter) -> Bool {
+        guard session != nil else {
             return false
         }
         router.returnFromPhotoReview(
@@ -2403,7 +2787,8 @@ enum PhotoReviewBackCoordinator {
     ) async -> PhotoReviewBackOutcome {
         let request = session.scanReturn()
         guard let focus = await captureFlow.applyPhotoReviewScanReturn(
-            request
+            request,
+            expectedActivationID: session.intakeActivationID
         ) else {
             return .persistenceRejected
         }
@@ -2412,6 +2797,9 @@ enum PhotoReviewBackCoordinator {
         guard host.completeReturnToScan(from: session) else {
             return .sessionChanged
         }
+        _ = await captureFlow.markPhotoReviewLeft(
+            activationID: session.intakeActivationID
+        )
 
         return .completed(
             PhotoReviewScanReturn(
@@ -2437,6 +2825,8 @@ struct PhotoReviewView: View {
     var acknowledgeSubmissionPresentation: (UUID) -> Void = { _ in }
     var backToCamera: (() -> Void)? = nil
     let delete: () async -> PhotoReviewDeleteApplication?
+    var commitReorder:
+        ((StagedCapturePhoto.ID, Int) async -> PhotoReviewReorderResult?)? = nil
     var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
     var voiceNoteStore: VoiceNoteStore? = nil
     /// Absent in fixtures, which stage no durable session and so cannot apply a picker
@@ -2913,6 +3303,7 @@ struct PhotoReviewView: View {
                                     proxy: proxy
                                 )
                             },
+                            commitReorder: commitReorder,
                             observeDrop: observeNativeDrop
                         )
                     }
@@ -3452,6 +3843,27 @@ struct PhotoReviewView: View {
         _ action: PhotoReviewReorderAction,
         photoID: StagedCapturePhoto.ID
     ) {
+        if let commitReorder,
+           let destinationIndex = store.destinationIndex(
+               for: photoID,
+               action: action
+           ) {
+            Task {
+                guard let result = await commitReorder(
+                    photoID,
+                    destinationIndex
+                ) else {
+                    return
+                }
+                hardwareFocusedThumbnailID = result.photoID
+                focusedThumbnailID = result.photoID
+                UIAccessibility.post(
+                    notification: .announcement,
+                    argument: result.announcement
+                )
+            }
+            return
+        }
         guard let result = accessibilityActionPresentation.perform(
             action,
             photoID: photoID,

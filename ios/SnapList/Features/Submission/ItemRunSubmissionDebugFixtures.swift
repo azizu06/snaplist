@@ -9,16 +9,11 @@ struct DelayedItemRunSubmissionFixture {
 }
 
 private struct AcceptedPresentationGatedItemRunSubmitter: ItemRunSubmitting {
-    private static let restoredPhotoPath = "/fixture/capture-photo.jpg"
-    private static let restoredPhotoData = Data([
-        0xFF, 0xD8, 0xFF, 0xD9,
-    ])
-
     static func readRestoredPhoto(at url: URL) throws -> Data {
-        guard url.isFileURL, url.path == restoredPhotoPath else {
+        guard url.isFileURL else {
             throw CocoaError(.fileReadNoSuchFile)
         }
-        return restoredPhotoData
+        return try Data(contentsOf: url)
     }
 
     func submit(

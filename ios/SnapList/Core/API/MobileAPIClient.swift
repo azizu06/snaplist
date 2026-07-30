@@ -1,4 +1,7 @@
 import Foundation
+#if DEBUG
+import UIKit
+#endif
 
 protocol MobileAPIClient {
     func getHealth() async throws -> HealthEnvelope
@@ -152,6 +155,9 @@ struct AppDependencies {
     let guestAllowance: any GuestAllowanceCapability
     let captureCamera: any CaptureCamera
     let framingEvaluator: any FramingEvaluating
+    let nativeIntake: NativeIntake
+    // #543 still reads the legacy submission draft until its principal-generation
+    // fence lands. Production Scan and Photo Review never receive this store.
     let captureDraftStore: any CaptureDraftStoring
     let subscriptionClient: any SubscriptionClient
     let analyticsClient: any AnalyticsClient
@@ -159,7 +165,9 @@ struct AppDependencies {
     static func make(
         configuration: LaunchConfiguration,
         apiOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
-        tokenProvider: any BearerTokenProviding = UnavailableBearerTokenProvider()
+        tokenProvider: any BearerTokenProviding = UnavailableBearerTokenProvider(),
+        nativeIntakeIdentitySource: NativeIntake.IdentitySource = .processPrivate,
+        nativeIntakeApplicationSupportDirectory: URL? = nil
     ) -> AppDependencies {
         let cameraAuthorization: any CameraAuthorizationProviding
         if let fixtureStatus = configuration.cameraAuthorizationFixture {
@@ -169,6 +177,29 @@ struct AppDependencies {
         }
         let captureDraftStore = makeCaptureDraftStore(configuration: configuration)
         let captureCamera = makeCaptureCamera(configuration: configuration)
+        let resolvedNativeIntakeIdentitySource:
+            NativeIntake.IdentitySource
+#if DEBUG
+        if configuration.usesRestoredCaptureFixture {
+            resolvedNativeIntakeIdentitySource = .processPrivate
+        } else {
+            resolvedNativeIntakeIdentitySource =
+                nativeIntakeIdentitySource
+        }
+#else
+        resolvedNativeIntakeIdentitySource =
+            nativeIntakeIdentitySource
+#endif
+        let nativeIntake = NativeIntake(
+            applicationSupportDirectory:
+                nativeIntakeApplicationSupportDirectory
+                ?? FileManager.default.urls(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask
+                ).first
+                ?? FileManager.default.temporaryDirectory,
+            identitySource: resolvedNativeIntakeIdentitySource
+        )
         if configuration.usesZeroNetworkFixtures {
             let client = ZeroNetworkMobileAPIClient()
             return AppDependencies(
@@ -180,6 +211,7 @@ struct AppDependencies {
                 guestAllowance: DeferredGuestAllowanceCapability(),
                 captureCamera: captureCamera,
                 framingEvaluator: VisionObjectFramingEvaluator(),
+                nativeIntake: nativeIntake,
                 captureDraftStore: captureDraftStore,
                 subscriptionClient: FixtureSubscriptionClient(),
                 analyticsClient: NoOpAnalyticsClient()
@@ -200,6 +232,7 @@ struct AppDependencies {
             guestAllowance: DeferredGuestAllowanceCapability(),
             captureCamera: captureCamera,
             framingEvaluator: VisionObjectFramingEvaluator(),
+            nativeIntake: nativeIntake,
             captureDraftStore: captureDraftStore,
             subscriptionClient: RevenueCatSubscriptionClient(),
             analyticsClient: NoOpAnalyticsClient()
@@ -230,6 +263,63 @@ struct AppDependencies {
 }
 
 #if DEBUG
+extension AppDependencies {
+    @MainActor
+    func seedRestoredCaptureFixtureIfNeeded(
+        configuration: LaunchConfiguration
+    ) async {
+        guard configuration.usesRestoredCaptureFixture else {
+            return
+        }
+
+        let events = await nativeIntake.events()
+        var iterator = events.makeAsyncIterator()
+        guard case .snapshot(let initialSnapshot) = await iterator.next()
+        else {
+            return
+        }
+        if !initialSnapshot.photos.isEmpty
+            || initialSnapshot.voice != nil {
+            guard await nativeIntake.perform(
+                .discard(expected: initialSnapshot.version)
+            ) == .committed else {
+                return
+            }
+        }
+
+        let renderer = UIGraphicsImageRenderer(
+            size: CGSize(width: 16, height: 16)
+        )
+        let photoData = renderer.jpegData(
+            withCompressionQuality: 0.9
+        ) { context in
+            UIColor.systemTeal.setFill()
+            context.fill(
+                CGRect(x: 0, y: 0, width: 16, height: 16)
+            )
+        }
+        let result = await nativeIntake.performReturningSnapshot(
+            .addPhotos([
+                NativeIntake.PhotoInput {
+                    photoData
+                }
+            ]),
+            expectedActivationID:
+                initialSnapshot.version.activationID
+        )
+        guard result.outcome == .committed,
+              let snapshot = result.snapshot,
+              let submissionStore =
+                captureDraftStore as? RestoredCaptureFixtureStore
+        else {
+            return
+        }
+        await submissionStore.retainLegacySubmissionFixture(
+            snapshot.photos
+        )
+    }
+}
+
 private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
     private var photos = [
         StagedCapturePhoto(
@@ -242,6 +332,12 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
 
     func load() async throws -> StagedCapturePhoto? { photos.first }
     func loadPhotos() async throws -> [StagedCapturePhoto] { photos }
+
+    func retainLegacySubmissionFixture(
+        _ committedPhotos: [StagedCapturePhoto]
+    ) {
+        photos = committedPhotos
+    }
 
     // The fixture has no image pipeline, so it cannot turn `imageData` into a staged
     // artifact and will not invent one. Handing back the photo it already holds would

@@ -12,12 +12,15 @@ struct AppShellView: View {
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
     @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
     @State private var photoReviewIntake: PhotoReviewIntake?
+    @State private var awaitsPrincipalReviewDismissal = false
+    @State private var awaitsCommittedEmptyDismissal = false
 
     var body: some View {
         Group {
@@ -75,6 +78,13 @@ struct AppShellView: View {
                             setReturnFocus: { pendingScanReturnFocus = $0 }
                         )
                     },
+                    commitReorder: { photoID, destinationIndex in
+                        await session.commitReorder(
+                            photoID: photoID,
+                            destinationIndex: destinationIndex,
+                            captureFlow: captureFlow
+                        )
+                    },
                     // Photo Review consumes #469's Voice note event locally. Start
                     // listing alone submits the photos in their displayed order; the
                     // optional local WAV never enters this transaction.
@@ -120,10 +130,27 @@ struct AppShellView: View {
             of: router.captureBoundaryRequest,
             initial: true
         ) { _, request in
-            guard photoReviewHost.consume(request) else { return }
+            guard photoReviewHost.consume(
+                request,
+                captureFlow: captureFlow
+            ) else { return }
             // A new session gets a new intake, so a recovery the seller already resolved
             // cannot reappear on the next item they review.
-            photoReviewIntake = PhotoReviewIntake(draftStore: captureFlow.draftStore)
+            let activationID = photoReviewHost.session?.intakeActivationID
+            if let activationID {
+                photoReviewIntake = PhotoReviewIntake(
+                    captureFlow: captureFlow,
+                    expectedActivationID: activationID
+                )
+            } else {
+                photoReviewIntake = nil
+            }
+            Task {
+                guard let activationID else { return }
+                _ = await captureFlow.markPhotoReviewEntered(
+                    activationID: activationID
+                )
+            }
         }
         // Home's update loop is suspended from the outermost view. Photo Review replaces
         // the shell while it is open, so anything attached to the shell stops observing
@@ -140,6 +167,14 @@ struct AppShellView: View {
                 break
             }
         }
+        .onChange(of: photoReviewHost.isCommitting) { _, isCommitting in
+            guard !isCommitting, awaitsCommittedEmptyDismissal else {
+                return
+            }
+            awaitsCommittedEmptyDismissal = false
+            guard captureFlow.stagedPhotos.isEmpty else { return }
+            _ = dismissActivePhotoReviewForDepartedIntake()
+        }
         .task(id: onboardingCaptureRouteID) {
             guard configuration.usesOnboarding,
                   captureFlow.hasCompletedRestoration else { return }
@@ -148,6 +183,53 @@ struct AppShellView: View {
                 captureFlow: captureFlow,
                 router: router
             )
+        }
+        .task {
+            guard let events = await captureFlow.nativeIntakeEvents() else {
+                return
+            }
+            for await event in events {
+                switch event {
+                case .snapshot(let snapshot):
+                    await captureFlow.awaitPublishedSnapshot(snapshot)
+#if DEBUG
+                    if !configuration.usesRestoredCaptureFixture {
+                        submissionHost.synchronizePrincipal(
+                            snapshot: snapshot,
+                            intake: dependencies.nativeIntake
+                        )
+                    }
+#else
+                    submissionHost.synchronizePrincipal(
+                        snapshot: snapshot,
+                        intake: dependencies.nativeIntake
+                    )
+#endif
+                    let activeReviewDeparted =
+                        photoReviewHost.session?.intakeActivationID
+                        .map { $0 != snapshot.version.activationID }
+                        ?? false
+                    if awaitsPrincipalReviewDismissal
+                        || activeReviewDeparted {
+                        awaitsPrincipalReviewDismissal = false
+                        _ = dismissActivePhotoReviewForDepartedIntake()
+                    } else if snapshot.photos.isEmpty,
+                              photoReviewHost.session != nil {
+                        photoReviewHost.session?
+                            .publishCommittedSnapshot(snapshot)
+                        if photoReviewHost.isCommitting {
+                            awaitsCommittedEmptyDismissal = true
+                        } else {
+                            _ = dismissActivePhotoReviewForDepartedIntake()
+                        }
+                    } else {
+                        photoReviewHost.session?.publishCommittedSnapshot(snapshot)
+                    }
+                case .dismissActivePhotoReview:
+                    awaitsPrincipalReviewDismissal =
+                        photoReviewHost.session != nil
+                }
+            }
         }
     }
 
@@ -331,6 +413,16 @@ struct AppShellView: View {
                 setReturnFocus: { pendingScanReturnFocus = $0 }
             )
         }
+    }
+
+    @discardableResult
+    private func dismissActivePhotoReviewForDepartedIntake() -> Bool {
+        guard photoReviewHost.leaveForDepartedIntake(using: router) else {
+            return false
+        }
+        pendingScanReturnFocus = .addPhotoButton
+        photoReviewIntake = nil
+        return true
     }
 }
 
@@ -551,9 +643,26 @@ enum AppShellPhotoReviewDeleteTransaction {
         }
         defer { host.endCommit() }
 
-        // A survivor keeps the seller in Photo Review, so the edited set reaches Scan
-        // through the same Back transaction that already owns that hand-off.
-        if let result = session.deleteNonFinalPhoto(id: photoID) {
+        let priorIDs = session.store.photos.map(\.id)
+        guard let removedIndex = priorIDs.firstIndex(of: photoID) else {
+            return nil
+        }
+        guard let activationID = session.intakeActivationID,
+              let snapshot = await captureFlow.removePhotoReviewPhoto(
+                  id: photoID,
+                  expectedActivationID: activationID
+              ),
+              host.session === session,
+              [priorIDs, snapshot.photos.map(\.id)]
+                .contains(session.store.photos.map(\.id)) else {
+            return nil
+        }
+
+        if let result = session.publishCommittedDelete(
+            id: photoID,
+            removedIndex: removedIndex,
+            snapshot: snapshot
+        ) {
             // Drain the pending value so one accepted delete cannot be announced twice.
             _ = session.consumeDeleteAnnouncement()
             return PhotoReviewDeleteApplication(
@@ -568,15 +677,19 @@ enum AppShellPhotoReviewDeleteTransaction {
         // Start the camera before the router returns, so zero-photo Scan arrives as the
         // approved guided camera rather than transiently as "Preparing camera". This
         // matches the ordering the Back exit already uses.
-        guard session.store.photos.map(\.id) == [photoID],
-              await captureFlow.applyPhotoReviewScanReturn(
-                  PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
-              ) != nil else {
+        guard priorIDs == [photoID], snapshot.photos.isEmpty else {
             return nil
         }
+        session.publishCommittedSnapshot(snapshot)
         await captureFlow.startCamera()
+        _ = await captureFlow.markPhotoReviewLeft(
+            activationID: session.intakeActivationID
+        )
 
-        guard let finalResult = host.deleteFinalPhoto(id: photoID, using: router) else {
+        guard let finalResult = host.completeCommittedFinalDelete(
+            from: session,
+            using: router
+        ) else {
             return nil
         }
         _ = host.consumeFinalDeleteAnnouncement()
@@ -680,7 +793,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
         captureFlow: CaptureFlowModel(
             camera: dependencies.captureCamera,
             evaluator: dependencies.framingEvaluator,
-            store: dependencies.captureDraftStore
+            intake: dependencies.nativeIntake
         ),
         homeStore: HomeStore(repository: HomeFixtureRepository(model: HomeFixtures.active)),
         runStore: RunDetailStore(
