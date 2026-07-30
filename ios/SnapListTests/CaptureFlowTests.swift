@@ -4410,9 +4410,9 @@ final class CaptureFlowTests: XCTestCase {
                 )
             }
         )
-        let sourceView = UIScrollView(
-            frame: CGRect(x: 0, y: 0, width: 320, height: 98)
-        )
+        let host = makeNativeInteractionHost()
+        let sourceView = host.innerHorizontalStrip
+        defer { host.cleanUp() }
         sourceView.bounds = CGRect(
             x: 44,
             y: 0,
