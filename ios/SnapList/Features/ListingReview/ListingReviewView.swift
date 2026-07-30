@@ -130,7 +130,6 @@ struct ListingReviewView: View {
                 assertive: assertive
             )
         }
-        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("listing-review")
     }
 
