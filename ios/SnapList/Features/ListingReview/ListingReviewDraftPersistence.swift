@@ -280,7 +280,7 @@ actor MemoryListingReviewDraftPersistence:
         guard tokens[runID] == token else {
             throw ListingReviewDraftPersistenceError.staleToken
         }
-        records[runID]
+        return records[runID]
     }
 
     func save(
