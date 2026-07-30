@@ -450,8 +450,14 @@ actor NativeIntake {
     /// focus and announcement with its own durable write.
     func performReturningSnapshot(
         _ operation: Operation,
-        expectedActivationID: UUID
+        expectedActivationID: UUID,
+        while requestIsActive: @escaping @MainActor @Sendable () -> Bool = {
+            true
+        }
     ) async -> OperationResult {
+        guard await requestIsActive() else {
+            return OperationResult(outcome: .superseded, snapshot: nil)
+        }
         let snapshotKey = UUID()
         let outcome = await perform(
             operation,

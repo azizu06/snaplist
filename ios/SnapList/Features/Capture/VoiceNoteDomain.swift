@@ -139,7 +139,10 @@ struct VoiceNoteCommitAuthority {
             TimeInterval,
             @escaping @MainActor @Sendable () -> Bool
         ) async -> VoiceNoteAsset?
-    let delete: () async -> Bool
+    let delete:
+        (
+            @escaping @MainActor @Sendable () -> Bool
+        ) async -> Bool
 }
 
 final class VoiceNoteLocalFileStore: VoiceNoteFileStoring {
@@ -314,6 +317,7 @@ final class VoiceNoteStore {
     }
 
     func startRecording() async {
+        authorityMutationID = nil
         guard discardPendingProvisionalBeforeRecording() else {
             return
         }
@@ -552,7 +556,7 @@ final class VoiceNoteStore {
     }
 
     @discardableResult
-    func deleteSavedNote() -> Bool {
+    func deleteSavedNote() async -> Bool {
         guard let savedNote else {
             return true
         }
@@ -560,22 +564,23 @@ final class VoiceNoteStore {
         if let authority {
             let mutationID = UUID()
             authorityMutationID = mutationID
-            Task {
-                let deleted = await authority.delete()
-                guard authorityMutationID == mutationID else {
-                    return
-                }
-                authorityMutationID = nil
-                guard deleted else {
-                    phase = .saved(isPlaying: false)
-                    return
-                }
-                if self.savedNote == savedNote || self.savedNote == nil {
-                    self.savedNote = nil
-                    phase = .ready
-                } else {
-                    phase = .saved(isPlaying: false)
-                }
+            let deleted = await authority.delete {
+                [weak self] in
+                self?.authorityMutationID == mutationID
+            }
+            guard authorityMutationID == mutationID else {
+                return false
+            }
+            authorityMutationID = nil
+            guard deleted else {
+                phase = .saved(isPlaying: false)
+                return false
+            }
+            if self.savedNote == savedNote || self.savedNote == nil {
+                self.savedNote = nil
+                phase = .ready
+            } else {
+                phase = .saved(isPlaying: false)
             }
             return true
         }

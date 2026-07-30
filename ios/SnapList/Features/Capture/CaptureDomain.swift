@@ -1138,11 +1138,16 @@ final class CaptureFlowModel {
     private var evaluationInFlight = false
     private var activeCaptureID: UUID?
     private var activeIntakeID: UUID?
+    private var activeIntakeActivationID: UUID?
     private var resumeAfterBackground = false
     private var pendingPhotoLimitAnnouncement: String?
     private var intakeEventTask: Task<Void, Never>?
     private var snapshotWaiters: [SnapshotWaiter] = []
     private var publishedSnapshotVersions: Set<NativeIntake.Version> = []
+#if DEBUG
+    private var nativeIntakeEventProjectionHook:
+        (@MainActor () async -> Void)?
+#endif
 
     private(set) var phase: CapturePhase = .idle
     private(set) var guidance: FramingGuidance = .coaching
@@ -1205,6 +1210,14 @@ final class CaptureFlowModel {
         guard let intake else { return nil }
         return await intake.events()
     }
+
+#if DEBUG
+    func setNativeIntakeEventProjectionHook(
+        _ hook: @escaping @MainActor () async -> Void
+    ) {
+        nativeIntakeEventProjectionHook = hook
+    }
+#endif
 
     func awaitPublishedSnapshot(
         _ snapshot: NativeIntake.Snapshot
@@ -1343,7 +1356,9 @@ final class CaptureFlowModel {
     }
 
     func reservePhotoCapture() -> UUID? {
-        guard canTakePhoto else { return nil }
+        guard canTakePhoto, captureIntakeActivationForReservation() else {
+            return nil
+        }
         let captureID = UUID()
         activeCaptureID = captureID
         activeIntakeID = captureID
@@ -1357,15 +1372,18 @@ final class CaptureFlowModel {
 
     func takePhoto(reservation captureID: UUID) async {
         guard activeCaptureID == captureID, activeIntakeID == captureID else { return }
+        let expectedActivationID = activeIntakeActivationID
         defer {
             if activeCaptureID == captureID {
                 activeCaptureID = nil
             }
             if activeIntakeID == captureID {
                 activeIntakeID = nil
+                activeIntakeActivationID = nil
             }
         }
         if let intake {
+            guard let expectedActivationID else { return }
             let outcome = await performAndAwaitSnapshot(
                 .addPhotos([
                     NativeIntake.PhotoInput(
@@ -1390,7 +1408,8 @@ final class CaptureFlowModel {
                         }
                     }
                 ]),
-                using: intake
+                using: intake,
+                expectedActivationID: expectedActivationID
             )
             if outcome == .committed {
                 queuePhotoLimitAnnouncementIfNeeded()
@@ -1426,14 +1445,20 @@ final class CaptureFlowModel {
             return false
         }
         let intakeID = UUID()
+        guard captureIntakeActivationForReservation() else {
+            return false
+        }
         activeIntakeID = intakeID
+        let expectedActivationID = activeIntakeActivationID
         defer {
             if activeIntakeID == intakeID {
                 activeIntakeID = nil
+                activeIntakeActivationID = nil
             }
         }
         let phaseBeforeSelection = phase
         if let intake {
+            guard let expectedActivationID else { return false }
             let outcome = await performAndAwaitSnapshot(
                 .addPhotos([
                     NativeIntake.PhotoInput(
@@ -1450,7 +1475,8 @@ final class CaptureFlowModel {
                         }
                     }
                 ]),
-                using: intake
+                using: intake,
+                expectedActivationID: expectedActivationID
             )
             return finishLibraryIntake(
                 outcome: outcome,
@@ -1480,7 +1506,10 @@ final class CaptureFlowModel {
     }
 
     func reserveLibraryIntake() -> UUID? {
-        guard !isAddingPhotos else { return nil }
+        guard !isAddingPhotos,
+              captureIntakeActivationForReservation() else {
+            return nil
+        }
         let intakeID = UUID()
         activeIntakeID = intakeID
         return intakeID
@@ -1488,14 +1517,17 @@ final class CaptureFlowModel {
 
     func stageLibraryPhotos(_ imageData: [Data], reservation intakeID: UUID) async -> Int {
         guard activeIntakeID == intakeID, activeCaptureID == nil else { return 0 }
+        let expectedActivationID = activeIntakeActivationID
         defer {
             if activeIntakeID == intakeID {
                 activeIntakeID = nil
+                activeIntakeActivationID = nil
             }
         }
         let phaseBeforeSelection = phase
         let remainingCapacity = max(0, 5 - stagedPhotos.count)
         if let intake {
+            guard let expectedActivationID else { return 0 }
             let inputs = imageData.prefix(remainingCapacity).map { data in
                 NativeIntake.PhotoInput(
                     isActive: { [weak self] in
@@ -1512,7 +1544,11 @@ final class CaptureFlowModel {
             }
             guard !inputs.isEmpty else { return 0 }
             let priorCount = stagedPhotos.count
-            let outcome = await performAndAwaitSnapshot(.addPhotos(inputs), using: intake)
+            let outcome = await performAndAwaitSnapshot(
+                .addPhotos(inputs),
+                using: intake,
+                expectedActivationID: expectedActivationID
+            )
             guard finishLibraryIntake(
                 outcome: outcome,
                 phaseBeforeSelection: phaseBeforeSelection
@@ -1539,14 +1575,17 @@ final class CaptureFlowModel {
         reservation intakeID: UUID
     ) async -> Int {
         guard activeIntakeID == intakeID, activeCaptureID == nil else { return 0 }
+        let expectedActivationID = activeIntakeActivationID
         defer {
             if activeIntakeID == intakeID {
                 activeIntakeID = nil
+                activeIntakeActivationID = nil
             }
         }
         let phaseBeforeSelection = phase
         let remainingCapacity = max(0, 5 - stagedPhotos.count)
         if let intake {
+            guard let expectedActivationID else { return 0 }
             let inputs = photos.prefix(remainingCapacity).map { photo in
                 NativeIntake.PhotoInput(
                     isActive: { [weak self] in
@@ -1569,7 +1608,11 @@ final class CaptureFlowModel {
             }
             guard !inputs.isEmpty else { return 0 }
             let priorCount = stagedPhotos.count
-            let outcome = await performAndAwaitSnapshot(.addPhotos(inputs), using: intake)
+            let outcome = await performAndAwaitSnapshot(
+                .addPhotos(inputs),
+                using: intake,
+                expectedActivationID: expectedActivationID
+            )
             guard finishLibraryIntake(
                 outcome: outcome,
                 phaseBeforeSelection: phaseBeforeSelection
@@ -1603,6 +1646,7 @@ final class CaptureFlowModel {
     func cancelLibraryIntake(reservation intakeID: UUID) {
         guard activeIntakeID == intakeID, activeCaptureID == nil else { return }
         activeIntakeID = nil
+        activeIntakeActivationID = nil
     }
 
     func addPhotoReviewPhotos<Photo: CaptureLibraryPhotoLoading>(
@@ -1686,12 +1730,18 @@ final class CaptureFlowModel {
         )?.voice
     }
 
-    func deleteVoiceNote(expectedActivationID: UUID) async -> Bool {
-        guard let intake else { return false }
+    func deleteVoiceNote(
+        expectedActivationID: UUID,
+        while requestIsActive: @escaping @MainActor @Sendable () -> Bool = {
+            true
+        }
+    ) async -> Bool {
+        guard let intake, requestIsActive() else { return false }
         return await committedPhotoReviewSnapshot(
             for: .deleteVoice,
             using: intake,
             expectedActivationID: expectedActivationID,
+            while: requestIsActive,
             acceptsUnchanged: true
         )?.voice == nil
     }
@@ -1731,7 +1781,8 @@ final class CaptureFlowModel {
         if let intake, let version = intakeSnapshot?.version {
             let outcome = await performAndAwaitSnapshot(
                 .discard(expected: version),
-                using: intake
+                using: intake,
+                expectedActivationID: version.activationID
             )
             guard outcome == .committed else {
                 phase = .failed
@@ -1769,6 +1820,7 @@ final class CaptureFlowModel {
     func cancelCamera() {
         activeIntakeID = nil
         activeCaptureID = nil
+        activeIntakeActivationID = nil
         camera.stop()
         resumeAfterBackground = false
         phase = stagedPhotos.isEmpty ? .idle : .captured
@@ -1794,6 +1846,18 @@ final class CaptureFlowModel {
         guard stagedPhotos.count == 5,
               pendingPhotoLimitAnnouncement == nil else { return }
         pendingPhotoLimitAnnouncement = "Five photo limit reached. Review your photos."
+    }
+
+    private func captureIntakeActivationForReservation() -> Bool {
+        guard intake != nil else {
+            activeIntakeActivationID = nil
+            return true
+        }
+        guard let activationID = intakeSnapshot?.version.activationID else {
+            return false
+        }
+        activeIntakeActivationID = activationID
+        return true
     }
 
     private func persistLibraryPhoto(
@@ -1833,6 +1897,11 @@ final class CaptureFlowModel {
             let events = await intake.events()
             for await event in events {
                 guard !Task.isCancelled else { return }
+#if DEBUG
+                if let hook = self?.nativeIntakeEventProjectionHook {
+                    await hook()
+                }
+#endif
                 self?.consume(event)
             }
         }
@@ -1865,6 +1934,7 @@ final class CaptureFlowModel {
                previousActivationID != snapshot.version.activationID {
                 activeCaptureID = nil
                 activeIntakeID = nil
+                activeIntakeActivationID = nil
             }
             if ![.camera, .denied, .unavailable].contains(phase) {
                 phase = snapshot.photos.isEmpty ? .idle : .captured
@@ -1895,14 +1965,18 @@ final class CaptureFlowModel {
 
     private func performAndAwaitSnapshot(
         _ operation: NativeIntake.Operation,
-        using intake: NativeIntake
+        using intake: NativeIntake,
+        expectedActivationID: UUID
     ) async -> NativeIntake.Outcome {
         startIntakeObservation()
         if intakeSnapshot == nil {
             _ = await waitForSnapshot(after: nil)
         }
         let priorVersion = intakeSnapshot?.version
-        let outcome = await intake.perform(operation)
+        let outcome = await intake.perform(
+            operation,
+            expectedActivationID: expectedActivationID
+        )
         if outcome == .committed,
            let priorVersion {
             _ = await waitForSnapshot(after: priorVersion)
@@ -1913,9 +1987,14 @@ final class CaptureFlowModel {
     private func committedSnapshot(
         for operation: NativeIntake.Operation,
         using intake: NativeIntake,
+        expectedActivationID: UUID,
         acceptsUnchanged: Bool = false
     ) async -> NativeIntake.Snapshot? {
-        let outcome = await performAndAwaitSnapshot(operation, using: intake)
+        let outcome = await performAndAwaitSnapshot(
+            operation,
+            using: intake,
+            expectedActivationID: expectedActivationID
+        )
         guard outcome == .committed
                 || (acceptsUnchanged && outcome == .unchanged) else {
             return nil
@@ -1927,11 +2006,15 @@ final class CaptureFlowModel {
         for operation: NativeIntake.Operation,
         using intake: NativeIntake,
         expectedActivationID: UUID,
+        while requestIsActive: @escaping @MainActor @Sendable () -> Bool = {
+            true
+        },
         acceptsUnchanged: Bool = false
     ) async -> NativeIntake.Snapshot? {
         let result = await intake.performReturningSnapshot(
             operation,
-            expectedActivationID: expectedActivationID
+            expectedActivationID: expectedActivationID,
+            while: requestIsActive
         )
         guard result.outcome == .committed
                 || (acceptsUnchanged && result.outcome == .unchanged) else {

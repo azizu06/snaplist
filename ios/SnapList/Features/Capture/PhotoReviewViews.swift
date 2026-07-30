@@ -2462,9 +2462,10 @@ final class PhotoReviewLiveSession {
                         duration: voice.duration
                     )
                 },
-                delete: { [weak captureFlow] in
+                delete: { [weak captureFlow] isActive in
                     await captureFlow?.deleteVoiceNote(
-                        expectedActivationID: intakeActivationID
+                        expectedActivationID: intakeActivationID,
+                        while: isActive
                     ) ?? false
                 }
             )

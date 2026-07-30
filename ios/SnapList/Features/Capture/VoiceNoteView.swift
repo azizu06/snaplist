@@ -319,7 +319,9 @@ struct VoiceNoteSheet: View {
                 .accessibilityIdentifier("voice-note.rerecord")
 
                 Button(role: .destructive) {
-                    store.deleteSavedNote()
+                    Task {
+                        await store.deleteSavedNote()
+                    }
                 } label: {
                     Image(systemName: "trash")
                         .frame(

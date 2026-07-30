@@ -221,7 +221,7 @@ final class NativeIntakeAdoptionTests: XCTestCase {
                         duration: voice.duration
                     )
                 },
-                delete: {
+                delete: { _ in
                     await capture.deleteVoiceNote(
                         expectedActivationID: activationID
                     )
@@ -291,6 +291,155 @@ final class NativeIntakeAdoptionTests: XCTestCase {
             "Stale Photo Review and Voice Note completions cannot publish into B."
         )
         XCTAssertNil(capture.intakeSnapshot?.voice)
+    }
+
+    func testProductionScanReservationCannotPublishAfterPrincipalReconciliation()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let identity = NativeIntakeAdoptionIdentity(
+            .init(
+                verifiedClerkSubject: "user_native_intake_scan_a",
+                persistedAppAttestKeyID: nil
+            )
+        )
+        let dependencies = AppDependencies.make(
+            configuration: .preview,
+            nativeIntakeIdentitySource: identity.source,
+            nativeIntakeApplicationSupportDirectory: root
+        )
+        let capture = CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            intake: dependencies.nativeIntake
+        )
+        _ = await capture.restore()
+        let activationA = try XCTUnwrap(
+            capture.intakeSnapshot?.version.activationID
+        )
+        let projectionGate = NativeIntakeAdoptionGate()
+        var shouldSuspendProjection = true
+        capture.setNativeIntakeEventProjectionHook {
+            guard shouldSuspendProjection else { return }
+            shouldSuspendProjection = false
+            await projectionGate.suspend()
+        }
+        let reservation = try XCTUnwrap(capture.reserveLibraryIntake())
+        let photo = NativeIntakeAdoptionObservedPhoto(
+            data: try makeJPEG(seed: 8)
+        )
+
+        identity.set(
+            .init(
+                verifiedClerkSubject: "user_native_intake_scan_b",
+                persistedAppAttestKeyID: nil
+            )
+        )
+        await projectionGate.waitUntilRequested()
+        let staleScan = Task {
+            await capture.stageLibraryPhotos(
+                [photo],
+                reservation: reservation
+            )
+        }
+        for _ in 0..<100 {
+            await Task.yield()
+        }
+        projectionGate.resume()
+
+        let staleScanResult = await staleScan.value
+        XCTAssertEqual(staleScanResult, 0)
+        let events = await dependencies.nativeIntake.events()
+        var iterator = events.makeAsyncIterator()
+        guard case .snapshot(let snapshotB)? = await iterator.next() else {
+            return XCTFail("Principal B must replay its current intake.")
+        }
+        XCTAssertNotEqual(snapshotB.version.activationID, activationA)
+        XCTAssertTrue(snapshotB.photos.isEmpty)
+        XCTAssertEqual(
+            photo.loadCount,
+            0,
+            "A reserved Scan operation must be rejected before loading into B."
+        )
+    }
+
+    func testAuthorityVoiceDeleteCannotReplaceNewerRerecording()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let identity = NativeIntakeAdoptionIdentity(
+            .init(
+                verifiedClerkSubject: "user_native_intake_voice_delete",
+                persistedAppAttestKeyID: nil
+            )
+        )
+        let dependencies = AppDependencies.make(
+            configuration: .preview,
+            nativeIntakeIdentitySource: identity.source,
+            nativeIntakeApplicationSupportDirectory: root
+        )
+        let capture = CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            intake: dependencies.nativeIntake
+        )
+        _ = await capture.restore()
+        let stagedPhotoCount = await capture.stageLibraryPhotos([
+            NativeIntakeAdoptionPhoto(data: try makeJPEG(seed: 9))
+        ])
+        XCTAssertEqual(stagedPhotoCount, 1)
+        let activationID = try XCTUnwrap(
+            capture.intakeSnapshot?.version.activationID
+        )
+        let provisionalURL = root.appendingPathComponent(
+            "delete-rerecord.wav"
+        )
+        try Data("retained voice".utf8).write(to: provisionalURL)
+        let savedVoice = await capture.saveVoiceNote(
+            provisionalURL: provisionalURL,
+            duration: 4,
+            expectedActivationID: activationID
+        )
+        let voice = try XCTUnwrap(savedVoice)
+        await waitUntil { capture.intakeSnapshot?.voice == voice }
+
+        let deleteGate = NativeIntakeAdoptionGate()
+        let audio = NativeIntakeAdoptionVoiceAudio()
+        let store = VoiceNoteStore(
+            savedNote: VoiceNoteAsset(
+                url: voice.mediaURL,
+                duration: voice.duration
+            ),
+            audio: audio,
+            files: NativeIntakeAdoptionVoiceFiles(root: root),
+            authority: VoiceNoteCommitAuthority(
+                save: { _, _, _ in nil },
+                delete: { isActive in
+                    await deleteGate.suspend()
+                    return await capture.deleteVoiceNote(
+                        expectedActivationID: activationID,
+                        while: isActive
+                    )
+                }
+            )
+        )
+        let staleDelete = Task {
+            await store.deleteSavedNote()
+        }
+        await deleteGate.waitUntilRequested()
+
+        await store.rerecord()
+        XCTAssertEqual(store.phase, .recording(elapsed: 0, level: 0))
+        XCTAssertEqual(store.savedNote?.url, voice.mediaURL)
+        deleteGate.resume()
+
+        let staleDeleteResult = await staleDelete.value
+        XCTAssertFalse(staleDeleteResult)
+        XCTAssertEqual(store.phase, .recording(elapsed: 0, level: 0))
+        XCTAssertEqual(store.savedNote?.url, voice.mediaURL)
+        XCTAssertEqual(capture.intakeSnapshot?.voice, voice)
     }
 
     func testConcurrentPhotoReviewReordersReturnTheirOwnCommittedSnapshots()
@@ -489,6 +638,22 @@ private struct NativeIntakeAdoptionPhoto: CaptureLibraryPhotoLoading {
 
     func loadPhotoData() async throws -> Data? {
         data
+    }
+}
+
+@MainActor
+private final class NativeIntakeAdoptionObservedPhoto:
+    CaptureLibraryPhotoLoading {
+    let data: Data
+    private(set) var loadCount = 0
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    func loadPhotoData() async throws -> Data? {
+        loadCount += 1
+        return data
     }
 }
 
