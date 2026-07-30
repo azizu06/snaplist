@@ -35,10 +35,9 @@ fi
 
 if (( ${+SNAPLIST_IOS_SHARD} )); then
   case $SNAPLIST_IOS_SHARD in
-    unit | ui-1 | ui-2 | ui-drag) ;;
+    unit | ui-1 | ui-2) ;;
     *)
-      print -u2 -r -- \
-        "SNAPLIST_IOS_SHARD must be unit, ui-1, ui-2, or ui-drag."
+      print -u2 -r -- "SNAPLIST_IOS_SHARD must be unit, ui-1, or ui-2."
       exit 64
       ;;
   esac
