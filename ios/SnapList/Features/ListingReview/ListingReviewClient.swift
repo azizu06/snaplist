@@ -93,7 +93,15 @@ struct ListingReviewAPIClient: ListingReviewServing {
                 throw ListingReviewClientError.invalidResponse
             }
             if response.statusCode == 409 {
-                throw ListingReviewClientError.conflict
+                let envelope = try? JSONDecoder().decode(
+                    ErrorEnvelope.self,
+                    from: data
+                )
+                if envelope?.error.code == "conflict",
+                   envelope?.error.message == ListingReviewCopy.staleReview {
+                    throw ListingReviewClientError.conflict
+                }
+                throw ListingReviewClientError.unavailable
             }
             guard response.statusCode == 200 else {
                 throw ListingReviewClientError.unavailable
@@ -159,5 +167,14 @@ private extension ListingReviewAPIClient {
 
     struct SaveEnvelope: Decodable {
         let data: ListingReviewSaveReceipt
+    }
+
+    struct ErrorEnvelope: Decodable {
+        let error: APIError
+
+        struct APIError: Decodable {
+            let code: String
+            let message: String
+        }
     }
 }

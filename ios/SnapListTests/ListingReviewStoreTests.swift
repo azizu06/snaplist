@@ -160,6 +160,44 @@ final class ListingReviewStoreTests: XCTestCase {
             snapshot.listing.description
         )
 
+        let staleClient = ListingReviewAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            session: makeConflictSession(
+                message: ListingReviewCopy.staleReview
+            )
+        )
+        do {
+            _ = try await staleClient.save(
+                runID: snapshot.binding.runID,
+                draft: ListingReviewDraft(snapshot: snapshot),
+                expectedReviewRevision: snapshot.binding.reviewRevision,
+                idempotencyKey: UUID(),
+                bearerToken: "listing-review-test-bearer"
+            )
+            XCTFail("Accepted a stale save conflict")
+        } catch {
+            XCTAssertEqual(error as? ListingReviewClientError, .conflict)
+        }
+
+        let inProgressClient = ListingReviewAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            session: makeConflictSession(
+                message: "This save is already in progress. Try again."
+            )
+        )
+        do {
+            _ = try await inProgressClient.save(
+                runID: snapshot.binding.runID,
+                draft: ListingReviewDraft(snapshot: snapshot),
+                expectedReviewRevision: snapshot.binding.reviewRevision,
+                idempotencyKey: UUID(),
+                bearerToken: "listing-review-test-bearer"
+            )
+            XCTFail("Accepted an in-progress save response")
+        } catch {
+            XCTAssertEqual(error as? ListingReviewClientError, .unavailable)
+        }
+
         let removePersistence = ListingReviewCommitGatePersistence(
             gate: .remove
         )
@@ -207,11 +245,16 @@ final class ListingReviewStoreTests: XCTestCase {
     }
 
     func testSemanticRevertBecomesCleanAndRelaunchRestoresDirtyDraft() async throws {
-        let snapshot = try Self.makeSnapshot()
+        let snapshot = try Self.makeSnapshot(
+            photoURL: "https://media.snaplist.dev/items/expired-550-cover.jpg"
+        )
+        let refreshed = try Self.makeSnapshot(
+            photoURL: "https://media.snaplist.dev/items/fresh-550-cover.jpg"
+        )
         let persistence = MemoryListingReviewDraftPersistence()
         let service = ListingReviewRecordingService(
             saves: [],
-            reloads: [.success(snapshot), .success(snapshot)]
+            reloads: [.success(snapshot), .success(refreshed)]
         )
         let first = makeStore(service: service, persistence: persistence)
 
@@ -225,6 +268,10 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertTrue(relaunchedOpened)
         XCTAssertEqual(relaunched.draft?.description, "Locally staged description")
         XCTAssertTrue(relaunched.isDirty)
+        XCTAssertEqual(
+            relaunched.snapshot?.photos.first?.url,
+            refreshed.photos.first?.url
+        )
 
         await relaunched.setDescription(snapshot.listing.description)
         let revertedOutcome = await relaunched.done()
@@ -394,6 +441,33 @@ final class ListingReviewStoreTests: XCTestCase {
         )
     }
 
+    private func makeConflictSession(message: String) -> URLSession {
+        ListingReviewURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 409,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(
+                    """
+                    {
+                      "error": {
+                        "code": "conflict",
+                        "message": "\(message)",
+                        "requestId": "listing-review-request"
+                      }
+                    }
+                    """.utf8
+                )
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ListingReviewURLProtocolStub.self]
+        return URLSession(configuration: configuration)
+    }
+
     private static func receipt(
         for snapshot: ListingReviewResult
     ) -> ListingReviewSaveReceipt {
@@ -410,7 +484,9 @@ final class ListingReviewStoreTests: XCTestCase {
 
     private static func makeSnapshot(
         revision: String = "55000000-0000-4000-8000-000000000004",
-        title: String = "Sony WH-1000XM4 Noise-Canceling Headphones"
+        title: String = "Sony WH-1000XM4 Noise-Canceling Headphones",
+        photoURL: String =
+            "https://media.snaplist.dev/items/550-cover.jpg"
     ) throws -> ListingReviewResult {
         let object: [String: Any] = [
             "schemaVersion": 1,
@@ -422,7 +498,7 @@ final class ListingReviewStoreTests: XCTestCase {
             ],
             "photos": [[
                 "ordinal": 0,
-                "url": "https://media.snaplist.dev/items/550-cover.jpg",
+                "url": photoURL,
             ]],
             "identity": [
                 "label": "Sony WH-1000XM4",
@@ -456,6 +532,44 @@ final class ListingReviewStoreTests: XCTestCase {
             from: JSONSerialization.data(withJSONObject: object)
         )
     }
+}
+
+private final class ListingReviewURLProtocolStub:
+    URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var handler:
+        (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    override class func canonicalRequest(
+        for request: URLRequest
+    ) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(
+                self,
+                didFailWithError: URLError(.badServerResponse)
+            )
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(
+                self,
+                didReceive: response,
+                cacheStoragePolicy: .notAllowed
+            )
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
 
 private actor ListingReviewTestBearerProvider: BearerTokenProviding {

@@ -140,11 +140,11 @@ final class ListingReviewStore {
                         != ListingReviewDraft(snapshot: persisted.snapshot)
                 if persisted.snapshot.binding.reviewRevision
                     == canonical.binding.reviewRevision {
-                    adopt(persisted)
+                    adopt(persisted, canonical: canonical)
                     phase = .ready
                     return true
                 } else if persistedWasDirty {
-                    adopt(persisted)
+                    adopt(persisted, canonical: canonical)
                     isStale = true
                     phase = .conflict
                     announcement = ListingReviewCopy.staleReview
@@ -408,9 +408,12 @@ final class ListingReviewStore {
         expiresAt = now().addingTimeInterval(retention)
     }
 
-    private func adopt(_ persisted: PersistedListingReviewDraft) {
+    private func adopt(
+        _ persisted: PersistedListingReviewDraft,
+        canonical: ListingReviewResult
+    ) {
         draftGeneration &+= 1
-        snapshot = persisted.snapshot
+        snapshot = canonical
         draft = persisted.draft
         pendingSave = persisted.pendingSave
         expiresAt = persisted.expiresAt
