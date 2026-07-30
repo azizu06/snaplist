@@ -9,8 +9,24 @@ actor NativeIntake {
     }
 
     struct IdentitySource: Sendable {
+        enum AnonymousScopePersistence: Sendable {
+            case processPrivate
+            case installation
+        }
+
         let current: @Sendable () async -> Identity
         let changes: @Sendable () -> AsyncStream<Void>
+        let anonymousScopePersistence: AnonymousScopePersistence
+
+        init(
+            current: @escaping @Sendable () async -> Identity,
+            changes: @escaping @Sendable () -> AsyncStream<Void>,
+            anonymousScopePersistence: AnonymousScopePersistence = .processPrivate
+        ) {
+            self.current = current
+            self.changes = changes
+            self.anonymousScopePersistence = anonymousScopePersistence
+        }
 
         static let processPrivate = IdentitySource(
             current: { Identity(verifiedClerkSubject: nil, persistedAppAttestKeyID: nil) },
@@ -133,6 +149,11 @@ actor NativeIntake {
         let createdAt: Date
     }
 
+    private struct AnonymousInstallationIdentity: Codable {
+        let schemaVersion: Int
+        let id: UUID
+    }
+
     private enum ReadResult<Value> {
         case value(Value)
         case absent
@@ -181,6 +202,7 @@ actor NativeIntake {
     private var identityTask: Task<Void, Never>?
     private var retentionTask: Task<Void, Never>?
     private var reviewActivationID: UUID?
+    private var anonymousIdentityUnavailable = false
     private var deletionRetryAfter: [URL: Date] = [:]
 
     init(
@@ -225,7 +247,8 @@ actor NativeIntake {
                     persistedAppAttestKeyID: persistedAppAttestKey()?.id
                 )
             },
-            changes: changes
+            changes: changes,
+            anonymousScopePersistence: .installation
         )
     }
 
@@ -495,8 +518,34 @@ actor NativeIntake {
 
     private func reconcileIdentity() async {
         let identity = await identitySource.current()
-        let nextScope = Self.resolveScope(identity)
-        if let active, active.scope == nextScope {
+        let nextScope: Scope?
+        do {
+            nextScope = try resolveScope(identity)
+        } catch {
+            let shouldDismissReview =
+                reviewActivationID != nil
+                && reviewActivationID == active?.activationID
+            reviewActivationID = nil
+            anonymousIdentityUnavailable = true
+            let unavailable = blankBundle(
+                scope: nil,
+                root: ephemeralRoot,
+                activationID: UUID(),
+                recovery: .pending
+            )
+            active = unavailable
+            if shouldDismissReview {
+                publish(.dismissActivePhotoReview)
+            }
+            publish(.snapshot(unavailable.snapshot))
+            rescheduleRetention()
+            return
+        }
+        let wasAnonymousIdentityUnavailable = anonymousIdentityUnavailable
+        anonymousIdentityUnavailable = false
+        if let active,
+           active.scope == nextScope,
+           !wasAnonymousIdentityUnavailable {
             return
         }
         let shouldDismissReview = reviewActivationID != nil && reviewActivationID == active?.activationID
@@ -512,20 +561,116 @@ actor NativeIntake {
         rescheduleRetention()
     }
 
-    private static func resolveScope(_ identity: Identity) -> Scope? {
-        let authenticated = usable(identity.verifiedClerkSubject)
-        let guest = usable(identity.persistedAppAttestKeyID)
+    private func resolveScope(_ identity: Identity) throws -> Scope? {
+        let authenticated = Self.usable(identity.verifiedClerkSubject)
+        let guest = Self.usable(identity.persistedAppAttestKeyID)
         let taggedIdentity = authenticated.map { ("clerk-subject", $0) }
             ?? guest.map { ("app-attest-key-id", $0) }
-        guard let (tag, value) = taggedIdentity else {
-            return nil
+        if let (tag, value) = taggedIdentity {
+            return Self.scope(tag: tag, value: value)
         }
+        switch identitySource.anonymousScopePersistence {
+        case .processPrivate:
+            return nil
+        case .installation:
+            let identity = try loadOrCreateAnonymousInstallationIdentity()
+            return Self.scope(
+                tag: "anonymous-installation-id",
+                value: identity.id.uuidString.lowercased()
+            )
+        }
+    }
+
+    private static func scope(tag: String, value: String) -> Scope {
         let tagged = ["dev.snaplist.native-intake-principal", "v1", tag, value]
             .joined(separator: "\u{0}")
         let digest = SHA256.hash(data: Data(tagged.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
         return Scope(directoryComponent: "v1-\(digest)")
+    }
+
+    private func loadOrCreateAnonymousInstallationIdentity() throws
+        -> AnonymousInstallationIdentity {
+        try Self.prepareRoot(
+            applicationSupportRoot,
+            under: durableAnchor,
+            fileManager: fileManager
+        )
+        let url = applicationSupportRoot.appendingPathComponent(
+            "anonymous-installation-v1.json"
+        )
+        if let existing = try readAnonymousInstallationIdentity(at: url) {
+            try Self.protect(url, fileManager: fileManager)
+            return existing
+        }
+
+        let created = AnonymousInstallationIdentity(
+            schemaVersion: 1,
+            id: UUID()
+        )
+        let data = try JSONEncoder().encode(created)
+        let pendingURL = applicationSupportRoot.appendingPathComponent(
+            ".anonymous-installation-\(UUID().uuidString).pending"
+        )
+        try Self.write(
+            data,
+            to: pendingURL,
+            under: durableAnchor,
+            fileManager: fileManager
+        )
+        defer {
+            Self.removeIfContained(
+                pendingURL,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+        }
+        do {
+            try Self.validateContainedPath(
+                url,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+            try fileManager.linkItem(at: pendingURL, to: url)
+            try Self.protect(url, fileManager: fileManager)
+            return created
+        } catch {
+            guard Self.isFileAlreadyPresent(error),
+                  let existing = try readAnonymousInstallationIdentity(
+                    at: url
+                  ) else {
+                throw error
+            }
+            try Self.protect(url, fileManager: fileManager)
+            return existing
+        }
+    }
+
+    private func readAnonymousInstallationIdentity(
+        at url: URL
+    ) throws -> AnonymousInstallationIdentity? {
+        do {
+            try Self.validateContainedPath(
+                url,
+                under: durableAnchor,
+                fileManager: fileManager
+            )
+            let data = try Data(contentsOf: url)
+            let identity = try JSONDecoder().decode(
+                AnonymousInstallationIdentity.self,
+                from: data
+            )
+            guard identity.schemaVersion == 1 else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            return identity
+        } catch {
+            guard Self.isMissing(error) else {
+                throw error
+            }
+            return nil
+        }
     }
 
     private static func usable(_ value: String?) -> String? {
@@ -885,7 +1030,11 @@ actor NativeIntake {
         return deadlines.min()
     }
 
-    private func retentionDeadlineReached() {
+    private func retentionDeadlineReached() async {
+        if anonymousIdentityUnavailable {
+            await reconcileIdentity()
+            return
+        }
         let currentTime = now()
         if let current = active, current.recovery == .pending {
             let recovered = loadBundle(
@@ -1279,6 +1428,11 @@ actor NativeIntake {
     private static func isMissing(_ error: Error) -> Bool {
         let cocoa = CocoaError.Code(rawValue: (error as NSError).code)
         return cocoa == .fileNoSuchFile || cocoa == .fileReadNoSuchFile
+    }
+
+    private static func isFileAlreadyPresent(_ error: Error) -> Bool {
+        CocoaError.Code(rawValue: (error as NSError).code)
+            == .fileWriteFileExists
     }
 
     private func storageAnchor(for bundle: ActiveBundle) -> URL {

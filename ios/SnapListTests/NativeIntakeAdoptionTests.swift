@@ -5,6 +5,73 @@ import XCTest
 
 @MainActor
 final class NativeIntakeAdoptionTests: XCTestCase {
+    func testProductionAnonymousIntakeRestoresPhotoAndVoiceAcrossRelaunch()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let committedSnapshot: NativeIntake.Snapshot
+        do {
+            let firstDependencies = AppDependencies.make(
+                configuration: .preview,
+                nativeIntakeIdentitySource: productionAnonymousIdentitySource(),
+                nativeIntakeApplicationSupportDirectory: root
+            )
+            let firstCapture = CaptureFlowModel(
+                camera: firstDependencies.captureCamera,
+                evaluator: firstDependencies.framingEvaluator,
+                intake: firstDependencies.nativeIntake
+            )
+            let initialRestoration = await firstCapture.restore()
+            XCTAssertEqual(initialRestoration, .noDraft)
+            let addedPhotoCount = await firstCapture.stageLibraryPhotos([
+                NativeIntakeAdoptionPhoto(data: try makeJPEG(seed: 10))
+            ])
+            XCTAssertEqual(addedPhotoCount, 1)
+            let activationID = try XCTUnwrap(
+                firstCapture.intakeSnapshot?.version.activationID
+            )
+            let provisionalVoiceURL = root.appendingPathComponent(
+                "anonymous-relaunch.wav"
+            )
+            try Data("anonymous relaunch voice".utf8).write(
+                to: provisionalVoiceURL
+            )
+            let savedVoice = await firstCapture.saveVoiceNote(
+                provisionalURL: provisionalVoiceURL,
+                duration: 4,
+                expectedActivationID: activationID
+            )
+            let committedVoice = try XCTUnwrap(savedVoice)
+            await waitUntil {
+                firstCapture.intakeSnapshot?.voice == committedVoice
+            }
+            committedSnapshot = try XCTUnwrap(firstCapture.intakeSnapshot)
+        }
+
+        let relaunchedDependencies = AppDependencies.make(
+            configuration: .preview,
+            nativeIntakeIdentitySource: productionAnonymousIdentitySource(),
+            nativeIntakeApplicationSupportDirectory: root
+        )
+        let relaunchedCapture = CaptureFlowModel(
+            camera: relaunchedDependencies.captureCamera,
+            evaluator: relaunchedDependencies.framingEvaluator,
+            intake: relaunchedDependencies.nativeIntake
+        )
+        let restoredResult = await relaunchedCapture.restore()
+        XCTAssertEqual(restoredResult, .stagedPhoto)
+        XCTAssertEqual(
+            relaunchedCapture.intakeSnapshot?.photos,
+            committedSnapshot.photos
+        )
+        XCTAssertEqual(
+            relaunchedCapture.intakeSnapshot?.voice,
+            committedSnapshot.voice
+        )
+    }
+
     func testProductionScanAndPhotoReviewPublishOnlyCommittedNativeIntakeSnapshots()
         async throws {
         let root = FileManager.default.temporaryDirectory
@@ -536,6 +603,20 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         }
         XCTAssertTrue(condition())
     }
+
+    private func productionAnonymousIdentitySource()
+        -> NativeIntake.IdentitySource {
+        ClerkAuthenticationComposition.makeNativeIntakeIdentitySource(
+            keyStore: NativeIntakeAdoptionEmptyAppAttestKeyStore(),
+            verifiedClerkSubject: { nil },
+            clerkChanges: {
+                AsyncStream { $0.finish() }
+            },
+            appAttestChanges: {
+                AsyncStream { $0.finish() }
+            }
+        )
+    }
 }
 
 @MainActor
@@ -639,6 +720,13 @@ private struct NativeIntakeAdoptionPhoto: CaptureLibraryPhotoLoading {
     func loadPhotoData() async throws -> Data? {
         data
     }
+}
+
+private struct NativeIntakeAdoptionEmptyAppAttestKeyStore:
+    AppAttestKeyIDStoring {
+    func load() throws -> AppAttestStoredKey? { nil }
+    func save(_: AppAttestStoredKey) throws {}
+    func remove() throws {}
 }
 
 @MainActor
