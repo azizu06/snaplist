@@ -39,7 +39,8 @@
         "byteLength": 8,
         "mediaType": "image/jpeg"
       }
-    ]
+    ],
+    "voiceContext": null
   },
   "meta": {
     "requestId": "req_mobile_item_submission_fixture"

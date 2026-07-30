@@ -23,6 +23,7 @@ import {
   authorizeRemoveAndCompleteStagingCleanup,
   createSubmissionAdminControl,
   expireAndClaimStagingCleanup,
+  fixedWavBytes,
   jpeg,
   localSubmissionStackIsReachable,
   proveVerifiedGuestLostResponseRecovery,
@@ -243,6 +244,11 @@ afterAll(async () => {
     [guestId],
   );
   await database.query(
+    `delete from private.mobile_item_submission_voice_handoffs
+     where user_id = $1`,
+    [guestId],
+  );
+  await database.query(
     `delete from private.mobile_item_submissions
      where user_id = $1`,
     [guestId],
@@ -271,7 +277,7 @@ const describeVerifiedGuestFirstRun =
 describeVerifiedGuestFirstRun(
   "verified guest first-run submission against local Supabase",
   () => {
-  it("serializes concurrent logical runs and replays only the winner through publishable-key RLS", async () => {
+  it("serializes concurrent guest voice runs and replays only the winner through publishable-key RLS", async () => {
     const guestBearer = `guestcap_${crypto.randomUUID().replaceAll("-", "")}`;
     const internalJwt = await mintVerifiedGuestJwt(guestId, activeCapabilityId);
     const recovery = await proveVerifiedGuestLostResponseRecovery({
@@ -661,36 +667,54 @@ describeVerifiedGuestFirstRun(
       requestId: () => crypto.randomUUID(),
     });
     const idempotencyKeys = [crypto.randomUUID(), crypto.randomUUID()];
+    const voiceBytes = fixedWavBytes(541);
+    const voiceMultipart = () => {
+      const body = singlePhotoMultipart();
+      body.append(
+        "voiceContext",
+        new File(
+          [Uint8Array.from(voiceBytes).buffer],
+          "seller-context.wav",
+          { type: "audio/wav" },
+        ),
+      );
+      body.append("voiceContextLocale", "EN-us");
+      return body;
+    };
 
     expect(guestBearer).not.toContain(guestId);
     const responses = await Promise.all(
       idempotencyKeys.map((key) =>
-        handler(request(guestBearer, key, singlePhotoMultipart())),
+        handler(request(guestBearer, key, voiceMultipart())),
       ),
     );
     expect(
       observedRequests.filter((entry) =>
-        entry.path.endsWith("/rpc/find_mobile_item_submission"),
+        entry.path.endsWith("/rpc/find_mobile_item_submission_v2"),
       ),
     ).toHaveLength(2);
     expect(
       observedRequests.filter((entry) =>
-        entry.path.endsWith("/rpc/begin_mobile_item_submission"),
+        entry.path.endsWith("/rpc/begin_mobile_item_submission_v2"),
       ),
     ).toHaveLength(2);
     const storageRequests = observedRequests.filter((entry) =>
       entry.path.includes("/storage/v1/"),
     );
-    expect(storageRequests).toHaveLength(4);
+    expect(storageRequests).toHaveLength(8);
     expect(storageRequests.map((entry) => entry.method).sort()).toEqual([
       "GET",
       "GET",
+      "GET",
+      "GET",
+      "POST",
+      "POST",
       "POST",
       "POST",
     ]);
     expect(
       observedRequests.filter((entry) =>
-        entry.path.endsWith("/rpc/commit_mobile_item_submission"),
+        entry.path.endsWith("/rpc/commit_mobile_item_submission_v2"),
       ),
     ).toHaveLength(2);
     expect(observedRequests.filter((entry) =>
@@ -704,6 +728,13 @@ describeVerifiedGuestFirstRun(
     const winnerIndex = responses.findIndex((response) => response.status === 202);
     const loserIndex = 1 - winnerIndex;
     const winner = await responses[winnerIndex]!.json();
+    expect(winner.data.voiceContext).toMatchObject({
+      version: 1,
+      byteLength: voiceBytes.byteLength,
+      durationMs: 10,
+      mediaType: "audio/wav",
+      contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     await expect(responses[loserIndex]!.json()).resolves.toMatchObject({
       error: {
         code: "forbidden",
@@ -719,7 +750,7 @@ describeVerifiedGuestFirstRun(
       request(
         guestBearer,
         idempotencyKeys[winnerIndex]!,
-        singlePhotoMultipart(),
+        voiceMultipart(),
       ),
     );
     expect(replay.status).toBe(200);
@@ -732,13 +763,13 @@ describeVerifiedGuestFirstRun(
     });
     expect(
       observedRequests.filter((entry) =>
-        entry.path.endsWith("/rpc/find_mobile_item_submission"),
+        entry.path.endsWith("/rpc/find_mobile_item_submission_v2"),
       ),
     ).toHaveLength(3);
     expect(
       observedRequests.slice(requestsBeforeReplay).map((entry) => entry.path),
     ).toEqual([
-      expect.stringMatching(/\/rpc\/find_mobile_item_submission$/),
+      expect.stringMatching(/\/rpc\/find_mobile_item_submission_v2$/),
     ]);
     expect(
       observedRequests.filter((entry) =>
@@ -782,6 +813,8 @@ describeVerifiedGuestFirstRun(
       storage_objects: number;
       usage_reservations: number;
       photo_paths: string[];
+      accepted_voice_handoffs: number;
+      staged_voice_handoffs: number;
     }>(
       `select
          (select count(*)::integer from public.ai_item_allowance_periods
@@ -809,6 +842,14 @@ describeVerifiedGuestFirstRun(
           from private.pipeline_run_usage_reservations reservation
           join public.pipeline_runs run on run.id = reservation.run_id
           where run.user_id = $1) usage_reservations,
+         (select count(*)::integer
+          from private.mobile_item_submission_voice_handoffs handoff
+          where handoff.user_id = $1
+            and handoff.state = 'accepted') accepted_voice_handoffs,
+         (select count(*)::integer
+          from private.mobile_item_submission_voice_handoffs handoff
+          where handoff.user_id = $1
+            and handoff.state = 'staged') staged_voice_handoffs,
          (select item.photos from public.items item
           where item.id = $2::uuid and item.user_id = $1) photo_paths`,
       [guestId, winner.data.itemId],
@@ -821,8 +862,10 @@ describeVerifiedGuestFirstRun(
       ledger_rows: 1,
       queue_messages: 1,
       runs: 1,
-      storage_objects: 1,
+      storage_objects: 3,
       usage_reservations: 1,
+      accepted_voice_handoffs: 1,
+      staged_voice_handoffs: 1,
     });
     expect(durable.rows[0]!.photo_paths).toHaveLength(1);
 

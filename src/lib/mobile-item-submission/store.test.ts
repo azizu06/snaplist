@@ -23,11 +23,13 @@ describe("fixed mobile item submission RPC capability", () => {
     await expect(staging.findSubmission({
       userId: "guest_server_verified",
       idempotencyKey: "33220000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: "d".repeat(64),
       requestFingerprint: "c".repeat(64),
     })).resolves.toBeNull();
 
-    expect(rpc).toHaveBeenCalledWith("find_mobile_item_submission", {
+    expect(rpc).toHaveBeenCalledWith("find_mobile_item_submission_v2", {
       p_idempotency_key: "33220000-0000-4000-8000-000000000001",
+      p_legacy_request_fingerprint: "d".repeat(64),
       p_request_fingerprint: "c".repeat(64),
     });
   });
@@ -42,6 +44,7 @@ describe("fixed mobile item submission RPC capability", () => {
     await staging.beginSubmission({
       userId: "guest_server_verified",
       idempotencyKey: "33220000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: null,
       requestFingerprint: "c".repeat(64),
       batchId: "33220000-0000-4000-8000-000000000001",
       cleanupId: "33220000-0000-4000-8000-000000000004",
@@ -51,13 +54,15 @@ describe("fixed mobile item submission RPC capability", () => {
         storagePath:
           "guest_server_verified/pipeline-staging/33220000-0000-4000-8000-000000000001/0/0-photo.jpg",
       }],
+      voiceReceipt: null,
     });
 
-    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission", {
+    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission_v2", {
       p_batch_id: "33220000-0000-4000-8000-000000000001",
       p_cleanup_id: "33220000-0000-4000-8000-000000000004",
       p_cost_basis: 12.34,
       p_idempotency_key: "33220000-0000-4000-8000-000000000001",
+      p_legacy_request_fingerprint: null,
       p_photo_receipts: [{
         ordinal: 0,
         storage_path:
@@ -67,6 +72,7 @@ describe("fixed mobile item submission RPC capability", () => {
         media_type: "image/jpeg",
       }],
       p_request_fingerprint: "c".repeat(64),
+      p_voice_receipt: null,
     });
   });
 
@@ -98,6 +104,7 @@ describe("fixed mobile item submission RPC capability", () => {
     await staging.commitSubmission({
       userId: "guest_server_verified",
       idempotencyKey: "33220000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: null,
       requestFingerprint: "c".repeat(64),
       batchId: "33220000-0000-4000-8000-000000000001",
       cleanupId: "33220000-0000-4000-8000-000000000004",
@@ -113,14 +120,16 @@ describe("fixed mobile item submission RPC capability", () => {
         storagePath:
           "guest_server_verified/pipeline-staging/33220000-0000-4000-8000-000000000001/0/0-photo.jpg",
       }],
+      voiceReceipt: null,
     });
 
-    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission", {
+    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission_v2", {
       p_batch_id: "33220000-0000-4000-8000-000000000001",
       p_cleanup_id: "33220000-0000-4000-8000-000000000004",
       p_cost_basis: 12.34,
       p_daily_limit: 15,
       p_idempotency_key: "33220000-0000-4000-8000-000000000001",
+      p_legacy_request_fingerprint: null,
       p_per_minute_limit: 20,
       p_photo_identity: {
         kind: "content_sha256_set_v1",
@@ -135,6 +144,7 @@ describe("fixed mobile item submission RPC capability", () => {
         media_type: "image/jpeg",
       }],
       p_request_fingerprint: "c".repeat(64),
+      p_voice_receipt: null,
     });
   });
 
@@ -161,6 +171,7 @@ describe("fixed mobile item submission RPC capability", () => {
     await expect(staging.commitSubmission({
       userId: "guest_server_verified",
       idempotencyKey: "33220000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: null,
       requestFingerprint: "c".repeat(64),
       batchId: "33220000-0000-4000-8000-000000000001",
       cleanupId: "33220000-0000-4000-8000-000000000004",
@@ -172,6 +183,7 @@ describe("fixed mobile item submission RPC capability", () => {
         fingerprint: "b".repeat(64),
       },
       photoReceipts,
+      voiceReceipt: null,
     })).rejects.toMatchObject({
       code: "mobile_item_submission_denied",
       kind: "allowance_denied",
@@ -212,6 +224,7 @@ describe("fixed mobile item submission RPC capability", () => {
     const result = await staging.commitSubmission({
       userId: "guest_352",
       idempotencyKey: "35220000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: null,
       requestFingerprint: "e".repeat(64),
       batchId: "35220000-0000-4000-8000-000000000001",
       cleanupId: "35220000-0000-4000-8000-000000000004",
@@ -223,6 +236,7 @@ describe("fixed mobile item submission RPC capability", () => {
         fingerprint: "f".repeat(64),
       },
       photoReceipts: receipts,
+      voiceReceipt: null,
     });
 
     expect(result.receipt.photos.map((photo) => photo.ordinal)).toEqual([
@@ -244,6 +258,7 @@ describe("fixed mobile item submission RPC capability", () => {
     await expect(staging.findSubmission({
       userId: "user_334",
       idempotencyKey: "33420000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: null,
       requestFingerprint: "c".repeat(64),
     })).rejects.toMatchObject({
       code: "mobile_item_submission_denied",
@@ -259,18 +274,21 @@ describe("fixed mobile item submission RPC capability", () => {
     await staging.beginSubmission({
       userId: "user_334",
       idempotencyKey: "33420000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: null,
       requestFingerprint: "c".repeat(64),
       batchId: "33420000-0000-4000-8000-000000000001",
       cleanupId: "33420000-0000-4000-8000-000000000004",
       costBasis: 12.34,
       photoReceipts,
+      voiceReceipt: null,
     });
 
-    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission", {
+    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission_v2", {
       p_batch_id: "33420000-0000-4000-8000-000000000001",
       p_cleanup_id: "33420000-0000-4000-8000-000000000004",
       p_cost_basis: 12.34,
       p_idempotency_key: "33420000-0000-4000-8000-000000000001",
+      p_legacy_request_fingerprint: null,
       p_photo_receipts: [{
         ordinal: 0,
         storage_path: photoReceipts[0].storagePath,
@@ -280,6 +298,7 @@ describe("fixed mobile item submission RPC capability", () => {
       }],
       p_request_fingerprint: "c".repeat(64),
       p_user_id: "user_334",
+      p_voice_receipt: null,
     });
   });
 
@@ -309,6 +328,7 @@ describe("fixed mobile item submission RPC capability", () => {
     const result = await staging.commitSubmission({
       userId: "user_334",
       idempotencyKey: "33420000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: null,
       requestFingerprint: "c".repeat(64),
       batchId: "33420000-0000-4000-8000-000000000001",
       cleanupId: "33420000-0000-4000-8000-000000000004",
@@ -320,6 +340,7 @@ describe("fixed mobile item submission RPC capability", () => {
         fingerprint: "b".repeat(64),
       },
       photoReceipts,
+      voiceReceipt: null,
     });
 
     expect(result).toMatchObject({
@@ -331,12 +352,13 @@ describe("fixed mobile item submission RPC capability", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain("storagePath");
-    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission", {
+    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission_v2", {
       p_batch_id: "33420000-0000-4000-8000-000000000001",
       p_cleanup_id: "33420000-0000-4000-8000-000000000004",
       p_cost_basis: 12.34,
       p_daily_limit: 15,
       p_idempotency_key: "33420000-0000-4000-8000-000000000001",
+      p_legacy_request_fingerprint: null,
       p_per_minute_limit: 20,
       p_photo_identity: {
         kind: "content_sha256_set_v1",
@@ -353,6 +375,89 @@ describe("fixed mobile item submission RPC capability", () => {
       ],
       p_request_fingerprint: "c".repeat(64),
       p_user_id: "user_334",
+      p_voice_receipt: null,
     });
+  });
+
+  it("maps one private voice handoff into only the matching public receipt", async () => {
+    const voiceReceipt = {
+      version: 1 as const,
+      storagePath:
+        "user_334/pipeline-staging/33420000-0000-4000-8000-000000000001/0/voice-a.wav",
+      contentSha256: "d".repeat(64),
+      byteLength: 364,
+      durationMs: 10,
+      locale: "en-US",
+      mediaType: "audio/wav" as const,
+    };
+    const rpc = vi.fn(async () => ({
+      data: [{
+        item_id: "33420000-0000-4000-8000-000000000002",
+        run_id: "33420000-0000-4000-8000-000000000003",
+        queue_message_id: 42,
+        photo_identity_kind: "content_sha256_set_v1",
+        photo_identity_fingerprint: "b".repeat(64),
+        photo_receipts: photoReceipts.map((receipt) => ({
+          ordinal: receipt.ordinal,
+          storage_path: receipt.storagePath,
+          content_sha256: receipt.contentSha256,
+          byte_length: receipt.byteLength,
+          media_type: receipt.mediaType,
+        })),
+        voice_receipt: {
+          version: voiceReceipt.version,
+          storage_path: voiceReceipt.storagePath,
+          content_sha256: voiceReceipt.contentSha256,
+          byte_length: voiceReceipt.byteLength,
+          duration_ms: voiceReceipt.durationMs,
+          locale: voiceReceipt.locale,
+          media_type: voiceReceipt.mediaType,
+        },
+        is_replay: false,
+      }],
+      error: null,
+    }));
+    const staging = createSupabaseMobileItemSubmissionStaging({ rpc });
+
+    const result = await staging.commitSubmission({
+      userId: "user_334",
+      idempotencyKey: "33420000-0000-4000-8000-000000000001",
+      legacyRequestFingerprint: null,
+      requestFingerprint: "c".repeat(64),
+      batchId: "33420000-0000-4000-8000-000000000001",
+      cleanupId: "33420000-0000-4000-8000-000000000004",
+      costBasis: 12.34,
+      dailyLimit: 15,
+      perMinuteLimit: 20,
+      photoIdentity: {
+        kind: "content_sha256_set_v1",
+        fingerprint: "b".repeat(64),
+      },
+      photoReceipts,
+      voiceReceipt,
+    });
+
+    expect(result.receipt.voiceContext).toEqual({
+      version: 1,
+      contentSha256: "d".repeat(64),
+      byteLength: 364,
+      durationMs: 10,
+      mediaType: "audio/wav",
+    });
+    expect(JSON.stringify(result.receipt)).not.toMatch(/storage|locale/i);
+    expect(rpc).toHaveBeenCalledWith(
+      "commit_mobile_item_submission_v2",
+      expect.objectContaining({
+        p_voice_receipt: {
+          version: 1,
+          storage_path: voiceReceipt.storagePath,
+          content_sha256: "d".repeat(64),
+          byte_length: 364,
+          duration_ms: 10,
+          locale: "en-US",
+          media_type: "audio/wav",
+        },
+      }),
+    );
   });
 });

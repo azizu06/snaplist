@@ -202,7 +202,7 @@ describe("lean native design authority contract", () => {
           target: 5,
           ownerIssue: 352,
         },
-        voiceContextImplementationGapOwnerIssue: 351,
+        voiceContextProductionGateOwnerIssue: 386,
       });
     }
   });

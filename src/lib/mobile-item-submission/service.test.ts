@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { createMobileItemSubmissionHandler } from "./http";
-import { MobileItemSubmissionDeniedError } from "./contract";
+import {
+  MobileItemSubmissionConflictError,
+  MobileItemSubmissionDeniedError,
+  prepareMobileItemSubmission,
+  type MobileItemSubmissionReceipt,
+} from "./contract";
 import {
   createMobileItemSubmissionOperations,
   type MobileItemSubmissionStaging,
@@ -37,6 +42,31 @@ function multipartRequest(): Request {
   });
 }
 
+function fixedWavBytes(sampleSeed = 0): Uint8Array {
+  const samples = 160;
+  const bytes = new Uint8Array(44 + samples * 2);
+  const view = new DataView(bytes.buffer);
+  const writeAscii = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      bytes[offset + index] = value.charCodeAt(index);
+    }
+  };
+  writeAscii(0, "RIFF");
+  view.setUint32(4, bytes.byteLength - 8, true);
+  writeAscii(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16_000, true);
+  view.setUint32(28, 32_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(36, "data");
+  view.setUint32(40, samples * 2, true);
+  view.setInt16(44, sampleSeed, true);
+  return bytes;
+}
+
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -46,6 +76,417 @@ function deferred() {
 }
 
 describe("mobile item submission HTTP composition", () => {
+  it("replays a pre-existing photo-only v1 binding through the current v2 handler", async () => {
+    const prepared = await prepareMobileItemSubmission(
+      await multipartRequest().formData(),
+    );
+    const legacyFingerprint = prepared.legacyRequestFingerprint!;
+    const receipt: MobileItemSubmissionReceipt = {
+      itemId: "54130000-0000-4000-8000-000000000001",
+      runId: "54130000-0000-4000-8000-000000000002",
+      status: "queued",
+      stage: "queued",
+      photoIdentity: {
+        kind: "content_sha256_set_v1",
+        fingerprint: "d".repeat(64),
+      },
+      photos: prepared.photos.map(
+        ({ ordinal, contentSha256, byteLength, mediaType }) => ({
+          ordinal,
+          contentSha256,
+          byteLength,
+          mediaType,
+        }),
+      ),
+      voiceContext: null,
+    };
+    const beginSubmission = vi.fn();
+    const commitSubmission = vi.fn();
+    const storageFor = vi.fn();
+    const operations = createMobileItemSubmissionOperations({
+      resolvePrincipal: async (bearerToken) => ({
+        kind: "clerk",
+        userId: "user_photo_v1_replay",
+        bearerToken,
+      }),
+      limits: { dailyLimit: 15, perMinuteLimit: 20 },
+      storageFor,
+      staging: {
+        async findSubmission(input) {
+          const compatibility = input as typeof input & {
+            legacyRequestFingerprint?: string | null;
+          };
+          expect(input.requestFingerprint).not.toBe(legacyFingerprint);
+          return compatibility.legacyRequestFingerprint === legacyFingerprint
+            ? receipt
+            : null;
+        },
+        beginSubmission,
+        commitSubmission,
+        async resolveCleanupIntent() {
+          return true;
+        },
+      },
+    });
+    const handler = createMobileItemSubmissionHandler({
+      itemSubmission: operations,
+      requestId: () => "req_photo_v1_replay",
+    });
+
+    const response = await handler(multipartRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        itemId: receipt.itemId,
+        runId: receipt.runId,
+        voiceContext: null,
+      },
+    });
+    expect(beginSubmission).not.toHaveBeenCalled();
+    expect(commitSubmission).not.toHaveBeenCalled();
+    expect(storageFor).not.toHaveBeenCalled();
+  });
+
+  it("returns one canonical run and matching voice receipt after ambiguous v2 replay", async () => {
+    const objects = new Map<string, { bytes: Uint8Array; mediaType: string }>();
+    let committed:
+      | {
+          fingerprint: string;
+          receipt: MobileItemSubmissionReceipt;
+        }
+      | undefined;
+    let queueMessages = 0;
+    const staging: MobileItemSubmissionStaging = {
+      async findSubmission(input) {
+        if (!committed) return null;
+        if (committed.fingerprint !== input.requestFingerprint) {
+          throw new MobileItemSubmissionConflictError();
+        }
+        return committed.receipt;
+      },
+      async beginSubmission() {
+        return true;
+      },
+      async resolveCleanupIntent() {
+        return true;
+      },
+      async commitSubmission(input) {
+        if (committed) {
+          if (committed.fingerprint !== input.requestFingerprint) {
+            throw new MobileItemSubmissionConflictError();
+          }
+          return { outcome: "replayed", receipt: committed.receipt };
+        }
+        const voice = (
+          input as typeof input & {
+            voiceReceipt: null | {
+              byteLength: number;
+              contentSha256: string;
+              durationMs: number;
+              mediaType: "audio/wav";
+              version: 1;
+            };
+          }
+        ).voiceReceipt;
+        committed = {
+          fingerprint: input.requestFingerprint,
+          receipt: {
+            itemId: "54100000-0000-4000-8000-000000000001",
+            runId: "54100000-0000-4000-8000-000000000002",
+            status: "queued",
+            stage: "queued",
+            photoIdentity: input.photoIdentity,
+            photos: input.photoReceipts.map(
+              ({ ordinal, contentSha256, byteLength, mediaType }) => ({
+                ordinal,
+                contentSha256,
+                byteLength,
+                mediaType,
+              }),
+            ),
+            voiceContext:
+              voice === null
+                ? null
+                : {
+                    version: voice.version,
+                    contentSha256: voice.contentSha256,
+                    byteLength: voice.byteLength,
+                    durationMs: voice.durationMs,
+                    mediaType: voice.mediaType,
+                  },
+          } as MobileItemSubmissionReceipt,
+        };
+        queueMessages += 1;
+        return { outcome: "created", receipt: committed.receipt };
+      },
+    };
+    const base = createMobileItemSubmissionOperations({
+      resolvePrincipal: vi.fn(async (bearerToken) => ({
+        kind: "clerk" as const,
+        userId: "user_voice_replay",
+        bearerToken,
+      })),
+      limits: { dailyLimit: 15, perMinuteLimit: 20 },
+      storageFor: vi.fn(() => ({
+        async upload(path: string, bytes: Uint8Array, mediaType: string) {
+          if (objects.has(path)) throw new Error("duplicate object");
+          objects.set(path, { bytes: Uint8Array.from(bytes), mediaType });
+        },
+        async download(path: string) {
+          const stored = objects.get(path);
+          if (!stored) throw new Error("missing object");
+          return stored;
+        },
+      })),
+      staging,
+    });
+    let loseFirstResponse = true;
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => "req_voice_replay",
+      itemSubmission: {
+        resolvePrincipal: base.resolvePrincipal,
+        async submit(input) {
+          const result = await base.submit(input);
+          if (loseFirstResponse) {
+            loseFirstResponse = false;
+            throw new Error("response lost after commit");
+          }
+          return result;
+        },
+      },
+    });
+    const wav = fixedWavBytes();
+    const request = () => {
+      const body = new FormData();
+      for (let ordinal = 0; ordinal < 5; ordinal += 1) {
+        body.append(
+          "photo",
+          new File([
+            new Uint8Array([...JPEG, ordinal]).buffer,
+          ], `photo-${ordinal}.jpg`, { type: "image/jpeg" }),
+        );
+      }
+      body.append(
+        "voiceContext",
+        new File(
+          [Uint8Array.from(wav).buffer],
+          "seller-context.wav",
+          { type: "audio/wav" },
+        ),
+      );
+      body.append("voiceContextLocale", "EN-us");
+      return new Request("http://localhost/v1/items/runs", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer signed-clerk-jwt",
+          "idempotency-key": "54100000-0000-4000-8000-000000000003",
+        },
+        body,
+      });
+    };
+
+    expect((await handler(request())).status).toBe(503);
+    const replay = await handler(request());
+    expect(replay.status).toBe(200);
+    await expect(replay.json()).resolves.toMatchObject({
+      data: {
+        itemId: "54100000-0000-4000-8000-000000000001",
+        runId: "54100000-0000-4000-8000-000000000002",
+        photos: [
+          { ordinal: 0 },
+          { ordinal: 1 },
+          { ordinal: 2 },
+          { ordinal: 3 },
+          { ordinal: 4 },
+        ],
+        voiceContext: {
+          version: 1,
+          byteLength: wav.byteLength,
+          durationMs: 10,
+          mediaType: "audio/wav",
+          contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
+      },
+    });
+    expect(queueMessages).toBe(1);
+    expect(objects.size).toBe(6);
+  });
+
+  it("continues bounded-invalid voice as photo-only with a null receipt", async () => {
+    const submit = vi.fn(async (
+      input: Parameters<ReturnType<
+        typeof createMobileItemSubmissionOperations
+      >["submit"]>[0],
+    ) => ({
+      outcome: "created" as const,
+      receipt: {
+        itemId: "54110000-0000-4000-8000-000000000001",
+        runId: "54110000-0000-4000-8000-000000000002",
+        status: "queued" as const,
+        stage: "queued" as const,
+        photoIdentity: {
+          kind: "content_sha256_set_v1" as const,
+          fingerprint: "a".repeat(64),
+        },
+        photos: input.photos.map(
+          ({ ordinal, contentSha256, byteLength, mediaType }) => ({
+            ordinal,
+            contentSha256,
+            byteLength,
+            mediaType,
+          }),
+        ),
+        voiceContext: null,
+      },
+    }));
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => "req_invalid_voice",
+      itemSubmission: {
+        async resolvePrincipal(bearerToken) {
+          return { kind: "clerk", userId: "user_541", bearerToken };
+        },
+        submit,
+      },
+    });
+    const request = (duplicate: "none" | "voice" | "locale" = "none") => {
+      const body = new FormData();
+      body.append(
+        "photo",
+        new File([JPEG], "front.jpg", { type: "image/jpeg" }),
+      );
+      body.append(
+        "voiceContext",
+        new File(
+          [new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer],
+          "invalid.wav",
+          { type: "audio/wav" },
+        ),
+      );
+      body.append("voiceContextLocale", "en-US");
+      if (duplicate === "voice") {
+        body.append(
+          "voiceContext",
+          new File(
+            [Uint8Array.from(fixedWavBytes()).buffer],
+            "second.wav",
+            { type: "audio/wav" },
+          ),
+        );
+      }
+      if (duplicate === "locale") {
+        body.append("voiceContextLocale", "fr-FR");
+      }
+      return new Request("http://localhost/v1/items/runs", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer signed-clerk-jwt",
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body,
+      });
+    };
+
+    const response = await handler(request());
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      data: { voiceContext: null },
+    });
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit.mock.calls[0][0].voice).toBeNull();
+    expect((await handler(request("voice"))).status).toBe(400);
+    expect((await handler(request("locale"))).status).toBe(400);
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it("conflicts when accepted voice bytes or canonical locale change under one key", async () => {
+    let committed:
+      | { fingerprint: string; receipt: MobileItemSubmissionReceipt }
+      | undefined;
+    let queueMessages = 0;
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => "req_changed_voice",
+      itemSubmission: {
+        async resolvePrincipal(bearerToken) {
+          return { kind: "clerk", userId: "user_541", bearerToken };
+        },
+        async submit(input) {
+          if (committed) {
+            if (committed.fingerprint !== input.requestFingerprint) {
+              throw new MobileItemSubmissionConflictError();
+            }
+            return { outcome: "replayed", receipt: committed.receipt };
+          }
+          const voice = input.voice;
+          committed = {
+            fingerprint: input.requestFingerprint,
+            receipt: {
+              itemId: "54120000-0000-4000-8000-000000000001",
+              runId: "54120000-0000-4000-8000-000000000002",
+              status: "queued",
+              stage: "queued",
+              photoIdentity: {
+                kind: "content_sha256_set_v1",
+                fingerprint: "b".repeat(64),
+              },
+              photos: input.photos.map(
+                ({ ordinal, contentSha256, byteLength, mediaType }) => ({
+                  ordinal,
+                  contentSha256,
+                  byteLength,
+                  mediaType,
+                }),
+              ),
+              voiceContext:
+                voice === null
+                  ? null
+                  : {
+                      version: voice.version,
+                      contentSha256: voice.contentSha256,
+                      byteLength: voice.byteLength,
+                      durationMs: voice.durationMs,
+                      mediaType: voice.mediaType,
+                    },
+            },
+          };
+          queueMessages += 1;
+          return { outcome: "created", receipt: committed.receipt };
+        },
+      },
+    });
+    const key = "54120000-0000-4000-8000-000000000003";
+    const request = (sampleSeed: number, locale: string) => {
+      const body = new FormData();
+      body.append(
+        "photo",
+        new File([JPEG], "front.jpg", { type: "image/jpeg" }),
+      );
+      body.append(
+        "voiceContext",
+        new File(
+          [Uint8Array.from(fixedWavBytes(sampleSeed)).buffer],
+          "seller-context.wav",
+          { type: "audio/wav" },
+        ),
+      );
+      body.append("voiceContextLocale", locale);
+      return new Request("http://localhost/v1/items/runs", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer signed-clerk-jwt",
+          "idempotency-key": key,
+        },
+        body,
+      });
+    };
+
+    expect((await handler(request(1, "EN-us"))).status).toBe(202);
+    expect((await handler(request(1, "en-US"))).status).toBe(200);
+    expect((await handler(request(2, "en-US"))).status).toBe(409);
+    expect((await handler(request(1, "fr-FR"))).status).toBe(409);
+    expect(queueMessages).toBe(1);
+  });
+
   it("persists cleanup before writes and commits only independently verified server-owned objects", async () => {
     const events: string[] = [];
     const objects = new Map<string, { bytes: Uint8Array; mediaType: string }>();
@@ -69,6 +510,7 @@ describe("mobile item submission HTTP composition", () => {
               mediaType,
             }),
           ),
+          voiceContext: null,
         },
       };
     });
@@ -280,6 +722,7 @@ describe("mobile item submission HTTP composition", () => {
               runId: "33200000-0000-4000-8000-000000000011",
               stage: "queued" as const,
               status: "queued" as const,
+              voiceContext: null,
             },
           };
         }),
