@@ -4,12 +4,19 @@ import { Client } from "pg";
 import {
   cleanupClerkTestUsers,
   mintUserJwt,
+  mintVerifiedGuestJwt,
 } from "@/lib/supabase/test-users";
 import {
   MobileRunNotFoundError,
   createConfiguredSupabaseMobileRunOperations,
 } from "./runs";
 import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
+import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
+import type { PipelineResult } from "@/lib/pipeline";
+import {
+  createSupabasePipelineWorkerStore,
+  type PipelineWorkerRpcClient,
+} from "@/lib/pipeline-queue/worker-store";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL
@@ -33,6 +40,12 @@ let userBToken = "";
 let userAClient: SupabaseClient;
 let itemA = "";
 let runA = "";
+let reviewItemA = "";
+let reviewListingA = "";
+let reviewRunA = "";
+let reviewRevisionA = "";
+let guestOperationTokenA = "";
+let reviewQueueMessageA = "";
 
 async function stackReachable(): Promise<boolean> {
   if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
@@ -101,10 +114,146 @@ beforeAll(async () => {
     .single();
   expect(runError).toBeNull();
   runA = run!.id;
+
+  const reviewBatchId = crypto.randomUUID();
+  const reviewIdempotencyKey = `listing-review-${reviewBatchId}`;
+  reviewRevisionA = crypto.randomUUID();
+  const evidenceAsOf = new Date().toISOString();
+  const reviewPhotoPath = `${userAId}/items/review-front.jpg`;
+  const reviewPhotoIdentity = canonicalizeVerifiedPhotoSet(["a".repeat(64)]);
+  const staged = await admin.rpc("stage_pipeline_batch", {
+    p_user_id: userAId,
+    p_batch_id: reviewBatchId,
+    p_entries: [{
+      idempotency_key: reviewIdempotencyKey,
+      source: "single",
+      autopilot_enabled: false,
+      photo_paths: [reviewPhotoPath],
+      cost_basis: null,
+    }],
+    p_daily_limit: 10,
+    p_per_minute_limit: 10,
+    p_photo_identities: [{
+      idempotency_key: reviewIdempotencyKey,
+      photo_identity_kind: reviewPhotoIdentity.kind,
+      photo_identity_fingerprint: reviewPhotoIdentity.fingerprint,
+    }],
+  });
+  expect(staged.error).toBeNull();
+  const stagedReview = (staged.data as Array<{
+    item_id: string;
+    run_id: string;
+    queue_message_id: string | number;
+  }>)[0]!;
+  reviewItemA = stagedReview.item_id;
+  reviewRunA = stagedReview.run_id;
+  reviewQueueMessageA = String(stagedReview.queue_message_id);
+
+  const worker = createSupabasePipelineWorkerStore(
+    admin as unknown as PipelineWorkerRpcClient,
+  );
+  const acquisition = await worker.acquire({
+    runId: reviewRunA,
+    messageId: reviewQueueMessageA,
+    leaseSeconds: 60,
+  });
+  expect(acquisition.kind).toBe("acquired");
+  if (acquisition.kind !== "acquired") {
+    throw new Error(`Expected review fixture acquisition, received ${acquisition.kind}`);
+  }
+  const reviewResult: PipelineResult = {
+    attributes: {
+      brand: "Sony",
+      model: "WH-1000XM4",
+      condition: "very-good",
+      category: "electronics",
+      title: "Sony WH-1000XM4",
+    },
+    identification: {
+      label: "Sony WH-1000XM4",
+      confident: true,
+      evidence: 0.9,
+    },
+    price: {
+      suggested: 145,
+      range: { min: 130, max: 160 },
+      confidence: 0.72,
+      sources: [],
+      tier: "llm-only",
+    },
+    confidence: {
+      score: 0.72,
+      band: "medium",
+      autopilotEligible: false,
+    },
+    listing: {
+      platform: "ebay",
+      title: "Sony WH-1000XM4 Noise-Canceling Headphones",
+      description: "Clean, fully working headphones with case and charging cable.",
+      fields: {
+        itemSpecifics: {
+          Brand: "Sony",
+          Model: "WH-1000XM4",
+        },
+      },
+    },
+    model: "test-vision",
+    listingModel: "test-listing",
+  };
+  await worker.checkpoint({
+    runId: reviewRunA,
+    leaseToken: acquisition.context.run.lease_token,
+    stage: "generating",
+    checkpoint: {
+      identified: {
+        attributes: reviewResult.attributes,
+        identification: reviewResult.identification,
+        model: reviewResult.model,
+      },
+      priced: {
+        result: reviewResult.price,
+        evidenceAsOf,
+      },
+      generated: {
+        copy: reviewResult.listing,
+        model: reviewResult.listingModel!,
+      },
+    },
+    leaseSeconds: 60,
+  });
+  const completion = await worker.complete({
+    runId: reviewRunA,
+    leaseToken: acquisition.context.run.lease_token,
+    result: reviewResult,
+    autopilotEnabled: false,
+  });
+  reviewListingA = completion.listingId;
+  const savedReview = await userAClient.rpc("save_review_edits", {
+    p_item_id: reviewItemA,
+    p_listing_id: reviewListingA,
+    p_expected_review_revision: acquisition.context.item.review_revision,
+    p_new_review_revision: reviewRevisionA,
+    p_attributes: reviewResult.attributes,
+    p_condition: reviewResult.attributes.condition,
+    p_price_override: 149.99,
+    p_cost_basis: null,
+    p_listing_title: reviewResult.listing.title,
+    p_listing_description: reviewResult.listing.description,
+  });
+  expect(savedReview.error).toBeNull();
+  guestOperationTokenA = await mintVerifiedGuestJwt(
+    userAId,
+    crypto.randomUUID(),
+  );
 });
 
 afterAll(async () => {
   if (!reachable) return;
+  if (reviewQueueMessageA) {
+    await admin.rpc("ack_pipeline_message", {
+      p_message_id: reviewQueueMessageA,
+    });
+  }
   const database = new Client({ connectionString: DATABASE_URL });
   await database.connect();
   try {
@@ -179,6 +328,57 @@ describe("mobile durable-run RLS adapter", () => {
       MobileRunNotFoundError,
     );
   });
+
+  it.each(["Clerk", "GuestBearer"])(
+    "returns one coherent review only to the owning %s principal",
+    async (principalKind) => {
+      if (!reachable) return;
+      const ownerToken =
+        principalKind === "Clerk" ? userAToken : guestOperationTokenA;
+      const owner = createClient(SUPABASE_URL, ANON_KEY!, {
+        accessToken: async () => ownerToken,
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const foreign = createClient(SUPABASE_URL, ANON_KEY!, {
+        accessToken: async () => userBToken,
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+
+      const [owned, hidden] = await Promise.all([
+        owner.rpc("get_mobile_listing_review", { p_run_id: reviewRunA }),
+        foreign.rpc("get_mobile_listing_review", { p_run_id: reviewRunA }),
+      ]);
+
+      expect(owned.error).toBeNull();
+      expect(owned.data).toMatchObject({
+        run: {
+          id: reviewRunA,
+          userId: userAId,
+          itemId: reviewItemA,
+          listingId: reviewListingA,
+        },
+        item: {
+          id: reviewItemA,
+          userId: userAId,
+          reviewRevision: reviewRevisionA,
+        },
+        listing: {
+          id: reviewListingA,
+          userId: userAId,
+          itemId: reviewItemA,
+          runId: reviewRunA,
+        },
+        pricingSnapshot: {
+          runId: reviewRunA,
+          userId: userAId,
+          itemId: reviewItemA,
+          listingId: reviewListingA,
+        },
+      });
+      expect(hidden.error).toBeNull();
+      expect(hidden.data).toBeNull();
+    },
+  );
 
   it("replays cancel and retry on one logical run without deleting its photos", async () => {
     if (!reachable) return;

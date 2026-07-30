@@ -217,6 +217,7 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
     let safeFailure: RunSafeFailure?
     let allowance: RunAllowanceTruth
     let legalActions: RunActionTruth
+    let review: ListingReviewResult?
     let lastMeaningfulUpdateAt: String
     let retentionCleanedAt: String?
 
@@ -237,7 +238,8 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         allowance: RunAllowanceTruth,
         legalActions: RunActionTruth,
         lastMeaningfulUpdateAt: String,
-        retentionCleanedAt: String?
+        retentionCleanedAt: String?,
+        review: ListingReviewResult? = nil
     ) {
         self.id = id
         self.itemID = itemID
@@ -254,6 +256,7 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         self.safeFailure = safeFailure
         self.allowance = allowance
         self.legalActions = legalActions
+        self.review = review
         self.lastMeaningfulUpdateAt = lastMeaningfulUpdateAt
         self.retentionCleanedAt = retentionCleanedAt
     }
@@ -274,6 +277,7 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         case safeFailure
         case allowance
         case legalActions
+        case review
         case lastMeaningfulUpdateAt
         case retentionCleanedAt
     }
@@ -301,6 +305,9 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         safeFailure = try values.decodeRequiredIfPresent(RunSafeFailure.self, forKey: .safeFailure)
         allowance = try values.decode(RunAllowanceTruth.self, forKey: .allowance)
         legalActions = try values.decode(RunActionTruth.self, forKey: .legalActions)
+        review = values.contains(.review)
+            ? try values.decode(ListingReviewResult.self, forKey: .review)
+            : nil
         lastMeaningfulUpdateAt = try values.decode(String.self, forKey: .lastMeaningfulUpdateAt)
         retentionCleanedAt = try values.decodeRequiredIfPresent(
             String.self,
@@ -312,6 +319,19 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         try values.require(schemaVersion == 1, forKey: .schemaVersion)
         try values.validateDateTime(lastMeaningfulUpdateAt, forKey: .lastMeaningfulUpdateAt)
         try values.validateDateTime(retentionCleanedAt, forKey: .retentionCleanedAt)
+        if let review {
+            try values.require(
+                id == review.binding.runID
+                    && itemID == review.binding.itemID
+                    && listingID == review.binding.listingID
+                    && status == .succeeded
+                    && stage == .completed
+                    && legalActions.canOpenReview,
+                forKey: .review
+            )
+        } else {
+            try values.require(!legalActions.canOpenReview, forKey: .review)
+        }
     }
 }
 

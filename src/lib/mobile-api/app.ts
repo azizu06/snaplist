@@ -2,6 +2,7 @@ import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import type { NativeSubscriptionBridge } from "@/lib/billing";
 import type { HomeProjectionReader } from "@/lib/home/projection";
 import type { PricingEvidenceReader } from "@/lib/pricing-evidence";
+import type { ListingReviewReader } from "@/lib/listing-review";
 import {
   MobileRunConflictError,
   MobileRunInvalidCursorError,
@@ -39,6 +40,9 @@ import {
 export interface MobileApiPrincipal {
   /** Clerk subject; this is the same text id used by Supabase RLS. */
   userId: string;
+  kind?: "clerk" | "verifiedGuest";
+  /** Guest principals mint one fresh project JWT for each protected RLS operation. */
+  mintOperationToken?: () => Promise<string>;
 }
 
 export interface MobileApiDependencies {
@@ -80,6 +84,8 @@ export interface MobileApiDependencies {
   runHistory?: MobileRunHistoryReader;
   /** Immutable, run-coherent RLS pricing evidence for native item detail. */
   pricingEvidence?: PricingEvidenceReader;
+  /** One strict run-bound Listing Review projection. */
+  listingReview?: ListingReviewReader;
   workerSecret?: string;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
@@ -229,6 +235,14 @@ export function createMobileApiHandler(
           401,
           "unauthorized",
           "Authentication is required.",
+        );
+      }
+      if (principal.kind === "verifiedGuest") {
+        return errorResponse(
+          requestId,
+          403,
+          "forbidden",
+          "Run history requires an account.",
         );
       }
       if (!dependencies.runHistory) {
@@ -493,6 +507,14 @@ export function createMobileApiHandler(
           "Authentication is required.",
         );
       }
+      if (action && principal.kind === "verifiedGuest") {
+        return errorResponse(
+          requestId,
+          403,
+          "forbidden",
+          "This run action requires an account.",
+        );
+      }
 
       const unavailableMessage = action
         ? `Run ${action === "retry" ? "retry" : "cancellation"} is temporarily unavailable.`
@@ -507,10 +529,14 @@ export function createMobileApiHandler(
       }
 
       try {
+        const runOperationToken =
+          !action && principal.mintOperationToken
+            ? await principal.mintOperationToken()
+            : token;
         const baseInput = {
           runId: parsedRunId.data,
           userId: principal.userId,
-          bearerToken: token,
+          bearerToken: runOperationToken,
         };
         const run = action
           ? await dependencies.runOperations[action]({
@@ -526,8 +552,45 @@ export function createMobileApiHandler(
             "This run is unavailable.",
           );
         }
+        let responseRun = run;
+        if (
+          !action
+          && run.status === "succeeded"
+          && run.stage === "completed"
+          && run.listingId
+          && dependencies.listingReview
+        ) {
+          const review = await dependencies.listingReview.forRun({
+            runId: run.id,
+            userId: principal.userId,
+            bearerToken: token,
+            mintOperationToken: principal.mintOperationToken,
+          });
+          if (review) {
+            if (
+              review.binding.runId !== run.id
+              || review.binding.itemId !== run.itemId
+              || review.binding.listingId !== run.listingId
+            ) {
+              throw new Error(
+                "Listing Review did not match the durable run projection.",
+              );
+            }
+            responseRun = {
+              ...run,
+              legalActions: {
+                ...run.legalActions,
+                canOpenReview: true,
+              },
+              review,
+            };
+          }
+        }
         return json(
-          mobileRunEnvelopeSchema.parse({ data: run, meta: { requestId } }),
+          mobileRunEnvelopeSchema.parse({
+            data: responseRun,
+            meta: { requestId },
+          }),
           action === "retry" ? 202 : 200,
         );
       } catch (error) {

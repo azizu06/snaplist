@@ -3,6 +3,7 @@ import { homeProjectionSchema } from "@/lib/home/projection";
 import { pipelineConsumerSummarySchema } from "./worker-summary";
 import { guestClaimTerminalOutcomeSchema } from "@/lib/guest-recovery/service";
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
+import { listingReviewProjectionSchema } from "@/lib/listing-review";
 
 export const MOBILE_API_VERSION = "v1" as const;
 
@@ -128,6 +129,7 @@ export const mobileRunSchema = z
         canStartNewCapture: z.boolean(),
       })
       .strict(),
+    review: listingReviewProjectionSchema.optional(),
     lastMeaningfulUpdateAt: z.string().datetime({ offset: true }),
     retentionCleanedAt: nullableTimestampSchema,
   })

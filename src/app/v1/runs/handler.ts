@@ -1,4 +1,6 @@
 import { verifyToken } from "@clerk/nextjs/server";
+import { createConfiguredVerifiedGuestPrincipalResolver } from "@/lib/guest-capability/configured";
+import { createConfiguredSupabaseListingReviewReader } from "@/lib/listing-review";
 import {
   createConfiguredSupabaseMobileRunOperations,
   createMobileApiHandler,
@@ -13,7 +15,8 @@ const unavailableWorker: PipelineWorker = {
 
 function configuredRunOperations() {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const anonKey = process.env.SUPABASE_PUBLISHABLE_KEY?.trim()
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
   const cursorSigningSecret = process.env.CLERK_SECRET_KEY?.trim();
   if (!supabaseURL || !anonKey || !cursorSigningSecret) {
     throw new Error("The mobile RLS run adapter is not configured.");
@@ -25,8 +28,40 @@ function configuredRunOperations() {
   });
 }
 
+function configuredListingReview() {
+  const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY?.trim()
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!supabaseURL || !publishableKey) {
+    throw new Error("The mobile Listing Review adapter is not configured.");
+  }
+  return createConfiguredSupabaseListingReviewReader({
+    publishableKey,
+    supabaseURL,
+  });
+}
+
 const handler = createMobileApiHandler({
   async authenticate(token) {
+    if (token.startsWith("guestcap_")) {
+      const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+      const secretKey = process.env.SUPABASE_SECRET_KEY?.trim()
+        || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+      const keyId = process.env.SUPABASE_GUEST_JWT_KEY_ID?.trim();
+      const privateKeyPem =
+        process.env.SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM?.trim();
+      if (!supabaseURL || !secretKey || !keyId || !privateKeyPem) {
+        throw new Error(
+          "The verified guest authentication boundary is not configured.",
+        );
+      }
+      return createConfiguredVerifiedGuestPrincipalResolver({
+        keyId,
+        privateKeyPem,
+        secretKey,
+        supabaseURL,
+      }).resolve(token);
+    }
     const secretKey = process.env.CLERK_SECRET_KEY?.trim();
     const authorizedParties = process.env.CLERK_AUTHORIZED_PARTIES?.split(",")
       .map((party) => party.trim())
@@ -37,7 +72,7 @@ const handler = createMobileApiHandler({
     const verified = await verifyToken(token, { secretKey, authorizedParties });
     const userId = verified.sub?.trim();
     if (!userId) throw new Error("The verified Clerk token has no subject.");
-    return { userId };
+    return { kind: "clerk" as const, userId };
   },
   runOperations: {
     get(input) {
@@ -53,6 +88,11 @@ const handler = createMobileApiHandler({
   runHistory: {
     list(input) {
       return configuredRunOperations().list(input);
+    },
+  },
+  listingReview: {
+    forRun(input) {
+      return configuredListingReview().forRun(input);
     },
   },
   worker: unavailableWorker,

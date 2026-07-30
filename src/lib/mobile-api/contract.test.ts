@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { listingReviewProjectionSchema } from "@/lib/listing-review";
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import {
   apiErrorEnvelopeSchema,
@@ -202,6 +203,31 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(openApiSchema).toEqual(runtimeSchema);
   });
 
+  it("keeps #376's run review and principal contract aligned with runtime JSON Schema", () => {
+    expect(contract.paths["/v1/runs/{runId}"].get).toMatchObject({
+      "x-owner-issue": 241,
+      "x-related-owner-issues": expect.arrayContaining([376]),
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }, { GuestBearer: [] }],
+    });
+    expect(contract.components.schemas.PipelineRun).toMatchObject({
+      properties: {
+        review: { $ref: "#/components/schemas/ListingReviewProjection" },
+      },
+    });
+
+    const generatedRuntimeSchema = z.toJSONSchema(
+      listingReviewProjectionSchema,
+    ) as Record<string, unknown>;
+    delete generatedRuntimeSchema.$schema;
+    const runtimeSchema = dereferenceContractSchema(generatedRuntimeSchema);
+    const openApiSchema = dereferenceContractSchema(
+      contract.components.schemas.ListingReviewProjection,
+    );
+
+    expect(openApiSchema).toEqual(runtimeSchema);
+  });
+
   it("documents the standard Clerk token checks without inventing an audience", () => {
     const description =
       contract.components.securitySchemes.ClerkBearer.description ?? "";
@@ -265,8 +291,12 @@ describe("SwiftUI mobile HTTP contract", () => {
   });
 
   it("marks the three #241 run operations implemented with the canonical DTO", () => {
+    expect(contract.paths["/v1/runs/{runId}"].get).toMatchObject({
+      "x-owner-issue": 241,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }, { GuestBearer: [] }],
+    });
     for (const [path, method] of [
-      ["/v1/runs/{runId}", "get"],
       ["/v1/runs/{runId}/retry", "post"],
       ["/v1/runs/{runId}/cancel", "post"],
     ] as const) {
