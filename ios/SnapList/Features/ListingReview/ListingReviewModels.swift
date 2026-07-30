@@ -1,11 +1,18 @@
 import Foundation
 
-private enum ListingReviewCopy {
+enum ListingReviewCopy {
     static let startingPriceEstimate = "Starting price estimate"
     static let noVerifiedSoldMatches = "No verified sold matches found."
+    static let staleReview = "This review changed. Reload and try again."
+    static let saveFailed = "Failed to save changes. Please try again."
+    static let draftPersistenceFailed =
+        "Couldn’t save changes on this phone. Please try again."
+    static let openFailed = "Failed to load this review. Please try again."
+    static let reloadFailed =
+        "Couldn’t reload. Your changes are still here."
 }
 
-struct ListingReviewBinding: Decodable, Equatable, Sendable {
+struct ListingReviewBinding: Codable, Equatable, Sendable {
     let runID: UUID
     let itemID: UUID
     let listingID: UUID
@@ -27,7 +34,7 @@ struct ListingReviewBinding: Decodable, Equatable, Sendable {
     }
 }
 
-struct ListingReviewPhoto: Decodable, Equatable, Sendable {
+struct ListingReviewPhoto: Codable, Equatable, Sendable {
     let ordinal: Int
     let url: URL
 
@@ -48,7 +55,7 @@ struct ListingReviewPhoto: Decodable, Equatable, Sendable {
     }
 }
 
-struct ListingReviewIdentity: Decodable, Equatable, Sendable {
+struct ListingReviewIdentity: Codable, Equatable, Sendable {
     let label: String
     let confident: Bool
 
@@ -68,7 +75,7 @@ struct ListingReviewIdentity: Decodable, Equatable, Sendable {
     }
 }
 
-struct ListingReviewSpecific: Decodable, Equatable, Sendable {
+struct ListingReviewSpecific: Codable, Equatable, Sendable {
     let name: String
     let value: String
 
@@ -97,7 +104,7 @@ struct ListingReviewSpecific: Decodable, Equatable, Sendable {
     }
 }
 
-enum ListingReviewCondition: String, Decodable, Equatable, Sendable {
+enum ListingReviewCondition: String, Codable, Equatable, Sendable {
     case new
     case likeNew = "like-new"
     case veryGood = "very-good"
@@ -121,7 +128,7 @@ enum ListingReviewCondition: String, Decodable, Equatable, Sendable {
     }
 }
 
-struct ListingReviewListing: Decodable, Equatable, Sendable {
+struct ListingReviewListing: Codable, Equatable, Sendable {
     let title: String
     let description: String
     let condition: ListingReviewCondition
@@ -153,7 +160,7 @@ struct ListingReviewListing: Decodable, Equatable, Sendable {
     }
 }
 
-struct ListingReviewPriceRange: Decodable, Equatable, Sendable {
+struct ListingReviewPriceRange: Codable, Equatable, Sendable {
     let minimum: Decimal
     let maximum: Decimal
 
@@ -178,7 +185,7 @@ struct ListingReviewPriceRange: Decodable, Equatable, Sendable {
     }
 }
 
-struct ListingReviewPricing: Decodable, Equatable, Sendable {
+struct ListingReviewPricing: Codable, Equatable, Sendable {
     let suggestedPrice: Decimal
     let range: ListingReviewPriceRange
     let confidence: Double
@@ -228,7 +235,7 @@ struct ListingReviewPricing: Decodable, Equatable, Sendable {
     }
 }
 
-struct ListingReviewSoldMatch: Decodable, Equatable, Sendable {
+struct ListingReviewSoldMatch: Codable, Equatable, Sendable {
     let id: String
     let sourceURL: URL
     let title: String?
@@ -293,7 +300,7 @@ struct ListingReviewSoldMatch: Decodable, Equatable, Sendable {
     }
 }
 
-struct ListingReviewResult: Decodable, Equatable, Sendable {
+struct ListingReviewResult: Codable, Equatable, Sendable {
     let schemaVersion: Int
     let binding: ListingReviewBinding
     let photos: [ListingReviewPhoto]
