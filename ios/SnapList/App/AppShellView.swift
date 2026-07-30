@@ -12,6 +12,7 @@ struct AppShellView: View {
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
     @State private var pendingCapturePresentation: PendingCapturePresentation?
@@ -185,6 +186,10 @@ struct AppShellView: View {
                 switch event {
                 case .snapshot(let snapshot):
                     await captureFlow.awaitPublishedSnapshot(snapshot)
+                    submissionHost.synchronizePrincipal(
+                        snapshot: snapshot,
+                        intake: dependencies.nativeIntake
+                    )
                     let activeReviewDeparted =
                         photoReviewHost.session?.intakeActivationID
                         .map { $0 != snapshot.version.activationID }
