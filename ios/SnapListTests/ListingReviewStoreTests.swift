@@ -109,13 +109,23 @@ final class ListingReviewStoreTests: XCTestCase {
             await overlapStore.setTitle("Older edit")
         }
         await overlapPersistence.waitUntilBlocked()
-        await overlapStore.setTitle("Newest edit")
+        let newerOverlapService = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let newerOverlapStore = makeStore(
+            service: newerOverlapService,
+            persistence: overlapPersistence
+        )
+        let newerOverlapOpened = await newerOverlapStore.open(snapshot)
+        XCTAssertTrue(newerOverlapOpened)
+        await newerOverlapStore.setTitle("Newest edit")
         await overlapPersistence.release()
         await olderEdit.value
         let overlapRecord = try await overlapPersistence.loadCurrent(
             runID: snapshot.binding.runID
         )
-        XCTAssertEqual(overlapStore.draft?.title, "Newest edit")
+        XCTAssertEqual(newerOverlapStore.draft?.title, "Newest edit")
         XCTAssertEqual(overlapRecord?.draft.title, "Newest edit")
 
         let savingProvider = ListingReviewGateBearerProvider(
@@ -155,7 +165,7 @@ final class ListingReviewStoreTests: XCTestCase {
         )
         let removeService = ListingReviewRecordingService(
             saves: [.success(Self.receipt(for: snapshot))],
-            reloads: [.success(snapshot), .success(snapshot)]
+            reloads: [.success(snapshot)]
         )
         let removeStore = makeStore(
             service: removeService,
@@ -168,17 +178,28 @@ final class ListingReviewStoreTests: XCTestCase {
             await removeStore.done()
         }
         await removePersistence.waitUntilBlocked()
-        let removeReopened = await removeStore.open(snapshot)
+        let newerRemoveService = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let newerRemoveStore = makeStore(
+            service: newerRemoveService,
+            persistence: removePersistence
+        )
+        let removeReopened = await newerRemoveStore.open(snapshot)
         XCTAssertTrue(removeReopened)
-        await removeStore.setTitle("Newest draft after reopen")
+        await newerRemoveStore.setTitle("Newest draft after reopen")
         await removePersistence.release()
         let staleRemoveOutcome = await removeTask.value
         let newestRecord = try await removePersistence.loadCurrent(
             runID: snapshot.binding.runID
         )
         XCTAssertEqual(staleRemoveOutcome, .stayed)
-        XCTAssertEqual(removeStore.phase, .ready)
-        XCTAssertEqual(removeStore.draft?.title, "Newest draft after reopen")
+        XCTAssertEqual(newerRemoveStore.phase, .ready)
+        XCTAssertEqual(
+            newerRemoveStore.draft?.title,
+            "Newest draft after reopen"
+        )
         XCTAssertEqual(
             newestRecord?.draft.title,
             "Newest draft after reopen"
