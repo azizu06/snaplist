@@ -90,19 +90,20 @@ extension ListingReviewFixture {
 #if DEBUG
 extension ListingReviewFixture {
     var review: ListingReviewResult {
-        ListingReviewLaunchFixture.review(
-            matchCount: switch self {
-            case .zeroEvidence:
-                0
-            case .fiveEvidence:
-                5
-            default:
-                3
-            },
+        let matchCount: Int
+        switch self {
+        case .zeroEvidence:
+            matchCount = 0
+        case .fiveEvidence:
+            matchCount = 5
+        default:
+            matchCount = 3
+        }
+        return ListingReviewLaunchFixture.review(
+            matchCount: matchCount,
             usesLongText: self == .longText
         )
     }
-
 }
 
 private struct ListingReviewFixtureBearerTokenProvider:
