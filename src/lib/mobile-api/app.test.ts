@@ -12,6 +12,10 @@ import type { PipelineResult } from "@/lib/pipeline/types";
 import { buildPricingEvidenceProjection } from "@/lib/pricing-evidence";
 import { createMobileEbayOauthOperations } from "@/lib/marketplace/ebay/mobile-oauth";
 import {
+  ListingReviewIdempotencyConflictError,
+  ListingReviewStaleError,
+} from "@/lib/listing-review/save";
+import {
   MobileRunConflictError,
   MobileRunNotFoundError,
   createMobileRunOperations,
@@ -68,6 +72,33 @@ function handler(overrides: Record<string, unknown> = {}) {
   });
 }
 
+const listingReviewSaveIntent = {
+  expectedReviewRevision: "54900000-0000-4000-8000-000000000004",
+  title: "Sony WH-1000XM4 Wireless Headphones",
+  description: "Tested and working.",
+  condition: "good",
+  specifics: [
+    { name: "Brand", value: "Sony" },
+    { name: "Model", value: "WH-1000XM4" },
+  ],
+  sellerPriceOverride: 179.99,
+};
+
+function listingReviewSaveRequest(): Request {
+  return new Request(
+    "http://localhost/v1/runs/54900000-0000-4000-8000-000000000001/review",
+    {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer signed-jwt",
+        "content-type": "application/json",
+        "idempotency-key": "54900000-0000-4000-8000-000000000005",
+      },
+      body: JSON.stringify(listingReviewSaveIntent),
+    },
+  );
+}
+
 describe("mobile API v1 provider-neutral handler", () => {
   it("serves versioned health without Next.js response types", async () => {
     const response = await handler()(new Request("http://localhost/v1/health"));
@@ -108,6 +139,76 @@ describe("mobile API v1 provider-neutral handler", () => {
     await expect(response.json()).resolves.toEqual({
       data: { userId: "user_native" },
       meta: { requestId: "req_test" },
+    });
+  });
+
+  it("saves one run-bound Listing Review through the injected domain service", async () => {
+    const save = vi.fn().mockResolvedValue({
+      schemaVersion: 1,
+      runId: "54900000-0000-4000-8000-000000000001",
+      itemId: "54900000-0000-4000-8000-000000000002",
+      listingId: "54900000-0000-4000-8000-000000000003",
+      reviewRevision: "54900000-0000-4000-8000-000000000005",
+    });
+    const response = await handler({ listingReviewSave: { save } })(
+      listingReviewSaveRequest(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(save).toHaveBeenCalledWith({
+      runId: "54900000-0000-4000-8000-000000000001",
+      idempotencyKey: "54900000-0000-4000-8000-000000000005",
+      intent: listingReviewSaveIntent,
+      userId: "user_smoke",
+      bearerToken: "signed-jwt",
+      mintOperationToken: undefined,
+    });
+    await expect(response.json()).resolves.toEqual({
+      data: {
+        schemaVersion: 1,
+        runId: "54900000-0000-4000-8000-000000000001",
+        itemId: "54900000-0000-4000-8000-000000000002",
+        listingId: "54900000-0000-4000-8000-000000000003",
+        reviewRevision: "54900000-0000-4000-8000-000000000005",
+      },
+      meta: { requestId: "req_test" },
+    });
+  });
+
+  it("returns the exact stale-review conflict without losing it behind a server error", async () => {
+    const response = await handler({
+      listingReviewSave: {
+        save: vi.fn().mockRejectedValue(new ListingReviewStaleError()),
+      },
+    })(listingReviewSaveRequest());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "conflict",
+        message: "This review changed. Reload and try again.",
+        requestId: "req_test",
+      },
+    });
+  });
+
+  it("reports a reused idempotency key with different intent as a conflict", async () => {
+    const response = await handler({
+      listingReviewSave: {
+        save: vi
+          .fn()
+          .mockRejectedValue(new ListingReviewIdempotencyConflictError()),
+      },
+    })(listingReviewSaveRequest());
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "conflict",
+        message:
+          "This Idempotency-Key is already bound to different review edits.",
+        requestId: "req_test",
+      },
     });
   });
 

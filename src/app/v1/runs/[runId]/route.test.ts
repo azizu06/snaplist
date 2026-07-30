@@ -4,10 +4,13 @@ const {
   verifyToken,
   createConfiguredSupabaseMobileRunOperations,
   createConfiguredSupabaseListingReviewReader,
+  createConfiguredSupabaseListingReviewSaver,
+  createInternalGuidedCorrectionCompletionRpcClient,
   createConfiguredVerifiedGuestPrincipalResolver,
   resolveGuest,
   mintOperationToken,
   readListingReview,
+  saveListingReview,
   get,
   retry,
   cancel,
@@ -15,10 +18,13 @@ const {
   verifyToken: vi.fn(),
   createConfiguredSupabaseMobileRunOperations: vi.fn(),
   createConfiguredSupabaseListingReviewReader: vi.fn(),
+  createConfiguredSupabaseListingReviewSaver: vi.fn(),
+  createInternalGuidedCorrectionCompletionRpcClient: vi.fn(),
   createConfiguredVerifiedGuestPrincipalResolver: vi.fn(),
   resolveGuest: vi.fn(),
   mintOperationToken: vi.fn(),
   readListingReview: vi.fn(),
+  saveListingReview: vi.fn(),
   get: vi.fn(),
   retry: vi.fn(),
   cancel: vi.fn(),
@@ -32,6 +38,10 @@ vi.mock("@/lib/mobile-api", async (importOriginal) => ({
 vi.mock("@/lib/listing-review", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/listing-review")>()),
   createConfiguredSupabaseListingReviewReader,
+  createConfiguredSupabaseListingReviewSaver,
+}));
+vi.mock("@/lib/pipeline/guided-correction-internal", () => ({
+  createInternalGuidedCorrectionCompletionRpcClient,
 }));
 vi.mock("@/lib/guest-capability/configured", () => ({
   createConfiguredVerifiedGuestPrincipalResolver,
@@ -40,6 +50,7 @@ vi.mock("@/lib/guest-capability/configured", () => ({
 import { GET } from "./route";
 import { POST as retryPOST } from "./retry/route";
 import { POST as cancelPOST } from "./cancel/route";
+import { PUT as saveReviewPUT } from "./review/route";
 
 const environmentKeys = [
   "CLERK_SECRET_KEY",
@@ -76,6 +87,19 @@ beforeEach(() => {
   readListingReview.mockResolvedValue(null);
   createConfiguredSupabaseListingReviewReader.mockReturnValue({
     forRun: readListingReview,
+  });
+  createInternalGuidedCorrectionCompletionRpcClient.mockReturnValue({
+    rpc: vi.fn(),
+  });
+  saveListingReview.mockResolvedValue({
+    schemaVersion: 1,
+    runId: "24100000-0000-4000-8000-000000000001",
+    itemId: "24100000-0000-4000-8000-000000000002",
+    listingId: "24100000-0000-4000-8000-000000000005",
+    reviewRevision: "24100000-0000-4000-8000-000000000006",
+  });
+  createConfiguredSupabaseListingReviewSaver.mockReturnValue({
+    save: saveListingReview,
   });
   get.mockResolvedValue({
     id: "24100000-0000-4000-8000-000000000001",
@@ -236,5 +260,45 @@ describe("production mobile durable-run route composition", () => {
       bearerToken: "signed-release-jwt",
       idempotencyKey: "24100000-0000-4000-8000-000000000004",
     }));
+  });
+
+  it("composes the production Listing Review save with RLS and narrow completion clients", async () => {
+    const response = await saveReviewPUT(
+      new Request(
+        "https://snaplist.example/v1/runs/24100000-0000-4000-8000-000000000001/review",
+        {
+          method: "PUT",
+          headers: {
+            authorization: "Bearer signed-release-jwt",
+            "content-type": "application/json",
+            "idempotency-key": "24100000-0000-4000-8000-000000000006",
+          },
+          body: JSON.stringify({
+            expectedReviewRevision:
+              "24100000-0000-4000-8000-000000000004",
+            title: "Sony headphones",
+            description: "Tested and working.",
+            condition: "good",
+            specifics: [{ name: "Brand", value: "Sony" }],
+            sellerPriceOverride: null,
+          }),
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createConfiguredSupabaseListingReviewSaver).toHaveBeenCalledWith({
+      supabaseURL: "https://project.supabase.co",
+      publishableKey: "sb_publishable_release",
+      completionClient: expect.objectContaining({ rpc: expect.any(Function) }),
+    });
+    expect(saveListingReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "24100000-0000-4000-8000-000000000001",
+        idempotencyKey: "24100000-0000-4000-8000-000000000006",
+        userId: "user_release",
+        bearerToken: "signed-release-jwt",
+      }),
+    );
   });
 });

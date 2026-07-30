@@ -4,6 +4,14 @@ import type { HomeProjectionReader } from "@/lib/home/projection";
 import type { PricingEvidenceReader } from "@/lib/pricing-evidence";
 import type { ListingReviewReader } from "@/lib/listing-review";
 import {
+  ListingReviewIdempotencyConflictError,
+  ListingReviewNotEditableError,
+  listingReviewSaveIntentSchema,
+  ListingReviewSaveInProgressError,
+  ListingReviewStaleError,
+  type ListingReviewSaver,
+} from "@/lib/listing-review/save";
+import {
   MobileRunConflictError,
   MobileRunInvalidCursorError,
   MobileRunNotFoundError,
@@ -26,6 +34,7 @@ import {
   homeProjectionEnvelopeSchema,
   mobileRunCollectionEnvelopeSchema,
   mobileRunEnvelopeSchema,
+  listingReviewSaveEnvelopeSchema,
   pricingEvidenceEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
   ebayOauthSessionEnvelopeSchema,
@@ -86,6 +95,8 @@ export interface MobileApiDependencies {
   pricingEvidence?: PricingEvidenceReader;
   /** One strict run-bound Listing Review projection. */
   listingReview?: ListingReviewReader;
+  /** One run-bound, idempotent Listing Review mutation. */
+  listingReviewSave?: ListingReviewSaver;
   workerSecret?: string;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
@@ -449,6 +460,110 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "Home is temporarily unavailable.",
+        );
+      }
+    }
+
+    const listingReviewSavePath = pathname.match(
+      new RegExp(`^/${MOBILE_API_VERSION}/runs/([^/]+)/review$`),
+    );
+    if (listingReviewSavePath) {
+      if (request.method !== "PUT") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const runId = z.string().uuid().safeParse(listingReviewSavePath[1]);
+      const idempotencyKey = z
+        .string()
+        .uuid()
+        .safeParse(request.headers.get("idempotency-key")?.trim());
+      let requestBody: unknown;
+      try {
+        requestBody = await request.json();
+      } catch {
+        requestBody = null;
+      }
+      const intent = listingReviewSaveIntentSchema.safeParse(requestBody);
+      if (!runId.success || !idempotencyKey.success || !intent.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          !runId.success
+            ? "A valid run ID is required."
+            : !idempotencyKey.success
+              ? "A valid Idempotency-Key is required."
+              : "A valid Listing Review save is required.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      if (!dependencies.listingReviewSave) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Listing Review save is temporarily unavailable.",
+        );
+      }
+      try {
+        const receipt = await dependencies.listingReviewSave.save({
+          runId: runId.data,
+          idempotencyKey: idempotencyKey.data,
+          intent: intent.data,
+          userId: principal.userId,
+          bearerToken: token,
+          mintOperationToken: principal.mintOperationToken,
+        });
+        return json(
+          listingReviewSaveEnvelopeSchema.parse({
+            data: receipt,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        if (
+          error instanceof ListingReviewStaleError
+          || error instanceof ListingReviewIdempotencyConflictError
+          || error instanceof ListingReviewSaveInProgressError
+          || error instanceof ListingReviewNotEditableError
+        ) {
+          return errorResponse(
+            requestId,
+            409,
+            "conflict",
+            error.message,
+          );
+        }
+        dependencies.reportError?.("mobile-api.listing-review-save", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Listing Review save is temporarily unavailable.",
         );
       }
     }

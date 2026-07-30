@@ -39,6 +39,7 @@ const VALID_CONTRACT_OWNER_ISSUES = new Set([
   175,
   240,
   241,
+  549,
 ]);
 
 function operations() {
@@ -119,6 +120,106 @@ describe("SwiftUI mobile HTTP contract", () => {
       "#/components/parameters/IdempotencyKey",
     );
     expect(JSON.stringify(contract)).toContain("Idempotency-Key");
+  });
+
+  it("publishes the implemented run-bound Listing Review save contract to both mirrors", () => {
+    expect(nativeContractSource).toBe(serverContractSource);
+    const saveOperation = contract.paths["/v1/runs/{runId}/review"].put;
+    expect(saveOperation).toMatchObject({
+      operationId: "saveListingReview",
+      "x-owner-issue": 549,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }, { GuestBearer: [] }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              $ref: "#/components/schemas/ListingReviewSaveIntent",
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/ListingReviewSaveEnvelope",
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/InvalidRequest" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "409": { $ref: "#/components/responses/Conflict" },
+        "503": { $ref: "#/components/responses/Unavailable" },
+      },
+    });
+    expect(
+      JSON.stringify(contract.paths["/v1/runs/{runId}/review"]),
+    ).toContain("#/components/parameters/IdempotencyKey");
+    expect(contract.components.schemas.ListingReviewSaveIntent).toMatchObject({
+      additionalProperties: false,
+      required: [
+        "expectedReviewRevision",
+        "title",
+        "description",
+        "condition",
+        "specifics",
+        "sellerPriceOverride",
+      ],
+      properties: {
+        expectedReviewRevision: { type: "string", format: "uuid" },
+        title: { type: "string", minLength: 1, maxLength: 80 },
+        description: { type: "string", minLength: 1, maxLength: 20_000 },
+        condition: {
+          type: "string",
+          enum: [
+            "new",
+            "like-new",
+            "very-good",
+            "good",
+            "acceptable",
+            "fair",
+            "poor",
+            "for-parts",
+          ],
+        },
+        specifics: {
+          type: "array",
+          maxItems: 50,
+          items: {
+            additionalProperties: false,
+            required: ["name", "value"],
+          },
+        },
+        sellerPriceOverride: {
+          anyOf: [
+            { type: "number", minimum: 0.01, multipleOf: 0.01 },
+            { type: "null" },
+          ],
+        },
+      },
+    });
+    expect(contract.components.schemas.ListingReviewSaveReceipt).toEqual({
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "schemaVersion",
+        "runId",
+        "itemId",
+        "listingId",
+        "reviewRevision",
+      ],
+      properties: {
+        schemaVersion: { const: 1 },
+        runId: { type: "string", format: "uuid" },
+        itemId: { type: "string", format: "uuid" },
+        listingId: { type: "string", format: "uuid" },
+        reviewRevision: { type: "string", format: "uuid" },
+      },
+    });
   });
 
   it("documents the exact eBay OAuth callback vocabulary in both OpenAPI copies", () => {
