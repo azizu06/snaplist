@@ -125,6 +125,17 @@ enum RunDetailFixture: String, Equatable {
     case reviewable
 }
 
+enum ListingReviewFixture: String, Equatable {
+    case loaded
+    case zeroEvidence = "zero-evidence"
+    case fiveEvidence = "five-evidence"
+    case saveFailure = "save-failure"
+    case offline
+    case conflict
+    case correctionUnavailable = "correction-unavailable"
+    case longText = "long-text"
+}
+
 enum SubmissionFixture: String, Equatable {
     case delayed
     case acceptedPresentationGated = "accepted-presentation-gated"
@@ -196,6 +207,8 @@ struct LaunchConfiguration: Equatable {
     var submissionAcknowledgmentNotification:
         SubmissionAcknowledgmentNotificationName?
     var runDetailFixture: RunDetailFixture?
+    var listingReviewFixture: ListingReviewFixture?
+    var resetListingReviewDraft: Bool
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -211,7 +224,9 @@ struct LaunchConfiguration: Equatable {
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
         submissionAcknowledgmentNotification: nil,
-        runDetailFixture: nil
+        runDetailFixture: nil,
+        listingReviewFixture: nil,
+        resetListingReviewDraft: false
     )
 
     static let preview = LaunchConfiguration(
@@ -228,7 +243,9 @@ struct LaunchConfiguration: Equatable {
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
         submissionAcknowledgmentNotification: nil,
-        runDetailFixture: .loaded
+        runDetailFixture: .loaded,
+        listingReviewFixture: nil,
+        resetListingReviewDraft: false
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -304,6 +321,14 @@ struct LaunchConfiguration: Equatable {
             } else if argument.hasPrefix("--run-detail-fixture=") {
                 let value = String(argument.dropFirst("--run-detail-fixture=".count))
                 configuration.runDetailFixture = RunDetailFixture(rawValue: value)
+            } else if argument.hasPrefix("--listing-review-fixture=") {
+                let value = String(
+                    argument.dropFirst("--listing-review-fixture=".count)
+                )
+                configuration.listingReviewFixture =
+                    ListingReviewFixture(rawValue: value)
+            } else if argument == "--reset-listing-review-draft" {
+                configuration.resetListingReviewDraft = true
             }
         }
 

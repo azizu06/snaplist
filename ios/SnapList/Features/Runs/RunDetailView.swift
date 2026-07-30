@@ -4,6 +4,12 @@ import SwiftUI
 struct RunDetailView: View {
     let runID: UUID
     @Bindable var store: RunDetailStore
+    @Bindable var listingReviewStore: ListingReviewStore
+    let correctionAvailable: Bool
+    @State private var presentsListingReview = false
+    @State private var isOpeningReview = false
+    @State private var reviewOpenFailed = false
+    @AccessibilityFocusState private var reviewOpenerFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -53,6 +59,13 @@ struct RunDetailView: View {
         .task(id: runID) {
             await store.load(runID: runID)
         }
+        .navigationDestination(isPresented: $presentsListingReview) {
+            ListingReviewView(
+                store: listingReviewStore,
+                correctionAvailable: correctionAvailable,
+                dismissReview: dismissListingReview
+            )
+        }
     }
 
     @ViewBuilder
@@ -75,6 +88,41 @@ struct RunDetailView: View {
             Text(run.sellerFacingDetail)
                 .snapListTypography(.body)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
+
+            if run.legalActions.canOpenReview,
+               let review = run.review {
+                Button {
+                    Task { await openListingReview(review) }
+                } label: {
+                    HStack(spacing: 8) {
+                        if isOpeningReview {
+                            ProgressView()
+                                .accessibilityHidden(true)
+                        }
+                        Text(isOpeningReview ? "Opening…" : "Review")
+                            .snapListTypography(.rowTitle)
+                    }
+                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                    .padding(.horizontal, 16)
+                    .background(
+                        SnapListColorToken.action.color.opacity(0.1),
+                        in: RoundedRectangle(cornerRadius: 12)
+                    )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.action.color)
+                .disabled(isOpeningReview)
+                .accessibilityLabel("Review \(run.item?.title ?? "listing")")
+                .accessibilityFocused($reviewOpenerFocused)
+                .accessibilityIdentifier("run.review.open")
+            }
+
+            if reviewOpenFailed {
+                Text(ListingReviewCopy.openFailed)
+                    .snapListTypography(.body)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .accessibilityIdentifier("run.review.open-failed")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(SnapListMetrics.screenGutter)
@@ -83,6 +131,30 @@ struct RunDetailView: View {
 
     private var isLoading: Bool {
         store.state == .loading
+    }
+
+    private func openListingReview(
+        _ review: ListingReviewResult
+    ) async {
+        guard !isOpeningReview else { return }
+        isOpeningReview = true
+        reviewOpenFailed = false
+        let opened = await listingReviewStore.open(review)
+        isOpeningReview = false
+        if opened {
+            presentsListingReview = true
+        } else {
+            reviewOpenFailed = true
+            ListingReviewAnnouncement.post(
+                ListingReviewCopy.openFailed,
+                assertive: true
+            )
+        }
+    }
+
+    private func dismissListingReview() {
+        presentsListingReview = false
+        reviewOpenerFocused = true
     }
 }
 
