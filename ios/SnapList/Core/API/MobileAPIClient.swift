@@ -177,6 +177,19 @@ struct AppDependencies {
         }
         let captureDraftStore = makeCaptureDraftStore(configuration: configuration)
         let captureCamera = makeCaptureCamera(configuration: configuration)
+        let resolvedNativeIntakeIdentitySource:
+            NativeIntake.IdentitySource
+#if DEBUG
+        if configuration.usesRestoredCaptureFixture {
+            resolvedNativeIntakeIdentitySource = .processPrivate
+        } else {
+            resolvedNativeIntakeIdentitySource =
+                nativeIntakeIdentitySource
+        }
+#else
+        resolvedNativeIntakeIdentitySource =
+            nativeIntakeIdentitySource
+#endif
         let nativeIntake = NativeIntake(
             applicationSupportDirectory:
                 nativeIntakeApplicationSupportDirectory
@@ -185,7 +198,7 @@ struct AppDependencies {
                     in: .userDomainMask
                 ).first
                 ?? FileManager.default.temporaryDirectory,
-            identitySource: nativeIntakeIdentitySource
+            identitySource: resolvedNativeIntakeIdentitySource
         )
         if configuration.usesZeroNetworkFixtures {
             let client = ZeroNetworkMobileAPIClient()
