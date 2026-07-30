@@ -173,6 +173,10 @@ private final class ItemRunSubmissionPresentationAcknowledgmentGate:
         resolve(true)
     }
 
+    func cancel() {
+        resolve(false)
+    }
+
     private func resolve(_ acknowledged: Bool) {
         let continuation: CheckedContinuation<Bool, Never>?
         lock.lock()
@@ -212,6 +216,11 @@ final class ItemRunSubmissionHost {
         ItemRunSubmissionCoordinator.AmbiguousRetry?
     private var admittedAmbiguousRetry:
         ItemRunSubmissionCoordinator.AmbiguousRetry?
+    private var activePrincipalGeneration: UUID?
+    private var activePrincipalContext: ItemRunSubmissionPrincipalContext?
+    private var activeSubmissionID: UUID?
+    private var preparationTask:
+        Task<ItemRunSubmissionCoordinator.Preparation, Never>?
     /// Fixture launches render approved states with no server behind them, so Start
     /// listing is inert by design there rather than unavailable.
     private let isInert: Bool
@@ -253,6 +262,39 @@ final class ItemRunSubmissionHost {
     }
 #endif
 
+    /// #545 calls this from the committed NativeIntake snapshot event block. A new
+    /// activation ID is a principal transition even when the seller later returns to
+    /// the same opaque filesystem scope.
+    func synchronizePrincipal(
+        snapshot: NativeIntake.Snapshot,
+        intake: NativeIntake
+    ) {
+        let nextGeneration = snapshot.version.activationID
+        if activePrincipalGeneration != nextGeneration {
+            cancelAndResetDepartingSubmission()
+            activePrincipalGeneration = nextGeneration
+        }
+        activePrincipalContext = ItemRunSubmissionPrincipalContext(
+            snapshot: snapshot,
+            intake: intake
+        )
+    }
+
+    private func cancelAndResetDepartingSubmission() {
+        preparationTask?.cancel()
+        preparationTask = nil
+        activeSubmissionID = nil
+        presentationAcknowledgmentGate?.cancel()
+        presentationAcknowledgmentGate = nil
+        pendingAmbiguousRetry = nil
+        admittedAmbiguousRetry = nil
+        isSubmitting = false
+        acceptedRun = nil
+        clearedIntake = false
+        retention = nil
+        pendingPresentationEvent = nil
+    }
+
     /// One tap, one submission. A second tap while a request is open would build a
     /// second attempt from the same photos and could buy the seller a second run.
     func startListing(photos: [StagedCapturePhoto]) async {
@@ -278,19 +320,75 @@ final class ItemRunSubmissionHost {
         if case .submissionRejected(_, _)? = pendingPresentationEvent {
             pendingPresentationEvent = nil
         }
+        let capturedPrincipalContext =
+            activePrincipalContext?.photos == photos
+                ? activePrincipalContext
+                : nil
+        // Once live NativeIntake composition has supplied a principal generation,
+        // falling back to the old global attempt/draft path would cross scopes.
+        guard activePrincipalGeneration == nil
+                || capturedPrincipalContext != nil else {
+            publish(retention: .intakeUnavailable)
+            return
+        }
+        let expectedPrincipalGeneration =
+            capturedPrincipalContext?.generation
+        let submissionID = UUID()
+        activeSubmissionID = submissionID
         isSubmitting = true
-        defer { isSubmitting = false }
+        defer {
+            if activeSubmissionID == submissionID {
+                preparationTask = nil
+                activeSubmissionID = nil
+                isSubmitting = false
+            }
+        }
 
-        let preparation: ItemRunSubmissionCoordinator.Preparation
+        let isCurrent: @MainActor () -> Bool = { [weak self] in
+            guard let self else {
+                return false
+            }
+            if let expectedPrincipalGeneration {
+                return self.activePrincipalGeneration
+                    == expectedPrincipalGeneration
+            }
+            return self.activePrincipalGeneration == nil
+        }
+
+        let task: Task<ItemRunSubmissionCoordinator.Preparation, Never>
         if let retry = admittedAmbiguousRetry {
             admittedAmbiguousRetry = nil
-            preparation = await coordinator.retryAmbiguousSubmission(
-                retry,
-                currentPhotos: photos
-            )
+            task = Task {
+                await coordinator.retryAmbiguousSubmission(
+                    retry,
+                    currentPhotos: photos,
+                    isCurrent: isCurrent
+                )
+            }
+        } else if let capturedPrincipalContext {
+            task = Task {
+                await coordinator.prepareSubmission(
+                    principalContext: capturedPrincipalContext,
+                    isCurrent: isCurrent
+                )
+            }
         } else {
-            preparation = await coordinator.prepareSubmission(photos: photos)
+            task = Task {
+                await coordinator.prepareSubmission(photos: photos)
+            }
         }
+        preparationTask = task
+        let preparation = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        guard activeSubmissionID == submissionID,
+              isCurrent(),
+              !Task.isCancelled else {
+            return
+        }
+        preparationTask = nil
 
         switch preparation {
         case .accepted(let submission):
@@ -317,7 +415,10 @@ final class ItemRunSubmissionHost {
             if presentationAcknowledgmentGate === gate {
                 presentationAcknowledgmentGate = nil
             }
-            guard acknowledged, !Task.isCancelled else {
+            guard acknowledged,
+                  activeSubmissionID == submissionID,
+                  isCurrent(),
+                  !Task.isCancelled else {
                 if pendingPresentationEvent == .itemSaved(
                     eventID: eventID,
                     handoff: handoff
@@ -328,6 +429,11 @@ final class ItemRunSubmissionHost {
             }
 
             let acceptance = await coordinator.finalize(submission)
+            guard activeSubmissionID == submissionID,
+                  isCurrent(),
+                  !Task.isCancelled else {
+                return
+            }
             clearedIntake = acceptance.clearedIntake
             if !acceptance.clearedIntake,
                pendingPresentationEvent == .itemSaved(
@@ -649,12 +755,36 @@ enum ItemRunSubmissionHostFactory {
 /// Turns the seller's ordered Photo Review intake into one canonical durable run.
 @MainActor
 final class ItemRunSubmissionCoordinator {
+    fileprivate struct CapturedContext {
+        let photos: [StagedCapturePhoto]
+        let scopeProof: ItemRunSubmissionPrincipalScopeProof?
+        let attemptStore: any ItemRunSubmissionAttemptStoring
+        let validateFilesystemContext:
+            @MainActor () async -> Bool
+        let prepareDurableIntake:
+            @MainActor ([StagedCapturePhoto]) async -> Bool
+        let discardExactly:
+            @MainActor ([StagedCapturePhoto]) async -> Bool
+    }
+
+    private struct CapturedBearer {
+        let token: String
+    }
+
+    private enum BearerAcquisition {
+        case captured(CapturedBearer)
+        case principalMismatch
+        case unavailable
+    }
+
     fileprivate struct AmbiguousRetry {
+        fileprivate let context: CapturedContext
         fileprivate let submittedPhotos: [StagedCapturePhoto]
         fileprivate let payload: ItemRunSubmissionPayload
     }
 
     fileprivate struct Submission {
+        fileprivate let context: CapturedContext
         fileprivate let acceptedRun: AcceptedItemRun
         fileprivate let submittedPhotos: [StagedCapturePhoto]
         fileprivate let attempt: ItemRunSubmissionAttempt
@@ -706,13 +836,93 @@ final class ItemRunSubmissionCoordinator {
     fileprivate func prepareSubmission(
         photos: [StagedCapturePhoto]
     ) async -> Preparation {
+        let attemptStore = attemptStore
+        let draftStore = draftStore
+        return await prepareSubmission(
+            context: CapturedContext(
+                photos: photos,
+                scopeProof: nil,
+                attemptStore: attemptStore,
+                validateFilesystemContext: { true },
+                prepareDurableIntake: { photos in
+                    let durablePhotos = (try? await draftStore.loadPhotos()) ?? []
+                    guard durablePhotos != photos else {
+                        return true
+                    }
+                    do {
+                        try await draftStore.replacePhotos(with: photos)
+                        return true
+                    } catch {
+                        return false
+                    }
+                },
+                discardExactly: { photos in
+                    (try? await draftStore.discardExactly(photos)) ?? false
+                }
+            ),
+            isCurrent: { true }
+        )
+    }
+
+    fileprivate func prepareSubmission(
+        principalContext: ItemRunSubmissionPrincipalContext,
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> Preparation {
+        await prepareSubmission(
+            context: CapturedContext(
+                photos: principalContext.photos,
+                scopeProof: principalContext.scopeProof,
+                attemptStore: principalContext.attemptStore,
+                validateFilesystemContext: {
+                    await principalContext
+                        .validatesFilesystemContext()
+                },
+                prepareDurableIntake: { _ in true },
+                discardExactly: { _ in
+                    await principalContext.discardExactly()
+                }
+            ),
+            isCurrent: isCurrent
+        )
+    }
+
+    private func prepareSubmission(
+        context: CapturedContext,
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> Preparation {
+        guard let submitter else {
+            return .retained(.submissionUnavailable)
+        }
+
+        // Bearer authority is acquired while only the immutable principal context is
+        // captured. Draft, attempt, and photo bytes remain unread until the current
+        // principal generation has been revalidated.
+        let capturedBearer: CapturedBearer
+        switch await acquireBearer(for: context) {
+        case .captured(let bearer):
+            capturedBearer = bearer
+        case .principalMismatch:
+            return .retained(.submissionUnavailable)
+        case .unavailable:
+            return .retained(.authenticationRequired)
+        }
+        guard !Task.isCancelled, isCurrent() else {
+            return .retained(.submissionUnavailable)
+        }
+        guard await context.validateFilesystemContext() else {
+            return .retained(.attemptNotPersisted)
+        }
+
         let readData = readData
         let intake: ItemRunSubmissionSnapshot.Result
         do {
             // Up to five full-size photos get read and hashed here. Doing that on the
             // main actor stalls the screen the seller is still looking at.
             intake = try await Task.detached(priority: .userInitiated) {
-                try ItemRunSubmissionSnapshot.make(for: photos, readData: readData)
+                try ItemRunSubmissionSnapshot.make(
+                    for: context.photos,
+                    readData: readData
+                )
             }.value
         } catch {
             return .retained(.intakeUnavailable)
@@ -733,13 +943,22 @@ final class ItemRunSubmissionCoordinator {
         // this submission cannot resolve, and nothing is sent: a request whose clear is
         // already known to refuse would spend an AI-item credit for a run the seller
         // never sees.
-        let durablePhotos = (try? await draftStore.loadPhotos()) ?? []
-        if durablePhotos != photos {
-            do {
-                try await draftStore.replacePhotos(with: photos)
-            } catch {
-                return .retained(.intakeUnavailable)
-            }
+        guard await context.prepareDurableIntake(context.photos) else {
+            return .retained(.intakeUnavailable)
+        }
+
+        // Hashing and the durable-intake handoff both suspend. Authentication can
+        // switch while NativeIntake's principal event is still queued, so resolve a
+        // fresh same-session bearer/proof pair before touching the captured attempt.
+        guard await revalidatedBearer(
+            captured: capturedBearer,
+            for: context,
+            isCurrent: isCurrent
+        ) != nil else {
+            return .retained(.submissionUnavailable)
+        }
+        guard await context.validateFilesystemContext() else {
+            return .retained(.attemptNotPersisted)
         }
 
         // A stored attempt standing for these exact photos is the same logical
@@ -751,7 +970,7 @@ final class ItemRunSubmissionCoordinator {
         // second key this whole path exists to avoid, so it stops before the network.
         let storedAttempt: ItemRunSubmissionAttempt?
         do {
-            storedAttempt = try await attemptStore.loadAttempt()
+            storedAttempt = try await context.attemptStore.loadAttempt()
         } catch {
             return .retained(.attemptNotPersisted)
         }
@@ -766,69 +985,116 @@ final class ItemRunSubmissionCoordinator {
         }
         if attempt != storedAttempt {
             do {
-                try await attemptStore.saveAttempt(attempt)
+                try await context.attemptStore.saveAttempt(attempt)
             } catch {
                 return .retained(.attemptNotPersisted)
             }
-        }
-
-        guard let submitter else {
-            return .retained(.submissionUnavailable)
-        }
-
-        let token: String
-        do {
-            token = try await tokenProvider.bearerToken()
-        } catch {
-            return .retained(.authenticationRequired)
         }
 
         let payload = ItemRunSubmissionPayload(
             attempt: attempt,
             photoData: intake.photoData
         )
+        // Resolve again beside dispatch. Comparing only the earlier proof cannot see
+        // an authentication switch whose NativeIntake event has not reached AppShell.
+        guard let dispatchBearer = await revalidatedBearer(
+            captured: capturedBearer,
+            for: context,
+            isCurrent: isCurrent
+        ) else {
+            return .retained(.submissionUnavailable)
+        }
+        guard await context.validateFilesystemContext() else {
+            return .retained(.attemptNotPersisted)
+        }
         let outcome = await submitter.submit(
             payload,
-            bearerToken: token
+            bearerToken: dispatchBearer.token
         )
 
+        // The server may have committed even if the visible principal departed while
+        // the request was open. Suppress that departed result and retain its exact key
+        // for an idempotent replay; never infer cancellation or clean up another scope.
+        guard await revalidatedBearer(
+            captured: dispatchBearer,
+            for: context,
+            isCurrent: isCurrent
+        ) != nil else {
+            return .retained(.submissionUnavailable)
+        }
+        guard await context.validateFilesystemContext() else {
+            return .retained(.attemptNotPersisted)
+        }
         return await resolve(
             outcome,
+            context: context,
             payload: payload,
-            submittedPhotos: photos
+            submittedPhotos: context.photos
         )
     }
 
     fileprivate func retryAmbiguousSubmission(
         _ retry: AmbiguousRetry,
-        currentPhotos: [StagedCapturePhoto]
+        currentPhotos: [StagedCapturePhoto],
+        isCurrent: @escaping @MainActor () -> Bool = { true }
     ) async -> Preparation {
+        guard let submitter else {
+            return .retained(.submissionUnavailable)
+        }
+
+        let capturedBearer: CapturedBearer
+        switch await acquireBearer(for: retry.context) {
+        case .captured(let bearer):
+            capturedBearer = bearer
+        case .principalMismatch:
+            return .retained(.submissionUnavailable)
+        case .unavailable:
+            return .retained(.authenticationRequired)
+        }
+        guard !Task.isCancelled, isCurrent() else {
+            return .retained(.submissionUnavailable)
+        }
+        guard await retry.context.validateFilesystemContext() else {
+            return .retained(.attemptNotPersisted)
+        }
+
         let storedAttempt: ItemRunSubmissionAttempt?
         do {
-            storedAttempt = try await attemptStore.loadAttempt()
+            storedAttempt = try await retry.context.attemptStore.loadAttempt()
         } catch {
             return .retained(.attemptNotPersisted)
         }
         guard storedAttempt == retry.payload.attempt else {
             return .retained(.attemptNotPersisted)
         }
-        guard let submitter else {
+
+        guard let dispatchBearer = await revalidatedBearer(
+            captured: capturedBearer,
+            for: retry.context,
+            isCurrent: isCurrent
+        ) else {
             return .retained(.submissionUnavailable)
         }
-
-        let token: String
-        do {
-            token = try await tokenProvider.bearerToken()
-        } catch {
-            return .retained(.authenticationRequired)
+        guard await retry.context.validateFilesystemContext() else {
+            return .retained(.attemptNotPersisted)
         }
-
         let outcome = await submitter.submit(
             retry.payload,
-            bearerToken: token
+            bearerToken: dispatchBearer.token
         )
+        guard await revalidatedBearer(
+            captured: dispatchBearer,
+            for: retry.context,
+            isCurrent: isCurrent
+        ) != nil else {
+            return .retained(.submissionUnavailable)
+        }
+        guard await retry.context.validateFilesystemContext() else {
+            return .retained(.attemptNotPersisted)
+        }
         return await resolve(
             outcome,
+            context: retry.context,
             payload: retry.payload,
             submittedPhotos: retry.submittedPhotos,
             canClearSubmittedIntake:
@@ -836,8 +1102,54 @@ final class ItemRunSubmissionCoordinator {
         )
     }
 
+    private func acquireBearer(
+        for context: CapturedContext
+    ) async -> BearerAcquisition {
+        do {
+            if let expectedScopeProof = context.scopeProof {
+                let bound = try await tokenProvider.principalBoundBearer()
+                guard bound.scopeProof == expectedScopeProof else {
+                    return .principalMismatch
+                }
+                return .captured(
+                    CapturedBearer(
+                        token: bound.bearerToken
+                    )
+                )
+            }
+            return .captured(
+                CapturedBearer(
+                    token: try await tokenProvider.bearerToken()
+                )
+            )
+        } catch {
+            return .unavailable
+        }
+    }
+
+    private func revalidatedBearer(
+        captured: CapturedBearer,
+        for context: CapturedContext,
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> CapturedBearer? {
+        guard !Task.isCancelled, isCurrent() else {
+            return nil
+        }
+        guard context.scopeProof != nil else {
+            return captured
+        }
+        guard case .captured(let bearer) =
+            await acquireBearer(for: context),
+              !Task.isCancelled,
+              isCurrent() else {
+            return nil
+        }
+        return bearer
+    }
+
     private func resolve(
         _ outcome: ItemRunSubmissionTransportOutcome,
+        context: CapturedContext,
         payload: ItemRunSubmissionPayload,
         submittedPhotos: [StagedCapturePhoto],
         canClearSubmittedIntake: Bool = true
@@ -853,6 +1165,7 @@ final class ItemRunSubmissionCoordinator {
             }
             return .accepted(
                 Submission(
+                    context: context,
                     acceptedRun: AcceptedItemRun(
                         runID: receipt.runId,
                         itemID: receipt.itemId,
@@ -873,13 +1186,14 @@ final class ItemRunSubmissionCoordinator {
         case .conflict:
             // This key is bound to other bytes and can never accept these, so retiring
             // it is the only way the seller's retained photos stay submittable.
-            try? await attemptStore.clearAttempt(attempt)
+            try? await context.attemptStore.clearAttempt(attempt)
             return .retained(.conflict)
         case .rateLimited(let reason):
             return .retained(.rateLimited(reason: reason))
         case .ambiguous:
             return .ambiguous(
                 AmbiguousRetry(
+                    context: context,
                     submittedPhotos: submittedPhotos,
                     payload: payload
                 )
@@ -896,15 +1210,17 @@ final class ItemRunSubmissionCoordinator {
                 clearedIntake: false
             )
         }
-        let clearedIntake = (
-            try? await draftStore.discardExactly(submission.submittedPhotos)
-        ) ?? false
+        let clearedIntake = await submission.context.discardExactly(
+            submission.submittedPhotos
+        )
         // The key is only retired once the photos it stands for are gone. If they
         // survived, the seller can still submit these exact bytes, and keeping the
         // key makes that an idempotent replay of the run the server already made
         // rather than a second run on a second AI-item credit.
         if clearedIntake {
-            try? await attemptStore.clearAttempt(submission.attempt)
+            try? await submission.context.attemptStore.clearAttempt(
+                submission.attempt
+            )
         }
         return ItemRunAcceptance(
             run: submission.acceptedRun,

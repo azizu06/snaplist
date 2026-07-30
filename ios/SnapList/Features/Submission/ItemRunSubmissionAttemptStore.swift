@@ -1,4 +1,179 @@
+import CryptoKit
 import Foundation
+
+/// In-memory comparison value for #540's opaque authenticated scope. It is
+/// neither a bearer nor an authorization capability, and it is never encoded.
+/// The raw Clerk subject is consumed only long enough to reproduce #540's
+/// one-way scope digest.
+struct ItemRunSubmissionPrincipalScopeProof: Equatable, Sendable {
+    private let digest: Data
+
+    init?(filesystemRoot: URL) {
+        let component = filesystemRoot.standardizedFileURL.lastPathComponent
+        guard component.hasPrefix("v1-") else {
+            return nil
+        }
+        let hex = component.dropFirst(3)
+        guard hex.count == 64,
+              hex.allSatisfy({ $0.isHexDigit && !$0.isUppercase })
+        else {
+            return nil
+        }
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(32)
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index..<next], radix: 16) else {
+                return nil
+            }
+            bytes.append(byte)
+            index = next
+        }
+        digest = Data(bytes)
+    }
+
+    init?(verifiedClerkSubject: String) {
+        guard !verifiedClerkSubject.isEmpty else {
+            return nil
+        }
+        let tagged = [
+            "dev.snaplist.native-intake-principal",
+            "v1",
+            "clerk-subject",
+            verifiedClerkSubject,
+        ].joined(separator: "\u{0}")
+        digest = Data(SHA256.hash(data: Data(tagged.utf8)))
+    }
+}
+
+/// One immutable handoff from #540's committed NativeIntake snapshot into the
+/// submission boundary. The generation is process-local fencing authority. The
+/// filesystem root is already opaque and principal-scoped; no identity value or
+/// bearer is derived, decoded, or persisted here.
+struct ItemRunSubmissionPrincipalContext: Sendable {
+    let generation: UUID
+    let scopeProof: ItemRunSubmissionPrincipalScopeProof
+    let photos: [StagedCapturePhoto]
+    let attemptStore: any ItemRunSubmissionAttemptStoring
+
+    private let validateFilesystemContext:
+        @Sendable () async throws -> Void
+    private let discardCommittedIntake: @Sendable () async -> Bool
+
+    private init(
+        generation: UUID,
+        scopeProof: ItemRunSubmissionPrincipalScopeProof,
+        photos: [StagedCapturePhoto],
+        attemptStore: any ItemRunSubmissionAttemptStoring,
+        validateFilesystemContext:
+            @escaping @Sendable () async throws -> Void,
+        discardCommittedIntake: @escaping @Sendable () async -> Bool
+    ) {
+        self.generation = generation
+        self.scopeProof = scopeProof
+        self.photos = photos
+        self.attemptStore = attemptStore
+        self.validateFilesystemContext = validateFilesystemContext
+        self.discardCommittedIntake = discardCommittedIntake
+    }
+
+    init?(
+        snapshot: NativeIntake.Snapshot,
+        intake: NativeIntake,
+        fileManager: FileManager = .default
+    ) {
+        guard snapshot.recovery == .ready,
+              let filesystemRoot = Self.filesystemRoot(for: snapshot.photos),
+              LocalItemRunSubmissionAttemptStore
+                  .trustedApplicationSupportAnchor(
+                      forPrincipalRoot: filesystemRoot
+                  ) != nil,
+              let scopeProof = ItemRunSubmissionPrincipalScopeProof(
+                  filesystemRoot: filesystemRoot
+              )
+        else {
+            return nil
+        }
+        let attemptStore = LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: filesystemRoot,
+            fileManager: fileManager
+        )
+        self.init(
+            generation: snapshot.version.activationID,
+            scopeProof: scopeProof,
+            photos: snapshot.photos,
+            attemptStore: attemptStore,
+            validateFilesystemContext: {
+                try await attemptStore.validatePrincipalScope()
+            },
+            discardCommittedIntake: {
+                await intake.perform(.discard(expected: snapshot.version))
+                    == .committed
+            }
+        )
+    }
+
+    func discardExactly() async -> Bool {
+        await discardCommittedIntake()
+    }
+
+    func validatesFilesystemContext() async -> Bool {
+        do {
+            try await validateFilesystemContext()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// NativeIntake publishes photos from `<opaque-root>/Current/Assets`.
+    /// Translate that public committed path back to the immutable opaque root and
+    /// reject mixed or malformed roots rather than guessing principal ownership.
+    private static func filesystemRoot(
+        for photos: [StagedCapturePhoto]
+    ) -> URL? {
+        guard let first = photos.first,
+              let root = filesystemRoot(for: first.photoURL)
+        else {
+            return nil
+        }
+        let assetsRoot = root
+            .appendingPathComponent("Current", isDirectory: true)
+            .appendingPathComponent("Assets", isDirectory: true)
+            .standardizedFileURL
+        guard photos.allSatisfy({
+            $0.photoURL.deletingLastPathComponent().standardizedFileURL
+                == assetsRoot
+                && $0.thumbnailURL.deletingLastPathComponent()
+                    .standardizedFileURL == assetsRoot
+        }) else {
+            return nil
+        }
+        return root
+    }
+
+    private static func filesystemRoot(for mediaURL: URL) -> URL? {
+        guard mediaURL.isFileURL else {
+            return nil
+        }
+        let assetsRoot = mediaURL.deletingLastPathComponent()
+            .standardizedFileURL
+        guard assetsRoot.lastPathComponent == "Assets" else {
+            return nil
+        }
+        let currentRoot = assetsRoot.deletingLastPathComponent()
+            .standardizedFileURL
+        guard currentRoot.lastPathComponent == "Current" else {
+            return nil
+        }
+        let root = currentRoot.deletingLastPathComponent().standardizedFileURL
+        guard !root.path.isEmpty, root.path != "/" else {
+            return nil
+        }
+        return root
+    }
+}
 
 /// Durable, device-local home for the one in-flight submission attempt.
 ///
@@ -9,6 +184,7 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
     static let writingOptions: Data.WritingOptions = [.atomic, .completeFileProtection]
 
     private let fileManager: FileManager
+    private let containmentAnchor: URL?
     private let rootDirectory: URL
     private let attemptURL: URL
     private let encoder = JSONEncoder()
@@ -22,11 +198,31 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         ).first!
             .appendingPathComponent("SnapList", isDirectory: true)
             .appendingPathComponent("ItemRunSubmission", isDirectory: true)
-        self.rootDirectory = resolvedRoot
-        attemptURL = resolvedRoot.appendingPathComponent("attempt.json")
+        containmentAnchor = resolvedRoot.standardizedFileURL
+        self.rootDirectory = resolvedRoot.standardizedFileURL
+        attemptURL = resolvedRoot
+            .appendingPathComponent("attempt.json")
+            .standardizedFileURL
+    }
+
+    init(
+        principalRootDirectory: URL,
+        fileManager: FileManager = .default
+    ) {
+        self.fileManager = fileManager
+        containmentAnchor = Self.trustedApplicationSupportAnchor(
+            forPrincipalRoot: principalRootDirectory
+        )
+        rootDirectory = principalRootDirectory
+            .appendingPathComponent("ItemRunSubmission", isDirectory: true)
+            .standardizedFileURL
+        attemptURL = rootDirectory
+            .appendingPathComponent("attempt.json")
+            .standardizedFileURL
     }
 
     func loadAttempt() async throws -> ItemRunSubmissionAttempt? {
+        try validateStorePaths()
         // Existence comes from the same metadata read that fails closed. `fileExists`
         // answers false both for a path that is absent and for one it cannot stat, and a
         // pre-check that returns nil for the second mints a fresh key for photos the first
@@ -58,12 +254,13 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         // using. It falls through to the read and fails closed with everything else that
         // cannot be identified.
         if isRegularFile == false {
-            return discardUnusableAttempt()
+            return try discardUnusableAttempt()
         }
         // A regular record that exists but cannot be read is not the same as no record.
         // Reporting it as absent mints a second key for photos the first submission may
         // already have committed, which is the duplicate run this file exists to prevent.
         // Fail closed and let the caller stop before the network instead.
+        try validateStorePaths()
         let data = try Data(contentsOf: attemptURL)
         // Read the version before the body. Decoding the whole record first cannot tell
         // a renamed or removed field from genuine corruption, so every future schema
@@ -77,7 +274,7 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
                   ItemRunSubmissionAttempt.self,
                   from: data
               ) else {
-            return discardUnusableAttempt()
+            return try discardUnusableAttempt()
         }
         return stored
     }
@@ -113,17 +310,21 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
     /// refuses, for any photo set. The remaining causes are a locked device, which clears
     /// itself, and filesystem damage. Corrupt bytes are not among them, because those read
     /// successfully and fail to decode, which lands here instead.
-    private func discardUnusableAttempt() -> ItemRunSubmissionAttempt? {
-        try? fileManager.removeItem(at: attemptURL)
+    private func discardUnusableAttempt() throws
+        -> ItemRunSubmissionAttempt? {
+        try validateStorePaths()
+        try fileManager.removeItem(at: attemptURL)
         return nil
     }
 
     func saveAttempt(_ attempt: ItemRunSubmissionAttempt) async throws {
+        try validateStorePaths()
         try fileManager.createDirectory(
             at: rootDirectory,
             withIntermediateDirectories: true,
             attributes: [.protectionKey: Self.fileProtection]
         )
+        try validateStorePaths()
         var resourceValues = URLResourceValues()
         resourceValues.isExcludedFromBackup = true
         var protectedRootDirectory = rootDirectory
@@ -136,6 +337,100 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
         guard try await loadAttempt() == attempt else {
             return
         }
+        try validateStorePaths()
         try fileManager.removeItem(at: attemptURL)
+    }
+
+    func validatePrincipalScope() async throws {
+        try validateStorePaths()
+    }
+
+    private func validateStorePaths() throws {
+        guard let containmentAnchor else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
+        try Self.validateContainedPath(
+            attemptURL,
+            under: containmentAnchor,
+            fileManager: fileManager
+        )
+    }
+
+    /// #540 owns this fixed durable layout:
+    /// `<Application Support>/SnapList/NativeIntake/<opaque principal>`.
+    /// Walking back only these named components recovers the same lexical trust
+    /// anchor without resolving a path that may already contain a symlink.
+    nonisolated static func trustedApplicationSupportAnchor(
+        forPrincipalRoot principalRoot: URL
+    ) -> URL? {
+        let principalRoot = principalRoot.standardizedFileURL
+        let nativeIntakeRoot = principalRoot.deletingLastPathComponent()
+        guard nativeIntakeRoot.lastPathComponent == "NativeIntake" else {
+            return nil
+        }
+        let snapListRoot = nativeIntakeRoot.deletingLastPathComponent()
+        guard snapListRoot.lastPathComponent == "SnapList" else {
+            return nil
+        }
+        let anchor = snapListRoot.deletingLastPathComponent()
+            .standardizedFileURL
+        guard !anchor.path.isEmpty, anchor.path != "/" else {
+            return nil
+        }
+        return anchor
+    }
+
+    /// Match #540's vault rule: lexical containment is insufficient because an
+    /// attacker-controlled or corrupt ancestor symlink can redirect an otherwise
+    /// ordinary-looking attempt path into another principal's scope.
+    private nonisolated static func validateContainedPath(
+        _ candidate: URL,
+        under anchor: URL,
+        fileManager: FileManager
+    ) throws {
+        let anchor = anchor.standardizedFileURL
+        let candidate = candidate.standardizedFileURL
+        guard isContained(candidate, under: anchor) else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
+        var current = anchor
+        try rejectSymlinkIfPresent(current, fileManager: fileManager)
+        for component in candidate.pathComponents.dropFirst(
+            anchor.pathComponents.count
+        ) {
+            current.appendPathComponent(component)
+            try rejectSymlinkIfPresent(current, fileManager: fileManager)
+        }
+        guard isContained(
+            candidate.resolvingSymlinksInPath(),
+            under: anchor.resolvingSymlinksInPath()
+        ) else {
+            throw CocoaError(.fileReadInvalidFileName)
+        }
+    }
+
+    private nonisolated static func rejectSymlinkIfPresent(
+        _ url: URL,
+        fileManager: FileManager
+    ) throws {
+        do {
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            guard attributes[.type] as? FileAttributeType
+                    != .typeSymbolicLink else {
+                throw CocoaError(.fileReadInvalidFileName)
+            }
+        } catch {
+            guard describesAnAbsentPath(error) else {
+                throw error
+            }
+        }
+    }
+
+    private nonisolated static func isContained(
+        _ candidate: URL,
+        under anchor: URL
+    ) -> Bool {
+        candidate == anchor
+            || candidate.path.hasPrefix(anchor.path + "/")
     }
 }

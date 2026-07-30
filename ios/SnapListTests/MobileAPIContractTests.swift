@@ -19,6 +19,38 @@ final class MobileAPIContractTests: XCTestCase {
         }
     }
 
+    func testPrincipalBoundBearerUsesOneVerifiedClerkSession()
+        async throws {
+        let subject = "user_principal_a"
+        let provider = ClerkBearerTokenProvider(
+            session: StubClerkSessionToken(
+                token: "opaque-session-bearer",
+                scopeProof: ItemRunSubmissionPrincipalScopeProof(
+                    verifiedClerkSubject: subject
+                )
+            )
+        )
+
+        let bound = try await provider.principalBoundBearer()
+
+        XCTAssertGreaterThan(bound.bearerToken.count, 0)
+        XCTAssertEqual(
+            bound.scopeProof,
+            ItemRunSubmissionPrincipalScopeProof(
+                filesystemRoot: URL(
+                    fileURLWithPath:
+                        "/fixture/v1-25b0a8ae3094981f87c4359d7478da6097257500d73711ae6e58b27af12d8a75"
+                )
+            )
+        )
+        XCTAssertNotEqual(
+            bound.scopeProof,
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "user_principal_b"
+            )
+        )
+    }
+
     func testAuthenticatedMobileRequestGetsBearerFromTokenProvider() async throws {
         let recorder = MobileAPIRequestRecorder()
         let session = Self.makeSession { request in
@@ -225,8 +257,17 @@ final class MobileAPIContractTests: XCTestCase {
 
 private struct StubClerkSessionToken: ClerkSessionTokenProviding {
     let token: String?
+    var scopeProof: ItemRunSubmissionPrincipalScopeProof? = nil
 
     func sessionToken() async throws -> String? { token }
+
+    func sessionAuthentication() async throws
+        -> ClerkSessionAuthentication {
+        ClerkSessionAuthentication(
+            token: token,
+            scopeProof: scopeProof
+        )
+    }
 }
 
 private struct StubBearerTokenProvider: BearerTokenProviding {
