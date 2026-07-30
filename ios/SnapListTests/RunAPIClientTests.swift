@@ -261,9 +261,8 @@ final class RunAPIClientTests: XCTestCase {
             }
         )
 
-        let review = try XCTUnwrap(
-            try await client.fetchRun(id: runID, bearerToken: "review-token").review
-        )
+        let run = try await client.fetchRun(id: runID, bearerToken: "review-token")
+        let review = try XCTUnwrap(run.review)
         let match = try XCTUnwrap(review.verifiedSoldMatches.first)
         XCTAssertEqual(match.id, "ebay-sold-376")
         XCTAssertEqual(match.soldPrice, 142.5)
