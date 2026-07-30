@@ -890,10 +890,6 @@ final class ItemRunSubmissionCoordinator {
         context: CapturedContext,
         isCurrent: @escaping @MainActor () -> Bool
     ) async -> Preparation {
-        guard let submitter else {
-            return .retained(.submissionUnavailable)
-        }
-
         // Bearer authority is acquired while only the immutable principal context is
         // captured. Draft, attempt, and photo bytes remain unread until the current
         // principal generation has been revalidated.
@@ -991,6 +987,9 @@ final class ItemRunSubmissionCoordinator {
             }
         }
 
+        guard let submitter else {
+            return .retained(.submissionUnavailable)
+        }
         let payload = ItemRunSubmissionPayload(
             attempt: attempt,
             photoData: intake.photoData

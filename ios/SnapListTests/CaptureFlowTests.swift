@@ -1425,8 +1425,8 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             events.events,
             [
+                .tokenRequested(nil),
                 .attemptPersisted(persistedKey),
-                .tokenRequested(persistedKey),
             ]
         )
         XCTAssertEqual(presentationProbe.announcements, [exactMessage])
@@ -1536,8 +1536,8 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             events.events,
             [
+                .tokenRequested(nil),
                 .attemptPersisted(persistedKey),
-                .tokenRequested(persistedKey),
                 .tokenRequested(persistedKey),
             ]
         )
@@ -1973,7 +1973,7 @@ final class CaptureFlowTests: XCTestCase {
         let firstTokenCallCount = await tokenProvider.callCount
         XCTAssertEqual(firstSaveCount, 1)
         XCTAssertEqual(firstClearCount, 0)
-        XCTAssertEqual(firstTokenCallCount, 0)
+        XCTAssertEqual(firstTokenCallCount, 1)
         XCTAssertEqual(firstAttempt.idempotencyKey, persistedKey)
         XCTAssertEqual(firstAttempt.photos.map(\.ordinal), [0, 1])
         XCTAssertEqual(
@@ -2020,7 +2020,7 @@ final class CaptureFlowTests: XCTestCase {
         let tokenCallCountBeforeExplicitRetry =
             await tokenProvider.callCount
         XCTAssertEqual(saveCountBeforeExplicitRetry, 1)
-        XCTAssertEqual(tokenCallCountBeforeExplicitRetry, 0)
+        XCTAssertEqual(tokenCallCountBeforeExplicitRetry, 1)
 
         await scenario.perform(submissionHost: submissionHost)
 
@@ -2048,7 +2048,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(persistedAttemptAfterSecond, firstAttempt)
         XCTAssertEqual(finalSaveCount, 1)
         XCTAssertEqual(finalClearCount, 0)
-        XCTAssertEqual(finalTokenCallCount, 0)
+        XCTAssertEqual(finalTokenCallCount, 2)
 
         try await scenario.assertPreserved()
     }
@@ -2140,9 +2140,15 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(firstSuccessfulSaveCount, 0)
         XCTAssertEqual(firstClearCount, 0)
-        XCTAssertEqual(firstTokenCallCount, 0)
+        XCTAssertEqual(firstTokenCallCount, 1)
         XCTAssertTrue(firstPayloads.isEmpty)
-        XCTAssertEqual(events.events, [.attemptSaveFailed(failedKey)])
+        XCTAssertEqual(
+            events.events,
+            [
+                .tokenRequested(nil),
+                .attemptSaveFailed(failedKey),
+            ]
+        )
         try await scenario.assertPreserved()
 
         // A retained presentation is not a retry scheduler. The failed key was never
@@ -2167,7 +2173,7 @@ final class CaptureFlowTests: XCTestCase {
         let tokenCallsBeforeExplicitRetry = await tokenProvider.callCount
         let payloadsBeforeExplicitRetry = await submitter.payloads
         XCTAssertEqual(saveAttemptsBeforeExplicitRetry.count, 1)
-        XCTAssertEqual(tokenCallsBeforeExplicitRetry, 0)
+        XCTAssertEqual(tokenCallsBeforeExplicitRetry, 1)
         XCTAssertTrue(payloadsBeforeExplicitRetry.isEmpty)
 
         await attemptStore.recover()
@@ -2204,7 +2210,7 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(finalSuccessfulSaveCount, 1)
         XCTAssertEqual(finalClearCount, 0)
-        XCTAssertEqual(finalTokenCallCount, 1)
+        XCTAssertEqual(finalTokenCallCount, 2)
         XCTAssertEqual(persistedAttempt.idempotencyKey, persistedKey)
         XCTAssertEqual(persistedAttempt.photos.map(\.ordinal), [0, 1])
         XCTAssertEqual(
@@ -2231,9 +2237,10 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(
             events.events,
             [
+                .tokenRequested(nil),
                 .attemptSaveFailed(failedKey),
+                .tokenRequested(nil),
                 .attemptPersisted(persistedKey),
-                .tokenRequested(persistedKey),
                 .transportStarted(persistedKey),
             ]
         )
@@ -2501,7 +2508,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(storedAttempt)
         XCTAssertEqual(attemptSaveCount, 0)
         XCTAssertEqual(attemptClearCount, 0)
-        XCTAssertEqual(tokenCallCount, 0)
+        XCTAssertEqual(tokenCallCount, 1)
         XCTAssertTrue(payloadsAfterRefusal.isEmpty)
         try await scenario.assertPreserved()
 
@@ -2577,7 +2584,7 @@ final class CaptureFlowTests: XCTestCase {
             await draftStore.discardExactlyCount
         XCTAssertTrue(payloadsAfterReview.isEmpty)
         XCTAssertNil(attemptAfterReview)
-        XCTAssertEqual(finalTokenCallCount, 0)
+        XCTAssertEqual(finalTokenCallCount, 1)
         XCTAssertEqual(finalDiscardExactlyCount, 0)
         XCTAssertEqual(submissionHost.retention, .intakeUnavailable)
         XCTAssertNil(submissionHost.pendingPresentationEvent)
