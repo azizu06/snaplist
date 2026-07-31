@@ -9,7 +9,14 @@ import {
   selectSoldCompEvidence,
   selectVerifiedSoldMatches,
 } from "../sold-comp-matcher";
-import type { ItemSignal, PriceResult, PricingProvider } from "../types";
+import {
+  pricingEvidenceShippingSchema,
+  type ItemSignal,
+  type PriceResult,
+  type PricingEvidenceFormat,
+  type PricingEvidenceShipping,
+  type PricingProvider,
+} from "../types";
 import { logEvent, type LogFields } from "../../observability";
 import {
   buildSoldSearchQuery,
@@ -114,6 +121,18 @@ export interface ApifySoldComp extends EbaySoldComp {
   priceDisclosure?: "displayed-sold-price" | "asking-price-not-accepted-amount";
 }
 
+function sameShipping(
+  observed: PricingEvidenceShipping | undefined,
+  expected: PricingEvidenceShipping | undefined,
+): boolean {
+  if (observed == null || expected == null) return observed === expected;
+  if (observed.type !== expected.type) return false;
+  return observed.type !== "paid" || expected.type !== "paid"
+    ? true
+    : observed.price === expected.price
+      && observed.currency === expected.currency;
+}
+
 function sameApifySoldComps(
   observed: readonly ApifySoldComp[],
   expected: readonly ApifySoldComp[],
@@ -129,6 +148,10 @@ function sameApifySoldComps(
         comp.price === expectedComp.price &&
         comp.condition === expectedComp.condition &&
         comp.soldAt === expectedComp.soldAt &&
+        comp.photoUrl === expectedComp.photoUrl &&
+        comp.size === expectedComp.size &&
+        comp.format === expectedComp.format &&
+        sameShipping(comp.shipping, expectedComp.shipping) &&
         comp.isBestOfferAccepted === expectedComp.isBestOfferAccepted &&
         comp.priceDisclosure === expectedComp.priceDisclosure
       );
@@ -294,11 +317,71 @@ function soldTimestamp(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function suppliedHttpsPhotoUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const candidate = value.trim();
+  if (!candidate || candidate.length > 2_048) return undefined;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" && Boolean(url.host)
+      ? candidate
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function suppliedBuyingFormat(value: unknown): PricingEvidenceFormat | undefined {
+  switch (value) {
+    case "auction":
+      return "auction";
+    case "buyItNow":
+      return "buy-it-now";
+    case "auctionWithBIN":
+      return "auction-with-buy-it-now";
+    default:
+      return undefined;
+  }
+}
+
+function suppliedSize(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const sizes = Object.entries(value as Record<string, unknown>)
+    .filter(([name]) => name.trim().toLowerCase() === "size")
+    .map(([, rawSize]) => (typeof rawSize === "string" ? rawSize.trim() : ""))
+    .filter((size) => size.length > 0 && size.length <= 120);
+  return new Set(sizes).size === 1 ? sizes[0] : undefined;
+}
+
+function suppliedShipping(raw: Record<string, unknown>): PricingEvidenceShipping | undefined {
+  const type =
+    typeof raw.shippingType === "string"
+      ? raw.shippingType.trim().toLowerCase()
+      : "";
+  if (type === "free") return { type: "free" };
+  if (type === "pickup") return { type: "pickup" };
+  if (type !== "paid") return undefined;
+
+  const candidate = {
+    type: "paid" as const,
+    price: finitePositive(raw.shippingPrice),
+    currency:
+      typeof raw.shippingCurrency === "string"
+        ? raw.shippingCurrency.trim().toUpperCase()
+        : "",
+  };
+  const parsed = pricingEvidenceShippingSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /**
  * Normalize untrusted Actor rows into the provider-neutral sold-comp contract.
- * Seller identity, images, item IDs, raw payload fields, and non-USD prices never
- * cross this boundary. Best Offer asking prices remain labeled so the merged
- * matcher can reject them rather than silently treating them as accepted prices.
+ * Seller identity, item IDs, unknown raw payload fields, and non-USD sold prices
+ * never cross this boundary. Documented optional photo, item-specific size,
+ * format, and shipping facts survive only when the Actor supplied schema-valid
+ * values. Best Offer asking
+ * prices remain labeled so the merged matcher can reject them rather than silently
+ * treating them as accepted prices.
  */
 export function normalizeApifySoldItems(
   rawItems: readonly unknown[],
@@ -335,6 +418,10 @@ export function normalizeApifySoldItems(
       listingType === "best_offer_accepted" ||
       raw.priceDisclosure === "asking-price-not-accepted-amount";
     const soldAt = soldTimestamp(raw.endedAt);
+    const photoUrl = suppliedHttpsPhotoUrl(raw.thumbnailUrl);
+    const size = suppliedSize(raw.itemSpecifics);
+    const format = suppliedBuyingFormat(raw.buyingFormat);
+    const shipping = suppliedShipping(raw);
 
     seen.add(url);
     normalized.push({
@@ -343,6 +430,10 @@ export function normalizeApifySoldItems(
       price,
       ...(conditionText ? { condition: conditionText } : {}),
       ...(soldAt != null ? { soldAt } : {}),
+      ...(photoUrl ? { photoUrl } : {}),
+      ...(size ? { size } : {}),
+      ...(format ? { format } : {}),
+      ...(shipping ? { shipping } : {}),
       isBestOfferAccepted: bestOffer,
       priceDisclosure: bestOffer
         ? "asking-price-not-accepted-amount"

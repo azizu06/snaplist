@@ -3,6 +3,8 @@ import type {
   ItemSignal,
   PriceResult,
   PriceSource,
+  PricingEvidenceFormat,
+  PricingEvidenceShipping,
   PricingProvider,
 } from "../types";
 import { TIGHT_AGREEMENT_MIN, spreadToAgreement } from "./web-search";
@@ -86,6 +88,14 @@ export interface EbaySoldComp {
    * unparseable — an undated comp is treated as neutral (never expired, full weight).
    */
   soldAt?: number;
+  /** Exact HTTPS listing photo supplied by the pricing provider, when present. */
+  photoUrl?: string;
+  /** Exact provider-supplied size display value, when present. */
+  size?: string;
+  /** Provider-supplied sale format normalized without changing ranking. */
+  format?: PricingEvidenceFormat;
+  /** Provider-supplied shipping facts normalized without seller inference. */
+  shipping?: PricingEvidenceShipping;
 }
 
 function isEbaySoldCompArray(value: unknown): value is EbaySoldComp[] {
@@ -1204,6 +1214,10 @@ export function synthesizeSoldResult(
     currency: "USD",
     ...(c.condition ? { condition: c.condition } : {}),
     ...(c.soldAt != null ? { soldAt: c.soldAt } : {}),
+    ...(c.photoUrl ? { photoUrl: c.photoUrl } : {}),
+    ...(c.size ? { size: c.size } : {}),
+    ...(c.format ? { format: c.format } : {}),
+    ...(c.shipping ? { shipping: c.shipping } : {}),
     kind: "sold-comparable" as const,
     priceDisclosure: "displayed-sold-price" as const,
   }));
