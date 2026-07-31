@@ -204,6 +204,19 @@ describe("normalizeApifySoldItems", () => {
     expect(comp).not.toHaveProperty("shipping");
   });
 
+  it("normalizes a mixed-case HTTPS thumbnail before retaining it", () => {
+    const [comp] = normalizeApifySoldItems([
+      rawItem({
+        thumbnailUrl:
+          "HtTpS://i.ebayimg.com/images/g/synthetic-normalized/s-l500.jpg",
+      }),
+    ]);
+
+    expect(comp.photoUrl).toBe(
+      "https://i.ebayimg.com/images/g/synthetic-normalized/s-l500.jpg",
+    );
+  });
+
   it("uses conditionId only as a fallback when the Actor omits condition text", () => {
     const conditions = normalizeApifySoldItems([
       rawItem({ itemId: "n", url: "https://www.ebay.com/itm/n", condition: null, conditionId: 1000 }),

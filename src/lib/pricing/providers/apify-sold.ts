@@ -324,7 +324,7 @@ function suppliedHttpsPhotoUrl(value: unknown): string | undefined {
   try {
     const url = new URL(candidate);
     return url.protocol === "https:" && Boolean(url.host)
-      ? candidate
+      ? url.toString()
       : undefined;
   } catch {
     return undefined;
