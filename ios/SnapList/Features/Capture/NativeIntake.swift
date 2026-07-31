@@ -99,6 +99,11 @@ actor NativeIntake {
         case setVoice(VoiceInput)
         case deleteVoice
         case discard(expected: Version)
+        case retireAcceptedPhotos(
+            expected: Version,
+            photoIDs: [Photo.ID],
+            preservingUnmatchedVoiceID: Voice.ID
+        )
         case photoReviewEntered(activationID: UUID)
         case photoReviewLeft(activationID: UUID)
     }
@@ -142,6 +147,21 @@ actor NativeIntake {
         let expiresAt: Date
         let photos: [Photo]
         let voice: Voice?
+    }
+
+    /// A server-accepted photo run whose optional voice was not accepted leaves only
+    /// deletion authority behind. This record never enters an active snapshot or a
+    /// later submission; it exists solely so existing scoped discard/expiry cleanup
+    /// can remove the protected bytes at their original absolute deadline.
+    private struct DeferredUnmatchedVoice: Codable, Equatable {
+        let schemaVersion: Int
+        let expiresAt: Date
+        let voice: Voice
+    }
+
+    private struct DeferredUnmatchedVoiceRecord {
+        let root: URL
+        let value: DeferredUnmatchedVoice
     }
 
     private struct EphemeralMarker: Codable {
@@ -464,6 +484,17 @@ actor NativeIntake {
             return .committed
         case .discard(let expected):
             return discard(expected: expected)
+        case .retireAcceptedPhotos(
+            let expected,
+            let photoIDs,
+            let preservingUnmatchedVoiceID
+        ):
+            return retireAcceptedPhotos(
+                expected: expected,
+                photoIDs: photoIDs,
+                preservingUnmatchedVoiceID:
+                    preservingUnmatchedVoiceID
+            )
         }
     }
 
@@ -962,6 +993,276 @@ actor NativeIntake {
         return .committed
     }
 
+    private func retireAcceptedPhotos(
+        expected: Version,
+        photoIDs: [Photo.ID],
+        preservingUnmatchedVoiceID: Voice.ID
+    ) -> Outcome {
+        guard let current = active,
+              current.version == expected else {
+            return .superseded
+        }
+        guard current.photos.map(\.id) == photoIDs,
+              let voice = current.voice,
+              voice.id == preservingUnmatchedVoiceID,
+              let expiresAt = current.expiresAt else {
+            return .rejected(.invalidOperation)
+        }
+        do {
+            try persistDeferredUnmatchedVoice(
+                voice,
+                expiresAt: expiresAt,
+                in: current
+            )
+            let currentRoot = current.root.appendingPathComponent(
+                "Current",
+                isDirectory: true
+            )
+            let anchor = storageAnchor(for: current)
+            try Self.validateContainedPath(
+                currentRoot,
+                under: anchor,
+                fileManager: fileManager
+            )
+            try fileManager.removeItem(at: currentRoot)
+        } catch {
+            return .rejected(.storageFailure)
+        }
+
+        let next = ActiveBundle(
+            scope: current.scope,
+            root: current.root,
+            activationID: current.activationID,
+            revision: current.revision + 1,
+            expiresAt: nil,
+            photos: [],
+            voice: nil,
+            recovery: .ready
+        )
+        active = next
+        publish(.snapshot(next.snapshot))
+        rescheduleRetention()
+        return .committed
+    }
+
+    private func persistDeferredUnmatchedVoice(
+        _ voice: Voice,
+        expiresAt: Date,
+        in bundle: ActiveBundle
+    ) throws {
+        let entryRoot = deferredUnmatchedVoiceEntryRoot(
+            for: voice.id,
+            in: bundle.root
+        )
+        let deferredVoiceURL = entryRoot.appendingPathComponent(
+            voice.mediaURL.lastPathComponent
+        )
+        let expected = DeferredUnmatchedVoice(
+            schemaVersion: 1,
+            expiresAt: expiresAt,
+            voice: Voice(
+                id: voice.id,
+                mediaURL: deferredVoiceURL,
+                duration: voice.duration
+            )
+        )
+        switch readDeferredUnmatchedVoice(at: entryRoot) {
+        case .value(let existing):
+            guard existing.value == expected else {
+                throw CocoaError(.fileWriteFileExists)
+            }
+            return
+        case .transient:
+            throw CocoaError(.fileReadUnknown)
+        case .malformed:
+            throw CocoaError(.fileReadCorruptFile)
+        case .absent:
+            break
+        }
+
+        let anchor = storageAnchor(for: bundle)
+        let container = deferredUnmatchedVoicesRoot(in: bundle.root)
+        try Self.prepareRoot(
+            container,
+            under: anchor,
+            fileManager: fileManager
+        )
+        let stagingRoot = makeStagingRoot(for: bundle)
+        defer {
+            Self.removeIfContained(
+                stagingRoot,
+                under: anchor,
+                fileManager: fileManager
+            )
+        }
+        try Self.prepareRoot(
+            stagingRoot,
+            under: anchor,
+            fileManager: fileManager
+        )
+        let stagedVoiceURL = stagingRoot.appendingPathComponent(
+            voice.mediaURL.lastPathComponent
+        )
+        try Self.validateContainedPath(
+            voice.mediaURL,
+            under: anchor,
+            fileManager: fileManager
+        )
+        try fileManager.copyItem(at: voice.mediaURL, to: stagedVoiceURL)
+        try Self.protect(stagedVoiceURL, fileManager: fileManager)
+        try Self.write(
+            JSONEncoder().encode(expected),
+            to: stagingRoot.appendingPathComponent("entry.json"),
+            under: anchor,
+            fileManager: fileManager
+        )
+        try Self.validateContainedPath(
+            entryRoot,
+            under: anchor,
+            fileManager: fileManager
+        )
+        try fileManager.moveItem(at: stagingRoot, to: entryRoot)
+    }
+
+    private func deferredUnmatchedVoicesRoot(in principalRoot: URL) -> URL {
+        principalRoot.appendingPathComponent(
+            "DeferredUnmatchedVoices",
+            isDirectory: true
+        )
+    }
+
+    private func deferredUnmatchedVoiceEntryRoot(
+        for voiceID: Voice.ID,
+        in principalRoot: URL
+    ) -> URL {
+        deferredUnmatchedVoicesRoot(in: principalRoot)
+            .appendingPathComponent(
+                voiceID.uuidString.lowercased(),
+                isDirectory: true
+            )
+    }
+
+    private func readDeferredUnmatchedVoice(
+        at entryRoot: URL
+    ) -> ReadResult<DeferredUnmatchedVoiceRecord> {
+        guard let anchor = storageAnchor(containing: entryRoot) else {
+            return .malformed
+        }
+        do {
+            try Self.validateContainedPath(
+                entryRoot,
+                under: anchor,
+                fileManager: fileManager
+            )
+            _ = try fileManager.attributesOfItem(atPath: entryRoot.path)
+        } catch {
+            return Self.isMissing(error) ? .absent : .transient
+        }
+        guard let voiceID = UUID(uuidString: entryRoot.lastPathComponent),
+              entryRoot.lastPathComponent
+                == voiceID.uuidString.lowercased() else {
+            return .malformed
+        }
+        let metadataURL = entryRoot.appendingPathComponent("entry.json")
+        do {
+            try Self.validateContainedPath(
+                metadataURL,
+                under: anchor,
+                fileManager: fileManager
+            )
+            let value = try JSONDecoder().decode(
+                DeferredUnmatchedVoice.self,
+                from: Data(contentsOf: metadataURL)
+            )
+            let expectedVoiceURL = entryRoot.appendingPathComponent(
+                "voice-\(voiceID.uuidString).wav"
+            )
+            guard value.schemaVersion == 1,
+                  value.voice.id == voiceID,
+                  value.voice.mediaURL.standardizedFileURL
+                    == expectedVoiceURL.standardizedFileURL,
+                  value.voice.duration > 0,
+                  value.voice.duration
+                    <= VoiceNotePresentation.maximumDuration else {
+                return .malformed
+            }
+            try Self.validateContainedPath(
+                expectedVoiceURL,
+                under: anchor,
+                fileManager: fileManager
+            )
+            _ = try fileManager.attributesOfItem(
+                atPath: expectedVoiceURL.path
+            )
+            return .value(
+                DeferredUnmatchedVoiceRecord(
+                    root: entryRoot,
+                    value: value
+                )
+            )
+        } catch {
+            return Self.isMissing(error) ? .malformed : .transient
+        }
+    }
+
+    private func deferredUnmatchedVoices(
+        in principalRoot: URL
+    ) -> ReadResult<[DeferredUnmatchedVoiceRecord]> {
+        let container = deferredUnmatchedVoicesRoot(in: principalRoot)
+        guard let anchor = storageAnchor(containing: container) else {
+            return .malformed
+        }
+        let entryRoots: [URL]
+        do {
+            try Self.validateContainedPath(
+                container,
+                under: anchor,
+                fileManager: fileManager
+            )
+            entryRoots = try fileManager.contentsOfDirectory(
+                at: container,
+                includingPropertiesForKeys: nil
+            )
+        } catch {
+            return Self.isMissing(error) ? .absent : .transient
+        }
+        var records: [DeferredUnmatchedVoiceRecord] = []
+        records.reserveCapacity(entryRoots.count)
+        for entryRoot in entryRoots {
+            switch readDeferredUnmatchedVoice(at: entryRoot) {
+            case .value(let record):
+                records.append(record)
+            case .absent, .malformed:
+                return .malformed
+            case .transient:
+                return .transient
+            }
+        }
+        return .value(records)
+    }
+
+    private func hasDeferredUnmatchedVoices(in principalRoot: URL) -> Bool {
+        if case .value(let records) = deferredUnmatchedVoices(
+            in: principalRoot
+        ) {
+            return !records.isEmpty
+        }
+        return false
+    }
+
+    private func currentBundleIsAbsent(in principalRoot: URL) -> Bool {
+        let currentRoot = principalRoot.appendingPathComponent(
+            "Current",
+            isDirectory: true
+        )
+        do {
+            _ = try fileManager.attributesOfItem(atPath: currentRoot.path)
+            return false
+        } catch {
+            return Self.isMissing(error)
+        }
+    }
+
     private func rescheduleRetention() {
         retentionTask?.cancel()
         guard let deadline = nearestRetentionDeadline() else {
@@ -991,14 +1292,20 @@ actor NativeIntake {
                 deadlines.append(deletionRetryAfter[active.root] ?? expiresAt)
             }
         }
-        switch ownedDurableRoots() {
+        let durableRoots = ownedDurableRoots()
+        switch durableRoots {
         case .value(let roots):
             for root in roots where root != active?.root {
                 switch readStoredBundle(at: root) {
                 case .value(let stored):
                     deadlines.append(deletionRetryAfter[root] ?? stored.expiresAt)
                 case .malformed:
-                    deadlines.append(deletionRetryAfter[root] ?? now())
+                    if !currentBundleIsAbsent(in: root)
+                        || !hasDeferredUnmatchedVoices(in: root) {
+                        deadlines.append(
+                            deletionRetryAfter[root] ?? now()
+                        )
+                    }
                 case .transient:
                     deadlines.append(now().addingTimeInterval(Self.retentionRetryInterval))
                 case .absent:
@@ -1010,7 +1317,8 @@ actor NativeIntake {
         case .absent, .malformed:
             break
         }
-        switch ownedEphemeralRoots() {
+        let ephemeralRoots = ownedEphemeralRoots()
+        switch ephemeralRoots {
         case .value(let roots):
             for root in roots where root != active?.root {
                 switch readEphemeralExpiry(at: root) {
@@ -1027,7 +1335,49 @@ actor NativeIntake {
         case .absent, .malformed:
             break
         }
+        appendDeferredUnmatchedVoiceDeadlines(
+            in: durableRoots,
+            to: &deadlines
+        )
+        appendDeferredUnmatchedVoiceDeadlines(
+            in: ephemeralRoots,
+            to: &deadlines
+        )
         return deadlines.min()
+    }
+
+    private func appendDeferredUnmatchedVoiceDeadlines(
+        in roots: ReadResult<[URL]>,
+        to deadlines: inout [Date]
+    ) {
+        switch roots {
+        case .value(let roots):
+            for root in roots {
+                switch deferredUnmatchedVoices(in: root) {
+                case .value(let records):
+                    deadlines.append(
+                        contentsOf: records.map {
+                            deletionRetryAfter[$0.root]
+                                ?? $0.value.expiresAt
+                        }
+                    )
+                case .transient, .malformed:
+                    deadlines.append(
+                        now().addingTimeInterval(
+                            Self.retentionRetryInterval
+                        )
+                    )
+                case .absent:
+                    break
+                }
+            }
+        case .transient:
+            deadlines.append(
+                now().addingTimeInterval(Self.retentionRetryInterval)
+            )
+        case .absent, .malformed:
+            break
+        }
     }
 
     private func retentionDeadlineReached() async {
@@ -1058,8 +1408,51 @@ actor NativeIntake {
                 publish(.snapshot(expired.snapshot))
             }
         }
+        cleanupExpiredDeferredUnmatchedVoices(at: currentTime)
         cleanupInactiveRoots(expiredAt: currentTime)
         rescheduleRetention()
+    }
+
+    private func cleanupExpiredDeferredUnmatchedVoices(
+        at currentTime: Date
+    ) {
+        for roots in [ownedDurableRoots(), ownedEphemeralRoots()] {
+            guard case .value(let roots) = roots else { continue }
+            for root in roots {
+                guard case .value(let records) =
+                    deferredUnmatchedVoices(in: root) else {
+                    continue
+                }
+                for record in records
+                    where record.value.expiresAt <= currentTime {
+                    let removed = removeDeferredUnmatchedVoice(record)
+                    deletionRetryAfter[record.root] = removed
+                        ? nil
+                        : currentTime.addingTimeInterval(
+                            Self.retentionRetryInterval
+                        )
+                }
+            }
+        }
+    }
+
+    private func removeDeferredUnmatchedVoice(
+        _ record: DeferredUnmatchedVoiceRecord
+    ) -> Bool {
+        guard let anchor = storageAnchor(containing: record.root) else {
+            return false
+        }
+        do {
+            try Self.validateContainedPath(
+                record.root,
+                under: anchor,
+                fileManager: fileManager
+            )
+            try fileManager.removeItem(at: record.root)
+            return true
+        } catch {
+            return Self.isMissing(error)
+        }
     }
 
     private func cleanupInactiveRoots(expiredAt currentTime: Date) {
@@ -1069,7 +1462,10 @@ actor NativeIntake {
                 case .value(let stored) where stored.expiresAt <= currentTime:
                     _ = removeExpiredRoot(root, at: currentTime)
                 case .malformed:
-                    _ = removeExpiredRoot(root, at: currentTime)
+                    if !currentBundleIsAbsent(in: root)
+                        || !hasDeferredUnmatchedVoices(in: root) {
+                        _ = removeExpiredRoot(root, at: currentTime)
+                    }
                 case .value, .absent, .transient:
                     break
                 }
@@ -1139,6 +1535,15 @@ actor NativeIntake {
         case .absent:
             return blankBundle(scope: scope, root: root, activationID: activationID, recovery: .ready)
         case .malformed:
+            if currentBundleIsAbsent(in: root),
+               hasDeferredUnmatchedVoices(in: root) {
+                return blankBundle(
+                    scope: scope,
+                    root: root,
+                    activationID: activationID,
+                    recovery: .ready
+                )
+            }
             return unavailableBundle(scope: scope, root: root, activationID: activationID)
         case .transient:
             return blankBundle(scope: scope, root: root, activationID: activationID, recovery: .pending)

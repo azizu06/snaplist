@@ -61,6 +61,8 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
     private let validateFilesystemContext:
         @Sendable () async throws -> Void
     private let discardCommittedIntake: @Sendable () async -> Bool
+    private let retireAcceptedPhotosPreservingVoice:
+        @Sendable () async -> Bool
 
     private init(
         generation: UUID,
@@ -70,7 +72,9 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
         attemptStore: any ItemRunSubmissionAttemptStoring,
         validateFilesystemContext:
             @escaping @Sendable () async throws -> Void,
-        discardCommittedIntake: @escaping @Sendable () async -> Bool
+        discardCommittedIntake: @escaping @Sendable () async -> Bool,
+        retireAcceptedPhotosPreservingVoice:
+            @escaping @Sendable () async -> Bool
     ) {
         self.generation = generation
         self.scopeProof = scopeProof
@@ -79,6 +83,8 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
         self.attemptStore = attemptStore
         self.validateFilesystemContext = validateFilesystemContext
         self.discardCommittedIntake = discardCommittedIntake
+        self.retireAcceptedPhotosPreservingVoice =
+            retireAcceptedPhotosPreservingVoice
     }
 
     init?(
@@ -117,12 +123,28 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
             discardCommittedIntake: {
                 await intake.perform(.discard(expected: snapshot.version))
                     == .committed
+            },
+            retireAcceptedPhotosPreservingVoice: {
+                guard let voice = snapshot.voice else {
+                    return false
+                }
+                return await intake.perform(
+                    .retireAcceptedPhotos(
+                        expected: snapshot.version,
+                        photoIDs: snapshot.photos.map(\.id),
+                        preservingUnmatchedVoiceID: voice.id
+                    )
+                ) == .committed
             }
         )
     }
 
     func discardExactly() async -> Bool {
         await discardCommittedIntake()
+    }
+
+    func retireAcceptedPhotosPreservingUnmatchedVoice() async -> Bool {
+        await retireAcceptedPhotosPreservingVoice()
     }
 
     func validatesFilesystemContext() async -> Bool {
