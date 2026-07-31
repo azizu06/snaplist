@@ -601,6 +601,68 @@ final class NativeIntakeTests: XCTestCase {
         )
         XCTAssertTrue(files.fileExists(atPath: deferredVoiceURL.path))
     }
+
+    func testReturningToAResidualRootKeepsVoicesWhenTheStoreCannotBeRead()
+        async throws {
+        let start = Date(timeIntervalSince1970: 2_100_000_000)
+        let clock = NativeIntakeTestClock(now: start)
+        let principalA = "user_native_intake_reopen_unreadable_a"
+        let principalB = "user_native_intake_reopen_unreadable_b"
+        let harness = NativeIntakeHarness(identity: .clerk(principalA))
+        addTeardownBlock { harness.cleanUp() }
+        let guardedFiles = NativeIntakeTestFileManager()
+        let session = try await harness.makeSession(
+            fileManager: guardedFiles,
+            now: clock.now,
+            sleepUntil: clock.sleep
+        )
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 1)])
+        )
+        let submitted = try await session.commit(
+            .setVoice(voice("reopened unmatched voice", duration: 3))
+        )
+        let submittedVoice = try XCTUnwrap(submitted.voice)
+        let principalARoot = intakeRoot(
+            containing: submitted.photos[0].photoURL
+        )
+        let deferredVoiceURL = principalARoot
+            .appendingPathComponent(
+                "DeferredUnmatchedVoices",
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                submittedVoice.id.uuidString.lowercased(),
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                "voice-\(submittedVoice.id.uuidString).wav"
+            )
+        let retirement = await session.perform(
+            .retireAcceptedPhotos(
+                expected: submitted.version,
+                photoIDs: submitted.photos.map(\.id),
+                preservingUnmatchedVoiceID: submittedVoice.id
+            )
+        )
+        XCTAssertEqual(retirement, .committed)
+        assertEmpty(try await session.nextSnapshot())
+        XCTAssertTrue(files.fileExists(atPath: deferredVoiceURL.path))
+
+        // Reopening the residual root reads its torn manifest and asks whether
+        // the root is a voice-only residual. An unreadable store cannot answer,
+        // and the fallback for "no" destroys the root, so uncertainty there has
+        // to stop short of that rather than resolve to it.
+        guardedFiles.rejectDeferredUnmatchedVoiceReads = true
+        await harness.identity.set(.clerk(principalB))
+        _ = try await session.nextSnapshot()
+        await harness.identity.set(.clerk(principalA))
+        _ = try await session.nextSnapshot()
+
+        XCTAssertTrue(files.fileExists(atPath: deferredVoiceURL.path))
+        XCTAssertTrue(files.fileExists(atPath: principalARoot.path))
+    }
+
     func testResidualRootWithoutAnyDeferredVoiceStoreIsStillExpired() async throws {
         let start = Date(timeIntervalSince1970: 2_100_000_000)
         let clock = NativeIntakeTestClock(now: start)

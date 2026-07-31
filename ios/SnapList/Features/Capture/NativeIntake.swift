@@ -1564,6 +1564,17 @@ actor NativeIntake {
                     recovery: .ready
                 )
             }
+            // Falling through here destroys the root, so the uncertainty that
+            // cannot promise a usable voice-only residual must not authorise
+            // that either. Pending keeps the bytes and retries the read.
+            if deferredUnmatchedVoicesPresent(in: root, whenUncertain: true) {
+                return blankBundle(
+                    scope: scope,
+                    root: root,
+                    activationID: activationID,
+                    recovery: .pending
+                )
+            }
             return unavailableBundle(scope: scope, root: root, activationID: activationID)
         case .transient:
             return blankBundle(scope: scope, root: root, activationID: activationID, recovery: .pending)
