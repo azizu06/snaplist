@@ -701,16 +701,20 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) async -> NativeIntake.Event? {
-        if let recorded = recorder.takeRecordedEvent() { return recorded }
-        let expectation = expectation(description: description)
-        recorder.notifyOnNextEvent { expectation.fulfill() }
-        await fulfillment(of: [expectation], timeout: timeout)
-        recorder.cancelPendingNotification()
-        guard let recorded = recorder.takeRecordedEvent() else {
-            XCTFail("Timed out waiting for \(description).", file: file, line: line)
-            return nil
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            if let recorded = recorder.takeRecordedEvent() { return recorded }
+            guard Date() < deadline else {
+                XCTFail(
+                    "Timed out waiting for \(description).",
+                    file: file,
+                    line: line
+                )
+                return nil
+            }
+            // Publishing runs on this actor, so yielding is what lets it make progress.
+            await Task.yield()
         }
-        return recorded
     }
 
     private func waitUntil(
@@ -741,13 +745,12 @@ final class NativeIntakeAdoptionTests: XCTestCase {
 @MainActor
 private final class NativeIntakeAdoptionEventRecorder {
     private var recorded: [NativeIntake.Event] = []
-    private var pendingNotification: (() -> Void)?
     private var recording: Task<Void, Never>?
 
     init(_ events: AsyncStream<NativeIntake.Event>) {
         recording = Task { @MainActor [weak self] in
             for await event in events {
-                self?.receive(event)
+                self?.recorded.append(event)
             }
         }
     }
@@ -759,21 +762,6 @@ private final class NativeIntakeAdoptionEventRecorder {
 
     func takeRecordedEvent() -> NativeIntake.Event? {
         recorded.isEmpty ? nil : recorded.removeFirst()
-    }
-
-    func notifyOnNextEvent(_ notify: @escaping () -> Void) {
-        pendingNotification = notify
-    }
-
-    func cancelPendingNotification() {
-        pendingNotification = nil
-    }
-
-    private func receive(_ event: NativeIntake.Event) {
-        recorded.append(event)
-        let notify = pendingNotification
-        pendingNotification = nil
-        notify?()
     }
 }
 

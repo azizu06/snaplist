@@ -3643,16 +3643,8 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(returnFocus, [])
         // Photo Review commits write through to the durable intake, so the survivor set
         // reaches Scan directly rather than waiting to be carried back.
-        await waitUntilIntake { captureFlow.stagedPhotos == [originalCover, third] }
+        await waitUntilTrue { captureFlow.stagedPhotos == [originalCover, third] }
         XCTAssertEqual(captureFlow.stagedPhotos, [originalCover, third])
-    }
-
-    private func waitUntilIntake(
-        _ condition: @escaping @MainActor () -> Bool
-    ) async {
-        for _ in 0..<1_000 where !condition() {
-            await Task.yield()
-        }
     }
 
     func testLivePhotoReviewDeletingTheFinalPhotoLeavesForGuidedScanWithNoPhotos()
@@ -6545,8 +6537,18 @@ final class CaptureFlowTests: XCTestCase {
     ///
     /// Photo Review commits are gated on the session's intake activation, so a flow built
     /// over the legacy draft store alone exposes no activation and rejects every commit.
+    private func waitUntilTrue(
+        _ condition: @escaping @MainActor () -> Bool
+    ) async {
+        for _ in 0..<1_000 where !condition() {
+            await Task.yield()
+        }
+    }
+
     private func makeIntakeCaptureFlow(root: URL) -> CaptureFlowModel {
         let dependencies = AppDependencies.make(
+            // The fixture supplies the stub camera these tests assert `phase` against.
+            // Its staged draft is ignored: `restore()` prefers the intake once one exists.
             configuration: LaunchConfiguration.parse(
                 arguments: ["--restored-capture-fixture"]
             ),
