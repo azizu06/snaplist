@@ -601,6 +601,129 @@ final class NativeIntakeTests: XCTestCase {
         )
         XCTAssertTrue(files.fileExists(atPath: deferredVoiceURL.path))
     }
+    func testResidualRootWithoutAnyDeferredVoiceStoreIsStillExpired() async throws {
+        let start = Date(timeIntervalSince1970: 2_100_000_000)
+        let clock = NativeIntakeTestClock(now: start)
+        let principalA = "user_native_intake_residual_a"
+        let principalB = "user_native_intake_residual_b"
+        let harness = NativeIntakeHarness(identity: .clerk(principalA))
+        addTeardownBlock { harness.cleanUp() }
+        let guardedFiles = NativeIntakeTestFileManager()
+        let session = try await harness.makeSession(
+            fileManager: guardedFiles,
+            now: clock.now,
+            sleepUntil: clock.sleep
+        )
+        let staged = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 1)])
+        )
+        let principalARoot = intakeRoot(
+            containing: staged.photos[0].photoURL
+        )
+        try guardedFiles.removeItem(
+            at: principalARoot.appendingPathComponent(
+                "Current",
+                isDirectory: true
+            )
+        )
+        XCTAssertFalse(
+            files.fileExists(
+                atPath: principalARoot
+                    .appendingPathComponent("DeferredUnmatchedVoices")
+                    .path
+            )
+        )
+
+        let switchRegistration = clock.latestRegistration
+        await harness.identity.set(.clerk(principalB))
+        assertEmpty(try await session.nextSnapshot())
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 2)])
+        )
+        await clock.waitUntilLiveSleeper(
+            after: switchRegistration,
+            deadline: clock.now().addingTimeInterval(
+                NativeIntake.recoveryWindow
+            )
+        )
+
+        XCTAssertFalse(files.fileExists(atPath: principalARoot.path))
+    }
+    func testResidualRootKeepsDeferredVoicesWhenItsManifestIsUnreadable() async throws {
+        let start = Date(timeIntervalSince1970: 2_100_000_000)
+        let clock = NativeIntakeTestClock(now: start)
+        let principalA = "user_native_intake_torn_manifest_a"
+        let principalB = "user_native_intake_torn_manifest_b"
+        // Principal B commits first so its bundle deadline is the earliest one
+        // on disk. Retaining or removing principal A's root then converges on
+        // the same wake-up, which keeps the verdict deterministic either way.
+        let harness = NativeIntakeHarness(identity: .clerk(principalB))
+        addTeardownBlock { harness.cleanUp() }
+        let guardedFiles = NativeIntakeTestFileManager()
+        let session = try await harness.makeSession(
+            fileManager: guardedFiles,
+            now: clock.now,
+            sleepUntil: clock.sleep
+        )
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 1)])
+        )
+        let principalBDeadline = clock.now().addingTimeInterval(
+            NativeIntake.recoveryWindow
+        )
+
+        await harness.identity.set(.clerk(principalA))
+        assertEmpty(try await session.nextSnapshot())
+        clock.advance(by: 2 * 60 * 60)
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 2)])
+        )
+        let submitted = try await session.commit(
+            .setVoice(voice("torn manifest unmatched voice", duration: 3))
+        )
+        let submittedVoice = try XCTUnwrap(submitted.voice)
+        let principalARoot = intakeRoot(
+            containing: submitted.photos[0].photoURL
+        )
+        let deferredVoiceURL = principalARoot
+            .appendingPathComponent(
+                "DeferredUnmatchedVoices",
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                submittedVoice.id.uuidString.lowercased(),
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                "voice-\(submittedVoice.id.uuidString).wav"
+            )
+        let retirement = await session.perform(
+            .retireAcceptedPhotos(
+                expected: submitted.version,
+                photoIDs: submitted.photos.map(\.id),
+                preservingUnmatchedVoiceID: submittedVoice.id
+            )
+        )
+        XCTAssertEqual(retirement, .committed)
+        assertEmpty(try await session.nextSnapshot())
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 3)])
+        )
+        let manifestURL = principalARoot
+            .appendingPathComponent("Current", isDirectory: true)
+            .appendingPathComponent("bundle.json")
+        try Data("{".utf8).write(to: manifestURL)
+
+        let switchRegistration = clock.latestRegistration
+        await harness.identity.set(.clerk(principalB))
+        _ = try await session.nextSnapshot()
+        await clock.waitUntilLiveSleeper(
+            after: switchRegistration,
+            deadline: principalBDeadline
+        )
+
+        XCTAssertTrue(files.fileExists(atPath: deferredVoiceURL.path))
+    }
     func testVanishedDeferredUnmatchedVoiceEntryStillExpiresItsSiblings() async throws {
         let start = Date(timeIntervalSince1970: 2_100_000_000)
         let clock = NativeIntakeTestClock(now: start)
@@ -666,7 +789,7 @@ final class NativeIntakeTests: XCTestCase {
         )
         XCTAssertTrue(files.fileExists(atPath: secondEntryRoot.path))
 
-        guardedFiles.vanishedDeferredUnmatchedVoiceEntries = [firstEntryRoot]
+        guardedFiles.reportMissing(firstEntryRoot)
         guardedFiles.failNextFileOperation = .rootDeletions([
             secondEntryRoot.standardizedFileURL.path
         ])
@@ -680,10 +803,25 @@ final class NativeIntakeTests: XCTestCase {
             deadline: retryDeadline
         )
 
-        XCTAssertEqual(
-            guardedFiles.rootDeletionFailureCount(at: secondEntryRoot),
-            1
+        // The sweep is blocked from completing the removal so that a freed and
+        // a frozen store both settle on the same retry deadline, which is what
+        // keeps this deterministic instead of hanging one of them.
+        guard guardedFiles.rootDeletionFailureCount(at: secondEntryRoot) == 1
+        else {
+            return XCTFail(
+                "A missing sibling entry froze the expiry of a readable one."
+            )
+        }
+        let removalBaseline = guardedFiles.successfulRootRemovalCount
+        guardedFiles.failNextFileOperation = nil
+        clock.advance(by: NativeIntake.retentionRetryInterval)
+        await guardedFiles.waitForRootRemovals(
+            removalBaseline + 1,
+            successful: true
         )
+
+        XCTAssertFalse(files.fileExists(atPath: secondEntryRoot.path))
+        XCTAssertTrue(files.fileExists(atPath: firstEntryRoot.path))
     }
     private func intakeRoot(containing asset: URL) -> URL {
         asset.deletingLastPathComponent()
@@ -1000,7 +1138,7 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
     override var temporaryDirectory: URL { isolatedTemporaryDirectory }
     private var rejectsReads = false
     private var rejectsDeferredUnmatchedVoiceReads = false
-    private var vanishedEntryPaths = Set<String>()
+    private var pathsReportingMissing = Set<String>()
     private var nextFailure: NativeIntakeFileFailure?
     private var failedRootDeletionPaths = Set<String>()
     private var completedRemovalAttempts = 0
@@ -1021,21 +1159,12 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
         get { lock.synchronized { rejectsDeferredUnmatchedVoiceReads } }
         set { lock.synchronized { rejectsDeferredUnmatchedVoiceReads = newValue } }
     }
-    /// Entry directories the listing still reports but whose metadata reads
-    /// report the entry as missing, matching a deferred-voice removal that
-    /// raced the retention sweep or only partly succeeded.
-    var vanishedDeferredUnmatchedVoiceEntries: Set<URL> {
-        get {
-            lock.synchronized {
-                Set(vanishedEntryPaths.map { URL(fileURLWithPath: $0) })
-            }
-        }
-        set {
-            lock.synchronized {
-                vanishedEntryPaths = Set(
-                    newValue.map(\.standardizedFileURL.path)
-                )
-            }
+    /// Makes metadata reads of `url` report it as missing while it is still
+    /// listed by its parent directory, matching a removal that raced the
+    /// retention sweep or only partly succeeded.
+    func reportMissing(_ url: URL) {
+        lock.synchronized {
+            _ = pathsReportingMissing.insert(url.standardizedFileURL.path)
         }
     }
     fileprivate func rootDeletionFailureCount(at root: URL) -> Int {
@@ -1065,7 +1194,7 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
             }
         }
         let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
-        if lock.synchronized({ vanishedEntryPaths.contains(standardized) }) {
+        if lock.synchronized({ pathsReportingMissing.contains(standardized) }) {
             throw CocoaError(.fileNoSuchFile)
         }
         return try super.attributesOfItem(atPath: path)

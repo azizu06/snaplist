@@ -1245,25 +1245,25 @@ actor NativeIntake {
         return .value(records)
     }
 
-    private func hasDeferredUnmatchedVoices(in principalRoot: URL) -> Bool {
-        if case .value(let records) = deferredUnmatchedVoices(
-            in: principalRoot
-        ) {
+    /// Reports whether a principal root still holds deferred unmatched voices.
+    /// Only a positive read — an empty listing, or no store at all — settles
+    /// the question; `whenUncertain` decides the rest, and callers must pass
+    /// whichever answer is safe for what they are about to do. Destroying a
+    /// root is safe only when voices can be ruled out, so those callers pass
+    /// `true`; presenting a root as a voice-only residual is safe only when
+    /// voices are known to be there, so that caller passes `false`.
+    private func deferredUnmatchedVoicesPresent(
+        in principalRoot: URL,
+        whenUncertain: Bool
+    ) -> Bool {
+        switch deferredUnmatchedVoices(in: principalRoot) {
+        case .value(let records):
             return !records.isEmpty
+        case .absent:
+            return false
+        case .transient, .malformed:
+            return whenUncertain
         }
-        return false
-    }
-
-    /// Answers whether protected voice bytes can be ruled out. An uncertain
-    /// read must never authorise destroying a residual root, so anything short
-    /// of a positive empty listing reports that voices may still be present.
-    private func mayHaveDeferredUnmatchedVoices(in principalRoot: URL) -> Bool {
-        if case .value(let records) = deferredUnmatchedVoices(
-            in: principalRoot
-        ) {
-            return !records.isEmpty
-        }
-        return true
     }
 
     private func currentBundleIsAbsent(in principalRoot: URL) -> Bool {
@@ -1316,8 +1316,10 @@ actor NativeIntake {
                 case .value(let stored):
                     deadlines.append(deletionRetryAfter[root] ?? stored.expiresAt)
                 case .malformed:
-                    if !currentBundleIsAbsent(in: root)
-                        || !mayHaveDeferredUnmatchedVoices(in: root) {
+                    if !deferredUnmatchedVoicesPresent(
+                        in: root,
+                        whenUncertain: true
+                    ) {
                         deadlines.append(
                             deletionRetryAfter[root] ?? now()
                         )
@@ -1478,8 +1480,10 @@ actor NativeIntake {
                 case .value(let stored) where stored.expiresAt <= currentTime:
                     _ = removeExpiredRoot(root, at: currentTime)
                 case .malformed:
-                    if !currentBundleIsAbsent(in: root)
-                        || !mayHaveDeferredUnmatchedVoices(in: root) {
+                    if !deferredUnmatchedVoicesPresent(
+                        in: root,
+                        whenUncertain: true
+                    ) {
                         _ = removeExpiredRoot(root, at: currentTime)
                     }
                 case .value, .absent, .transient:
@@ -1552,7 +1556,7 @@ actor NativeIntake {
             return blankBundle(scope: scope, root: root, activationID: activationID, recovery: .ready)
         case .malformed:
             if currentBundleIsAbsent(in: root),
-               hasDeferredUnmatchedVoices(in: root) {
+               deferredUnmatchedVoicesPresent(in: root, whenUncertain: false) {
                 return blankBundle(
                     scope: scope,
                     root: root,
