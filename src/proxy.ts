@@ -13,12 +13,15 @@ import { NextResponse } from "next/server";
 // (see src/app/dev/preview), so whitelisting it here is dev-only in effect.
 // /api/ebay/account-deletion is called server-to-server by eBay (no session);
 // the route gates itself via eBay's signature verification (412 otherwise).
-// /api/internal/pipeline-worker is called by a scheduler that holds no Clerk
-// cookie. It must not be redirected: a scheduler treats a 3xx as the final
-// response (Vercel Cron does not follow redirects, and neither does pg_net), so
-// a login redirect here is a silently un-drained queue rather than a visible
-// failure. The route stays fail-closed on its own — 503 with CRON_SECRET unset,
-// 401 without the matching bearer.
+// /api/internal/pipeline-worker and /api/internal/pipeline-maintenance are
+// called by a scheduler that holds no Clerk cookie — the same owner-only
+// pg_cron template schedules both. Neither may be redirected. Vercel Cron
+// treats a 3xx as the final response for that invocation and stops; pg_net
+// does the opposite and follows it, then records a 200 login page in
+// net._http_response. Either way the invocation looks successful while the
+// queue is never drained and retention never runs. Both routes stay
+// fail-closed on their own — 503 with CRON_SECRET unset, 401 without the
+// matching bearer.
 const isPublic = createRouteMatcher([
   "/",
   "/tour",
@@ -32,6 +35,7 @@ const isPublic = createRouteMatcher([
   "/api/ebay/account-deletion",
   "/api/cron/inbox-sync",
   "/api/internal/pipeline-worker",
+  "/api/internal/pipeline-maintenance",
   "/dev(.*)",
 ]);
 
