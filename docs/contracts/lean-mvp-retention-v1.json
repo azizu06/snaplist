@@ -7,388 +7,566 @@
     {
       "id": "local-intake-photos",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-local-client",
-        "deletionTriggers": ["seller-discards-intake", "matching-durable-acceptance-allows-local-cleanup", "local-recovery-window-expires"],
-        "maximumRetention": "24 hours from local intake capture",
-        "executor": "native-intake-cleanup-capability",
-        "completionProof": "protected photo files and their local intake references are absent"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-local-client",
+          "deletionTriggers": [
+            "seller-discards-intake",
+            "matching-durable-acceptance-allows-local-cleanup",
+            "local-recovery-window-expires"
+          ],
+          "maximumRetention": "24 hours from local intake capture",
+          "executor": "native-intake-cleanup-capability",
+          "completionProof": "protected photo files and their local intake references are absent"
+        }
+      ]
     },
     {
       "id": "local-intake-voice",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-local-client",
-        "deletionTriggers": ["seller-deletes-or-replaces-voice", "seller-discards-intake", "matching-durable-acceptance-allows-local-cleanup", "local-recovery-window-expires"],
-        "maximumRetention": "24 hours from local intake capture",
-        "executor": "native-intake-cleanup-capability",
-        "completionProof": "protected voice file and its local intake reference are absent"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-local-client",
+          "deletionTriggers": [
+            "seller-deletes-or-replaces-voice",
+            "seller-discards-intake",
+            "matching-durable-acceptance-allows-local-cleanup",
+            "local-recovery-window-expires"
+          ],
+          "maximumRetention": "24 hours from local intake capture",
+          "executor": "native-intake-cleanup-capability",
+          "completionProof": "protected voice file and its local intake reference are absent"
+        }
+      ]
     },
     {
       "id": "private-storage-photos",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["uncommitted-staging-window-expires", "failed-or-canceled-item-becomes-unreferenced", "guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "24 hours for uncommitted staging and unclaimed guest recovery; otherwise while referenced by the retained item until item deletion or account erasure",
-        "executor": "snaplist-private-storage-cleanup-capability",
-        "completionProof": "durable cleanup job records success and every selected private object path is absent"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "uncommitted-staging-window-expires",
+            "failed-or-canceled-item-becomes-unreferenced",
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "24 hours for uncommitted staging and unclaimed guest recovery; otherwise while referenced by the retained item until item deletion or account erasure",
+          "executor": "snaplist-private-storage-cleanup-capability",
+          "completionProof": "durable cleanup job records success and every selected private object path is absent"
+        }
+      ]
     },
     {
       "id": "private-storage-raw-voice",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["first-durable-terminal-transcription-outcome", "guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "24 hours after durable server acceptance",
-        "executor": "snaplist-private-storage-cleanup-capability",
-        "completionProof": "durable cleanup job records success and the raw voice object is absent"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "first-durable-terminal-transcription-outcome",
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "24 hours after durable server acceptance",
+          "executor": "snaplist-private-storage-cleanup-capability",
+          "completionProof": "durable cleanup job records success and the raw voice object is absent"
+        }
+      ]
     },
     {
       "id": "hosted-transcription-provider-copy",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "provider-owned",
-        "owner": "openai-api-abuse-monitoring",
-        "deletionTriggers": ["openai-abuse-monitoring-retention-expires"],
-        "maximumRetention": "None for abuse monitoring and None for application state, as OpenAI publishes for /v1/audio/transcriptions; bounded by the general default-policy ceiling of up to 30 days if any copy exists despite that. SnapList cannot shorten either and does not report the provider copy as deleted",
-        "executor": "openai-platform-under-its-default-api-data-policy-no-snaplist-executor",
-        "completionProof": "the transcription request is sent to /v1/audio/transcriptions, whose published abuse-monitoring and application-state retention are both None, under the default API data policy with no Zero Data Retention approval recorded. A retention claim below the published endpoint values may only be made once an OpenAI ZDR approval receipt exists",
-        "citations": [
-          {
-            "url": "https://developers.openai.com/api/docs/guides/your-data",
-            "clause": "How we use your data",
-            "quote": "As of March 1, 2023, data sent to the OpenAI API is not used to train or improve OpenAI models (unless you explicitly opt in to share data with us).",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://developers.openai.com/api/docs/guides/your-data",
-            "clause": "Storage requirements and retention controls per endpoint, /v1/audio/transcriptions row",
-            "quote": "/v1/audio/transcriptions | Data used for training: No | Abuse monitoring retention: None | Application state retention: None | Zero Data Retention eligible: Yes",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://developers.openai.com/api/docs/guides/your-data",
-            "clause": "Abuse monitoring retention, general default",
-            "quote": "By default, abuse monitoring logs are generated for all API feature usage and retained for up to 30 days, unless longer retention is required by law, or is reasonably necessary to protect our services or any third party from harm.",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://developers.openai.com/api/docs/guides/your-data",
-            "clause": "Zero data retention",
-            "quote": "Currently, these controls are subject to prior approval by OpenAI and acceptance of additional requirements.",
-            "retrieved": "2026-07-25"
-          }
-        ],
-        "ownerDecision": "Owner decision, not provider evidence: OpenAI is the pinned transcription provider and the default API data policy is the selected retention control. Zero Data Retention is not requested and not active, so it must not be recorded as the ceiling even though this endpoint is listed as eligible. Activating ZDR needs an OpenAI org-level approval and is an owner action outside this contract. The endpoint table's None is OpenAI's published figure, not something SnapList has observed, so the row keeps provider-owned treatment and does not promise the seller that no copy exists. This row is pinned to one adapter on purpose: ADR-0011 keeps seller voice context provider-neutral and docs/contracts/voice-context-v1.json does not freeze the provider or model, so activating a non-OpenAI transcription adapter reopens this row and its retention must be re-cited before that adapter carries seller audio."
-      }]
+      "dispositions": [
+        {
+          "treatment": "provider-owned",
+          "owner": "openai-api-abuse-monitoring",
+          "deletionTriggers": [
+            "openai-abuse-monitoring-retention-expires"
+          ],
+          "maximumRetention": "None for abuse monitoring and None for application state, as OpenAI publishes for /v1/audio/transcriptions; bounded by the general default-policy ceiling of up to 30 days if any copy exists despite that. SnapList cannot shorten either and does not report the provider copy as deleted",
+          "executor": "openai-platform-under-its-default-api-data-policy-no-snaplist-executor",
+          "completionProof": "the transcription request is sent to /v1/audio/transcriptions, whose published abuse-monitoring and application-state retention are both None, under the default API data policy with no Zero Data Retention approval recorded. A retention claim below the published endpoint values may only be made once an OpenAI ZDR approval receipt exists",
+          "citations": [
+            {
+              "url": "https://developers.openai.com/api/docs/guides/your-data",
+              "clause": "How we use your data",
+              "quote": "As of March 1, 2023, data sent to the OpenAI API is not used to train or improve OpenAI models (unless you explicitly opt in to share data with us).",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://developers.openai.com/api/docs/guides/your-data",
+              "clause": "Storage requirements and retention controls per endpoint, /v1/audio/transcriptions row",
+              "quote": "/v1/audio/transcriptions | Data used for training: No | Abuse monitoring retention: None | Application state retention: None | Zero Data Retention eligible: Yes",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://developers.openai.com/api/docs/guides/your-data",
+              "clause": "Abuse monitoring retention, general default",
+              "quote": "By default, abuse monitoring logs are generated for all API feature usage and retained for up to 30 days, unless longer retention is required by law, or is reasonably necessary to protect our services or any third party from harm.",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://developers.openai.com/api/docs/guides/your-data",
+              "clause": "Zero data retention",
+              "quote": "Currently, these controls are subject to prior approval by OpenAI and acceptance of additional requirements.",
+              "retrieved": "2026-07-25"
+            }
+          ],
+          "ownerDecision": "Owner decision, not provider evidence: OpenAI is the pinned transcription provider and the default API data policy is the selected retention control. Zero Data Retention is not requested and not active, so it must not be recorded as the ceiling even though this endpoint is listed as eligible. Activating ZDR needs an OpenAI org-level approval and is an owner action outside this contract. The endpoint table's None is OpenAI's published figure, not something SnapList has observed, so the row keeps provider-owned treatment and does not promise the seller that no copy exists. This row is pinned to one adapter on purpose: ADR-0011 keeps seller voice context provider-neutral and docs/contracts/voice-context-v1.json does not freeze the provider or model, so activating a non-OpenAI transcription adapter reopens this row and its retention must be re-cited before that adapter carries seller audio."
+        }
+      ]
     },
     {
       "id": "seller-voice-transcript",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["seller-deletes-voice-context", "guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "while attached to the retained item; never beyond the earliest applicable deletion trigger",
-        "executor": "snaplist-tenant-data-deletion-capability",
-        "completionProof": "transcript, seller_voice provenance, and language tag are absent from tenant data"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "seller-deletes-voice-context",
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "while attached to the retained item; never beyond the earliest applicable deletion trigger",
+          "executor": "snaplist-tenant-data-deletion-capability",
+          "completionProof": "transcript, seller_voice provenance, and language tag are absent from tenant data"
+        }
+      ]
     },
     {
       "id": "items",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "while the seller retains the item; unclaimed guest item no longer than 24 hours",
-        "executor": "snaplist-tenant-data-deletion-capability",
-        "completionProof": "item row and item-owned mutable data are absent for that tenant"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "while the seller retains the item; unclaimed guest item no longer than 24 hours",
+          "executor": "snaplist-tenant-data-deletion-capability",
+          "completionProof": "item row and item-owned mutable data are absent for that tenant"
+        }
+      ]
     },
     {
       "id": "user-settings",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["account-erasure"],
-        "maximumRetention": "for the account lifetime, then no later than account-erasure completion",
-        "executor": "snaplist-account-erasure-capability",
-        "completionProof": "the tenant user_settings row is absent"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "account-erasure"
+          ],
+          "maximumRetention": "for the account lifetime, then no later than account-erasure completion",
+          "executor": "snaplist-account-erasure-capability",
+          "completionProof": "the tenant user_settings row is absent"
+        }
+      ]
     },
     {
       "id": "ebay-drafts",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "while the associated unpublished item is retained; unclaimed guest draft no longer than 24 hours",
-        "executor": "snaplist-tenant-data-deletion-capability",
-        "completionProof": "SnapList-owned unpublished draft is absent for the associated item and tenant"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "while the associated unpublished item is retained; unclaimed guest draft no longer than 24 hours",
+          "executor": "snaplist-tenant-data-deletion-capability",
+          "completionProof": "SnapList-owned unpublished draft is absent for the associated item and tenant"
+        }
+      ]
     },
     {
       "id": "export-packs",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["review-revision-invalidates-pack", "guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "until invalidated or while the associated item is retained; unclaimed guest pack no longer than 24 hours",
-        "executor": "snaplist-tenant-data-deletion-capability",
-        "completionProof": "prepared/shared pack payload and cached pack references are absent"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "review-revision-invalidates-pack",
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "until invalidated or while the associated item is retained; unclaimed guest pack no longer than 24 hours",
+          "executor": "snaplist-tenant-data-deletion-capability",
+          "completionProof": "prepared/shared pack payload and cached pack references are absent"
+        }
+      ]
     },
     {
       "id": "pipeline-runs",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["terminal-operational-retention-expires", "guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "operational checkpoint and capture metadata 30 days after terminal outcome; remaining tenant run identity no later than item deletion or account erasure",
-        "executor": "snaplist-pipeline-retention-and-tenant-deletion-capabilities",
-        "completionProof": "retention checkpoint proves operational pruning and tenant deletion proves the selected run rows are absent"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "terminal-operational-retention-expires",
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "operational checkpoint and capture metadata 30 days after terminal outcome; remaining tenant run identity no later than item deletion or account erasure",
+          "executor": "snaplist-pipeline-retention-and-tenant-deletion-capabilities",
+          "completionProof": "retention checkpoint proves operational pruning and tenant deletion proves the selected run rows are absent"
+        }
+      ]
     },
     {
       "id": "pricing-evidence",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "while the associated item and immutable pricing-evidence snapshot are retained; unclaimed guest evidence no longer than 24 hours",
-        "executor": "snaplist-tenant-data-deletion-capability",
-        "completionProof": "prediction logs, verified sold matches, source citations, and snapshot references are absent for the item"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "while the associated item and immutable pricing-evidence snapshot are retained; unclaimed guest evidence no longer than 24 hours",
+          "executor": "snaplist-tenant-data-deletion-capability",
+          "completionProof": "prediction logs, verified sold matches, source citations, and snapshot references are absent for the item"
+        }
+      ]
     },
     {
       "id": "per-run-telemetry",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["guest-recovery-expires", "item-deletion", "account-erasure"],
-        "maximumRetention": "while linked to the retained item or run; unclaimed guest telemetry no longer than 24 hours",
-        "executor": "snaplist-tenant-data-deletion-capability",
-        "completionProof": "seller-, item-, and run-linked telemetry rows are absent; any surviving aggregate has no such identifiers"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "guest-recovery-expires",
+            "item-deletion",
+            "account-erasure"
+          ],
+          "maximumRetention": "while linked to the retained item or run; unclaimed guest telemetry no longer than 24 hours",
+          "executor": "snaplist-tenant-data-deletion-capability",
+          "completionProof": "seller-, item-, and run-linked telemetry rows are absent; any surviving aggregate has no such identifiers"
+        }
+      ]
     },
     {
       "id": "guest-recovery",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "guest-device-entitlement",
-        "deletionTriggers": ["successful-claim-transfers-ownership", "guest-recovery-expires"],
-        "maximumRetention": "24 hours after durable guest result acceptance unless atomically claimed sooner",
-        "executor": "guest-claim-or-expiry-capability-owned-by-issue-175",
-        "completionProof": "stable claimed outcome names the tenant owner or stable expired outcome proves guest artifacts were deleted"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "guest-device-entitlement",
+          "deletionTriggers": [
+            "successful-claim-transfers-ownership",
+            "guest-recovery-expires"
+          ],
+          "maximumRetention": "24 hours after durable guest result acceptance unless atomically claimed sooner",
+          "executor": "guest-claim-or-expiry-capability-owned-by-issue-175",
+          "completionProof": "stable claimed outcome names the tenant owner or stable expired outcome proves guest artifacts were deleted"
+        }
+      ]
     },
     {
       "id": "app-attest-challenges",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "guest-device-attestation",
-        "deletionTriggers": ["challenge-consumed", "challenge-expires", "account-or-guest-erasure"],
-        "maximumRetention": "active unexpired rows are ineligible; delete no later than 24 hours after consumed_at or expires_at, whichever first makes the row eligible",
-        "executor": "private-hourly-app-attest-retention-and-immediate-erasure-capability",
-        "completionProof": "the private cleanup result and durable absence prove no eligible challenge row remains; cron.job registration and cron.job_run_details prove at least one successful cleanup in every rolling 24 hours",
-        "ownerDecision": "Aziz approved this challenge ceiling and executor for issue #331 on 2026-07-26. SnapList retains no challenge history."
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "guest-device-attestation",
+          "deletionTriggers": [
+            "challenge-consumed",
+            "challenge-expires",
+            "account-or-guest-erasure"
+          ],
+          "maximumRetention": "active unexpired rows are ineligible; delete no later than 24 hours after consumed_at or expires_at, whichever first makes the row eligible",
+          "executor": "private-hourly-app-attest-retention-and-immediate-erasure-capability",
+          "completionProof": "the private cleanup result and durable absence prove no eligible challenge row remains; cron.job registration and cron.job_run_details prove at least one successful cleanup in every rolling 24 hours",
+          "ownerDecision": "Aziz approved this challenge ceiling and executor for issue #331 on 2026-07-26. SnapList retains no challenge history."
+        }
+      ]
     },
     {
       "id": "app-attest-current-keys",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "guest-device-attestation",
-        "deletionTriggers": ["key-inactive-for-90-days", "account-or-guest-erasure"],
-        "maximumRetention": "retain only the current key state while used; delete 90 days after latest successful assertion, or 90 days after attestation for a never-successful key",
-        "executor": "private-hourly-app-attest-retention-and-immediate-erasure-capability",
-        "completionProof": "the private cleanup result and durable absence prove no inactive key row remains; cron.job registration and cron.job_run_details prove at least one successful cleanup in every rolling 24 hours",
-        "ownerDecision": "Aziz approved this inactivity ceiling for issue #331 on 2026-07-26. Store only the current key ID, public key, required current receipt, counter, environment, attestation time, and latest successful verification time; retain no raw device fingerprint, historical receipt, or superseded key history."
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "guest-device-attestation",
+          "deletionTriggers": [
+            "key-inactive-for-90-days",
+            "account-or-guest-erasure"
+          ],
+          "maximumRetention": "retain only the current key state while used; delete 90 days after latest successful assertion, or 90 days after attestation for a never-successful key",
+          "executor": "private-hourly-app-attest-retention-and-immediate-erasure-capability",
+          "completionProof": "the private cleanup result and durable absence prove no inactive key row remains; cron.job registration and cron.job_run_details prove at least one successful cleanup in every rolling 24 hours",
+          "ownerDecision": "Aziz approved this inactivity ceiling for issue #331 on 2026-07-26. Store only the current key ID, public key, required current receipt, counter, environment, attestation time, and latest successful verification time; retain no raw device fingerprint, historical receipt, or superseded key history."
+        }
+      ]
     },
     {
       "id": "ai-item-credits",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["account-erasure-after-active-reservation-reconciliation"],
-        "maximumRetention": "for the account lifetime, then only until reservation settlement or restoration is durably reconciled for erasure",
-        "executor": "snaplist-account-erasure-capability",
-        "completionProof": "tenant credit reservations, ledger entries, and allowance periods are absent after reconciliation"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "account-erasure-after-active-reservation-reconciliation"
+          ],
+          "maximumRetention": "for the account lifetime, then only until reservation settlement or restoration is durably reconciled for erasure",
+          "executor": "snaplist-account-erasure-capability",
+          "completionProof": "tenant credit reservations, ledger entries, and allowance periods are absent after reconciliation"
+        }
+      ]
+    },
+    {
+      "id": "included-offer-device-claims",
+      "releaseDatum": true,
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "account-erasure-after-active-claim-reconciliation"
+          ],
+          "maximumRetention": "for the account lifetime, then only until any non-terminal claim is reconciled to a terminal state for erasure",
+          "executor": "snaplist-account-erasure-capability",
+          "completionProof": "tenant included-offer claim rows are absent after reconciliation, and the redemption queue holds no envelope naming a deleted claim",
+          "ownerDecision": "Issue #524 stores only claim identity, App Attest key id, state, Apple phase, attempt count, queue message id, and token deadline. The ephemeral DeviceCheck token is never stored, hashed, or derived from, so no device identifier survives erasure. Apple's lifetime device bit is provider-owned and unaffected; see included-offer-apple-device-bit."
+        }
+      ]
+    },
+    {
+      "id": "included-offer-support-overrides",
+      "releaseDatum": true,
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "account-erasure"
+          ],
+          "maximumRetention": "for the account lifetime; a consumed override is retained as the audit record of the exception until the account is erased",
+          "executor": "snaplist-account-erasure-capability",
+          "completionProof": "tenant included-offer support override rows are absent after erasure"
+        }
+      ]
+    },
+    {
+      "id": "included-offer-apple-device-bit",
+      "releaseDatum": true,
+      "dispositions": [
+        {
+          "treatment": "provider-owned",
+          "owner": "apple-devicecheck",
+          "deletionTriggers": [
+            "apple-controlled-only"
+          ],
+          "maximumRetention": "indefinite: DeviceCheck bit0 is per-device, per-developer state that Apple stores for the lifetime of the device and that SnapList cannot read back to an identity or reset",
+          "executor": "apple-devicecheck",
+          "completionProof": "SnapList holds no copy of the bit and no device identifier, so account erasure removes every SnapList-side datum; the residual bit remains solely under Apple's control",
+          "ownerDecision": "Issue #524 accepts that the fence's durability depends on an Apple-owned bit SnapList cannot erase. This is the deliberate trade for blocking unmetered provider spend, and the seller-facing appeal path is the audited one-time support override rather than a bit reset."
+        }
+      ]
     },
     {
       "id": "mobile-ebay-oauth-session-state",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["oauth-session-terminal", "oauth-session-expires", "account-erasure"],
-        "maximumRetention": "active unexpired rows are ineligible; delete no later than 24 hours after the row first becomes terminal or reaches the database-authoritative expires_at; account erasure removes every owned row immediately regardless of status",
-        "executor": "snaplist-mobile-ebay-oauth-retention-capability-and-issue-384-account-erasure-capability",
-        "completionProof": "bounded cleanup reports no eligible owned row and durable absence is confirmed; account erasure reports no mobile eBay OAuth session row for the tenant"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "oauth-session-terminal",
+            "oauth-session-expires",
+            "account-erasure"
+          ],
+          "maximumRetention": "active unexpired rows are ineligible; delete no later than 24 hours after the row first becomes terminal or reaches the database-authoritative expires_at; account erasure removes every owned row immediately regardless of status",
+          "executor": "snaplist-mobile-ebay-oauth-retention-capability-and-issue-384-account-erasure-capability",
+          "completionProof": "bounded cleanup reports no eligible owned row and durable absence is confirmed; account erasure reports no mobile eBay OAuth session row for the tenant"
+        }
+      ]
     },
     {
       "id": "ebay-connections",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["seller-disconnects-ebay", "verified-ebay-account-deletion-notification", "account-erasure"],
-        "maximumRetention": "until the earliest disconnect, verified provider deletion notice, or account erasure completion",
-        "executor": "snaplist-ebay-connection-deletion-capability-owned-by-issue-17",
-        "completionProof": "generation-fenced connection row and encrypted refresh/access tokens are absent"
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "seller-disconnects-ebay",
+            "verified-ebay-account-deletion-notification",
+            "account-erasure"
+          ],
+          "maximumRetention": "until the earliest disconnect, verified provider deletion notice, or account erasure completion",
+          "executor": "snaplist-ebay-connection-deletion-capability-owned-by-issue-17",
+          "completionProof": "generation-fenced connection row and encrypted refresh/access tokens are absent"
+        }
+      ]
     },
     {
       "id": "ebay-publish-receipts",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["item-deletion", "account-erasure", "verified-ebay-account-deletion-notification", "ebay-api-license-agreement-termination"],
-        "maximumRetention": "while the seller retains the published item, and no later than item deletion, account erasure, or a verified eBay account deletion notice; within ten days of eBay API License Agreement termination for every stored identifier",
-        "executor": "snaplist-tenant-data-deletion-capability-and-issue-384-account-erasure-capability",
-        "completionProof": "the SnapList-stored publish identifiers are absent for that tenant: listings.ebay_offer_id, listings.ebay_listing_id, and listings.ebay_status. The live eBay listing is an eBay-owned record; SnapList never reports it deleted because it removed its own copy of the identifier",
-        "citations": [
-          {
-            "url": "https://developer.ebay.com/join/api-license-agreement",
-            "clause": "Section 1 (Definitions), \"Personal Information\"",
-            "quote": "“Personal Information” means any information that directly or indirectly identifies an eBay User that you obtain or send to eBay through your participation in the Program and your use of the Developer Tools, including information that you collect or receive, or have access to, directly from Your Users in connection with your Application, information that is included in eBay Content, or information that you otherwise receive from eBay about Your Users or other eBay Users and their trading activities.",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://developer.ebay.com/join/api-license-agreement",
-            "clause": "Section 9 (Protecting User Privacy), Collecting and Storing Personal Information",
-            "quote": "You agree to promptly delete Personal Information on the earlier of: (i) when required by your data privacy and data retention policies; (ii) when requested by eBay or by the applicable eBay User to whom the Personal Information pertains, (iii) when the Personal Information is no longer necessary for the specific, legitimate purpose for which it was collected or processed for your Application, or (iv) when your participation in the Program is terminated.",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://developer.ebay.com/join/api-license-agreement",
-            "clause": "Section 16.2, Effect of Termination",
-            "quote": "You must destroy all copies of, or anything containing, eBay Content and Personal Information in your possession within ten (10) days after termination, and you will provide written certification of destruction to eBay upon eBay’s request.",
-            "retrieved": "2026-07-25"
-          }
-        ],
-        "ownerDecision": "Owner decision, not provider evidence: eBay-issued offer and listing identifiers stored against a seller are classified as Personal Information under the Section 1 definition, because they are received from eBay through the Program and indirectly identify an eBay User. eBay has not been asked to confirm this and the conservative reading is deliberate. If eBay later states these identifiers are not Personal Information, the only cost of this choice is a deleted column nobody was reading."
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "item-deletion",
+            "account-erasure",
+            "verified-ebay-account-deletion-notification",
+            "ebay-api-license-agreement-termination"
+          ],
+          "maximumRetention": "while the seller retains the published item, and no later than item deletion, account erasure, or a verified eBay account deletion notice; within ten days of eBay API License Agreement termination for every stored identifier",
+          "executor": "snaplist-tenant-data-deletion-capability-and-issue-384-account-erasure-capability",
+          "completionProof": "the SnapList-stored publish identifiers are absent for that tenant: listings.ebay_offer_id, listings.ebay_listing_id, and listings.ebay_status. The live eBay listing is an eBay-owned record; SnapList never reports it deleted because it removed its own copy of the identifier",
+          "citations": [
+            {
+              "url": "https://developer.ebay.com/join/api-license-agreement",
+              "clause": "Section 1 (Definitions), \"Personal Information\"",
+              "quote": "\u201cPersonal Information\u201d means any information that directly or indirectly identifies an eBay User that you obtain or send to eBay through your participation in the Program and your use of the Developer Tools, including information that you collect or receive, or have access to, directly from Your Users in connection with your Application, information that is included in eBay Content, or information that you otherwise receive from eBay about Your Users or other eBay Users and their trading activities.",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://developer.ebay.com/join/api-license-agreement",
+              "clause": "Section 9 (Protecting User Privacy), Collecting and Storing Personal Information",
+              "quote": "You agree to promptly delete Personal Information on the earlier of: (i) when required by your data privacy and data retention policies; (ii) when requested by eBay or by the applicable eBay User to whom the Personal Information pertains, (iii) when the Personal Information is no longer necessary for the specific, legitimate purpose for which it was collected or processed for your Application, or (iv) when your participation in the Program is terminated.",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://developer.ebay.com/join/api-license-agreement",
+              "clause": "Section 16.2, Effect of Termination",
+              "quote": "You must destroy all copies of, or anything containing, eBay Content and Personal Information in your possession within ten (10) days after termination, and you will provide written certification of destruction to eBay upon eBay\u2019s request.",
+              "retrieved": "2026-07-25"
+            }
+          ],
+          "ownerDecision": "Owner decision, not provider evidence: eBay-issued offer and listing identifiers stored against a seller are classified as Personal Information under the Section 1 definition, because they are received from eBay through the Program and indirectly identify an eBay User. eBay has not been asked to confirm this and the conservative reading is deliberate. If eBay later states these identifiers are not Personal Information, the only cost of this choice is a deleted column nobody was reading."
+        }
+      ]
     },
     {
       "id": "clerk-identity",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "clerk-identity-provider",
-        "deletionTriggers": ["account-erasure"],
-        "maximumRetention": "for the account lifetime; account erasure deletes the Clerk user and verifies its absence in the same operation. Clerk's public documentation states no post-deletion backup or archive window, so SnapList claims none",
-        "executor": "snaplist-account-erasure-capability-calling-clerk-users-delete-user",
-        "completionProof": "after clerkClient.users.deleteUser(userId), reading that user back through the Clerk Backend API reports it absent with status 404. A user.deleted webhook is an acknowledgement that the request was accepted and is never accepted as proof on its own. The executable form of this proof is src/lib/retention-contract/clerk-identity-absence.test.ts. OBSERVED 2026-07-26 against a live Clerk development instance (sk_test_ secret, no production data): the suite created a user, read it back successfully by id, called deleteUser on it, and the subsequent read of the same id was reported absent — status 404, error code resource_not_found, longMessage 'No user was found with id <deleted id>'. The test asserts the reported 404 status rather than merely that the read rejected, so a network or auth failure cannot be mistaken for absence. It skips when no sk_test_ CLERK_RETENTION_PROOF_SECRET_KEY is configured, so CI, which runs without secrets, does not re-observe this proof",
-        "citations": [
-          {
-            "url": "https://clerk.com/docs/reference/backend/user/delete-user",
-            "clause": "deleteUser()",
-            "quote": "Deletes the given User",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://clerk.com/legal/privacy",
-            "clause": "Retention of personal information",
-            "quote": "We store the personal information we collect as described in this Privacy Policy for as long as you use our Services or as necessary to fulfill the purpose(s) for which it was collected, provide our Services, resolve disputes, establish legal defenses, conduct audits, pursue legitimate business purposes, enforce our agreements, and comply with applicable laws.",
-            "retrieved": "2026-07-25"
-          }
-        ],
-        "ownerDecision": "Owner decision, not provider evidence: the verified-absence branch is selected instead of waiting on Clerk to describe its internal backup retention. Clerk's published retention clause is duration-by-purpose and states no numeric window, so a cited maximum is not available from the provider. Observed absence through Clerk's own API is what SnapList proves and all it claims. That proof has now been performed rather than merely defined: the absence test was run once against a Clerk development instance on 2026-07-26 and the observed result is recorded in completionProof. The same accepted-versus-verified distinction that blocked this row was applied to the proof itself, which is why the row waited for an observed run instead of asserting that the test would pass."
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "clerk-identity-provider",
+          "deletionTriggers": [
+            "account-erasure"
+          ],
+          "maximumRetention": "for the account lifetime; account erasure deletes the Clerk user and verifies its absence in the same operation. Clerk's public documentation states no post-deletion backup or archive window, so SnapList claims none",
+          "executor": "snaplist-account-erasure-capability-calling-clerk-users-delete-user",
+          "completionProof": "after clerkClient.users.deleteUser(userId), reading that user back through the Clerk Backend API reports it absent with status 404. A user.deleted webhook is an acknowledgement that the request was accepted and is never accepted as proof on its own. The executable form of this proof is src/lib/retention-contract/clerk-identity-absence.test.ts. OBSERVED 2026-07-26 against a live Clerk development instance (sk_test_ secret, no production data): the suite created a user, read it back successfully by id, called deleteUser on it, and the subsequent read of the same id was reported absent \u2014 status 404, error code resource_not_found, longMessage 'No user was found with id <deleted id>'. The test asserts the reported 404 status rather than merely that the read rejected, so a network or auth failure cannot be mistaken for absence. It skips when no sk_test_ CLERK_RETENTION_PROOF_SECRET_KEY is configured, so CI, which runs without secrets, does not re-observe this proof",
+          "citations": [
+            {
+              "url": "https://clerk.com/docs/reference/backend/user/delete-user",
+              "clause": "deleteUser()",
+              "quote": "Deletes the given User",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://clerk.com/legal/privacy",
+              "clause": "Retention of personal information",
+              "quote": "We store the personal information we collect as described in this Privacy Policy for as long as you use our Services or as necessary to fulfill the purpose(s) for which it was collected, provide our Services, resolve disputes, establish legal defenses, conduct audits, pursue legitimate business purposes, enforce our agreements, and comply with applicable laws.",
+              "retrieved": "2026-07-25"
+            }
+          ],
+          "ownerDecision": "Owner decision, not provider evidence: the verified-absence branch is selected instead of waiting on Clerk to describe its internal backup retention. Clerk's published retention clause is duration-by-purpose and states no numeric window, so a cited maximum is not available from the provider. Observed absence through Clerk's own API is what SnapList proves and all it claims. That proof has now been performed rather than merely defined: the absence test was run once against a Clerk development instance on 2026-07-26 and the observed result is recorded in completionProof. The same accepted-versus-verified distinction that blocked this row was applied to the proof itself, which is why the row waited for an observed run instead of asserting that the test would pass."
+        }
+      ]
     },
     {
       "id": "apple-revenuecat-references",
       "releaseDatum": true,
-      "dispositions": [{
-        "treatment": "delete",
-        "owner": "seller-snaplist-tenant",
-        "deletionTriggers": ["account-erasure-after-entitlement-reconciliation"],
-        "maximumRetention": "for the account lifetime, then deleted at account erasure once every open credit reservation is settled or restored. No multi-year retention applies, because SnapList holds no per-user tax record; see ownerDecision for why",
-        "executor": "snaplist-account-erasure-capability-and-revenuecat-delete-customer-api",
-        "completionProof": "the tenant's mapping rows are absent: public.revenuecat_customer_bindings, public.ai_item_allowance_periods, private.revenuecat_webhook_events, and private.storekit_ai_item_period_events; and reading the RevenueCat customer back after deletion reports it absent. Apple's payout and financial reports in App Store Connect and RevenueCat's own retained records are provider-owned and are never reported deleted by SnapList",
-        "citations": [
-          {
-            "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
-            "clause": "PAYMENTS, TAXES, AND REFUNDS",
-            "quote": "Apple will charge your selected payment method for any paid Transactions, including any applicable taxes.",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
-            "clause": "Apps and In-App Purchases, merchant of record; conditional on the contracting Apple entity",
-            "quote": "However, if you are a customer of Apple Distribution International Ltd. or Apple Services Pte. Ltd., then the merchant of record is that entity, which means that you acquire the App license from Apple Distribution International Ltd. or Apple Services Pte. Ltd., as applicable, but the App is licensed by the App Provider.",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
-            "clause": "PAYMENTS, TAXES, AND REFUNDS, counterparty to the transaction",
-            "quote": "Each Transaction is an electronic contract between you and Apple, and/or you and the entity providing the Content on our Services.",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://developer.apple.com/help/app-store-connect/getting-paid/overview-of-receiving-payments/",
-            "clause": "Overview of receiving payments; Apple, not the developer, collects payment from the customer",
-            "quote": "Reports only include paid transactions where we are able to collect payment from the customer (view Schedule 2 of your Apple Developer Agreement).",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://developer.apple.com/help/app-store-connect/making-payments-to-apple/understanding-taxes/",
-            "clause": "Understanding taxes, alternative payment processing",
-            "quote": "For In-App Purchases made using alternative payment processing or linking out to a webpage, you're responsible for taxes, including (but not limited to):",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload",
-            "clause": "appAccountToken",
-            "quote": "A UUID you create at the time of purchase that associates the transaction with a customer on your own service.",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://www.revenuecat.com/docs/dashboard-and-metrics/customer-profile",
-            "clause": "Deleting customers",
-            "quote": "Deleting customers through the RevenueCat dashboard or API clears out all of their data and is sufficient for GDPR erasure requests.",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://www.revenuecat.com/docs/dashboard-and-metrics/customer-profile",
-            "clause": "Deleting customers, scope",
-            "quote": "Deleting a customer will also remove all their purchase history for sandbox and production data",
-            "retrieved": "2026-07-25"
-          },
-          {
-            "url": "https://www.revenuecat.com/docs/customers/identifying-customers",
-            "clause": "Aliases",
-            "quote": "there will be only one App User ID within the original_app_user_id field",
-            "retrieved": "2026-07-25"
-          }
-        ],
-        "ownerDecision": "Owner decision, not provider evidence, on three points. Apple charges the customer for the transaction including any applicable taxes, never discloses the customer to the developer, and keeps the payout and financial reports in App Store Connect that are the tax record. For customers of Apple Distribution International Ltd. or Apple Services Pte. Ltd. the cited terms name that entity the merchant of record; elsewhere the terms make the transaction a contract with Apple. The conclusion rests on who charges the customer and who holds the records, which holds either way. First, SnapList's Apple and RevenueCat references are an entitlement mapping, not a tax record: the stored rows carry a Clerk user id, a RevenueCat app user id, an Apple original transaction id, and allowance state, and carry no customer identity, price, or tax amount. Apple never discloses the customer to the developer; the only per-customer link is a UUID the developer itself creates. So the row is deleted at account erasure rather than retained for a fixed number of years, and the 7-year fallback is deliberately not used. This conclusion has not been reviewed by a tax professional. Second, one RevenueCat customer is the original_app_user_id plus its aliases array, so deleting the customer deletes the whole alias set; that follows from the two cited clauses read together rather than from a single sentence stating it. Third, RevenueCat's public documentation does not state that deletion is synchronous, so completion requires reading the customer back rather than trusting the delete response. If SnapList ever adopts alternative payment processing or external purchase links, Apple stops collecting the tax and this row must be reopened."
-      }]
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "seller-snaplist-tenant",
+          "deletionTriggers": [
+            "account-erasure-after-entitlement-reconciliation"
+          ],
+          "maximumRetention": "for the account lifetime, then deleted at account erasure once every open credit reservation is settled or restored. No multi-year retention applies, because SnapList holds no per-user tax record; see ownerDecision for why",
+          "executor": "snaplist-account-erasure-capability-and-revenuecat-delete-customer-api",
+          "completionProof": "the tenant's mapping rows are absent: public.revenuecat_customer_bindings, public.ai_item_allowance_periods, private.revenuecat_webhook_events, and private.storekit_ai_item_period_events; and reading the RevenueCat customer back after deletion reports it absent. Apple's payout and financial reports in App Store Connect and RevenueCat's own retained records are provider-owned and are never reported deleted by SnapList",
+          "citations": [
+            {
+              "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
+              "clause": "PAYMENTS, TAXES, AND REFUNDS",
+              "quote": "Apple will charge your selected payment method for any paid Transactions, including any applicable taxes.",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
+              "clause": "Apps and In-App Purchases, merchant of record; conditional on the contracting Apple entity",
+              "quote": "However, if you are a customer of Apple Distribution International Ltd. or Apple Services Pte. Ltd., then the merchant of record is that entity, which means that you acquire the App license from Apple Distribution International Ltd. or Apple Services Pte. Ltd., as applicable, but the App is licensed by the App Provider.",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://www.apple.com/legal/internet-services/itunes/us/terms.html",
+              "clause": "PAYMENTS, TAXES, AND REFUNDS, counterparty to the transaction",
+              "quote": "Each Transaction is an electronic contract between you and Apple, and/or you and the entity providing the Content on our Services.",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://developer.apple.com/help/app-store-connect/getting-paid/overview-of-receiving-payments/",
+              "clause": "Overview of receiving payments; Apple, not the developer, collects payment from the customer",
+              "quote": "Reports only include paid transactions where we are able to collect payment from the customer (view Schedule 2 of your Apple Developer Agreement).",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://developer.apple.com/help/app-store-connect/making-payments-to-apple/understanding-taxes/",
+              "clause": "Understanding taxes, alternative payment processing",
+              "quote": "For In-App Purchases made using alternative payment processing or linking out to a webpage, you're responsible for taxes, including (but not limited to):",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload",
+              "clause": "appAccountToken",
+              "quote": "A UUID you create at the time of purchase that associates the transaction with a customer on your own service.",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://www.revenuecat.com/docs/dashboard-and-metrics/customer-profile",
+              "clause": "Deleting customers",
+              "quote": "Deleting customers through the RevenueCat dashboard or API clears out all of their data and is sufficient for GDPR erasure requests.",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://www.revenuecat.com/docs/dashboard-and-metrics/customer-profile",
+              "clause": "Deleting customers, scope",
+              "quote": "Deleting a customer will also remove all their purchase history for sandbox and production data",
+              "retrieved": "2026-07-25"
+            },
+            {
+              "url": "https://www.revenuecat.com/docs/customers/identifying-customers",
+              "clause": "Aliases",
+              "quote": "there will be only one App User ID within the original_app_user_id field",
+              "retrieved": "2026-07-25"
+            }
+          ],
+          "ownerDecision": "Owner decision, not provider evidence, on three points. Apple charges the customer for the transaction including any applicable taxes, never discloses the customer to the developer, and keeps the payout and financial reports in App Store Connect that are the tax record. For customers of Apple Distribution International Ltd. or Apple Services Pte. Ltd. the cited terms name that entity the merchant of record; elsewhere the terms make the transaction a contract with Apple. The conclusion rests on who charges the customer and who holds the records, which holds either way. First, SnapList's Apple and RevenueCat references are an entitlement mapping, not a tax record: the stored rows carry a Clerk user id, a RevenueCat app user id, an Apple original transaction id, and allowance state, and carry no customer identity, price, or tax amount. Apple never discloses the customer to the developer; the only per-customer link is a UUID the developer itself creates. So the row is deleted at account erasure rather than retained for a fixed number of years, and the 7-year fallback is deliberately not used. This conclusion has not been reviewed by a tax professional. Second, one RevenueCat customer is the original_app_user_id plus its aliases array, so deleting the customer deletes the whole alias set; that follows from the two cited clauses read together rather than from a single sentence stating it. Third, RevenueCat's public documentation does not state that deletion is synchronous, so completion requires reading the customer back rather than trusting the delete response. If SnapList ever adopts alternative payment processing or external purchase links, Apple stops collecting the tax and this row must be reopened."
+        }
+      ]
     }
   ],
   "blockers": []

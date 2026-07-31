@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 import {
   cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
   mintUserJwt,
   mintVerifiedGuestJwt,
 } from "@/lib/supabase/test-users";
@@ -129,6 +130,9 @@ async function seedReview(
   const batchId = crypto.randomUUID();
   const idempotencyKey = `listing-review-save-${label}-${batchId}`;
   const photoPath = `${userId}/items/${batchId}/front.jpg`;
+  // Listing Review save is downstream of the #524 device fence; the seed only
+  // needs its tenant to be past it so the included first run can reserve.
+  await grantIncludedOfferDeviceClaim(admin, userId);
   const staged = await admin.rpc("stage_pipeline_batch", {
     p_user_id: userId,
     p_batch_id: batchId,

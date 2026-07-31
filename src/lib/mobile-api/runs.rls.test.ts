@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 import {
   cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
   mintUserJwt,
   mintVerifiedGuestJwt,
 } from "@/lib/supabase/test-users";
@@ -91,6 +92,12 @@ beforeAll(async () => {
   userAClient = createClient(SUPABASE_URL, ANON_KEY!, {
     accessToken: async () => userAToken,
   });
+  // Every pipeline_runs insert below reserves an included credit, which #524
+  // now fences on the device. This suite tests run reads and operations, not
+  // how a device earns its reservation, so both tenants start past the fence.
+  await Promise.all(
+    [userAId, userBId].map((id) => grantIncludedOfferDeviceClaim(admin, id)),
+  );
   const { data: item, error: itemError } = await userAClient
     .from("items")
     .insert({

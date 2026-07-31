@@ -28,8 +28,15 @@ import {
   type VerifiedGuestHandoff,
 } from "@/lib/guest-recovery/service";
 import {
+  includedOfferDeviceTokenRequestSchema,
+  includedOfferHttpStatus,
+  includedOfferRedeemRequestSchema,
+} from "@/lib/included-offer-fence/http";
+import type { IncludedOfferFence } from "@/lib/included-offer-fence/service";
+import {
   MOBILE_API_VERSION,
   apiErrorEnvelopeSchema,
+  includedOfferEnvelopeSchema,
   healthEnvelopeSchema,
   homeProjectionEnvelopeSchema,
   mobileRunCollectionEnvelopeSchema,
@@ -83,6 +90,11 @@ export interface MobileApiDependencies {
     idempotencyKey: string;
     targetUserId: string;
   }) => Promise<GuestClaimTerminalOutcome>;
+  /**
+   * #524 device fence. Absent means the fence is unconfigured, which denies the
+   * included offer rather than granting an unfenced one.
+   */
+  includedOffer?: IncludedOfferFence;
   worker: PipelineWorker;
   subscriptionBridge?: NativeSubscriptionBridge;
   /** Read-only RLS projection for the native Seller Home. */
@@ -891,6 +903,144 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "The guest draft could not be claimed. Retry before it expires.",
+        );
+      }
+    }
+
+    // #524: the included first AI offer is fenced per physical device. Every
+    // route here is proof-bound; the account always comes from authenticate().
+    const includedOfferMatch = pathname.match(
+      /^\/v1\/included-offer\/redemptions(?:\/([^/]+)(?:\/(device-token))?)?$/,
+    );
+    if (includedOfferMatch) {
+      const claimId = includedOfferMatch[1];
+      const isRead = claimId !== undefined && includedOfferMatch[2] === undefined;
+      if (request.method !== (isRead ? "GET" : "POST")) {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      // The redemption request is the only one without a claim to key on, so it
+      // carries the caller's own key; the other two are keyed by the claim id.
+      const idempotencyKey = claimId
+        ? null
+        : z
+            .string()
+            .uuid()
+            .safeParse(request.headers.get("idempotency-key")?.trim());
+      const parsedClaimId = claimId
+        ? z.string().uuid().safeParse(claimId)
+        : null;
+      if (idempotencyKey?.success === false) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid Idempotency-Key is required.",
+        );
+      }
+      if (parsedClaimId?.success === false) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid claim ID is required.",
+        );
+      }
+      const { includedOffer } = dependencies;
+      if (!includedOffer) {
+        // Denying is the safe direction: an unconfigured fence must never let
+        // an unfenced included run through to provider spend.
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "The included offer is not configured.",
+        );
+      }
+
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.included-offer-authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+
+      try {
+        let outcome;
+        if (parsedClaimId?.success && isRead) {
+          outcome = await includedOffer.readClaim({
+            claimId: parsedClaimId.data,
+            userId: principal.userId,
+          });
+        } else {
+          const body: unknown = await request.json();
+          if (parsedClaimId?.success) {
+            const parsed =
+              includedOfferDeviceTokenRequestSchema.safeParse(body);
+            if (!parsed.success) {
+              return errorResponse(
+                requestId,
+                400,
+                "invalid_request",
+                "A fresh device token and App Attest assertion are required.",
+              );
+            }
+            outcome = await includedOffer.submitDeviceToken({
+              appAttest: parsed.data.appAttest,
+              claimId: parsedClaimId.data,
+              deviceToken: parsed.data.deviceToken,
+              userId: principal.userId,
+            });
+          } else {
+            const parsed = includedOfferRedeemRequestSchema.safeParse(body);
+            if (!parsed.success || !idempotencyKey?.success) {
+              return errorResponse(
+                requestId,
+                400,
+                "invalid_request",
+                "An App Attest assertion is required.",
+              );
+            }
+            outcome = await includedOffer.redeem({
+              appAttest: parsed.data.appAttest,
+              idempotencyKey: idempotencyKey.data,
+              userId: principal.userId,
+            });
+          }
+        }
+        return json(
+          includedOfferEnvelopeSchema.parse({
+            data: outcome,
+            meta: { requestId },
+          }),
+          includedOfferHttpStatus(outcome),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.included-offer", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "The included offer is temporarily unavailable.",
         );
       }
     }

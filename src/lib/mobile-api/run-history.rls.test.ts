@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 import {
   cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
   mintUserJwt,
 } from "@/lib/supabase/test-users";
 import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
@@ -64,6 +65,11 @@ beforeAll(async () => {
   admin = createClient(SUPABASE_URL, SECRET_API_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  // The runs seeded below reserve included credits, which #524 fences on the
+  // device. History projection is not that seam, so both tenants start past it.
+  await Promise.all(
+    [ownerId, foreignId].map((id) => grantIncludedOfferDeviceClaim(admin, id)),
+  );
 
   const database = new Client({ connectionString: DATABASE_URL });
   await database.connect();

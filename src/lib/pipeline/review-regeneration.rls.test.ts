@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "../supabase/test-users";
@@ -360,6 +361,9 @@ beforeAll(async () => {
       p_user_id: user.id,
     });
     if (period.error) throw new Error(period.error.message);
+    // A StoreKit period does not replace the included first run, which is
+    // still what the first reservation draws on and what #524 now fences.
+    await grantIncludedOfferDeviceClaim(admin, user.id);
   }
 });
 

@@ -4,6 +4,7 @@ import { Client } from "pg";
 
 import {
   cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
@@ -122,6 +123,13 @@ beforeAll(async () => {
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "photo_identity"),
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "photo_identity_concurrent"),
   ]);
+  // Photo-set identity is not the device fence's seam (#524); these tenants
+  // only need to be past it so their included first run can reserve.
+  await Promise.all(
+    [seller, concurrentSeller].map((user) =>
+      grantIncludedOfferDeviceClaim(admin, user.id),
+    ),
+  );
 });
 
 afterAll(async () => {
