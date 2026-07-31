@@ -140,3 +140,7 @@ Spec reviewers assess the exact head, followed by one applicable GitHub Codex re
 - [Durable pipeline](docs/architecture/durable-pipeline.md)
 - [Mobile API contract](docs/contracts/mobile-api-v1.openapi.json)
 - [Sold-comps egress](docs/sold-comps-egress.md)
+
+## License
+
+SnapList is released under the [Apache License 2.0](LICENSE).

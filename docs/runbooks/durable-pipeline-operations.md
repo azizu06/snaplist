@@ -138,18 +138,164 @@ a separately reviewed code change: freeze durable producers first, preserve
 existing queue/run rows, and resume the queue only after the fallback is
 removed. Never delete run truth to make the old path appear clean.
 
+## Scheduler reachability
+
+Three conditions must hold before any scheduler can drain the queue. All are
+properties of the app or of the stored origin, not of the schedule itself, so
+none is visible from the `crons` array or from reading the pg_cron template.
+
+They apply to **both** scheduled routes — `/api/internal/pipeline-worker` and
+`/api/internal/pipeline-maintenance`. The template schedules both, and a
+maintenance route that never runs means retention, guest-draft expiry, and
+Storage cleanup silently stop.
+
+1. **Method.** Both routes answer `GET` and `POST` identically. Vercel Cron only
+   ever issues `GET`; the pg_cron template POSTs through pg_net. A route that
+   answered one method returned `405` to the other and did nothing.
+2. **No redirect in front of the route.** Both paths are listed in the auth
+   proxy's public matcher (`src/proxy.ts`) because a scheduler carries no Clerk
+   cookie. Public here means "not cookie authenticated"; each route's own
+   `CRON_SECRET` guard is unchanged and still fails closed with `503` unset and
+   `401` on a bad bearer.
+
+   A login redirect in front of either route is invisible in **both** directions,
+   which is why this is the dangerous failure mode rather than a loud one:
+
+   | Scheduler | Behavior on the `307` | What the operator sees |
+   | --- | --- | --- |
+   | Vercel Cron | [does not follow redirects](https://vercel.com/docs/cron-jobs/manage-cron-jobs#cron-jobs-and-redirects) — the `3xx` is the final response | invocation recorded, no work done |
+   | pg_net | **follows** it and fetches `/login` | `net._http_response` row with `status_code = 200` and a ~50 KB HTML body |
+
+   Measured locally against pg_net 0.20.3: a redirected maintenance call stored
+   `status_code 200` with 52,079 bytes of login-page HTML. A green response log
+   is therefore not evidence that a route ran — check the body.
+3. **No trailing slash on the stored origin.** `<origin>/` concatenated with
+   `/api/internal/...` produces a doubled slash, which Next.js answers with a
+   `308` to the normalized path. The template normalizes with `rtrim(..., '/')`
+   so a stored origin in either form works; if you build the URL yourself, strip
+   it.
+
+Whichever scheduler the owner activates, verify by reading the response **body**,
+not just the status: the worker returns `{"claimed":…,"succeeded":…}` and
+maintenance returns `{"queueMessagesDeleted":…,"health":{…}}`. HTML, a `307`,
+`401`, or `405` all mean the route was never reached.
+
+### Why the worker is not in `vercel.json`
+
+The repository deliberately does not schedule this route as a Vercel cron job.
+[Vercel's plan limits](https://vercel.com/docs/cron-jobs/usage-and-pricing) cap
+Hobby at **one invocation per day** with **±59 minutes** of scheduling
+imprecision, and a sub-daily cron expression **fails deployment** on that plan.
+The worker claims one message per invocation (`PIPELINE_OPERATIONS_POLICY.worker.batchSize`),
+so a Hobby cron would move one accepted run per day — not a drained queue. The
+fixed one-invocation-per-minute cadence above needs Vercel Pro, and ADR-0009
+authorizes no paid plan without an explicit owner-approved upgrade trigger.
+
+The Supabase pg_cron template below already meets the cadence policy at no cost
+and is the decided hosted activation path (owner decision, 2026-07-31).
+
+`vercel.json` therefore declares no `crons` array at all. That is deliberate and
+asserted by `src/vercel-config.test.ts`; an entry appearing there is a regression,
+not a completion.
+
 ## Owner-only hosted activation and rollback
 
-Hosted activation is not performed by this repository change. The owner must:
+Supabase pg_cron is the activation path. It meets the one-invocation-per-minute
+policy above at no cost, which Vercel's Hobby scheduler cannot (see the previous
+section). Hosted activation is a credential action against real infrastructure
+and is never performed by a repository change — the steps below are the owner's
+to run, in order.
 
-1. confirm the target deployment, spend cap, and current Supabase limits;
-2. create/rotate one `CRON_SECRET` outside git and configure the app with it;
-3. manually inspect and apply
-   `supabase/templates/pipeline-operations-cron.sql`, replacing its origin and
-   secret placeholders so Vault—not the SQL file—stores the values;
-4. invoke each protected route once and inspect health before allowing cadence;
-5. watch queue age, retries, terminal failures, cleanup dead letters, database
-   size, Storage, egress, invocations, and compute.
+Exactly **two values** are substituted anywhere in this procedure:
+
+| Placeholder | Value | Notes |
+| --- | --- | --- |
+| `<ORIGIN>` | the deployed SnapList HTTPS origin, e.g. `https://snaplist.vercel.app` | scheme included; a trailing slash is tolerated but not needed |
+| `<CRON_SECRET>` | the same secret configured as the app's `CRON_SECRET` env var | generate with `openssl rand -hex 32`; never commit it or paste it into a migration |
+
+Nothing else in the SQL below changes.
+
+**1. Confirm the target.** Check the deployment, spend cap, and current Supabase
+limits before scheduling anything.
+
+**2. Set `CRON_SECRET` on the deployment** (Vercel → project → Settings →
+Environment Variables), then redeploy so the running instance has it. With it
+unset both routes answer `503` and the schedule will drain nothing.
+
+**3. Prove reachability by hand, before scheduling.** Substitute both values and
+run these from your own machine. Read the **body**, not just the status:
+
+```sh
+# Expect: {"claimed":0,"succeeded":0,"retrying":0,"failed":0,"skipped":0}
+curl --fail-with-body -X POST \
+  -H "Authorization: Bearer <CRON_SECRET>" \
+  <ORIGIN>/api/internal/pipeline-worker
+
+# Expect: {"queueMessagesDeleted":0,...,"health":{"queueDepth":0,...}}
+curl --fail-with-body -X POST \
+  -H "Authorization: Bearer <CRON_SECRET>" \
+  <ORIGIN>/api/internal/pipeline-maintenance
+```
+
+HTML in either body means a login redirect is still in front of the route; a
+`401` means the secret does not match the deployment; a `405` means the route
+does not answer that method. Stop and fix before continuing — a schedule laid on
+top of any of these reports success forever and moves nothing.
+
+**4. Enable the extensions** in the Supabase SQL editor (idempotent):
+
+```sql
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+create extension if not exists supabase_vault;
+```
+
+**5. Store both values in Vault, then schedule.** Open
+`supabase/templates/pipeline-operations-cron.sql`, read it, replace
+`<owner-supplied-https-origin>` with `<ORIGIN>` and `<owner-supplied-cron-secret>`
+with `<CRON_SECRET>`, and run the file. Vault — not the SQL file, and not the
+repository — holds the values.
+
+If a secret of that name already exists, `vault.create_secret` fails rather than
+overwriting. Rotate instead:
+
+```sql
+select id, name from vault.secrets where name like 'snaplist_pipeline_%';
+select vault.update_secret('<id-from-above>', '<new value>');
+```
+
+**6. Verify it is actually firing.** Wait two minutes, then run all three. Each
+has a specific pass condition:
+
+```sql
+-- (a) Both jobs registered and active.
+select jobid, jobname, schedule, active from cron.job
+where jobname like 'snaplist-pipeline-%';
+--     expect snaplist-pipeline-worker '* * * * *' and
+--            snaplist-pipeline-maintenance '17 * * * *', both active = t
+
+-- (b) The schedule is executing without SQL errors.
+select j.jobname, d.status, d.start_time, d.return_message
+from cron.job_run_details d join cron.job j on j.jobid = d.jobid
+where j.jobname like 'snaplist-pipeline-%'
+order by d.start_time desc limit 10;
+--     expect one 'succeeded' worker row per minute
+--     'failed' here means the SQL never left Postgres; read return_message
+
+-- (c) The HTTP request actually reached the route. THIS is the one that
+--     catches a redirect: status_code 200 is necessary but NOT sufficient.
+select id, status_code, created, left(content, 120) as body
+from net._http_response order by id desc limit 10;
+--     expect JSON bodies: {"claimed":...} / {"queueMessagesDeleted":...}
+--     HTML (a <!DOCTYPE html> body, tens of KB) = redirected to /login
+--     status_code 0 or a populated error_msg = the origin was unreachable
+```
+
+Then confirm real work moves: submit one item and watch it leave `queued` on its
+own, with no manual `curl`.
+
+**7. Watch** queue age, retries, terminal failures, cleanup dead letters,
+database size, Storage, egress, invocations, and compute.
 
 Rollback is non-destructive:
 
@@ -160,6 +306,19 @@ select cron.unschedule('snaplist-pipeline-maintenance');
 
 Keep the queue, runs, Vault entries, and object cleanup jobs until the owner has
 verified recovery. Secret deletion/rotation is a separate credential action.
+
+### Proved locally, not hosted
+
+The whole path above was executed end to end against a local Supabase stack
+(pg_cron 1.6.4, pg_net 0.20.3, PGMQ 1.5.1) on 2026-07-31: the committed template
+was applied verbatim with local values, and an accepted run moved
+`queued → retrying → failed` across four consecutive minute-boundary firings with
+zero manual invocation, `net._http_response` recording `200` and a JSON worker
+summary each time, ending with a drained queue. The run's terminal state is
+`failed` because the local fixture has no real photo objects or provider
+credentials — that exercises the durable attempt/retry/terminal path, not model
+quality. The hosted equivalent is still the owner's to run; nothing in this
+repository can perform it.
 
 ## Supabase Free-plan accounting
 

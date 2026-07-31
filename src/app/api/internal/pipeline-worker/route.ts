@@ -12,8 +12,13 @@ function authorized(request: Request): boolean {
 /**
  * Scheduler-neutral, fail-closed worker entry point. Issue #162 may point hosted
  * Cron at this route later; this slice neither creates nor activates that schedule.
+ *
+ * Scheduler-neutral means both methods: Vercel Cron only ever issues GET, while
+ * the Supabase pg_cron template in `supabase/templates/pipeline-operations-cron.sql`
+ * POSTs through pg_net. Answering only one of them makes the other scheduler's
+ * invocation a 405 that drains nothing. Authority is identical on both paths.
  */
-export async function POST(request: Request): Promise<NextResponse> {
+async function handle(request: Request): Promise<NextResponse> {
   if (!process.env.CRON_SECRET) {
     return NextResponse.json(
       { error: "Pipeline worker is not configured." },
@@ -31,4 +36,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     logServerError("pipeline.worker", error);
     return NextResponse.json({ error: "Pipeline worker failed." }, { status: 500 });
   }
+}
+
+/** Vercel Cron invokes with GET. */
+export async function GET(request: Request): Promise<NextResponse> {
+  return handle(request);
+}
+
+/** Supabase pg_cron / pg_net and manual runbook triggers POST. */
+export async function POST(request: Request): Promise<NextResponse> {
+  return handle(request);
 }

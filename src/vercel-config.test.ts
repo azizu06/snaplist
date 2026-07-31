@@ -10,10 +10,18 @@ const config = JSON.parse(
   readFileSync(fileURLToPath(new URL("../vercel.json", import.meta.url)), "utf8"),
 ) as VercelConfig;
 
+const scheduledPaths = (config.crons ?? []).map((entry) => entry.path);
+
 describe("Vercel deployment configuration", () => {
   it("keeps five-minute inbox sync off the Hobby-limited Vercel scheduler", () => {
-    expect(config.crons).not.toContainEqual(
-      expect.objectContaining({ path: "/api/cron/inbox-sync" }),
-    );
+    expect(scheduledPaths).not.toContain("/api/cron/inbox-sync");
+  });
+
+  it("schedules no autonomous marketplace sweep", () => {
+    expect(scheduledPaths).not.toContain("/api/cron/reprice");
+  });
+
+  it("leaves no empty crons array behind when the last job is removed", () => {
+    expect(config.crons).not.toEqual([]);
   });
 });

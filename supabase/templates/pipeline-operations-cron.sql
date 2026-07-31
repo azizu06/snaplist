@@ -6,6 +6,17 @@
 --   create extension if not exists pg_cron;
 --   create extension if not exists pg_net;
 --   create extension if not exists supabase_vault;
+--
+-- The origin is normalized with rtrim(..., '/') on purpose. A stored origin
+-- ending in '/' would build '<origin>//api/internal/...', which Next.js answers
+-- with a 308 to the normalized path. pg_net follows that redirect and records a
+-- 200, so the schedule would look healthy while the request never reached the
+-- route. Verified locally: 'http://host:3000//api/internal/pipeline-worker'
+-- returns 308.
+--
+-- vault.create_secret fails if the name already exists. To ROTATE rather than
+-- create, use vault.update_secret(id, new_secret) with the id from
+-- `select id, name from vault.secrets where name like 'snaplist_pipeline_%'`.
 
 select vault.create_secret(
   '<owner-supplied-https-origin>',
@@ -25,11 +36,11 @@ select cron.schedule(
   '* * * * *',
   $worker$
     select net.http_post(
-      url := (
+      url := rtrim((
         select decrypted_secret
         from vault.decrypted_secrets
         where name = 'snaplist_pipeline_origin'
-      ) || '/api/internal/pipeline-worker',
+      ), '/') || '/api/internal/pipeline-worker',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
         'Authorization', 'Bearer ' || (
@@ -50,11 +61,11 @@ select cron.schedule(
   '17 * * * *',
   $maintenance$
     select net.http_post(
-      url := (
+      url := rtrim((
         select decrypted_secret
         from vault.decrypted_secrets
         where name = 'snaplist_pipeline_origin'
-      ) || '/api/internal/pipeline-maintenance',
+      ), '/') || '/api/internal/pipeline-maintenance',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
         'Authorization', 'Bearer ' || (
