@@ -55,6 +55,29 @@ describe("auth proxy", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
+  it("lets an authorized pipeline-worker scheduler request reach its route handler", async () => {
+    process.env.CRON_SECRET = "configured-cron-secret";
+    const request = new NextRequest(
+      "https://snaplist.test/api/internal/pipeline-worker",
+      {
+        headers: { authorization: "Bearer configured-cron-secret" },
+      },
+    );
+
+    const response = await proxy(request, {} as NextFetchEvent);
+
+    if (!response) {
+      throw new Error("Expected the proxy to return a response");
+    }
+
+    // A scheduler never follows redirects: Vercel Cron treats a 3xx as the
+    // final response for that invocation, and pg_net does not follow one
+    // either. A login redirect here silently drains nothing, forever.
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("keeps the native bearer surface outside cookie middleware", () => {
     for (const pathname of [
       "/v1",

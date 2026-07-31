@@ -138,6 +138,43 @@ a separately reviewed code change: freeze durable producers first, preserve
 existing queue/run rows, and resume the queue only after the fallback is
 removed. Never delete run truth to make the old path appear clean.
 
+## Scheduler reachability
+
+Two conditions must hold before any scheduler can drain the queue. Both are
+properties of the app, not of the schedule, so neither is visible from the
+`crons` array or the pg_cron template.
+
+1. **Method.** `/api/internal/pipeline-worker` answers `GET` and `POST`
+   identically. Vercel Cron only ever issues `GET`; the pg_cron template POSTs
+   through pg_net. A worker that answered one method returned `405` to the other
+   and drained nothing.
+2. **No redirect in front of the route.** The path is listed in the auth proxy's
+   public matcher (`src/proxy.ts`) because a scheduler carries no Clerk cookie.
+   A scheduler treats a `3xx` as the final response for that invocation —
+   [Vercel Cron does not follow redirects](https://vercel.com/docs/cron-jobs/manage-cron-jobs#cron-jobs-and-redirects),
+   and pg_net does not either — so a login redirect is an invocation that
+   reports success while the queue stands still. Public here means "not cookie
+   authenticated"; the route's own `CRON_SECRET` guard is unchanged and still
+   fails closed with `503` unset and `401` on a bad bearer.
+
+Whichever scheduler the owner activates, verify both by invoking the deployed
+route once by hand and reading the response body — a `200` with aggregate counts,
+not a `307`, `401`, or `405`.
+
+### Why the worker is not in `vercel.json`
+
+The repository deliberately does not schedule this route as a Vercel cron job.
+[Vercel's plan limits](https://vercel.com/docs/cron-jobs/usage-and-pricing) cap
+Hobby at **one invocation per day** with **±59 minutes** of scheduling
+imprecision, and a sub-daily cron expression **fails deployment** on that plan.
+The worker claims one message per invocation (`PIPELINE_OPERATIONS_POLICY.worker.batchSize`),
+so a Hobby cron would move one accepted run per day — not a drained queue. The
+fixed one-invocation-per-minute cadence above needs Vercel Pro, and ADR-0009
+authorizes no paid plan without an explicit owner-approved upgrade trigger.
+
+The Supabase pg_cron template below already meets the cadence policy at no cost
+and remains the intended hosted activation path.
+
 ## Owner-only hosted activation and rollback
 
 Hosted activation is not performed by this repository change. The owner must:
