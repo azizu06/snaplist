@@ -1087,7 +1087,7 @@ final class CaptureFlowTests: XCTestCase {
             defer { try? fileManager.removeItem(at: root) }
             let startedAt = Date(timeIntervalSince1970: 2_100_000_000)
             let subject = "user_photo_only_\(testCase.name)"
-            let photoData = makeLandscapeImageData(
+            let photoData = try makeLandscapeImageData(
                 leftColor: .systemIndigo,
                 rightColor: .systemMint
             )
@@ -1108,27 +1108,21 @@ final class CaptureFlowTests: XCTestCase {
             let nativeEvents = await nativeIntake.events()
             var nativeIterator = nativeEvents.makeAsyncIterator()
             _ = await nativeIterator.next()
-            XCTAssertEqual(
-                await nativeIntake.perform(
-                    .addPhotos([
-                        NativeIntake.PhotoInput { photoData },
-                    ])
-                ),
-                .committed,
-                testCase.name
+            let addPhotoOutcome = await nativeIntake.perform(
+                .addPhotos([
+                    NativeIntake.PhotoInput { photoData },
+                ])
             )
-            XCTAssertEqual(
-                await nativeIntake.perform(
-                    .setVoice(
-                        NativeIntake.VoiceInput(
-                            duration: 0.001,
-                            loadData: { voiceData }
-                        )
+            XCTAssertEqual(addPhotoOutcome, .committed, testCase.name)
+            let setVoiceOutcome = await nativeIntake.perform(
+                .setVoice(
+                    NativeIntake.VoiceInput(
+                        duration: 0.001,
+                        loadData: { voiceData }
                     )
-                ),
-                .committed,
-                testCase.name
+                )
             )
+            XCTAssertEqual(setVoiceOutcome, .committed, testCase.name)
             var submittedSnapshot: NativeIntake.Snapshot?
             while let event = await nativeIterator.next() {
                 guard case .snapshot(let snapshot) = event else { continue }
@@ -1191,7 +1185,8 @@ final class CaptureFlowTests: XCTestCase {
                 evaluator: TestFramingEvaluator(observations: []),
                 store: captureStore
             )
-            XCTAssertEqual(await captureFlow.restore(), .stagedPhoto)
+            let restoration = await captureFlow.restore()
+            XCTAssertEqual(restoration, .stagedPhoto)
             let router = AppRouter(initialFullScreen: .guidedCamera)
             router.openCaptureBoundary(
                 destination: .photoReview,
@@ -1313,7 +1308,7 @@ final class CaptureFlowTests: XCTestCase {
                 testCase.name
             )
 
-            let nextPhotoData = makeLandscapeImageData(
+            let nextPhotoData = try makeLandscapeImageData(
                 leftColor: .systemOrange,
                 rightColor: .systemBlue
             )
