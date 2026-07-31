@@ -1060,6 +1060,289 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertFalse(photoReviewHost.isCommitting)
     }
 
+    func testCanonicalPhotoAcceptanceWithUnmatchedVoiceReturnsToEmptyUsableScanAndRetainsVoiceForExpiry() async throws {
+        let cases: [(
+            name: String,
+            voiceReceipt: MobileItemSubmissionEnvelope.VoiceReceipt?
+        )] = [
+            ("null receipt", nil),
+            (
+                "nonmatching receipt",
+                MobileItemSubmissionEnvelope.VoiceReceipt(
+                    version: 1,
+                    contentSha256: String(repeating: "f", count: 64),
+                    byteLength: 1,
+                    durationMs: 1,
+                    mediaType: ItemRunSubmissionVoice.mediaType
+                )
+            ),
+        ]
+
+        for testCase in cases {
+            let fileManager = FileManager.default
+            let root = fileManager.temporaryDirectory.appendingPathComponent(
+                "snaplist-photo-only-acceptance-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            defer { try? fileManager.removeItem(at: root) }
+            let startedAt = Date(timeIntervalSince1970: 2_100_000_000)
+            let subject = "user_photo_only_\(testCase.name)"
+            let photoData = makeLandscapeImageData(
+                leftColor: .systemIndigo,
+                rightColor: .systemMint
+            )
+            let voiceData = photoOnlyAcceptanceVoiceWAV()
+            let nativeIntake = NativeIntake(
+                applicationSupportDirectory: root,
+                identitySource: NativeIntake.IdentitySource(
+                    current: {
+                        NativeIntake.Identity(
+                            verifiedClerkSubject: subject,
+                            persistedAppAttestKeyID: nil
+                        )
+                    },
+                    changes: { AsyncStream { _ in } }
+                ),
+                now: { startedAt }
+            )
+            let nativeEvents = await nativeIntake.events()
+            var nativeIterator = nativeEvents.makeAsyncIterator()
+            _ = await nativeIterator.next()
+            XCTAssertEqual(
+                await nativeIntake.perform(
+                    .addPhotos([
+                        NativeIntake.PhotoInput { photoData },
+                    ])
+                ),
+                .committed,
+                testCase.name
+            )
+            XCTAssertEqual(
+                await nativeIntake.perform(
+                    .setVoice(
+                        NativeIntake.VoiceInput(
+                            duration: 0.001,
+                            loadData: { voiceData }
+                        )
+                    )
+                ),
+                .committed,
+                testCase.name
+            )
+            var submittedSnapshot: NativeIntake.Snapshot?
+            while let event = await nativeIterator.next() {
+                guard case .snapshot(let snapshot) = event else { continue }
+                if snapshot.photos.count == 1, snapshot.voice != nil {
+                    submittedSnapshot = snapshot
+                    break
+                }
+            }
+            let snapshot = try XCTUnwrap(submittedSnapshot, testCase.name)
+            let submittedPhoto = try XCTUnwrap(snapshot.photos.first)
+            let submittedVoice = try XCTUnwrap(snapshot.voice)
+            let principalRoot = submittedPhoto.photoURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+            let originalManifest = principalRoot
+                .appendingPathComponent("Current", isDirectory: true)
+                .appendingPathComponent("bundle.json")
+            let originalExpiry = try JSONDecoder().decode(
+                PhotoOnlyAcceptanceExpiry.self,
+                from: Data(contentsOf: originalManifest)
+            ).expiresAt
+            XCTAssertEqual(
+                originalExpiry,
+                startedAt.addingTimeInterval(NativeIntake.recoveryWindow),
+                testCase.name
+            )
+            let scopeProof = try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    filesystemRoot: principalRoot
+                ),
+                testCase.name
+            )
+            let photoReceipt = try XCTUnwrap(
+                SubmissionIntakeFixture(
+                    stagedPhotos: snapshot.photos
+                ).expectedReceiptPhotos.first
+            )
+            let receipt = MobileItemSubmissionEnvelope.DataPayload(
+                itemId: UUID(),
+                runId: UUID(),
+                status: "queued",
+                stage: "queued",
+                photoIdentity: .init(
+                    kind: "content_sha256_set_v1",
+                    fingerprint: String(repeating: "a", count: 64)
+                ),
+                photos: [photoReceipt],
+                voiceContext: testCase.voiceReceipt
+            )
+            let captureStore = RecordingCaptureDraftStore(
+                photos: snapshot.photos
+            )
+            let camera = TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            )
+            let captureFlow = CaptureFlowModel(
+                camera: camera,
+                evaluator: TestFramingEvaluator(observations: []),
+                store: captureStore
+            )
+            XCTAssertEqual(await captureFlow.restore(), .stagedPhoto)
+            let router = AppRouter(initialFullScreen: .guidedCamera)
+            router.openCaptureBoundary(
+                destination: .photoReview,
+                photos: captureFlow.stagedPhotos,
+                opener: .reviewButton
+            )
+            let photoReviewHost = PhotoReviewLiveHost()
+            XCTAssertTrue(
+                photoReviewHost.consume(router.captureBoundaryRequest),
+                testCase.name
+            )
+            let session = try XCTUnwrap(
+                photoReviewHost.session,
+                testCase.name
+            )
+            let submitter = RecordingItemRunSubmitter(
+                outcomes: [.created(receipt)]
+            )
+            let submissionHost = ItemRunSubmissionHost(
+                coordinator: ItemRunSubmissionCoordinator(
+                    submitter: submitter,
+                    attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                    draftStore: captureStore,
+                    tokenProvider: PhotoOnlyAcceptanceBearerTokenProvider(
+                        scopeProof: scopeProof
+                    ),
+                    newIdempotencyKey: { UUID() }
+                )
+            )
+            submissionHost.synchronizePrincipal(
+                snapshot: snapshot,
+                intake: nativeIntake
+            )
+            let savedStateObserved = expectation(
+                description: "\(testCase.name) accepted handoff observed"
+            )
+            withObservationTracking {
+                _ = submissionHost.pendingPresentationEvent
+            } onChange: {
+                savedStateObserved.fulfill()
+            }
+            var pendingScanFocus: PhotoReviewScanFocus?
+            let transaction = Task {
+                await AppShellPhotoReviewSubmissionTransaction.perform(
+                    session: session,
+                    captureFlow: captureFlow,
+                    host: photoReviewHost,
+                    router: router,
+                    submissionHost: submissionHost,
+                    setReturnFocus: { pendingScanFocus = $0 }
+                )
+            }
+            await fulfillment(of: [savedStateObserved], timeout: 3)
+            guard case .itemSaved(let eventID, let handoff)? =
+                submissionHost.pendingPresentationEvent else {
+                transaction.cancel()
+                return XCTFail(
+                    "Expected one accepted handoff for \(testCase.name)."
+                )
+            }
+            XCTAssertEqual(handoff.acceptedRun.runID, receipt.runId)
+            var effectConsumer = PhotoReviewSubmissionEffectConsumer()
+            var announcements: [String] = []
+            effectConsumer.consume(
+                PhotoReviewSubmissionPresentation(host: submissionHost),
+                postAnnouncement: { announcements.append($0) },
+                acknowledgePresentation: {
+                    submissionHost.acknowledgePresentation(eventID: $0)
+                }
+            )
+            await transaction.value
+
+            XCTAssertEqual(announcements, ["Item saved."], testCase.name)
+            XCTAssertEqual(submissionHost.acceptedRun?.runID, receipt.runId)
+            XCTAssertTrue(submissionHost.clearedIntake, testCase.name)
+            XCTAssertNil(submissionHost.pendingPresentationEvent)
+            XCTAssertNil(photoReviewHost.session, testCase.name)
+            XCTAssertTrue(captureFlow.stagedPhotos.isEmpty, testCase.name)
+            XCTAssertEqual(captureFlow.phase, .camera, testCase.name)
+            XCTAssertEqual(pendingScanFocus, .addPhotoButton, testCase.name)
+            XCTAssertFalse(
+                fileManager.fileExists(atPath: submittedPhoto.photoURL.path),
+                testCase.name
+            )
+            XCTAssertFalse(
+                fileManager.fileExists(atPath: submittedVoice.mediaURL.path),
+                testCase.name
+            )
+            let storedAttempt = try await LocalItemRunSubmissionAttemptStore(
+                principalRootDirectory: principalRoot
+            ).loadAttempt()
+            XCTAssertNil(storedAttempt, testCase.name)
+            let acceptedSnapshot = try await currentSnapshot(of: nativeIntake)
+            XCTAssertTrue(acceptedSnapshot.photos.isEmpty, testCase.name)
+            XCTAssertNil(acceptedSnapshot.voice, testCase.name)
+
+            let deferredMetadataURL = try XCTUnwrap(
+                fileManager.enumerator(
+                    at: principalRoot,
+                    includingPropertiesForKeys: nil
+                )?.compactMap { $0 as? URL }
+                    .first { $0.lastPathComponent == "entry.json" },
+                testCase.name
+            )
+            let deferred = try JSONDecoder().decode(
+                PhotoOnlyAcceptanceDeferredVoice.self,
+                from: Data(contentsOf: deferredMetadataURL)
+            )
+            XCTAssertEqual(deferred.expiresAt, originalExpiry, testCase.name)
+            XCTAssertEqual(deferred.voice.id, submittedVoice.id, testCase.name)
+            XCTAssertEqual(deferred.voice.duration, submittedVoice.duration)
+            XCTAssertTrue(
+                deferred.voice.mediaURL.path.hasPrefix(principalRoot.path + "/"),
+                testCase.name
+            )
+            XCTAssertEqual(
+                try Data(contentsOf: deferred.voice.mediaURL),
+                voiceData,
+                testCase.name
+            )
+
+            let nextPhotoData = makeLandscapeImageData(
+                leftColor: .systemOrange,
+                rightColor: .systemBlue
+            )
+            let nextPhoto = await nativeIntake.performReturningSnapshot(
+                .addPhotos([
+                    NativeIntake.PhotoInput { nextPhotoData },
+                ]),
+                expectedActivationID: acceptedSnapshot.version.activationID
+            )
+            XCTAssertEqual(nextPhoto.outcome, .committed, testCase.name)
+            XCTAssertEqual(nextPhoto.snapshot?.photos.count, 1, testCase.name)
+            XCTAssertNil(nextPhoto.snapshot?.voice, testCase.name)
+            XCTAssertTrue(
+                fileManager.fileExists(atPath: deferred.voice.mediaURL.path),
+                testCase.name
+            )
+            XCTAssertEqual(
+                try JSONDecoder().decode(
+                    PhotoOnlyAcceptanceDeferredVoice.self,
+                    from: Data(contentsOf: deferredMetadataURL)
+                ).expiresAt,
+                originalExpiry,
+                testCase.name
+            )
+            let payloads = await submitter.payloads
+            XCTAssertEqual(payloads.count, 1, testCase.name)
+        }
+    }
+
     func testAcceptedSubmissionWithChangedDurableIntakeKeepsPhotoReviewAndAttempt() async throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(
@@ -9733,6 +10016,54 @@ private struct PhotoReviewConditionalPresentationHarness: View {
                 }
         }
     }
+}
+
+private struct PhotoOnlyAcceptanceExpiry: Decodable {
+    let expiresAt: Date
+}
+
+private struct PhotoOnlyAcceptanceDeferredVoice: Decodable {
+    let expiresAt: Date
+    let voice: NativeIntake.Voice
+}
+
+private struct PhotoOnlyAcceptanceBearerTokenProvider:
+    BearerTokenProviding {
+    let scopeProof: ItemRunSubmissionPrincipalScopeProof
+
+    func bearerToken() async throws -> String {
+        "photo-only-acceptance-token"
+    }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        PrincipalBoundBearer(
+            bearerToken: try await bearerToken(),
+            scopeProof: scopeProof
+        )
+    }
+}
+
+private func currentSnapshot(
+    of intake: NativeIntake
+) async throws -> NativeIntake.Snapshot {
+    var iterator = await intake.events().makeAsyncIterator()
+    while let event = await iterator.next() {
+        if case .snapshot(let snapshot) = event {
+            return snapshot
+        }
+    }
+    throw CocoaError(.fileReadUnknown)
+}
+
+private func photoOnlyAcceptanceVoiceWAV() -> Data {
+    Data([
+        0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00,
+        0x57, 0x41, 0x56, 0x45, 0x66, 0x6D, 0x74, 0x20,
+        0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00,
+        0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61,
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ])
 }
 
 private final class TestCaptureCamera: CaptureCamera {
