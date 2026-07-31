@@ -1,4 +1,5 @@
 import { verifyToken } from "@clerk/nextjs/server";
+import { logServerError } from "@/lib/api/errors";
 import { createConfiguredIncludedOfferFence } from "@/lib/included-offer-fence/configured";
 import { createMobileApiHandler } from "@/lib/mobile-api";
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
@@ -30,9 +31,11 @@ export function handleIncludedOfferRequest(request: Request): Promise<Response> 
     includedOffer = createConfiguredIncludedOfferFence(process.env, {
       accessToken: bearerToken(request),
     }).fence;
-  } catch {
+  } catch (error) {
     // Leave it undefined: the handler answers 503 rather than letting an
-    // unfenced included run through. The reason stays server-side.
+    // unfenced included run through. The caller learns nothing beyond
+    // "unavailable", but a misconfigured credential must not be silent to us.
+    logServerError("included-offer.compose", error);
     includedOffer = undefined;
   }
 

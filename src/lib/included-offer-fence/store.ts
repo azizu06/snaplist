@@ -78,9 +78,27 @@ export interface IncludedOfferClaimStore {
     overrideId: string;
   }): Promise<boolean>;
   /**
+   * A claim other than `exceptClaimId` that still occupies the rendezvous. The
+   * worker uses it to keep exactly one claim open at a time.
+   *
+   * "Occupies" is bounded, or an abandoned claim would stall the queue for
+   * every account: either its token window is still open, or it carries an
+   * unresolved `update` write that no other claim can make progress past anyway.
+   */
+  findOpenRendezvousClaim(input: {
+    exceptClaimId: string;
+    now: Date;
+  }): Promise<IncludedOfferClaim | null>;
+  /**
    * The global single-writer lease over Apple's query-and-set window. Apple
    * exposes query and update but no compare-and-set, so correctness requires
    * that exactly one claim anywhere can be mid-rendezvous.
+   *
+   * Acquisition also fails while any other non-terminal claim carries
+   * `applePhase === "update"`. That claim observed a clear device and may or may
+   * not have landed its write, so the device is indeterminate but spoken for —
+   * letting a rival read the bit as clear is exactly how one device mints two
+   * included runs.
    */
   acquireWriterLease(input: {
     claimId: string;
@@ -89,6 +107,13 @@ export interface IncludedOfferClaimStore {
   }): Promise<boolean>;
   releaseWriterLease(input: { claimId: string }): Promise<void>;
 }
+
+/** States in which a claim already holds, or is owed, an Apple rendezvous. */
+const OPEN_RENDEZVOUS_STATES: readonly IncludedOfferClaimState[] = [
+  "awaiting_device_token",
+  "apple_pending",
+  "reconcile_required",
+];
 
 export const includedOfferQueueEnvelopeSchema = z
   .object({
@@ -227,6 +252,24 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
     return true;
   }
 
+  async findOpenRendezvousClaim(input: {
+    exceptClaimId: string;
+    now: Date;
+  }): Promise<IncludedOfferClaim | null> {
+    for (const claim of this.#claims.values()) {
+      if (
+        claim.claimId !== input.exceptClaimId &&
+        OPEN_RENDEZVOUS_STATES.includes(claim.state) &&
+        ((claim.tokenDeadlineAt !== null &&
+          claim.tokenDeadlineAt.getTime() > input.now.getTime()) ||
+          claim.applePhase === "update")
+      ) {
+        return { ...claim };
+      }
+    }
+    return null;
+  }
+
   async acquireWriterLease(input: {
     claimId: string;
     leaseMs: number;
@@ -238,6 +281,17 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
       this.#lease.expiresAt.getTime() > input.now.getTime()
     ) {
       return false;
+    }
+    // An unresolved write outranks an expired lease: the lease can time out, but
+    // Apple's indeterminate bit does not become somebody else's to claim.
+    for (const claim of this.#claims.values()) {
+      if (
+        claim.claimId !== input.claimId &&
+        claim.applePhase === "update" &&
+        OPEN_RENDEZVOUS_STATES.includes(claim.state)
+      ) {
+        return false;
+      }
     }
     this.#lease = {
       claimId: input.claimId,

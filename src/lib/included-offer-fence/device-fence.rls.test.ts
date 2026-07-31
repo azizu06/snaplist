@@ -214,50 +214,6 @@ describe("included-offer device fence at the pre-spend reservation boundary", ()
     }
   });
 
-  it("holds the claim state machine and the spent-claim record immutable", async () => {
-    if (!reachable) return;
-    const claimId = await reserveClaim(userA);
-
-    const reTransition = await admin.rpc("transition_included_offer_claim", {
-      p_claim_id: claimId,
-      p_from: ["reserved"],
-      p_to: "denied_device_consumed",
-    });
-    expect(reTransition.error?.message).toMatch(/already terminal/i);
-
-    const observed = crypto.randomUUID();
-    const created = await admin.rpc("begin_included_offer_claim", {
-      p_app_attest_key_id: `key-${observed}`,
-      p_claim_id: observed,
-      p_idempotency_key: `idem-${observed}`,
-      p_state: "queued",
-      p_user_id: userA.id,
-    });
-    expect(created.error).toBeNull();
-    await admin.rpc("transition_included_offer_claim", {
-      p_claim_id: observed,
-      p_from: ["queued"],
-      p_to: "awaiting_device_token",
-    });
-    await admin.rpc("transition_included_offer_claim", {
-      p_apple_phase: "update",
-      p_claim_id: observed,
-      p_from: ["awaiting_device_token"],
-      p_set_apple_phase: true,
-      p_to: "apple_pending",
-    });
-    // Downgrading the phase would let a later set bit0 read as somebody else's
-    // consumption instead of this claim's own write.
-    const withdrawn = await admin.rpc("transition_included_offer_claim", {
-      p_apple_phase: "query",
-      p_claim_id: observed,
-      p_from: ["apple_pending"],
-      p_set_apple_phase: true,
-      p_to: "reconcile_required",
-    });
-    expect(withdrawn.error?.message).toMatch(/cannot be withdrawn/i);
-  });
-
   it("consumes an audited support override once and only for its own account", async () => {
     if (!reachable) return;
     const claimId = await reserveClaim(userB);

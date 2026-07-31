@@ -427,4 +427,70 @@ describe("included first AI offer device fence", () => {
     expect(statuses).toEqual(["queued", "reserved"]);
     expect(h.deviceCheck.bits("device-4")).toEqual({ bit0: true, bit1: false });
   });
+
+  it("refuses a rival clear-device observation while a write is unresolved", async () => {
+    const h = harness();
+
+    // Mia observes a clear device under the lease, then her update never
+    // reaches Apple. The device bit is now indeterminate but spoken for.
+    const mia = await h.redeem("user_mia", "key-mia", "idem-mia-1");
+    await h.advance();
+    h.deviceCheck.failNextUpdate("timeout");
+    await expect(
+      h.submitToken("user_mia", "key-mia", claimIdOf(mia), "device-5:token-a"),
+    ).resolves.toMatchObject({ status: "retry_required" });
+    expect(h.deviceCheck.bits("device-5")?.bit0 ?? false).toBe(false);
+
+    // Noah is a different Clerk account on the same physical device. Apple still
+    // reports the bit clear, but that clear reading is Mia's to reconcile.
+    const noah = await h.redeem("user_noah", "key-noah", "idem-noah-1");
+    await h.openForToken(claimIdOf(noah));
+    const noahOutcome = await h.submitToken(
+      "user_noah",
+      "key-noah",
+      claimIdOf(noah),
+      "device-5:token-b",
+    );
+    expect(noahOutcome.status).not.toBe("reserved");
+    expect(h.deviceCheck.bits("device-5")?.bit0 ?? false).toBe(false);
+
+    // Mia reconciles into the one reservation the device may ever grant, and
+    // Noah's retry now reads the bit as consumed by somebody else. Both claims
+    // are reopened directly so this stays a test of the lease rather than of
+    // the worker's scheduling.
+    h.setNow(new Date("2026-07-31T18:10:00.000Z"));
+    await h.openForToken(claimIdOf(mia));
+    await expect(
+      h.submitToken("user_mia", "key-mia", claimIdOf(mia), "device-5:token-c"),
+    ).resolves.toEqual({ claimId: claimIdOf(mia), status: "reserved" });
+
+    // Noah's rendezvous window lapsed while the device was indeterminate, so he
+    // requeues and is invited again once the bit is finally decided.
+    await expect(
+      h.submitToken("user_noah", "key-noah", claimIdOf(noah), "device-5:token-d"),
+    ).resolves.toMatchObject({ status: "queued" });
+    await h.openForToken(claimIdOf(noah));
+    await expect(
+      h.submitToken("user_noah", "key-noah", claimIdOf(noah), "device-5:token-e"),
+    ).resolves.toMatchObject({ status: "denied_device_consumed" });
+  });
+
+  it("opens one rendezvous at a time while an earlier claim is unresolved", async () => {
+    const h = harness();
+
+    const opal = await h.redeem("user_opal", "key-opal", "idem-opal-1");
+    await h.advance();
+    h.deviceCheck.failNextUpdate("throttled");
+    await expect(
+      h.submitToken("user_opal", "key-opal", claimIdOf(opal), "device-6:token-a"),
+    ).resolves.toMatchObject({ status: "retry_required" });
+
+    // Opal's claim is still mid-rendezvous, so the worker must not invite the
+    // next account to spend a fresh token it can only be refused for.
+    const pete = await h.redeem("user_pete", "key-pete", "idem-pete-1");
+    await expect(h.advance()).resolves.toEqual({ acked: [], opened: [] });
+    await expect(
+      h.fence.readClaim({ claimId: claimIdOf(pete), userId: "user_pete" }),
+    ).resolves.toMatchObject({ status: "queued" });
+  });
 });

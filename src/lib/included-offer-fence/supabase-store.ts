@@ -21,6 +21,7 @@ type IncludedOfferRpcName =
   | "defer_included_offer_message"
   | "acquire_included_offer_writer_lease"
   | "release_included_offer_writer_lease"
+  | "find_open_included_offer_rendezvous"
   | "find_active_included_offer_override"
   | "consume_included_offer_override";
 
@@ -213,6 +214,15 @@ export function createSupabaseIncludedOfferClaimStore(
       );
       failed("override consumption", error);
       return z.boolean().parse(data);
+    },
+
+    async findOpenRendezvousClaim(input) {
+      const { data, error } = await client.rpc(
+        "find_open_included_offer_rendezvous",
+        { p_except_claim_id: input.exceptClaimId },
+      );
+      failed("open rendezvous lookup", error);
+      return optionalClaim(data);
     },
 
     async acquireWriterLease(input) {

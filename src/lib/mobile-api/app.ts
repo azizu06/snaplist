@@ -910,7 +910,9 @@ export function createMobileApiHandler(
     // #524: the included first AI offer is fenced per physical device. Every
     // route here is proof-bound; the account always comes from authenticate().
     const includedOfferMatch = pathname.match(
-      /^\/v1\/included-offer\/redemptions(?:\/([^/]+)(?:\/(device-token))?)?$/,
+      new RegExp(
+        `^/${MOBILE_API_VERSION}/included-offer/redemptions(?:/([^/]+)(?:/(device-token))?)?$`,
+      ),
     );
     if (includedOfferMatch) {
       const claimId = includedOfferMatch[1];

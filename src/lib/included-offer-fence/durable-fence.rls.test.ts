@@ -460,4 +460,75 @@ describe("durable included-offer fence over Postgres", () => {
     expect(message.envelope).toEqual({ claim_id: claimId, schema_version: 1 });
     await admin.rpc("ack_included_offer_message", { p_message_id: message.message_id });
   });
+
+  // Lives here rather than beside the other RLS cases because it parks a claim
+  // with an unresolved `update` write, which holds the deployment-wide
+  // rendezvous. Two suites doing that concurrently would fence each other out.
+  it("holds the claim state machine and the spent-claim record immutable", async () => {
+    if (!reachable) return;
+    const claimId = crypto.randomUUID();
+    const reserved = await admin.rpc("begin_included_offer_claim", {
+      p_app_attest_key_id: `key-${claimId}`,
+      p_claim_id: claimId,
+      p_idempotency_key: `idem-${claimId}`,
+      p_state: "queued",
+      p_user_id: userA.id,
+    });
+    expect(reserved.error).toBeNull();
+    const advanced = await admin.rpc("transition_included_offer_claim", {
+      p_claim_id: claimId,
+      p_from: ["queued"],
+      p_to: "reserved",
+    });
+    expect(advanced.error).toBeNull();
+
+    const reTransition = await admin.rpc("transition_included_offer_claim", {
+      p_claim_id: claimId,
+      p_from: ["reserved"],
+      p_to: "denied_device_consumed",
+    });
+    expect(reTransition.error?.message).toMatch(/already terminal/i);
+
+    const observed = crypto.randomUUID();
+    const created = await admin.rpc("begin_included_offer_claim", {
+      p_app_attest_key_id: `key-${observed}`,
+      p_claim_id: observed,
+      p_idempotency_key: `idem-${observed}`,
+      p_state: "queued",
+      p_user_id: userA.id,
+    });
+    expect(created.error).toBeNull();
+    await admin.rpc("transition_included_offer_claim", {
+      p_claim_id: observed,
+      p_from: ["queued"],
+      p_to: "awaiting_device_token",
+    });
+    await admin.rpc("transition_included_offer_claim", {
+      p_apple_phase: "update",
+      p_claim_id: observed,
+      p_from: ["awaiting_device_token"],
+      p_set_apple_phase: true,
+      p_to: "apple_pending",
+    });
+    // Downgrading the phase would let a later set bit0 read as somebody else's
+    // consumption instead of this claim's own write.
+    const withdrawn = await admin.rpc("transition_included_offer_claim", {
+      p_apple_phase: "query",
+      p_claim_id: observed,
+      p_from: ["apple_pending"],
+      p_set_apple_phase: true,
+      p_to: "reconcile_required",
+    });
+    expect(withdrawn.error?.message).toMatch(/cannot be withdrawn/i);
+
+    // Settle it: an unresolved 'update' write holds the deployment-wide
+    // rendezvous open, which is the point of the fence and would otherwise
+    // block every other suite sharing this database.
+    const settled = await admin.rpc("transition_included_offer_claim", {
+      p_claim_id: observed,
+      p_from: ["apple_pending"],
+      p_to: "denied_apple_unavailable",
+    });
+    expect(settled.error).toBeNull();
+  });
 });

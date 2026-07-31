@@ -110,7 +110,11 @@ function outcomeFor(claim: IncludedOfferClaim, now: Date): IncludedOfferOutcome 
         status: "device_token_required",
         tokenDeadlineAt: (claim.tokenDeadlineAt ?? now).toISOString(),
       };
-    default:
+    // Listed rather than defaulted: a new claim state must be a compile error
+    // here, not something that quietly reports itself as "queued".
+    case "queued":
+    case "apple_pending":
+    case "reconcile_required":
       return {
         claimId: claim.claimId,
         retryAfterMs: retryAfterMsFor(claim, now),
@@ -156,29 +160,22 @@ export function createIncludedOfferFence(
   }
 
   /**
-   * The bounded Apple rendezvous, always under the global single-writer lease.
+   * The bounded Apple rendezvous. The caller has already taken the global
+   * single-writer lease and moved the claim to `apple_pending`, so this owns
+   * Apple's query-and-set window for the duration.
    *
-   * `phase` carries what the claim already proved. A claim that reached `update`
-   * observed a clear device while holding the lease, so no other claim can have
-   * written the bit in the interim and a later `bit0 = true` is our own write.
+   * `priorPhase` carries what the claim already proved. A claim that reached
+   * `update` observed a clear device while holding the lease, and the lease
+   * refuses every rival while that write is unresolved, so a later `bit0 = true`
+   * is our own write rather than somebody else's consumption.
    */
   async function rendezvous(
-    claim: IncludedOfferClaim,
+    owned: IncludedOfferClaim,
+    priorPhase: IncludedOfferApplePhase | null,
+    attemptCount: number,
     deviceToken: string,
     now: Date,
   ): Promise<IncludedOfferOutcome> {
-    const attemptCount = claim.attemptCount + 1;
-    const priorPhase: IncludedOfferApplePhase | null = claim.applePhase;
-    const owned =
-      (await composition.store.transitionClaim({
-        applePhase: priorPhase ?? "query",
-        attemptCount,
-        claimId: claim.claimId,
-        from: ["awaiting_device_token", "reconcile_required"],
-        now,
-        to: "apple_pending",
-      })) ?? claim;
-
     const query = await composition.deviceCheck.queryTwoBits({ deviceToken });
     if (query.status === "ambiguous") {
       return deferAmbiguous(owned, query.reason, attemptCount, now);
@@ -196,14 +193,18 @@ export function createIncludedOfferFence(
 
     // Observed clear under the lease. Record that before touching Apple again so
     // a crash between here and the response cannot be reconciled as "consumed".
-    const writing =
-      (await composition.store.transitionClaim({
-        applePhase: "update",
-        claimId: owned.claimId,
-        from: ["apple_pending"],
-        now,
-        to: "apple_pending",
-      })) ?? owned;
+    const writing = await composition.store.transitionClaim({
+      applePhase: "update",
+      claimId: owned.claimId,
+      from: ["apple_pending"],
+      now,
+      to: "apple_pending",
+    });
+    if (!writing) {
+      // The ownership record has to land before Apple is touched. Writing the
+      // bit without it would leave a set device nobody can reconcile.
+      return deferAmbiguous(owned, "server_error", attemptCount, now);
+    }
 
     const update = await composition.deviceCheck.updateTwoBits({
       bit0: true,
@@ -272,34 +273,36 @@ export function createIncludedOfferFence(
       const override = await composition.store.findActiveSupportOverride({
         userId: input.userId,
       });
-      const claimId = newClaimId();
-      if (override) {
-        const claim = await composition.store.createClaim({
-          appAttestKeyId: proof.keyId,
-          claimId,
-          idempotencyKey: input.idempotencyKey,
-          now,
-          state: "reserved",
-          userId: input.userId,
-        });
-        // An override authorizes exactly this claim and never clears Apple's
-        // lifetime device bit.
-        await composition.store.consumeSupportOverride({
-          claimId: claim.claimId,
-          now,
-          overrideId: override.overrideId,
-        });
-        return outcomeFor(claim, now);
-      }
-
       const claim = await composition.store.createClaim({
         appAttestKeyId: proof.keyId,
-        claimId,
+        claimId: newClaimId(),
         idempotencyKey: input.idempotencyKey,
         now,
         state: "queued",
         userId: input.userId,
       });
+      if (override) {
+        // Consuming decides; the override is one-time, so a concurrent
+        // different-key redemption that loses this race falls through to the
+        // device fence rather than minting a second exception. An override
+        // authorizes exactly one claim and never clears Apple's lifetime bit.
+        const consumed = await composition.store.consumeSupportOverride({
+          claimId: claim.claimId,
+          now,
+          overrideId: override.overrideId,
+        });
+        if (consumed) {
+          const reserved =
+            (await composition.store.transitionClaim({
+              claimId: claim.claimId,
+              from: ["queued"],
+              now,
+              to: "reserved",
+              tokenDeadlineAt: null,
+            })) ?? claim;
+          return outcomeFor(reserved, now);
+        }
+      }
       const messageId = await composition.queue.enqueue({
         claim_id: claim.claimId,
         schema_version: INCLUDED_OFFER_REDEMPTION_SCHEMA_VERSION,
@@ -353,8 +356,25 @@ export function createIncludedOfferFence(
       ) {
         return outcomeFor({ ...claim, state: "queued" }, now);
       }
+
+      const attemptCount = claim.attemptCount + 1;
+      const priorPhase = claim.applePhase;
+      const owned = await composition.store.transitionClaim({
+        applePhase: priorPhase ?? "query",
+        attemptCount,
+        claimId: claim.claimId,
+        from: ["awaiting_device_token", "reconcile_required"],
+        now,
+        to: "apple_pending",
+      });
+      if (!owned) {
+        // A concurrent call for this same claim already owns the rendezvous and
+        // holds the lease. Releasing it here would reopen Apple's window
+        // mid-write, so this call withdraws without touching either.
+        return outcomeFor(claim, now);
+      }
       try {
-        return await rendezvous(claim, deviceToken, now);
+        return await rendezvous(owned, priorPhase, attemptCount, deviceToken, now);
       } finally {
         await composition.store.releaseWriterLease({ claimId: claim.claimId });
       }
@@ -396,6 +416,18 @@ export function createIncludedOfferRedemptionWorker(
       if (!claim || isTerminalIncludedOfferState(claim.state)) {
         await composition.queue.ack(message.messageId);
         acked.push(message.envelope.claim_id);
+        return { acked, opened };
+      }
+
+      // Single-writer means one open rendezvous, not one message in flight.
+      // Inviting a second account to spend a fresh ephemeral token it can only
+      // be refused for would also make the queue's ordering cosmetic.
+      const inFlight = await composition.store.findOpenRendezvousClaim({
+        exceptClaimId: claim.claimId,
+        now,
+      });
+      if (inFlight) {
+        await composition.queue.defer(message.messageId, visibilityTimeoutSeconds);
         return { acked, opened };
       }
 

@@ -631,6 +631,23 @@ begin
       message = 'Invalid included-offer writer lease bounds';
   end if;
 
+  -- An unresolved write outranks an expired lease. A non-terminal claim at
+  -- phase 'update' observed a clear device and may or may not have landed its
+  -- write, so the device bit is indeterminate but already spoken for. Letting a
+  -- rival read that bit as clear is exactly how one device mints two included
+  -- runs, and no lease timeout makes it somebody else's to claim.
+  if exists (
+    select 1
+    from public.included_offer_device_claims claim
+    where claim.apple_phase = 'update'
+      and claim.claim_id <> p_claim_id
+      and claim.state not in (
+        'reserved', 'denied_device_consumed', 'denied_apple_unavailable'
+      )
+  ) then
+    return false;
+  end if;
+
   insert into private.included_offer_writer_lease (
     singleton, claim_id, leased_at, expires_at
   ) values (
@@ -675,6 +692,51 @@ $$;
 revoke all on function public.release_included_offer_writer_lease(uuid)
   from public, anon, authenticated;
 grant execute on function public.release_included_offer_writer_lease(uuid)
+  to service_role;
+
+-- Single-writer means one open rendezvous, not one message in flight. The
+-- worker asks this before inviting the next claim, so a second account is never
+-- told to mint a fresh ephemeral token it can only be refused for.
+--
+-- Occupancy is deliberately bounded: either the claim's token window is still
+-- open, or it carries an unresolved 'update' write that no other claim can make
+-- progress past anyway. An abandoned claim past its deadline stops blocking, or
+-- one lapsed rendezvous would stall the queue for every account.
+create or replace function public.find_open_included_offer_rendezvous(
+  p_except_claim_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_now timestamptz := statement_timestamp();
+  v_claim public.included_offer_device_claims;
+begin
+  perform private.assert_included_offer_authority();
+  select claim.* into v_claim
+  from public.included_offer_device_claims claim
+  where claim.state in (
+      'awaiting_device_token', 'apple_pending', 'reconcile_required'
+    )
+    and (p_except_claim_id is null or claim.claim_id <> p_except_claim_id)
+    and (
+      (claim.token_deadline_at is not null and claim.token_deadline_at > v_now)
+      or claim.apple_phase = 'update'
+    )
+  order by claim.created_at
+  limit 1;
+  if not found then
+    return null;
+  end if;
+  return private.included_offer_claim_json(v_claim);
+end;
+$$;
+
+revoke all on function public.find_open_included_offer_rendezvous(uuid)
+  from public, anon, authenticated;
+grant execute on function public.find_open_included_offer_rendezvous(uuid)
   to service_role;
 
 -- ---------------------------------------------------------------------------
