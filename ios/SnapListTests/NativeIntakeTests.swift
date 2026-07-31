@@ -534,6 +534,157 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(returnedB.photos, principalBPhoto.photos)
         XCTAssertNil(returnedB.voice)
     }
+    func testUnreadableDeferredUnmatchedVoiceStoreNeverDestroysTheResidualRoot() async throws {
+        let start = Date(timeIntervalSince1970: 2_100_000_000)
+        let retryDeadline = start.addingTimeInterval(
+            NativeIntake.retentionRetryInterval
+        )
+        let clock = NativeIntakeTestClock(now: start)
+        let principalA = "user_native_intake_deferred_unreadable_a"
+        let principalB = "user_native_intake_deferred_unreadable_b"
+        let harness = NativeIntakeHarness(identity: .clerk(principalA))
+        addTeardownBlock { harness.cleanUp() }
+        let guardedFiles = NativeIntakeTestFileManager()
+        let session = try await harness.makeSession(
+            fileManager: guardedFiles,
+            now: clock.now,
+            sleepUntil: clock.sleep
+        )
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 1)])
+        )
+        let submitted = try await session.commit(
+            .setVoice(voice("unreadable unmatched voice", duration: 3))
+        )
+        let submittedVoice = try XCTUnwrap(submitted.voice)
+        let principalARoot = intakeRoot(
+            containing: submitted.photos[0].photoURL
+        )
+        let deferredVoiceURL = principalARoot
+            .appendingPathComponent(
+                "DeferredUnmatchedVoices",
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                submittedVoice.id.uuidString.lowercased(),
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                "voice-\(submittedVoice.id.uuidString).wav"
+            )
+        let retirement = await session.perform(
+            .retireAcceptedPhotos(
+                expected: submitted.version,
+                photoIDs: submitted.photos.map(\.id),
+                preservingUnmatchedVoiceID: submittedVoice.id
+            )
+        )
+        XCTAssertEqual(retirement, .committed)
+        assertEmpty(try await session.nextSnapshot())
+        XCTAssertTrue(files.fileExists(atPath: deferredVoiceURL.path))
+
+        guardedFiles.failNextFileOperation = .rootDeletions([
+            principalARoot.standardizedFileURL.path
+        ])
+        guardedFiles.rejectDeferredUnmatchedVoiceReads = true
+        let switchRegistration = clock.latestRegistration
+        await harness.identity.set(.clerk(principalB))
+        assertEmpty(try await session.nextSnapshot())
+        await clock.waitUntilLiveSleeper(
+            after: switchRegistration,
+            deadline: retryDeadline
+        )
+
+        XCTAssertEqual(
+            guardedFiles.rootDeletionFailureCount(at: principalARoot),
+            0
+        )
+        XCTAssertTrue(files.fileExists(atPath: deferredVoiceURL.path))
+    }
+    func testVanishedDeferredUnmatchedVoiceEntryStillExpiresItsSiblings() async throws {
+        let start = Date(timeIntervalSince1970: 2_100_000_000)
+        let clock = NativeIntakeTestClock(now: start)
+        let harness = NativeIntakeHarness(
+            identity: .clerk("user_native_intake_deferred_siblings")
+        )
+        addTeardownBlock { harness.cleanUp() }
+        let guardedFiles = NativeIntakeTestFileManager()
+        let session = try await harness.makeSession(
+            fileManager: guardedFiles,
+            now: clock.now,
+            sleepUntil: clock.sleep
+        )
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 1)])
+        )
+        let first = try await session.commit(
+            .setVoice(voice("first unmatched voice", duration: 3))
+        )
+        let firstVoice = try XCTUnwrap(first.voice)
+        let principalRoot = intakeRoot(
+            containing: first.photos[0].photoURL
+        )
+        let firstRetirement = await session.perform(
+            .retireAcceptedPhotos(
+                expected: first.version,
+                photoIDs: first.photos.map(\.id),
+                preservingUnmatchedVoiceID: firstVoice.id
+            )
+        )
+        XCTAssertEqual(firstRetirement, .committed)
+        assertEmpty(try await session.nextSnapshot())
+
+        clock.advance(by: 60 * 60)
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 2)])
+        )
+        let second = try await session.commit(
+            .setVoice(voice("second unmatched voice", duration: 3))
+        )
+        let secondVoice = try XCTUnwrap(second.voice)
+        let secondRetirement = await session.perform(
+            .retireAcceptedPhotos(
+                expected: second.version,
+                photoIDs: second.photos.map(\.id),
+                preservingUnmatchedVoiceID: secondVoice.id
+            )
+        )
+        XCTAssertEqual(secondRetirement, .committed)
+        assertEmpty(try await session.nextSnapshot())
+
+        let deferredRoot = principalRoot.appendingPathComponent(
+            "DeferredUnmatchedVoices",
+            isDirectory: true
+        )
+        let firstEntryRoot = deferredRoot.appendingPathComponent(
+            firstVoice.id.uuidString.lowercased(),
+            isDirectory: true
+        )
+        let secondEntryRoot = deferredRoot.appendingPathComponent(
+            secondVoice.id.uuidString.lowercased(),
+            isDirectory: true
+        )
+        XCTAssertTrue(files.fileExists(atPath: secondEntryRoot.path))
+
+        guardedFiles.vanishedDeferredUnmatchedVoiceEntries = [firstEntryRoot]
+        guardedFiles.failNextFileOperation = .rootDeletions([
+            secondEntryRoot.standardizedFileURL.path
+        ])
+        let expiryRegistration = clock.latestRegistration
+        clock.advance(by: NativeIntake.recoveryWindow)
+        let retryDeadline = clock.now().addingTimeInterval(
+            NativeIntake.retentionRetryInterval
+        )
+        await clock.waitUntilLiveSleeper(
+            after: expiryRegistration,
+            deadline: retryDeadline
+        )
+
+        XCTAssertEqual(
+            guardedFiles.rootDeletionFailureCount(at: secondEntryRoot),
+            1
+        )
+    }
     private func intakeRoot(containing asset: URL) -> URL {
         asset.deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -848,6 +999,8 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
         .appendingPathComponent("snaplist-native-intake-\(UUID().uuidString)", isDirectory: true)
     override var temporaryDirectory: URL { isolatedTemporaryDirectory }
     private var rejectsReads = false
+    private var rejectsDeferredUnmatchedVoiceReads = false
+    private var vanishedEntryPaths = Set<String>()
     private var nextFailure: NativeIntakeFileFailure?
     private var failedRootDeletionPaths = Set<String>()
     private var completedRemovalAttempts = 0
@@ -863,6 +1016,27 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
     var rejectManifestMetadataReads: Bool {
         get { lock.synchronized { rejectsReads } }
         set { lock.synchronized { rejectsReads = newValue } }
+    }
+    var rejectDeferredUnmatchedVoiceReads: Bool {
+        get { lock.synchronized { rejectsDeferredUnmatchedVoiceReads } }
+        set { lock.synchronized { rejectsDeferredUnmatchedVoiceReads = newValue } }
+    }
+    /// Entry directories the listing still reports but whose metadata reads
+    /// report the entry as missing, matching a deferred-voice removal that
+    /// raced the retention sweep or only partly succeeded.
+    var vanishedDeferredUnmatchedVoiceEntries: Set<URL> {
+        get {
+            lock.synchronized {
+                Set(vanishedEntryPaths.map { URL(fileURLWithPath: $0) })
+            }
+        }
+        set {
+            lock.synchronized {
+                vanishedEntryPaths = Set(
+                    newValue.map(\.standardizedFileURL.path)
+                )
+            }
+        }
     }
     fileprivate func rootDeletionFailureCount(at root: URL) -> Int {
         lock.synchronized { failedRootDeletionPaths.contains(root.standardizedFileURL.path) ? 1 : 0 }
@@ -890,7 +1064,27 @@ final class NativeIntakeTestFileManager: FileManager, @unchecked Sendable {
                 throw CocoaError(.fileReadNoPermission)
             }
         }
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        if lock.synchronized({ vanishedEntryPaths.contains(standardized) }) {
+            throw CocoaError(.fileNoSuchFile)
+        }
         return try super.attributesOfItem(atPath: path)
+    }
+    override func contentsOfDirectory(
+        at url: URL,
+        includingPropertiesForKeys keys: [URLResourceKey]?,
+        options mask: FileManager.DirectoryEnumerationOptions
+    ) throws -> [URL] {
+        if url.lastPathComponent == "DeferredUnmatchedVoices" {
+            if lock.synchronized({ rejectsDeferredUnmatchedVoiceReads }) {
+                throw CocoaError(.fileReadNoPermission)
+            }
+        }
+        return try super.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: keys,
+            options: mask
+        )
     }
     override func setAttributes(
         _ attributes: [FileAttributeKey: Any],

@@ -1061,9 +1061,9 @@ final class CaptureFlowTests: XCTestCase {
     }
 
     func testCanonicalPhotoAcceptanceWithUnmatchedVoiceReturnsToEmptyUsableScanAndRetainsVoiceForExpiry() async throws {
-        let cases: [(
+        let voiceReceipts: [(
             name: String,
-            voiceReceipt: MobileItemSubmissionEnvelope.VoiceReceipt?
+            value: MobileItemSubmissionEnvelope.VoiceReceipt?
         )] = [
             ("null receipt", nil),
             (
@@ -1077,6 +1077,23 @@ final class CaptureFlowTests: XCTestCase {
                 )
             ),
         ]
+        let acceptances: [(
+            name: String,
+            outcome: (MobileItemSubmissionEnvelope.DataPayload)
+                -> ItemRunSubmissionTransportOutcome
+        )] = [
+            ("created", { .created($0) }),
+            ("replayed", { .replayed($0) }),
+        ]
+        let cases = voiceReceipts.flatMap { receipt in
+            acceptances.map { acceptance in
+                (
+                    name: "\(receipt.name)/\(acceptance.name)",
+                    voiceReceipt: receipt.value,
+                    outcome: acceptance.outcome
+                )
+            }
+        }
 
         for testCase in cases {
             let fileManager = FileManager.default
@@ -1173,6 +1190,7 @@ final class CaptureFlowTests: XCTestCase {
                 photos: [photoReceipt],
                 voiceContext: testCase.voiceReceipt
             )
+            let acceptance = testCase.outcome(receipt)
             let captureStore = RecordingCaptureDraftStore(
                 photos: snapshot.photos
             )
@@ -1203,7 +1221,7 @@ final class CaptureFlowTests: XCTestCase {
                 testCase.name
             )
             let submitter = RecordingItemRunSubmitter(
-                outcomes: [.created(receipt)]
+                outcomes: [acceptance]
             )
             let submissionHost = ItemRunSubmissionHost(
                 coordinator: ItemRunSubmissionCoordinator(
@@ -1267,6 +1285,16 @@ final class CaptureFlowTests: XCTestCase {
             XCTAssertTrue(captureFlow.stagedPhotos.isEmpty, testCase.name)
             XCTAssertEqual(captureFlow.phase, .camera, testCase.name)
             XCTAssertEqual(pendingScanFocus, .addPhotoButton, testCase.name)
+            XCTAssertEqual(
+                router.photoReviewScanReturn,
+                PhotoReviewScanReturn(photos: [], focus: .addPhotoButton),
+                testCase.name
+            )
+            XCTAssertEqual(
+                router.presentedFullScreen,
+                .guidedCamera,
+                testCase.name
+            )
             XCTAssertFalse(
                 fileManager.fileExists(atPath: submittedPhoto.photoURL.path),
                 testCase.name

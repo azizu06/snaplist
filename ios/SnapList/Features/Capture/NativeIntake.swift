@@ -1232,7 +1232,11 @@ actor NativeIntake {
             switch readDeferredUnmatchedVoice(at: entryRoot) {
             case .value(let record):
                 records.append(record)
-            case .absent, .malformed:
+            case .absent:
+                // The entry vanished between the listing and the read, so it
+                // holds no protected bytes and must not stall its siblings.
+                continue
+            case .malformed:
                 return .malformed
             case .transient:
                 return .transient
@@ -1248,6 +1252,18 @@ actor NativeIntake {
             return !records.isEmpty
         }
         return false
+    }
+
+    /// Answers whether protected voice bytes can be ruled out. An uncertain
+    /// read must never authorise destroying a residual root, so anything short
+    /// of a positive empty listing reports that voices may still be present.
+    private func mayHaveDeferredUnmatchedVoices(in principalRoot: URL) -> Bool {
+        if case .value(let records) = deferredUnmatchedVoices(
+            in: principalRoot
+        ) {
+            return !records.isEmpty
+        }
+        return true
     }
 
     private func currentBundleIsAbsent(in principalRoot: URL) -> Bool {
@@ -1301,7 +1317,7 @@ actor NativeIntake {
                     deadlines.append(deletionRetryAfter[root] ?? stored.expiresAt)
                 case .malformed:
                     if !currentBundleIsAbsent(in: root)
-                        || !hasDeferredUnmatchedVoices(in: root) {
+                        || !mayHaveDeferredUnmatchedVoices(in: root) {
                         deadlines.append(
                             deletionRetryAfter[root] ?? now()
                         )
@@ -1463,7 +1479,7 @@ actor NativeIntake {
                     _ = removeExpiredRoot(root, at: currentTime)
                 case .malformed:
                     if !currentBundleIsAbsent(in: root)
-                        || !hasDeferredUnmatchedVoices(in: root) {
+                        || !mayHaveDeferredUnmatchedVoices(in: root) {
                         _ = removeExpiredRoot(root, at: currentTime)
                     }
                 case .value, .absent, .transient:
