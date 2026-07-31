@@ -1383,9 +1383,8 @@ final class ItemRunSubmissionTests: XCTestCase {
         let submission = Task {
             await host.startListing(photos: native.snapshot.photos)
         }
-        let savedEvent = try XCTUnwrap(
-            await waitForPendingItemSavedEvent(on: host)
-        )
+        let pendingSavedEvent = await waitForPendingItemSavedEvent(on: host)
+        let savedEvent = try XCTUnwrap(pendingSavedEvent)
         host.acknowledgePresentation(eventID: savedEvent.eventID)
         await submission.value
 
@@ -1457,9 +1456,8 @@ final class ItemRunSubmissionTests: XCTestCase {
         let submission = Task {
             await host.startListing(photos: native.snapshot.photos)
         }
-        let savedEvent = try XCTUnwrap(
-            await waitForPendingItemSavedEvent(on: host)
-        )
+        let pendingSavedEvent = await waitForPendingItemSavedEvent(on: host)
+        let savedEvent = try XCTUnwrap(pendingSavedEvent)
         host.acknowledgePresentation(eventID: savedEvent.eventID)
         await submission.value
 
@@ -3964,19 +3962,26 @@ private final class FailingAcceptedPhotoRetirementFileManager:
     private var shouldRejectCurrentRemoval = false
 
     var rejectNextCurrentRemoval: Bool {
-        get { lock.synchronized { shouldRejectCurrentRemoval } }
-        set { lock.synchronized { shouldRejectCurrentRemoval = newValue } }
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return shouldRejectCurrentRemoval
+        }
+        set {
+            lock.lock()
+            shouldRejectCurrentRemoval = newValue
+            lock.unlock()
+        }
     }
 
     override func removeItem(at URL: URL) throws {
-        let reject = lock.synchronized {
-            guard shouldRejectCurrentRemoval,
-                  URL.lastPathComponent == "Current" else {
-                return false
-            }
+        lock.lock()
+        let reject = shouldRejectCurrentRemoval
+            && URL.lastPathComponent == "Current"
+        if reject {
             shouldRejectCurrentRemoval = false
-            return true
         }
+        lock.unlock()
         guard !reject else {
             throw CocoaError(.fileWriteNoPermission)
         }
