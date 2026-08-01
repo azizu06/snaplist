@@ -2,6 +2,21 @@ begin;
 
 select plan(36);
 
+-- Issue #524 fences the included first AI run by physical device, so every
+-- non-guest tenant here needs the reserved claim a real redemption would have
+-- produced before it can stage a run.
+insert into public.included_offer_device_claims
+  (claim_id, user_id, idempotency_key, app_attest_key_id, state)
+select
+  gen_random_uuid(),
+  tenant,
+  gen_random_uuid()::text,
+  'pgtap-key-' || tenant,
+  'reserved'
+from unnest(array[
+  'credit_pgtap_user'
+]) as tenant;
+
 select ok(
   to_regclass('public.ai_item_allowance_periods') is not null,
   'AI-item allowance periods exist'

@@ -2,6 +2,21 @@ begin;
 
 select plan(3);
 
+-- Issue #524 fences the included first AI run by physical device, so every
+-- non-guest tenant here needs the reserved claim a real redemption would have
+-- produced before it can stage a run.
+insert into public.included_offer_device_claims
+  (claim_id, user_id, idempotency_key, app_attest_key_id, state)
+select
+  gen_random_uuid(),
+  tenant,
+  gen_random_uuid()::text,
+  'pgtap-key-' || tenant,
+  'reserved'
+from unnest(array[
+  'worker_compat_user'
+]) as tenant;
+
 -- Emulate issue #159's separately owned migration surface. The worker reads
 -- capture_input through to_jsonb(row), so it remains compatible whether #159's
 -- migration lands before or after #160. This transaction rolls every fixture
