@@ -145,7 +145,12 @@ struct ListingReviewView: View {
         draft: ListingReviewDraft
     ) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            // Four bounded children, not a feed. A lazy stack would leave the
+            // ones below the fold out of the accessibility tree until the
+            // seller scrolls them into view, which at the largest Dynamic Type
+            // sizes is most of the review — including the title control that
+            // Voice Control and the rotor need to be able to name.
+            VStack(alignment: .leading, spacing: 18) {
                 ListingReviewPhotoPager(photos: snapshot.photos)
 
                 stateBanner
