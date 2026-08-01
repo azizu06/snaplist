@@ -163,9 +163,42 @@ final class ListingReviewUITests: XCTestCase {
             anyElement("listing-review.sold-detail", in: app)
                 .waitForExistence(timeout: 3)
         )
+        // A sold comp explains the price only when the terms of the sale come
+        // with it: a free-shipping Buy It Now and a paid auction are not the
+        // same $52.
+        XCTAssertTrue(
+            app.staticTexts["Body only"].exists,
+            "The sold detail must carry the comp's size."
+        )
+        XCTAssertTrue(
+            app.staticTexts["Buy It Now"].exists,
+            "The sold detail must carry the comp's selling format."
+        )
+        XCTAssertTrue(
+            app.staticTexts["Free shipping"].exists,
+            "The sold detail must carry the comp's shipping term."
+        )
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(firstMatch.waitForExistence(timeout: 3))
         XCTAssertTrue(firstMatch.isHittable)
+
+        // The third fixture record carries none of the three optional facts.
+        // An absent fact drops its row; it never renders a labelled blank.
+        let bareMatch = app.buttons["listing-review.sold-match.2"]
+        XCTAssertTrue(bareMatch.waitForExistence(timeout: 3))
+        bareMatch.tap()
+        XCTAssertTrue(
+            anyElement("listing-review.sold-detail", in: app)
+                .waitForExistence(timeout: 3)
+        )
+        for absent in ["SIZE", "FORMAT", "SHIPPING"] {
+            XCTAssertFalse(
+                app.staticTexts[absent].exists,
+                "An absent \(absent) fact must not render its row."
+            )
+        }
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(bareMatch.waitForExistence(timeout: 3))
     }
 
     func testCorrectionBoundaryAndAdaptiveManualFallbackRemainReachable() {

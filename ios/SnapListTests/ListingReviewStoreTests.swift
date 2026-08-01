@@ -653,7 +653,10 @@ final class ListingReviewStoreTests: XCTestCase {
             match["format"] = "buy-it-now"
             match["shipping"] = [
                 "type": "paid",
-                "price": 8.75,
+                // 8.75 is binary-exact, so a `Double` literal survives here by
+                // luck. 8.95 would not. Carry the decimal exactly so the
+                // fixture never depends on that.
+                "price": NSDecimalNumber(string: "8.75"),
                 "currency": "USD",
             ]
             return match

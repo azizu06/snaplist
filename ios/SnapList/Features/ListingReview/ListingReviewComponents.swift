@@ -199,8 +199,12 @@ enum ListingReviewLaunchFixture {
                 count: 12
             )
             : "Tested camera body with normal handling wear. Includes a 50mm lens and strap."
+        // Sold-comp facts rotate so one fixture proves all three shapes: a
+        // free Buy It Now, a paid auction, and a record that simply lacks the
+        // optional facts. The third case is the one that matters — an absent
+        // fact must drop its row rather than render an empty one.
         let matches = (0..<matchCount).map { index in
-            [
+            var match: [String: Any] = [
                 "id": "fixture-sold-\(index + 1)",
                 "sourceURL":
                     "https://example.com/sold/\(index + 1)",
@@ -210,7 +214,28 @@ enum ListingReviewLaunchFixture {
                 "currency": "USD",
                 "condition": "Used",
                 "soldAt": 1_785_024_000_000 + (index * 86_400_000),
-            ] as [String: Any]
+            ]
+            switch index % 3 {
+            case 0:
+                match["size"] = "Body only"
+                match["format"] = "buy-it-now"
+                match["shipping"] = ["type": "free"]
+            case 1:
+                match["size"] = "With 50mm lens"
+                match["format"] = "auction"
+                match["shipping"] = [
+                    "type": "paid",
+                    // A bare `8.95` literal is a `Double`, and
+                    // `JSONSerialization` writes it as 8.9499999999999993,
+                    // which the two-decimal currency guard rejects. Carry the
+                    // decimal exactly instead.
+                    "price": NSDecimalNumber(string: "8.95"),
+                    "currency": "USD",
+                ]
+            default:
+                break
+            }
+            return match
         }
         let object: [String: Any] = [
             "schemaVersion": 1,
@@ -669,5 +694,28 @@ extension ListingReviewSoldMatch {
         return Date(
             timeIntervalSince1970: TimeInterval(soldAt) / 1_000
         ).formatted(date: .abbreviated, time: .omitted)
+    }
+
+    /// Wording follows the approved v2.2.1 sold-comp records verbatim
+    /// (`Buy It Now`, `Auction`, `Free shipping`, `$8.95 shipping`). The
+    /// board's `Auction · 9 bids` carries a bid count the read contract does
+    /// not supply, so the format stands alone rather than inventing one.
+    var formatLabel: String? {
+        switch format {
+        case .auction: "Auction"
+        case .buyItNow: "Buy It Now"
+        case .auctionWithBuyItNow: "Auction with Buy It Now"
+        case nil: nil
+        }
+    }
+
+    func shippingLabel(locale: Locale = .current) -> String? {
+        switch shipping {
+        case .free: "Free shipping"
+        case let .paid(price, currency):
+            "\(ListingReviewCurrency.string(price, currencyCode: currency, locale: locale)) shipping"
+        case .pickup: "Local pickup"
+        case nil: nil
+        }
     }
 }
