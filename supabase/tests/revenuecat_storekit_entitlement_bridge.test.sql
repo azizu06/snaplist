@@ -314,6 +314,9 @@ select * from public.bind_revenuecat_customer('rc-user-ledger', 'rc-user-ledger'
 select * from public.resolve_revenuecat_customer(
   'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger'
 );
+-- The reservation below only lands while this StoreKit span actually covers
+-- now. Every span in this file is anchored to date_trunc('month', now()) for
+-- that reason -- now() is frozen at BEGIN, so all of them agree on one instant.
 select public.record_verified_revenuecat_ai_item_period(
   'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger:p1',
   'rc-original-ledger', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
