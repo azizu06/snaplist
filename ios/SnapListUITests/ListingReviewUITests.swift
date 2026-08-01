@@ -171,6 +171,13 @@ final class ListingReviewUITests: XCTestCase {
     func testCorrectionBoundaryAndAdaptiveManualFallbackRemainReachable() {
         var app = launch(resetDraft: true)
         _ = openReview(in: app)
+        // Negative control. This launch carries no `--reduced-motion`, and a
+        // CI simulator has the system setting off, so the surface must resolve
+        // reduced motion as false here. Without it the assertions below would
+        // hold whether or not the launch argument reached the view.
+        XCTAssertFalse(
+            app.otherElements["listing-review.motion-reduced"].exists
+        )
         var secondary = app.buttons["listing-review.secondary"]
         XCTAssertEqual(secondary.label, "Fix item")
         secondary.tap()
@@ -198,6 +205,14 @@ final class ListingReviewUITests: XCTestCase {
         secondary = app.buttons["listing-review.secondary"]
         let done = app.buttons["listing-review.done"]
 
+        // The screenshot below is filed as AC6 Reduced Motion evidence, so the
+        // surface has to have actually resolved reduced motion. It reads the
+        // launch argument rather than the system setting, which on this
+        // simulator stays off for the whole run.
+        XCTAssertTrue(
+            app.otherElements["listing-review.motion-reduced"]
+                .waitForExistence(timeout: 3)
+        )
         XCTAssertEqual(secondary.label, "Edit details")
         XCTAssertTrue(secondary.isHittable)
         XCTAssertTrue(done.isHittable)
@@ -233,6 +248,10 @@ final class ListingReviewUITests: XCTestCase {
             ]
         )
         _ = openReview(in: app)
+        XCTAssertTrue(
+            app.otherElements["listing-review.motion-reduced"]
+                .waitForExistence(timeout: 3)
+        )
         let longTitle = app.buttons["listing-review.title"]
         XCTAssertTrue(longTitle.exists)
         XCTAssertGreaterThan(

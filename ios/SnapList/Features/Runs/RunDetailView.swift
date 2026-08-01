@@ -6,6 +6,7 @@ struct RunDetailView: View {
     @Bindable var store: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
     let correctionAvailable: Bool
+    let forceReducedMotion: Bool
     @State private var presentsListingReview = false
     @State private var isOpeningReview = false
     @State private var reviewOpenFailed = false
@@ -63,6 +64,7 @@ struct RunDetailView: View {
             ListingReviewView(
                 store: listingReviewStore,
                 correctionAvailable: correctionAvailable,
+                forceReducedMotion: forceReducedMotion,
                 dismissReview: dismissListingReview
             )
         }

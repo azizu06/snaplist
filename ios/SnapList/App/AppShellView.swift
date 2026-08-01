@@ -372,7 +372,8 @@ struct AppShellView: View {
                     store: runStore,
                     listingReviewStore: listingReviewStore,
                     correctionAvailable:
-                        configuration.listingReviewCorrectionAvailable
+                        configuration.listingReviewCorrectionAvailable,
+                    forceReducedMotion: configuration.forceReducedMotion
                 )
             default:
                 HomeRouteBoundaryView(route: route)

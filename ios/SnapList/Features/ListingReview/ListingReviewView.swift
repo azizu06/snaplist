@@ -24,9 +24,10 @@ private enum ListingReviewDestination: Identifiable, Hashable {
 struct ListingReviewView: View {
     @Bindable var store: ListingReviewStore
     let correctionAvailable: Bool
+    let forceReducedMotion: Bool
     let dismissReview: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
     @State private var destination: ListingReviewDestination?
@@ -138,6 +139,26 @@ struct ListingReviewView: View {
         // as `listing-review`.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("listing-review")
+        .overlay(alignment: .topLeading) {
+#if DEBUG
+            // A simulator with the system setting off leaves
+            // `accessibilityReduceMotion` false for the whole run, so a
+            // screenshot taken under `--reduced-motion` proves nothing on its
+            // own. This publishes the resolved value the surface actually
+            // used, the way Photo Review and Scan Camera already do.
+            if reduceMotion {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel("Reduced motion")
+                    .accessibilityIdentifier("listing-review.motion-reduced")
+            }
+#endif
+        }
+    }
+
+    private var reduceMotion: Bool {
+        systemReduceMotion || forceReducedMotion
     }
 
     private func review(
