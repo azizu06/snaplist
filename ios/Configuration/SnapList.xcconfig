@@ -17,3 +17,13 @@ SNAPLIST_POSTHOG_KEY = phc_kCSPUChoXv8kmbK8Co5uJSmvogn7pGbhpS6kYsYChvRy
 // reachable: PostHogNetworkGate pins scheme, host, and port, and
 // PostHogBatchOnlyURLProtocol allows nothing but /batch.
 SNAPLIST_POSTHOG_HOST = https:/$()/us.i.posthog.com
+// Public Sentry ingest endpoint for the `snaplist` project. Like the Clerk
+// publishable key it identifies the project and grants no read access, so it
+// belongs here rather than in a side channel. Escape both slashes with $() —
+// xcconfig treats a bare // as the start of a comment and would silently
+// truncate the value:
+//   SNAPLIST_SENTRY_DSN = https:/$()/PUBLIC_KEY@oORG.ingest.us.sentry.io/PROJECT_ID
+// Left empty until the owner fills it in; an empty or unexpanded value makes
+// the app skip crash reporting instead of starting a reporter that cannot
+// deliver.
+SNAPLIST_SENTRY_DSN =

@@ -51,6 +51,8 @@
 	<string>$(SNAPLIST_POSTHOG_HOST)</string>
 	<key>SnapListPostHogKey</key>
 	<string>$(SNAPLIST_POSTHOG_KEY)</string>
+	<key>SnapListSentryDSN</key>
+	<string>$(SNAPLIST_SENTRY_DSN)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
