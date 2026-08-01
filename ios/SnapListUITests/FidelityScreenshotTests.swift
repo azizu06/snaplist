@@ -13,7 +13,7 @@ final class FidelityScreenshotTests: XCTestCase {
             "--zero-network-fixtures",
             "--reduced-motion"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
         XCUIDevice.shared.orientation = .portrait
 
         XCTAssertTrue(app.buttons["dock.home"].waitForExistence(timeout: 3))

@@ -395,7 +395,7 @@ final class ListingReviewUITests: XCTestCase {
             "--listing-review-fixture=\(fixture)",
         ] + (resetDraft ? ["--reset-listing-review-draft"] : [])
             + extraArguments
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
         return app
     }
 
