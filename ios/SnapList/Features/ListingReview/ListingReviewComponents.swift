@@ -305,6 +305,48 @@ enum ListingReviewAnnouncement {
     }
 }
 
+enum ListingReviewPriceStyle {
+    /// Ink, not an alarm colour. The approved review states the rule once,
+    /// under a red-hairlined field, and the frozen palette resolves no
+    /// destructive colour — red is confined to borders and surfaces there.
+    static let invalidMessage = SnapListColorToken.inkPrimary
+}
+
+enum ListingReviewSoldSummary {
+    /// The right-hand summary on the sold-match rail heading.
+    ///
+    /// A low-to-high range is only honest when every match is denominated in the same
+    /// currency. The read contract types each match's `currency` independently of the
+    /// others, so a mixed set has no single low and high — comparing the raw amounts
+    /// would state a range that does not exist. Such a set degrades to the count alone.
+    static func text(
+        for matches: [ListingReviewSoldMatch],
+        locale: Locale = .current
+    ) -> String {
+        guard !matches.isEmpty else { return "" }
+        let count = "\(matches.count) sold"
+        let currencies = Set(matches.map(\.currency))
+        guard currencies.count == 1,
+              let currency = currencies.first,
+              let minimum = matches.map(\.soldPrice).min(),
+              let maximum = matches.map(\.soldPrice).max() else {
+            return count
+        }
+        let low = ListingReviewCurrency.string(
+            minimum,
+            currencyCode: currency,
+            locale: locale
+        )
+        guard minimum != maximum else { return "\(count) · \(low)" }
+        let high = ListingReviewCurrency.string(
+            maximum,
+            currencyCode: currency,
+            locale: locale
+        )
+        return "\(count) · \(low)–\(high)"
+    }
+}
+
 enum ListingReviewCurrency {
     static func string(
         _ amount: Decimal,
@@ -548,6 +590,16 @@ struct ListingReviewSoldCard: View {
     let total: Int
     let action: () -> Void
 
+    @Environment(\.locale) private var locale
+
+    private var soldPriceText: String {
+        ListingReviewCurrency.string(
+            match.soldPrice,
+            currencyCode: match.currency,
+            locale: locale
+        )
+    }
+
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 9) {
@@ -560,14 +612,9 @@ struct ListingReviewSoldCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .accessibilityHidden(true)
 
-                Text(
-                    ListingReviewCurrency.string(
-                        match.soldPrice,
-                        currencyCode: match.currency
-                    )
-                )
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                Text(soldPriceText)
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
 
                 Text(match.soldDateLabel)
                     .font(.caption)
@@ -575,7 +622,7 @@ struct ListingReviewSoldCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(.white)
+            .background(SnapListColorToken.canvas.color)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay {
                 RoundedRectangle(cornerRadius: 14)
@@ -590,7 +637,7 @@ struct ListingReviewSoldCard: View {
             spacing: 12
         )
         .accessibilityLabel(
-            "Sold \(ListingReviewCurrency.string(match.soldPrice, currencyCode: match.currency)) on \(match.soldDateLabel)"
+            "Sold \(soldPriceText) on \(match.soldDateLabel)"
         )
         .accessibilityValue(
             [match.title, match.condition]

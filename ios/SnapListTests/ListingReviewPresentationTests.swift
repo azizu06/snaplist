@@ -1,0 +1,60 @@
+import XCTest
+@testable import SnapList
+
+private extension Locale {
+    /// Pinned so currency formatting assertions do not depend on the test host's region.
+    static let enUS = Locale(identifier: "en_US")
+}
+
+final class ListingReviewPresentationTests: XCTestCase {
+    func testSoldSummaryRendersOneRangeWhenEveryMatchSharesACurrency() throws {
+        let matches = try soldMatches([(40, "USD"), (52, "USD"), (66, "USD")])
+
+        XCTAssertEqual(
+            ListingReviewSoldSummary.text(for: matches, locale: .enUS),
+            "3 sold · $40–$66"
+        )
+    }
+
+    func testSoldSummaryOmitsTheRangeWhenMatchesDoNotShareOneCurrency() throws {
+        let matches = try soldMatches([(40, "USD"), (900, "SEK")])
+
+        XCTAssertEqual(
+            ListingReviewSoldSummary.text(for: matches, locale: .enUS),
+            "2 sold"
+        )
+    }
+
+    func testInvalidPriceMessageUsesInkAndNotAnUnapprovedRed() throws {
+        let tokens = try loadJSON(
+            named: "snaplist-design-tokens",
+            at: .resolvedContracts
+        )
+        let colors = try XCTUnwrap(tokens["colors"] as? [String: Any])
+
+        // The frozen palette resolves no destructive colour at all, so any red
+        // for this message would have to be invented rather than approved.
+        XCTAssertTrue(colors["destructive"] is NSNull)
+        XCTAssertEqual(
+            ListingReviewPriceStyle.invalidMessage.rawValue,
+            colors["ink_primary"] as? String
+        )
+    }
+
+    private func soldMatches(
+        _ facts: [(Int, String)]
+    ) throws -> [ListingReviewSoldMatch] {
+        try facts.enumerated().map { index, fact in
+            let object: [String: Any] = [
+                "id": "sold-\(index + 1)",
+                "sourceURL": "https://example.com/sold/\(index + 1)",
+                "soldPrice": fact.0,
+                "currency": fact.1,
+            ]
+            return try JSONDecoder().decode(
+                ListingReviewSoldMatch.self,
+                from: JSONSerialization.data(withJSONObject: object)
+            )
+        }
+    }
+}

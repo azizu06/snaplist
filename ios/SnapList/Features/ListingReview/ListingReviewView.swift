@@ -158,7 +158,7 @@ struct ListingReviewView: View {
                 }
                 footer
             }
-            .background(.white)
+            .background(SnapListColorToken.canvas.color)
         }
     }
 
@@ -226,7 +226,7 @@ struct ListingReviewView: View {
                     .padding(.vertical, 14)
             }
         }
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay {
             RoundedRectangle(cornerRadius: 18)
@@ -268,19 +268,23 @@ struct ListingReviewView: View {
                     Button {
                         Task { await commitPrice() }
                     } label: {
-                        Image(systemName: "checkmark")
+                        Text("Apply")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(SnapListColorToken.action.color)
+                            .padding(.horizontal, 12)
                             .frame(
-                                width: SnapListMetrics.minimumTouchTarget,
-                                height: SnapListMetrics.minimumTouchTarget
+                                minHeight: SnapListMetrics.minimumTouchTarget
                             )
                     }
-                    .accessibilityLabel("Apply price")
+                    .accessibilityLabel("Apply price, keeps it on this phone")
                     .accessibilityIdentifier("listing-review.price.apply")
                 }
                 if priceInvalid {
                     Text(ListingReviewCopy.invalidPrice)
                         .font(.callout)
-                        .foregroundStyle(Color(hex: "#A64B4B"))
+                        .foregroundStyle(
+                            ListingReviewPriceStyle.invalidMessage.color
+                        )
                         .accessibilityIdentifier("listing-review.price.error")
                 }
             } else {
@@ -351,7 +355,7 @@ struct ListingReviewView: View {
                     .tracking(0.5)
                     .foregroundStyle(SnapListColorToken.textTertiary.color)
                 Spacer()
-                Text(soldFacts(matches))
+                Text(ListingReviewSoldSummary.text(for: matches, locale: locale))
                     .font(.caption)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
             }
@@ -437,7 +441,7 @@ struct ListingReviewView: View {
                 pending: draft.specifics != snapshot.listing.specifics
             )
         }
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay {
             RoundedRectangle(cornerRadius: 18)
@@ -480,7 +484,7 @@ struct ListingReviewView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .overlay(alignment: .top) {
             Divider()
         }
@@ -667,19 +671,5 @@ struct ListingReviewView: View {
         let remainder = max(specifics.count - visible.count, 0)
         return visible.joined(separator: " · ")
             + (remainder > 0 ? " · +\(remainder) more" : "")
-    }
-
-    private func soldFacts(
-        _ matches: [ListingReviewSoldMatch]
-    ) -> String {
-        guard let minimum = matches.map(\.soldPrice).min(),
-              let maximum = matches.map(\.soldPrice).max(),
-              let currency = matches.first?.currency else {
-            return ""
-        }
-        let range = minimum == maximum
-            ? ListingReviewCurrency.string(minimum, currencyCode: currency)
-            : "\(ListingReviewCurrency.string(minimum, currencyCode: currency))–\(ListingReviewCurrency.string(maximum, currencyCode: currency))"
-        return "\(matches.count) sold · \(range)"
     }
 }

@@ -163,7 +163,7 @@ private struct ListingReviewSpecificFieldView: View {
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 14)
                     .frame(minHeight: 48)
-                    .background(.white)
+                    .background(SnapListColorToken.canvas.color)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14)

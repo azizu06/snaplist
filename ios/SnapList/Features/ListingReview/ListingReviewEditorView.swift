@@ -39,7 +39,7 @@ struct ListingReviewEditorView: View {
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: field.minimumHeight)
                     .padding(10)
-                    .background(.white)
+                    .background(SnapListColorToken.canvas.color)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14)
@@ -180,7 +180,7 @@ struct ListingReviewCorrectionBoundaryView: View {
                 .foregroundStyle(SnapListColorToken.textTertiary.color)
             }
             .padding(16)
-            .background(.white)
+            .background(SnapListColorToken.canvas.color)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay {
                 RoundedRectangle(cornerRadius: 14)

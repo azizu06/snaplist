@@ -310,13 +310,19 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(price.isHittable)
         price.tap()
         let priceField = app.textFields["listing-review.price.field"]
+        let apply = app.buttons["listing-review.price.apply"]
+        XCTAssertEqual(apply.label, "Apply price, keeps it on this phone")
+        XCTAssertTrue(
+            apply.frame.height >= 44,
+            "apply target measured \(apply.frame.height)pt"
+        )
         priceField.typeText("0")
-        app.buttons["listing-review.price.apply"].tap()
+        apply.tap()
         XCTAssertTrue(
             app.staticTexts["Must be above $0."].waitForExistence(timeout: 2)
         )
         priceField.typeText("1")
-        app.buttons["listing-review.price.apply"].tap()
+        apply.tap()
         XCTAssertFalse(app.staticTexts["Must be above $0."].exists)
         XCTAssertTrue(
             anyElement("listing-review.unsaved", in: app).exists
