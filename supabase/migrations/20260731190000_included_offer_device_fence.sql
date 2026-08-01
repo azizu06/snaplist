@@ -946,6 +946,7 @@ declare
   v_used integer;
   v_existing public.ai_item_credit_reservations%rowtype;
   v_claim public.included_offer_device_claims%rowtype;
+  v_device_denied boolean := false;
   v_uses_included boolean := false;
   v_now timestamptz := statement_timestamp();
 begin
@@ -1009,7 +1010,47 @@ begin
       )
     );
 
-  if v_used >= v_period.allowance then
+  -- Issue #524: the included promotion additionally requires that this physical
+  -- Apple device has not already consumed it. #332 verified-guest principals are
+  -- fenced by their own App Attest-backed allowance and are out of scope here.
+  --
+  -- The fence is evaluated before the paid fallback rather than after it,
+  -- because a denied device is a reason to *skip* the included period, not a
+  -- reason to refuse the account. Acceptance criteria 7 and 8: only the
+  -- promotion is denied, and the seller stays usable on every paid path.
+  if v_used < v_period.allowance then
+    if new.user_id ~ '^guest_[0-9a-f]{48}$'
+      or exists (
+        -- A technical retry after a restored credit reuses the account's
+        -- already spent claim; the device is not asked to pay twice for one
+        -- account.
+        select 1
+        from public.included_offer_device_claims spent
+        where spent.user_id = new.user_id
+          and spent.consumed_at is not null
+      )
+    then
+      v_uses_included := true;
+    else
+      select * into v_claim
+      from public.included_offer_device_claims claim
+      where claim.user_id = new.user_id
+        and claim.state = 'reserved'
+        and claim.consumed_at is null
+      order by claim.created_at
+      limit 1
+      for update;
+
+      -- No reserved claim means the redemption never completed, or Apple
+      -- reported this device's `bit0` already set. Either way the account keeps
+      -- its unspent included period and falls through to the paid path below;
+      -- the audited one-time support override is the only way back to it.
+      v_uses_included := found;
+      v_device_denied := not found;
+    end if;
+  end if;
+
+  if not v_uses_included then
     select * into v_period
     from public.ai_item_allowance_periods period
     where period.user_id = new.user_id
@@ -1019,10 +1060,18 @@ begin
     limit 1
     for update;
 
+    -- A device-denied seller is told about the fence rather than about the
+    -- subscription, whatever the paid period's own state turns out to be: the
+    -- included run is what they are entitled to and cannot reach, and the
+    -- support override — not a purchase, and not waiting for a monthly reset —
+    -- is the remedy that would give it back.
     if not found then
       raise exception using
         errcode = 'P0001',
-        message = 'AI item credit unavailable: snaplist-pro-required';
+        message = case when v_device_denied
+          then 'AI item credit unavailable: device-fence-required'
+          else 'AI item credit unavailable: snaplist-pro-required'
+        end;
     end if;
     if not (
       (v_period.state = 'active' and v_now < v_period.expires_date)
@@ -1034,7 +1083,10 @@ begin
     ) then
       raise exception using
         errcode = 'P0001',
-        message = 'AI item credit unavailable: storekit-entitlement-unavailable';
+        message = case when v_device_denied
+          then 'AI item credit unavailable: device-fence-required'
+          else 'AI item credit unavailable: storekit-entitlement-unavailable'
+        end;
     end if;
 
     select count(*) into v_used
@@ -1050,41 +1102,12 @@ begin
     if v_used >= v_period.allowance then
       raise exception using
         errcode = 'P0001',
-        message = 'AI item credit unavailable: monthly-allowance-reached';
+        message = case when v_device_denied
+          then 'AI item credit unavailable: device-fence-required'
+          else 'AI item credit unavailable: monthly-allowance-reached'
+        end;
     end if;
-  else
-    v_uses_included := true;
-  end if;
-
-  -- Issue #524: the included promotion additionally requires that this physical
-  -- Apple device has not already consumed it. #332 verified-guest principals are
-  -- fenced by their own App Attest-backed allowance and are out of scope here.
-  if v_uses_included
-    and new.user_id !~ '^guest_[0-9a-f]{48}$'
-    and not exists (
-      -- A technical retry after a restored credit reuses the account's already
-      -- spent claim; the device is not asked to pay twice for one account.
-      select 1
-      from public.included_offer_device_claims spent
-      where spent.user_id = new.user_id
-        and spent.consumed_at is not null
-    )
-  then
-    select * into v_claim
-    from public.included_offer_device_claims claim
-    where claim.user_id = new.user_id
-      and claim.state = 'reserved'
-      and claim.consumed_at is null
-    order by claim.created_at
-    limit 1
-    for update;
-
-    if not found then
-      raise exception using
-        errcode = 'P0001',
-        message = 'AI item credit unavailable: device-fence-required';
-    end if;
-
+  elsif v_claim.claim_id is not null then
     update public.included_offer_device_claims
     set consumed_at = v_now,
         pipeline_run_id = new.id
