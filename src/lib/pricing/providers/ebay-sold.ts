@@ -24,6 +24,7 @@ import {
 import {
   selectSoldCompEvidence,
   selectVerifiedSoldMatches,
+  type SoldCompEvidence,
 } from "../sold-comp-matcher";
 
 /**
@@ -1235,6 +1236,53 @@ export function synthesizeSoldResult(
   };
 }
 
+/** Freshness/age-decay inputs for the shared finalization seam (#363). */
+export interface VerifiedSoldFinalizationOptions {
+  /** Reference "now" (epoch ms). Omit to disable staleness filtering and age-decay. */
+  now?: number;
+  /** Staleness cutoff in days; defaults to the freshness module default. */
+  staleDays?: number;
+  /** Recency half-life in days; defaults to the freshness module default. */
+  halfLifeDays?: number;
+}
+
+/**
+ * Turn one canonical matcher result into the cited `PriceResult`, or decline.
+ *
+ * This is the single provider-neutral seam every sold-comp retrieval adapter
+ * finalizes through — the public sold-page scraper and the Apify Actor adapter
+ * both call it immediately after `selectSoldCompEvidence`. It owns, in order:
+ * staleness filtering, deterministic best-five retention, the minimum-evidence
+ * gate, match-score weighting, and synthesis. Retrieval stays adapter-specific;
+ * these evidence decisions must not be reimplemented per adapter, because
+ * duplicated copies drift and a seller's price would then depend on which
+ * retrieval adapter happened to be active (#363).
+ */
+export function finalizeVerifiedSoldResult<T extends EbaySoldComp>(
+  evidence: SoldCompEvidence<T>,
+  options: VerifiedSoldFinalizationOptions = {},
+): PriceResult | null {
+  const { now, staleDays, halfLifeDays } = options;
+  const anchors = evidence.anchors.map(({ comp }) => comp);
+  // Age-decay is opt-in via `now`: with no clock, every anchor stands and the
+  // suggested price is the unweighted median.
+  const fresh = now == null ? anchors : selectFreshComps(anchors, now, staleDays);
+  const freshSet = new Set(fresh);
+  const retained = selectVerifiedSoldMatches(
+    evidence.anchors.filter(({ comp }) => freshSet.has(comp)),
+  );
+  if (retained.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
+  const evidenceWeights = new Map(retained.map(({ comp, score }) => [comp, score]));
+
+  return synthesizeSoldResult(
+    retained.map(({ comp }) => comp),
+    {
+      ...(now != null ? { now, halfLifeDays } : {}),
+      evidenceWeight: (comp) => evidenceWeights.get(comp as T) ?? 1,
+    },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // The provider
 // ---------------------------------------------------------------------------
@@ -1755,29 +1803,20 @@ function createEbaySoldPricingProviderInternal(
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales
       // can't price the main item near an accessory price.
-      const normalizedComps = normalizeBoundedCandidates(comps);
-      const evidence = selectSoldCompEvidence(normalizedComps, signal);
-      const relevant = evidence.anchors.map((entry) => entry.comp);
-      // Age-decay (#59), opt-in via `now`: drop comps with a known stale sale date,
-      // then recency-weight the suggested price toward more recent sales.
+      const evidence = selectSoldCompEvidence(
+        normalizeBoundedCandidates(comps),
+        signal,
+      );
+      // Everything downstream of canonical matching — staleness (#59),
+      // best-five retention, the minimum-evidence gate, match weighting, and
+      // synthesis — belongs to the one shared seam, so this adapter and the
+      // Apify adapter can never drift apart (#363).
       const tNow = now?.();
-      const fresh =
-        tNow != null ? selectFreshComps(relevant, tNow, staleDays) : relevant;
-      const freshSet = new Set(fresh);
-      const retained = selectVerifiedSoldMatches(
-        evidence.anchors.filter(({ comp }) => freshSet.has(comp)),
-      );
-      if (retained.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
-      const evidenceWeights = new Map(
-        retained.map((entry) => [entry.comp, entry.score]),
-      );
-      return synthesizeSoldResult(
-        retained.map(({ comp }) => comp),
-        {
-          ...(tNow != null ? { now: tNow, halfLifeDays } : {}),
-          evidenceWeight: (comp) => evidenceWeights.get(comp) ?? 1,
-        },
-      );
+      return finalizeVerifiedSoldResult(evidence, {
+        ...(tNow != null ? { now: tNow } : {}),
+        staleDays,
+        halfLifeDays,
+      });
     },
   };
 }

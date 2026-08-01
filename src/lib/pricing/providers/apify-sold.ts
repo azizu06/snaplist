@@ -1,14 +1,10 @@
 import { ApifyClient } from "apify-client";
 import type { TtlCache } from "../comp-cache";
 import {
-  selectFreshComps,
   SOLD_HALFLIFE_DAYS_DEFAULT,
   SOLD_STALE_DAYS_DEFAULT,
 } from "../freshness";
-import {
-  selectSoldCompEvidence,
-  selectVerifiedSoldMatches,
-} from "../sold-comp-matcher";
+import { selectSoldCompEvidence } from "../sold-comp-matcher";
 import {
   pricingEvidenceShippingSchema,
   type ItemSignal,
@@ -21,9 +17,8 @@ import { logEvent, type LogFields } from "../../observability";
 import {
   buildSoldSearchQuery,
   canonicalEbayItemUrl,
-  EBAY_SOLD_MIN_COMPS,
+  finalizeVerifiedSoldResult,
   normalizeEbaySoldCompUrls,
-  synthesizeSoldResult,
   type EbaySoldComp,
 } from "./ebay-sold";
 
@@ -1306,21 +1301,17 @@ export function createApifySoldPricingProvider(
       const comps = await loadComps(query, signal, pricingDeadline);
       if (comps == null) return null;
 
-      const normalizedComps = normalizeEbaySoldCompUrls(comps);
-      const evidence = selectSoldCompEvidence(normalizedComps, signal);
-      const clock = now?.();
-      const anchors = evidence.anchors.map(({ comp }) => comp);
-      const fresh = clock == null ? anchors : selectFreshComps(anchors, clock, staleDays);
-      const freshSet = new Set(fresh);
-      const retained = selectVerifiedSoldMatches(
-        evidence.anchors.filter(({ comp }) => freshSet.has(comp)),
+      const evidence = selectSoldCompEvidence(
+        normalizeEbaySoldCompUrls(comps),
+        signal,
       );
-      if (retained.length < EBAY_SOLD_MIN_COMPS) return null;
-      const weights = new Map(retained.map(({ comp, score }) => [comp, score]));
-
-      return synthesizeSoldResult(retained.map(({ comp }) => comp), {
-        ...(clock != null ? { now: clock, halfLifeDays } : {}),
-        evidenceWeight: (comp) => weights.get(comp as ApifySoldComp) ?? 1,
+      // Retrieval is Actor-specific; every evidence decision after canonical
+      // matching runs through the one shared finalization seam (#363).
+      const clock = now?.();
+      return finalizeVerifiedSoldResult(evidence, {
+        ...(clock != null ? { now: clock } : {}),
+        staleDays,
+        halfLifeDays,
       });
     },
   };
