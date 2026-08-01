@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ExtractedAttributes } from "../pipeline/types";
-import { FACEBOOK_PLATFORM, MERCARI_PLATFORM, type RawExportPacks } from "./schema";
+import {
+  DEPOP_PLATFORM,
+  FACEBOOK_PLATFORM,
+  MERCARI_PLATFORM,
+  type RawExportPacks,
+} from "./schema";
 import type { ExportPackGenerate } from "./generate";
 import { loadOrGenerateExportPacks } from "./persist";
 
@@ -115,6 +120,24 @@ const RAW: RawExportPacks = {
 
 const REVIEW_REVISION = "00000000-0000-4000-8000-000000000001";
 
+/**
+ * A valid persisted Depop row (issue #378). Depop is the third honest
+ * destination, so a store is only "complete" when it carries one too — tests
+ * that assert the fully-cached path must include it.
+ */
+function storedDepopRow(): StoredRow {
+  return {
+    platform: DEPOP_PLATFORM,
+    // Row identity only; Depop has no title field and the block never shows it.
+    title: "Sony WH-1000XM4",
+    description: "Sony WH-1000XM4. Condition: good.",
+    copy: {
+      hashtags: ["#sony"],
+      copyBlock: "Sony WH-1000XM4. Condition: good.\n\n#sony",
+    },
+  };
+}
+
 function countingGenerate(): { generate: ExportPackGenerate; calls: () => number } {
   let n = 0;
   return {
@@ -145,8 +168,9 @@ describe("loadOrGenerateExportPacks", () => {
 
     expect(view.facebook.price).toBe(177.77);
     expect(view.mercari.price).toBe(177.77);
+    expect(view.depop.price).toBe(177.77);
     expect(view.facebook.copyBlock).toContain("Asking $177.77");
-    expect(inserted).toHaveLength(2);
+    expect(inserted).toHaveLength(3);
     for (const row of inserted) {
       expect(row.copy["price"]).toBe(177.77);
     }
@@ -175,6 +199,7 @@ describe("loadOrGenerateExportPacks", () => {
 
       expect(view.facebook.price).toBe(44.44);
       expect(view.mercari.price).toBe(44.44);
+      expect(view.depop.price).toBe(44.44);
       for (const row of inserted) {
         expect(row.copy["price"]).toBe(44.44);
       }
@@ -205,10 +230,10 @@ describe("loadOrGenerateExportPacks", () => {
     expect(view.facebook.copyBlock).toContain("Asking $120");
     expect(view.mercari.hashtags.length).toBeGreaterThan(0);
 
-    expect(inserted).toHaveLength(2);
+    expect(inserted).toHaveLength(3);
     expect(persistedRevisions).toEqual([REVIEW_REVISION]);
     const platforms = inserted.map((r) => r.platform).sort();
-    expect(platforms).toEqual([FACEBOOK_PLATFORM, MERCARI_PLATFORM]);
+    expect(platforms).toEqual([DEPOP_PLATFORM, FACEBOOK_PLATFORM, MERCARI_PLATFORM]);
     for (const row of inserted) {
       expect(typeof row.copy["copyBlock"]).toBe("string");
       // Provenance is persisted WITH the pack so export outputs stay
@@ -238,6 +263,7 @@ describe("loadOrGenerateExportPacks", () => {
           model: "stored-model-id",
         },
       },
+      storedDepopRow(),
     ];
     const { generate, calls } = countingGenerate();
     const view = await loadOrGenerateExportPacks(fakeSupabase(stored, []), {
@@ -270,6 +296,7 @@ describe("loadOrGenerateExportPacks", () => {
           copyBlock: "Stored Mercari title\n\nStored Mercari description. Ships fast.\n\n#sony",
         },
       },
+      storedDepopRow(),
     ];
     const inserted: InsertedRow[] = [];
     const { generate, calls } = countingGenerate();
@@ -308,6 +335,7 @@ describe("loadOrGenerateExportPacks", () => {
         description: "Stored Mercari description. Ships fast.",
         copy: { hashtags: ["#sony"], copyBlock: "Stored Mercari block. Ships." },
       },
+      storedDepopRow(),
     ];
     const inserted: InsertedRow[] = [];
     const { generate, calls } = countingGenerate();
@@ -356,6 +384,7 @@ describe("loadOrGenerateExportPacks", () => {
         description: "Stored Mercari description. Ships fast.",
         copy: { hashtags: [], copyBlock: "Stored Mercari block. Ships." },
       },
+      storedDepopRow(),
     ];
     const inserted: InsertedRow[] = [];
     const { generate, calls } = countingGenerate();
@@ -396,10 +425,13 @@ describe("loadOrGenerateExportPacks", () => {
 
     expect(calls()).toBe(1);
     expect(view.cached).toBe(false);
-    // The stored FB pack is preserved; only Mercari is newly generated + inserted.
+    // The stored FB pack is preserved; the two missing destinations are the
+    // only ones newly generated + inserted.
     expect(view.facebook.title).toBe("Stored FB title");
-    expect(inserted).toHaveLength(1);
-    expect(inserted[0]!.platform).toBe(MERCARI_PLATFORM);
+    expect(inserted.map((r) => r.platform).sort()).toEqual([
+      DEPOP_PLATFORM,
+      MERCARI_PLATFORM,
+    ]);
   });
 
   it("a stored row that fails its platform schema falls through to regeneration", async () => {
@@ -426,7 +458,7 @@ describe("loadOrGenerateExportPacks", () => {
     expect(calls()).toBe(1);
     expect(view.mercari.title.length).toBeLessThanOrEqual(40);
     const platforms = inserted.map((r) => r.platform).sort();
-    expect(platforms).toEqual([FACEBOOK_PLATFORM, MERCARI_PLATFORM]);
+    expect(platforms).toEqual([DEPOP_PLATFORM, FACEBOOK_PLATFORM, MERCARI_PLATFORM]);
   });
 
   it("propagates a read error instead of silently regenerating", async () => {
@@ -490,6 +522,7 @@ describe("loadOrGenerateExportPacks", () => {
         description: "Stored Mercari description.",
         copy: { copyBlock: "Stored Mercari block.", hashtags: [] },
       },
+      storedDepopRow(),
     ];
     const changedRevision = "00000000-0000-4000-8000-000000000002";
 
@@ -566,5 +599,69 @@ describe("loadOrGenerateExportPacks", () => {
       ),
     ).rejects.toThrow(/Failed to persist export packs: Seller price changed/i);
     expect(inserted).toHaveLength(0);
+  });
+});
+
+/**
+ * DEPOP + the effective-price precedence on CACHED packs (issue #378). This is
+ * the issue's declared public RED seam: change the seller price after a pack
+ * was generated, request delivery, and every destination — including the ones
+ * served from persisted rows without a model call — must carry the NEW
+ * effective price at the current revision. A cached pack that keeps an old
+ * "Asking $X" line is a delivery path using a price the seller replaced.
+ */
+/** One valid persisted row per honest destination, written at an older price. */
+function storedRowsForAllPlatforms(): StoredRow[] {
+  return [
+    {
+      platform: FACEBOOK_PLATFORM,
+      title: "Sony WH-1000XM4 headphones",
+      description: "Selling my Sony headphones, good condition.",
+      copy: {
+        copyBlock:
+          "Sony WH-1000XM4 headphones\n\nSelling my Sony headphones, good condition.\n\nAsking $44.44",
+      },
+    },
+    {
+      platform: MERCARI_PLATFORM,
+      title: "Sony WH-1000XM4 Headphones",
+      description: "Sony WH-1000XM4 in good condition. Ships next day.",
+      copy: { hashtags: ["#sony"], copyBlock: "Stored Mercari block. Ships." },
+    },
+    storedDepopRow(),
+  ];
+}
+
+describe("loadOrGenerateExportPacks — three honest destinations", () => {
+  it("serves a cached pack per destination at the seller's current effective price", async () => {
+    const inserted: InsertedRow[] = [];
+    const { generate, calls } = countingGenerate();
+
+    const view = await loadOrGenerateExportPacks(
+      fakeSupabase(storedRowsForAllPlatforms(), inserted),
+      {
+        userId: "user-1",
+        itemId: "item-1",
+        reviewRevision: REVIEW_REVISION,
+        reviewContentRevision: REVIEW_REVISION,
+        attributes: CORE,
+        // The pack rows were written when the recommendation was 44.44; the
+        // seller has since overridden the price.
+        suggestedPrice: 44.44,
+        priceOverride: 177.77,
+        generate,
+        model: "test-model",
+      },
+    );
+
+    expect(calls()).toBe(0);
+    expect(view.cached).toBe(true);
+    expect(inserted).toHaveLength(0);
+    expect(view.facebook.price).toBe(177.77);
+    expect(view.mercari.price).toBe(177.77);
+    expect(view.depop.price).toBe(177.77);
+    expect(view.facebook.copyBlock).toContain("Asking $177.77");
+    expect(view.facebook.copyBlock).not.toContain("44.44");
+    expect(view.depop.copyBlock).toContain("Sony WH-1000XM4");
   });
 });

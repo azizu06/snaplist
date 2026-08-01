@@ -52,6 +52,20 @@ export const MERCARI_DESCRIPTION_MAX_LENGTH = 1000;
 /** Maximum hashtags in a Mercari pack (a few targeted tags, not spam). */
 export const MERCARI_MAX_HASHTAGS = 3;
 
+/** Platform discriminator for the Depop assisted-export pack (issue #378). */
+export const DEPOP_PLATFORM = "depop" as const;
+
+/**
+ * Depop's description cap, in characters. Depop has NO separate title field —
+ * the description IS the listing text — so a Depop pack carries no title, and
+ * `buildDepopDescription` puts the item's identity in the opening words
+ * because Depop's search weights the start of the description most heavily.
+ */
+export const DEPOP_DESCRIPTION_MAX_LENGTH = 1000;
+
+/** Depop's hashtag cap. */
+export const DEPOP_MAX_HASHTAGS = 5;
+
 /** A normalized Mercari hashtag: `#` + lowercase alphanumerics, nothing else. */
 export const mercariHashtagSchema = z
   .string()
@@ -110,6 +124,30 @@ export const mercariPackSchema = z.object({
 });
 
 export type MercariPack = z.infer<typeof mercariPackSchema>;
+
+/**
+ * The validated Depop export pack. Unlike Facebook and Mercari it has NO
+ * title: Depop's listing form has no title field, so inventing one would
+ * describe a field the seller cannot fill. Both fields are assembled
+ * deterministically from the validated core in `generate.ts`, so this pack has
+ * no model free-text channel at all.
+ */
+export const depopPackSchema = z.object({
+  /** Keyword-first, core-built description. Required, ≤ 1000 chars. */
+  description: z
+    .string()
+    .min(1, "Depop description is required")
+    .max(
+      DEPOP_DESCRIPTION_MAX_LENGTH,
+      `Depop description must be ${DEPOP_DESCRIPTION_MAX_LENGTH} characters or fewer`,
+    ),
+  /** 0–5 normalized hashtags, each derived from the validated core. */
+  hashtags: z
+    .array(mercariHashtagSchema)
+    .max(DEPOP_MAX_HASHTAGS, `At most ${DEPOP_MAX_HASHTAGS} Depop hashtags`),
+});
+
+export type DepopPack = z.infer<typeof depopPackSchema>;
 
 /**
  * PERMISSIVE schema handed to `generateObject` on the real path (mirrors
