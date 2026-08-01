@@ -886,7 +886,6 @@ export function DashboardView({
   unarchiveAction,
   deleteAction,
   bulkUpdateAction,
-  repriceSlot,
   activitySlot,
 }: {
   rows: DashboardRow[];
@@ -901,8 +900,6 @@ export function DashboardView({
   deleteAction?: IdsAction;
   /** Batched quick-edit (price + status) — opens the full-screen grid. */
   bulkUpdateAction?: (updates: BulkListingUpdate[]) => Promise<void>;
-  /** Additive slot: the stale-inventory reprice panel (issue #102). */
-  repriceSlot?: ReactNode;
   /** Durable pipeline status, assembled from RLS-scoped database rows. */
   activitySlot?: ReactNode;
 }) {
@@ -1110,7 +1107,6 @@ export function DashboardView({
       </header>
 
       {activitySlot}
-      {repriceSlot}
       {/* #101 — invested / projected-profit band. Renders only when at least
           one active item carries a cost basis (logic lives in ./profit). */}
       {rows.length > 0 ? <ProfitSummary rows={rows} /> : null}

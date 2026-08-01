@@ -42,7 +42,6 @@ future native HTTP needs, not authorization for #195 to extract their domain beh
 | `GET/POST /api/internal/pipeline-worker` | `createInternalPipelineWorker().consume()` | Existing adapter; #195 extracts shared composition only |
 | `GET/POST /api/internal/pipeline-maintenance` | `runInternalPipelineMaintenance()` | Existing operations surface; scheduled by the owner-only pg_cron template |
 | `GET/POST /api/cron/inbox-sync` | `syncInboxForSeller` with scheduled repositories/adapters | Existing operations surface |
-| `GET/POST /api/cron/reprice` | `runRepriceSweep` | Existing operations surface |
 | `POST /internal/v1/pipeline/consume` | Same `createPipelineWorker().consume()` | Local proof; #162 owns hosted scheduling/health |
 
 ## Composition proof
