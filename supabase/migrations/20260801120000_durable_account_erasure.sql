@@ -917,6 +917,14 @@ begin
   from private.account_erasure_generations generation
   where generation.generation_id = p_generation_id
   for update;
+  -- The pre-lock check cannot see a finalize that completed while this call was
+  -- waiting for the lock. Re-check under the row lock so a late advance cannot
+  -- drag a completed generation back to deletion_in_progress.
+  if v_generation.status in (
+    'deletion_completed', 'deletion_completed_with_retained_records'
+  ) then
+    return private.account_erasure_payload(p_generation_id);
+  end if;
 
   -- Re-select Storage: an upload that raced `begin` may have committed since.
   insert into private.account_erasure_storage_manifest (
@@ -1205,6 +1213,15 @@ begin
   from private.account_erasure_generations generation
   where generation.generation_id = p_generation_id
   for update;
+  -- The check above ran before the lock, so a concurrent finalize can have
+  -- completed the generation while this call waited. Re-check now that the row
+  -- is held: without this the loser re-stamps completed_at and slides the
+  -- receipt's 30-day prune window forward every time it is called.
+  if v_generation.status in (
+    'deletion_completed', 'deletion_completed_with_retained_records'
+  ) then
+    return private.account_erasure_payload(p_generation_id);
+  end if;
 
   if cardinality(coalesce(p_attention_reasons, '{}'::text[])) > 0 then
     update private.account_erasure_generations

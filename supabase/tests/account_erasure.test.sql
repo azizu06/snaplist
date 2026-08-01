@@ -1,6 +1,6 @@
 begin;
 
-select plan(39);
+select plan(41);
 
 -- Issue #384: erase one signed-in account durably and idempotently.
 --
@@ -302,6 +302,41 @@ select throws_ok(
   '23514',
   null,
   'a completed receipt cannot be given its raw identifiers back'
+);
+
+-- A replayed finalize has to answer with the status it already wrote and touch
+-- nothing. If it re-stamped completed_at, every retry would slide the receipt's
+-- 30-day prune deadline forward and the record would outlive its own contract.
+-- (`finalize` and `advance` each re-check the terminal statuses a second time
+-- once they hold the row lock. That second check only fires when a concurrent
+-- call completed the generation during the lock wait, which a single-session
+-- contract like this one cannot stage; what is proved here is the same-session
+-- replay that returns before taking the lock at all.)
+create temporary table erasure_384_replay on commit drop as
+select completed_at
+from private.account_erasure_generations
+where user_id_digest = private.account_erasure_user_digest('user_384_owner');
+
+select is(
+  (
+    select public.finalize_account_erasure(
+      (
+        select generation_id from private.account_erasure_generations
+        where user_id_digest = private.account_erasure_user_digest('user_384_owner')
+      ),
+      true, true
+    )->>'status'
+  ),
+  'deletion_completed',
+  'a replayed finalize answers with the status it already wrote'
+);
+select is(
+  (
+    select completed_at from private.account_erasure_generations
+    where user_id_digest = private.account_erasure_user_digest('user_384_owner')
+  ),
+  (select completed_at from erasure_384_replay),
+  'the replay leaves the receipt''s prune deadline exactly where it was'
 );
 
 -- ---------------------------------------------------------------------------
