@@ -248,6 +248,11 @@ describe("fixed mobile item submission RPC capability", () => {
     ["AI item credit unavailable: snaplist-pro-required", "allowance_denied", "snaplist-pro-required"],
     ["AI item credit unavailable: storekit-entitlement-unavailable", "allowance_denied", "storekit-entitlement-unavailable"],
     ["AI item credit unavailable: monthly-allowance-reached", "allowance_denied", "monthly-allowance-reached"],
+    // Issue #524. The commit RPC's denial map does not name this one, so it
+    // re-raises with the original message: without this arm the seller's
+    // submission surfaces as an untyped 503 "outcome is unknown" and the native
+    // client has nothing to route to the redemption flow.
+    ["AI item credit unavailable: device-fence-required", "allowance_denied", "device-fence-required"],
     ["Pipeline daily capacity reached", "rate_limited", "daily-capacity-reached"],
     ["Pipeline per-minute capacity reached", "rate_limited", "per-minute-capacity-reached"],
   ] as const)("preserves the existing staging denial %s", async (message, kind, reason) => {

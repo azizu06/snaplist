@@ -168,6 +168,27 @@ describe("enqueueUpload", () => {
     expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
   });
 
+  it("tells a browser seller the included first item is verified in the iOS app", async () => {
+    mocks.stageUploadEntries.mockRejectedValueOnce(
+      new Error(
+        "Pipeline staging failed: AI item credit unavailable: device-fence-required",
+      ),
+    );
+
+    // #524 fences the included first AI item to one physical Apple device, and
+    // only the iOS app can produce that proof. Falling through to the generic
+    // "please try again" would invite this seller to retry a request that can
+    // never succeed on this surface.
+    await expect(enqueueUpload(uploadForm())).rejects.toThrow(
+      /verified\+in\+the\+SnapList\+iOS\+app/i,
+    );
+    expect(mocks.redirect).toHaveBeenCalledWith(expect.stringContaining(
+      "batch=11111111-1111-4111-8111-111111111111",
+    ));
+
+    expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
+  });
+
   it("reports an exhausted monthly allowance separately from abuse capacity", async () => {
     mocks.stageUploadEntries.mockRejectedValueOnce(
       new Error(

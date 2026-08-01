@@ -134,6 +134,17 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
         batchId.data,
       );
     }
+    // Issue #524. The included first AI item is fenced to one physical Apple
+    // device, and that proof can only be produced by the iOS app — the browser
+    // has no App Attest or DeviceCheck to offer. So the web path never mints
+    // the promotion; it reaches the paid path or says so plainly rather than
+    // implying the seller has already spent something they may not have.
+    if (message.includes("device-fence-required")) {
+      redirectUploadError(
+        "The free first AI item is verified in the SnapList iOS app. Start SnapList Pro to continue here, or contact support if you've already used it.",
+        batchId.data,
+      );
+    }
     redirectUploadError(
       "We couldn't save this listing for processing. Please try again.",
       batchId.data,

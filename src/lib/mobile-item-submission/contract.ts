@@ -160,6 +160,13 @@ export type MobileItemSubmissionDenialReason =
   | "snaplist-pro-required"
   | "storekit-entitlement-unavailable"
   | "monthly-allowance-reached"
+  /**
+   * Issue #524. The account still holds an unspent included first run, but this
+   * physical Apple device has already consumed the promotion — or never proved
+   * it had not. Distinct from the three above: no purchase and no waiting clears
+   * it, only a completed device redemption or an audited support override.
+   */
+  | "device-fence-required"
   | "daily-capacity-reached"
   | "per-minute-capacity-reached";
 
