@@ -101,6 +101,52 @@ struct UIProcessTerminationBoundary {
     }
 }
 
+/// Retires a live target process *before* a launch is issued.
+///
+/// `XCUIApplication.launch()` on a still-running instance performs an implicit
+/// `Terminate <pid>` inside the launch operation itself, and that implicit
+/// termination never observes `.notRunning`. When CoreSimulator is slow to reap
+/// the old process the whole launch stalls inside XCTest's launch budget and
+/// reports `does not have a process ID` — or acquires a pid whose background
+/// assertion then times out. Running the termination here, through a boundary
+/// that explicitly waits for `.notRunning`, moves that work out of the launch
+/// budget and into a step with its own bounded wait.
+///
+/// Retirement failure never skips the launch: an unverifiable prior state is
+/// reported to the caller, not converted into a silently absent test.
+struct UILaunchBoundary {
+    private let terminationBoundary: UIProcessTerminationBoundary
+
+    init(
+        terminationBoundary: UIProcessTerminationBoundary = UIProcessTerminationBoundary()
+    ) {
+        self.terminationBoundary = terminationBoundary
+    }
+
+    @discardableResult
+    func launch(
+        _ process: any UIProcessLifecycle,
+        timeout: TimeInterval = 3,
+        issueLaunch: () -> Void
+    ) -> Bool {
+        let retired = terminationBoundary.terminate(process, timeout: timeout)
+        issueLaunch()
+        return retired
+    }
+}
+
+extension XCUIApplication {
+    /// Launches after any live prior instance has been retired and observed
+    /// `.notRunning`, so XCTest never has to terminate it implicitly inside the
+    /// launch budget. See `UILaunchBoundary`.
+    ///
+    /// A retirement that cannot be verified is not fatal: the launch is still
+    /// issued, leaving behaviour no worse than an unguarded `launch()`.
+    func launchAfterRetiringPriorInstance() {
+        UILaunchBoundary().launch(self) { self.launch() }
+    }
+}
+
 final class UIProcessTerminationBoundaryTests: XCTestCase {
     func testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit() {
         let process = FakeUIProcess()
@@ -224,6 +270,73 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
             XCTFail("Exit verification did not receive its separate timeout")
         }
         XCTAssertEqual(process.state, .notRunning)
+    }
+}
+
+final class UILaunchBoundaryTests: XCTestCase {
+    func testLaunchIsIssuedOnlyAfterTheProcessIsObservedNotRunning() {
+        let process = FakeUIProcess()
+        let boundary = UILaunchBoundary(
+            terminationBoundary: UIProcessTerminationBoundary {
+                process.pressHome()
+            }
+        )
+        var stateWhenLaunchIssued: XCUIApplication.State?
+
+        XCTAssertTrue(
+            boundary.launch(process, timeout: 4) {
+                stateWhenLaunchIssued = process.state
+                process.recordLaunch()
+            }
+        )
+
+        XCTAssertEqual(
+            stateWhenLaunchIssued?.rawValue,
+            XCUIApplication.State.notRunning.rawValue,
+            "A launch issued while the prior instance is still running makes"
+                + " XCTest terminate it implicitly inside the launch budget."
+        )
+        XCTAssertEqual(
+            process.events,
+            [
+                "press-home",
+                "wait-safe-to-terminate",
+                "terminate",
+                "wait-not-running",
+                "launch"
+            ]
+        )
+    }
+
+    func testAlreadyStoppedProcessLaunchesWithoutAnotherTerminateRequest() {
+        let process = FakeUIProcess(initialState: .notRunning)
+        let boundary = UILaunchBoundary()
+
+        XCTAssertTrue(
+            boundary.launch(process, timeout: 4) {
+                process.recordLaunch()
+            }
+        )
+        XCTAssertEqual(process.events, ["launch"])
+        XCTAssertEqual(process.waitTimeouts, [])
+    }
+
+    func testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure() {
+        let process = FakeUIProcess(initialState: .unknown)
+        let boundary = UILaunchBoundary()
+
+        XCTAssertFalse(
+            boundary.launch(process, timeout: 4) {
+                process.recordLaunch()
+            },
+            "Unverified retirement must be reported, never swallowed."
+        )
+        XCTAssertEqual(
+            process.events,
+            ["launch"],
+            "A test must still run when the prior process cannot be retired;"
+                + " skipping it would convert a flake into a silent hole."
+        )
     }
 }
 
@@ -387,6 +500,10 @@ private final class FakeUIProcess: UIProcessLifecycle {
         }
     }
 
+    func recordLaunch() {
+        events.append("launch")
+    }
+
     func terminate() {
         events.append("terminate")
         state = .notRunning
@@ -450,7 +567,7 @@ final class HomeVisualRegressionTests: XCTestCase {
                 "--reset-onboarding-progress",
                 "--reduced-motion"
             ]
-            app.launch()
+            app.launchAfterRetiringPriorInstance()
 
             XCTAssertTrue(
                 app.descendants(matching: .any)[state == "HOME-04" ? "home.search.field" : state == "HOME-02" ? "home.empty" : "home.active"]

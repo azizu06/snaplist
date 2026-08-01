@@ -81,7 +81,7 @@ final class SnapListUITests: XCTestCase {
     func testRestoredDraftResumesBeforeTheFreshLauncherCanOverwriteIt() {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -111,7 +111,7 @@ final class SnapListUITests: XCTestCase {
     func testLiveScanReviewOpensApprovedPhotoReviewShellWithExactRestoredPhoto() {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -154,7 +154,7 @@ final class SnapListUITests: XCTestCase {
     func testLivePhotoReviewBackReturnsExactRestoredPhotoAndFocusesScanReview() {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -204,7 +204,7 @@ final class SnapListUITests: XCTestCase {
     func testLivePhotoReviewVoiceAndStartListingStayTypedBoundariesOverIntake() {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -294,7 +294,7 @@ final class SnapListUITests: XCTestCase {
             "--restored-capture-fixture",
             "--voice-note-take-ready-fixture"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -389,7 +389,7 @@ final class SnapListUITests: XCTestCase {
             "--restored-capture-fixture",
             "--submission-fixture=delayed"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -447,7 +447,7 @@ final class SnapListUITests: XCTestCase {
             "--restored-capture-fixture",
             "--submission-fixture=rate-limited"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -527,7 +527,7 @@ final class SnapListUITests: XCTestCase {
             "--submission-fixture=accepted-presentation-gated",
             "--submission-acknowledgment-notification=\(acknowledgmentNotification)"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -632,7 +632,7 @@ final class SnapListUITests: XCTestCase {
             "--restored-capture-fixture",
             "--dynamic-type=accessibility5"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 5))
@@ -694,7 +694,7 @@ final class SnapListUITests: XCTestCase {
     func testLivePhotoReviewDeletingTheOnlyPhotoReturnsToGuidedScanWithNoPhotos() {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))
@@ -748,7 +748,7 @@ final class SnapListUITests: XCTestCase {
                 "--restored-capture-fixture",
                 "--dynamic-type=\(typeSize)"
             ]
-            app.launch()
+            app.launchAfterRetiringPriorInstance()
 
             let resume = app.buttons["button.primary.resume-captured-photo"]
             XCTAssertTrue(resume.waitForExistence(timeout: 5), typeSize)
@@ -1473,7 +1473,7 @@ final class SnapListUITests: XCTestCase {
             "--reset-onboarding-progress",
             "--camera-status=authorized"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         XCTAssertTrue(
             app.buttons["button.primary.start-with-one-item"].waitForExistence(timeout: 3)
@@ -1564,7 +1564,7 @@ final class SnapListUITests: XCTestCase {
                 "--fixture=onboarding",
                 "--reset-onboarding-progress"
             ]
-            cleanup.launch()
+            cleanup.launchAfterRetiringPriorInstance()
             cleanup.terminate()
         }
 
@@ -1574,7 +1574,7 @@ final class SnapListUITests: XCTestCase {
             "--reset-onboarding-progress",
             "--fixture-staged-library-photos=2"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
         XCTAssertTrue(app.staticTexts["Photos ready"].waitForExistence(timeout: 3))
 
         app.terminate()
@@ -1582,7 +1582,7 @@ final class SnapListUITests: XCTestCase {
             "--fixture=onboarding",
             "--camera-status=denied"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         XCTAssertTrue(app.staticTexts["Photos ready"].waitForExistence(timeout: 3))
         app.buttons["button.primary.continue-to-capture"].tap()
@@ -1710,7 +1710,7 @@ final class SnapListUITests: XCTestCase {
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture=home", "--zero-network-fixtures"] + extraArguments
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
         guard orientation == .landscapeLeft || orientation == .landscapeRight else {
             return app
         }
@@ -1822,7 +1822,7 @@ final class SnapListUITests: XCTestCase {
         if resetCameraAuthorization {
             app.resetAuthorizationStatus(for: .camera)
         }
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
         return app
     }
 
@@ -1834,7 +1834,7 @@ final class SnapListUITests: XCTestCase {
             "--restored-capture-fixture",
             fixtureArgument
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let resume = app.buttons["button.primary.resume-captured-photo"]
         XCTAssertTrue(resume.waitForExistence(timeout: 3))

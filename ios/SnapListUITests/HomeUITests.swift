@@ -275,7 +275,7 @@ final class HomeUITests: XCTestCase {
             "--zero-network-fixtures",
             "--reset-onboarding-progress"
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let openSearch = app.buttons["home.search.open"]
         XCTAssertTrue(openSearch.waitForExistence(timeout: 3))
@@ -306,7 +306,7 @@ final class HomeUITests: XCTestCase {
             "--zero-network-fixtures",
             "--reset-onboarding-progress",
         ]
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
 
         let rowIdentifiers = [
             "trophy.processing.row.run.37500000-0000-4000-8000-000000000003",
@@ -389,7 +389,7 @@ final class HomeUITests: XCTestCase {
             "--zero-network-fixtures",
             "--reset-onboarding-progress"
         ] + extraArguments
-        app.launch()
+        app.launchAfterRetiringPriorInstance()
         return app
     }
 
