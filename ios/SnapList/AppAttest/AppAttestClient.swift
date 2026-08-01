@@ -94,6 +94,76 @@ final class DeviceCheckAppAttestService: AppAttestServicing, @unchecked Sendable
     }
 }
 
+enum DeviceCheckTokenError: Error, Equatable {
+    case appleServiceUnavailable
+    case unsupportedDevice
+}
+
+/**
+ Apple's per-physical-device state, which is a different primitive from the
+ App Attest service above.
+
+ App Attest proves *this installation made this request*; a reinstall mints a
+ new key and the old proof means nothing. `DCDevice` addresses the hardware
+ itself and survives reinstall, which is the only property that lets issue
+ #524 fence one included first AI item to one device. The server, never the
+ client, reads and writes `bit0` — the token here is opaque, single-use, and
+ carries no verdict.
+ */
+protocol DeviceCheckTokenProviding: Sendable {
+    var isSupported: Bool { get }
+    func generateToken() async throws -> Data
+}
+
+/**
+ The Apple primitive: `DCDevice.current.generateToken`.
+
+ Availability gate: `DCDevice.current.isSupported`, which is false on the
+ Simulator and on hardware without the capability. Honest fallback: the caller
+ is told the device cannot participate and routes to the paid path rather than
+ opening a claim that could never be answered. Server-truth boundary: the token
+ only travels; whether the device already consumed the promotion is decided
+ server-side by the single-writer redemption queue.
+ */
+struct AppleDeviceCheckTokenProvider: DeviceCheckTokenProviding {
+    var isSupported: Bool { DCDevice.current.isSupported }
+
+    func generateToken() async throws -> Data {
+        let device = DCDevice.current
+        guard device.isSupported else {
+            throw DeviceCheckTokenError.unsupportedDevice
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            device.generateToken { token, error in
+                if let token {
+                    continuation.resume(returning: token)
+                    return
+                }
+                continuation.resume(
+                    throwing: error ?? DeviceCheckTokenError.appleServiceUnavailable
+                )
+            }
+        }
+    }
+}
+
+/** One unspent App Attest assertion, addressed to the request it signed. */
+struct AppAttestAssertionProof: Equatable, Sendable {
+    let assertionObject: Data
+    let challengeID: UUID
+    let keyID: String
+}
+
+enum AppAttestProofOutcome: Equatable, Sendable {
+    case proof(AppAttestAssertionProof)
+    case unavailable(AppAttestUnavailableReason)
+    case invalid(AppAttestInvalidReason)
+}
+
+protocol AppAttestProofProviding: Sendable {
+    func assertionProof(requestBody: Data) async -> AppAttestProofOutcome
+}
+
 protocol AppAttestKeyIDStoring: Sendable {
     func load() throws -> AppAttestStoredKey?
     func save(_ key: AppAttestStoredKey) throws
@@ -459,6 +529,64 @@ actor AppAttestClient {
         }
     }
 
+    /**
+     Issue #524. Produces an assertion and stops, one step short of
+     `assert(requestBody:)`.
+
+     The included-offer redemption endpoints verify the assertion themselves
+     through #331. Calling `verifyAssertion` here would claim the one-time
+     challenge first, so the redemption would arrive holding evidence the server
+     had already retired and be refused as `challenge_replayed`.
+     */
+    func assertionProof(requestBody: Data) async -> AppAttestProofOutcome {
+        guard service.isSupported else { return .unavailable(.unsupportedDevice) }
+        let keyID: String
+        do {
+            guard let storedKey = try keyStore.load(),
+                  storedKey.state == .verified else {
+                return .invalid(.missingVerifiedKey)
+            }
+            keyID = storedKey.id
+        } catch {
+            return .invalid(.keyPersistenceFailed)
+        }
+
+        do {
+            let challenge = try await server.issueChallenge(kind: .assertion, keyID: keyID)
+            let clientData = try assertionClientData(
+                challenge: challenge.bytes,
+                keyID: keyID,
+                requestBody: requestBody
+            )
+            let object = try await service.generateAssertion(
+                keyID,
+                clientDataHash: Data(SHA256.hash(data: clientData))
+            )
+            return .proof(AppAttestAssertionProof(
+                assertionObject: object,
+                challengeID: challenge.id,
+                keyID: keyID
+            ))
+        } catch AppAttestServiceError.staleKey {
+            return .invalid(.appleRejected)
+        } catch let error as AppAttestServerClientError {
+            switch Self.truth(for: error) {
+            case .unavailable(let reason):
+                return .unavailable(reason)
+            case .invalid(let reason):
+                return .invalid(reason)
+            case .verified:
+                return .invalid(.serverRejected)
+            }
+        } catch let error as DCError where error.code == .serverUnavailable {
+            return .unavailable(.appleServiceUnavailable)
+        } catch is URLError {
+            return .unavailable(.serverUnavailable)
+        } catch {
+            return .invalid(.appleRejected)
+        }
+    }
+
     private func attemptAssertion(
         keyID: String,
         requestBody: Data
@@ -527,6 +655,8 @@ actor AppAttestClient {
         ))
     }
 }
+
+extension AppAttestClient: AppAttestProofProviding {}
 
 private extension Data {
     init?(base64URLEncoded value: String) {

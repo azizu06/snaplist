@@ -185,6 +185,21 @@ export async function POST(request: Request) {
         { status: 403 },
       );
     }
+    // Issue #524. Only the iOS app can produce the App Attest and DeviceCheck
+    // evidence the included first AI item is fenced on, so this browser path
+    // never mints it. 403 rather than 500: the request was understood and
+    // refused, and the paid path in the same account still works.
+    if (detail.includes("device-fence-required")) {
+      return NextResponse.json(
+        {
+          error:
+            "The free first AI item is verified in the SnapList iOS app. Start SnapList Pro to continue here, or contact support if you've already used it.",
+          kind: "entitlement",
+          reason: "device-fence-required",
+        },
+        { status: 403 },
+      );
+    }
     return NextResponse.json(
       { error: "We couldn't save this batch for processing. Please try again." },
       { status: 500 },

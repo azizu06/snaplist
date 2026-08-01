@@ -65,6 +65,14 @@ async function stageCreditedRun(label: string): Promise<CreditedRunFixture> {
   try {
     await client.query("begin");
     await assumeRole(client, "service_role");
+    // Retention concurrency is downstream of the #524 device fence; this
+    // tenant only needs to be past it so its included first run can reserve.
+    await client.query(
+      `select public.begin_included_offer_claim(
+         gen_random_uuid(), $1, gen_random_uuid()::text, $2, 'reserved'
+       )`,
+      [userId, `fixture-key-${userId}`],
+    );
     const staged = await client.query<{
       item_id: string;
       queue_message_id: string;

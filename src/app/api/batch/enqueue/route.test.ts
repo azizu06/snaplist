@@ -173,6 +173,34 @@ describe("POST /api/batch/enqueue", () => {
     expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
   });
 
+  it("refuses the included first item on a surface that cannot prove a device", async () => {
+    mocks.stageUploadEntries.mockRejectedValueOnce(
+      new Error(
+        "Pipeline staging failed: AI item credit unavailable: device-fence-required",
+      ),
+    );
+    const form = new FormData();
+    form.set("manifest", JSON.stringify({
+      batchId: "11111111-1111-4111-8111-111111111111",
+      entries: [{ idempotencyKey: "item-1", costBasis: "5", photoCount: 1 }],
+    }));
+    form.append("photo:0", new File(["photo"], "item.jpg", { type: "image/jpeg" }));
+
+    const response = await POST(new Request("https://snaplist.test/api/batch/enqueue", {
+      method: "POST",
+      body: form,
+    }));
+
+    // 403, not 500: #524 understood the request and refused it. A 500 would
+    // read as a transient fault worth retrying, and this one never clears.
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      kind: "entitlement",
+      reason: "device-fence-required",
+    });
+    expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
+  });
+
   it("lets the atomic ledger reject a free multi-item batch as one transaction", async () => {
     mocks.stageUploadEntries.mockRejectedValueOnce(
       new Error(

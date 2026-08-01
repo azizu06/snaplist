@@ -111,7 +111,11 @@ function deniedError(reason: z.infer<typeof commitDenialReasonSchema>) {
 function rpcData(operation: string, result: RpcResult): unknown {
   if (result.error) {
     const allowanceReason = result.error.message.match(
-      /AI item credit unavailable: (snaplist-pro-required|storekit-entitlement-unavailable|monthly-allowance-reached)/i,
+      // `device-fence-required` reaches here as a raw message rather than as a
+      // `denial_reason` column: the commit RPC's own map does not name it, so
+      // it re-raises unchanged. Typing it here is what turns a 503 "outcome is
+      // unknown" into a 403 the native client can route to redemption.
+      /AI item credit unavailable: (snaplist-pro-required|storekit-entitlement-unavailable|monthly-allowance-reached|device-fence-required)/i,
     )?.[1]?.toLowerCase();
     if (allowanceReason) {
       throw new MobileItemSubmissionDeniedError(
@@ -120,6 +124,7 @@ function rpcData(operation: string, result: RpcResult): unknown {
           "snaplist-pro-required",
           "storekit-entitlement-unavailable",
           "monthly-allowance-reached",
+          "device-fence-required",
         ]).parse(allowanceReason),
       );
     }

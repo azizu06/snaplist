@@ -160,6 +160,16 @@ export type MobileItemSubmissionDenialReason =
   | "snaplist-pro-required"
   | "storekit-entitlement-unavailable"
   | "monthly-allowance-reached"
+  /**
+   * Issue #524. The account still holds an unspent included first run, but this
+   * physical Apple device has already consumed the promotion — or never proved
+   * it had not — and the account has no paid period to fall back on. Only this
+   * last part makes it a denial: a seller with a live subscription reaches the
+   * paid path and hears about that path instead. So three routes clear it, and
+   * the seller-facing copy offers all three: a completed device redemption, an
+   * audited support override, or starting SnapList Pro.
+   */
+  | "device-fence-required"
   | "daily-capacity-reached"
   | "per-minute-capacity-reached";
 

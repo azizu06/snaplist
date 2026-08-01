@@ -238,6 +238,45 @@
       }]
     },
     {
+      "id": "included-offer-device-claims",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["account-erasure-after-active-claim-reconciliation"],
+        "maximumRetention": "for the account lifetime, then only until any non-terminal claim is reconciled to a terminal state for erasure",
+        "executor": "snaplist-account-erasure-capability",
+        "completionProof": "tenant included-offer claim rows are absent after reconciliation, and the redemption queue holds no envelope naming a deleted claim",
+        "ownerDecision": "Issue #524 stores only claim identity, App Attest key id, state, Apple phase, attempt count, queue message id, and token deadline. The ephemeral DeviceCheck token is never stored, hashed, or derived from, so no device identifier survives erasure. Apple's lifetime device bit is provider-owned and unaffected; see included-offer-apple-device-bit."
+      }]
+    },
+    {
+      "id": "included-offer-support-overrides",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["account-erasure"],
+        "maximumRetention": "for the account lifetime; a consumed override is retained as the audit record of the exception until the account is erased",
+        "executor": "snaplist-account-erasure-capability",
+        "completionProof": "tenant included-offer support override rows are absent after erasure",
+        "ownerDecision": "Owner decision, not provider evidence: a consumed override is kept for the account lifetime rather than deleted on consumption. It is the only record that a device-fence exception was granted, by whom, and for what stated reason, and the one-time uniqueness guarantee is enforced against it. Deleting it at consumption would make the exception unauditable and let the same account be granted a second one."
+      }]
+    },
+    {
+      "id": "included-offer-apple-device-bit",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "provider-owned",
+        "owner": "apple-devicecheck",
+        "deletionTriggers": ["apple-controlled-only"],
+        "maximumRetention": "indefinite: DeviceCheck bit0 is per-device, per-developer state that Apple stores for the lifetime of the device and that SnapList cannot read back to an identity or reset",
+        "executor": "apple-devicecheck",
+        "completionProof": "SnapList holds no copy of the bit and no device identifier, so account erasure removes every SnapList-side datum; the residual bit remains solely under Apple's control",
+        "ownerDecision": "Issue #524 accepts that the fence's durability depends on an Apple-owned bit SnapList cannot erase. This is the deliberate trade for blocking unmetered provider spend, and the seller-facing appeal path is the audited one-time support override rather than a bit reset."
+      }]
+    },
+    {
       "id": "mobile-ebay-oauth-session-state",
       "releaseDatum": true,
       "dispositions": [{
