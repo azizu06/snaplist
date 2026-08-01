@@ -63,11 +63,16 @@ final class ListingReviewPresentationTests: XCTestCase {
         _ facts: [(Int, String)]
     ) throws -> [ListingReviewSoldMatch] {
         try facts.enumerated().map { index, fact in
+            // The read contract distinguishes an absent key from an explicit
+            // null, so a nullable fact still has to be carried on the wire.
             let object: [String: Any] = [
                 "id": "sold-\(index + 1)",
                 "sourceURL": "https://example.com/sold/\(index + 1)",
                 "soldPrice": fact.0,
                 "currency": fact.1,
+                "title": NSNull(),
+                "condition": NSNull(),
+                "soldAt": NSNull(),
             ]
             return try JSONDecoder().decode(
                 ListingReviewSoldMatch.self,

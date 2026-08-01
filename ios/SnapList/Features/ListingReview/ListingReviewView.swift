@@ -35,6 +35,7 @@ struct ListingReviewView: View {
     @State private var priceEditing = false
     @State private var priceText = ""
     @State private var priceInvalid = false
+    @FocusState private var priceFieldFocused: Bool
     @AccessibilityFocusState private var focusedElement:
         ListingReviewFocus?
 
@@ -130,6 +131,12 @@ struct ListingReviewView: View {
                 assertive: assertive
             )
         }
+        // Without the container, the identifier is not bound to an element of
+        // its own and propagates down instead. Children inside the footer's
+        // safe-area inset do not override it, so `listing-review.done`,
+        // `listing-review.secondary` and the pending strip were all published
+        // as `listing-review`.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("listing-review")
     }
 
@@ -249,6 +256,7 @@ struct ListingReviewView: View {
             if priceEditing {
                 HStack(spacing: 10) {
                     TextField("Price", text: $priceText)
+                        .focused($priceFieldFocused)
                         .keyboardType(.decimalPad)
                         .font(.title.weight(.bold).monospacedDigit())
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
@@ -279,6 +287,12 @@ struct ListingReviewView: View {
                     .accessibilityLabel("Apply price, keeps it on this phone")
                     .accessibilityIdentifier("listing-review.price.apply")
                 }
+                // The seller already aimed at the price to change it, so the
+                // field takes the keyboard on arrival rather than waiting for
+                // a second tap. Focus is requested here rather than in the
+                // opening action because the field does not exist yet at the
+                // moment `priceEditing` flips.
+                .onAppear { priceFieldFocused = true }
                 if priceInvalid {
                     Text(ListingReviewCopy.invalidPrice)
                         .font(.callout)

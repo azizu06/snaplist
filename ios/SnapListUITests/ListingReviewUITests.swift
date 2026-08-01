@@ -13,7 +13,7 @@ final class ListingReviewUITests: XCTestCase {
 
         XCTAssertTrue(reviewOpener.waitForExistence(timeout: 3))
         XCTAssertTrue(reviewOpener.isHittable)
-        XCTAssertFalse(anyElement("listing-review", in: app).exists)
+        XCTAssertFalse(app.otherElements["listing-review"].exists)
     }
 
     func testDirtyBackAndRelaunchRestoreDraftBeforeOneGuardedDoneSave() {
@@ -84,7 +84,7 @@ final class ListingReviewUITests: XCTestCase {
 
         XCTAssertFalse(discardAlert.waitForExistence(timeout: 2))
         XCTAssertFalse(anyElement("listing-review.unsaved", in: app).exists)
-        XCTAssertTrue(anyElement("listing-review", in: app).exists)
+        XCTAssertTrue(app.otherElements["listing-review"].exists)
     }
 
     func testFailedAndOfflineSavesKeepTheLastUsableDirtyDraft() {
@@ -373,10 +373,8 @@ final class ListingReviewUITests: XCTestCase {
         reviewOpener.tap()
 
         XCTAssertTrue(
-            anyElement(
-                "listing-review",
-                in: app
-            ).waitForExistence(timeout: 3),
+            app.otherElements["listing-review"]
+                .waitForExistence(timeout: 3),
             file: file,
             line: line
         )
