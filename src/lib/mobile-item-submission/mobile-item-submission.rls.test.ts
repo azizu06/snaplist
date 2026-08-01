@@ -484,7 +484,7 @@ describe("authenticated mobile item submission against local Supabase", () => {
       });
       const cleanup = await runPipelineMaintenance({
         store: cleanupStore,
-        photos: {
+        storage: {
           async remove(paths) {
             removedPaths.push(paths);
           },
@@ -729,7 +729,7 @@ describe("authenticated mobile item submission against local Supabase", () => {
           return claim;
         },
       },
-      photos: {
+      storage: {
         async remove(paths) {
           removedPaths.push(paths);
           const { error } = await admin.storage.from("photos").remove(paths);
@@ -876,7 +876,7 @@ describe("authenticated mobile item submission against local Supabase", () => {
     });
     const cleanup = await runPipelineMaintenance({
       store: cleanupStore,
-      photos: {
+      storage: {
         async remove(photoPaths) {
           const { error } = await admin.storage.from("photos").remove(photoPaths);
           if (error) throw error;

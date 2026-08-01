@@ -50,6 +50,59 @@ create unique index mobile_item_submission_voice_handoffs_run_key
   on private.mobile_item_submission_voice_handoffs (run_id)
   where run_id is not null;
 
+-- Both deletion triggers and the ceiling publish the same work, so they share
+-- one shape. A raw voice job that dead-lettered is revived rather than skipped:
+-- `do nothing` would leave the object present with `raw_audio_deleted_at` null
+-- forever, and the retention contract has no way to resolve a row whose executor
+-- has quietly stopped trying.
+create or replace function private.queue_raw_seller_voice_cleanup(
+  p_user_id text,
+  p_idempotency_key uuid,
+  p_cleanup_id uuid,
+  p_storage_path text
+)
+returns boolean
+language plpgsql
+as $$
+declare
+  v_queued boolean;
+begin
+  insert into private.pipeline_storage_cleanup_jobs as job (
+    source_type,
+    source_id,
+    photo_paths
+  ) values (
+    'raw_voice',
+    p_cleanup_id,
+    array[p_storage_path]
+  )
+  on conflict (source_type, source_id) do update
+  set state = 'pending',
+      attempt_count = 0,
+      available_at = statement_timestamp(),
+      lease_token = null,
+      lease_expires_at = null,
+      safe_error = null,
+      updated_at = statement_timestamp()
+  where job.state = 'dead'
+  returning true into v_queued;
+
+  update private.mobile_item_submission_voice_handoffs handoff
+  set raw_audio_cleanup_queued_at = coalesce(
+        handoff.raw_audio_cleanup_queued_at,
+        statement_timestamp()
+      ),
+      updated_at = statement_timestamp()
+  where handoff.user_id = p_user_id
+    and handoff.idempotency_key = p_idempotency_key;
+
+  return coalesce(v_queued, false);
+end;
+$$;
+
+revoke all on function private.queue_raw_seller_voice_cleanup(text, uuid, uuid, text)
+  from public, anon, authenticated, service_role;
+
 -- The first durable terminal transcription outcome is the deletion trigger. A
 -- later outcome, a redelivered queue message, or a replayed worker attempt is
 -- the same logical run and must not queue a second deletion or rewrite history.
@@ -101,23 +154,16 @@ begin
   end if;
 
   v_storage_path := v_handoff.receipt->>'storage_path';
-  insert into private.pipeline_storage_cleanup_jobs (
-    source_type,
-    source_id,
-    photo_paths
-  ) values (
-    'raw_voice',
+  perform private.queue_raw_seller_voice_cleanup(
+    v_handoff.user_id,
+    v_handoff.idempotency_key,
     v_handoff.cleanup_id,
-    array[v_storage_path]
-  ) on conflict (source_type, source_id) do nothing;
+    v_storage_path
+  );
 
   update private.mobile_item_submission_voice_handoffs handoff
   set transcription_outcome = p_outcome,
       transcription_outcome_at = statement_timestamp(),
-      raw_audio_cleanup_queued_at = coalesce(
-        handoff.raw_audio_cleanup_queued_at,
-        statement_timestamp()
-      ),
       updated_at = statement_timestamp()
   where handoff.user_id = v_handoff.user_id
     and handoff.idempotency_key = v_handoff.idempotency_key;
@@ -133,11 +179,17 @@ grant execute on function public.record_raw_seller_voice_transcription_outcome(
 ) to service_role;
 
 -- The 24 hour ceiling is a backstop, not a schedule. It queues deletion for raw
--- audio whose transcription never reached a terminal outcome, including an
--- uncommitted staged upload whose submission was abandoned. Because the ceiling
--- is unconditional, item deletion, guest expiry, and account erasure cannot
--- leave raw audio behind: each of those triggers is bounded by a later deadline
--- than this one, and this sweep runs regardless of tenant state.
+-- audio whose transcription never reached a terminal outcome, including a staged
+-- upload whose submission was never accepted, once that upload's deadline has
+-- lapsed. A client actively replaying the same stage refreshes that deadline by
+-- #541's design, so the sweep reaches an upload the client has stopped touching,
+-- not one still in flight.
+--
+-- Item deletion and guest recovery expiry have no leaf deletion capability
+-- anywhere in the repository to hook into, so for those two triggers this sweep
+-- is the executor and the ceiling is the bound. Account erasure does have the
+-- #384 leaf shape, and raw audio contributes one below rather than making an
+-- erased tenant wait out the ceiling.
 create or replace function public.prepare_raw_seller_voice_retention(
   p_batch_size integer default 25
 )
@@ -181,27 +233,14 @@ begin
     for update skip locked
     limit p_batch_size
   loop
-    insert into private.pipeline_storage_cleanup_jobs (
-      source_type,
-      source_id,
-      photo_paths
-    ) values (
-      'raw_voice',
+    if private.queue_raw_seller_voice_cleanup(
+      v_handoff.user_id,
+      v_handoff.idempotency_key,
       v_handoff.cleanup_id,
-      array[v_handoff.storage_path]
-    ) on conflict (source_type, source_id) do nothing;
-    if found then
+      v_handoff.storage_path
+    ) then
       v_queued := v_queued + 1;
     end if;
-
-    update private.mobile_item_submission_voice_handoffs handoff
-    set raw_audio_cleanup_queued_at = coalesce(
-          handoff.raw_audio_cleanup_queued_at,
-          statement_timestamp()
-        ),
-        updated_at = statement_timestamp()
-    where handoff.user_id = v_handoff.user_id
-      and handoff.idempotency_key = v_handoff.idempotency_key;
   end loop;
 
   return jsonb_build_object(
@@ -214,6 +253,77 @@ $$;
 revoke all on function public.prepare_raw_seller_voice_retention(integer)
   from public, anon, authenticated;
 grant execute on function public.prepare_raw_seller_voice_retention(integer)
+  to service_role;
+
+-- Issue #384 leaf capability for the private-storage-raw-voice retention row.
+-- Erasure cannot wait out the ceiling, so it publishes deletion for every one of
+-- the tenant's undeleted objects immediately. It reports `complete` only when
+-- every handoff already carries its named proof: a queued job is scheduled work,
+-- not a finished deletion, and the orchestrator must not report otherwise.
+create or replace function public.delete_raw_seller_voice_for_account_erasure(
+  p_user_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_handoff record;
+  v_queued integer := 0;
+  v_remaining integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using
+      errcode = '42501',
+      message = 'Pipeline operations authorization is required';
+  end if;
+  if nullif(btrim(p_user_id), '') is null then
+    raise exception using
+      errcode = '22023',
+      message = 'Account erasure tenant is required';
+  end if;
+
+  for v_handoff in
+    select handoff.user_id,
+           handoff.idempotency_key,
+           handoff.cleanup_id,
+           handoff.receipt->>'storage_path' as storage_path
+    from private.mobile_item_submission_voice_handoffs handoff
+    where handoff.user_id = p_user_id
+      and handoff.raw_audio_deleted_at is null
+    order by handoff.cleanup_id
+    for update
+  loop
+    if private.queue_raw_seller_voice_cleanup(
+      v_handoff.user_id,
+      v_handoff.idempotency_key,
+      v_handoff.cleanup_id,
+      v_handoff.storage_path
+    ) then
+      v_queued := v_queued + 1;
+    end if;
+  end loop;
+
+  select count(*)::integer into v_remaining
+  from private.mobile_item_submission_voice_handoffs handoff
+  where handoff.user_id = p_user_id
+    and handoff.raw_audio_deleted_at is null;
+
+  return jsonb_build_object(
+    'queued_count', v_queued,
+    'remaining_count', v_remaining,
+    'complete', v_remaining = 0
+  );
+end;
+$$;
+
+comment on function public.delete_raw_seller_voice_for_account_erasure(text) is
+  'Issue #386 leaf capability: account erasure publishes raw seller audio deletion for the tenant and reports complete only once every object carries its named absence proof.';
+
+revoke all on function public.delete_raw_seller_voice_for_account_erasure(text)
+  from public, anon, authenticated;
+grant execute on function public.delete_raw_seller_voice_for_account_erasure(text)
   to service_role;
 
 -- The executor must be able to tell raw seller audio apart from photo cleanup:

@@ -1,4 +1,4 @@
-import type { PipelinePhotoCleanupCapability } from "./maintenance";
+import type { PipelineStorageCleanupCapability } from "./maintenance";
 
 /**
  * The narrow slice of a Supabase Storage bucket the cleanup capability needs.
@@ -13,7 +13,7 @@ export interface StorageCleanupBucket {
 
 export function createStorageCleanupCapability(
   bucket: StorageCleanupBucket,
-): PipelinePhotoCleanupCapability {
+): PipelineStorageCleanupCapability {
   return {
     async remove(paths) {
       const { error } = await bucket.remove(paths);

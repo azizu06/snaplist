@@ -914,7 +914,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     );
     await runPipelineMaintenance({
       store: createSupabasePipelineOperationsStore(admin as never),
-      photos: {
+      storage: {
         async remove(paths) {
           const removed = await admin.storage.from("photos").remove(paths);
           if (removed.error) throw new Error(removed.error.message);
@@ -950,7 +950,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     );
     await runPipelineMaintenance({
       store: createSupabasePipelineOperationsStore(admin as never),
-      photos: {
+      storage: {
         async remove(paths) {
           const removed = await admin.storage.from("photos").remove(paths);
           if (removed.error) throw new Error(removed.error.message);
@@ -1013,7 +1013,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     const operations = createSupabasePipelineOperationsStore(admin as never);
     await runPipelineMaintenance({
       store: operations,
-      photos: {
+      storage: {
         async remove(paths) {
           const removed = await admin.storage.from("photos").remove(paths);
           if (removed.error) throw new Error(removed.error.message);

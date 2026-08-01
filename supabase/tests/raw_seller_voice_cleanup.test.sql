@@ -1,6 +1,6 @@
 begin;
 
-select plan(41);
+select plan(51);
 
 -- Issue #386: raw seller voice is temporary transcription input. The first
 -- durable terminal transcription outcome schedules deletion; a 24 hour ceiling
@@ -681,6 +681,120 @@ select is(
   ),
   1,
   'the listing draft survives raw audio deletion'
+);
+
+select is(
+  (
+    select item.photos from public.items item
+    where item.id = '86000000-0000-4000-8000-0000000000d4'
+  ),
+  array['raw-voice-tenant-a/items/photo-0.enc'],
+  'the item photo set survives raw audio deletion'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from private.pipeline_storage_cleanup_jobs job
+    where 'raw-voice-tenant-a/items/photo-0.enc' = any(job.photo_paths)
+  ),
+  0,
+  'raw audio deletion never queues an item photo for removal'
+);
+
+-- A raw voice job that dead-lettered would otherwise sit unresolved forever:
+-- the object is still present and no proof can ever be recorded. The ceiling
+-- sweep is the recovery path, so it revives the job instead of skipping it.
+update private.pipeline_storage_cleanup_jobs job
+set state = 'dead',
+    lease_token = null,
+    lease_expires_at = null,
+    safe_error = 'Raw seller voice cleanup exhausted its attempts.'
+where job.source_type = 'raw_voice'
+  and job.source_id = '86000000-0000-4000-8000-0000000000c2';
+update private.mobile_item_submission_voice_handoffs handoff
+set cleanup_after = now() - interval '1 minute'
+where handoff.cleanup_id = '86000000-0000-4000-8000-0000000000c2';
+
+set local role service_role;
+select set_config(
+  'request.jwt.claims', '{"role":"service_role"}', true
+);
+
+select is(
+  public.prepare_raw_seller_voice_retention(25),
+  jsonb_build_object('rawVoiceJobsQueued', 1, 'skippedForLock', false),
+  'the ceiling revives raw audio deletion that dead-lettered'
+);
+
+reset role;
+
+select is(
+  (
+    select job.state
+    from private.pipeline_storage_cleanup_jobs job
+    where job.source_type = 'raw_voice'
+      and job.source_id = '86000000-0000-4000-8000-0000000000c2'
+  ),
+  'pending',
+  'the revived deletion is claimable durable work again'
+);
+
+-- Account erasure cannot wait out the ceiling, and cannot report completion
+-- while an object still lacks its named proof.
+select extensions.function_privs_are(
+  'public', 'delete_raw_seller_voice_for_account_erasure', array['text'],
+  'authenticated',
+  array[]::text[], 'a seller cannot drive another tenant erasure capability'
+);
+
+set local role service_role;
+select set_config(
+  'request.jwt.claims', '{"role":"service_role"}', true
+);
+
+select is(
+  public.delete_raw_seller_voice_for_account_erasure('raw-voice-tenant-b')
+    ->>'complete',
+  'false',
+  'erasure does not report completion while raw audio lacks its proof'
+);
+
+select is(
+  public.delete_raw_seller_voice_for_account_erasure('raw-voice-tenant-a')
+    ->>'complete',
+  'true',
+  'erasure reports completion once every object carries its proof'
+);
+
+select is(
+  public.delete_raw_seller_voice_for_account_erasure('raw-voice-tenant-a')
+    ->>'queued_count',
+  '0',
+  'an erased tenant with nothing left queues no further deletion'
+);
+
+reset role;
+
+select is(
+  (
+    select count(*)::integer
+    from private.pipeline_storage_cleanup_jobs job
+    where job.source_type = 'raw_voice'
+      and job.source_id = '86000000-0000-4000-8000-0000000000c5'
+  ),
+  1,
+  'erasure publishes the erased tenant raw audio deletion immediately'
+);
+
+select isnt(
+  (
+    select handoff.raw_audio_cleanup_queued_at
+    from private.mobile_item_submission_voice_handoffs handoff
+    where handoff.cleanup_id = '86000000-0000-4000-8000-0000000000c5'
+  ),
+  null,
+  'erasure records when the deletion became durable work'
 );
 
 select * from finish();

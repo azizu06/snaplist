@@ -8,7 +8,7 @@ import type {
   RawSellerVoiceRetention,
 } from "./store";
 
-export interface PipelinePhotoCleanupCapability {
+export interface PipelineStorageCleanupCapability {
   remove(paths: string[]): Promise<void>;
   /**
    * Raw seller voice is the one datum whose retention row demands proof of
@@ -26,7 +26,7 @@ export interface PipelineMaintenanceSummary extends PipelineCleanupOutcome {
 
 export async function runPipelineMaintenance(dependencies: {
   store: PipelineOperationsStore;
-  photos: PipelinePhotoCleanupCapability;
+  storage: PipelineStorageCleanupCapability;
 }): Promise<PipelineMaintenanceSummary> {
   const guestRecoveryExpiry = await dependencies.store.expireGuestRecoveries(
     PIPELINE_OPERATIONS_POLICY.maintenance.batchSize,
@@ -61,9 +61,9 @@ export async function runPipelineMaintenance(dependencies: {
     if (authorization.kind === "stale") continue;
     const isRawSellerVoice = claim.job.sourceType === "raw_voice";
     try {
-      await dependencies.photos.remove(authorization.photoPaths);
+      await dependencies.storage.remove(authorization.photoPaths);
       if (isRawSellerVoice) {
-        await dependencies.photos.confirmAbsent(authorization.photoPaths);
+        await dependencies.storage.confirmAbsent(authorization.photoPaths);
       }
       // Completion is the only place a deletion is reported, and for raw voice
       // it is where the retention contract's completion proof is recorded.
@@ -84,10 +84,11 @@ export async function runPipelineMaintenance(dependencies: {
     }
   }
 
+  // `storageJobsQueued` is a persisted metric owned by `prepare_pipeline_retention`.
+  // The raw voice ceiling reports its own count so neither number silently
+  // changes meaning for whoever reads the recorded outcome.
   const outcome: PipelineCleanupOutcome = {
     ...prepared,
-    storageJobsQueued:
-      prepared.storageJobsQueued + rawSellerVoiceRetention.rawVoiceJobsQueued,
     claimedStorageJobs,
     deletedObjects,
     failedObjects,

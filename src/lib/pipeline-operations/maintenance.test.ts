@@ -62,26 +62,26 @@ describe("pipeline maintenance", () => {
         lastCleanupFailedObjects: 0,
       }),
     };
-    const photos = {
+    const storage = {
       remove: vi.fn().mockResolvedValue(undefined),
       confirmAbsent: vi.fn().mockResolvedValue(undefined),
     };
 
-    await expect(runPipelineMaintenance({ store, photos })).resolves.toMatchObject({
+    await expect(runPipelineMaintenance({ store, storage })).resolves.toMatchObject({
       claimedStorageJobs: 1,
       deletedObjects: 2,
       failedObjects: 0,
       guestRecoveryExpiry: { expiredCount: 2, skippedForLock: false },
       health: { queueDepth: 0 },
     });
-    expect(photos.remove).toHaveBeenCalledWith([
+    expect(storage.remove).toHaveBeenCalledWith([
       "guest_fixture/items/front.enc",
       "user_account/guest-claims/recovery/lease/1",
     ]);
     expect(store.completeStorageCleanup).toHaveBeenCalledOnce();
     // Photo cleanup keeps its single-call shape: only raw seller voice pays for
     // the extra read-back its retention row demands.
-    expect(photos.confirmAbsent).not.toHaveBeenCalled();
+    expect(storage.confirmAbsent).not.toHaveBeenCalled();
     expect(store.recordCleanupOutcome).toHaveBeenCalledWith(
       expect.objectContaining({ deletedObjects: 2, failedObjects: 0 }),
     );
@@ -141,12 +141,12 @@ describe("pipeline maintenance", () => {
         lastCleanupFailedObjects: 1,
       }),
     };
-    const photos = {
+    const storage = {
       remove: vi.fn().mockRejectedValue(new Error("provider token=secret-detail")),
       confirmAbsent: vi.fn().mockResolvedValue(undefined),
     };
 
-    const result = await runPipelineMaintenance({ store, photos });
+    const result = await runPipelineMaintenance({ store, storage });
     expect(result.failedObjects).toBe(1);
     expect(store.failStorageCleanup).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
@@ -158,36 +158,39 @@ describe("pipeline maintenance", () => {
 
   it("deletes raw seller voice only after an independent read proves absence", async () => {
     const store = rawVoiceStore();
-    const photos = {
+    const storage = {
       remove: vi.fn().mockResolvedValue(undefined),
       confirmAbsent: vi.fn().mockResolvedValue(undefined),
     };
 
-    const result = await runPipelineMaintenance({ store, photos });
+    const result = await runPipelineMaintenance({ store, storage });
 
-    expect(photos.remove).toHaveBeenCalledWith([RAW_VOICE_PATH]);
-    expect(photos.confirmAbsent).toHaveBeenCalledWith([RAW_VOICE_PATH]);
+    expect(storage.remove).toHaveBeenCalledWith([RAW_VOICE_PATH]);
+    expect(storage.confirmAbsent).toHaveBeenCalledWith([RAW_VOICE_PATH]);
     expect(store.completeStorageCleanup).toHaveBeenCalledOnce();
     expect(result.deletedObjects).toBe(1);
     expect(result.rawSellerVoiceRetention).toEqual({
       rawVoiceJobsQueued: 1,
       skippedForLock: false,
     });
+    // `storageJobsQueued` keeps meaning what `prepare_pipeline_retention`
+    // returned. The ceiling reports its own count instead of inflating a
+    // persisted metric other readers already interpret.
     expect(store.recordCleanupOutcome).toHaveBeenCalledWith(
-      expect.objectContaining({ storageJobsQueued: 1 }),
+      expect.objectContaining({ storageJobsQueued: 0 }),
     );
   });
 
   it("keeps raw seller voice deletion retryable when absence cannot be proven", async () => {
     const store = rawVoiceStore();
-    const photos = {
+    const storage = {
       remove: vi.fn().mockResolvedValue(undefined),
       confirmAbsent: vi
         .fn()
         .mockRejectedValue(new Error("bucket token=secret-detail")),
     };
 
-    const result = await runPipelineMaintenance({ store, photos });
+    const result = await runPipelineMaintenance({ store, storage });
 
     expect(store.completeStorageCleanup).not.toHaveBeenCalled();
     expect(store.failStorageCleanup).toHaveBeenCalledWith(

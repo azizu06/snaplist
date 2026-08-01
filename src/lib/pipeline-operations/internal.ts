@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runPipelineMaintenance } from "./maintenance";
-import { createStorageCleanupCapability } from "./photo-cleanup";
+import { createStorageCleanupCapability } from "./storage-cleanup";
 import { createSupabasePipelineOperationsStore } from "./store";
 
 export async function runInternalPipelineMaintenance() {
@@ -15,6 +15,6 @@ export async function runInternalPipelineMaintenance() {
 
   return runPipelineMaintenance({
     store,
-    photos: createStorageCleanupCapability(admin.storage.from("photos")),
+    storage: createStorageCleanupCapability(admin.storage.from("photos")),
   });
 }
