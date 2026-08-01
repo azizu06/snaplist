@@ -69,6 +69,49 @@ function preparedView(platform: AssistedExportPlatform): ExportHandoffView {
   return { platform, state: "prepared", handedOffAt: null, sharedAt: null };
 }
 
+/**
+ * A refused handoff RPC. The Postgres `code` is the machine-readable half of
+ * the refusal and callers branch on it — `P0002` means the pack went stale
+ * under the seller and the sheet must reopen, `22023` means the destination is
+ * not an assisted one, `42501` means the caller is unauthenticated. Collapsing
+ * these into a bare message would leave a UI unable to tell "try again" from
+ * "this can never work".
+ */
+export class ExportHandoffError extends Error {
+  readonly code: string | undefined;
+
+  constructor(message: string, code: string | undefined) {
+    super(message);
+    this.name = "ExportHandoffError";
+    this.code = code;
+  }
+}
+
+interface PostgrestFailure {
+  message: string;
+  code?: string;
+}
+
+function refused(error: PostgrestFailure): never {
+  throw new ExportHandoffError(error.message, error.code);
+}
+
+/**
+ * The RPCs return a timestamptz, which PostgREST serializes as a string. A
+ * null or non-string result means the capability did not do what its contract
+ * says, and that must surface as a failure rather than as an optimistic
+ * timestamp the caller renders next to the word `Shared`.
+ */
+function requireTimestamp(data: unknown, rpc: string): string {
+  if (typeof data !== "string" || data.length === 0) {
+    throw new ExportHandoffError(
+      `${rpc} returned no timestamp; the handoff was not recorded.`,
+      undefined,
+    );
+  }
+  return data;
+}
+
 function assertAssisted(platform: AssistedExportPlatform): void {
   if (!(ASSISTED_EXPORT_PLATFORMS as readonly string[]).includes(platform)) {
     throw new Error(
@@ -81,6 +124,15 @@ function assertAssisted(platform: AssistedExportPlatform): void {
  * The handoff state of all three destinations for one pack revision. A
  * destination with no row is `prepared`, not missing or failed: SnapList did
  * prepare the pack, the seller simply has not confirmed anything yet.
+ *
+ * Reads key on `reviewContentRevision` alone while every mutation also carries
+ * the full `reviewRevision`, and the asymmetry is deliberate. Receipts belong
+ * to the pack text the seller actually handed over, which is what the content
+ * revision identifies; a price edit advances the full revision without
+ * changing that text, so the receipt legitimately survives it. The mutation
+ * guard is stricter on purpose: writing `Shared` is a claim about the listing
+ * as a whole, so it fails closed the moment ANY part of the listing moved
+ * under a mounted confirm sheet.
  */
 export async function loadExportHandoffs(
   supabase: SupabaseClient,
@@ -92,7 +144,10 @@ export async function loadExportHandoffs(
     .eq("item_id", input.itemId)
     .eq("source_review_revision", input.reviewContentRevision);
   if (error) {
-    throw new Error(`Failed to read export handoffs: ${error.message}`);
+    refused({
+      message: `Failed to read export handoffs: ${error.message}`,
+      code: error.code,
+    });
   }
 
   const view = {
@@ -132,8 +187,8 @@ export async function recordExportHandoff(
     p_source_review_revision: input.reviewContentRevision,
     p_expected_review_revision: input.reviewRevision,
   });
-  if (error) throw new Error(error.message);
-  return data as string;
+  if (error) refused(error);
+  return requireTimestamp(data, "record_export_handoff");
 }
 
 /**
@@ -153,8 +208,8 @@ export async function markExportShared(
     p_source_review_revision: input.reviewContentRevision,
     p_expected_review_revision: input.reviewRevision,
   });
-  if (error) throw new Error(error.message);
-  return data as string;
+  if (error) refused(error);
+  return requireTimestamp(data, "mark_export_shared");
 }
 
 /** Take back a confirmation. The recorded handoff stands; the claim does not. */

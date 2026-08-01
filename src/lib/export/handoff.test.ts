@@ -115,6 +115,38 @@ describe("assisted export handoffs", () => {
     ).rejects.toThrow(/listing changed/i);
   });
 
+  it("keeps the refusal code so a stale pack is distinguishable from a bad destination", async () => {
+    // `P0002` is "reopen the sheet and try again"; `22023` can never succeed.
+    // A caller that only sees the message cannot tell those apart.
+    await expect(
+      markExportShared(
+        fakeSupabase([], [], {
+          message: "This listing changed. Reopen the export pack and try again.",
+          code: "P0002",
+        } as { message: string }),
+        {
+          itemId: ITEM_ID,
+          platform: "depop",
+          reviewContentRevision: CONTENT_REVISION,
+          reviewRevision: REVIEW_REVISION,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "P0002" });
+  });
+
+  it("refuses to report Shared when the capability returned no receipt", async () => {
+    // No error and no timestamp means the guarded update matched nothing. A
+    // caller must never paint `Shared` over a write that did not happen.
+    await expect(
+      markExportShared(fakeSupabase([], [], null, null), {
+        itemId: ITEM_ID,
+        platform: "mercari",
+        reviewContentRevision: CONTENT_REVISION,
+        reviewRevision: REVIEW_REVISION,
+      }),
+    ).rejects.toThrow(/no timestamp/i);
+  });
+
   it("refuses to record an assisted handoff for a directly published marketplace", async () => {
     const calls: { name: string; args: Record<string, unknown> }[] = [];
     await expect(

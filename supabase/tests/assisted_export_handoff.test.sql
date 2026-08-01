@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(21);
+select extensions.plan(23);
 
 -- =====================================================================
 -- Issue #378 — assisted export packs for Facebook Marketplace, Mercari,
@@ -186,6 +186,43 @@ select extensions.ok(
   'handing the pack to the destination records a durable handoff'
 );
 
+-- Redelivery is not a second delivery. Age the receipt first so a rewritten
+-- timestamp cannot hide behind now() being frozen for the whole transaction.
+reset role;
+update public.export_handoffs
+set handoff_at = handoff_at - interval '3 minutes'
+where item_id = 'e7100000-0000-4000-8000-000000000001'
+  and platform = 'depop';
+set local role authenticated;
+
+select extensions.is(
+  (
+    select public.record_export_handoff(
+      'e7100000-0000-4000-8000-000000000001'::uuid,
+      'depop',
+      'e7200000-0000-4000-8000-000000000001'::uuid,
+      'e7300000-0000-4000-8000-000000000001'::uuid
+    )
+  ),
+  now() - interval '3 minutes',
+  'a redelivered handoff keeps the first receipt instead of minting a second'
+);
+
+-- Hand Facebook over too, so the isolation assertion below has something it
+-- could actually fail on: both destinations have performed a handoff and are
+-- one confirmation away from `Shared`. Wrapped in a DO block because a bare
+-- select would emit a non-TAP row into the harness output.
+do $handoff$
+begin
+  perform public.record_export_handoff(
+    'e7100000-0000-4000-8000-000000000001'::uuid,
+    'facebook',
+    'e7200000-0000-4000-8000-000000000001'::uuid,
+    'e7300000-0000-4000-8000-000000000001'::uuid
+  );
+end;
+$handoff$;
+
 -- eBay is a transactional adapter, never an assisted handoff.
 select extensions.throws_ok(
   $$
@@ -348,12 +385,31 @@ select extensions.is(
   'handoff receipts are invisible across tenants'
 );
 
--- Retention: a receipt cannot outlive the pack it describes. Guided
--- identity correction deletes stale pack rows when a revision advances.
+-- Retention: a receipt cannot outlive the pack it describes.
+--
+-- This is the EXACT predicate the production invalidation paths use —
+-- `save_review_edits`, `regenerate_review_listing`,
+-- `sharpen_review_estimate`, and the pricing-evidence completion all
+-- delete `where item_id = … and user_id = … and platform in ('facebook',
+-- 'mercari')`. Depop is not in that literal, so a Depop pack and its
+-- receipt would survive a correction they no longer describe unless the
+-- sweep keeps the assisted destinations coherent.
 reset role;
 delete from public.listings
 where item_id = 'e7100000-0000-4000-8000-000000000001'
-  and source_review_revision = 'e7200000-0000-4000-8000-000000000001';
+  and user_id = 'export-handoff-a'
+  and platform in ('facebook', 'mercari');
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.listings
+    where item_id = 'e7100000-0000-4000-8000-000000000001'
+      and platform = 'depop'
+  ),
+  0,
+  'invalidating the packs leaves no assisted destination behind'
+);
 
 select extensions.is(
   (

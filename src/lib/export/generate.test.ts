@@ -813,4 +813,28 @@ describe("generateExportPacks — Depop", () => {
     expect(copy.fields["copyBlock"]).toBe(res.depop.copyBlock);
     expect(res.depop.price).toBe(120);
   });
+
+  it("pastes as description-then-hashtags, with no title line to strip", async () => {
+    // Depop's composer has one text field. Facebook and Mercari packs lead with
+    // a title line that the UI splits off into its own band; if Depop's block
+    // acquired one, the seller would paste a stray heading into a field that
+    // has nowhere to put it, and Depop's search would weight that heading
+    // instead of the keyword-first opening.
+    const { generate } = scriptedGenerate([GOOD_RAW]);
+    const res = await generateExportPacks({
+      attributes: CORE,
+      price: 120,
+      generate,
+      model: "test-model",
+    });
+
+    const lines = res.depop.copyBlock.split("\n");
+    expect(lines[0]).toBe(res.depop.pack.description);
+    expect(res.depop.copyBlock).not.toContain(res.facebook.pack.title);
+    expect(res.depop.copyBlock).not.toContain(res.mercari.pack.title);
+
+    // Everything after the description is hashtags and nothing else.
+    const tail = lines.slice(1).join("\n").trim();
+    expect(tail).toBe(res.depop.pack.hashtags.join(" "));
+  });
 });

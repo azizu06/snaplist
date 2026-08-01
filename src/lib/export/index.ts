@@ -66,6 +66,7 @@ export {
 
 export {
   ASSISTED_EXPORT_PLATFORMS,
+  ExportHandoffError,
   loadExportHandoffs,
   recordExportHandoff,
   markExportShared,

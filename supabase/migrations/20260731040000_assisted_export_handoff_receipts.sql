@@ -112,12 +112,24 @@ comment on function public.persist_export_packs(uuid, uuid, uuid, jsonb) is
 -- block guided identity correction, which refuses to regenerate a
 -- published listing.
 -- ---------------------------------------------------------------------
-alter table public.listings
-  add constraint listings_assisted_export_never_published
-  check (
-    platform not in ('facebook', 'mercari', 'depop')
-    or status is distinct from 'published'
-  );
+do $constraint$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.listings'::regclass
+      and conname = 'listings_assisted_export_never_published'
+  ) then
+    alter table public.listings
+      add constraint listings_assisted_export_never_published
+      check (
+        platform not in ('facebook', 'mercari', 'depop')
+        or status is distinct from 'published'
+      ) not valid;
+    alter table public.listings
+      validate constraint listings_assisted_export_never_published;
+  end if;
+end;
+$constraint$;
 
 -- ---------------------------------------------------------------------
 -- 3. Durable handoff receipts.
@@ -148,10 +160,9 @@ create table public.export_handoffs (
   constraint export_handoffs_unique_per_revision
     unique (item_id, platform, source_review_revision),
   -- A receipt only exists for a pack SnapList actually prepared, and it
-  -- dies with it. Guided identity correction deletes the stale pack rows
-  -- when a revision advances, so this is what keeps a `Shared` claim from
-  -- outliving the listing it described (retention matrix:
-  -- export-packs / review-revision-invalidates-pack).
+  -- dies with it. Paired with the sweep below, this is what keeps a
+  -- `Shared` claim from outliving the listing it described (retention
+  -- matrix: export-packs / review-revision-invalidates-pack).
   constraint export_handoffs_pack_fkey
     foreign key (item_id, platform, source_review_revision)
     references public.listings (item_id, platform, source_review_revision)
@@ -167,6 +178,58 @@ comment on column public.export_handoffs.shared_at is
 
 create index export_handoffs_item_revision_idx
   on public.export_handoffs (item_id, source_review_revision);
+
+-- ---------------------------------------------------------------------
+-- Keep the assisted destinations coherent when a pack is invalidated.
+--
+-- Four production paths drop an item's cached packs when its identity or
+-- estimate changes — `regenerate_review_listing`, `save_review_edits`,
+-- `sharpen_review_estimate`, and the guided-correction evidence
+-- completion — and each carries the literal
+-- `platform in ('facebook', 'mercari')` inside a large SECURITY DEFINER
+-- body. Adding a third destination to those literals would mean
+-- re-declaring roughly 600 lines of tenancy-critical guided-correction
+-- code verbatim, on a surface this issue does not own, to change one
+-- list. A sweep expresses the actual rule once instead: assisted export
+-- packs for an item are invalidated together, whatever the caller
+-- remembered to name. Without it a Depop pack — and a `Shared` receipt
+-- for it — would outlive the identity it described.
+--
+-- A statement trigger fires even when its statement touched no rows, so
+-- the sweep's own delete would re-enter forever without an explicit
+-- guard. `pg_trigger_depth()` is 1 at the top level and 2 when the sweep
+-- re-enters itself, which also correctly skips a cascade-driven delete:
+-- a cascade already removes every row the sweep would.
+-- ---------------------------------------------------------------------
+create or replace function private.sweep_assisted_export_packs()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if pg_catalog.pg_trigger_depth() > 1 then
+    return null;
+  end if;
+
+  delete from public.listings as pack
+  using deleted_packs as gone
+  where pack.item_id = gone.item_id
+    and pack.user_id = gone.user_id
+    and pack.platform in ('facebook', 'mercari', 'depop')
+    and gone.platform in ('facebook', 'mercari', 'depop');
+  return null;
+end;
+$$;
+
+comment on function private.sweep_assisted_export_packs() is
+  'Invalidates an item''s remaining assisted export packs whenever any one of them is deleted, so a destination missing from an older call site cannot outlive the identity it described (issue #378).';
+
+create trigger sweep_assisted_export_packs
+after delete on public.listings
+referencing old table as deleted_packs
+for each statement
+execute function private.sweep_assisted_export_packs();
 
 alter table public.export_handoffs enable row level security;
 
@@ -193,6 +256,10 @@ create or replace function private.assert_export_pack_current(
 )
 returns void
 language plpgsql
+-- Explicitly invoker: this helper carries no privilege of its own. It runs
+-- inside the SECURITY DEFINER capabilities below and must never become a
+-- second way to reach `public.items` on its own.
+security invoker
 set search_path = ''
 as $$
 begin

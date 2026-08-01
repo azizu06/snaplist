@@ -18,8 +18,8 @@ import {
 /**
  * Load-or-generate seam for the export page (issue #15): the packs are
  * generated once per coherent review-content revision and persisted as `listings` rows (platform
- * 'facebook' / 'mercari' — exactly the platforms the schema migration
- * anticipated), then served from those rows while that revision remains current. Identity or
+ * 'facebook' / 'mercari' / 'depop' — the three assisted destinations, all of
+ * which the seller finishes by hand), then served from those rows while that revision remains current. Identity or
  * other content edits advance the revision, so stale packs are ignored and regenerated. Price-only
  * edits reuse the generated copy, attach the current effective price, and are guarded by the full
  * review revision so an in-flight stale price fails closed. All reads and writes go through the
@@ -54,7 +54,7 @@ export interface ExportPacksView {
   facebook: ExportPackView;
   mercari: ExportPackView;
   depop: DepopPackView;
-  /** True when both packs were served from persisted rows (no model call). */
+  /** True when all three packs were served from persisted rows (no model call). */
   cached: boolean;
   /**
    * The generating model id — provenance is PERSISTED with each pack row
