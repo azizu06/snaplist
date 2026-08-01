@@ -61,7 +61,7 @@ export default function Error({
           Try again
         </button>
         <Link
-          href="/dashboard"
+          href="/"
           className="inline-flex items-center justify-center rounded-lg border border-border-strong bg-surface px-4 py-2.5 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
         >
           Go to your listings

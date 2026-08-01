@@ -11,9 +11,13 @@
  * so `//evil.example`, `/\evil.example`, and `/<tab>/evil.example` all resolve
  * cross-origin from strings that look like plain paths. Control characters are also
  * rejected in decoded form (`%09` etc.) as defense in depth for callers handing in
- * a still-encoded value. Anything that fails falls back to `/upload`.
+ * a still-encoded value. Anything that fails falls back to `/`.
+ *
+ * The fallback is the marketing home because #598 retired the web app route
+ * group and the launch client is SwiftUI, so there is no signed-in web
+ * destination to land on. Where the post-signup path should actually go is #191.
  */
-const FALLBACK = "/upload";
+const FALLBACK = "/";
 const BASE_ORIGIN = "https://safe-next.invalid";
 
 export function safeNext(raw: unknown): string {

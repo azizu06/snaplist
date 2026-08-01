@@ -43,7 +43,6 @@ ios/SnapList/Features/Capture/AVFoundationCapture.swift
 ios/SnapList/Features/Capture/CaptureDomain.swift
 ios/SnapList/Features/Capture/CaptureViews.swift
 ios/SnapList/Features/FoundationPlaceholderView.swift
-ios/SnapList/Features/Home/ClerkHomeAuthentication.swift
 ios/SnapList/Features/Home/HomeDomain.swift
 ios/SnapList/Features/Home/HomeRepository.swift
 ios/SnapList/Features/Home/HomeViews.swift
@@ -61,7 +60,6 @@ src/app/api/batch/status/route.ts
 src/app/api/billing/checkout/route.ts
 src/app/api/billing/portal/route.ts
 src/app/api/cron/inbox-sync/route.ts
-src/app/api/cron/reprice/route.ts
 src/app/api/ebay/account-deletion/route.ts
 src/app/api/ebay/callback/route.ts
 src/app/api/ebay/connect/route.ts
@@ -183,7 +181,6 @@ src/lib/pipeline-queue/queue.ts
 src/lib/pipeline-queue/supabase-pgmq.ts
 src/lib/pipeline-queue/worker-store.ts
 src/lib/pipeline-queue/worker.ts
-src/lib/pipeline-recovery/runs.ts
 src/lib/pipeline-staging/index.ts
 src/lib/pipeline-staging/internal.ts
 src/lib/pipeline-staging/schema.ts
@@ -223,7 +220,6 @@ src/lib/pricing/providers/web-search.ts
 src/lib/pricing/router.ts
 src/lib/pricing/sold-comp-matcher.ts
 src/lib/pricing/sold-comps-smoke.ts
-src/lib/pricing/strategies.ts
 src/lib/pricing/types.ts
 src/lib/rag/corpus-data.ts
 src/lib/rag/embedding.ts
@@ -231,14 +227,9 @@ src/lib/rag/harvest.ts
 src/lib/rag/index.ts
 src/lib/rag/retrieve.ts
 src/lib/rag/types.ts
-src/lib/reprice/index.ts
-src/lib/reprice/policy.ts
-src/lib/reprice/suggestions.ts
-src/lib/reprice/sweep.ts
 src/lib/sentry.ts
 src/lib/settings/user-settings.ts
 src/lib/supabase/admin.ts
-src/lib/supabase/client.ts
 src/lib/supabase/server.ts
 src/lib/supabase/tenant-server.ts
 src/lib/supabase/test-users.ts
@@ -246,7 +237,6 @@ src/lib/ui/dates.ts
 src/lib/ui/format.ts
 src/lib/ui/item-label.ts
 src/lib/ui/publish-eligibility.ts
-src/lib/ui/realtime-status.ts
 src/lib/ui/search.ts
 src/lib/ui/status.ts
 src/lib/unit-economics/calculate.ts
