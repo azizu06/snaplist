@@ -103,6 +103,31 @@ account erasure, Storage cleanup, a hosted schedule, provider mutation, native U
 Future executor issues must consume the contract, preserve tenant fencing and replay safety, and
 produce the named completion proof before reporting deletion.
 
+### 6. Let the erasure receipt outlive the account, scrubbed and bounded
+
+Issue #384's executor needs one record that survives the deletion it performs. A durable erasure has
+to answer a replayed `Idempotency-Key` with the generation it already resolved to, and has to keep
+refusing writes to an account that is gone; deleting that record with everything else makes both
+answers impossible, and a replay would then start a second erasure of a person who no longer exists.
+
+So `account-erasure-receipt` is a matrix row rather than an implementation detail, and it carries
+three limits. It is not tenant data: it lives in `private`, it is unreachable by any tenant, and it
+is keyed by a SHA-256 digest of a fixed constant prefix and the user id rather than by the id. That
+prefix is a domain separator carried in the migration source, not a secret, so the digest is
+deliberately *not* described as salted — what defeats enumeration is the entropy of a Clerk user id,
+not anything withheld from someone who has read the migration.
+
+It is scrubbed at the moment a *completed* status is written — the SnapList user id, Clerk user id,
+RevenueCat app user ids, and `Idempotency-Key` are removed by database constraint, not by convention
+— so what outlives the account cannot re-identify the person. An erasure that has not completed,
+including one parked in `deletion_needs_attention`, still holds those identifiers, because resuming
+the deletion requires them. That is a bounded window on unfinished work rather than a retention
+decision, and such a row is not pruned until it completes.
+
+And it expires: a daily private prune removes receipts 30 days after they complete. That window is
+an owner judgement, long enough for a client retrying a stalled erasure to resolve to its own
+generation and short enough that a digest does not become indefinite retention.
+
 ## Consequences
 
 - Account-erasure and App Store review work share one machine-checked vocabulary instead of deriving
