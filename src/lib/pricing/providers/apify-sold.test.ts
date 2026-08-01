@@ -71,9 +71,14 @@ function rawItem(overrides: Record<string, unknown> = {}): Record<string, unknow
     soldPrice: "180.00",
     soldCurrency: "USD",
     listingType: "buy_it_now",
+    buyingFormat: "buyItNow",
     isBestOfferAccepted: false,
     sellerUsername: "must-not-survive-normalization",
-    thumbnailUrl: "https://images.example/private.jpg",
+    thumbnailUrl: "https://i.ebayimg.com/images/g/synthetic/s-l500.jpg",
+    shippingType: "paid",
+    shippingPrice: 8.95,
+    shippingCurrency: "USD",
+    itemSpecifics: { Brand: "Sony", Size: "One size" },
     ...overrides,
   };
 }
@@ -159,7 +164,7 @@ describe("Apify sold-comp configuration", () => {
 });
 
 describe("normalizeApifySoldItems", () => {
-  it("normalizes only provider-neutral pricing fields and drops seller/image identity", () => {
+  it("preserves documented provider facts while dropping seller identity and unknown fields", () => {
     const [comp] = normalizeApifySoldItems([rawItem()]);
 
     expect(comp).toEqual({
@@ -168,12 +173,48 @@ describe("normalizeApifySoldItems", () => {
       price: 180,
       condition: "Pre-Owned",
       soldAt: Date.parse("2026-07-10T12:00:00.000Z"),
+      photoUrl: "https://i.ebayimg.com/images/g/synthetic/s-l500.jpg",
+      size: "One size",
+      format: "buy-it-now",
+      shipping: { type: "paid", price: 8.95, currency: "USD" },
       isBestOfferAccepted: false,
       priceDisclosure: "displayed-sold-price",
     });
     expect(comp).not.toHaveProperty("itemId");
     expect(comp).not.toHaveProperty("sellerUsername");
     expect(comp).not.toHaveProperty("thumbnailUrl");
+  });
+
+  it("keeps unsupported, missing, and malformed optional facts absent", () => {
+    const [comp] = normalizeApifySoldItems([
+      rawItem({
+        thumbnailUrl: "http://i.ebayimg.com/insecure.jpg",
+        buyingFormat: "classifiedAd",
+        shippingType: "paid",
+        shippingPrice: null,
+        shippingCurrency: null,
+        itemSpecifics: { Size: "   " },
+        size: "Unpublished actor field",
+      }),
+    ]);
+
+    expect(comp).not.toHaveProperty("photoUrl");
+    expect(comp).not.toHaveProperty("size");
+    expect(comp).not.toHaveProperty("format");
+    expect(comp).not.toHaveProperty("shipping");
+  });
+
+  it("normalizes a mixed-case HTTPS thumbnail before retaining it", () => {
+    const [comp] = normalizeApifySoldItems([
+      rawItem({
+        thumbnailUrl:
+          "HtTpS://i.ebayimg.com/images/g/synthetic-normalized/s-l500.jpg",
+      }),
+    ]);
+
+    expect(comp.photoUrl).toBe(
+      "https://i.ebayimg.com/images/g/synthetic-normalized/s-l500.jpg",
+    );
   });
 
   it("uses conditionId only as a fallback when the Actor omits condition text", () => {
@@ -1079,6 +1120,52 @@ describe("createApifySoldPricingProvider", () => {
     expect(winner).not.toBeNull();
     expect(retry).toEqual(winner);
     expect(runActor).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a cache replay that drops provider-supplied optional facts", async () => {
+    vi.useFakeTimers();
+    try {
+      let stored: ApifySoldComp[] | null = null;
+      const runActor = successfulRun([
+        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+        rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+      ]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => stored,
+        set: async (_key, value) => {
+          stored = value.map((comp) => ({
+            url: comp.url,
+            title: comp.title,
+            price: comp.price,
+            condition: comp.condition,
+            soldAt: comp.soldAt,
+            isBestOfferAccepted: comp.isBestOfferAccepted,
+            priceDisclosure: comp.priceDisclosure,
+          }));
+          throw new Error("winner store response rejected after lossy commit");
+        },
+        claim: async () => true,
+      };
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+
+      const result = provider.price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      await expect(result).resolves.toBeNull();
+      expect(runActor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects a different shared result after the winner store is rejected", async () => {

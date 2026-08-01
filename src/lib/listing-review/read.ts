@@ -147,6 +147,33 @@ export const listingReviewProjectionSchema = z
             currency: z.string().regex(/^[A-Z]{3}$/),
             condition: z.string().min(1).max(120).nullable(),
             soldAt: z.number().int().nonnegative().nullable(),
+            photoURL: z
+              .string()
+              .regex(/^https:\/\//)
+              .url()
+              .max(2_048)
+              .optional(),
+            size: z.string().min(1).max(120).optional(),
+            format: z
+              .enum([
+                "auction",
+                "buy-it-now",
+                "auction-with-buy-it-now",
+              ])
+              .optional(),
+            shipping: z
+              .discriminatedUnion("type", [
+                z.object({ type: z.literal("free") }).strict(),
+                z
+                  .object({
+                    type: z.literal("paid"),
+                    price: currency,
+                    currency: z.string().regex(/^[A-Z]{3}$/),
+                  })
+                  .strict(),
+                z.object({ type: z.literal("pickup") }).strict(),
+              ])
+              .optional(),
           })
           .strict(),
       )
@@ -270,6 +297,10 @@ function projectReview(
     currency: record.currency,
     condition: record.condition ?? null,
     soldAt: record.soldAt ?? null,
+    ...(record.photoUrl ? { photoURL: record.photoUrl } : {}),
+    ...(record.size ? { size: record.size } : {}),
+    ...(record.format ? { format: record.format } : {}),
+    ...(record.shipping ? { shipping: record.shipping } : {}),
   }));
 
   return listingReviewProjectionSchema.parse({

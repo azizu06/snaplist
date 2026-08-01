@@ -239,7 +239,15 @@ final class RunAPIClientTests: XCTestCase {
                     "soldPrice": 142.5,
                     "currency": "USD",
                     "condition": "Used",
-                    "soldAt": 1785283200
+                    "soldAt": 1785283200,
+                    "photoURL": "https://i.ebayimg.com/images/g/376/s-l500.jpg",
+                    "size": "One size",
+                    "format": "buy-it-now",
+                    "shipping": {
+                      "type": "paid",
+                      "price": 8.95,
+                      "currency": "USD"
+                    }
                   }
                 ],
                 "startingPriceCopy": "Starting price estimate",
@@ -271,7 +279,65 @@ final class RunAPIClientTests: XCTestCase {
         let match = try XCTUnwrap(review.verifiedSoldMatches.first)
         XCTAssertEqual(match.id, "ebay-sold-376")
         XCTAssertEqual(match.soldPrice, 142.5)
+        XCTAssertEqual(
+            match.photoURL,
+            URL(string: "https://i.ebayimg.com/images/g/376/s-l500.jpg")
+        )
+        XCTAssertEqual(match.size, "One size")
+        XCTAssertEqual(match.format, .buyItNow)
+        XCTAssertEqual(
+            match.shipping,
+            .paid(price: 8.95, currency: "USD")
+        )
         XCTAssertNil(review.soldEvidenceCopy)
+    }
+
+    func testRunDetailDecodesSparseVerifiedSoldMatch() async throws {
+        let runID = UUID(uuidString: "37600000-0000-4000-8000-000000000001")!
+        let payload = Self.reviewEnvelope.replacingOccurrences(
+            of: #"""
+                "verifiedSoldMatches": [],
+                "startingPriceCopy": "Starting price estimate",
+                "soldEvidenceCopy": "No verified sold matches found."
+          """#,
+            with: #"""
+                "verifiedSoldMatches": [
+                  {
+                    "id": "ebay-sold-sparse-376",
+                    "sourceURL": "https://www.ebay.com/itm/sparse-376",
+                    "title": null,
+                    "soldPrice": 90,
+                    "currency": "USD",
+                    "condition": null,
+                    "soldAt": null
+                  }
+                ],
+                "startingPriceCopy": "Starting price estimate",
+                "soldEvidenceCopy": null
+          """#
+        )
+        let client = RunAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            session: makeSession { request in
+                (
+                    HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    Data(payload.utf8)
+                )
+            }
+        )
+
+        let run = try await client.fetchRun(id: runID, bearerToken: "review-token")
+        let match = try XCTUnwrap(run.review?.verifiedSoldMatches.first)
+        XCTAssertEqual(match.id, "ebay-sold-sparse-376")
+        XCTAssertNil(match.photoURL)
+        XCTAssertNil(match.size)
+        XCTAssertNil(match.format)
+        XCTAssertNil(match.shipping)
     }
 
     func testMalformedRunContractFailsClosed() async throws {
