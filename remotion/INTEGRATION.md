@@ -1,8 +1,16 @@
 # Real-UI demo media
 
+> **This pipeline cannot run right now. See issue #602.** Issue #598 deleted the
+> web route group `src/app/(app)`, and with it the deterministic capture fixtures
+> every job below navigated to. The clips already committed under `public/demo/`
+> are unaffected and the marketing site still renders them. Only regeneration is
+> blocked. #602 decides whether the pipeline is retired or recaptured from the
+> SwiftUI client. The rest of this document describes how it worked before that
+> deletion.
+
 The marketing tour and the in-app inbox teaser use captures of the shipped
-SnapList components, not a separately drawn demo interface. Deterministic
-fixtures live under `src/app/(app)/dev/preview`; the capture boundary only adds
+SnapList components rather than a separately drawn demo interface. Deterministic
+fixtures lived under `src/app/(app)/dev/preview`; the capture boundary only adds
 theme, focus, and mobile-state controls for the media pipeline.
 
 ## Pipeline
@@ -80,7 +88,6 @@ Run the focused capture/catalog tests before rendering:
 
 ```sh
 pnpm vitest run src/lib/demo-capture-qa.test.ts \
-  'src/app/(app)/inbox/conversation-list-layout.test.ts' \
   src/lib/demo-products.test.ts
 ```
 

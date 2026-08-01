@@ -77,10 +77,13 @@ synthesizeSoldResult(comps)   ← STAYS in TypeScript, unchanged
 
 ## 3. Current state (grounded in the code)
 
-- **Entry seam:** `uploadAndProcess()` in `src/app/(app)/upload/actions.ts` runs
-  auth → daily-item quota (`checkDailyItemQuota`) → store photos → `recordPipelineRunAndMaybeAlert`
-  → `createVisionPipeline({ supabase })` → `runPipelineAndPersist(...)` → `redirect("/review/:id")`.
-  **The user waits for the entire run, scrape included, before the redirect.**
+- **Entry seam:** `POST /v1/items/runs` (`src/app/v1/items/runs/handler.ts`) resolves the principal,
+  stores photos, and records a durable `pipeline_runs` row. Execution happens later in
+  `src/lib/pipeline-queue/durable-processor.ts`, which runs `createVisionPipeline({ supabase })` →
+  `runPipelineAndPersist(...)` (ADR-0007). **The seller does not wait for the run.** Submission
+  returns once the run is durably accepted, and the client polls or refreshes for the result.
+  The synchronous web upload action this section used to describe was deleted with the browser
+  route group in issue #598.
 - **Scraper:** `createDefaultFetchPage()` in `ebay-sold.ts` direct-fetches by
   default. Optional `EBAY_SOLD_PROXY_TEMPLATE` routes the validated eBay target
   through operator-selected hosted egress; malformed templates fail before any

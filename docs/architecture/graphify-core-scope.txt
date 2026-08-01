@@ -55,15 +55,6 @@ next.config.ts
 package.json
 pnpm-lock.yaml
 pnpm-workspace.yaml
-src/app/(app)/dashboard/actions.ts
-src/app/(app)/dashboard/reprice-actions.ts
-src/app/(app)/listings/[listingId]/actions.ts
-src/app/(app)/notifications/actions.ts
-src/app/(app)/pipeline-runs/actions.ts
-src/app/(app)/review/[itemId]/actions.ts
-src/app/(app)/settings/actions.ts
-src/app/(app)/upload/actions.ts
-src/app/(app)/upload/durable-actions.ts
 src/app/api/batch/enqueue/route.ts
 src/app/api/batch/item/route.ts
 src/app/api/batch/status/route.ts
