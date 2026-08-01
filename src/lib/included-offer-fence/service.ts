@@ -83,9 +83,14 @@ export interface IncludedOfferRedemptionWorker {
    * Advances the single head claim.
    *
    * `erasing` names the claims this tick declined to touch because their owner
-   * is mid-erasure. It is reported rather than dropped: those rows leave by
-   * deletion, not by anything the worker does, and a tick that met one and said
-   * nothing is indistinguishable from a tick that did no work at all (#588).
+   * is mid-erasure, and whose queue wake-up it therefore retired. The row itself
+   * leaves by deletion, not by anything the worker does; the message goes because
+   * it can never produce progress, and a deferred one would own the head for the
+   * length of the erasure. Reported rather than silent: a tick that met one and
+   * said nothing is indistinguishable from a tick that did no work at all (#588).
+   *
+   * Disjoint from `acked`, which names messages retired because their claim was
+   * already gone or terminal.
    */
   advance(): Promise<{
     acked: string[];
@@ -520,12 +525,24 @@ export function createIncludedOfferRedemptionWorker(
           opened.push(transition.claim.claimId);
           break;
         case "account_erasure_in_progress":
-          // Deferring rather than acking is what makes this self-healing: once
-          // erasure deletes the row, the redelivery finds no claim and the
-          // existing missing-claim path retires the message. Acking here would
-          // instead drop a message whose claim might yet outlive the erasure.
+          // Retire the wake-up rather than defer it. Deferring hands the erasing
+          // owner the queue head permanently: the visibility timeout is shorter
+          // than the cron period, so this same message is the oldest visible one
+          // on every later tick and is declined again, and the account queued
+          // behind it never reaches `awaiting_device_token` at all — this issue's
+          // own stall, moved off the sweep and onto the head.
+          //
+          // Dropping it loses nothing, by the proof in 20260801220000 rather than
+          // by judgement: the fence outlives the row, so an erasing claim is never
+          // writable again — not while `advance_account_erasure` defers across
+          // ticks, and not when it fails into `deletion_needs_attention`, since
+          // both keep the generation on file. Either the row is deleted and this
+          // redelivery would have hit the missing-claim path anyway, or it stays
+          // fenced and the message was pure head occupancy. Acking is a queue
+          // delete and never writes the fenced row, so the tick still cannot 500.
           erasing.push(claim.claimId);
-          break;
+          await composition.queue.ack(message.messageId);
+          return { acked, erasing, expired, opened };
         case "not_applied":
           break;
       }
