@@ -885,6 +885,105 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertFalse(files.fileExists(atPath: secondEntryRoot.path))
         XCTAssertTrue(files.fileExists(atPath: firstEntryRoot.path))
     }
+    func testUnreadableDeferredUnmatchedVoiceEntryStillExpiresItsSiblings() async throws {
+        let start = Date(timeIntervalSince1970: 2_100_000_000)
+        let clock = NativeIntakeTestClock(now: start)
+        let harness = NativeIntakeHarness(
+            identity: .clerk("user_native_intake_deferred_unreadable_sibling")
+        )
+        addTeardownBlock { harness.cleanUp() }
+        let guardedFiles = NativeIntakeTestFileManager()
+        let session = try await harness.makeSession(
+            fileManager: guardedFiles,
+            now: clock.now,
+            sleepUntil: clock.sleep
+        )
+        var entryRoots: [URL] = []
+        var principalRoot: URL?
+        for seed in 1...3 {
+            if seed > 1 {
+                clock.advance(by: 60 * 60)
+            }
+            _ = try await session.commit(
+                .addPhotos([harness.photoInput(seed: seed)])
+            )
+            let staged = try await session.commit(
+                .setVoice(voice("unmatched voice \(seed)", duration: 3))
+            )
+            let stagedVoice = try XCTUnwrap(staged.voice)
+            let root = intakeRoot(containing: staged.photos[0].photoURL)
+            principalRoot = root
+            let retirement = await session.perform(
+                .retireAcceptedPhotos(
+                    expected: staged.version,
+                    photoIDs: staged.photos.map(\.id),
+                    preservingUnmatchedVoiceID: stagedVoice.id
+                )
+            )
+            XCTAssertEqual(retirement, .committed)
+            assertEmpty(try await session.nextSnapshot())
+            entryRoots.append(
+                root
+                    .appendingPathComponent(
+                        "DeferredUnmatchedVoices",
+                        isDirectory: true
+                    )
+                    .appendingPathComponent(
+                        stagedVoice.id.uuidString.lowercased(),
+                        isDirectory: true
+                    )
+            )
+        }
+        _ = try XCTUnwrap(principalRoot)
+        let unreadableEntryRoot = entryRoots[0]
+        let freedEntryRoot = entryRoots[1]
+        let blockedEntryRoot = entryRoots[2]
+
+        // A directory-tree removal is not atomic, so an interrupted deletion
+        // sweep can leave the entry directory standing with its metadata
+        // already gone. That entry can never be read back, but its siblings
+        // are still ordinary deferred voices with real deadlines.
+        try files.removeItem(
+            at: unreadableEntryRoot.appendingPathComponent("entry.json")
+        )
+        XCTAssertTrue(files.fileExists(atPath: unreadableEntryRoot.path))
+        XCTAssertTrue(files.fileExists(atPath: freedEntryRoot.path))
+
+        // One sibling's removal is blocked so that a working and a stalled
+        // sweep both settle on the same retry deadline, which keeps this
+        // assertion deterministic instead of hanging one of them.
+        guardedFiles.failNextFileOperation = .rootDeletions([
+            blockedEntryRoot.standardizedFileURL.path
+        ])
+        let expiryRegistration = clock.latestRegistration
+        clock.advance(by: NativeIntake.recoveryWindow)
+        let retryDeadline = clock.now().addingTimeInterval(
+            NativeIntake.retentionRetryInterval
+        )
+        await clock.waitUntilLiveSleeper(
+            after: expiryRegistration,
+            deadline: retryDeadline
+        )
+
+        guard guardedFiles.rootDeletionFailureCount(at: blockedEntryRoot) == 1
+        else {
+            return XCTFail(
+                "An unreadable entry froze the expiry of its readable siblings."
+            )
+        }
+        XCTAssertFalse(files.fileExists(atPath: freedEntryRoot.path))
+        XCTAssertFalse(files.fileExists(atPath: unreadableEntryRoot.path))
+
+        let removalBaseline = guardedFiles.successfulRootRemovalCount
+        guardedFiles.failNextFileOperation = nil
+        clock.advance(by: NativeIntake.retentionRetryInterval)
+        await guardedFiles.waitForRootRemovals(
+            removalBaseline + 1,
+            successful: true
+        )
+
+        XCTAssertFalse(files.fileExists(atPath: blockedEntryRoot.path))
+    }
     private func intakeRoot(containing asset: URL) -> URL {
         asset.deletingLastPathComponent()
             .deletingLastPathComponent()
