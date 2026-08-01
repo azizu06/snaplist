@@ -20,17 +20,30 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
 
+        // Opening the row is navigation, so assert it separately from the
+        // action inside it. A failure here means the row did not toggle; a
+        // failure below means the workspace opened but its action is not
+        // reachable. Collapsing the two would leave that ambiguous.
+        let workspace = marker("assisted-export.workspace.facebook", in: app)
+        XCTAssertTrue(
+            workspace.waitForExistence(timeout: 5),
+            "Tapping the row opens its workspace.\n\(app.debugDescription)"
+        )
+
         // `SnapListPrimaryButton` derives its identifier from its own title, so
         // these are addressed the way the rest of the suite addresses that
         // component rather than by an outer identifier that never reaches it.
         let open = app.buttons["button.primary.open-facebook-marketplace"]
-        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            open.waitForExistence(timeout: 5),
+            "The workspace offers the open action.\n\(app.debugDescription)"
+        )
         open.tap()
 
         let markAsShared = app.buttons["assisted-export.mark-as-shared.facebook"]
         XCTAssertTrue(
             markAsShared.waitForExistence(timeout: 5),
-            "Mark as shared follows a recorded handoff."
+            "Mark as shared follows a recorded handoff.\n\(app.debugDescription)"
         )
         markAsShared.tap()
 
