@@ -427,6 +427,94 @@ describe("durable included-offer fence over Postgres", () => {
     await admin.rpc("release_included_offer_writer_lease", { p_claim_id: rival });
   });
 
+  it("outranks an expired lease with an unresolved Apple write, until it goes stale", async () => {
+    if (!reachable) return;
+    const writer = crypto.randomUUID();
+    const rival = crypto.randomUUID();
+    const created = await admin.rpc("begin_included_offer_claim", {
+      p_app_attest_key_id: `key-${writer}`,
+      p_claim_id: writer,
+      p_idempotency_key: `idem-${writer}`,
+      p_state: "queued",
+      p_user_id: userA.id,
+    });
+    expect(created.error).toBeNull();
+    await admin.rpc("transition_included_offer_claim", {
+      p_claim_id: writer,
+      p_from: ["queued"],
+      p_to: "awaiting_device_token",
+    });
+    // The write is outstanding: Apple may or may not have taken it, so nobody
+    // else may read that device's bit and believe what it says.
+    const writing = await admin.rpc("transition_included_offer_claim", {
+      p_apple_phase: "update",
+      p_claim_id: writer,
+      p_from: ["awaiting_device_token"],
+      p_set_apple_phase: true,
+      p_to: "apple_pending",
+    });
+    expect(writing.error).toBeNull();
+
+    // A one-second lease that has already lapsed still must not free the
+    // rendezvous, or the rival would observe a stale clear and reserve too.
+    await admin.rpc("acquire_included_offer_writer_lease", {
+      p_claim_id: writer,
+      p_lease_seconds: 1,
+    });
+    await admin.rpc("release_included_offer_writer_lease", {
+      p_claim_id: writer,
+    });
+    await expect(
+      admin.rpc("acquire_included_offer_writer_lease", {
+        p_claim_id: rival,
+        p_lease_seconds: 30,
+      }),
+    ).resolves.toMatchObject({ data: false, error: null });
+    await expect(
+      admin.rpc("holds_included_offer_writer_lease", { p_claim_id: rival }),
+    ).resolves.toMatchObject({ data: false, error: null });
+
+    // The worker sees the same occupancy before inviting the next account, and
+    // the writer does not block itself.
+    await expect(
+      admin.rpc("has_open_included_offer_rendezvous", {
+        p_except_claim_id: rival,
+      }),
+    ).resolves.toMatchObject({ data: true, error: null });
+    await expect(
+      admin.rpc("has_open_included_offer_rendezvous", {
+        p_except_claim_id: writer,
+      }),
+    ).resolves.toMatchObject({ data: false, error: null });
+
+    // Sweeping terminalizes rather than merely unblocking: the writer loses the
+    // offer, so whatever Apple's bit now says is unambiguous for the next claim.
+    const swept = await admin.rpc("expire_stale_included_offer_rendezvous", {
+      p_older_than: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(swept.error).toBeNull();
+    expect(swept.data).toEqual([writer]);
+    const settled = await admin
+      .from("included_offer_device_claims")
+      .select("state")
+      .eq("claim_id", writer)
+      .single();
+    expect(settled.data).toEqual({ state: "denied_apple_unavailable" });
+
+    await expect(
+      admin.rpc("acquire_included_offer_writer_lease", {
+        p_claim_id: rival,
+        p_lease_seconds: 30,
+      }),
+    ).resolves.toMatchObject({ data: true, error: null });
+    await expect(
+      admin.rpc("holds_included_offer_writer_lease", { p_claim_id: rival }),
+    ).resolves.toMatchObject({ data: true, error: null });
+    await admin.rpc("release_included_offer_writer_lease", {
+      p_claim_id: rival,
+    });
+  });
+
   it("carries claim identity only through the redemption queue", async () => {
     if (!reachable) return;
     const claimId = crypto.randomUUID();

@@ -21,7 +21,9 @@ type IncludedOfferRpcName =
   | "defer_included_offer_message"
   | "acquire_included_offer_writer_lease"
   | "release_included_offer_writer_lease"
-  | "find_open_included_offer_rendezvous"
+  | "has_open_included_offer_rendezvous"
+  | "expire_stale_included_offer_rendezvous"
+  | "holds_included_offer_writer_lease"
   | "find_active_included_offer_override"
   | "consume_included_offer_override";
 
@@ -216,13 +218,31 @@ export function createSupabaseIncludedOfferClaimStore(
       return z.boolean().parse(data);
     },
 
-    async findOpenRendezvousClaim(input) {
+    async hasOpenRendezvous(input) {
       const { data, error } = await client.rpc(
-        "find_open_included_offer_rendezvous",
+        "has_open_included_offer_rendezvous",
         { p_except_claim_id: input.exceptClaimId },
       );
       failed("open rendezvous lookup", error);
-      return optionalClaim(data);
+      return z.boolean().parse(data);
+    },
+
+    async expireStaleRendezvous(input) {
+      const { data, error } = await client.rpc(
+        "expire_stale_included_offer_rendezvous",
+        { p_older_than: input.olderThan.toISOString() },
+      );
+      failed("stale rendezvous expiry", error);
+      return z.array(z.string().uuid()).parse(data ?? []);
+    },
+
+    async holdsWriterLease(input) {
+      const { data, error } = await client.rpc(
+        "holds_included_offer_writer_lease",
+        { p_claim_id: input.claimId },
+      );
+      failed("writer lease continuity check", error);
+      return z.boolean().parse(data);
     },
 
     async acquireWriterLease(input) {

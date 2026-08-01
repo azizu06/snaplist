@@ -17,7 +17,11 @@ describe("/api/internal/included-offer-worker", () => {
 
   it("advances one head claim for an authorized scheduler on either method", async () => {
     process.env.CRON_SECRET = "worker-secret";
-    advance.mockResolvedValue({ acked: ["claim-a"], opened: [] });
+    advance.mockResolvedValue({
+      acked: ["claim-a"],
+      expired: ["claim-b"],
+      opened: [],
+    });
     const route = await import("./route");
     for (const invoke of [route.GET, route.POST]) {
       advance.mockClear();
@@ -28,8 +32,11 @@ describe("/api/internal/included-offer-worker", () => {
         }),
       );
       expect(response.status).toBe(200);
+      // The sweep of abandoned Apple writes is reported, not swallowed: an
+      // operator watching this endpoint should see claims being terminalized.
       await expect(response.json()).resolves.toEqual({
         acked: ["claim-a"],
+        expired: ["claim-b"],
         opened: [],
       });
       expect(advance).toHaveBeenCalledOnce();

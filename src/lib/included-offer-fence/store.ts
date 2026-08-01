@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   INCLUDED_OFFER_REDEMPTION_SCHEMA_VERSION,
+  isTerminalIncludedOfferState,
   type IncludedOfferApplePhase,
   type IncludedOfferClaimState,
 } from "./contract";
@@ -78,17 +79,28 @@ export interface IncludedOfferClaimStore {
     overrideId: string;
   }): Promise<boolean>;
   /**
-   * A claim other than `exceptClaimId` that still occupies the rendezvous. The
-   * worker uses it to keep exactly one claim open at a time.
+   * Whether a claim other than `exceptClaimId` still occupies the rendezvous.
+   * The worker uses it to keep exactly one claim open at a time.
    *
-   * "Occupies" is bounded, or an abandoned claim would stall the queue for
-   * every account: either its token window is still open, or it carries an
+   * "Occupies" means either its token window is still open, or it carries an
    * unresolved `update` write that no other claim can make progress past anyway.
+   * Deliberately a boolean: the worker does not own the blocking claim and has
+   * no business reading another tenant's identity out of it.
    */
-  findOpenRendezvousClaim(input: {
+  hasOpenRendezvous(input: {
     exceptClaimId: string;
     now: Date;
-  }): Promise<IncludedOfferClaim | null>;
+  }): Promise<boolean>;
+  /**
+   * Terminalizes claims whose unresolved `update` write has gone stale, and
+   * returns their ids.
+   *
+   * An unresolved write blocks every account's redemption, and a client that
+   * never comes back would block them forever. Terminalizing is the only safe
+   * release: the device bit may or may not be set, so the abandoning claim has
+   * to lose the offer before anyone else may read that bit as clear.
+   */
+  expireStaleRendezvous(input: { olderThan: Date }): Promise<string[]>;
   /**
    * The global single-writer lease over Apple's query-and-set window. Apple
    * exposes query and update but no compare-and-set, so correctness requires
@@ -105,6 +117,14 @@ export interface IncludedOfferClaimStore {
     leaseMs: number;
     now: Date;
   }): Promise<boolean>;
+  /**
+   * Whether this claim still holds the lease it took, unexpired.
+   *
+   * Re-acquiring cannot answer this: a lease that lapsed and was picked up and
+   * released by a rival is free again, and re-acquiring it would succeed while
+   * the rival's write sat between our stale `bit0` read and our own.
+   */
+  holdsWriterLease(input: { claimId: string; now: Date }): Promise<boolean>;
   releaseWriterLease(input: { claimId: string }): Promise<void>;
 }
 
@@ -252,10 +272,10 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
     return true;
   }
 
-  async findOpenRendezvousClaim(input: {
+  async hasOpenRendezvous(input: {
     exceptClaimId: string;
     now: Date;
-  }): Promise<IncludedOfferClaim | null> {
+  }): Promise<boolean> {
     for (const claim of this.#claims.values()) {
       if (
         claim.claimId !== input.exceptClaimId &&
@@ -264,10 +284,26 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
           claim.tokenDeadlineAt.getTime() > input.now.getTime()) ||
           claim.applePhase === "update")
       ) {
-        return { ...claim };
+        return true;
       }
     }
-    return null;
+    return false;
+  }
+
+  async expireStaleRendezvous(input: { olderThan: Date }): Promise<string[]> {
+    const expired: string[] = [];
+    for (const claim of this.#claims.values()) {
+      if (
+        claim.applePhase === "update" &&
+        !isTerminalIncludedOfferState(claim.state) &&
+        claim.updatedAt.getTime() <= input.olderThan.getTime()
+      ) {
+        claim.state = "denied_apple_unavailable";
+        claim.tokenDeadlineAt = null;
+        expired.push(claim.claimId);
+      }
+    }
+    return expired;
   }
 
   async acquireWriterLease(input: {
@@ -283,12 +319,14 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
       return false;
     }
     // An unresolved write outranks an expired lease: the lease can time out, but
-    // Apple's indeterminate bit does not become somebody else's to claim.
+    // Apple's indeterminate bit does not become somebody else's to claim. The
+    // state test is "not terminal" rather than the open-rendezvous set, because
+    // a deadline requeue parks a claim at `queued` with its phase intact.
     for (const claim of this.#claims.values()) {
       if (
         claim.claimId !== input.claimId &&
         claim.applePhase === "update" &&
-        OPEN_RENDEZVOUS_STATES.includes(claim.state)
+        !isTerminalIncludedOfferState(claim.state)
       ) {
         return false;
       }
@@ -298,6 +336,16 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
       expiresAt: new Date(input.now.getTime() + input.leaseMs),
     };
     return true;
+  }
+
+  async holdsWriterLease(input: {
+    claimId: string;
+    now: Date;
+  }): Promise<boolean> {
+    return (
+      this.#lease?.claimId === input.claimId &&
+      this.#lease.expiresAt.getTime() > input.now.getTime()
+    );
   }
 
   async releaseWriterLease(input: { claimId: string }): Promise<void> {

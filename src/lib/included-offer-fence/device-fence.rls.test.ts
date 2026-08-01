@@ -206,6 +206,9 @@ describe("included-offer device fence at the pre-spend reservation boundary", ()
       "begin_included_offer_claim",
       "transition_included_offer_claim",
       "acquire_included_offer_writer_lease",
+      "holds_included_offer_writer_lease",
+      "has_open_included_offer_rendezvous",
+      "expire_stale_included_offer_rendezvous",
       "grant_included_offer_support_override",
       "claim_included_offer_message",
     ]) {

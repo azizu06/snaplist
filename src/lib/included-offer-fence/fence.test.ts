@@ -33,6 +33,7 @@ function harness(options?: {
   gateQuery?(): Promise<void>;
   initialBits?: Record<string, { bit0: boolean; bit1: boolean }>;
   maxAppleAttempts?: number;
+  reconcileDeadlineMs?: number;
 }) {
   let now = new Date("2026-07-31T18:00:00.000Z");
   const appAttest = createFakeAppAttestVerifier({});
@@ -62,6 +63,7 @@ function harness(options?: {
     },
     maxAppleAttempts: options?.maxAppleAttempts,
     queue,
+    reconcileDeadlineMs: options?.reconcileDeadlineMs,
     store,
     tokenWindowMs: TOKEN_WINDOW_MS,
   };
@@ -488,9 +490,78 @@ describe("included first AI offer device fence", () => {
     // Opal's claim is still mid-rendezvous, so the worker must not invite the
     // next account to spend a fresh token it can only be refused for.
     const pete = await h.redeem("user_pete", "key-pete", "idem-pete-1");
-    await expect(h.advance()).resolves.toEqual({ acked: [], opened: [] });
+    await expect(h.advance()).resolves.toEqual({
+      acked: [],
+      expired: [],
+      opened: [],
+    });
     await expect(
       h.fence.readClaim({ claimId: claimIdOf(pete), userId: "user_pete" }),
     ).resolves.toMatchObject({ status: "queued" });
+  });
+
+  it("refuses to set Apple's bit once the writer lease has lapsed", async () => {
+    // The lease is what makes a clear reading trustworthy. Dropping it mid-query
+    // stands in for a rendezvous that outlived its lease: by the time the write
+    // would land, a rival could have taken the lease, spent the device, and let
+    // it go again, so the clear reading in hand is stale.
+    let dropLease: (() => Promise<void>) | null = null;
+    const h = harness({
+      async gateQuery() {
+        const drop = dropLease;
+        dropLease = null;
+        await drop?.();
+      },
+    });
+
+    const quinn = await h.redeem("user_quinn", "key-quinn", "idem-quinn-1");
+    await h.advance();
+    dropLease = () =>
+      h.store.releaseWriterLease({ claimId: claimIdOf(quinn) });
+
+    await expect(
+      h.submitToken("user_quinn", "key-quinn", claimIdOf(quinn), "device-11:token-a"),
+    ).resolves.toMatchObject({ status: "retry_required" });
+    // Nothing was written to Apple, so the device stays genuinely unspent and
+    // the seller can still reconcile into it.
+    expect(h.deviceCheck.bits("device-11")?.bit0 ?? false).toBe(false);
+
+    await h.openForToken(claimIdOf(quinn));
+    await expect(
+      h.submitToken("user_quinn", "key-quinn", claimIdOf(quinn), "device-11:token-b"),
+    ).resolves.toEqual({ claimId: claimIdOf(quinn), status: "reserved" });
+  });
+
+  it("terminalizes an abandoned Apple write instead of blocking the queue forever", async () => {
+    const h = harness({ reconcileDeadlineMs: 5 * 60_000 });
+
+    const rosa = await h.redeem("user_rosa", "key-rosa", "idem-rosa-1");
+    await h.advance();
+    h.deviceCheck.failNextUpdate("unavailable");
+    await expect(
+      h.submitToken("user_rosa", "key-rosa", claimIdOf(rosa), "device-12:token-a"),
+    ).resolves.toMatchObject({ status: "retry_required" });
+
+    // Rosa never comes back. Her unresolved write holds the deployment-wide
+    // rendezvous, so Sam cannot be invited while it stands.
+    const sam = await h.redeem("user_sam", "key-sam", "idem-sam-1");
+    await expect(h.advance()).resolves.toMatchObject({ opened: [] });
+
+    h.setNow(new Date("2026-07-31T18:30:00.000Z"));
+    const swept = await h.advance();
+    expect(swept.expired).toEqual([claimIdOf(rosa)]);
+    // Rosa's own queue message is now terminal, so it retires rather than
+    // reopening her, and the next turn belongs to Sam.
+    expect(swept.acked).toEqual([claimIdOf(rosa)]);
+    await expect(h.advance()).resolves.toMatchObject({
+      opened: [claimIdOf(sam)],
+    });
+
+    // Rosa loses the offer rather than merely stopping blocking: the device bit
+    // may already be set, and only a terminal claim makes the next reading
+    // mean what it says.
+    await expect(
+      h.fence.readClaim({ claimId: claimIdOf(rosa), userId: "user_rosa" }),
+    ).resolves.toMatchObject({ status: "denied_apple_unavailable" });
   });
 });

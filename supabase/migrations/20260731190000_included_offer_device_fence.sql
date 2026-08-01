@@ -694,49 +694,112 @@ revoke all on function public.release_included_offer_writer_lease(uuid)
 grant execute on function public.release_included_offer_writer_lease(uuid)
   to service_role;
 
+-- Whether this claim still holds an unexpired lease. Re-acquiring cannot answer
+-- that: a lease that lapsed and was taken, used, and released by a rival is free
+-- again, so re-acquisition would succeed on a device the rival already spent.
+create or replace function public.holds_included_offer_writer_lease(
+  p_claim_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform private.assert_included_offer_authority();
+  return exists (
+    select 1
+    from private.included_offer_writer_lease lease
+    where lease.claim_id = p_claim_id
+      and lease.expires_at > statement_timestamp()
+  );
+end;
+$$;
+
+revoke all on function public.holds_included_offer_writer_lease(uuid)
+  from public, anon, authenticated;
+grant execute on function public.holds_included_offer_writer_lease(uuid)
+  to service_role;
+
 -- Single-writer means one open rendezvous, not one message in flight. The
 -- worker asks this before inviting the next claim, so a second account is never
 -- told to mint a fresh ephemeral token it can only be refused for.
 --
--- Occupancy is deliberately bounded: either the claim's token window is still
--- open, or it carries an unresolved 'update' write that no other claim can make
--- progress past anyway. An abandoned claim past its deadline stops blocking, or
--- one lapsed rendezvous would stall the queue for every account.
-create or replace function public.find_open_included_offer_rendezvous(
+-- Occupancy means either the claim's token window is still open, or it carries
+-- an unresolved 'update' write that no other claim can make progress past
+-- anyway. A claim past its deadline that never observed clear stops blocking.
+--
+-- Returns a boolean rather than the claim: the worker does not own the blocking
+-- claim and has no business reading another tenant's identity out of it.
+create or replace function public.has_open_included_offer_rendezvous(
   p_except_claim_id uuid
 )
-returns jsonb
+returns boolean
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
   v_now timestamptz := statement_timestamp();
-  v_claim public.included_offer_device_claims;
 begin
   perform private.assert_included_offer_authority();
-  select claim.* into v_claim
-  from public.included_offer_device_claims claim
-  where claim.state in (
-      'awaiting_device_token', 'apple_pending', 'reconcile_required'
-    )
-    and (p_except_claim_id is null or claim.claim_id <> p_except_claim_id)
-    and (
-      (claim.token_deadline_at is not null and claim.token_deadline_at > v_now)
-      or claim.apple_phase = 'update'
-    )
-  order by claim.created_at
-  limit 1;
-  if not found then
-    return null;
-  end if;
-  return private.included_offer_claim_json(v_claim);
+  return exists (
+    select 1
+    from public.included_offer_device_claims claim
+    where claim.state in (
+        'awaiting_device_token', 'apple_pending', 'reconcile_required'
+      )
+      and claim.claim_id <> p_except_claim_id
+      and (
+        (claim.token_deadline_at is not null and claim.token_deadline_at > v_now)
+        or claim.apple_phase = 'update'
+      )
+  );
 end;
 $$;
 
-revoke all on function public.find_open_included_offer_rendezvous(uuid)
+revoke all on function public.has_open_included_offer_rendezvous(uuid)
   from public, anon, authenticated;
-grant execute on function public.find_open_included_offer_rendezvous(uuid)
+grant execute on function public.has_open_included_offer_rendezvous(uuid)
+  to service_role;
+
+-- Releases a rendezvous whose unresolved write has gone stale.
+--
+-- Terminalizing is the only safe release. The device bit may or may not have
+-- been set, so the abandoning claim must lose the offer before any other claim
+-- may read that bit: set means denied, clear means genuinely unspent. Merely
+-- unblocking would let both claims reserve.
+create or replace function public.expire_stale_included_offer_rendezvous(
+  p_older_than timestamptz
+)
+returns setof uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform private.assert_included_offer_authority();
+  if p_older_than is null then
+    raise exception using
+      errcode = '22023',
+      message = 'Included-offer rendezvous expiry needs a cutoff';
+  end if;
+  return query
+  update public.included_offer_device_claims claim
+  set state = 'denied_apple_unavailable',
+      token_deadline_at = null
+  where claim.apple_phase = 'update'
+    and claim.state not in (
+      'reserved', 'denied_device_consumed', 'denied_apple_unavailable'
+    )
+    and claim.updated_at <= p_older_than
+  returning claim.claim_id;
+end;
+$$;
+
+revoke all on function public.expire_stale_included_offer_rendezvous(timestamptz)
+  from public, anon, authenticated;
+grant execute on function public.expire_stale_included_offer_rendezvous(timestamptz)
   to service_role;
 
 -- ---------------------------------------------------------------------------

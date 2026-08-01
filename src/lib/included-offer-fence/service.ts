@@ -46,6 +46,12 @@ export interface IncludedOfferFenceComposition {
   /** Terminal after this many ambiguous Apple attempts. Never grants the offer. */
   maxAppleAttempts?: number;
   newClaimId?: () => string;
+  /**
+   * How long an unresolved Apple write may hold the deployment-wide rendezvous
+   * before the worker terminalizes it. Generous: a seller reconciling a real
+   * network blip must not lose their offer to an impatient sweep.
+   */
+  reconcileDeadlineMs?: number;
   queue: IncludedOfferRedemptionQueue;
   store: IncludedOfferClaimStore;
   /** How long a claim at the head may wait for a fresh token before requeueing. */
@@ -73,10 +79,11 @@ export interface IncludedOfferFence {
 
 export interface IncludedOfferRedemptionWorker {
   /** Advances the single head claim. Returns the claims opened for a token. */
-  advance(): Promise<{ acked: string[]; opened: string[] }>;
+  advance(): Promise<{ acked: string[]; expired: string[]; opened: string[] }>;
 }
 
 const DEFAULT_MAX_APPLE_ATTEMPTS = 5;
+const DEFAULT_RECONCILE_DEADLINE_MS = 15 * 60_000;
 const DEFAULT_WRITER_LEASE_MS = 30_000;
 const QUEUE_VISIBILITY_SLACK_MS = 5_000;
 
@@ -189,6 +196,14 @@ export function createIncludedOfferFence(
       }
       const settled = await settle(owned, "denied_device_consumed", now);
       return outcomeFor(settled, now);
+    }
+
+    // The `bit0 = false` above is only worth acting on if we have held the lease
+    // continuously since reading it. A lease that lapsed mid-query could have
+    // been taken, used, and released by a rival, leaving this reading stale and
+    // the device already spent.
+    if (!(await composition.store.holdsWriterLease({ claimId: owned.claimId, now }))) {
+      return deferAmbiguous(owned, "timeout", attemptCount, now);
     }
 
     // Observed clear under the lease. Record that before touching Apple again so
@@ -395,6 +410,8 @@ export function createIncludedOfferRedemptionWorker(
   composition: IncludedOfferFenceComposition,
 ): IncludedOfferRedemptionWorker {
   const clock = composition.clock ?? (() => new Date());
+  const reconcileDeadlineMs =
+    composition.reconcileDeadlineMs ?? DEFAULT_RECONCILE_DEADLINE_MS;
   const visibilityTimeoutSeconds = Math.max(
     1,
     Math.ceil((composition.tokenWindowMs + QUEUE_VISIBILITY_SLACK_MS) / 1000),
@@ -405,10 +422,19 @@ export function createIncludedOfferRedemptionWorker(
       const now = clock();
       const acked: string[] = [];
       const opened: string[] = [];
+
+      // An unresolved write blocks every account, so a client that never comes
+      // back would block them forever. Terminalizing is the only safe release:
+      // the abandoning claim loses the offer, and only then may the next claim
+      // read Apple's bit — as set if the write landed, clear if it did not.
+      const expired = await composition.store.expireStaleRendezvous({
+        olderThan: new Date(now.getTime() - reconcileDeadlineMs),
+      });
+
       const message = await composition.queue.claimHead({
         visibilityTimeoutSeconds,
       });
-      if (!message) return { acked, opened };
+      if (!message) return { acked, expired, opened };
 
       const claim = await composition.store.findClaimById({
         claimId: message.envelope.claim_id,
@@ -416,19 +442,19 @@ export function createIncludedOfferRedemptionWorker(
       if (!claim || isTerminalIncludedOfferState(claim.state)) {
         await composition.queue.ack(message.messageId);
         acked.push(message.envelope.claim_id);
-        return { acked, opened };
+        return { acked, expired, opened };
       }
 
       // Single-writer means one open rendezvous, not one message in flight.
       // Inviting a second account to spend a fresh ephemeral token it can only
       // be refused for would also make the queue's ordering cosmetic.
-      const inFlight = await composition.store.findOpenRendezvousClaim({
+      const inFlight = await composition.store.hasOpenRendezvous({
         exceptClaimId: claim.claimId,
         now,
       });
       if (inFlight) {
         await composition.queue.defer(message.messageId, visibilityTimeoutSeconds);
-        return { acked, opened };
+        return { acked, expired, opened };
       }
 
       const deadline = new Date(now.getTime() + composition.tokenWindowMs);
@@ -441,7 +467,7 @@ export function createIncludedOfferRedemptionWorker(
       });
       if (openedClaim) opened.push(openedClaim.claimId);
       await composition.queue.defer(message.messageId, visibilityTimeoutSeconds);
-      return { acked, opened };
+      return { acked, expired, opened };
     },
   };
 }
