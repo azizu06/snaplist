@@ -157,7 +157,11 @@ private actor ListingReviewFixtureService: ListingReviewServing {
         idempotencyKey: UUID,
         bearerToken: String
     ) async throws -> ListingReviewSaveReceipt {
-        try await Task.sleep(for: .milliseconds(650))
+        // Long enough that "Saving…" outlives more than one XCUI existence
+        // poll. A save that resolves inside a single poll interval is not
+        // observable from a UI test at all, which makes an assertion on the
+        // in-flight state pass or fail on timing rather than on behaviour.
+        try await Task.sleep(for: .milliseconds(1_800))
         switch fixture {
         case .saveFailure:
             throw ListingReviewClientError.unavailable

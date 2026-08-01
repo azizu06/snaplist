@@ -47,8 +47,8 @@ final class ListingReviewUITests: XCTestCase {
         )
 
         app.buttons["listing-review.done"].tap()
-        XCTAssertTrue(app.staticTexts["Saving…"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["Saving…"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 6))
         XCTAssertFalse(anyElement("listing-review.unsaved", in: app).exists)
     }
 
@@ -61,7 +61,7 @@ final class ListingReviewUITests: XCTestCase {
         let changedAlert = app.alerts[
             "This review changed. Reload and try again."
         ]
-        XCTAssertTrue(changedAlert.waitForExistence(timeout: 4))
+        XCTAssertTrue(changedAlert.waitForExistence(timeout: 6))
         changedAlert.buttons["Reload"].tap()
 
         let discardAlert = app.alerts["Discard changes and reload?"]
@@ -112,7 +112,7 @@ final class ListingReviewUITests: XCTestCase {
 
             XCTAssertTrue(
                 app.staticTexts[expectation.copy]
-                    .waitForExistence(timeout: 4)
+                    .waitForExistence(timeout: 6)
             )
             XCTAssertTrue(anyElement("listing-review.unsaved", in: app).exists)
             XCTAssertEqual(
