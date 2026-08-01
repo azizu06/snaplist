@@ -1,6 +1,6 @@
 begin;
 
-select plan(44);
+select plan(51);
 
 -- Issue #384: erase one signed-in account durably and idempotently.
 --
@@ -521,6 +521,133 @@ select is(
   'counting export receipts cannot leave an erasure with no way to reach zero'
 );
 rollback to savepoint export_receipt;
+
+-- ---------------------------------------------------------------------------
+-- Issue #586: the included-offer tables (migration 20260731190000, issue #524).
+-- #524 and #384 were both green alone and could not see each other, so merging
+-- them left two tenant tables the fence and the completion proof did not know
+-- about. The catalog assertions above name them; these prove the behaviour.
+--
+-- Both rows are DELETED by erasure rather than retained. #524 requires it:
+-- "Claim and support-override rows carry the verified Clerk `user_id` and
+-- enforce tenant RLS", and its migration grants `delete` on both tables to
+-- service_role, with the claims table commenting that the grant exists "for the
+-- account-erasure capability the retention matrix names as executor". Retaining
+-- either row is also unavailable in practice — a table the completion proof
+-- counts can never reach zero if erasure leaves rows in it, so a retained row
+-- would have to be excluded from the guard entirely, which only erasure's own
+-- receipt is.
+--
+-- Deleting them costs #524 nothing. The lifetime fence is Apple's DeviceCheck
+-- bit0, which SnapList never sets back and never clears; #524 lists clearing it
+-- as an explicit exclusion. A second Clerk account on the same physical device
+-- is still denied after the first account is erased, because the denial comes
+-- from Apple rather than from these rows. A spent override cannot be replayed
+-- either: `consume_included_offer_override` requires a live claim owned by the
+-- same user, and both are gone.
+-- ---------------------------------------------------------------------------
+
+savepoint included_offer_rows;
+insert into public.user_settings (user_id)
+values ('user_586_offer'), ('user_586_device_twin');
+
+-- Measured before either row exists, so the two assertions below are deltas
+-- rather than totals. A total reads 0 after erasure whether or not the count
+-- function mentions these tables at all.
+create temporary table included_offer_probe as
+select private.account_erasure_owned_row_count('user_586_offer') as before_rows;
+
+insert into public.included_offer_device_claims (
+  claim_id, user_id, idempotency_key, app_attest_key_id, state
+)
+values (
+  '58600000-0000-4000-8000-000000000001', 'user_586_offer',
+  'idem_586_first', 'attest_key_586', 'queued'
+);
+select is(
+  private.account_erasure_owned_row_count('user_586_offer')
+    - (select before_rows from included_offer_probe),
+  1,
+  'a durable included-offer claim raises the count that has to reach zero before erasure may finish'
+);
+
+insert into public.included_offer_support_overrides (
+  override_id, user_id, granted_by, reason
+)
+values (
+  '58600000-0000-4000-8000-000000000002', 'user_586_offer',
+  'support_586', 'shared device appeal'
+);
+select is(
+  private.account_erasure_owned_row_count('user_586_offer')
+    - (select before_rows from included_offer_probe),
+  2,
+  'an audited support override is owned tenant data, so erasure has to reach it too'
+);
+
+select public.begin_account_erasure(
+  'user_586_offer', '58600000-0000-4000-8000-000000000003'
+);
+
+-- The refused claim carries a fresh claim_id and a fresh idempotency key, so
+-- `included_offer_device_claims_idempotency_key` cannot reject it on its own —
+-- otherwise the assertion would stop describing erasure at all. The bystander
+-- insert below is the control proving exactly that.
+select throws_ok(
+  $$insert into public.included_offer_device_claims (
+      claim_id, user_id, idempotency_key, app_attest_key_id, state
+    )
+    values (
+      '58600000-0000-4000-8000-000000000004', 'user_586_offer',
+      'idem_586_second', 'attest_key_586', 'queued'
+    )$$,
+  '55000',
+  null,
+  'a seller cannot open a new included-offer claim on an account already being erased'
+);
+select lives_ok(
+  $$insert into public.included_offer_device_claims (
+      claim_id, user_id, idempotency_key, app_attest_key_id, state
+    )
+    values (
+      '58600000-0000-4000-8000-000000000005', 'user_586_device_twin',
+      'idem_586_second', 'attest_key_586', 'queued'
+    )$$,
+  'the same claim on a healthy account is accepted, so the refusal above is erasure and not a constraint'
+);
+select throws_ok(
+  $$insert into public.included_offer_support_overrides (
+      override_id, user_id, granted_by, reason
+    )
+    values (
+      '58600000-0000-4000-8000-000000000006', 'user_586_offer',
+      'support_586', 'second appeal'
+    )$$,
+  '55000',
+  null,
+  'support cannot grant a new override into an account already being erased'
+);
+
+select public.advance_account_erasure(
+  (select generation_id from private.account_erasure_generations
+   where user_id = 'user_586_offer')
+);
+select is(
+  private.account_erasure_owned_row_count('user_586_offer'),
+  0,
+  'counting included-offer rows cannot leave an erasure with no way to reach zero'
+);
+-- Stated directly rather than only through the aggregate above: the audited
+-- override is deleted, not kept as surviving audit state.
+select is(
+  (
+    select count(*)::integer from public.included_offer_support_overrides
+    where user_id = 'user_586_offer'
+  ),
+  0,
+  'the audited override does not outlive the account it was granted to'
+);
+rollback to savepoint included_offer_rows;
 
 -- ---------------------------------------------------------------------------
 -- A guest copy mid-flight owns rows in two tenants at once. Erasure waits for
