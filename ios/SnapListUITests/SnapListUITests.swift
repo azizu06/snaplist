@@ -1121,14 +1121,20 @@ final class SnapListUITests: XCTestCase {
         thirdPhoto.coordinate(
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
         ).press(
-            forDuration: 0.8,
+            // UIKit lifts the drag item on its own animation, and translating before
+            // that animation settles makes it run the lift backwards and abort the
+            // session. Hold well past the lift so the drag is airborne before travel.
+            forDuration: 1.5,
             thenDragTo: firstPhoto.coordinate(
                 withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
             ),
-            withVelocity: 500,
+            // A fast synthesized translation reaches Cover in one or two events, which
+            // is too coarse for the drop interaction to be consulted at all. Travel
+            // slowly enough to deliver a stream of moves.
+            withVelocity: 200,
             // Keep the native session over Cover long enough for SwiftUI to
             // render the transient production gap before performDrop clears it.
-            thenHoldForDuration: 0.6
+            thenHoldForDuration: 1.2
         )
 
         let reorderedExpectation = XCTNSPredicateExpectation(

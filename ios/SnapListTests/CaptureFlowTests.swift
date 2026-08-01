@@ -3569,23 +3569,37 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
-    func testLivePhotoReviewDeleteRoutesTheOpenActionsPhotoToTheSurvivingNeighbour() async {
-        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000041")
-        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000042")
-        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000043")
-        let captureFlow = makeRestoredCaptureFlow()
+    func testLivePhotoReviewDeleteRoutesTheOpenActionsPhotoToTheSurvivingNeighbour()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let captureFlow = makeIntakeCaptureFlow(root: root)
         let restoration = await captureFlow.restore()
-        XCTAssertEqual(restoration, .stagedPhoto)
+        XCTAssertEqual(restoration, .noDraft)
+        let staged = await captureFlow.stageLibraryPhotos(
+            (1...3).map { makeIntakeJPEG(seed: $0) }
+        )
+        XCTAssertEqual(staged, 3)
         let durableIntake = captureFlow.stagedPhotos
+        guard durableIntake.count == 3 else {
+            XCTFail("Photo Review needs exactly three durable photos.")
+            return
+        }
+        let originalCover = durableIntake[0]
+        let second = durableIntake[1]
+        let third = durableIntake[2]
 
         let router = AppRouter(initialFullScreen: .guidedCamera)
         router.openCaptureBoundary(
             destination: .photoReview,
-            photos: [originalCover, second, third],
+            photos: durableIntake,
             opener: .reviewButton
         )
         let host = PhotoReviewLiveHost()
-        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        XCTAssertTrue(
+            host.consume(router.captureBoundaryRequest, captureFlow: captureFlow)
+        )
         guard let session = host.session else {
             XCTFail("The exact three-photo request must expose one live session.")
             return
@@ -3627,20 +3641,25 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(router.photoReviewScanReturn, nil)
         XCTAssertEqual(returnFocus, [])
-        XCTAssertEqual(
-            captureFlow.stagedPhotos,
-            durableIntake,
-            "A survivor delete reaches Scan through Back, never as its own write."
-        )
+        // Photo Review commits write through to the durable intake, so the survivor set
+        // reaches Scan directly rather than waiting to be carried back.
+        await waitUntilTrue { captureFlow.stagedPhotos == [originalCover, third] }
+        XCTAssertEqual(captureFlow.stagedPhotos, [originalCover, third])
     }
 
-    func testLivePhotoReviewDeletingTheFinalPhotoLeavesForGuidedScanWithNoPhotos() async {
-        let captureFlow = makeRestoredCaptureFlow()
+    func testLivePhotoReviewDeletingTheFinalPhotoLeavesForGuidedScanWithNoPhotos()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let captureFlow = makeIntakeCaptureFlow(root: root)
         let restoration = await captureFlow.restore()
-        XCTAssertEqual(restoration, .stagedPhoto)
+        XCTAssertEqual(restoration, .noDraft)
+        let staged = await captureFlow.stageLibraryPhotos([makeIntakeJPEG(seed: 1)])
+        XCTAssertEqual(staged, 1)
         let restoredPhotos = captureFlow.stagedPhotos
         guard let onlyPhoto = restoredPhotos.first, restoredPhotos.count == 1 else {
-            XCTFail("The restored capture fixture must stage exactly one photo.")
+            XCTFail("Photo Review needs exactly one durable photo.")
             return
         }
 
@@ -3651,7 +3670,9 @@ final class CaptureFlowTests: XCTestCase {
             opener: .reviewButton
         )
         let host = PhotoReviewLiveHost()
-        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        XCTAssertTrue(
+            host.consume(router.captureBoundaryRequest, captureFlow: captureFlow)
+        )
         guard let session = host.session else {
             XCTFail("The exact one-photo request must expose one live session.")
             return
@@ -6512,17 +6533,45 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(model.stagedPhotos.count, 5)
     }
 
-    private func makeRestoredCaptureFlow() -> CaptureFlowModel {
+    /// Builds a capture flow over the durable NativeIntake, the way `AppShellView` does.
+    ///
+    /// Photo Review commits are gated on the session's intake activation, so a flow built
+    /// over the legacy draft store alone exposes no activation and rejects every commit.
+    private func waitUntilTrue(
+        _ condition: @escaping @MainActor () -> Bool
+    ) async {
+        for _ in 0..<1_000 where !condition() {
+            await Task.yield()
+        }
+    }
+
+    private func makeIntakeCaptureFlow(root: URL) -> CaptureFlowModel {
         let dependencies = AppDependencies.make(
+            // The fixture supplies the stub camera these tests assert `phase` against.
+            // Its staged draft is ignored: `restore()` prefers the intake once one exists.
             configuration: LaunchConfiguration.parse(
                 arguments: ["--restored-capture-fixture"]
-            )
+            ),
+            nativeIntakeApplicationSupportDirectory: root
         )
         return CaptureFlowModel(
             camera: dependencies.captureCamera,
             evaluator: dependencies.framingEvaluator,
-            store: dependencies.captureDraftStore
+            intake: dependencies.nativeIntake
         )
+    }
+
+    private func makeIntakeJPEG(seed: Int) -> Data {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8))
+        return renderer.jpegData(withCompressionQuality: 0.9) { context in
+            UIColor(
+                red: CGFloat(seed % 3) / 2,
+                green: CGFloat(seed % 5) / 4,
+                blue: CGFloat(seed % 7) / 6,
+                alpha: 1
+            ).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
     }
 
     private func makeStagedPhoto(id: String) -> StagedCapturePhoto {

@@ -112,8 +112,9 @@ final class NativeIntakeAdoptionTests: XCTestCase {
 
         let eventStream = await capture.nativeIntakeEvents()
         let events = try XCTUnwrap(eventStream)
-        var iterator = events.makeAsyncIterator()
-        guard case .snapshot(let initialSnapshot)? = await iterator.next() else {
+        let recorder = NativeIntakeAdoptionEventRecorder(events)
+        defer { recorder.stopRecording() }
+        guard case .snapshot(let initialSnapshot)? = await nextEvent(from: recorder, "the replayed committed A snapshot") else {
             return XCTFail("NativeIntake must replay the committed A snapshot.")
         }
         XCTAssertEqual(initialSnapshot.photos, capture.stagedPhotos)
@@ -140,13 +141,13 @@ final class NativeIntakeAdoptionTests: XCTestCase {
                 persistedAppAttestKeyID: nil
             )
         )
-        let dismissal = await iterator.next()
+        let dismissal = await nextEvent(from: recorder, "the departing Photo Review dismissal")
         XCTAssertEqual(
             dismissal,
             .dismissActivePhotoReview,
             "Only an active departing Photo Review is dismissed."
         )
-        guard case .snapshot(let emptyB)? = await iterator.next() else {
+        guard case .snapshot(let emptyB)? = await nextEvent(from: recorder, "principal B's own committed snapshot") else {
             return XCTFail("Principal B must publish its own committed snapshot.")
         }
         XCTAssertTrue(emptyB.photos.isEmpty)
@@ -156,7 +157,7 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         let bPhoto = NativeIntakeAdoptionPhoto(data: try makeJPEG(seed: 6))
         let bAdded = await capture.stageLibraryPhotos([bPhoto])
         XCTAssertEqual(bAdded, 1)
-        guard case .snapshot(let populatedB)? = await iterator.next() else {
+        guard case .snapshot(let populatedB)? = await nextEvent(from: recorder, "principal B's committed addition snapshot") else {
             return XCTFail("Principal B addition must publish one snapshot.")
         }
         XCTAssertEqual(populatedB.photos, capture.stagedPhotos)
@@ -167,42 +168,71 @@ final class NativeIntakeAdoptionTests: XCTestCase {
                 persistedAppAttestKeyID: nil
             )
         )
-        guard case .snapshot(let returnedA)? = await iterator.next() else {
+        guard case .snapshot(let returnedA)? = await nextEvent(from: recorder, "principal A's restored committed snapshot") else {
             return XCTFail("Returning to A must not dismiss an inactive review.")
         }
         await waitUntil { capture.intakeSnapshot?.version == returnedA.version }
         XCTAssertEqual(returnedA.photos, initialSnapshot.photos)
 
-        let movedID = try XCTUnwrap(session.store.photos.last?.id)
-        let reorder = await session.commitReorder(
+        // Reconciling identity mints a fresh activation on every principal change, so the
+        // round trip leaves the departed session holding a superseded activation. It was
+        // already dismissed above; its commits must stay inert rather than publish.
+        let dismissedReorderID = try XCTUnwrap(session.store.photos.last?.id)
+        let dismissedReorder = await session.commitReorder(
+            photoID: dismissedReorderID,
+            destinationIndex: 0,
+            captureFlow: capture
+        )
+        XCTAssertNil(
+            dismissedReorder,
+            "A dismissed Photo Review cannot commit against a superseded activation."
+        )
+
+        let reopenedSession = try XCTUnwrap(
+            PhotoReviewLiveSession.start(
+                from: CaptureBoundaryRequest(
+                    destination: .photoReview,
+                    photos: returnedA.photos,
+                    opener: .reviewButton
+                ),
+                captureFlow: capture
+            )
+        )
+        let didReenterReview = await capture.markPhotoReviewEntered(
+            activationID: reopenedSession.intakeActivationID
+        )
+        XCTAssertTrue(didReenterReview)
+
+        let movedID = try XCTUnwrap(reopenedSession.store.photos.last?.id)
+        let reorder = await reopenedSession.commitReorder(
             photoID: movedID,
             destinationIndex: 0,
             captureFlow: capture
         )
-        guard case .snapshot(let reorderedA)? = await iterator.next() else {
+        guard case .snapshot(let reorderedA)? = await nextEvent(from: recorder, "the committed reorder snapshot") else {
             return XCTFail("A committed reorder must publish one snapshot.")
         }
         XCTAssertEqual(reorder?.photoID, movedID)
-        XCTAssertEqual(session.store.photos, reorderedA.photos)
+        XCTAssertEqual(reopenedSession.store.photos, reorderedA.photos)
         XCTAssertEqual(capture.stagedPhotos, reorderedA.photos)
 
-        let removedID = try XCTUnwrap(session.store.photos.last?.id)
-        let activationID = try XCTUnwrap(session.intakeActivationID)
+        let removedID = try XCTUnwrap(reopenedSession.store.photos.last?.id)
+        let activationID = try XCTUnwrap(reopenedSession.intakeActivationID)
         let removalResult = await capture.removePhotoReviewPhoto(
             id: removedID,
             expectedActivationID: activationID
         )
         let removedA = try XCTUnwrap(removalResult)
-        guard case .snapshot(let removalEvent)? = await iterator.next() else {
+        guard case .snapshot(let removalEvent)? = await nextEvent(from: recorder, "the committed delete snapshot") else {
             return XCTFail("A committed delete must publish one snapshot.")
         }
         XCTAssertEqual(removedA, removalEvent)
-        _ = session.publishCommittedDelete(
+        _ = reopenedSession.publishCommittedDelete(
             id: removedID,
             removedIndex: reorderedA.photos.count - 1,
             snapshot: removedA
         )
-        XCTAssertEqual(session.store.photos, removedA.photos)
+        XCTAssertEqual(reopenedSession.store.photos, removedA.photos)
 
         let voiceURL = root.appendingPathComponent("provisional.wav")
         try Data("bounded voice".utf8).write(to: voiceURL)
@@ -212,12 +242,12 @@ final class NativeIntakeAdoptionTests: XCTestCase {
             expectedActivationID: activationID
         )
         let committedVoice = try XCTUnwrap(voiceResult)
-        guard case .snapshot(let voicedA)? = await iterator.next() else {
+        guard case .snapshot(let voicedA)? = await nextEvent(from: recorder, "the committed voice note snapshot") else {
             return XCTFail("A committed voice note must publish one snapshot.")
         }
         XCTAssertEqual(committedVoice, voicedA.voice)
-        session.publishCommittedSnapshot(voicedA)
-        XCTAssertEqual(session.voiceNoteStore.savedNote?.url, committedVoice.mediaURL)
+        reopenedSession.publishCommittedSnapshot(voicedA)
+        XCTAssertEqual(reopenedSession.voiceNoteStore.savedNote?.url, committedVoice.mediaURL)
 
         let restoredDependencies = AppDependencies.make(
             configuration: .preview,
@@ -238,25 +268,25 @@ final class NativeIntakeAdoptionTests: XCTestCase {
             captureFlow: capture,
             expectedActivationID: activationID
         )
-        session.store.beginPickerRequest(.add)
+        reopenedSession.store.beginPickerRequest(.add)
         let suspendedPhoto = NativeIntakeAdoptionSuspendedPhoto(
             data: try makeJPEG(seed: 7)
         )
         let stalePicker = Task {
             await photoReviewIntake.apply(
                 [suspendedPhoto],
-                to: session.store
+                to: reopenedSession.store
             )
         }
         await suspendedPhoto.waitUntilRequested()
 
         let reorderGate = NativeIntakeAdoptionGate()
         let staleReorderPhotoID = try XCTUnwrap(
-            session.store.photos.last?.id
+            reopenedSession.store.photos.last?.id
         )
         let staleReorder = Task {
             await reorderGate.suspend()
-            return await session.commitReorder(
+            return await reopenedSession.commitReorder(
                 photoID: staleReorderPhotoID,
                 destinationIndex: 0,
                 captureFlow: capture
@@ -329,7 +359,16 @@ final class NativeIntakeAdoptionTests: XCTestCase {
                 persistedAppAttestKeyID: nil
             )
         )
-        guard case .snapshot(let returnedB)? = await iterator.next() else {
+        let departingDismissal = await nextEvent(
+            from: recorder,
+            "the reopened Photo Review's dismissal"
+        )
+        XCTAssertEqual(
+            departingDismissal,
+            .dismissActivePhotoReview,
+            "The reopened Photo Review is active, so departing A dismisses it."
+        )
+        guard case .snapshot(let returnedB)? = await nextEvent(from: recorder, "principal B ahead of stale completions") else {
             return XCTFail(
                 "The principal change must publish B before stale completions."
             )
@@ -337,9 +376,9 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         await waitUntil { capture.intakeSnapshot?.version == returnedB.version }
 
         let newerRequest = PhotoReviewPickerRequest.replace(
-            photoID: try XCTUnwrap(session.store.photos.first?.id)
+            photoID: try XCTUnwrap(reopenedSession.store.photos.first?.id)
         )
-        session.store.beginPickerRequest(newerRequest)
+        reopenedSession.store.beginPickerRequest(newerRequest)
         suspendedPhoto.resume()
         reorderGate.resume()
         voiceDeleteGate.resume()
@@ -350,7 +389,7 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         XCTAssertEqual(stalePickerOutcome, .inert)
         XCTAssertNil(staleReorderOutcome)
         XCTAssertFalse(staleVoiceDeleteOutcome)
-        XCTAssertEqual(session.store.activePickerRequest, newerRequest)
+        XCTAssertEqual(reopenedSession.store.activePickerRequest, newerRequest)
         XCTAssertNil(photoReviewIntake.recovery)
         XCTAssertEqual(
             capture.stagedPhotos,
@@ -418,8 +457,9 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         let staleScanResult = await staleScan.value
         XCTAssertEqual(staleScanResult, 0)
         let events = await dependencies.nativeIntake.events()
-        var iterator = events.makeAsyncIterator()
-        guard case .snapshot(let snapshotB)? = await iterator.next() else {
+        let recorder = NativeIntakeAdoptionEventRecorder(events)
+        defer { recorder.stopRecording() }
+        guard case .snapshot(let snapshotB)? = await nextEvent(from: recorder, "principal B's replayed committed intake") else {
             return XCTFail("Principal B must replay its current intake.")
         }
         XCTAssertNotEqual(snapshotB.version.activationID, activationA)
@@ -509,6 +549,60 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         XCTAssertEqual(capture.intakeSnapshot?.voice, voice)
     }
 
+    func testSupersededVoiceDeleteReportsFailureInsteadOfSilentSuccess()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let identity = NativeIntakeAdoptionIdentity(
+            .init(
+                verifiedClerkSubject: "user_native_intake_superseded_delete",
+                persistedAppAttestKeyID: nil
+            )
+        )
+        let dependencies = AppDependencies.make(
+            configuration: .preview,
+            nativeIntakeIdentitySource: identity.source,
+            nativeIntakeApplicationSupportDirectory: root
+        )
+        let capture = CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            intake: dependencies.nativeIntake
+        )
+        _ = await capture.restore()
+        let stagedPhotoCount = await capture.stageLibraryPhotos([
+            NativeIntakeAdoptionPhoto(data: try makeJPEG(seed: 11))
+        ])
+        XCTAssertEqual(stagedPhotoCount, 1)
+        let activationID = try XCTUnwrap(
+            capture.intakeSnapshot?.version.activationID
+        )
+        let provisionalURL = root.appendingPathComponent("superseded.wav")
+        try Data("retained voice".utf8).write(to: provisionalURL)
+        let savedVoice = await capture.saveVoiceNote(
+            provisionalURL: provisionalURL,
+            duration: 4,
+            expectedActivationID: activationID
+        )
+        let voice = try XCTUnwrap(savedVoice)
+        await waitUntil { capture.intakeSnapshot?.voice == voice }
+
+        let deleted = await capture.deleteVoiceNote(
+            expectedActivationID: UUID()
+        )
+
+        XCTAssertFalse(
+            deleted,
+            "A superseded voice delete must report failure, not silent success."
+        )
+        XCTAssertEqual(
+            capture.intakeSnapshot?.voice,
+            voice,
+            "A superseded voice delete must leave the committed voice intact."
+        )
+    }
+
     func testConcurrentPhotoReviewReordersReturnTheirOwnCommittedSnapshots()
         async throws {
         let root = FileManager.default.temporaryDirectory
@@ -595,6 +689,34 @@ final class NativeIntakeAdoptionTests: XCTestCase {
         }
     }
 
+    /// Waits for the next recorded intake event, failing by name instead of hanging.
+    ///
+    /// XCTest applies no per-test timeout, so consuming an `AsyncStream` through a bare
+    /// `await iterator.next()` turns a missing event into a silent job-length hang rather
+    /// than a reportable failure at the line that expected it.
+    private func nextEvent(
+        from recorder: NativeIntakeAdoptionEventRecorder,
+        _ description: String,
+        timeout: TimeInterval = 10,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async -> NativeIntake.Event? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            if let recorded = recorder.takeRecordedEvent() { return recorded }
+            guard Date() < deadline else {
+                XCTFail(
+                    "Timed out waiting for \(description).",
+                    file: file,
+                    line: line
+                )
+                return nil
+            }
+            // Publishing runs on this actor, so yielding is what lets it make progress.
+            await Task.yield()
+        }
+    }
+
     private func waitUntil(
         _ condition: @escaping @MainActor () -> Bool
     ) async {
@@ -616,6 +738,30 @@ final class NativeIntakeAdoptionTests: XCTestCase {
                 AsyncStream { $0.finish() }
             }
         )
+    }
+}
+
+/// Records intake events off the stream so a test can wait for them with a deadline.
+@MainActor
+private final class NativeIntakeAdoptionEventRecorder {
+    private var recorded: [NativeIntake.Event] = []
+    private var recording: Task<Void, Never>?
+
+    init(_ events: AsyncStream<NativeIntake.Event>) {
+        recording = Task { @MainActor [weak self] in
+            for await event in events {
+                self?.recorded.append(event)
+            }
+        }
+    }
+
+    func stopRecording() {
+        recording?.cancel()
+        recording = nil
+    }
+
+    func takeRecordedEvent() -> NativeIntake.Event? {
+        recorded.isEmpty ? nil : recorded.removeFirst()
     }
 }
 

@@ -1737,13 +1737,17 @@ final class CaptureFlowModel {
         }
     ) async -> Bool {
         guard let intake, requestIsActive() else { return false }
-        return await committedPhotoReviewSnapshot(
+        // A rejected operation yields no snapshot. Optional-chaining into `.voice` would
+        // collapse that into the same `nil` a committed delete produces, so a superseded
+        // delete would report the voice gone while it is still committed.
+        guard let snapshot = await committedPhotoReviewSnapshot(
             for: .deleteVoice,
             using: intake,
             expectedActivationID: expectedActivationID,
             while: requestIsActive,
             acceptsUnchanged: true
-        )?.voice == nil
+        ) else { return false }
+        return snapshot.voice == nil
     }
 
     @discardableResult
