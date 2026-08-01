@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { llmProviderConfigError, resolveApiKey, resolveProvider } from "./llm/registry";
+import {
+  SELLER_MEDIA_ROLES,
+  llmProviderConfigError,
+  resolveApiKey,
+  resolveProvider,
+  sellerMediaConfigError,
+} from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
 
 const optionalProxyTemplateSchema = z.preprocess(
@@ -200,10 +206,22 @@ function llmProviderIssues(raw: Record<string, unknown>): string[] {
   // resolveProvider is key-aware in local development (a single-key box selects
   // the usable provider), so this still accepts a Gemini-only dev box, but rejects
   // an explicit LLM_PROVIDER with no matching key, or no keys at all (#55 review).
-  if (!resolveApiKey(resolveProvider(env), env)) {
+  const provider = resolveProvider(env);
+  if (!resolveApiKey(provider, env)) {
     return [
       "  - OPENAI_API_KEY: Missing the API key for the selected LLM provider. Set OPENAI_API_KEY (OpenAI) or GOOGLE_GENERATIVE_AI_API_KEY / GEMINI_API_KEY (Gemini), or set LLM_PROVIDER to match the key you have.",
     ];
+  }
+
+  // A selectable provider is not yet a permissible one for SELLER MEDIA (#501).
+  // Google's unpaid tier may train on submitted content and may have it read by
+  // human reviewers, and the vision role sends the seller's own photo bytes. This
+  // config could not process a single item, so fail at startup rather than on the
+  // first seller's photo. Iterated over the role set so a second seller-media role
+  // is covered the day it is added.
+  for (const role of SELLER_MEDIA_ROLES) {
+    const mediaError = sellerMediaConfigError(role, provider, env);
+    if (mediaError) return [`  - GEMINI_BILLING_ENABLED: ${mediaError}`];
   }
   return [];
 }

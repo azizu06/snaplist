@@ -201,6 +201,105 @@ export function resolveProvider(env: EnvLike = process.env): LlmProvider {
 }
 
 /**
+ * Roles whose model request carries the SELLER'S OWN MEDIA — raw photo or audio
+ * bytes — rather than text derived from it.
+ *
+ * `vision` is the only one: `vision/extract.ts` and `vision/measurements.ts` are
+ * the sole call sites that build `{ type: "image" }` parts, and the bytes they
+ * send come straight out of the private `photos` bucket (`vision/photos.ts`).
+ * Every other role receives text. `seller-media-fence.test.ts` scans the source
+ * and fails if a new module starts sending media without joining this set, so the
+ * fence below cannot be reopened by a role quietly gaining a media payload.
+ */
+export const SELLER_MEDIA_ROLES: ReadonlySet<LlmRole> = new Set<LlmRole>(["vision"]);
+
+/**
+ * The operator's attestation that the Google project behind the Gemini key is
+ * billing-enabled, so Google's **Paid Services** terms apply to it.
+ *
+ * It is a claim about an external fact that no code on this machine can observe:
+ * billing lives in the Google console, not in the repository. So it is asked for
+ * by name and defaults to "not attested" — the safe answer — rather than being
+ * inferred from the presence of a key, a NODE_ENV, or anything else.
+ */
+const GEMINI_BILLING_VAR = "GEMINI_BILLING_ENABLED";
+
+/**
+ * Parse the attestation: `true`/`false` (any casing, trimmed), unset meaning not
+ * attested. `undefined` means the value was set to something that is neither.
+ */
+function parseGeminiBillingAttestation(env: EnvLike): boolean | undefined {
+  const raw = env[GEMINI_BILLING_VAR]?.trim().toLowerCase() ?? "";
+  if (raw === "") return false;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return undefined;
+}
+
+/**
+ * Why `GEMINI_BILLING_ENABLED` cannot be read, or `undefined` if it can.
+ *
+ * Reported whatever the active provider is. The variable's vocabulary must not
+ * depend on which provider happens to be selected today, or a config that says
+ * `yes` would sit silently on an OpenAI deploy and then fail closed — confusingly
+ * — the moment someone flipped `LLM_PROVIDER`.
+ */
+export function geminiBillingConfigError(env: EnvLike = process.env): string | undefined {
+  if (parseGeminiBillingAttestation(env) !== undefined) return undefined;
+  return (
+    `${GEMINI_BILLING_VAR} is set to "${env[GEMINI_BILLING_VAR]}", which is neither ` +
+    `"true" nor "false". It attests that the Google project behind the Gemini key ` +
+    `is billing-enabled, so it must be stated exactly.`
+  );
+}
+
+/**
+ * Why this configuration may not hand `role`'s payload to `provider`, or
+ * `undefined` if it may. Pure and non-throwing so the env schema can report it
+ * alongside every other bad variable instead of blowing up mid-parse (#501).
+ *
+ * Google's Gemini API Terms split on BILLING, not on environment. Under **Unpaid
+ * Services** Google uses submitted content and responses "to improve, and develop
+ * Google products and services" and "Human reviewers may read, annotate, and
+ * process your API input and output." Under **Paid Services** it does not, and
+ * only then are the retention controls even available. A seller photo is taken
+ * inside someone's home and carries faces, addresses, documents, and surroundings
+ * far beyond the item, so the unpaid bargain is not ours to accept on their
+ * behalf.
+ *
+ * Local development is the one exception, and it is allowed by name rather than
+ * by fallthrough: the photos crossing a developer's own machine are that
+ * developer's own, which is the condition ADR-0002 records this trade resting on.
+ * It stops holding the moment a photo they did not take enters a local pipeline —
+ * a sourced gold set, a seeded corpus of real listing photos, or a TestFlight
+ * build pointed at a dev configuration — and ADR-0002 says to revisit it then.
+ */
+export function sellerMediaConfigError(
+  role: LlmRole,
+  provider: LlmProvider,
+  env: EnvLike = process.env,
+): string | undefined {
+  const vocabularyError = geminiBillingConfigError(env);
+  if (vocabularyError) return vocabularyError;
+
+  if (!SELLER_MEDIA_ROLES.has(role)) return undefined;
+  if (provider !== "google") return undefined;
+  if (parseGeminiBillingAttestation(env) === true) return undefined;
+  if (isLocalDevelopment(env)) return undefined;
+
+  return (
+    `The "${role}" role sends the seller's own photo bytes to the model, and this ` +
+    `configuration would send them to Google's Gemini on the UNPAID tier, whose terms ` +
+    `permit Google to use submitted content to improve its products and permit human ` +
+    `reviewers to read API input and output. Choose another provider ` +
+    `(LLM_PROVIDER=openai), or set ${GEMINI_BILLING_VAR}=true once the Google project ` +
+    `behind the key is billing-enabled so the Paid Services terms apply. Do not set it ` +
+    `to make this message go away — it is a claim about billing, and the seller's ` +
+    `photos are what rests on it.`
+  );
+}
+
+/**
  * Resolve the model id for a role: explicit override → role env var → the active
  * provider's default. Pure (env injectable) so the precedence is unit-testable.
  */
@@ -232,6 +331,8 @@ export interface ResolveLanguageModelOptions {
   modelId?: string;
   /** Explicit API key (else resolved from env). */
   apiKey?: string;
+  /** Env bag to resolve against (defaults to `process.env`; injectable for tests). */
+  env?: EnvLike;
 }
 
 /**
@@ -239,14 +340,25 @@ export interface ResolveLanguageModelOptions {
  * ready to hand to `generateObject` / `generateText`. The provider SDK is
  * lazy-imported so the offline test path never loads it. Construction makes NO
  * network call — the request happens when the SDK function runs.
+ *
+ * This is where the seller-media fence bites, and it is checked against the
+ * EFFECTIVE provider rather than `LLM_PROVIDER`, so a call site that forces
+ * `provider: "google"` (the eval's cross-family judge, a spike script) is fenced
+ * on the same terms as a deploy that selected it. Throwing here is the guarantee
+ * that holds identically on every host — the config-startup checks are earlier
+ * and friendlier, but how hard they stop depends on the platform (ADR-0002).
  */
 export async function resolveLanguageModel(
   role: LlmRole,
   opts: ResolveLanguageModelOptions = {},
 ): Promise<LanguageModel> {
-  const provider = opts.provider ?? resolveProvider();
-  const modelId = resolveModelId(role, { provider, modelId: opts.modelId });
-  const apiKey = opts.apiKey ?? resolveApiKey(provider);
+  const env = opts.env ?? process.env;
+  const provider = opts.provider ?? resolveProvider(env);
+  const mediaError = sellerMediaConfigError(role, provider, env);
+  if (mediaError) throw new Error(mediaError);
+
+  const modelId = resolveModelId(role, { provider, modelId: opts.modelId, env });
+  const apiKey = opts.apiKey ?? resolveApiKey(provider, env);
 
   if (provider === "google") {
     const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
