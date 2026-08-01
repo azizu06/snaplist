@@ -94,6 +94,273 @@ struct URLSessionMobileAPIClient: MobileAPIClient {
     }
 }
 
+/**
+ Issue #524. The three included-offer redemption calls, kept off `MobileAPIClient`
+ so a surface that has no business minting the promotion cannot reach them.
+ */
+protocol IncludedOfferRedeeming: Sendable {
+    func redeemIncludedOffer(
+        idempotencyKey: String,
+        proof: AppAttestProofPayload
+    ) async throws -> IncludedOfferOutcome
+    func readIncludedOfferClaim(claimID: String) async throws -> IncludedOfferOutcome
+    func submitIncludedOfferDeviceToken(
+        claimID: String,
+        deviceToken: String,
+        proof: AppAttestProofPayload
+    ) async throws -> IncludedOfferOutcome
+}
+
+/**
+ The exact bytes an App Attest assertion signs for a redemption request.
+
+ This must reproduce `canonicalRedemptionRequest` in
+ `src/lib/included-offer-fence/contract.ts` byte for byte: the server hashes its
+ own reconstruction and compares, so one differing character fails verification
+ rather than degrading. `.sortedKeys` supplies the alphabetical key order that
+ file fixes by construction, and `userId` is the verified Clerk subject — signing
+ a different identity produces a hash the server will not reproduce.
+ */
+enum IncludedOfferCanonicalRequest {
+    static let schemaVersion = 1
+
+    private struct RedeemPayload: Encodable {
+        let action = "included-offer.redeem"
+        let idempotencyKey: String
+        let schemaVersion = IncludedOfferCanonicalRequest.schemaVersion
+        let userId: String
+    }
+
+    private struct DeviceTokenPayload: Encodable {
+        let action = "included-offer.device-token"
+        let claimId: String
+        let schemaVersion = IncludedOfferCanonicalRequest.schemaVersion
+        let userId: String
+    }
+
+    static func redeem(idempotencyKey: String, userID: String) throws -> Data {
+        try encoder.encode(
+            RedeemPayload(idempotencyKey: idempotencyKey, userId: userID)
+        )
+    }
+
+    static func deviceToken(claimID: String, userID: String) throws -> Data {
+        try encoder.encode(
+            DeviceTokenPayload(claimId: claimID, userId: userID)
+        )
+    }
+
+    private static var encoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }
+}
+
+extension URLSessionMobileAPIClient: IncludedOfferRedeeming {
+    func redeemIncludedOffer(
+        idempotencyKey: String,
+        proof: AppAttestProofPayload
+    ) async throws -> IncludedOfferOutcome {
+        try await sendIncludedOffer(
+            path: "/v1/included-offer/redemptions",
+            method: "POST",
+            idempotencyKey: idempotencyKey,
+            body: IncludedOfferRedeemBody(appAttest: proof)
+        )
+    }
+
+    func readIncludedOfferClaim(claimID: String) async throws -> IncludedOfferOutcome {
+        try await sendIncludedOffer(
+            path: "/v1/included-offer/redemptions/\(claimID)",
+            method: "GET",
+            idempotencyKey: nil,
+            body: Optional<IncludedOfferRedeemBody>.none
+        )
+    }
+
+    func submitIncludedOfferDeviceToken(
+        claimID: String,
+        deviceToken: String,
+        proof: AppAttestProofPayload
+    ) async throws -> IncludedOfferOutcome {
+        try await sendIncludedOffer(
+            path: "/v1/included-offer/redemptions/\(claimID)/device-token",
+            method: "POST",
+            idempotencyKey: nil,
+            body: IncludedOfferDeviceTokenBody(
+                appAttest: proof,
+                deviceToken: deviceToken
+            )
+        )
+    }
+
+    private func sendIncludedOffer<Body: Encodable>(
+        path: String,
+        method: String,
+        idempotencyKey: String?,
+        body: Body?
+    ) async throws -> IncludedOfferOutcome {
+        var request = URLRequest(url: baseURL.appending(path: path))
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(
+            "Bearer \(try await tokenProvider.bearerToken())",
+            forHTTPHeaderField: "Authorization"
+        )
+        if let idempotencyKey {
+            request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        }
+        if let body {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            request.httpBody = try encoder.encode(body)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw MobileAPIClientError.invalidResponse
+        }
+        // A refusal here is the fence answering, so its body is decoded like any
+        // other outcome. Only a status carrying no outcome at all — an auth
+        // failure, a 5xx — stays a transport error.
+        do {
+            return try decoder.decode(IncludedOfferEnvelope.self, from: data).data
+        } catch {
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                throw MobileAPIClientError.httpStatus(httpResponse.statusCode)
+            }
+            throw MobileAPIClientError.invalidResponse
+        }
+    }
+}
+
+/**
+ Composes the redemption: Apple's two device primitives plus the three calls.
+
+ Nothing here decides whether the promotion is owed. The client produces
+ evidence and the server decides, which is what keeps a jailbroken or patched
+ build from granting itself an included run.
+ */
+struct IncludedOfferRedemption: Sendable {
+    enum Result: Equatable, Sendable {
+        case outcome(IncludedOfferOutcome)
+        /// `DCDevice.isSupported` is false — Simulator, or hardware without it.
+        case deviceUnsupported
+        /// Apple could not mint a token right now; the claim stays retryable.
+        case deviceTokenUnavailable
+        case proofUnavailable(AppAttestUnavailableReason)
+        case proofInvalid(AppAttestInvalidReason)
+        case transportUnavailable
+    }
+
+    private let attest: any AppAttestProofProviding
+    private let client: any IncludedOfferRedeeming
+    private let deviceCheck: any DeviceCheckTokenProviding
+    private let userID: String
+
+    init(
+        attest: any AppAttestProofProviding,
+        client: any IncludedOfferRedeeming,
+        deviceCheck: any DeviceCheckTokenProviding = AppleDeviceCheckTokenProvider(),
+        userID: String
+    ) {
+        self.attest = attest
+        self.client = client
+        self.deviceCheck = deviceCheck
+        self.userID = userID
+    }
+
+    /**
+     Opens one redemption claim.
+
+     The DeviceCheck gate runs before the network on purpose: a device that can
+     never mint a token can never answer the rendezvous, so opening a claim
+     would leave the seller waiting on a promotion this hardware cannot collect.
+     The honest answer is `.deviceUnsupported` and the paid path.
+     */
+    func redeem(idempotencyKey: String) async -> Result {
+        guard deviceCheck.isSupported else { return .deviceUnsupported }
+        let requestBody: Data
+        do {
+            requestBody = try IncludedOfferCanonicalRequest.redeem(
+                idempotencyKey: idempotencyKey,
+                userID: userID
+            )
+        } catch {
+            return .transportUnavailable
+        }
+        switch await attest.assertionProof(requestBody: requestBody) {
+        case .unavailable(let reason):
+            return .proofUnavailable(reason)
+        case .invalid(let reason):
+            return .proofInvalid(reason)
+        case .proof(let proof):
+            do {
+                return .outcome(try await client.redeemIncludedOffer(
+                    idempotencyKey: idempotencyKey,
+                    proof: AppAttestProofPayload(proof)
+                ))
+            } catch {
+                return .transportUnavailable
+            }
+        }
+    }
+
+    /**
+     Answers a `device_token_required` claim with a fresh token and a fresh proof
+     signed over that claim.
+
+     The token is minted before the proof and the submission only happens with
+     both in hand: posting without a real Apple token would spend the bounded
+     rendezvous window on evidence Apple never issued.
+     */
+    func answerTokenRendezvous(claimID: String) async -> Result {
+        guard deviceCheck.isSupported else { return .deviceUnsupported }
+        let deviceToken: Data
+        do {
+            deviceToken = try await deviceCheck.generateToken()
+        } catch {
+            return .deviceTokenUnavailable
+        }
+        let requestBody: Data
+        do {
+            requestBody = try IncludedOfferCanonicalRequest.deviceToken(
+                claimID: claimID,
+                userID: userID
+            )
+        } catch {
+            return .transportUnavailable
+        }
+        switch await attest.assertionProof(requestBody: requestBody) {
+        case .unavailable(let reason):
+            return .proofUnavailable(reason)
+        case .invalid(let reason):
+            return .proofInvalid(reason)
+        case .proof(let proof):
+            do {
+                return .outcome(try await client.submitIncludedOfferDeviceToken(
+                    claimID: claimID,
+                    deviceToken: deviceToken.base64EncodedString(),
+                    proof: AppAttestProofPayload(proof)
+                ))
+            } catch {
+                return .transportUnavailable
+            }
+        }
+    }
+
+    /** Reads durable claim state while the seller waits. Carries no proof. */
+    func readClaim(claimID: String) async -> Result {
+        do {
+            return .outcome(try await client.readIncludedOfferClaim(claimID: claimID))
+        } catch {
+            return .transportUnavailable
+        }
+    }
+}
+
 struct ZeroNetworkMobileAPIClient: MobileAPIClient, ContractOnlyFixtureProviding {
     func getHealth() async throws -> HealthEnvelope {
         HealthEnvelope(

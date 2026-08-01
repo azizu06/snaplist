@@ -245,6 +245,349 @@ final class MobileAPIContractTests: XCTestCase {
         )
     }
 
+    // MARK: Issue #524 — included-offer redemption
+
+    func testCanonicalRedeemRequestReproducesTheServerSignedBytes() throws {
+        let bytes = try IncludedOfferCanonicalRequest.redeem(
+            idempotencyKey: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+            userID: "user_524"
+        )
+
+        // Byte-for-byte equality with canonicalRedemptionRequest() in
+        // src/lib/included-offer-fence/contract.ts. A divergence of one
+        // character changes the request hash and the assertion stops verifying.
+        XCTAssertEqual(
+            String(decoding: bytes, as: UTF8.self),
+            #"{"action":"included-offer.redeem","idempotencyKey":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","schemaVersion":1,"userId":"user_524"}"#
+        )
+    }
+
+    func testCanonicalDeviceTokenRequestReproducesTheServerSignedBytes() throws {
+        let bytes = try IncludedOfferCanonicalRequest.deviceToken(
+            claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33",
+            userID: "user_524"
+        )
+
+        XCTAssertEqual(
+            String(decoding: bytes, as: UTF8.self),
+            #"{"action":"included-offer.device-token","claimId":"8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33","schemaVersion":1,"userId":"user_524"}"#
+        )
+    }
+
+    func testIncludedOfferRedemptionPostsProofUnderAnIdempotencyKey() async throws {
+        let recorder = MobileAPIRequestRecorder()
+        let session = Self.makeSession { request in
+            recorder.record(request)
+            return (
+                Self.jsonResponse(for: request, status: 202),
+                Data(
+                    #"{"data":{"claimId":"8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33","retryAfterMs":1500,"status":"queued"},"meta":{"requestId":"req_524"}}"#.utf8
+                )
+            )
+        }
+        let client = URLSessionMobileAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            tokenProvider: StubBearerTokenProvider(token: "bearer-524"),
+            session: session
+        )
+
+        let outcome = try await client.redeemIncludedOffer(
+            idempotencyKey: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+            proof: AppAttestProofPayload(
+                assertionObject: "YXNzZXJ0aW9u",
+                challengeId: "00000000-0000-4000-8000-000000000331",
+                keyId: "native-fixed-key-id"
+            )
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .queued(
+                claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33",
+                retryAfterMs: 1500
+            )
+        )
+        let request = try XCTUnwrap(recorder.request)
+        XCTAssertEqual(request.url?.path, "/v1/included-offer/redemptions")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Idempotency-Key"),
+            "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+        )
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Authorization"),
+            "Bearer bearer-524"
+        )
+        XCTAssertEqual(
+            String(decoding: Self.body(of: request), as: UTF8.self),
+            #"{"appAttest":{"assertionObject":"YXNzZXJ0aW9u","challengeId":"00000000-0000-4000-8000-000000000331","keyId":"native-fixed-key-id"}}"#
+        )
+    }
+
+    func testDeniedDeviceIsATypedOutcomeRatherThanATransportFailure() async throws {
+        let session = Self.makeSession { request in
+            (
+                Self.jsonResponse(for: request, status: 409),
+                Data(
+                    #"{"data":{"appealPath":"support-override","claimId":"8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33","status":"denied_device_consumed"},"meta":{"requestId":"req_524"}}"#.utf8
+                )
+            )
+        }
+        let client = URLSessionMobileAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            tokenProvider: StubBearerTokenProvider(token: "bearer-524"),
+            session: session
+        )
+
+        // 409 is the fence answering, not the network failing. Throwing here
+        // would turn "this device already used the promotion, appeal to
+        // support" into an unexplained error the seller cannot act on.
+        let outcome = try await client.redeemIncludedOffer(
+            idempotencyKey: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+            proof: Self.stubProof
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .deniedDeviceConsumed(claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33")
+        )
+    }
+
+    func testUnknownRedemptionStatusFailsClosed() async {
+        let session = Self.makeSession { request in
+            (
+                Self.jsonResponse(for: request, status: 200),
+                Data(
+                    #"{"data":{"claimId":"8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33","status":"granted"},"meta":{"requestId":"req_524"}}"#.utf8
+                )
+            )
+        }
+        let client = URLSessionMobileAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            tokenProvider: StubBearerTokenProvider(token: "bearer-524"),
+            session: session
+        )
+
+        do {
+            _ = try await client.redeemIncludedOffer(
+                idempotencyKey: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+                proof: Self.stubProof
+            )
+            XCTFail("An unrecognized redemption status must not be read as a grant.")
+        } catch {}
+    }
+
+    func testDeviceTokenSubmissionTargetsTheClaimItAnswers() async throws {
+        let recorder = MobileAPIRequestRecorder()
+        let session = Self.makeSession { request in
+            recorder.record(request)
+            return (
+                Self.jsonResponse(for: request, status: 200),
+                Data(
+                    #"{"data":{"claimId":"8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33","status":"reserved"},"meta":{"requestId":"req_524"}}"#.utf8
+                )
+            )
+        }
+        let client = URLSessionMobileAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            tokenProvider: StubBearerTokenProvider(token: "bearer-524"),
+            session: session
+        )
+
+        let outcome = try await client.submitIncludedOfferDeviceToken(
+            claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33",
+            deviceToken: "ZGV2aWNlLXRva2Vu",
+            proof: Self.stubProof
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .reserved(claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33")
+        )
+        let request = try XCTUnwrap(recorder.request)
+        XCTAssertEqual(
+            request.url?.path,
+            "/v1/included-offer/redemptions/8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33/device-token"
+        )
+        XCTAssertEqual(request.httpMethod, "POST")
+        // The claim is addressed by path only; the body carries proof and token.
+        XCTAssertEqual(
+            String(decoding: Self.body(of: request), as: UTF8.self),
+            #"{"appAttest":{"assertionObject":"YXNzZXJ0aW9u","challengeId":"00000000-0000-4000-8000-000000000331","keyId":"native-fixed-key-id"},"deviceToken":"ZGV2aWNlLXRva2Vu"}"#
+        )
+    }
+
+    func testClaimReadIsAPlainAuthenticatedGET() async throws {
+        let recorder = MobileAPIRequestRecorder()
+        let session = Self.makeSession { request in
+            recorder.record(request)
+            return (
+                Self.jsonResponse(for: request, status: 202),
+                Data(
+                    #"{"data":{"claimId":"8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33","status":"device_token_required","tokenDeadlineAt":"2026-08-01T00:00:00.000Z"},"meta":{"requestId":"req_524"}}"#.utf8
+                )
+            )
+        }
+        let client = URLSessionMobileAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            tokenProvider: StubBearerTokenProvider(token: "bearer-524"),
+            session: session
+        )
+
+        let outcome = try await client.readIncludedOfferClaim(
+            claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33"
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .deviceTokenRequired(
+                claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33",
+                tokenDeadlineAt: "2026-08-01T00:00:00.000Z"
+            )
+        )
+        let request = try XCTUnwrap(recorder.request)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(
+            request.url?.path,
+            "/v1/included-offer/redemptions/8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33"
+        )
+        XCTAssertEqual(Self.body(of: request), Data())
+    }
+
+    func testRedemptionStopsBeforeTheServerWhenTheDeviceHasNoDeviceCheck() async {
+        let client = IncludedOfferRedemptionStub()
+        let redemption = IncludedOfferRedemption(
+            attest: AppAttestProofProviderStub(),
+            client: client,
+            deviceCheck: DeviceCheckTokenProviderStub(isSupported: false),
+            userID: "user_524"
+        )
+
+        let result = await redemption.redeem(
+            idempotencyKey: "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+        )
+
+        // A device that can never produce a DeviceCheck token can never answer
+        // the rendezvous, so opening a claim would strand it. The caller routes
+        // to the paid path instead of leaving the seller waiting on a promotion
+        // this hardware cannot collect.
+        XCTAssertEqual(result, .deviceUnsupported)
+        XCTAssertEqual(client.redeemCallCount, 0)
+    }
+
+    func testRendezvousSignsTheClaimItIsAnsweringWithAFreshToken() async throws {
+        let attest = AppAttestProofProviderStub()
+        let client = IncludedOfferRedemptionStub(
+            deviceTokenOutcome: .reserved(
+                claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33"
+            )
+        )
+        let redemption = IncludedOfferRedemption(
+            attest: attest,
+            client: client,
+            deviceCheck: DeviceCheckTokenProviderStub(
+                isSupported: true,
+                token: Data("device-token".utf8)
+            ),
+            userID: "user_524"
+        )
+
+        let result = await redemption.answerTokenRendezvous(
+            claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33"
+        )
+
+        XCTAssertEqual(
+            result,
+            .outcome(.reserved(claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33"))
+        )
+        XCTAssertEqual(
+            attest.requestBodies.map { String(decoding: $0, as: UTF8.self) },
+            [
+                #"{"action":"included-offer.device-token","claimId":"8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33","schemaVersion":1,"userId":"user_524"}"#,
+            ]
+        )
+        XCTAssertEqual(
+            client.submittedDeviceToken,
+            Data("device-token".utf8).base64EncodedString()
+        )
+    }
+
+    func testRendezvousWithoutAnAppleTokenNeverPostsAnEmptyAnswer() async {
+        let client = IncludedOfferRedemptionStub()
+        let redemption = IncludedOfferRedemption(
+            attest: AppAttestProofProviderStub(),
+            client: client,
+            deviceCheck: DeviceCheckTokenProviderStub(
+                isSupported: true,
+                token: nil
+            ),
+            userID: "user_524"
+        )
+
+        let result = await redemption.answerTokenRendezvous(
+            claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33"
+        )
+
+        // The claim keeps its window and stays retryable; posting without a real
+        // token would spend the rendezvous on evidence Apple never issued.
+        XCTAssertEqual(result, .deviceTokenUnavailable)
+        XCTAssertEqual(client.deviceTokenCallCount, 0)
+    }
+
+    func testUnprovableInstallationIsReportedRatherThanRetried() async {
+        let client = IncludedOfferRedemptionStub()
+        let redemption = IncludedOfferRedemption(
+            attest: AppAttestProofProviderStub(
+                outcome: .invalid(.missingVerifiedKey)
+            ),
+            client: client,
+            deviceCheck: DeviceCheckTokenProviderStub(isSupported: true),
+            userID: "user_524"
+        )
+
+        let result = await redemption.redeem(
+            idempotencyKey: "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+        )
+
+        XCTAssertEqual(result, .proofInvalid(.missingVerifiedKey))
+        XCTAssertEqual(client.redeemCallCount, 0)
+    }
+
+    private static let stubProof = AppAttestProofPayload(
+        assertionObject: "YXNzZXJ0aW9u",
+        challengeId: "00000000-0000-4000-8000-000000000331",
+        keyId: "native-fixed-key-id"
+    )
+
+    private static func jsonResponse(
+        for request: URLRequest,
+        status: Int
+    ) -> HTTPURLResponse {
+        HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+    }
+
+    /// `URLProtocol` moves a request body onto `httpBodyStream`, so asserting on
+    /// `httpBody` alone silently passes against an empty body.
+    private static func body(of request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
+
     private static func makeSession(
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> URLSession {
@@ -252,6 +595,90 @@ final class MobileAPIContractTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MobileAPIURLProtocolStub.self]
         return URLSession(configuration: configuration)
+    }
+}
+
+private struct DeviceCheckTokenProviderStub: DeviceCheckTokenProviding {
+    let isSupported: Bool
+    var token: Data?
+
+    func generateToken() async throws -> Data {
+        guard isSupported else { throw DeviceCheckTokenError.unsupportedDevice }
+        guard let token else { throw DeviceCheckTokenError.appleServiceUnavailable }
+        return token
+    }
+}
+
+private final class AppAttestProofProviderStub: AppAttestProofProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private let outcome: AppAttestProofOutcome
+    private var recorded: [Data] = []
+
+    var requestBodies: [Data] { lock.withLock { recorded } }
+
+    init(
+        outcome: AppAttestProofOutcome = .proof(AppAttestAssertionProof(
+            assertionObject: Data("assertion".utf8),
+            challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000331")!,
+            keyID: "native-fixed-key-id"
+        ))
+    ) {
+        self.outcome = outcome
+    }
+
+    func assertionProof(requestBody: Data) async -> AppAttestProofOutcome {
+        lock.withLock { recorded.append(requestBody) }
+        return outcome
+    }
+}
+
+private final class IncludedOfferRedemptionStub: IncludedOfferRedeeming, @unchecked Sendable {
+    private let lock = NSLock()
+    private let redeemOutcome: IncludedOfferOutcome
+    private let deviceTokenOutcome: IncludedOfferOutcome
+    private var storedDeviceToken: String?
+    private var redeemCalls = 0
+    private var deviceTokenCalls = 0
+
+    var redeemCallCount: Int { lock.withLock { redeemCalls } }
+    var deviceTokenCallCount: Int { lock.withLock { deviceTokenCalls } }
+    var submittedDeviceToken: String? { lock.withLock { storedDeviceToken } }
+
+    init(
+        redeemOutcome: IncludedOfferOutcome = .queued(
+            claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33",
+            retryAfterMs: 1500
+        ),
+        deviceTokenOutcome: IncludedOfferOutcome = .reserved(
+            claimID: "8c7f0b16-0a4e-4d21-9c2a-6b0f4a1d5e33"
+        )
+    ) {
+        self.redeemOutcome = redeemOutcome
+        self.deviceTokenOutcome = deviceTokenOutcome
+    }
+
+    func redeemIncludedOffer(
+        idempotencyKey: String,
+        proof: AppAttestProofPayload
+    ) async throws -> IncludedOfferOutcome {
+        lock.withLock { redeemCalls += 1 }
+        return redeemOutcome
+    }
+
+    func readIncludedOfferClaim(claimID: String) async throws -> IncludedOfferOutcome {
+        redeemOutcome
+    }
+
+    func submitIncludedOfferDeviceToken(
+        claimID: String,
+        deviceToken: String,
+        proof: AppAttestProofPayload
+    ) async throws -> IncludedOfferOutcome {
+        lock.withLock {
+            deviceTokenCalls += 1
+            storedDeviceToken = deviceToken
+        }
+        return deviceTokenOutcome
     }
 }
 

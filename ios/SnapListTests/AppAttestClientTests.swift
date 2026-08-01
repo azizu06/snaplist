@@ -354,6 +354,75 @@ final class AppAttestClientTests: XCTestCase {
         XCTAssertEqual(truth, .invalid(.serverRejected))
     }
 
+    // MARK: Issue #524 — proof for the included-offer redemption endpoints
+
+    func testRedemptionProofLeavesTheChallengeForTheRedemptionEndpoint() async throws {
+        let service = AppAttestServiceStub(isSupported: true)
+        let server = AppAttestServerStub()
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            keyStore: AppAttestKeyStoreStub(
+                key: .init(id: "native-fixed-key-id", state: .verified)
+            ),
+            server: server,
+            service: service
+        )
+
+        let outcome = await client.assertionProof(
+            requestBody: Data(#"{"action":"included-offer.redeem"}"#.utf8)
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .proof(AppAttestAssertionProof(
+                assertionObject: Data("fixed-assertion".utf8),
+                challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000331")!,
+                keyID: "native-fixed-key-id"
+            ))
+        )
+        // The redemption endpoint spends this challenge itself. Verifying here
+        // would retire it first and leave the redemption holding dead evidence.
+        let verificationCallCount = await server.assertionVerificationCallCount
+        XCTAssertEqual(verificationCallCount, 0)
+        let challengeCallCount = await server.challengeCallCount
+        XCTAssertEqual(challengeCallCount, 1)
+    }
+
+    func testRedemptionProofNeedsAVerifiedKeyBeforeReachingApple() async {
+        let service = AppAttestServiceStub(isSupported: true)
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            keyStore: AppAttestKeyStoreStub(
+                key: .init(id: "native-fixed-key-id", state: .pending)
+            ),
+            server: AppAttestServerStub(),
+            service: service
+        )
+
+        let outcome = await client.assertionProof(requestBody: Data("{}".utf8))
+
+        XCTAssertEqual(outcome, .invalid(.missingVerifiedKey))
+        XCTAssertNil(service.assertionHash)
+    }
+
+    func testRedemptionProofIsUnavailableWhereAppAttestIsUnsupported() async {
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            keyStore: AppAttestKeyStoreStub(
+                key: .init(id: "native-fixed-key-id", state: .verified)
+            ),
+            server: AppAttestServerStub(),
+            service: AppAttestServiceStub(isSupported: false)
+        )
+
+        let outcome = await client.assertionProof(requestBody: Data("{}".utf8))
+
+        XCTAssertEqual(outcome, .unavailable(.unsupportedDevice))
+    }
+
     private func makeURLSessionServerClient() -> URLSessionAppAttestServerClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AppAttestURLProtocolStub.self]
