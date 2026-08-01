@@ -1201,13 +1201,28 @@ actor NativeIntake {
                 )
             )
         } catch {
+            // A missing entry.json or voice file is malformed rather than
+            // absent, which is why this cannot agree with the catch above it.
+            // That one covers the entry directory itself vanishing, leaving
+            // nothing behind to protect. This one covers an entry that still
+            // exists but no longer describes a deferred voice, and calling
+            // that absent would tell the retention sweep there is nothing
+            // here while an orphaned voice file may still sit inside it.
             return Self.isMissing(error) ? .malformed : .transient
         }
     }
 
+    /// One principal's deferred unmatched voices, split by whether they can
+    /// still be read. An unreadable entry keeps its own list because it is
+    /// storage the sweep must resolve but not a voice any caller can use.
+    private struct DeferredUnmatchedVoiceListing {
+        var records: [DeferredUnmatchedVoiceRecord] = []
+        var unreadableRoots: [URL] = []
+    }
+
     private func deferredUnmatchedVoices(
         in principalRoot: URL
-    ) -> ReadResult<[DeferredUnmatchedVoiceRecord]> {
+    ) -> ReadResult<DeferredUnmatchedVoiceListing> {
         let container = deferredUnmatchedVoicesRoot(in: principalRoot)
         guard let anchor = storageAnchor(containing: container) else {
             return .malformed
@@ -1226,23 +1241,27 @@ actor NativeIntake {
         } catch {
             return Self.isMissing(error) ? .absent : .transient
         }
-        var records: [DeferredUnmatchedVoiceRecord] = []
-        records.reserveCapacity(entryRoots.count)
+        var listing = DeferredUnmatchedVoiceListing()
+        listing.records.reserveCapacity(entryRoots.count)
         for entryRoot in entryRoots {
             switch readDeferredUnmatchedVoice(at: entryRoot) {
             case .value(let record):
-                records.append(record)
+                listing.records.append(record)
             case .absent:
                 // The entry vanished between the listing and the read, so it
                 // holds no protected bytes and must not stall its siblings.
                 continue
             case .malformed:
-                return .malformed
+                // The entry is still on disk but cannot be read back, so it
+                // must not stall its siblings either. It is reported rather
+                // than skipped because it may still hold voice bytes, and
+                // only the sweep can decide what becomes of them.
+                listing.unreadableRoots.append(entryRoot)
             case .transient:
                 return .transient
             }
         }
-        return .value(records)
+        return .value(listing)
     }
 
     /// Reports whether a principal root still holds deferred unmatched voices.
@@ -1257,8 +1276,12 @@ actor NativeIntake {
         whenUncertain: Bool
     ) -> Bool {
         switch deferredUnmatchedVoices(in: principalRoot) {
-        case .value(let records):
-            return !records.isEmpty
+        case .value(let listing):
+            // An unreadable entry counts as present. Its bytes are real even
+            // though its metadata is not, so a root holding one has not been
+            // ruled clear of voices and must not be destroyed as if it had.
+            return !listing.records.isEmpty
+                || !listing.unreadableRoots.isEmpty
         case .absent:
             return false
         case .transient, .malformed:
@@ -1372,11 +1395,19 @@ actor NativeIntake {
         case .value(let roots):
             for root in roots {
                 switch deferredUnmatchedVoices(in: root) {
-                case .value(let records):
+                case .value(let listing):
                     deadlines.append(
-                        contentsOf: records.map {
+                        contentsOf: listing.records.map {
                             deletionRetryAfter[$0.root]
                                 ?? $0.value.expiresAt
+                        }
+                    )
+                    // An unreadable entry has no deadline to read, so it is
+                    // due immediately and the retry interval bounds it only
+                    // once a removal has already failed.
+                    deadlines.append(
+                        contentsOf: listing.unreadableRoots.map {
+                            deletionRetryAfter[$0] ?? now()
                         }
                     )
                 case .transient, .malformed:
@@ -1437,14 +1468,28 @@ actor NativeIntake {
         for roots in [ownedDurableRoots(), ownedEphemeralRoots()] {
             guard case .value(let roots) = roots else { continue }
             for root in roots {
-                guard case .value(let records) =
+                guard case .value(let listing) =
                     deferredUnmatchedVoices(in: root) else {
                     continue
                 }
-                for record in records
-                    where record.value.expiresAt <= currentTime {
-                    let removed = removeDeferredUnmatchedVoice(record)
-                    deletionRetryAfter[record.root] = removed
+                let expired = listing.records
+                    .filter { $0.value.expiresAt <= currentTime }
+                    .map(\.root)
+                // An unreadable entry is deleted on sight rather than kept.
+                // Nothing can recover it: a record only ever reaches a caller
+                // through a successful read, so no path can surface, match, or
+                // return one to the seller. What it can still do is hold raw
+                // voice bytes with no deadline to read, and ADR-0012 caps
+                // those at 24 hours. Deletion is bounded to entries inside
+                // this principal's own store, under its validated storage
+                // anchor. Only schema version 1 is ever written, so if a
+                // second version is added its writer must land before this
+                // sweep learns to tolerate it.
+                for entryRoot in expired + listing.unreadableRoots {
+                    let removed = removeDeferredUnmatchedVoiceEntry(
+                        at: entryRoot
+                    )
+                    deletionRetryAfter[entryRoot] = removed
                         ? nil
                         : currentTime.addingTimeInterval(
                             Self.retentionRetryInterval
@@ -1454,19 +1499,17 @@ actor NativeIntake {
         }
     }
 
-    private func removeDeferredUnmatchedVoice(
-        _ record: DeferredUnmatchedVoiceRecord
-    ) -> Bool {
-        guard let anchor = storageAnchor(containing: record.root) else {
+    private func removeDeferredUnmatchedVoiceEntry(at root: URL) -> Bool {
+        guard let anchor = storageAnchor(containing: root) else {
             return false
         }
         do {
             try Self.validateContainedPath(
-                record.root,
+                root,
                 under: anchor,
                 fileManager: fileManager
             )
-            try fileManager.removeItem(at: record.root)
+            try fileManager.removeItem(at: root)
             return true
         } catch {
             return Self.isMissing(error)
