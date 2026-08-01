@@ -405,6 +405,20 @@ protocol TrophyWallRepository: Sendable {
     func initialCards(for principalScope: TrophyWallPrincipalScope) -> [TrophyWallCard]
 }
 
+/// What the client actually knows about the tenant's server-side collection.
+/// Trophy Wall may only describe a collection it has proved, so an unproved
+/// collection stays `unknown` and renders nothing rather than an empty success.
+enum TrophyWallCollectionOutcome: Equatable, Sendable {
+    /// No collection request has completed yet.
+    case unknown
+    /// A collection page arrived, so an absent card is proved absence.
+    case loaded
+    /// The request never reached the boundary; saved cards are all we know.
+    case offline
+    /// The boundary refused the request; saved cards are all we know.
+    case unavailable
+}
+
 @MainActor
 final class TrophyWallStore {
     private enum CanonicalHistoryState {
@@ -419,8 +433,11 @@ final class TrophyWallStore {
         }
     }
 
+    static let collectionPageLimit = 20
+
     let principalScope: TrophyWallPrincipalScope
     private(set) var cards: [TrophyWallCard]
+    private(set) var collectionOutcome: TrophyWallCollectionOutcome = .unknown
     private var canonicalHistoryStates: [UUID: CanonicalHistoryState]
 
     var processingRows: [TrophyWallProcessingRow] {
@@ -444,6 +461,22 @@ final class TrophyWallStore {
                 return
             }
             states[runID] = .visible(card.orderKey)
+        }
+    }
+
+    /// Re-requests the tenant's collection page from the existing boundary. A
+    /// failure never mutates, drops, or invents a card: it only downgrades what
+    /// the client is allowed to claim about the collection.
+    func refreshCollection(using repository: any TrophyWallRunHistoryRepository) async {
+        do {
+            let page = try await repository.fetchPage(
+                limit: Self.collectionPageLimit,
+                cursor: nil
+            )
+            ingest(historyPage: page, principalScope: principalScope)
+            collectionOutcome = .loaded
+        } catch {
+            collectionOutcome = error is URLError ? .offline : .unavailable
         }
     }
 

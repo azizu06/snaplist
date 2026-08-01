@@ -808,6 +808,22 @@ struct TrophyWallProcessingView: View {
         let visibleRows: [TrophyWallProcessingRow]
         let disclosureLabel: String?
         let disclosureAccessibilityLabel: String?
+        let offlineNotice: String?
+        let collectionMessage: CollectionMessage?
+    }
+
+    /// The centered group shown when there is no row to show at all. It states
+    /// only what the client proved and offers exactly one recovery action.
+    struct CollectionMessage: Equatable {
+        enum Action: Equatable {
+            case scan(label: String)
+            case tryAgain(label: String)
+        }
+
+        let heading: String
+        let action: Action
+        let scoutImageName: String
+        let scoutAccessibilityLabel: String
     }
 
     struct DisclosureTransition: Equatable {
@@ -818,6 +834,20 @@ struct TrophyWallProcessingView: View {
     private static let smallestSupportedHeight: CGFloat = 667
     private static let compactRowLimit = 3
     private static let smallestHeightRowLimit = 2
+    private static let scoutAccessibilityLabel = "Scout, the SnapList camera helper"
+    private static let offlineNoticeText = "You're offline. Showing saved items."
+    private static let emptyCollectionMessage = CollectionMessage(
+        heading: "Nothing is processing.",
+        action: .scan(label: "Scan an item"),
+        scoutImageName: "ScoutUncertain",
+        scoutAccessibilityLabel: scoutAccessibilityLabel
+    )
+    private static let unavailableCollectionMessage = CollectionMessage(
+        heading: "Processing unavailable",
+        action: .tryAgain(label: "Try again"),
+        scoutImageName: "ScoutRetryReview",
+        scoutAccessibilityLabel: scoutAccessibilityLabel
+    )
 
     @ScaledMetric(relativeTo: .title2) private var titleSize = 24
     @ScaledMetric(relativeTo: .callout) private var disclosureSize = 14
@@ -825,13 +855,33 @@ struct TrophyWallProcessingView: View {
     @State private var isExpanded = false
 
     let rows: [TrophyWallProcessingRow]
+    let collectionOutcome: TrophyWallCollectionOutcome
     let onBack: () -> Void
     let openRoute: (HomeRoute) -> Void
+    let onScan: () -> Void
+    let onTryAgain: () -> Void
+
+    init(
+        rows: [TrophyWallProcessingRow],
+        collectionOutcome: TrophyWallCollectionOutcome = .unknown,
+        onBack: @escaping () -> Void,
+        openRoute: @escaping (HomeRoute) -> Void,
+        onScan: @escaping () -> Void,
+        onTryAgain: @escaping () -> Void
+    ) {
+        self.rows = rows
+        self.collectionOutcome = collectionOutcome
+        self.onBack = onBack
+        self.openRoute = openRoute
+        self.onScan = onScan
+        self.onTryAgain = onTryAgain
+    }
 
     var body: some View {
         GeometryReader { proxy in
             let presentation = Self.presentation(
                 from: rows,
+                collectionOutcome: collectionOutcome,
                 availableHeight: proxy.size.height,
                 isExpanded: isExpanded
             )
@@ -861,6 +911,18 @@ struct TrophyWallProcessingView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 10)
+
+                if let offlineNotice = presentation.offlineNotice {
+                    TrophyWallOfflineNoticeView(text: offlineNotice)
+                }
+
+                if let collectionMessage = presentation.collectionMessage {
+                    TrophyWallCollectionMessageView(
+                        message: collectionMessage,
+                        onScan: onScan,
+                        onTryAgain: onTryAgain
+                    )
+                }
 
                 if !presentation.visibleRows.isEmpty {
                     ScrollView {
@@ -951,9 +1013,23 @@ struct TrophyWallProcessingView: View {
 
     static func presentation(
         from rows: [TrophyWallProcessingRow],
+        collectionOutcome: TrophyWallCollectionOutcome = .unknown,
         availableHeight: CGFloat,
         isExpanded: Bool
     ) -> Presentation {
+        guard !rows.isEmpty else {
+            return Presentation(
+                visibleRows: [],
+                disclosureLabel: nil,
+                disclosureAccessibilityLabel: nil,
+                offlineNotice: nil,
+                collectionMessage: collectionMessage(for: collectionOutcome)
+            )
+        }
+
+        // The offline notice is a claim about saved items, so it is only
+        // truthful while there are saved items to show.
+        let offlineNotice = collectionOutcome == .offline ? offlineNoticeText : nil
         let clampedRows = visibleRows(
             from: rows,
             availableHeight: availableHeight
@@ -963,7 +1039,9 @@ struct TrophyWallProcessingView: View {
             return Presentation(
                 visibleRows: rows,
                 disclosureLabel: nil,
-                disclosureAccessibilityLabel: nil
+                disclosureAccessibilityLabel: nil,
+                offlineNotice: offlineNotice,
+                collectionMessage: nil
             )
         }
 
@@ -971,7 +1049,9 @@ struct TrophyWallProcessingView: View {
             return Presentation(
                 visibleRows: rows,
                 disclosureLabel: "Show less",
-                disclosureAccessibilityLabel: "Show fewer items"
+                disclosureAccessibilityLabel: "Show fewer items",
+                offlineNotice: offlineNotice,
+                collectionMessage: nil
             )
         }
 
@@ -980,8 +1060,26 @@ struct TrophyWallProcessingView: View {
             disclosureLabel: hiddenCount == 2 ? "Show 2 more" : "Show more",
             disclosureAccessibilityLabel: hiddenCount == 2
                 ? "Show 2 more items"
-                : "Show more items"
+                : "Show more items",
+            offlineNotice: offlineNotice,
+            collectionMessage: nil
         )
+    }
+
+    private static func collectionMessage(
+        for outcome: TrophyWallCollectionOutcome
+    ) -> CollectionMessage? {
+        switch outcome {
+        case .unknown:
+            // Nothing has been proved, so no empty success may be claimed.
+            nil
+        case .loaded:
+            emptyCollectionMessage
+        case .offline, .unavailable:
+            // Without a saved row there is no cached truth to keep, so both
+            // reachability failures collapse to the same recovery state.
+            unavailableCollectionMessage
+        }
     }
 
     static func disclosureTransition(
@@ -992,6 +1090,109 @@ struct TrophyWallProcessingView: View {
             isExpanded: nextExpanded,
             announcement: nextExpanded ? "Expanded" : "Collapsed"
         )
+    }
+}
+
+private struct TrophyWallOfflineNoticeView: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(SnapListColorToken.textTertiary.color)
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+
+            Text(text)
+                .snapListTypography(.status)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .background(SnapListColorToken.groupingFill.color)
+        .clipShape(.rect(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityIdentifier("trophy.processing.offline")
+    }
+}
+
+private struct TrophyWallCollectionMessageView: View {
+    // Only the approved static Scout artwork ships today. It is the approved
+    // Reduced Motion fallback, so it stays honest under any motion setting.
+    private static let scoutHeight: CGFloat = 150
+
+    let message: TrophyWallProcessingView.CollectionMessage
+    let onScan: () -> Void
+    let onTryAgain: () -> Void
+
+    @ScaledMetric(relativeTo: .title3) private var headingSize = 18
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(message.scoutImageName)
+                .resizable()
+                .scaledToFit()
+                .frame(height: Self.scoutHeight)
+                .accessibilityLabel(message.scoutAccessibilityLabel)
+
+            Text(message.heading)
+                .font(.system(size: headingSize, weight: .bold))
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("trophy.processing.collection.heading")
+
+            action
+        }
+        .padding(.horizontal, 34)
+        .padding(.top, 24)
+        .padding(.bottom, 104)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("trophy.processing.collection")
+    }
+
+    @ViewBuilder
+    private var action: some View {
+        switch message.action {
+        case .scan(let label):
+            Button(action: onScan) {
+                Text(label)
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.canvas.color)
+                    .padding(.horizontal, 28)
+                    .frame(minHeight: 52)
+                    .background(SnapListColorToken.action.color)
+                    .clipShape(.rect(cornerRadius: 14))
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .accessibilityIdentifier("trophy.processing.collection.scan")
+        case .tryAgain(let label):
+            Button(action: onTryAgain) {
+                Text(label)
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.actionDeep.color)
+                    .padding(.horizontal, 22)
+                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                    .background(SnapListColorToken.actionTint.color)
+                    .clipShape(.rect(cornerRadius: 12))
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .accessibilityIdentifier("trophy.processing.collection.try-again")
+        }
     }
 }
 

@@ -2,6 +2,9 @@ import SwiftUI
 
 enum SnapListColorToken: String, CaseIterable {
     case action = "#3665F3"
+    /// Action blue's deeper tone, used for action text on `actionTint`.
+    case actionDeep = "#2B51C4"
+    case actionTint = "#EEF3FF"
     case inkPrimary = "#16181B"
     case textSecondary = "#55585C"
     case textTertiary = "#8A8D92"
