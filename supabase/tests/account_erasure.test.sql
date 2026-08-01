@@ -1,6 +1,6 @@
 begin;
 
-select plan(41);
+select plan(43);
 
 -- Issue #384: erase one signed-in account durably and idempotently.
 --
@@ -442,6 +442,63 @@ select extensions.has_trigger(
   'storage', 'objects', 'zzz_fence_account_erasure_storage_object',
   'private Storage refuses new objects for an account being erased'
 );
+
+-- ---------------------------------------------------------------------------
+-- What that coverage means for the newest tenant table. `public.export_handoffs`
+-- (migration 20260731040000) holds a seller's assisted-export receipts — their
+-- own claim that they posted a pack to Facebook, Mercari, or Depop. Its rows
+-- cascade from `listings` and `items`, so they were already going away; what was
+-- missing is that erasure never REFUSED one, and never counted one. Both are
+-- asserted as behaviour here, not just as catalog wiring above.
+-- ---------------------------------------------------------------------------
+
+savepoint export_receipt;
+insert into public.user_settings (user_id) values ('user_384_export');
+insert into public.items (
+  id, user_id, review_content_revision, photo_identity_kind, photo_identity_fingerprint
+)
+values (
+  '38400000-0000-4000-8000-0000000000e1', 'user_384_export',
+  '38400000-0000-4000-8000-0000000000e3', 'content_sha256_set_v1', repeat('e', 64)
+);
+insert into public.listings (id, user_id, item_id, platform, source_review_revision)
+values (
+  '38400000-0000-4000-8000-0000000000e2', 'user_384_export',
+  '38400000-0000-4000-8000-0000000000e1', 'depop',
+  '38400000-0000-4000-8000-0000000000e3'
+);
+insert into public.export_handoffs (
+  user_id, item_id, platform, source_review_revision, handoff_at, shared_at
+)
+values (
+  'user_384_export', '38400000-0000-4000-8000-0000000000e1', 'depop',
+  '38400000-0000-4000-8000-0000000000e3', now(), now()
+);
+select public.begin_account_erasure(
+  'user_384_export', '38400000-0000-4000-8000-0000000000e4'
+);
+select throws_ok(
+  $$insert into public.export_handoffs (
+      user_id, item_id, platform, source_review_revision, handoff_at
+    )
+    values (
+      'user_384_export', '38400000-0000-4000-8000-0000000000e1', 'facebook',
+      '38400000-0000-4000-8000-0000000000e3', now()
+    )$$,
+  '55000',
+  null,
+  'a seller cannot record a new export receipt into an account already being erased'
+);
+select public.advance_account_erasure(
+  (select generation_id from private.account_erasure_generations
+   where user_id = 'user_384_export')
+);
+select is(
+  private.account_erasure_owned_row_count('user_384_export'),
+  0,
+  'the export receipts the completion proof now counts are gone before it counts them'
+);
+rollback to savepoint export_receipt;
 
 -- ---------------------------------------------------------------------------
 -- A guest copy mid-flight owns rows in two tenants at once. Erasure waits for

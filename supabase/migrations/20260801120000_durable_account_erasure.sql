@@ -505,6 +505,7 @@ begin
   foreach v_table in array array[
     'public.items',
     'public.listings',
+    'public.export_handoffs',
     'public.messages',
     'public.embeddings',
     'public.prediction_logs',
@@ -812,6 +813,7 @@ as $$
   from (
     select count(*)::integer as count from public.items where user_id = p_user_id
     union all select count(*)::integer from public.listings where user_id = p_user_id
+    union all select count(*)::integer from public.export_handoffs where user_id = p_user_id
     union all select count(*)::integer from public.messages where user_id = p_user_id
     union all select count(*)::integer from public.embeddings where user_id = p_user_id
     union all select count(*)::integer from public.prediction_logs where user_id = p_user_id
@@ -1070,6 +1072,13 @@ begin
   delete from public.embeddings where user_id = v_generation.user_id;
   delete from public.pipeline_run_history_order_versions where user_id = v_generation.user_id;
   delete from public.pipeline_runs where user_id = v_generation.user_id;
+  -- Assisted-export receipts (migration 20260731040000) already cascade from
+  -- both `listings` and `items`, so this delete removes nothing today. It is
+  -- here because the completion proof now COUNTS the receipts: leaving their
+  -- removal to a foreign key declared in another migration means a later change
+  -- to that key would not fail a test, it would strand every erasure at
+  -- "Mandatory account erasure work is incomplete" with no way to finish.
+  delete from public.export_handoffs where user_id = v_generation.user_id;
   delete from public.listings where user_id = v_generation.user_id;
   delete from public.items where user_id = v_generation.user_id;
 
