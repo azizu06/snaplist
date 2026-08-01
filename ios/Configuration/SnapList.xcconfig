@@ -26,4 +26,4 @@ SNAPLIST_POSTHOG_HOST = https:/$()/us.i.posthog.com
 // Left empty until the owner fills it in; an empty or unexpanded value makes
 // the app skip crash reporting instead of starting a reporter that cannot
 // deliver.
-SNAPLIST_SENTRY_DSN =
+SNAPLIST_SENTRY_DSN = https:/$()/916ebc45655102b3b8e3b1a76509ee11@o4511502147125248.ingest.us.sentry.io/4511570143019008
