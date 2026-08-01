@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { accountErasureStateSchema, type AccountErasureState } from "./service";
+import {
+  accountErasureStateSchema,
+  isTerminalAccountErasureStatus,
+  type AccountErasureState,
+} from "./service";
 import { AccountErasureIdempotencyConflictError } from "./store";
 
 export interface AccountErasureHttpDependencies {
@@ -62,14 +66,18 @@ export function createAccountErasureHandler(
         userId: authentication.userId,
         idempotencyKey: idempotencyKey.data,
       }));
+      // The identity block carries provider references the caller must never
+      // see, so the response projects only the seller-facing state.
       return json({
         data: {
           generationId: state.generationId,
           status: state.status,
-          blockers: state.blockers,
+          retainedRecords: state.retainedRecords,
+          deferrals: state.deferrals,
+          attentionReasons: state.attentionReasons,
         },
         meta: { requestId },
-      }, state.status === "complete" ? 200 : 202);
+      }, isTerminalAccountErasureStatus(state.status) ? 200 : 202);
     } catch (error) {
       if (error instanceof AccountErasureIdempotencyConflictError) {
         return errorResponse(

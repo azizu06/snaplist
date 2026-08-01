@@ -4,6 +4,8 @@ import { createConfiguredAccountErasureOperations } from "./configured";
 const baseInput = {
   supabaseURL: "https://project.supabase.co",
   secretKey: "sb_secret_current",
+  clerkSecretKey: "sk_test_account_erasure",
+  revenueCatSecretKey: "sk_revenuecat_account_erasure",
 };
 
 describe("configured account erasure", () => {

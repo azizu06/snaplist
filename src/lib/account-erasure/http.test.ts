@@ -16,11 +16,14 @@ function request(headers: HeadersInit = {}): Request {
 }
 
 describe("account erasure HTTP boundary", () => {
-  it("returns durable blocked truth without exposing the Storage manifest", async () => {
+  it("returns durable unfinished truth without exposing the manifest or identity", async () => {
     const erase = vi.fn().mockResolvedValue({
       generationId,
-      status: "blocked",
-      blockers: ["clerk-identity-retention"],
+      status: "deletion_in_progress",
+      retainedRecords: [],
+      deferrals: ["ebay-provider-authority-pending"],
+      attentionReasons: [],
+      identity: { clerkUserId: "user_384", revenueCatAppUserIds: ["rc_384"] },
       storageObjects: [{ bucketId: "photos", objectName: "user_384/private.jpg" }],
     });
     const handler = createAccountErasureHandler({
@@ -37,12 +40,56 @@ describe("account erasure HTTP boundary", () => {
     expect(body).toEqual({
       data: {
         generationId,
-        status: "blocked",
-        blockers: ["clerk-identity-retention"],
+        status: "deletion_in_progress",
+        retainedRecords: [],
+        deferrals: ["ebay-provider-authority-pending"],
+        attentionReasons: [],
       },
       meta: { requestId: "request-384" },
     });
     expect(JSON.stringify(body)).not.toContain("private.jpg");
+    expect(JSON.stringify(body)).not.toContain("rc_384");
+  });
+
+  it("answers 200 only for a terminal status, and keeps the two apart", async () => {
+    function handlerFor(status: string, retainedRecords: string[] = []) {
+      return createAccountErasureHandler({
+        authenticateReverified: vi.fn().mockResolvedValue({ userId: "user_384" }),
+        erase: vi.fn().mockResolvedValue({
+          generationId,
+          status,
+          retainedRecords,
+          deferrals: [],
+          attentionReasons: status === "deletion_needs_attention"
+            ? ["clerk-identity-deletion-unverified"]
+            : [],
+          identity: null,
+          storageObjects: [],
+        }),
+        requestId: () => "request-384",
+      });
+    }
+
+    await expect(handlerFor("deletion_completed")(request()))
+      .resolves.toMatchObject({ status: 200 });
+
+    const retained = await handlerFor(
+      "deletion_completed_with_retained_records",
+      ["ebay-live-listing"],
+    )(request());
+    expect(retained.status).toBe(200);
+    // The retained-records status must survive the transport intact: a client
+    // that saw a flat `deletion_completed` here would be told SnapList deleted
+    // a record it never owned.
+    expect(await retained.json()).toMatchObject({
+      data: {
+        status: "deletion_completed_with_retained_records",
+        retainedRecords: ["ebay-live-listing"],
+      },
+    });
+
+    await expect(handlerFor("deletion_needs_attention")(request()))
+      .resolves.toMatchObject({ status: 202 });
   });
 
   it("passes through the Clerk reverification challenge without starting erasure", async () => {

@@ -9,10 +9,18 @@ function configuredAccountErasureOperations() {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const secretKey = process.env.SUPABASE_SECRET_KEY?.trim()
     || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!supabaseURL || !secretKey) {
+  const clerkSecretKey = process.env.CLERK_SECRET_KEY?.trim();
+  const revenueCatSecretKey = process.env.REVENUECAT_SECRET_API_KEY?.trim();
+  if (!supabaseURL || !secretKey || !clerkSecretKey || !revenueCatSecretKey) {
     throw new Error("The account erasure adapter is not configured.");
   }
-  return createConfiguredAccountErasureOperations({ supabaseURL, secretKey });
+  return createConfiguredAccountErasureOperations({
+    supabaseURL,
+    secretKey,
+    clerkSecretKey,
+    revenueCatSecretKey,
+    revenueCatProjectId: process.env.REVENUECAT_PROJECT_ID?.trim() || undefined,
+  });
 }
 
 const handler = createAccountErasureHandler({

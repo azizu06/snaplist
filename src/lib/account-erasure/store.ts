@@ -1,15 +1,18 @@
 import { z } from "zod";
 import {
-  accountErasureBlockerSchema,
+  accountErasureAttentionReasonSchema,
+  accountErasureDeferralSchema,
+  accountErasureRetainedRecordSchema,
   accountErasureStateSchema,
-  resolvedAccountErasureBlockerSchema,
+  accountErasureStatusSchema,
   type AccountErasureStore,
 } from "./service";
 
 type AccountErasureRpcName =
   | "begin_account_erasure"
   | "confirm_account_erasure_storage_absence"
-  | "advance_account_erasure";
+  | "advance_account_erasure"
+  | "finalize_account_erasure";
 
 interface AccountErasureRpcResult {
   data: unknown;
@@ -32,8 +35,14 @@ export class AccountErasureIdempotencyConflictError extends Error {
 
 const rpcStateSchema = z.object({
   generation_id: z.string().uuid(),
-  status: z.enum(["deleting", "blocked", "complete"]),
-  blockers: z.array(accountErasureBlockerSchema),
+  status: accountErasureStatusSchema,
+  retained_records: z.array(accountErasureRetainedRecordSchema),
+  deferrals: z.array(accountErasureDeferralSchema),
+  attention_reasons: z.array(accountErasureAttentionReasonSchema),
+  identity: z.object({
+    clerk_user_id: z.string().min(1),
+    revenuecat_app_user_ids: z.array(z.string().min(1)),
+  }).strict().nullable(),
   storage_objects: z.array(z.object({
     bucket_id: z.enum(["photos", "message-photos"]),
     object_name: z.string().min(1).max(1_024),
@@ -41,7 +50,13 @@ const rpcStateSchema = z.object({
 }).strict().transform((state) => accountErasureStateSchema.parse({
   generationId: state.generation_id,
   status: state.status,
-  blockers: state.blockers,
+  retainedRecords: state.retained_records,
+  deferrals: state.deferrals,
+  attentionReasons: state.attention_reasons,
+  identity: state.identity === null ? null : {
+    clerkUserId: state.identity.clerk_user_id,
+    revenueCatAppUserIds: state.identity.revenuecat_app_user_ids,
+  },
   storageObjects: state.storage_objects.map((object) => ({
     bucketId: object.bucket_id,
     objectName: object.object_name,
@@ -86,11 +101,22 @@ export function createSupabaseAccountErasureStore(
     async advance(input) {
       const result = await client.rpc("advance_account_erasure", {
         p_generation_id: z.string().uuid().parse(input.generationId),
-        p_resolved_blockers: z
-          .array(resolvedAccountErasureBlockerSchema)
-          .parse(input.resolvedBlockers),
       });
       return rpcStateSchema.parse(rpcData("advancement", result));
+    },
+
+    async finalize(input) {
+      const result = await client.rpc("finalize_account_erasure", {
+        p_attention_reasons: z
+          .array(accountErasureAttentionReasonSchema)
+          .parse(input.attentionReasons),
+        p_clerk_identity_absent: z.boolean().parse(input.clerkIdentityAbsent),
+        p_generation_id: z.string().uuid().parse(input.generationId),
+        p_revenuecat_customer_absent: z
+          .boolean()
+          .parse(input.revenueCatCustomerAbsent),
+      });
+      return rpcStateSchema.parse(rpcData("completion", result));
     },
   };
 }

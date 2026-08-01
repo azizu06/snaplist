@@ -20,11 +20,12 @@ const PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
 const SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
 
-const RETENTION_BLOCKERS = [
-  "hosted-transcription-retention",
-  "ebay-publish-receipt-obligations",
-  "clerk-identity-retention",
-  "apple-revenuecat-reference-obligations",
+const ERASURE_STATUSES = [
+  "deletion_requested",
+  "deletion_in_progress",
+  "deletion_completed",
+  "deletion_completed_with_retained_records",
+  "deletion_needs_attention",
 ] as const;
 
 interface ErasureStorageObject {
@@ -34,9 +35,12 @@ interface ErasureStorageObject {
 
 interface ErasurePayload {
   generation_id: string;
-  status: "deleting" | "blocked" | "complete";
+  status: (typeof ERASURE_STATUSES)[number];
   storage_objects: ErasureStorageObject[];
-  blockers: string[];
+  retained_records: string[];
+  deferrals: string[];
+  attention_reasons: string[];
+  identity: { clerk_user_id: string; revenuecat_app_user_ids: string[] } | null;
 }
 
 let reachable = false;
@@ -75,13 +79,59 @@ function erasurePayload(value: unknown): ErasurePayload {
   const payload = value as Partial<ErasurePayload>;
   if (
     typeof payload.generation_id !== "string" ||
-    !["deleting", "blocked", "complete"].includes(payload.status ?? "") ||
+    !ERASURE_STATUSES.includes(payload.status as (typeof ERASURE_STATUSES)[number]) ||
     !Array.isArray(payload.storage_objects) ||
-    !Array.isArray(payload.blockers)
+    !Array.isArray(payload.retained_records) ||
+    !Array.isArray(payload.deferrals) ||
+    !Array.isArray(payload.attention_reasons)
   ) {
     throw new Error("Erasure payload is invalid.");
   }
   return payload as ErasurePayload;
+}
+
+async function advanceErasure(generationId: string): Promise<ErasurePayload> {
+  const advanced = await admin.rpc("advance_account_erasure", {
+    p_generation_id: generationId,
+  });
+  expect(advanced.error).toBeNull();
+  return erasurePayload(advanced.data);
+}
+
+/**
+ * Stands in for the provider identity phase, which runs outside Postgres. The
+ * absence flags are what the executor observed at Clerk and RevenueCat; Postgres
+ * still re-proves everything SnapList owns before writing a terminal status.
+ */
+async function finalizeErasure(
+  generationId: string,
+  proof: { clerk?: boolean; revenueCat?: boolean; attention?: string[] } = {},
+): Promise<ErasurePayload> {
+  const finalized = await admin.rpc("finalize_account_erasure", {
+    p_attention_reasons: proof.attention ?? [],
+    p_clerk_identity_absent: proof.clerk ?? true,
+    p_generation_id: generationId,
+    p_revenuecat_customer_absent: proof.revenueCat ?? true,
+  });
+  expect(finalized.error).toBeNull();
+  return erasurePayload(finalized.data);
+}
+
+/** The scrubbed receipt that must outlive the account it erased. */
+async function erasureReceipt(userId: string): Promise<{
+  status: string;
+  user_id: string | null;
+  idempotency_key: string | null;
+  clerk_user_id: string | null;
+  retained_records: string[];
+} | null> {
+  const { rows } = await database.query(
+    `select status, user_id, idempotency_key, clerk_user_id, retained_records
+     from private.account_erasure_generations
+     where user_id_digest = private.account_erasure_user_digest($1)`,
+    [userId],
+  );
+  return rows[0] ?? null;
 }
 
 async function stageCreditedRun(userId: string): Promise<{
@@ -225,19 +275,37 @@ async function mandatoryOwnerResidue(): Promise<number> {
   return result.rows[0]!.count;
 }
 
+/**
+ * These assertions run through PostgREST and Storage, so they need the current
+ * `sb_publishable_`/`sb_secret_` key pair. A stack still issuing legacy JWT keys
+ * cannot mint those, and the tests then pass without asserting anything — so say
+ * so out loud. erasure-behavior.rls.test.ts proves the same acceptance
+ * behaviours over the database connection and runs everywhere.
+ */
+function skip(reason: string): void {
+  console.warn(`[account-erasure.rls.test] SKIPPED — ${reason}. Nothing here was proved.`);
+}
+
 beforeAll(async () => {
   if (
     !PUBLISHABLE_KEY?.startsWith("sb_publishable_") ||
     !SECRET_KEY?.startsWith("sb_secret_") ||
     !new URL(SUPABASE_URL).hostname.match(/^(127\.0\.0\.1|localhost|::1)$/)
-  ) return;
+  ) {
+    skip("no local sb_publishable_/sb_secret_ key pair");
+    return;
+  }
   try {
     const health = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
       headers: { apikey: PUBLISHABLE_KEY },
       signal: AbortSignal.timeout(2_000),
     });
-    if (!health.ok) return;
+    if (!health.ok) {
+      skip(`auth health returned ${health.status}`);
+      return;
+    }
   } catch {
+    skip("no reachable local Supabase");
     return;
   }
 
@@ -452,46 +520,67 @@ describe("durable account erasure against local Supabase", () => {
     expect(confirmed.error).toBeNull();
     expect(confirmed.data).toBe(true);
 
-    const unresolved = await admin.rpc("advance_account_erasure", {
-      p_generation_id: started.generation_id,
-      p_resolved_blockers: [],
-    });
-    expect(unresolved.error).toBeNull();
-    expect(erasurePayload(unresolved.data)).toMatchObject({
+    const advanced = await advanceErasure(started.generation_id);
+    expect(advanced).toMatchObject({
       generation_id: started.generation_id,
-      status: "blocked",
+      status: "deletion_in_progress",
       storage_objects: [],
-      blockers: ["hosted-transcription-retention", "clerk-identity-retention"],
+      deferrals: [],
     });
-    const blockedSettings = await database.query<{ count: number }>(
-      "select count(*)::integer count from public.user_settings where user_id = $1",
-      [ownerId],
-    );
-    expect(blockedSettings.rows[0]!.count).toBe(1);
-
-    const advanced = await admin.rpc("advance_account_erasure", {
-      p_generation_id: started.generation_id,
-      p_resolved_blockers: [...RETENTION_BLOCKERS],
-    });
-    expect(advanced.error).toBeNull();
-    expect(erasurePayload(advanced.data)).toMatchObject({
-      generation_id: started.generation_id,
-      status: "complete",
-      storage_objects: [],
-      blockers: [],
-    });
-    const controlResidue = await database.query<{ count: number }>(
-      `select (
-         (select count(*) from private.account_erasure_generations
-          where generation_id = $1 or user_id = $2)
-         +
-         (select count(*) from private.account_erasure_storage_manifest
-          where generation_id = $1)
-       )::integer count`,
-      [started.generation_id, ownerId],
-    );
-    expect(controlResidue.rows[0]!.count).toBe(0);
+    // The provider identity work Postgres cannot do is handed out, not guessed at.
+    expect(advanced.identity).toMatchObject({ clerk_user_id: ownerId });
     expect(await mandatoryOwnerResidue()).toBe(0);
+
+    // Provider-owned deletion is not SnapList deletion: without observed
+    // absence there is no completion to report.
+    const unproved = await admin.rpc("finalize_account_erasure", {
+      p_attention_reasons: [],
+      p_clerk_identity_absent: false,
+      p_generation_id: started.generation_id,
+      p_revenuecat_customer_absent: true,
+    });
+    expect(unproved.error).not.toBeNull();
+    expect(await erasureReceipt(ownerId)).toMatchObject({
+      status: "deletion_in_progress",
+    });
+
+    const completed = await finalizeErasure(started.generation_id);
+    expect(completed).toMatchObject({
+      generation_id: started.generation_id,
+      status: "deletion_completed",
+      storage_objects: [],
+      retained_records: [],
+      identity: null,
+    });
+
+    // The receipt survives so replay and the fence stay truthful, but it keeps
+    // no raw identifier of the account it erased.
+    expect(await erasureReceipt(ownerId)).toEqual({
+      status: "deletion_completed",
+      user_id: null,
+      idempotency_key: null,
+      clerk_user_id: null,
+      retained_records: [],
+    });
+    const manifestResidue = await database.query<{ count: number }>(
+      `select count(*)::integer count
+       from private.account_erasure_storage_manifest
+       where generation_id = $1`,
+      [started.generation_id],
+    );
+    expect(manifestResidue.rows[0]!.count).toBe(0);
+    expect(await mandatoryOwnerResidue()).toBe(0);
+
+    // A replay after completion resolves to the one generation, not a new one.
+    const terminalReplay = await admin.rpc("begin_account_erasure", {
+      p_idempotency_key: erasureKey,
+      p_user_id: ownerId,
+    });
+    expect(terminalReplay.error).toBeNull();
+    expect(erasurePayload(terminalReplay.data)).toMatchObject({
+      generation_id: started.generation_id,
+      status: "deletion_completed",
+    });
 
     const foreignAfter = await foreignState();
     expect(foreignAfter.settings).toEqual(foreignBefore.settings);
@@ -620,14 +709,13 @@ describe("durable account erasure against local Supabase", () => {
         expect(confirmed.error).toBeNull();
       }
 
-      const pendingAuthority = await admin.rpc("advance_account_erasure", {
-        p_generation_id: generationId,
-        p_resolved_blockers: [...RETENTION_BLOCKERS],
-      });
-      expect(pendingAuthority.error).toBeNull();
-      expect(erasurePayload(pendingAuthority.data)).toMatchObject({
-        status: "blocked",
-        blockers: ["external-ebay-authority-pending"],
+      // A dispatch is already with eBay. Deleting the local record that explains
+      // it would erase SnapList's own account of an action eBay is still
+      // performing, so erasure waits instead.
+      const pendingAuthority = await advanceErasure(generationId);
+      expect(pendingAuthority).toMatchObject({
+        status: "deletion_in_progress",
+        deferrals: ["ebay-provider-authority-pending"],
       });
 
       const completionClient = createClient(SUPABASE_URL, SECRET_KEY!, {
@@ -657,30 +745,28 @@ describe("durable account erasure against local Supabase", () => {
         ebay_status: "published",
       });
 
-      const unresolved = await admin.rpc("advance_account_erasure", {
-        p_generation_id: generationId,
-        p_resolved_blockers: RETENTION_BLOCKERS.filter(
-          (blocker) => blocker !== "ebay-publish-receipt-obligations",
-        ),
-      });
-      expect(unresolved.error).toBeNull();
-      expect(erasurePayload(unresolved.data)).toMatchObject({
-        status: "blocked",
-        blockers: ["ebay-publish-receipt-obligations"],
+      // The provider round trip has landed, so the local rows go — but the live
+      // eBay listings do not, and erasure records exactly that.
+      const advanced = await advanceErasure(generationId);
+      expect(advanced).toMatchObject({
+        status: "deletion_in_progress",
+        deferrals: [],
+        retained_records: ["ebay-live-listing"],
       });
       const stillLocal = await database.query<{ count: number }>(
         "select count(*)::integer count from public.listings where id = any($1::uuid[])",
         [[existing.listingId, inFlight.listingId]],
       );
-      expect(stillLocal.rows[0]!.count).toBe(2);
-      expect(adapter.requests).toHaveLength(0);
+      expect(stillLocal.rows[0]!.count).toBe(0);
 
-      const completed = await admin.rpc("advance_account_erasure", {
-        p_generation_id: generationId,
-        p_resolved_blockers: [...RETENTION_BLOCKERS],
+      const completed = await finalizeErasure(generationId);
+      // Not a flat `deletion_completed`: two listings are still live on eBay,
+      // and SnapList must not report deleting a record eBay owns.
+      expect(completed).toMatchObject({
+        status: "deletion_completed_with_retained_records",
+        retained_records: ["ebay-live-listing"],
       });
-      expect(completed.error).toBeNull();
-      expect(erasurePayload(completed.data).status).toBe("complete");
+      // Erasure ends no listing. Nothing was sent to eBay at any point.
       expect(adapter.requests).toHaveLength(0);
       expect(adapter.reviseRequests).toHaveLength(0);
     } finally {
@@ -759,12 +845,10 @@ describe("durable account erasure against local Supabase", () => {
         foreignAllowancePeriodId,
       }));
 
-      const completed = await admin.rpc("advance_account_erasure", {
-        p_generation_id: generationId,
-        p_resolved_blockers: [...RETENTION_BLOCKERS],
-      });
-      expect(completed.error).toBeNull();
-      expect(erasurePayload(completed.data).status).toBe("complete");
+      const advanced = await advanceErasure(generationId);
+      expect(advanced.deferrals).toEqual([]);
+      const completed = await finalizeErasure(generationId);
+      expect(completed.status).toBe("deletion_completed");
 
       const ownerResidue = await database.query<{ count: number }>(
         `select (
@@ -895,12 +979,10 @@ describe("durable account erasure against local Supabase", () => {
       });
       expect(started.error).toBeNull();
       generationId = erasurePayload(started.data).generation_id;
-      const completed = await admin.rpc("advance_account_erasure", {
-        p_generation_id: generationId,
-        p_resolved_blockers: [...RETENTION_BLOCKERS],
-      });
-      expect(completed.error).toBeNull();
-      expect(erasurePayload(completed.data).status).toBe("complete");
+      const advanced = await advanceErasure(generationId);
+      expect(advanced.deferrals).toEqual([]);
+      const completed = await finalizeErasure(generationId);
+      expect(completed.status).toBe("deletion_completed");
     } finally {
       if (claimLeaseToken) {
         await database.query(
@@ -989,12 +1071,10 @@ describe("durable account erasure against local Supabase", () => {
         claim_target_user_id: null,
       });
 
-      const completed = await admin.rpc("advance_account_erasure", {
-        p_generation_id: generationId,
-        p_resolved_blockers: [...RETENTION_BLOCKERS],
-      });
-      expect(completed.error).toBeNull();
-      expect(erasurePayload(completed.data).status).toBe("complete");
+      const advanced = await advanceErasure(generationId);
+      expect(advanced.deferrals).toEqual([]);
+      const completed = await finalizeErasure(generationId);
+      expect(completed.status).toBe("deletion_completed");
     } finally {
       if (generationId) {
         await database.query(

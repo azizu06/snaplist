@@ -1,12 +1,22 @@
 import "server-only";
 
+import { createClerkClient } from "@clerk/nextjs/server";
 import { createClient } from "@supabase/supabase-js";
+import { createAccountErasureIdentity } from "./identity";
 import { eraseAccount } from "./service";
 import { createSupabaseAccountErasureStore } from "./store";
 
 export interface ConfiguredAccountErasureInput {
   supabaseURL: string;
   secretKey: string;
+  clerkSecretKey: string;
+  revenueCatSecretKey: string;
+  /**
+   * Without it the RevenueCat absence read-back cannot run, and every erasure
+   * holding a RevenueCat binding resolves to `deletion_needs_attention` rather
+   * than claiming a deletion it did not witness. See identity.ts.
+   */
+  revenueCatProjectId?: string;
 }
 
 export function createConfiguredAccountErasureOperations(
@@ -19,6 +29,7 @@ export function createConfiguredAccountErasureOperations(
   const client = createClient(input.supabaseURL, input.secretKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
   const dependencies = {
     store: createSupabaseAccountErasureStore(client),
     storage: {
@@ -29,13 +40,13 @@ export function createConfiguredAccountErasureOperations(
         if (error) throw error;
       },
     },
-    // ADR-0012 leaves these provider/legal dispositions unresolved. A future
-    // authority may replace this capability only after that contract changes.
-    dispositions: {
-      async resolvedBlockers() {
-        return [];
+    identity: createAccountErasureIdentity({
+      clerk: createClerkClient({ secretKey: input.clerkSecretKey }),
+      revenueCat: {
+        secretKey: input.revenueCatSecretKey,
+        projectId: input.revenueCatProjectId,
       },
-    },
+    }),
   };
 
   return {

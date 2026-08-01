@@ -29,6 +29,8 @@ const environmentKeys = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "SUPABASE_SECRET_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
+  "REVENUECAT_SECRET_API_KEY",
+  "REVENUECAT_PROJECT_ID",
 ] as const;
 const idempotencyKey = "38430000-0000-4000-8000-000000000001";
 const generationId = "38430000-0000-4000-8000-000000000002";
@@ -48,6 +50,8 @@ beforeEach(() => {
   process.env.CLERK_AUTHORIZED_PARTIES = "https://snaplist.example";
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
   process.env.SUPABASE_SECRET_KEY = "sb_secret_release";
+  process.env.REVENUECAT_SECRET_API_KEY = "sk_revenuecat_release";
+  process.env.REVENUECAT_PROJECT_ID = "proj_release";
   has.mockReturnValue(true);
   authenticateRequest.mockResolvedValue({
     isAuthenticated: true,
@@ -56,8 +60,11 @@ beforeEach(() => {
   clerkClient.mockResolvedValue({ authenticateRequest });
   erase.mockResolvedValue({
     generationId,
-    status: "complete",
-    blockers: [],
+    status: "deletion_completed",
+    retainedRecords: [],
+    deferrals: [],
+    attentionReasons: [],
+    identity: null,
     storageObjects: [],
   });
   createConfiguredAccountErasureOperations.mockReturnValue({ erase });
@@ -93,6 +100,9 @@ describe("production account erasure route", () => {
       authorizedParties: ["https://snaplist.example"],
     });
     expect(createConfiguredAccountErasureOperations).toHaveBeenCalledWith({
+      clerkSecretKey: "sk_test_release",
+      revenueCatProjectId: "proj_release",
+      revenueCatSecretKey: "sk_revenuecat_release",
       secretKey: "sb_secret_release",
       supabaseURL: "https://project.supabase.co",
     });
