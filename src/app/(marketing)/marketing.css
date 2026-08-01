@@ -1,0 +1,1849 @@
+/* ============================================================================
+   Marketing surface (issue #191) — implements `SnapList Web - App Store Landing
+   v6`.
+
+   Everything here is scoped under `.mkt`, which the (marketing) layout puts on
+   its root element. globals.css owns the app/auth token set (near-black ink on a
+   green accent); the marketing site is a separate identity (white canvas, ink
+   #16181B, action blue #3665F3, Public Sans) and must not inherit or leak into
+   it. Scoping rather than overriding is what keeps `(auth)` and the Clerk cards
+   untouched by this file.
+
+   The design is inline-style driven with computed values. Reproducing it as
+   utility classes would bury the clamp() type scale in unreadable arbitrary
+   values, so the section geometry lives here as semantic classes — the same
+   pattern globals.css already used for the retired marketing components.
+   ============================================================================ */
+
+.mkt {
+  --ink: #16181b;
+  --ink-2: #55585c;
+  --ink-3: #8a8d92;
+  --canvas: #ffffff;
+  --soft: #f7f7f7;
+  --hairline: #ecedef;
+  --hairline-2: #ecedf0;
+  --wash: #eef3ff;
+  --wash-2: #f6f8ff;
+  --wash-3: #f7f9ff;
+  --action: #3665f3;
+  --action-deep: #244cc0;
+
+  --quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --decel: cubic-bezier(0, 0, 0.2, 1);
+
+  /* Header height plus breathing room, so an in-page anchor never lands under
+     the sticky header. */
+  --scroll-margin: 92px;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  /* globals.css paints `body` from the app token set and next-themes may put
+     `.dark` on <html>. The marketing site is a separate, light-only identity, so
+     it repaints its own canvas rather than inheriting either. */
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-public-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* The hero phones are rotated and overlapped; without this a sub-pixel
+     overhang turns into a horizontal scrollbar at exactly one width. */
+  overflow-x: hidden;
+}
+
+@media (max-width: 767px) {
+  .mkt {
+    --scroll-margin: 84px;
+  }
+}
+
+/* The in-page nav is anchor based, so smooth scrolling has to sit on the
+   scrolling element rather than on `.mkt`. It is scoped to pages that render the
+   marketing surface so `(auth)` keeps the browser default. */
+html:has(.mkt) {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:has(.mkt) {
+    scroll-behavior: auto;
+  }
+}
+
+.mkt-main {
+  flex: 1 1 auto;
+}
+
+.mkt :focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.mkt a {
+  color: var(--action);
+  text-decoration: none;
+}
+
+.mkt a:hover {
+  color: var(--action-deep);
+  text-decoration: underline;
+}
+
+.mkt button {
+  font-family: inherit;
+}
+
+.mkt [id] {
+  scroll-margin-top: var(--scroll-margin);
+}
+
+/* ---------------------------------------------------------------- skip link */
+
+.mkt-skip {
+  position: absolute;
+  left: 12px;
+  top: -56px;
+  z-index: 100;
+  background: var(--action);
+  color: #ffffff;
+  padding: 12px 18px;
+  border-radius: 6px;
+  font-weight: 600;
+  transition: top 0.15s ease;
+}
+
+.mkt-skip:focus {
+  top: 12px;
+  text-decoration: none;
+  color: #ffffff;
+}
+
+/* -------------------------------------------------------------------- shell */
+
+.mkt-shell {
+  max-width: 1220px;
+  margin: 0 auto;
+  padding-inline: clamp(20px, 5vw, 40px);
+}
+
+.mkt-shell--narrow {
+  max-width: 1120px;
+}
+
+.mkt-shell--prose {
+  max-width: 720px;
+}
+
+.mkt-section {
+  padding-block: clamp(64px, 7vw, 104px);
+}
+
+/* ------------------------------------------------------------------- header */
+
+.mkt-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background-color: rgba(255, 255, 255, 0.18);
+  border-bottom: 1px solid rgba(236, 237, 239, 0.45);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  backdrop-filter: blur(28px) saturate(140%);
+  transition:
+    background-color 240ms ease,
+    border-color 240ms ease,
+    box-shadow 240ms ease;
+}
+
+/* Boolean threshold, not a scroll-linked animation: the class flips once past
+   32px and the surface transitions between two fixed states. */
+.mkt-header[data-opaque="true"] {
+  background-color: rgba(244, 247, 255, 0.56);
+  border-bottom-color: rgba(54, 101, 243, 0.12);
+  box-shadow:
+    0 8px 28px rgba(22, 24, 27, 0.1),
+    inset 0 1px rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  backdrop-filter: blur(28px) saturate(150%);
+}
+
+/* Which bar renders is a media query, not a measured viewport width, so the
+   server paint already matches the device. */
+.mkt-header__narrow {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .mkt-header__desktop {
+    display: none;
+  }
+  .mkt-header__narrow {
+    display: block;
+  }
+}
+
+.mkt-header__bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+  height: 80px;
+}
+
+.mkt-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.mkt-lockup:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.mkt-lockup__mark {
+  height: 46px;
+  width: auto;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.mkt-lockup__word {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.mkt-navlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 2.4vw, 34px);
+}
+
+.mkt-navlink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 2px 4px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.mkt-navlink:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.mkt-underline {
+  position: relative;
+  display: inline-block;
+}
+
+.mkt-underline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 2px;
+  background: var(--action);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 200ms var(--quint);
+}
+
+.mkt-navlink:hover .mkt-underline::after,
+.mkt-navlink:focus-visible .mkt-underline::after {
+  transform: scaleX(1);
+}
+
+/* ------------------------------------------------------------- mobile menu */
+
+.mkt-header__bar--narrow {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mkt-burger {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.mkt-burger__box {
+  position: relative;
+  width: 22px;
+  height: 14px;
+  display: block;
+}
+
+.mkt-burger__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--ink);
+  border-radius: 2px;
+  transform-origin: center;
+  transition:
+    transform 240ms var(--decel),
+    opacity 240ms var(--decel);
+}
+
+.mkt-burger__line:nth-child(1) {
+  top: 0;
+}
+.mkt-burger__line:nth-child(2) {
+  top: 6px;
+}
+.mkt-burger__line:nth-child(3) {
+  top: 12px;
+}
+
+.mkt-burger[aria-expanded="true"] .mkt-burger__line:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+}
+.mkt-burger[aria-expanded="true"] .mkt-burger__line:nth-child(2) {
+  opacity: 0;
+}
+.mkt-burger[aria-expanded="true"] .mkt-burger__line:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+}
+
+/* In flow, not a focus trap: the panel pushes the page down and Tab continues
+   into the document, which is the behavior the v5/v6 contract froze. */
+.mkt-menu {
+  background: rgba(255, 255, 255, 0.84);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  backdrop-filter: blur(28px) saturate(150%);
+  opacity: 0;
+  visibility: hidden;
+  border-top: 0 solid rgba(54, 101, 243, 0.12);
+  transition:
+    opacity 240ms var(--decel),
+    visibility 0s linear 240ms;
+}
+
+.mkt-menu[data-open="true"] {
+  opacity: 1;
+  visibility: visible;
+  border-top-width: 1px;
+  transition:
+    opacity 240ms var(--decel),
+    visibility 0s;
+}
+
+.mkt-menu__clip {
+  overflow: hidden;
+  min-height: 0;
+  max-height: 0;
+  transition: max-height 240ms var(--decel);
+}
+
+.mkt-menu[data-open="true"] .mkt-menu__clip {
+  max-height: var(--menu-max, 0px);
+}
+
+.mkt-menu__inner {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0 16px;
+}
+
+.mkt-menu__link {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 4px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+  border-bottom: 1px solid var(--hairline-2);
+}
+
+.mkt-menu__link:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* -------------------------------------------------------- App Store control */
+
+.mkt-appstore {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--ink);
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 22px;
+  min-height: 54px;
+  cursor: pointer;
+}
+
+.mkt-appstore:hover {
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.mkt-appstore--sm {
+  gap: 7px;
+  border-radius: 9px;
+  padding: 8px clamp(10px, 2vw, 14px);
+  min-height: 44px;
+}
+
+.mkt-appstore--md {
+  gap: 8px;
+  border-radius: 10px;
+  padding: 10px 16px;
+  min-height: 48px;
+}
+
+.mkt-appstore--lg {
+  padding: 14px 24px;
+  min-height: 56px;
+}
+
+/* No App Store product page exists until #380 submits one. The control keeps its
+   place in the composition and states plainly that it is not live yet, rather
+   than linking somewhere that does not resolve. */
+.mkt-appstore[data-pending="true"] {
+  background: var(--soft);
+  color: var(--ink-2);
+  border: 1px solid var(--hairline);
+  cursor: default;
+}
+
+.mkt-appstore__stack {
+  text-align: left;
+  line-height: 1.05;
+}
+
+.mkt-appstore__kicker {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.mkt-appstore__name {
+  display: block;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mkt-appstore--sm .mkt-appstore__kicker {
+  font-size: 9px;
+  letter-spacing: 0.01em;
+}
+.mkt-appstore--sm .mkt-appstore__name {
+  font-size: 14px;
+}
+.mkt-appstore--md .mkt-appstore__kicker {
+  font-size: 10px;
+  letter-spacing: 0.01em;
+}
+.mkt-appstore--md .mkt-appstore__name {
+  font-size: 17px;
+}
+.mkt-appstore--lg .mkt-appstore__name {
+  font-size: 21px;
+}
+
+/* --------------------------------------------------------------------- hero */
+
+.mkt-hero {
+  padding: clamp(48px, 7vw, 96px) 0 clamp(56px, 6vw, 92px);
+}
+
+.mkt-hero__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: clamp(40px, 6vw, 72px);
+  align-items: center;
+}
+
+.mkt-hero__copy {
+  flex: 1 1 420px;
+  min-width: min(100%, 340px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.mkt-hero__art {
+  flex: 1 1 440px;
+  min-width: min(100%, 300px);
+  display: flex;
+  justify-content: center;
+}
+
+.mkt-h1 {
+  margin: 0 0 14px;
+  font-size: clamp(48px, 7vw, 76px);
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.mkt-lede {
+  margin: 0 0 18px;
+  font-size: clamp(21px, 2.4vw, 28px);
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.mkt-sub {
+  margin: 0 0 30px;
+  font-size: clamp(17px, 1.6vw, 20px);
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 32em;
+  text-wrap: pretty;
+}
+
+/* The two-phone hero arrangement only reads at width; below 880 the design
+   shows the single Listing Review phone. */
+.mkt-hero__pair {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.mkt-hero__pair-back {
+  margin-top: 44px;
+  transform: rotate(-3deg);
+}
+
+.mkt-hero__pair-front {
+  margin-left: -64px;
+  z-index: 3;
+}
+
+.mkt-hero__single {
+  width: 264px;
+  max-width: 82vw;
+}
+
+@media (max-width: 879px) {
+  .mkt-hero__copy {
+    align-items: center;
+    text-align: center;
+  }
+  .mkt-hero__pair {
+    display: none;
+  }
+}
+
+@media (min-width: 880px) {
+  .mkt-hero__single {
+    display: none;
+  }
+}
+
+/* -------------------------------------------------------------- phone frame */
+
+.mkt-phone {
+  position: relative;
+  background: var(--ink);
+  padding: 10px;
+  border-radius: 44px;
+  box-shadow: 0 26px 60px rgba(16, 24, 40, 0.22);
+}
+
+.mkt-phone__notch {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 86px;
+  height: 23px;
+  background: var(--ink);
+  border-radius: 13px;
+  z-index: 5;
+}
+
+.mkt-phone__chip {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  z-index: 6;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--canvas);
+  border: 1px solid var(--hairline-2);
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.mkt-phone__screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--canvas);
+  border-radius: 34px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --------------------------------------------------------------- hero art */
+
+/* The hero phones are sized by aspect-ratio rather than a fixed height, so the
+   single-phone variant can shrink with the viewport (max-width: 82vw) without
+   the frame going out of proportion. */
+.mkt-hero__lp {
+  aspect-ratio: 268 / 552;
+}
+
+.mkt-hero__pair-front .mkt-hero__lp {
+  width: 268px;
+}
+
+.mkt-hero__single .mkt-hero__lp {
+  width: 100%;
+}
+
+.mkt-hero__sp {
+  width: 232px;
+  aspect-ratio: 232 / 480;
+  border-radius: 38px;
+  padding: 9px;
+  box-shadow: 0 18px 44px rgba(16, 24, 40, 0.18);
+}
+
+.mkt-hero__sp .mkt-phone__notch {
+  width: 74px;
+  height: 20px;
+  top: 8px;
+}
+
+.mkt-hero__sp .mkt-phone__screen {
+  background: var(--ink);
+  border-radius: 30px;
+}
+
+.mkt-hero__sbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 30px 14px 10px;
+  color: var(--canvas);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mkt-hero__scount {
+  font-size: 12px;
+  color: #c9cdd6;
+}
+
+.mkt-hero__sview {
+  flex: 1 1 auto;
+  margin: 0 14px;
+  border-radius: 12px;
+  background: #24262b;
+  position: relative;
+}
+
+.mkt-hero__sview::after {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+}
+
+.mkt-hero__sstrip {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px 8px;
+}
+
+.mkt-hero__sthumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: #3a3d44;
+}
+
+.mkt-hero__sshutter-row {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 18px;
+}
+
+.mkt-hero__sshutter {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--canvas);
+  box-shadow:
+    0 0 0 3px var(--ink),
+    0 0 0 5px var(--canvas);
+}
+
+.mkt-hero__lbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 32px 16px 12px;
+  border-bottom: 1px solid var(--hairline-2);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.mkt-hero__lbody {
+  flex: 1 1 auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow: hidden;
+}
+
+/* Screen internals. 9px labels inside the illustrative frames are decorative
+   chrome, not page copy; they are below AA on purpose and carry no information
+   the page does not also state at full size. */
+.mkt-scr {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.mkt-scr__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 32px 16px 12px;
+  border-bottom: 1px solid var(--hairline-2);
+}
+
+.mkt-scr__title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.mkt-scr__pill {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--soft);
+  border: 1px solid var(--hairline-2);
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.mkt-scr__body {
+  flex: 1 1 auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow: hidden;
+}
+
+.mkt-scr__field {
+  border: 1px solid var(--hairline-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.mkt-scr__field--filled {
+  background: var(--soft);
+}
+
+.mkt-scr__label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.mkt-scr__value {
+  font-size: 13px;
+  color: var(--ink);
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+.mkt-scr__row {
+  display: flex;
+  gap: 9px;
+}
+
+.mkt-scr__row > * {
+  flex: 1;
+}
+
+.mkt-scr__cta {
+  margin: 10px 16px 18px;
+  height: 42px;
+  border-radius: 9px;
+  background: var(--action);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mkt-scr__capture {
+  background: var(--ink);
+}
+
+.mkt-scr__capture-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 30px 14px 10px;
+  color: #ffffff;
+}
+
+.mkt-scr__viewfinder {
+  flex: 1 1 auto;
+  margin: 0 14px;
+  border-radius: 12px;
+  background: #24262b;
+  position: relative;
+}
+
+.mkt-scr__viewfinder::after {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+}
+
+.mkt-scr__strip {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px 8px;
+}
+
+.mkt-scr__thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: #3a3d44;
+}
+
+.mkt-scr__shutter-row {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 18px;
+}
+
+.mkt-scr__shutter {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 3px var(--ink),
+    0 0 0 5px #ffffff;
+}
+
+.mkt-scr__handoff {
+  border: 1px solid var(--hairline-2);
+  border-radius: 9px;
+  padding: 11px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mkt-scr__handoff-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mkt-scr__tile {
+  position: relative;
+  width: 62px;
+  height: 62px;
+  border-radius: 9px;
+  background: var(--hairline-2);
+}
+
+.mkt-scr__tile > span {
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.mkt-scr__tool {
+  flex: 1;
+  height: 44px;
+  border: 1px solid var(--hairline-2);
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* --------------------------------------------------- feature explorer (tabs) */
+
+.mkt-features {
+  /* One of the three pale washes. No crisp edge: the wash eases in and out so
+     the page reads continuous instead of slabbed. */
+  background: linear-gradient(
+    180deg,
+    var(--canvas) 0%,
+    var(--wash-2) 22%,
+    var(--wash-2) 78%,
+    var(--canvas) 100%
+  );
+}
+
+.mkt-h2 {
+  margin: 0 0 14px;
+  text-align: center;
+  font-size: clamp(24px, 3.4vw, 36px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+.mkt-h2--display {
+  margin-bottom: 72px;
+  font-size: clamp(28px, 3.6vw, 46px);
+}
+
+/* The frame is drawn at 288x592 and scaled uniformly, so `scale()` needs a
+   unitless factor. CSS cannot divide a length by a length, so the width and its
+   factor are declared together in fixed steps rather than derived from a clamp().
+   The steps are chosen to land on the design's computed width at each proof
+   width (1440, 1024, 768, 430, 390, 375) and to stay inside the section's
+   content box at every one, so nothing can overflow horizontally. */
+.mkt-explorer {
+  --phone-w: 384px;
+  --phone-scale: 1.33333;
+  --phone-h: calc(var(--phone-w) * 592 / 288);
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: clamp(36px, 4vw, 64px);
+}
+
+@media (max-width: 1279px) {
+  .mkt-explorer {
+    --phone-w: 360px;
+    --phone-scale: 1.25;
+  }
+}
+
+@media (max-width: 1139px) {
+  .mkt-explorer {
+    --phone-w: 340px;
+    --phone-scale: 1.18056;
+  }
+}
+
+@media (max-width: 759px) {
+  .mkt-explorer {
+    --phone-w: 352px;
+    --phone-scale: 1.22222;
+  }
+}
+
+@media (max-width: 409px) {
+  .mkt-explorer {
+    --phone-w: 328px;
+    --phone-scale: 1.13889;
+  }
+}
+
+@media (max-width: 374px) {
+  .mkt-explorer {
+    --phone-w: 280px;
+    --phone-scale: 0.97222;
+  }
+}
+
+.mkt-explorer__stage {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.mkt-explorer__panel {
+  display: flex;
+  justify-content: center;
+  max-width: 100%;
+}
+
+/* The frame is designed at 288x592 and scaled uniformly, so every internal
+   dimension stays in proportion at any breakpoint. */
+.mkt-explorer__frame {
+  position: relative;
+  width: var(--phone-w);
+  height: var(--phone-h);
+}
+
+.mkt-explorer__scale {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: scale(var(--phone-scale));
+  transform-origin: top left;
+}
+
+.mkt-explorer__device {
+  position: relative;
+  width: 288px;
+  height: 592px;
+  background: var(--ink);
+  border-radius: 46px;
+  padding: 10px;
+  box-shadow: 0 24px 56px rgba(16, 24, 40, 0.2);
+}
+
+.mkt-explorer__device .mkt-phone__notch {
+  width: 92px;
+  height: 24px;
+}
+
+.mkt-explorer__device .mkt-phone__screen {
+  border-radius: 36px;
+}
+
+.mkt-explorer__slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateY(20px);
+  visibility: hidden;
+  z-index: 0;
+  pointer-events: none;
+  transition: none;
+}
+
+.mkt-explorer__slide[data-active="true"] {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  z-index: 2;
+  pointer-events: auto;
+  transition:
+    opacity 300ms var(--quint),
+    transform 300ms var(--quint);
+}
+
+.mkt-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.mkt-dots__btn {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.mkt-dots__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hairline-2);
+  border: 1px solid var(--ink-3);
+  display: block;
+  transition:
+    width 240ms var(--quint),
+    border-radius 240ms var(--quint);
+}
+
+.mkt-dots__btn[aria-current="true"] .mkt-dots__dot {
+  width: 20px;
+  border-radius: 999px;
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.mkt-tablist {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 540px;
+  min-height: var(--phone-h);
+  align-self: center;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(16px, 1.6vw, 20px);
+}
+
+.mkt-tab {
+  width: 100%;
+  flex: 1 1 0%;
+  text-align: left;
+  background: var(--canvas);
+  border: 1px solid var(--hairline-2);
+  border-radius: 16px;
+  padding: clamp(20px, 2vw, 26px) clamp(22px, 2.2vw, 30px);
+  min-height: 44px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  transform-origin: center;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  transition:
+    transform 240ms var(--quint),
+    box-shadow 240ms var(--quint),
+    border-color 240ms var(--quint),
+    background 240ms var(--quint);
+}
+
+/* The page's one signature interaction. It is not repeated on the value cards,
+   the FAQ rows, the Trophy Wall module, or the footer. */
+.mkt-tab[aria-selected="true"] {
+  transform: translateY(-8px) scale(1.01);
+  background: var(--wash-3);
+  border-color: var(--action);
+  box-shadow:
+    inset 0 2px 0 var(--action),
+    0 10px 26px rgba(54, 101, 243, 0.18);
+}
+
+.mkt-tab:hover {
+  transform: translateY(-4px);
+  border-color: rgba(54, 101, 243, 0.55);
+  background: var(--wash-3);
+  box-shadow: 0 10px 24px rgba(54, 101, 243, 0.12);
+}
+
+.mkt-tab[aria-selected="true"]:hover {
+  transform: translateY(-8px) scale(1.01);
+  box-shadow:
+    inset 0 2px 0 var(--action),
+    0 10px 26px rgba(54, 101, 243, 0.18);
+}
+
+.mkt-tab__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: clamp(17px, 1.35vw, 19px);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.mkt-tab__body {
+  display: block;
+  font-size: clamp(16px, 1.2vw, 17px);
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.mkt-chip {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--hairline-2);
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+/* Below 760 the explorer stacks: large phone, dots, then all four cards in one
+   column. Inactive cards stay visible and compact; they are never hidden. */
+@media (max-width: 759px) {
+  .mkt-explorer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: clamp(24px, 6vw, 32px);
+  }
+  .mkt-explorer__stage {
+    width: 100%;
+  }
+  .mkt-h2--display {
+    margin-bottom: 44px;
+  }
+  .mkt-tablist {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: var(--phone-w);
+    min-height: auto;
+    gap: 14px;
+  }
+  .mkt-tab {
+    flex: 0 0 auto;
+    padding: 22px 24px;
+  }
+  .mkt-tab[aria-selected="true"],
+  .mkt-tab[aria-selected="true"]:hover {
+    transform: translateY(-5px) scale(1.01);
+  }
+}
+
+/* --------------------------------------------------------------- value cards */
+
+.mkt-why {
+  background: var(--canvas);
+}
+
+.mkt-why__lede {
+  margin: 0 auto clamp(36px, 5vw, 56px);
+  text-align: center;
+  font-size: clamp(17px, 1.6vw, 20px);
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 30em;
+  text-wrap: pretty;
+}
+
+.mkt-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .mkt-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mkt-card {
+  background: var(--canvas);
+  border: 1px solid var(--hairline-2);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow:
+    0 10px 28px rgba(16, 24, 40, 0.08),
+    0 2px 6px rgba(16, 24, 40, 0.04);
+  transition:
+    transform 220ms var(--quint),
+    box-shadow 220ms var(--quint),
+    border-color 220ms var(--quint);
+}
+
+.mkt-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(54, 101, 243, 0.45);
+  box-shadow:
+    0 16px 38px rgba(16, 24, 40, 0.12),
+    0 3px 8px rgba(16, 24, 40, 0.05);
+}
+
+.mkt-card__icon {
+  width: 44px;
+  height: 44px;
+  background: var(--wash);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.mkt-card__title {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.mkt-card__body {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+/* -------------------------------------------------------------- trophy wall */
+
+.mkt-trophy {
+  background: linear-gradient(
+    180deg,
+    var(--canvas) 0%,
+    var(--wash) 26%,
+    var(--wash) 74%,
+    var(--canvas) 100%
+  );
+}
+
+.mkt-trophy__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: clamp(36px, 5vw, 64px);
+  align-items: center;
+  justify-content: center;
+}
+
+.mkt-trophy__copy {
+  flex: 0 1 440px;
+  max-width: 440px;
+  min-width: min(100%, 300px);
+  text-align: left;
+}
+
+.mkt-trophy__art {
+  flex: 1 1 340px;
+  min-width: min(100%, 300px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mkt-trophy__h2 {
+  margin: 0 0 10px;
+  font-size: clamp(30px, 4.2vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  font-weight: 700;
+}
+
+.mkt-trophy__accent {
+  margin: 0 0 14px;
+  font-size: clamp(22px, 3.4vw, 28px);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+  color: var(--action);
+  max-width: 14ch;
+  text-wrap: balance;
+}
+
+.mkt-trophy__body {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 38ch;
+  text-wrap: pretty;
+}
+
+.mkt-trophy__scout {
+  height: 80px;
+  width: auto;
+  display: block;
+  margin-bottom: -6px;
+  position: relative;
+  z-index: 2;
+}
+
+.mkt-trophy__caption {
+  margin: 12px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  text-align: center;
+  max-width: 34ch;
+}
+
+.mkt-trophy__device {
+  position: relative;
+  width: 312px;
+  max-width: 84vw;
+  aspect-ratio: 288 / 592;
+  background: var(--ink);
+  border-radius: 48px;
+  padding: 11px;
+  box-shadow: 0 24px 56px rgba(16, 24, 40, 0.2);
+}
+
+.mkt-trophy__device .mkt-phone__notch {
+  width: 92px;
+  height: 24px;
+}
+
+.mkt-trophy__device .mkt-phone__chip {
+  right: 24px;
+}
+
+.mkt-trophy__device .mkt-phone__screen {
+  border-radius: 36px;
+}
+
+.mkt-trophy__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--hairline-2);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.mkt-trophy__row-art {
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  background: var(--hairline-2);
+  flex: 0 0 auto;
+}
+
+.mkt-trophy__row-title {
+  flex: 1;
+  font-size: 14px;
+  color: var(--ink);
+  min-width: 0;
+}
+
+/* `Ready to review` is the longest real Trophy Wall state and does not fit on
+   one line beside a 46px thumbnail inside a 312px frame. The pill wraps rather
+   than truncating the item title, which would read as a rendering bug. */
+.mkt-trophy__state {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--action);
+  border: 1px solid var(--action);
+  padding: 2px 7px;
+  border-radius: 999px;
+  max-width: 76px;
+  flex: 0 0 auto;
+}
+
+.mkt-trophy__device .mkt-scr__bar {
+  padding: 34px 18px 12px;
+}
+
+.mkt-trophy__device .mkt-scr__title {
+  font-size: 15px;
+}
+
+.mkt-trophy__device .mkt-scr__body {
+  padding: 14px 18px;
+  gap: 10px;
+}
+
+@media (max-width: 899px) {
+  .mkt-trophy__copy {
+    text-align: center;
+  }
+  .mkt-trophy__accent,
+  .mkt-trophy__body {
+    margin-inline: auto;
+  }
+  .mkt-trophy__scout {
+    height: clamp(68px, 20vw, 76px);
+    margin-bottom: 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  .mkt-trophy__scout {
+    height: 96px;
+    margin-bottom: -8px;
+  }
+}
+
+/* ---------------------------------------------------------------------- FAQ */
+
+.mkt-faq {
+  background: var(--canvas);
+}
+
+.mkt-faq__rule {
+  width: 36px;
+  height: 2px;
+  background: var(--action);
+  border-radius: 1px;
+  margin: 0 auto clamp(28px, 4vw, 40px);
+}
+
+.mkt-faq__list {
+  border-bottom: 1px solid var(--hairline-2);
+}
+
+.mkt-faq__row {
+  border-top: 1px solid var(--hairline-2);
+}
+
+.mkt-faq__row[data-open="true"] {
+  border-top-color: rgba(54, 101, 243, 0.35);
+}
+
+.mkt-faq__row:has(> .mkt-faq__btn:focus-visible) {
+  border-top-color: rgba(54, 101, 243, 0.35);
+}
+
+.mkt-faq__btn {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 20px 4px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mkt-faq__q {
+  font-size: clamp(17px, 2vw, 19px);
+  font-weight: 600;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+.mkt-faq__chevron {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: var(--ink-2);
+  transform: rotate(0deg);
+  transition: transform 300ms var(--decel);
+}
+
+.mkt-faq__btn[aria-expanded="true"] .mkt-faq__chevron,
+.mkt-faq__btn:focus-visible .mkt-faq__chevron {
+  color: var(--action);
+}
+
+.mkt-faq__btn[aria-expanded="true"] .mkt-faq__chevron {
+  transform: rotate(180deg);
+}
+
+.mkt-faq__region {
+  visibility: hidden;
+  transition: visibility 0s linear 300ms;
+}
+
+.mkt-faq__region[data-open="true"] {
+  visibility: visible;
+  transition: visibility 0s;
+}
+
+.mkt-faq__clip {
+  overflow: hidden;
+  min-height: 0;
+  max-height: 0;
+  transition: max-height 300ms var(--decel);
+}
+
+.mkt-faq__region[data-open="true"] .mkt-faq__clip {
+  max-height: var(--faq-max, 0px);
+}
+
+.mkt-faq__content {
+  padding: 0 4px 22px;
+  opacity: 0;
+  transition: opacity 300ms var(--decel);
+}
+
+.mkt-faq__region[data-open="true"] .mkt-faq__content {
+  opacity: 1;
+}
+
+.mkt-faq__a {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+/* ---------------------------------------------------------------- final CTA */
+
+.mkt-cta {
+  background: var(--soft);
+  border-top: 1px solid var(--hairline);
+  text-align: center;
+}
+
+.mkt-cta__h2 {
+  margin: 0 0 16px;
+  font-size: clamp(26px, 3.8vw, 42px);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+.mkt-cta__body {
+  margin: 0 auto 30px;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  max-width: 40em;
+  text-wrap: pretty;
+}
+
+.mkt-cta__row {
+  display: flex;
+  justify-content: center;
+}
+
+/* ------------------------------------------------------------------- footer */
+
+/* The page's only crisp boundary. */
+.mkt-footer {
+  border-top: 1px solid var(--hairline);
+  background: var(--soft);
+}
+
+.mkt-footer__inner {
+  padding-block: clamp(40px, 5vw, 64px);
+}
+
+.mkt-footer__row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  justify-items: center;
+  column-gap: clamp(24px, 4vw, 48px);
+  row-gap: 28px;
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+.mkt-footer__brand {
+  order: -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mkt-footer__brand .mkt-lockup__mark {
+  height: clamp(46px, 12vw, 60px);
+}
+
+.mkt-footer__brand .mkt-lockup__word {
+  font-size: clamp(26px, 6vw, 34px);
+}
+
+.mkt-footer__col {
+  text-align: center;
+}
+
+.mkt-footer__head {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+
+.mkt-footer__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mkt-footer__link {
+  color: var(--ink-2);
+  font-size: 15px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mkt-footer__link:hover {
+  color: var(--action-deep);
+}
+
+.mkt-footer__legal {
+  margin-top: clamp(28px, 4vw, 40px);
+  padding-top: 24px;
+  border-top: 1px solid var(--hairline);
+  text-align: center;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+@media (max-width: 699px) {
+  .mkt-footer__row {
+    grid-template-columns: 1fr 1fr;
+    max-width: 400px;
+    column-gap: 24px;
+  }
+  .mkt-footer__brand {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ------------------------------------------------------- document (legal) */
+
+.mkt-doc {
+  padding-block: clamp(56px, 7vw, 96px);
+}
+
+.mkt-doc h1 {
+  margin: 0 0 12px;
+  font-size: clamp(32px, 4.4vw, 46px);
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  font-weight: 700;
+}
+
+.mkt-doc__meta {
+  margin: 0 0 40px;
+  font-size: 15px;
+  color: var(--ink-3);
+}
+
+.mkt-doc h2 {
+  margin: 40px 0 12px;
+  font-size: clamp(20px, 2.4vw, 24px);
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  font-weight: 700;
+}
+
+.mkt-doc h3 {
+  margin: 28px 0 8px;
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.mkt-doc p {
+  margin: 0 0 16px;
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.mkt-doc ul {
+  margin: 0 0 16px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mkt-doc li {
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+
+.mkt-doc strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.mkt-doc__note {
+  border: 1px solid var(--hairline-2);
+  background: var(--soft);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin: 0 0 16px;
+}
+
+.mkt-doc__note p:last-child {
+  margin-bottom: 0;
+}
+
+/* ----------------------------------------------------------- reduced motion */
+
+/* State is preserved through border and color; only movement is removed. Nothing
+   here hides a state or drops a transition that carries meaning. */
+@media (prefers-reduced-motion: reduce) {
+  .mkt-skip,
+  .mkt-underline::after,
+  .mkt-header,
+  .mkt-burger__line,
+  .mkt-menu,
+  .mkt-menu__clip,
+  .mkt-tab,
+  .mkt-card,
+  .mkt-dots__dot,
+  .mkt-faq__chevron,
+  .mkt-faq__clip,
+  .mkt-faq__content,
+  .mkt-explorer__slide,
+  .mkt-explorer__slide[data-active="true"] {
+    transition: none !important;
+  }
+
+  .mkt-tab,
+  .mkt-tab:hover,
+  .mkt-tab[aria-selected="true"],
+  .mkt-tab[aria-selected="true"]:hover,
+  .mkt-card:hover,
+  .mkt-explorer__slide,
+  .mkt-explorer__slide[data-active="true"] {
+    transform: none !important;
+  }
+
+  .mkt-tab[aria-selected="true"],
+  .mkt-tab[aria-selected="true"]:hover {
+    border-color: var(--action) !important;
+    background: var(--wash-3) !important;
+    box-shadow: inset 0 2px 0 var(--action) !important;
+  }
+}

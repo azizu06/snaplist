@@ -23,9 +23,10 @@ import { NextResponse } from "next/server";
 // matching bearer.
 const isPublic = createRouteMatcher([
   "/",
-  "/tour",
-  "/features",
-  "/pricing",
+  // App Review resolves these two without a session, so they must never be
+  // able to answer a redirect to /login (issue #191).
+  "/privacy",
+  "/support",
   "/login(.*)",
   "/signup(.*)",
   "/api/health",
