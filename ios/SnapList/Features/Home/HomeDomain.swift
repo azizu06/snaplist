@@ -405,6 +405,20 @@ protocol TrophyWallRepository: Sendable {
     func initialCards(for principalScope: TrophyWallPrincipalScope) -> [TrophyWallCard]
 }
 
+/// What the client actually knows about the tenant's server-side collection.
+/// Trophy Wall may only describe a collection it has proved, so an unproved
+/// collection stays `unknown` and renders nothing rather than an empty success.
+enum TrophyWallCollectionOutcome: Equatable, Sendable {
+    /// No collection request has completed yet.
+    case unknown
+    /// A collection page arrived, so an absent card is proved absence.
+    case loaded
+    /// The request never reached the boundary; saved cards are all we know.
+    case offline
+    /// The boundary refused the request; saved cards are all we know.
+    case unavailable
+}
+
 @MainActor
 final class TrophyWallStore {
     private enum CanonicalHistoryState {
@@ -419,9 +433,13 @@ final class TrophyWallStore {
         }
     }
 
+    static let collectionPageLimit = 20
+
     let principalScope: TrophyWallPrincipalScope
     private(set) var cards: [TrophyWallCard]
+    private(set) var collectionOutcome: TrophyWallCollectionOutcome = .unknown
     private var canonicalHistoryStates: [UUID: CanonicalHistoryState]
+    private var isRefreshingCollection = false
 
     var processingRows: [TrophyWallProcessingRow] {
         cards.compactMap(TrophyWallProcessingRow.init(card:))
@@ -444,6 +462,53 @@ final class TrophyWallStore {
                 return
             }
             states[runID] = .visible(card.orderKey)
+        }
+    }
+
+    /// Re-requests the tenant's collection page from the existing boundary. A
+    /// failure never mutates, drops, or invents a card: it only downgrades what
+    /// the client is allowed to claim about the collection.
+    ///
+    /// Overlapping refreshes are dropped rather than queued, so a slow failure
+    /// can never land after, and downgrade, a newer success.
+    func refreshCollection(using repository: any TrophyWallRunHistoryRepository) async {
+        guard !isRefreshingCollection else {
+            return
+        }
+        isRefreshingCollection = true
+        defer { isRefreshingCollection = false }
+
+        do {
+            let page = try await repository.fetchPage(
+                limit: Self.collectionPageLimit,
+                cursor: nil
+            )
+            ingest(historyPage: page, principalScope: principalScope)
+            collectionOutcome = .loaded
+        } catch {
+            collectionOutcome = Self.outcome(forFailure: error)
+        }
+    }
+
+    /// A server that answered badly is not the same as a device that could not
+    /// reach one, so only genuine reachability codes may claim `offline`. Every
+    /// other failure — timeout, TLS, DNS, HTTP status, decode — is `unavailable`.
+    private static func outcome(
+        forFailure error: any Error
+    ) -> TrophyWallCollectionOutcome {
+        guard let urlError = error as? URLError else {
+            return .unavailable
+        }
+
+        switch urlError.code {
+        case .notConnectedToInternet,
+             .networkConnectionLost,
+             .dataNotAllowed,
+             .internationalRoamingOff,
+             .callIsActive:
+            return .offline
+        default:
+            return .unavailable
         }
     }
 

@@ -333,7 +333,9 @@ struct AppShellView: View {
             TrophyWallProcessingView(
                 rows: TrophyWallProcessingLaunchFixture.rows,
                 onBack: {},
-                openRoute: { router.navigate(to: .home($0)) }
+                openRoute: { router.navigate(to: .home($0)) },
+                onScan: {},
+                onTryAgain: {}
             )
         } else {
             sellerHomeFeature
