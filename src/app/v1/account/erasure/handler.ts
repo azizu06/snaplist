@@ -1,0 +1,51 @@
+import {
+  clerkClient,
+  reverificationErrorResponse,
+} from "@clerk/nextjs/server";
+import { createConfiguredAccountErasureOperations } from "@/lib/account-erasure/configured";
+import { createAccountErasureHandler } from "@/lib/account-erasure/http";
+
+function configuredAccountErasureOperations() {
+  const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const secretKey = process.env.SUPABASE_SECRET_KEY?.trim()
+    || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!supabaseURL || !secretKey) {
+    throw new Error("The account erasure adapter is not configured.");
+  }
+  return createConfiguredAccountErasureOperations({ supabaseURL, secretKey });
+}
+
+const handler = createAccountErasureHandler({
+  async authenticateReverified(request) {
+    const secretKey = process.env.CLERK_SECRET_KEY?.trim();
+    const authorizedParties = process.env.CLERK_AUTHORIZED_PARTIES?.split(",")
+      .map((party) => party.trim())
+      .filter(Boolean);
+    if (!secretKey || !authorizedParties?.length) {
+      throw new Error("The Clerk reverification boundary is not configured.");
+    }
+
+    const requestState = await (await clerkClient()).authenticateRequest(request, {
+      acceptsToken: "session_token",
+      authorizedParties,
+    });
+    if (!requestState.isAuthenticated) {
+      throw new Error("A verified Clerk session is required.");
+    }
+    const authentication = requestState.toAuth();
+    if (!authentication.userId) {
+      throw new Error("The verified Clerk session has no subject.");
+    }
+    if (!authentication.has({ reverification: "strict" })) {
+      return reverificationErrorResponse("strict");
+    }
+    return { userId: authentication.userId };
+  },
+  erase(input) {
+    return configuredAccountErasureOperations().erase(input);
+  },
+});
+
+export function handleAccountErasureRequest(request: Request): Promise<Response> {
+  return handler(request);
+}
