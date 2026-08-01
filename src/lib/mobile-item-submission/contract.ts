@@ -163,8 +163,11 @@ export type MobileItemSubmissionDenialReason =
   /**
    * Issue #524. The account still holds an unspent included first run, but this
    * physical Apple device has already consumed the promotion — or never proved
-   * it had not. Distinct from the three above: no purchase and no waiting clears
-   * it, only a completed device redemption or an audited support override.
+   * it had not — and the account has no paid period to fall back on. Only this
+   * last part makes it a denial: a seller with a live subscription reaches the
+   * paid path and hears about that path instead. So three routes clear it, and
+   * the seller-facing copy offers all three: a completed device redemption, an
+   * audited support override, or starting SnapList Pro.
    */
   | "device-fence-required"
   | "daily-capacity-reached"

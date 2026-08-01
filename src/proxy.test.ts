@@ -120,7 +120,7 @@ describe("auth proxy", () => {
     }
 
     // Issue #524's redemption queue has exactly one writer, and only this
-    // worker moves a claim to `device_token_required`. A login redirect here
+    // worker moves a claim to `awaiting_device_token`. A login redirect here
     // does not merely slow the fence down: no seller is ever asked for a
     // DeviceCheck token, so the included first AI run becomes unobtainable
     // while the trigger keeps requiring a reserved claim. The route's own

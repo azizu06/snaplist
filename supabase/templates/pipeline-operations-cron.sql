@@ -86,9 +86,10 @@ select cron.schedule(
 -- schedule: a minute cadence against a 290s timeout means pg_cron can and will
 -- start a tick while the last one is still running, and the extra tick simply
 -- fails to take the lease and returns. Until some tick runs, no claim ever
--- reaches `device_token_required`, so the promotion is unreachable however
--- correct the rest of the fence is — this schedule is what makes it
--- obtainable. A seller polls their claim while waiting, so this cadence bounds
+-- reaches `awaiting_device_token`, so the promotion stays unreachable however
+-- correct the rest of the fence is — this schedule is one of the two things
+-- that make it obtainable, the other being a seller-facing caller for the
+-- redemption client. A seller polls their claim while waiting, so this bounds
 -- how long that wait can be; an owner who wants it tighter can use pg_cron's
 -- sub-minute interval syntax instead of the cron expression.
 select cron.schedule(

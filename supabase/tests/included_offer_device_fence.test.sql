@@ -44,6 +44,11 @@ begin
   );
 end;
 $$;
+-- `reset role` drops the role but deliberately leaves the transaction-local
+-- `request.jwt.claims`: every staging call below resolves its authority from
+-- that claim, and clearing it fails the file at
+-- `assert_verified_guest_capability`. Verified by clearing it and watching the
+-- first `stage_pipeline_batch` raise.
 reset role;
 
 create temporary table included_offer_fence_runs (
@@ -86,7 +91,7 @@ select ok(
     join included_offer_fence_runs staged on staged.label = 'included'
     where claim.user_id = 'device-fence-included'
   ),
-  'spending the included run consumes that account''s device claim exactly once'
+  'spending the included run marks that account''s device claim consumed'
 );
 
 -- AC7/AC8. The seller below has no device claim at all. Before this contract
