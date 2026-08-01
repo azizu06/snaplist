@@ -984,6 +984,91 @@ final class NativeIntakeTests: XCTestCase {
 
         XCTAssertFalse(files.fileExists(atPath: blockedEntryRoot.path))
     }
+    func testRootHoldingOnlyAnUnreadableDeferredVoiceStillSweepsIt() async throws {
+        let start = Date(timeIntervalSince1970: 2_100_000_000)
+        let clock = NativeIntakeTestClock(now: start)
+        let principalA = "user_native_intake_only_unreadable_a"
+        let principalB = "user_native_intake_only_unreadable_b"
+        let harness = NativeIntakeHarness(identity: .clerk(principalA))
+        addTeardownBlock { harness.cleanUp() }
+        let guardedFiles = NativeIntakeTestFileManager()
+        let session = try await harness.makeSession(
+            fileManager: guardedFiles,
+            now: clock.now,
+            sleepUntil: clock.sleep
+        )
+        _ = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 1)])
+        )
+        let submitted = try await session.commit(
+            .setVoice(voice("solitary unmatched voice", duration: 3))
+        )
+        let submittedVoice = try XCTUnwrap(submitted.voice)
+        let principalARoot = intakeRoot(
+            containing: submitted.photos[0].photoURL
+        )
+        let retirement = await session.perform(
+            .retireAcceptedPhotos(
+                expected: submitted.version,
+                photoIDs: submitted.photos.map(\.id),
+                preservingUnmatchedVoiceID: submittedVoice.id
+            )
+        )
+        XCTAssertEqual(retirement, .committed)
+        assertEmpty(try await session.nextSnapshot())
+
+        let deferredRoot = principalARoot.appendingPathComponent(
+            "DeferredUnmatchedVoices",
+            isDirectory: true
+        )
+        let entryRoot = deferredRoot.appendingPathComponent(
+            submittedVoice.id.uuidString.lowercased(),
+            isDirectory: true
+        )
+        let deferredVoiceURL = entryRoot.appendingPathComponent(
+            "voice-\(submittedVoice.id.uuidString).wav"
+        )
+        let currentRoot = principalARoot.appendingPathComponent(
+            "Current",
+            isDirectory: true
+        )
+
+        // The root has to hold nothing but the unreadable entry. The leak is
+        // that an empty deadline list cancels the retention task outright, so
+        // any surviving bundle would contribute its own deadline and schedule
+        // the very wake this case exists to demand.
+        try? guardedFiles.removeItem(at: currentRoot)
+        try files.removeItem(
+            at: entryRoot.appendingPathComponent("entry.json")
+        )
+        XCTAssertFalse(files.fileExists(atPath: currentRoot.path))
+        XCTAssertEqual(
+            try files.contentsOfDirectory(atPath: deferredRoot.path).count,
+            1
+        )
+        XCTAssertTrue(files.fileExists(atPath: deferredVoiceURL.path))
+
+        await harness.identity.set(.clerk(principalB))
+        assertEmpty(try await session.nextSnapshot())
+
+        // An unreadable entry is due immediately, so its wake resumes without
+        // ever registering a sleeper and the sweep runs without the clock
+        // advancing. Polling for the effect keeps a cancelled retention task
+        // an assertion failure rather than a hang.
+        var swept = false
+        for _ in 0..<500 {
+            if !files.fileExists(atPath: entryRoot.path) {
+                swept = true
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(
+            swept,
+            "A root holding only an unreadable entry never woke to sweep it."
+        )
+        XCTAssertFalse(files.fileExists(atPath: deferredVoiceURL.path))
+    }
     private func intakeRoot(containing asset: URL) -> URL {
         asset.deletingLastPathComponent()
             .deletingLastPathComponent()
