@@ -87,6 +87,16 @@ extension ListingReviewFixture {
     }
 }
 
+extension LaunchConfiguration {
+    /// Guided correction has no interior yet — Fix item pushes a typed
+    /// boundary card owned by #212. Withholding the entry point unless a
+    /// fixture asks for it keeps that placeholder out of a real launch, where
+    /// the footer offers Edit details instead.
+    var listingReviewCorrectionAvailable: Bool {
+        listingReviewFixture?.correctionAvailable ?? false
+    }
+}
+
 #if DEBUG
 extension ListingReviewFixture {
     var review: ListingReviewResult {

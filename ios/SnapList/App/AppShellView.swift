@@ -372,9 +372,7 @@ struct AppShellView: View {
                     store: runStore,
                     listingReviewStore: listingReviewStore,
                     correctionAvailable:
-                        configuration.listingReviewFixture?
-                            .correctionAvailable
-                        ?? true
+                        configuration.listingReviewCorrectionAvailable
                 )
             default:
                 HomeRouteBoundaryView(route: route)

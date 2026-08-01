@@ -41,6 +41,24 @@ final class ListingReviewPresentationTests: XCTestCase {
         )
     }
 
+    func testGuidedCorrectionIsWithheldWithoutAFixtureBehindIt() {
+        // Fix item pushes a typed boundary card until #212 builds its interior,
+        // so a production launch must offer Edit details instead.
+        XCTAssertFalse(
+            LaunchConfiguration.standard.listingReviewCorrectionAvailable
+        )
+        XCTAssertTrue(
+            LaunchConfiguration.parse(
+                arguments: ["--listing-review-fixture=loaded"]
+            ).listingReviewCorrectionAvailable
+        )
+        XCTAssertFalse(
+            LaunchConfiguration.parse(
+                arguments: ["--listing-review-fixture=correction-unavailable"]
+            ).listingReviewCorrectionAvailable
+        )
+    }
+
     private func soldMatches(
         _ facts: [(Int, String)]
     ) throws -> [ListingReviewSoldMatch] {
