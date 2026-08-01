@@ -5,6 +5,7 @@ import {
   listingCopySchema,
 } from "@/lib/pipeline/types";
 import { priceResultSchema } from "@/lib/pricing";
+import { toJsonbSafe } from "./jsonb-safe";
 
 export const identifiedPipelineStageSchema = z
   .object({
@@ -68,14 +69,24 @@ export const pipelineWorkerCheckpointSchema = z
   .strict()
   .superRefine(requireCheckpointOrder);
 
-export const pipelineWorkerCheckpointWriteSchema = z
-  .object({
-    identified: identifiedPipelineStageSchema.optional(),
-    priced: pricedPipelineStageWriteSchema.optional(),
-    generated: generatedPipelineStageSchema.optional(),
-  })
-  .strict()
-  .superRefine(requireCheckpointOrder);
+/**
+ * The write boundary repairs PostgreSQL-unsafe strings before validation, so no
+ * checkpoint the worker builds can reach the `checkpoint_pipeline_run` RPC with
+ * content `jsonb` refuses to store. Without it the RPC returns a generic error,
+ * the worker classifies it as retryable, and the run re-runs the paid
+ * identification stage into the same rejection until it dead-letters.
+ */
+export const pipelineWorkerCheckpointWriteSchema = z.preprocess(
+  toJsonbSafe,
+  z
+    .object({
+      identified: identifiedPipelineStageSchema.optional(),
+      priced: pricedPipelineStageWriteSchema.optional(),
+      generated: generatedPipelineStageSchema.optional(),
+    })
+    .strict()
+    .superRefine(requireCheckpointOrder),
+);
 
 export type IdentifiedPipelineStage = z.infer<typeof identifiedPipelineStageSchema>;
 export type PricedPipelineStage = z.infer<typeof pricedPipelineStageSchema>;

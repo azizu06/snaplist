@@ -199,6 +199,41 @@ describe("run-scoped pipeline worker store", () => {
     expect(persistence.pricing_snapshot.evidence.map(({ id }) => id)).toEqual(["sold-1"]);
   });
 
+  it("never sends a PostgreSQL-unsafe checkpoint string to the RPC", async () => {
+    const nul = String.fromCharCode(0);
+    const loneSurrogate = String.fromCharCode(0xd800);
+    const replacement = String.fromCharCode(0xfffd);
+    const client = rpcClient({ checkpoint_pipeline_run: {} });
+    const store = createSupabasePipelineWorkerStore(client);
+
+    await store.checkpoint({
+      runId: RUN_ID,
+      leaseToken: LEASE_TOKEN,
+      stage: "identifying",
+      checkpoint: {
+        identified: {
+          attributes: { brand: `Sony${nul}WH${loneSurrogate}` },
+          model: "vision-model",
+        },
+      },
+      leaseSeconds: 300,
+    });
+
+    const sent = client.rpc.mock.calls.find(
+      ([name]) => name === "checkpoint_pipeline_run",
+    )?.[1] as Record<string, unknown>;
+    expect(sent.p_checkpoint).toEqual({
+      identified: {
+        attributes: { brand: `SonyWH${replacement}` },
+        model: "vision-model",
+      },
+    });
+    // PostgREST/Postgres reject these two escapes; neither may reach the wire.
+    const wire = JSON.stringify(sent);
+    expect(wire).not.toContain("\\u0000");
+    expect(wire).not.toContain("\\ud800");
+  });
+
   it("uses lease-fenced failure and message-rejection RPCs", async () => {
     const client = rpcClient({
       finish_pipeline_run_attempt: {
