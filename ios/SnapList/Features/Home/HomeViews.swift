@@ -1121,7 +1121,6 @@ private struct TrophyWallOfflineNoticeView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.updatesFrequently)
         .accessibilityIdentifier("trophy.processing.offline")
     }
 }

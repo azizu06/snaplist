@@ -1448,6 +1448,53 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(repository.requestedPages.count, 3)
     }
 
+    func testOnlyGenuineReachabilityFailuresMayClaimTheSellerIsOffline() async {
+        let fixture = TrophyWallTestFixture()
+        let cases: [(code: URLError.Code, outcome: TrophyWallCollectionOutcome)] = [
+            (.notConnectedToInternet, .offline),
+            (.networkConnectionLost, .offline),
+            (.dataNotAllowed, .offline),
+            (.timedOut, .unavailable),
+            (.badServerResponse, .unavailable),
+            (.secureConnectionFailed, .unavailable),
+            (.cannotFindHost, .unavailable),
+        ]
+
+        for testCase in cases {
+            let store = fixture.makeStore(cards: fixture.processingInitialCards)
+            let repository = ScriptedTrophyWallRunHistoryRepository(
+                results: [.failure(URLError(testCase.code))]
+            )
+
+            await store.refreshCollection(using: repository)
+
+            XCTAssertEqual(
+                store.collectionOutcome,
+                testCase.outcome,
+                "URLError.\(testCase.code) must not be described as \(store.collectionOutcome)."
+            )
+        }
+    }
+
+    func testOverlappingCollectionRefreshCannotDowngradeNewerServerTruth() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        let repository = GatedTrophyWallRunHistoryRepository()
+
+        async let inFlight: Void = store.refreshCollection(using: repository)
+        await repository.entered.wait()
+        await store.refreshCollection(using: repository)
+
+        XCTAssertEqual(repository.requestCount, 1)
+        XCTAssertEqual(store.collectionOutcome, .unknown)
+
+        await repository.release.open()
+        await inFlight
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        XCTAssertEqual(repository.requestCount, 1)
+    }
+
     func testCollectionStatesRenderTheirApprovedGroupAtBothDynamicTypeRoots() async {
         let fixture = TrophyWallTestFixture()
         let savedRows = fixture.makeStore(cards: fixture.processingInitialCards)
@@ -2053,6 +2100,46 @@ private final class ScriptedTrophyWallRunHistoryRepository:
         case .failure(let error):
             throw error
         }
+    }
+}
+
+/// A one-way latch two tasks can rendezvous on, so an overlapping-refresh test
+/// proves ordering instead of racing on `Task.yield()`.
+private actor RefreshGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let resumable = waiters
+        waiters.removeAll()
+        for waiter in resumable { waiter.resume() }
+    }
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
+private final class GatedTrophyWallRunHistoryRepository:
+    TrophyWallRunHistoryRepository, @unchecked Sendable {
+    let entered = RefreshGate()
+    let release = RefreshGate()
+
+    private let lock = NSLock()
+    private var count = 0
+
+    var requestCount: Int {
+        lock.withLock { count }
+    }
+
+    func fetchPage(limit: Int, cursor: String?) async throws -> TrophyWallRunHistoryPage {
+        lock.withLock { count += 1 }
+        await entered.open()
+        await release.wait()
+        return TrophyWallRunHistoryPage(entries: [], nextCursor: nil)
     }
 }
 
