@@ -492,6 +492,7 @@ describe("included first AI offer device fence", () => {
     const pete = await h.redeem("user_pete", "key-pete", "idem-pete-1");
     await expect(h.advance()).resolves.toEqual({
       acked: [],
+      erasing: [],
       expired: [],
       opened: [],
     });
@@ -563,5 +564,78 @@ describe("included first AI offer device fence", () => {
     await expect(
       h.fence.readClaim({ claimId: claimIdOf(rosa), userId: "user_rosa" }),
     ).resolves.toMatchObject({ status: "denied_apple_unavailable" });
+  });
+
+  it("keeps advancing other accounts while one tenant is being erased", async () => {
+    const h = harness({ reconcileDeadlineMs: 5 * 60_000 });
+
+    const tess = await h.redeem("user_tess", "key-tess", "idem-tess-1");
+    await h.advance();
+    h.deviceCheck.failNextUpdate("unavailable");
+    await expect(
+      h.submitToken("user_tess", "key-tess", claimIdOf(tess), "device-13:token-a"),
+    ).resolves.toMatchObject({ status: "retry_required" });
+
+    // Tess asks for her account to be deleted while that write is unresolved.
+    // Every write to her claim is fenced from here — including the sweep that
+    // would otherwise release the rendezvous she is holding — so the worker has
+    // to stop selecting her row rather than abort the whole tick on it.
+    h.store.beginAccountErasure("user_tess");
+
+    const uma = await h.redeem("user_uma", "key-uma", "idem-uma-1");
+    h.setNow(new Date("2026-07-31T18:30:00.000Z"));
+
+    // Tess's own message is redelivered first, and her claim is long past the
+    // reconcile deadline. The tick resolves it and keeps going.
+    const tick = await h.advance();
+    expect(tick.expired).toEqual([]);
+    expect(tick.erasing).toEqual([claimIdOf(tess)]);
+    expect(tick.opened).toEqual([]);
+    // Her wake-up is retired, not rescheduled. A deferred one comes back as the
+    // oldest visible message on the very next tick and is declined again, which
+    // is a permanent claim on the queue head rather than a release.
+    expect(h.queue.depth()).toBe(1);
+
+    // The next cron tick. Production's period is a minute and the worker's queue
+    // visibility timeout is shorter, so anything the previous tick deferred is
+    // visible again by now — and the queue hands back the oldest visible
+    // message. Reading twice at a single instant cannot see that: the deferred
+    // message is merely invisible to the second read.
+    h.setNow(new Date("2026-07-31T18:40:00.000Z"));
+
+    // Liveness, which is the whole point: Uma is not held behind a rendezvous
+    // that nothing left in the system is allowed to release.
+    await expect(h.advance()).resolves.toMatchObject({
+      opened: [claimIdOf(uma)],
+    });
+  });
+
+  it("grants the writer lease past an erasing tenant's unresolved write", async () => {
+    const h = harness();
+
+    // Vera observes a clear device under the lease and her update never resolves.
+    // The deployment-wide rendezvous is now spoken for by an indeterminate bit.
+    const vera = await h.redeem("user_vera", "key-vera", "idem-vera-1");
+    await h.advance();
+    h.deviceCheck.failNextUpdate("timeout");
+    await expect(
+      h.submitToken("user_vera", "key-vera", claimIdOf(vera), "device-14:token-a"),
+    ).resolves.toMatchObject({ status: "retry_required" });
+
+    // Then she asks for her account to be deleted. Her claim can never reserve
+    // from here and the sweep can no longer reach it, so an unresolved write that
+    // still outranked the lease would refuse every other account for the length
+    // of the erasure — the same stall as the queue head, one seam over.
+    h.store.beginAccountErasure("user_vera");
+
+    // Wes is a different account on a different phone. The lease is the only
+    // thing standing between him and his own device, and it has to let him past.
+    // His claim is opened directly so this tests the lease rather than the
+    // worker's scheduling, which the erasure tick above already covers.
+    const wes = await h.redeem("user_wes", "key-wes", "idem-wes-1");
+    await h.openForToken(claimIdOf(wes));
+    await expect(
+      h.submitToken("user_wes", "key-wes", claimIdOf(wes), "device-15:token-a"),
+    ).resolves.toEqual({ claimId: claimIdOf(wes), status: "reserved" });
   });
 });

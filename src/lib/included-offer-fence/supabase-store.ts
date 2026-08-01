@@ -4,6 +4,7 @@ import {
   includedOfferQueueEnvelopeSchema,
   type IncludedOfferClaim,
   type IncludedOfferClaimStore,
+  type IncludedOfferClaimTransitionResult,
   type IncludedOfferQueueEnvelope,
   type IncludedOfferQueueMessage,
   type IncludedOfferRedemptionQueue,
@@ -138,6 +139,23 @@ function optionalClaim(data: unknown): IncludedOfferClaim | null {
   return toClaim(claimRowSchema.parse(data));
 }
 
+/**
+ * `transition_included_offer_claim` reports an account-erasure refusal as a
+ * marker object rather than a claim. It is deliberately not claim-shaped:
+ * `claimRowSchema` is strict, so anything that mistook one for the other would
+ * throw here instead of quietly becoming a half-populated claim.
+ */
+const transitionRefusalSchema = z
+  .object({ outcome: z.literal("account_erasure_in_progress") })
+  .strict();
+
+function transitionResult(data: unknown): IncludedOfferClaimTransitionResult {
+  if (data === null || data === undefined) return { status: "not_applied" };
+  const refusal = transitionRefusalSchema.safeParse(data);
+  if (refusal.success) return { status: "account_erasure_in_progress" };
+  return { claim: toClaim(claimRowSchema.parse(data)), status: "applied" };
+}
+
 export function createSupabaseIncludedOfferClaimStore(
   client: IncludedOfferRpcClient,
 ): IncludedOfferClaimStore {
@@ -190,7 +208,7 @@ export function createSupabaseIncludedOfferClaimStore(
         },
       );
       failed("claim transition", error);
-      return optionalClaim(data);
+      return transitionResult(data);
     },
 
     async recordQueueMessage() {

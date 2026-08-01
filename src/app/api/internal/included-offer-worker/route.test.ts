@@ -19,6 +19,7 @@ describe("/api/internal/included-offer-worker", () => {
     process.env.CRON_SECRET = "worker-secret";
     advance.mockResolvedValue({
       acked: ["claim-a"],
+      erasing: ["claim-c"],
       expired: ["claim-b"],
       opened: [],
     });
@@ -33,9 +34,13 @@ describe("/api/internal/included-offer-worker", () => {
       );
       expect(response.status).toBe(200);
       // The sweep of abandoned Apple writes is reported, not swallowed: an
-      // operator watching this endpoint should see claims being terminalized.
+      // operator watching this endpoint should see claims being terminalized —
+      // and, since #588, the claims a tick declined to touch because their
+      // owner is mid-erasure, which is otherwise indistinguishable from an
+      // idle tick.
       await expect(response.json()).resolves.toEqual({
         acked: ["claim-a"],
+        erasing: ["claim-c"],
         expired: ["claim-b"],
         opened: [],
       });
