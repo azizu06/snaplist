@@ -11,6 +11,7 @@ import {
   createEbaySoldPricingProvider as createRawEbaySoldPricingProvider,
   ebaySoldConfigured,
   filterRelevantComps,
+  finalizeVerifiedSoldResult,
   isAllowedEbayHost,
   isPrivateOrInternalHost,
   parsePrice,
@@ -21,6 +22,8 @@ import {
   type EbaySoldPricingProviderOptions,
   type FetchPage,
 } from "./ebay-sold";
+import { createApifySoldPricingProvider } from "./apify-sold";
+import { selectSoldCompEvidence } from "../sold-comp-matcher";
 import {
   createInMemoryTtlCache,
   createUpstashTtlCache,
@@ -2844,5 +2847,175 @@ describe("createEbaySoldPricingProvider — age-decay (#59, now injected)", () =
 
     expect(plain!.suggested).toBe(150); // plain median of [100,150,200]
     expect(weighted!.suggested).toBeGreaterThan(plain!.suggested);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The shared verified-sold finalization seam (#363)
+// ---------------------------------------------------------------------------
+
+/** One anchor-eligible sold comp; omit `soldAt` to leave the sale undated. */
+function anchorComp(
+  id: string,
+  price: number,
+  soldAt?: number,
+): EbaySoldComp {
+  return {
+    url: `https://www.ebay.com/itm/${id}`,
+    title: "Sony WH-1000XM4 Wireless Headphones",
+    price,
+    condition: "Pre-Owned",
+    ...(soldAt != null ? { soldAt } : {}),
+  };
+}
+
+const STALE_SOLD_AT = NOW - 400 * DAY;
+
+describe("finalizeVerifiedSoldResult — one shared seam for every retrieval adapter (#363)", () => {
+  it("declines when fewer than two verified anchors survive", () => {
+    const evidence = selectSoldCompEvidence(
+      [anchorComp("only", 180)],
+      BRANDED_SIGNAL,
+    );
+
+    expect(evidence.anchors).toHaveLength(1);
+    expect(finalizeVerifiedSoldResult(evidence)).toBeNull();
+  });
+
+  it("retains at most five deterministically ranked verified matches, never padded", () => {
+    // Seven equally-scored, undated anchors: rank falls through to the stable
+    // canonical-URL tie-break, so retrieval order cannot change the projection.
+    const comps = ["7", "5", "1", "3", "6", "2", "4"].map((id) =>
+      anchorComp(id, 100 + Number(id)),
+    );
+    const evidence = selectSoldCompEvidence(comps, BRANDED_SIGNAL);
+
+    const result = finalizeVerifiedSoldResult(evidence);
+
+    expect(evidence.anchors).toHaveLength(7);
+    expect(result!.evidence!.map((entry) => entry.sourceUrl)).toEqual([
+      "https://www.ebay.com/itm/1",
+      "https://www.ebay.com/itm/2",
+      "https://www.ebay.com/itm/3",
+      "https://www.ebay.com/itm/4",
+      "https://www.ebay.com/itm/5",
+    ]);
+    expect(result!.sources).toHaveLength(5);
+    expect(result!.suggested).toBe(103); // median of [101,102,103,104,105]
+  });
+
+  it("drops stale anchors before retention, weighting, and the minimum-evidence gate", () => {
+    const evidence = selectSoldCompEvidence(
+      [anchorComp("fresh", 180), anchorComp("stale", 900, STALE_SOLD_AT)],
+      BRANDED_SIGNAL,
+    );
+
+    // Without a clock there is no age-decay layer, so both anchors stand.
+    expect(finalizeVerifiedSoldResult(evidence)!.sources).toHaveLength(2);
+    // With one, the stale sale is dropped and the survivor is below the gate.
+    expect(finalizeVerifiedSoldResult(evidence, { now: NOW })).toBeNull();
+  });
+
+  it("weights the suggested price by canonical match score, not raw comp order", () => {
+    const evidence = selectSoldCompEvidence(
+      [anchorComp("a", 100), anchorComp("b", 200)],
+      BRANDED_SIGNAL,
+    );
+    // Every anchor here scores identically, so the weighted median reduces to
+    // the plain median — the documented no-op the adapters both relied on.
+    expect(finalizeVerifiedSoldResult(evidence)!.suggested).toBe(150);
+    expect(
+      evidence.anchors.every((match) => match.score === evidence.anchors[0].score),
+    ).toBe(true);
+  });
+});
+
+describe("verified sold finalization is identical across retrieval adapters (#363)", () => {
+  /** A public sold card with no parseable sale date (caption present, date absent). */
+  function undatedCard(id: string, price: number): string {
+    return `<li class="s-item">
+      <a class="s-item__link" href="https://www.ebay.com/itm/${id}"><div class="s-item__title">Sony WH-1000XM4 Wireless Headphones</div></a>
+      <span class="s-item__price">$${price.toFixed(2)}</span>
+      <div class="s-item__caption"><span>Sold</span></div>
+      <div class="s-item__subtitle"><span class="SECONDARY_INFO">Pre-Owned</span></div>
+    </li>`;
+  }
+
+  /** The same seven sales, expressed in each adapter's own retrieval shape. */
+  const FRESH: Array<[string, number]> = [
+    ["a", 170],
+    ["b", 180],
+    ["c", 190],
+    ["d", 200],
+    ["e", 210],
+    ["f", 175],
+  ];
+  const STALE_ID = "z";
+  const STALE_PRICE = 185;
+
+  /** Only the finalized facts both adapters must agree on. Sale timestamps are
+   * excluded: the public page reports a local-midnight caption date and the
+   * Actor an ISO instant, which is a retrieval difference, not a finalization one. */
+  function finalizedFacts(result: PriceResult) {
+    return {
+      suggested: result.suggested,
+      range: result.range,
+      confidence: result.confidence,
+      compAgreement: result.compAgreement,
+      tier: result.tier,
+      cited: result.evidence!.map((entry) => [entry.sourceUrl, entry.price]),
+    };
+  }
+
+  it("finalizes the same sales into the same cited result from both adapters", async () => {
+    const publicPage = await createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(
+        srp([
+          ...FRESH.map(([id, price]) => undatedCard(id, price)),
+          soldCard(`https://www.ebay.com/itm/${STALE_ID}`, STALE_PRICE, 400),
+        ]),
+      ),
+      now: () => NOW,
+    }).price(BRANDED_SIGNAL);
+
+    const apify = await createApifySoldPricingProvider({
+      enabled: true,
+      token: "test-token",
+      cache: createInMemoryTtlCache(60_000, () => NOW, "shared"),
+      now: () => NOW,
+      runActor: async () => ({
+        status: "SUCCEEDED",
+        items: [
+          ...FRESH.map(([id, price]) => ({
+            url: `https://www.ebay.com/itm/${id}`,
+            title: "Sony WH-1000XM4 Wireless Headphones",
+            condition: "Pre-Owned",
+            soldPrice: price,
+            soldCurrency: "USD",
+          })),
+          {
+            url: `https://www.ebay.com/itm/${STALE_ID}`,
+            title: "Sony WH-1000XM4 Wireless Headphones",
+            condition: "Pre-Owned",
+            soldPrice: STALE_PRICE,
+            soldCurrency: "USD",
+            endedAt: new Date(STALE_SOLD_AT).toISOString(),
+          },
+        ],
+      }),
+    }).price(BRANDED_SIGNAL);
+
+    // The stale sale is dropped and the sixth fresh sale falls outside the
+    // best-five retention, so the median of [170,180,190,200,210] stands.
+    expect(publicPage!.suggested).toBe(190);
+    expect(publicPage!.range).toEqual({ min: 170, max: 210 });
+    expect(publicPage!.evidence!.map((entry) => entry.sourceUrl)).toEqual([
+      "https://www.ebay.com/itm/a",
+      "https://www.ebay.com/itm/b",
+      "https://www.ebay.com/itm/c",
+      "https://www.ebay.com/itm/d",
+      "https://www.ebay.com/itm/e",
+    ]);
+    expect(finalizedFacts(apify!)).toEqual(finalizedFacts(publicPage!));
   });
 });

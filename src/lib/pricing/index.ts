@@ -64,6 +64,7 @@ export {
   parseSoldComps,
   parsePrice,
   filterRelevantComps,
+  finalizeVerifiedSoldResult,
   synthesizeSoldResult,
   assertSafeEbayUrl,
   isAllowedEbayHost,
@@ -74,6 +75,7 @@ export {
   type FetchPage,
   type EbaySoldComp,
   type EbaySoldPricingProviderOptions,
+  type VerifiedSoldFinalizationOptions,
 } from "./providers/ebay-sold";
 export {
   createApifySoldPricingProvider,
