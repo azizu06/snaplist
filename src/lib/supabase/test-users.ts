@@ -120,12 +120,15 @@ export async function grantIncludedOfferDeviceClaim(
   admin: SupabaseClient,
   userId: string,
 ): Promise<void> {
-  const { error } = await admin.from("included_offer_device_claims").insert({
-    app_attest_key_id: `fixture-key-${userId}`,
-    claim_id: crypto.randomUUID(),
-    idempotency_key: crypto.randomUUID(),
-    state: "reserved",
-    user_id: userId,
+  // Through the audited RPC, not a table insert: no key holds direct write
+  // authority on the fence, so the fixture cannot mint a claim the product
+  // could not have minted itself.
+  const { error } = await admin.rpc("begin_included_offer_claim", {
+    p_app_attest_key_id: `fixture-key-${userId}`,
+    p_claim_id: crypto.randomUUID(),
+    p_idempotency_key: crypto.randomUUID(),
+    p_state: "reserved",
+    p_user_id: userId,
   });
   if (error) throw new Error(error.message);
 }

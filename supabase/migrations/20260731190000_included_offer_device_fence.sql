@@ -92,7 +92,10 @@ alter table public.included_offer_device_claims enable row level security;
 revoke all on table public.included_offer_device_claims
   from public, anon, authenticated, service_role;
 grant select on table public.included_offer_device_claims to authenticated;
-grant select, insert, update, delete on table public.included_offer_device_claims
+-- No insert or update: every write goes through an audited security-definer RPC
+-- below, so no key can forge or mutate a claim outside that seam. Delete stays
+-- for the account-erasure capability the retention matrix names as executor.
+grant select, delete on table public.included_offer_device_claims
   to service_role;
 
 -- Tenants read their own promotion state and nothing else. Every write goes
@@ -135,7 +138,7 @@ alter table public.included_offer_support_overrides enable row level security;
 revoke all on table public.included_offer_support_overrides
   from public, anon, authenticated, service_role;
 grant select on table public.included_offer_support_overrides to authenticated;
-grant select, insert, update, delete
+grant select, delete
   on table public.included_offer_support_overrides to service_role;
 
 create policy included_offer_support_overrides_select_own
@@ -410,7 +413,8 @@ create or replace function public.transition_included_offer_claim(
   p_set_apple_phase boolean default false,
   p_attempt_count integer default null,
   p_token_deadline_at timestamptz default null,
-  p_set_token_deadline boolean default false
+  p_set_token_deadline boolean default false,
+  p_require_writer_lease boolean default false
 )
 returns jsonb
 language plpgsql
@@ -439,6 +443,19 @@ begin
       end
   where claim.claim_id = p_claim_id
     and claim.state = any (p_from)
+    -- Claiming the clear-device observation and proving the lease is still held
+    -- have to be one statement. Checking first and writing second leaves a gap
+    -- in which the lease lapses, a rival takes it, spends the device, and this
+    -- write lands anyway on a reading that is no longer true.
+    and (
+      not p_require_writer_lease
+      or exists (
+        select 1
+        from private.included_offer_writer_lease lease
+        where lease.claim_id = p_claim_id
+          and lease.expires_at > statement_timestamp()
+      )
+    )
   returning * into v_claim;
   if not found then
     return null;
@@ -448,10 +465,10 @@ end;
 $$;
 
 revoke all on function public.transition_included_offer_claim(
-  uuid, text[], text, text, boolean, integer, timestamptz, boolean
+  uuid, text[], text, text, boolean, integer, timestamptz, boolean, boolean
 ) from public, anon, authenticated;
 grant execute on function public.transition_included_offer_claim(
-  uuid, text[], text, text, boolean, integer, timestamptz, boolean
+  uuid, text[], text, text, boolean, integer, timestamptz, boolean, boolean
 ) to service_role;
 
 -- ---------------------------------------------------------------------------
@@ -694,33 +711,6 @@ revoke all on function public.release_included_offer_writer_lease(uuid)
 grant execute on function public.release_included_offer_writer_lease(uuid)
   to service_role;
 
--- Whether this claim still holds an unexpired lease. Re-acquiring cannot answer
--- that: a lease that lapsed and was taken, used, and released by a rival is free
--- again, so re-acquisition would succeed on a device the rival already spent.
-create or replace function public.holds_included_offer_writer_lease(
-  p_claim_id uuid
-)
-returns boolean
-language plpgsql
-security definer
-set search_path = ''
-as $$
-begin
-  perform private.assert_included_offer_authority();
-  return exists (
-    select 1
-    from private.included_offer_writer_lease lease
-    where lease.claim_id = p_claim_id
-      and lease.expires_at > statement_timestamp()
-  );
-end;
-$$;
-
-revoke all on function public.holds_included_offer_writer_lease(uuid)
-  from public, anon, authenticated;
-grant execute on function public.holds_included_offer_writer_lease(uuid)
-  to service_role;
-
 -- Single-writer means one open rendezvous, not one message in flight. The
 -- worker asks this before inviting the next claim, so a second account is never
 -- told to mint a fresh ephemeral token it can only be refused for.
@@ -743,6 +733,14 @@ declare
   v_now timestamptz := statement_timestamp();
 begin
   perform private.assert_included_offer_authority();
+  -- Without this, a null argument makes the comparison below null, `exists`
+  -- false, and the rendezvous read as free — the one answer that lets a second
+  -- account be invited onto a device somebody else is mid-write on.
+  if p_except_claim_id is null then
+    raise exception using
+      errcode = '22023',
+      message = 'Included-offer rendezvous occupancy needs a claim to exclude';
+  end if;
   return exists (
     select 1
     from public.included_offer_device_claims claim

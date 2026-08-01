@@ -198,27 +198,25 @@ export function createIncludedOfferFence(
       return outcomeFor(settled, now);
     }
 
-    // The `bit0 = false` above is only worth acting on if we have held the lease
-    // continuously since reading it. A lease that lapsed mid-query could have
-    // been taken, used, and released by a rival, leaving this reading stale and
-    // the device already spent.
-    if (!(await composition.store.holdsWriterLease({ claimId: owned.claimId, now }))) {
-      return deferAmbiguous(owned, "timeout", attemptCount, now);
-    }
-
-    // Observed clear under the lease. Record that before touching Apple again so
-    // a crash between here and the response cannot be reconciled as "consumed".
+    // Observed clear. Record that before touching Apple again so a crash between
+    // here and the response cannot be reconciled as "consumed" — and record it
+    // only while the lease is provably still held, in the same statement. A
+    // lease that lapsed mid-query could have been taken, used, and released by a
+    // rival, leaving this reading stale and the device already spent.
     const writing = await composition.store.transitionClaim({
       applePhase: "update",
       claimId: owned.claimId,
       from: ["apple_pending"],
       now,
+      requireWriterLease: true,
       to: "apple_pending",
     });
     if (!writing) {
-      // The ownership record has to land before Apple is touched. Writing the
-      // bit without it would leave a set device nobody can reconcile.
-      return deferAmbiguous(owned, "server_error", attemptCount, now);
+      // Either the lease is gone or another call already owns this rendezvous.
+      // Both mean this call may not touch Apple: the ownership record has to
+      // land first, and writing the bit without it would leave a set device
+      // nobody can reconcile.
+      return deferAmbiguous(owned, "timeout", attemptCount, now);
     }
 
     const update = await composition.deviceCheck.updateTwoBits({

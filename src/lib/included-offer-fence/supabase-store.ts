@@ -23,7 +23,6 @@ type IncludedOfferRpcName =
   | "release_included_offer_writer_lease"
   | "has_open_included_offer_rendezvous"
   | "expire_stale_included_offer_rendezvous"
-  | "holds_included_offer_writer_lease"
   | "find_active_included_offer_override"
   | "consume_included_offer_override";
 
@@ -185,6 +184,7 @@ export function createSupabaseIncludedOfferClaimStore(
           p_from: [...input.from],
           p_set_apple_phase: input.applePhase !== undefined,
           p_set_token_deadline: input.tokenDeadlineAt !== undefined,
+          p_require_writer_lease: input.requireWriterLease ?? false,
           p_to: input.to,
           p_token_deadline_at: input.tokenDeadlineAt?.toISOString() ?? null,
         },
@@ -234,15 +234,6 @@ export function createSupabaseIncludedOfferClaimStore(
       );
       failed("stale rendezvous expiry", error);
       return z.array(z.string().uuid()).parse(data ?? []);
-    },
-
-    async holdsWriterLease(input) {
-      const { data, error } = await client.rpc(
-        "holds_included_offer_writer_lease",
-        { p_claim_id: input.claimId },
-      );
-      failed("writer lease continuity check", error);
-      return z.boolean().parse(data);
     },
 
     async acquireWriterLease(input) {

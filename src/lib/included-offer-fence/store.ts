@@ -38,6 +38,13 @@ export interface IncludedOfferClaimTransition {
   /** Optimistic guard: the transition applies only from one of these states. */
   from: readonly IncludedOfferClaimState[];
   now: Date;
+  /**
+   * Applies only while this claim provably still holds the writer lease. Set it
+   * for the write that claims a clear-device observation: checking the lease
+   * separately leaves a gap in which it lapses, a rival spends the device, and
+   * the write lands anyway on a reading that is no longer true.
+   */
+  requireWriterLease?: boolean;
   to: IncludedOfferClaimState;
   tokenDeadlineAt?: Date | null;
 }
@@ -124,7 +131,6 @@ export interface IncludedOfferClaimStore {
    * released by a rival is free again, and re-acquiring it would succeed while
    * the rival's write sat between our stale `bit0` read and our own.
    */
-  holdsWriterLease(input: { claimId: string; now: Date }): Promise<boolean>;
   releaseWriterLease(input: { claimId: string }): Promise<void>;
 }
 
@@ -231,6 +237,15 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
   ): Promise<IncludedOfferClaim | null> {
     const claim = this.#claims.get(input.claimId);
     if (!claim || !input.from.includes(claim.state)) return null;
+    if (
+      input.requireWriterLease
+      && !(
+        this.#lease?.claimId === input.claimId
+        && this.#lease.expiresAt.getTime() > input.now.getTime()
+      )
+    ) {
+      return null;
+    }
     claim.state = input.to;
     claim.updatedAt = input.now;
     if (input.applePhase !== undefined) claim.applePhase = input.applePhase;
@@ -336,16 +351,6 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
       expiresAt: new Date(input.now.getTime() + input.leaseMs),
     };
     return true;
-  }
-
-  async holdsWriterLease(input: {
-    claimId: string;
-    now: Date;
-  }): Promise<boolean> {
-    return (
-      this.#lease?.claimId === input.claimId &&
-      this.#lease.expiresAt.getTime() > input.now.getTime()
-    );
   }
 
   async releaseWriterLease(input: { claimId: string }): Promise<void> {
