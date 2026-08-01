@@ -490,8 +490,13 @@ final class SnapListUITests: XCTestCase {
             },
             object: nil
         )
+        // This waits out the whole tap-to-terminal-outcome transition in one go,
+        // so it needs the budget the bounded-saving test spends reaching the same
+        // point in two steps: 8 seconds to observe saving, then 12 more to observe
+        // the outcome. Three seconds only bought about three predicate evaluations
+        // and went red on a slow runner against an unchanged app.
         XCTAssertEqual(
-            XCTWaiter.wait(for: [rejectionPresented], timeout: 3),
+            XCTWaiter.wait(for: [rejectionPresented], timeout: 20),
             .completed,
             "Typed rate limiting must visibly render the exact retained-item message."
         )
