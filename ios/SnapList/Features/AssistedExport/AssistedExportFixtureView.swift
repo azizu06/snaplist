@@ -30,6 +30,9 @@ struct AssistedExportFixtureView: View {
     static let editedReviewRevision = UUID(
         uuidString: "58100000-0000-4000-8000-0000000000a1"
     )!
+    private static let rebuiltContentRevision = UUID(
+        uuidString: "58100000-0000-4000-8000-0000000000c1"
+    )!
 
     /// The listing revision the screen observes. It belongs to the host rather
     /// than to the screen because in the product it belongs to the item.
@@ -38,6 +41,14 @@ struct AssistedExportFixtureView: View {
     /// cleared. A test cannot poll for a sheet that is dismissed in the same
     /// breath it appears, so the proof that it was presented has to outlive it.
     @State private var sheetWasPresented = false
+    /// Preparing a replacement pack is the host's work in the product, so the
+    /// host holds it here too.
+    @State private var pack = AssistedExportPack(
+        itemID: AssistedExportFixtureView.itemID,
+        contentRevision: AssistedExportFixtureView.contentRevision,
+        reviewRevision: AssistedExportFixtureView.reviewRevision,
+        photoCount: 8
+    )
 
     init(fixture: AssistedExportFixture) {
         self.fixture = fixture
@@ -58,6 +69,8 @@ struct AssistedExportFixtureView: View {
                     preparedAtText: "2:41 PM"
                 ),
                 listingRevision: listingRevision,
+                pack: pack,
+                onUpdatePack: preparePackForCurrentListing,
                 onConfirmSheetPresented: confirmSheetPresented
             )
         }
@@ -76,6 +89,17 @@ struct AssistedExportFixtureView: View {
 
     /// Records the presentation always, and moves the listing only for the one
     /// fixture that needs it, so the other two cannot go stale by accident.
+    /// Stands in for the host fetching a pack built at the current listing. The
+    /// pack text is rebuilt, so this carries a new content revision too.
+    private func preparePackForCurrentListing() {
+        pack = AssistedExportPack(
+            itemID: Self.itemID,
+            contentRevision: Self.rebuiltContentRevision,
+            reviewRevision: listingRevision,
+            photoCount: 8
+        )
+    }
+
     private func confirmSheetPresented() {
         sheetWasPresented = true
         guard fixture == .revisionChangeWhileConfirming else { return }

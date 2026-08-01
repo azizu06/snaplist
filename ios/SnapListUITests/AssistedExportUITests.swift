@@ -20,7 +20,10 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
 
-        let open = app.buttons["assisted-export.open.facebook"]
+        // `SnapListPrimaryButton` derives its identifier from its own title, so
+        // these are addressed the way the rest of the suite addresses that
+        // component rather than by an outer identifier that never reaches it.
+        let open = app.buttons["button.primary.open-facebook-marketplace"]
         XCTAssertTrue(open.waitForExistence(timeout: 5))
         open.tap()
 
@@ -48,18 +51,21 @@ final class AssistedExportUITests: XCTestCase {
             "A listing change must take the confirm sheet down, not leave it "
                 + "standing over a pack the seller was never shown."
         )
-        XCTAssertFalse(
-            app.buttons["assisted-export.confirm-shared"].exists,
-            "The only control that writes Shared must be gone with it."
-        )
+        // No separate assertion that the confirm button is gone: a negative
+        // existence check on an identifier this test never observed present
+        // would also pass if the identifier were simply wrong. The sheet is the
+        // button's only host, so the assertion above already covers it.
 
         XCTAssertTrue(
             marker("assisted-export.pack-out-of-date", in: app)
                 .waitForExistence(timeout: 5),
             "The screen says the pack is out of date rather than going quiet."
         )
+        // Non-empty first, so this cannot pass by reading nothing at all.
+        let label = row.label
+        XCTAssertFalse(label.isEmpty, "The row must still describe itself.")
         XCTAssertFalse(
-            row.label.localizedCaseInsensitiveContains("shared"),
+            label.localizedCaseInsensitiveContains("shared"),
             "Nothing was confirmed, so nothing reports Shared."
         )
     }

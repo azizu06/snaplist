@@ -23,7 +23,13 @@ struct AssistedExportView: View {
     /// seller can edit the listing from the review surface — so this screen
     /// observes it rather than owning it.
     private let listingRevision: UUID
+    /// The pack the host currently holds. Preparing a replacement is the
+    /// host's work, so this screen observes the result rather than building it.
+    private let pack: AssistedExportPack
     private let now: @Sendable () -> Date
+    /// The seller asking for a pack that matches the current listing. No
+    /// default: a screen that cannot honour it should not offer the action.
+    private let onUpdatePack: () -> Void
     /// Called when the confirm sheet is actually on screen, so a parent can
     /// coordinate around a presented modal.
     private let onConfirmSheetPresented: (() -> Void)?
@@ -32,13 +38,17 @@ struct AssistedExportView: View {
         domain: AssistedExportDomain,
         summary: AssistedExportItemSummary,
         listingRevision: UUID,
+        pack: AssistedExportPack,
         now: @escaping @Sendable () -> Date = Date.init,
+        onUpdatePack: @escaping () -> Void,
         onConfirmSheetPresented: (() -> Void)? = nil
     ) {
         _domain = State(initialValue: domain)
         self.summary = summary
         self.listingRevision = listingRevision
+        self.pack = pack
         self.now = now
+        self.onUpdatePack = onUpdatePack
         self.onConfirmSheetPresented = onConfirmSheetPresented
     }
 
@@ -64,6 +74,9 @@ struct AssistedExportView: View {
         }
         .onChange(of: listingRevision) { _, revision in
             withMotion { domain.listingRevisionChanged(to: revision) }
+        }
+        .onChange(of: pack) { _, replacement in
+            withMotion { domain.updatePack(to: replacement) }
         }
     }
 
@@ -126,8 +139,11 @@ struct AssistedExportView: View {
             }
             // The one primary action of this state. Updating is the seller's
             // call: SnapList will not quietly rebuild a pack underneath them.
-            SnapListPrimaryButton(title: AssistedExportCopy.updatePack) {}
-                .padding(.top, 4)
+            // Addressed as `button.primary.update-pack`.
+            SnapListPrimaryButton(title: AssistedExportCopy.updatePack) {
+                onUpdatePack()
+            }
+            .padding(.top, 4)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -224,13 +240,15 @@ struct AssistedExportView: View {
                 advisoryRow(advisory)
             }
 
+            // `SnapListPrimaryButton` derives its own accessibility identifier
+            // from its title, and an outer one would not reach the button. It
+            // is addressed as `button.primary.open-<destination>`.
             SnapListPrimaryButton(title: domain.primaryActionLabel(for: destination)) {
                 // Attempt first, then report. A pre-flight availability check
                 // would state something about the seller's device that this
                 // screen has no business asserting.
                 withMotion { domain.recordHandoff(.openedDestination, for: destination) }
             }
-            .accessibilityIdentifier("assisted-export.open.\(destination.rawValue)")
 
             deviceActions(destination)
 
@@ -455,10 +473,11 @@ struct AssistedExportView: View {
                     .snapListTypography(.sectionHeader)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .padding(.top, 4)
+                // Addressed as `button.primary.yes,-mark-as-shared`; see the
+                // note on the open action about the component's own identifier.
                 SnapListPrimaryButton(title: AssistedExportCopy.confirmShared) {
                     withMotion { domain.confirmShared(at: now()) }
                 }
-                .accessibilityIdentifier("assisted-export.confirm-shared")
                 SnapListSecondaryButton(title: AssistedExportCopy.confirmNotYet) {
                     withMotion { domain.dismissConfirmSheet() }
                 }
