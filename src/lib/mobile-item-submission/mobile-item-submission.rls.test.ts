@@ -488,6 +488,9 @@ describe("authenticated mobile item submission against local Supabase", () => {
           async remove(paths) {
             removedPaths.push(paths);
           },
+          // Photo cleanup jobs never take the raw seller voice path, so the
+          // absence proof is not exercised here.
+          async confirmAbsent() {},
         },
       });
       expect(cleanup).toMatchObject({ claimedStorageJobs: 0, deletedObjects: 0 });
@@ -732,6 +735,9 @@ describe("authenticated mobile item submission against local Supabase", () => {
           const { error } = await admin.storage.from("photos").remove(paths);
           if (error) throw error;
         },
+        // Photo cleanup jobs never take the raw seller voice path, so the
+        // absence proof is not exercised here.
+        async confirmAbsent() {},
       },
     });
     await claimedCleanup;
@@ -875,6 +881,9 @@ describe("authenticated mobile item submission against local Supabase", () => {
           const { error } = await admin.storage.from("photos").remove(photoPaths);
           if (error) throw error;
         },
+        // Photo cleanup jobs never take the raw seller voice path, so the
+        // absence proof is not exercised here.
+        async confirmAbsent() {},
       },
     });
 

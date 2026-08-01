@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSupabasePipelineOperationsStore } from "./store";
+import {
+  createSupabasePipelineOperationsStore,
+  PIPELINE_CLEANUP_SOURCE_TYPES,
+} from "./store";
 
 describe("pipeline operations fixed RPC store", () => {
   it("prepares retention, claims cleanup work, records outcomes, and loads health", async () => {
@@ -27,6 +30,7 @@ describe("pipeline operations fixed RPC store", () => {
           job: {
             jobId: "11111111-1111-4111-8111-111111111111",
             leaseToken: "22222222-2222-4222-8222-222222222222",
+            sourceType: "staging",
             photoPaths: ["user/photos/example.jpg"],
             attemptCount: 1,
             maxAttempts: 5,
@@ -112,6 +116,84 @@ describe("pipeline operations fixed RPC store", () => {
       "record_pipeline_cleanup_outcome",
       "pipeline_operations_health",
     ]);
+  });
+
+  it("accepts every cleanup source the database can queue", async () => {
+    // Naming raw voice must not un-name the others: a source the executor
+    // cannot parse is cleanup work that stalls at the claim.
+    for (const sourceType of PIPELINE_CLEANUP_SOURCE_TYPES) {
+      const rpc = vi.fn().mockResolvedValue({
+        data: {
+          kind: "claimed",
+          job: {
+            jobId: "11111111-1111-4111-8111-111111111111",
+            leaseToken: "22222222-2222-4222-8222-222222222222",
+            sourceType,
+            photoPaths: ["user/photos/example.jpg"],
+            attemptCount: 1,
+            maxAttempts: 5,
+          },
+        },
+        error: null,
+      });
+      const store = createSupabasePipelineOperationsStore({ rpc });
+      await expect(store.claimStorageCleanup(300)).resolves.toMatchObject({
+        kind: "claimed",
+        job: { sourceType },
+      });
+    }
+  });
+
+  it("sweeps the raw seller voice ceiling and records a terminal outcome", async () => {
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({
+        data: { rawVoiceJobsQueued: 2, skippedForLock: false },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: true, error: null })
+      .mockResolvedValueOnce({ data: false, error: null });
+    const store = createSupabasePipelineOperationsStore({ rpc });
+
+    await expect(store.prepareRawSellerVoiceRetention(25)).resolves.toEqual({
+      rawVoiceJobsQueued: 2,
+      skippedForLock: false,
+    });
+    await expect(store.recordRawSellerVoiceTranscriptionOutcome({
+      userId: "user_raw_voice",
+      runId: "55555555-5555-4555-8555-555555555555",
+      outcome: "failed",
+    })).resolves.toBe(true);
+    // Redelivery of an already settled run is an expected outcome, not an error.
+    await expect(store.recordRawSellerVoiceTranscriptionOutcome({
+      userId: "user_raw_voice",
+      runId: "55555555-5555-4555-8555-555555555555",
+      outcome: "failed",
+    })).resolves.toBe(false);
+
+    expect(rpc).toHaveBeenNthCalledWith(1, "prepare_raw_seller_voice_retention", {
+      p_batch_size: 25,
+    });
+    expect(rpc).toHaveBeenNthCalledWith(
+      2,
+      "record_raw_seller_voice_transcription_outcome",
+      {
+        p_user_id: "user_raw_voice",
+        p_run_id: "55555555-5555-4555-8555-555555555555",
+        p_outcome: "failed",
+      },
+    );
+  });
+
+  it("rejects a transcription outcome the deletion contract does not treat as terminal", async () => {
+    const rpc = vi.fn();
+    const store = createSupabasePipelineOperationsStore({ rpc });
+
+    await expect(store.recordRawSellerVoiceTranscriptionOutcome({
+      userId: "user_raw_voice",
+      runId: "55555555-5555-4555-8555-555555555555",
+      outcome: "in-progress" as never,
+    })).rejects.toThrow();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("releases failed cleanup work with a bounded safe reason", async () => {
