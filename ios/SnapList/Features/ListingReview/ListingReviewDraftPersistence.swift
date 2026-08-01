@@ -207,7 +207,13 @@ actor LocalListingReviewDraftPersistence:
         let attributes: [FileAttributeKey: Any]
         do {
             attributes = try fileManager.attributesOfItem(atPath: url.path)
-        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+        } catch {
+            let nsError = error as NSError
+            guard nsError.domain == NSCocoaErrorDomain,
+                  nsError.code == NSFileNoSuchFileError
+                    || nsError.code == NSFileReadNoSuchFileError else {
+                throw error
+            }
             return nil
         }
         guard attributes[.type] as? FileAttributeType == .typeRegular else {

@@ -37,6 +37,11 @@ final class ListingReviewStore {
 
     private var activeScope: ItemRunSubmissionPrincipalScopeProof?
     private var pendingSave: ListingReviewPendingSave?
+    /// The last draft the server acknowledged. The snapshot still holds the
+    /// copy this review opened with — rebuilding it from a receipt is not
+    /// something the read contract allows — so without this the review keeps
+    /// calling itself unsaved after a save it just completed.
+    private var savedDraft: ListingReviewDraft?
     private var expiresAt: Date?
     private var draftGeneration: UInt = 0
     private var openGeneration: UInt = 0
@@ -66,6 +71,7 @@ final class ListingReviewStore {
 
     var isDirty: Bool {
         guard let snapshot, let draft else { return false }
+        guard draft != savedDraft else { return false }
         return draft != ListingReviewDraft(snapshot: snapshot)
     }
 
@@ -318,6 +324,7 @@ final class ListingReviewStore {
                 return .stayed
             }
             pendingSave = nil
+            savedDraft = draft
             phase = .ready
             announcement = "Saved. Back to Processing review."
             return .saved(receipt)
@@ -404,6 +411,7 @@ final class ListingReviewStore {
         snapshot = canonical
         draft = ListingReviewDraft(snapshot: canonical)
         pendingSave = nil
+        savedDraft = nil
         isStale = false
         expiresAt = now().addingTimeInterval(retention)
     }
@@ -416,6 +424,7 @@ final class ListingReviewStore {
         snapshot = canonical
         draft = persisted.draft
         pendingSave = persisted.pendingSave
+        savedDraft = nil
         expiresAt = persisted.expiresAt
     }
 
@@ -531,6 +540,7 @@ final class ListingReviewStore {
         draft = nil
         activeScope = nil
         pendingSave = nil
+        savedDraft = nil
         expiresAt = nil
         isStale = false
         announcement = ""

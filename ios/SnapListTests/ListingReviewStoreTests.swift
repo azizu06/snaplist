@@ -244,6 +244,142 @@ final class ListingReviewStoreTests: XCTestCase {
         )
     }
 
+    func testASavedReviewStopsCallingItselfUnsaved() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let receipt = Self.receipt(for: snapshot)
+        let service = ListingReviewRecordingService(
+            saves: [.success(receipt)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+        await store.setDescription("Seller edit that reaches the server")
+        let outcome = await store.done()
+
+        XCTAssertEqual(outcome, .saved(receipt))
+        // The server now holds this draft, so the pending strip has no business
+        // still saying otherwise while the review dismisses.
+        XCTAssertFalse(store.isDirty)
+
+        // And a second Done cannot buy a second write: the first one cleared
+        // the pending save, so a repeat would mint a fresh idempotency key.
+        let repeated = await store.done()
+        let saveRequests = await service.recordedSaveRequests()
+        XCTAssertEqual(repeated, .dismissedWithoutWrite)
+        XCTAssertEqual(saveRequests.count, 1)
+    }
+
+    func testAReviewSurvivesItsOwnEncoderWithEveryFactPopulated() throws {
+        // Hand-written encoders drop a field the day someone adds one to the
+        // read contract and forgets the other half. Re-reading the app's own
+        // output through the same strict contract is what notices — but only
+        // if the fixture actually carries the field. A snapshot whose optional
+        // facts are all absent compares nil to nil and passes over a dropped
+        // key, so every fact this contract allows is populated here.
+        let populated = try Self.makeSnapshot(
+            sellerPriceOverride: 172.50,
+            soldMatches: 2
+        )
+        let restored = try JSONDecoder().decode(
+            ListingReviewResult.self,
+            from: JSONEncoder().encode(populated)
+        )
+
+        XCTAssertEqual(restored, populated)
+        XCTAssertNil(restored.soldEvidenceCopy)
+        XCTAssertEqual(restored.pricing.sellerPriceOverride, 172.50)
+        let fullMatch = try XCTUnwrap(restored.verifiedSoldMatches.last)
+        XCTAssertEqual(fullMatch.title, "Sony WH-1000XM4")
+        XCTAssertEqual(fullMatch.condition, "used")
+        XCTAssertEqual(fullMatch.soldAt, 1_750_000_000)
+        XCTAssertEqual(
+            fullMatch.photoURL,
+            URL(string: "https://media.snaplist.dev/sold/2.jpg")
+        )
+        XCTAssertEqual(fullMatch.size, "One size")
+        XCTAssertEqual(fullMatch.format, .buyItNow)
+        XCTAssertEqual(fullMatch.shipping, .paid(price: 8.75, currency: "USD"))
+
+        // The other half of the same contract: an explicit null and an omitted
+        // optional key each have to survive as themselves, not as each other.
+        let sparse = try Self.makeSnapshot(soldMatches: 1)
+        let restoredSparse = try JSONDecoder().decode(
+            ListingReviewResult.self,
+            from: JSONEncoder().encode(sparse)
+        )
+
+        XCTAssertEqual(restoredSparse, sparse)
+        let bareMatch = try XCTUnwrap(restoredSparse.verifiedSoldMatches.first)
+        XCTAssertNil(bareMatch.title)
+        XCTAssertNil(bareMatch.condition)
+        XCTAssertNil(bareMatch.soldAt)
+        XCTAssertNil(bareMatch.photoURL)
+        XCTAssertNil(bareMatch.size)
+        XCTAssertNil(bareMatch.format)
+        XCTAssertNil(bareMatch.shipping)
+        XCTAssertNil(restoredSparse.pricing.sellerPriceOverride)
+    }
+
+    func testRelaunchRestoresADraftThroughTheOnDiskRecord() async throws {
+        // Two comps, one bare and one carrying every fact, so the record that
+        // actually reaches the filesystem has evidence to lose.
+        let snapshot = try Self.makeSnapshot(soldMatches: 2)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot), .success(snapshot)]
+        )
+
+        let first = makeStore(
+            service: service,
+            persistence: LocalListingReviewDraftPersistence(rootDirectory: root)
+        )
+        let firstOpened = await first.open(snapshot)
+        XCTAssertTrue(firstOpened)
+        await first.setDescription("Locally staged description")
+        XCTAssertTrue(first.isDirty)
+
+        // A relaunch keeps the file and nothing else, so the record has to
+        // survive a round trip through the app's own encoder. The fixture
+        // carries no seller price override, which is the ordinary shape of a
+        // review the seller has not repriced yet.
+        let relaunched = makeStore(
+            service: service,
+            persistence: LocalListingReviewDraftPersistence(rootDirectory: root)
+        )
+        let relaunchedOpened = await relaunched.open(snapshot)
+        XCTAssertTrue(relaunchedOpened)
+        XCTAssertEqual(
+            relaunched.draft?.description,
+            "Locally staged description"
+        )
+        XCTAssertTrue(relaunched.isDirty)
+
+        // The store rebuilds its snapshot from the canonical response on every
+        // open, which hides whatever the file lost. Read the record straight
+        // off disk so the evidence the seller would be served offline is the
+        // thing under assertion.
+        let reader = LocalListingReviewDraftPersistence(rootDirectory: root)
+        let token = ListingReviewDraftPersistenceToken(
+            sessionID: UUID(),
+            generation: 0
+        )
+        let activated = await reader.activate(
+            token,
+            runID: snapshot.binding.runID
+        )
+        XCTAssertTrue(activated)
+        let record = try await reader.load(
+            runID: snapshot.binding.runID,
+            token: token
+        )
+        XCTAssertEqual(record?.snapshot, snapshot)
+    }
+
     func testSemanticRevertBecomesCleanAndRelaunchRestoresDirtyDraft() async throws {
         let snapshot = try Self.makeSnapshot(
             photoURL: "https://media.snaplist.dev/items/expired-550-cover.jpg"
@@ -303,6 +439,11 @@ final class ListingReviewStoreTests: XCTestCase {
             runID: snapshot.binding.runID
         )
         XCTAssertTrue(localActivated)
+        let missingRecord = try await local.load(
+            runID: snapshot.binding.runID,
+            token: localToken
+        )
+        XCTAssertNil(missingRecord)
         let record = PersistedListingReviewDraft(
             snapshot: snapshot,
             draft: ListingReviewDraft(snapshot: snapshot),
@@ -486,8 +627,40 @@ final class ListingReviewStoreTests: XCTestCase {
         revision: String = "55000000-0000-4000-8000-000000000004",
         title: String = "Sony WH-1000XM4 Noise-Canceling Headphones",
         photoURL: String =
-            "https://media.snaplist.dev/items/550-cover.jpg"
+            "https://media.snaplist.dev/items/550-cover.jpg",
+        sellerPriceOverride: Decimal? = nil,
+        soldMatches: Int = 0
     ) throws -> ListingReviewResult {
+        // One match carries every fact and one carries none, so a payload with
+        // comps behind it exercises both shapes the read contract allows: the
+        // nullable keys the server always sends, and the optional keys it
+        // omits outright.
+        let matches: [[String: Any]] = (0..<soldMatches).map { index in
+            let bare = index == 0
+            var match: [String: Any] = [
+                "id": "sold-\(index + 1)",
+                "sourceURL": "https://example.com/sold/\(index + 1)",
+                "title": bare ? NSNull() as Any : "Sony WH-1000XM4" as Any,
+                "soldPrice": 140 + index,
+                "currency": "USD",
+                "condition": bare ? NSNull() as Any : "used" as Any,
+                "soldAt": bare ? NSNull() as Any : 1_750_000_000 as Any,
+            ]
+            guard !bare else { return match }
+            match["photoURL"] =
+                "https://media.snaplist.dev/sold/\(index + 1).jpg"
+            match["size"] = "One size"
+            match["format"] = "buy-it-now"
+            match["shipping"] = [
+                "type": "paid",
+                // 8.75 is binary-exact, so a `Double` literal survives here by
+                // luck. 8.95 would not. Carry the decimal exactly so the
+                // fixture never depends on that.
+                "price": NSDecimalNumber(string: "8.75"),
+                "currency": "USD",
+            ]
+            return match
+        }
         let object: [String: Any] = [
             "schemaVersion": 1,
             "binding": [
@@ -519,13 +692,19 @@ final class ListingReviewStoreTests: XCTestCase {
                 "suggestedPrice": 145,
                 "range": ["minimum": 130, "maximum": 160],
                 "confidence": 0.72,
-                "sellerPriceOverride": NSNull(),
-                "effectivePrice": 145,
+                "sellerPriceOverride": sellerPriceOverride.map {
+                    NSDecimalNumber(decimal: $0) as Any
+                } ?? (NSNull() as Any),
+                "effectivePrice": NSDecimalNumber(
+                    decimal: sellerPriceOverride ?? 145
+                ),
             ],
             "evidenceAsOf": "2026-07-29T12:03:00.000Z",
-            "verifiedSoldMatches": [],
+            "verifiedSoldMatches": matches,
             "startingPriceCopy": "Starting price estimate",
-            "soldEvidenceCopy": "No verified sold matches found.",
+            "soldEvidenceCopy": matches.isEmpty
+                ? "No verified sold matches found." as Any
+                : NSNull() as Any,
         ]
         return try JSONDecoder().decode(
             ListingReviewResult.self,

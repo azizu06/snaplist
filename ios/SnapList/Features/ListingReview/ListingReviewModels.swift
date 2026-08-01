@@ -233,6 +233,18 @@ struct ListingReviewPricing: Codable, Equatable, Sendable {
             forKey: .effectivePrice
         )
     }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(suggestedPrice, forKey: .suggestedPrice)
+        try values.encode(range, forKey: .range)
+        try values.encode(confidence, forKey: .confidence)
+        try values.encodeRequired(
+            sellerPriceOverride,
+            forKey: .sellerPriceOverride
+        )
+        try values.encode(effectivePrice, forKey: .effectivePrice)
+    }
 }
 
 enum ListingReviewSoldFormat: String, Codable, Equatable, Sendable {
@@ -398,6 +410,28 @@ struct ListingReviewSoldMatch: Codable, Equatable, Sendable {
             forKey: .sourceURL
         )
     }
+
+    /// Mirrors the read above key for key. `title`, `condition` and `soldAt`
+    /// are nullable on the wire, so their keys are always written — the read
+    /// treats an absent one as a corrupt record. `photoURL`, `size`, `format`
+    /// and `shipping` are omitted rather than null, because that is the shape
+    /// the read tolerates and the shape the server sends. Writing seven of
+    /// eleven keys, as this did, loses four facts of sold evidence to a record
+    /// that then decodes cleanly and reports nothing.
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(sourceURL, forKey: .sourceURL)
+        try values.encodeRequired(title, forKey: .title)
+        try values.encode(soldPrice, forKey: .soldPrice)
+        try values.encode(currency, forKey: .currency)
+        try values.encodeRequired(condition, forKey: .condition)
+        try values.encodeRequired(soldAt, forKey: .soldAt)
+        try values.encodeIfPresent(photoURL, forKey: .photoURL)
+        try values.encodeIfPresent(size, forKey: .size)
+        try values.encodeIfPresent(format, forKey: .format)
+        try values.encodeIfPresent(shipping, forKey: .shipping)
+    }
 }
 
 struct ListingReviewResult: Codable, Equatable, Sendable {
@@ -468,6 +502,20 @@ struct ListingReviewResult: Codable, Equatable, Sendable {
             ),
             forKey: .soldEvidenceCopy
         )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(binding, forKey: .binding)
+        try values.encode(photos, forKey: .photos)
+        try values.encode(identity, forKey: .identity)
+        try values.encode(listing, forKey: .listing)
+        try values.encode(pricing, forKey: .pricing)
+        try values.encode(evidenceAsOf, forKey: .evidenceAsOf)
+        try values.encode(verifiedSoldMatches, forKey: .verifiedSoldMatches)
+        try values.encode(startingPriceCopy, forKey: .startingPriceCopy)
+        try values.encodeRequired(soldEvidenceCopy, forKey: .soldEvidenceCopy)
     }
 }
 

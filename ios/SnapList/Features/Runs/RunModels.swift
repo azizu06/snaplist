@@ -364,6 +364,21 @@ extension Decoder {
     }
 }
 
+extension KeyedEncodingContainer {
+    /// The mirror of `decodeRequiredIfPresent`. That read treats an absent key
+    /// and an explicit null as different things, so a nullable value has to be
+    /// written as null rather than left out. Swift's synthesized encoder uses
+    /// `encodeIfPresent` and drops the key, which makes a type that is
+    /// perfectly good on the wire fail to survive its own encoder — the way a
+    /// locally persisted draft has to.
+    mutating func encodeRequired<T>(
+        _ value: T?,
+        forKey key: Key
+    ) throws where T: Encodable {
+        try encode(value, forKey: key)
+    }
+}
+
 extension KeyedDecodingContainer {
     func decodeRequiredIfPresent<T>(
         _ type: T.Type,

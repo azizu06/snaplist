@@ -8,6 +8,7 @@ struct AppShellView: View {
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
     @Bindable var runStore: RunDetailStore
+    @Bindable var listingReviewStore: ListingReviewStore
     @Bindable var submissionHost: ItemRunSubmissionHost
     let configuration: LaunchConfiguration
 
@@ -366,7 +367,14 @@ struct AppShellView: View {
         case .home(let route):
             switch route {
             case .run(let runID):
-                RunDetailView(runID: runID, store: runStore)
+                RunDetailView(
+                    runID: runID,
+                    store: runStore,
+                    listingReviewStore: listingReviewStore,
+                    correctionAvailable:
+                        configuration.listingReviewCorrectionAvailable,
+                    forceReducedMotion: configuration.forceReducedMotion
+                )
             default:
                 HomeRouteBoundaryView(route: route)
             }
@@ -801,6 +809,12 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
         runStore: RunDetailStore(
             service: UnavailableRunService(),
             tokenProvider: PreviewBearerTokenProvider()
+        ),
+        listingReviewStore: ListingReviewStoreFactory.make(
+            configuration: .preview,
+            apiOrigin: nil,
+            tokenProvider: PreviewBearerTokenProvider(),
+            session: .shared
         ),
         submissionHost: ItemRunSubmissionHost(coordinator: nil),
         configuration: .preview

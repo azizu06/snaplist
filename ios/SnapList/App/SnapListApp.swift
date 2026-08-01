@@ -8,6 +8,7 @@ struct SnapListApp: App {
     @State private var captureFlow: CaptureFlowModel
     @State private(set) var homeStore: HomeStore
     @State private var runStore: RunDetailStore
+    @State private var listingReviewStore: ListingReviewStore
     @State private var submissionHost: ItemRunSubmissionHost
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
@@ -113,6 +114,14 @@ struct SnapListApp: App {
                 session: urlSession
             )
         )
+        _listingReviewStore = State(
+            initialValue: ListingReviewStoreFactory.make(
+                configuration: configuration,
+                apiOrigin: apiOrigin,
+                tokenProvider: tokenProvider,
+                session: urlSession
+            )
+        )
         _submissionHost = State(
             initialValue: ItemRunSubmissionHostFactory.make(
                 configuration: configuration,
@@ -140,6 +149,7 @@ struct SnapListApp: App {
                 captureFlow: captureFlow,
                 homeStore: homeStore,
                 runStore: runStore,
+                listingReviewStore: listingReviewStore,
                 submissionHost: submissionHost,
                 configuration: configuration
             )
