@@ -49,6 +49,22 @@ export interface IncludedOfferClaimTransition {
   tokenDeadlineAt?: Date | null;
 }
 
+/**
+ * Three answers, not two. `null` used to carry both "the state guard did not
+ * match" and "the account-erasure fence refuses this row", which left the worker
+ * deferring the head forever with nothing recorded anywhere (#588). They are
+ * different facts and only one of them ever resolves on its own.
+ */
+export type IncludedOfferClaimTransitionResult =
+  | { claim: IncludedOfferClaim; status: "applied" }
+  /**
+   * The owner is mid-erasure. Nothing was written and nothing here ever will
+   * be: erasure deletes the row, and until then every write to it is fenced.
+   */
+  | { status: "account_erasure_in_progress" }
+  /** The optimistic state or writer-lease guard did not match. */
+  | { status: "not_applied" };
+
 export interface IncludedOfferClaimStore {
   createClaim(input: {
     appAttestKeyId: string;
@@ -72,7 +88,7 @@ export interface IncludedOfferClaimStore {
   }): Promise<IncludedOfferClaim | null>;
   transitionClaim(
     input: IncludedOfferClaimTransition,
-  ): Promise<IncludedOfferClaim | null>;
+  ): Promise<IncludedOfferClaimTransitionResult>;
   recordQueueMessage(input: {
     claimId: string;
     queueMessageId: string;
@@ -93,6 +109,11 @@ export interface IncludedOfferClaimStore {
    * unresolved `update` write that no other claim can make progress past anyway.
    * Deliberately a boolean: the worker does not own the blocking claim and has
    * no business reading another tenant's identity out of it.
+   *
+   * A claim whose owner is mid-erasure does not occupy. Nothing is allowed to
+   * write it any more, so counting it would hold every other account behind a
+   * rendezvous that no tick can ever release — and it can never reserve, which
+   * is what makes releasing it safe. See #588.
    */
   hasOpenRendezvous(input: {
     exceptClaimId: string;
@@ -106,6 +127,9 @@ export interface IncludedOfferClaimStore {
    * never comes back would block them forever. Terminalizing is the only safe
    * release: the device bit may or may not be set, so the abandoning claim has
    * to lose the offer before anyone else may read that bit as clear.
+   *
+   * Skips claims whose owner is mid-erasure. Their rows are the erasure's to
+   * delete, not this sweep's to write, and writing one raises (#588).
    */
   expireStaleRendezvous(input: { olderThan: Date }): Promise<string[]>;
   /**
@@ -117,7 +141,8 @@ export interface IncludedOfferClaimStore {
    * `applePhase === "update"`. That claim observed a clear device and may or may
    * not have landed its write, so the device is indeterminate but spoken for —
    * letting a rival read the bit as clear is exactly how one device mints two
-   * included runs.
+   * included runs. A claim whose owner is mid-erasure is the one exception, for
+   * the reason given on `hasOpenRendezvous`.
    */
   acquireWriterLease(input: {
     claimId: string;
@@ -174,6 +199,7 @@ export interface IncludedOfferRedemptionQueue {
 export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore {
   readonly #claims = new Map<string, IncludedOfferClaim>();
   readonly #overrides = new Map<string, IncludedOfferSupportOverride>();
+  readonly #erasing = new Set<string>();
   #lease: { claimId: string; expiresAt: Date } | null = null;
 
   async createClaim(input: {
@@ -234,9 +260,16 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
 
   async transitionClaim(
     input: IncludedOfferClaimTransition,
-  ): Promise<IncludedOfferClaim | null> {
+  ): Promise<IncludedOfferClaimTransitionResult> {
     const claim = this.#claims.get(input.claimId);
-    if (!claim || !input.from.includes(claim.state)) return null;
+    // Asked before the state guard so the answer names the reason the caller
+    // can act on: a fenced row stays fenced whatever state it is in.
+    if (claim && this.#erasing.has(claim.userId)) {
+      return { status: "account_erasure_in_progress" };
+    }
+    if (!claim || !input.from.includes(claim.state)) {
+      return { status: "not_applied" };
+    }
     if (
       input.requireWriterLease
       && !(
@@ -244,7 +277,7 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
         && this.#lease.expiresAt.getTime() > input.now.getTime()
       )
     ) {
-      return null;
+      return { status: "not_applied" };
     }
     claim.state = input.to;
     claim.updatedAt = input.now;
@@ -253,7 +286,7 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
     if (input.tokenDeadlineAt !== undefined) {
       claim.tokenDeadlineAt = input.tokenDeadlineAt;
     }
-    return { ...claim };
+    return { claim: { ...claim }, status: "applied" };
   }
 
   async recordQueueMessage(input: {
@@ -294,6 +327,7 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
     for (const claim of this.#claims.values()) {
       if (
         claim.claimId !== input.exceptClaimId &&
+        !this.#erasing.has(claim.userId) &&
         OPEN_RENDEZVOUS_STATES.includes(claim.state) &&
         ((claim.tokenDeadlineAt !== null &&
           claim.tokenDeadlineAt.getTime() > input.now.getTime()) ||
@@ -310,6 +344,7 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
     for (const claim of this.#claims.values()) {
       if (
         claim.applePhase === "update" &&
+        !this.#erasing.has(claim.userId) &&
         !isTerminalIncludedOfferState(claim.state) &&
         claim.updatedAt.getTime() <= input.olderThan.getTime()
       ) {
@@ -341,6 +376,7 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
       if (
         claim.claimId !== input.claimId &&
         claim.applePhase === "update" &&
+        !this.#erasing.has(claim.userId) &&
         !isTerminalIncludedOfferState(claim.state)
       ) {
         return false;
@@ -355,6 +391,16 @@ export class InMemoryIncludedOfferClaimStore implements IncludedOfferClaimStore 
 
   async releaseWriterLease(input: { claimId: string }): Promise<void> {
     if (this.#lease?.claimId === input.claimId) this.#lease = null;
+  }
+
+  /**
+   * Mirrors `public.begin_account_erasure`. From this point the database
+   * refuses every write to this tenant's rows through
+   * `zzz_fence_account_erasure_tenant_mutation`, and a later
+   * `advance_account_erasure` tick deletes them.
+   */
+  beginAccountErasure(userId: string): void {
+    this.#erasing.add(userId);
   }
 
   /** Test-only seam for the audited support-override path. */

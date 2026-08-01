@@ -17,6 +17,7 @@ import type {
 import type {
   IncludedOfferClaim,
   IncludedOfferClaimStore,
+  IncludedOfferClaimTransitionResult,
   IncludedOfferRedemptionQueue,
 } from "./store";
 
@@ -78,8 +79,20 @@ export interface IncludedOfferFence {
 }
 
 export interface IncludedOfferRedemptionWorker {
-  /** Advances the single head claim. Returns the claims opened for a token. */
-  advance(): Promise<{ acked: string[]; expired: string[]; opened: string[] }>;
+  /**
+   * Advances the single head claim.
+   *
+   * `erasing` names the claims this tick declined to touch because their owner
+   * is mid-erasure. It is reported rather than dropped: those rows leave by
+   * deletion, not by anything the worker does, and a tick that met one and said
+   * nothing is indistinguishable from a tick that did no work at all (#588).
+   */
+  advance(): Promise<{
+    acked: string[];
+    erasing: string[];
+    expired: string[];
+    opened: string[];
+  }>;
 }
 
 const DEFAULT_MAX_APPLE_ATTEMPTS = 5;
@@ -130,6 +143,22 @@ function outcomeFor(claim: IncludedOfferClaim, now: Date): IncludedOfferOutcome 
   }
 }
 
+/**
+ * Request-path transitions. The #588 escape belongs to the worker, not to the
+ * seller: an ordinary request against a tenant mid-erasure is still refused,
+ * exactly as the database refused it before that issue. Raising here keeps that
+ * true rather than letting the refusal masquerade as a state-guard miss, which
+ * would report an outcome describing work the request did not do.
+ */
+function appliedClaim(
+  result: IncludedOfferClaimTransitionResult,
+): IncludedOfferClaim | null {
+  if (result.status === "account_erasure_in_progress") {
+    throw new Error("Account erasure has started for this account");
+  }
+  return result.status === "applied" ? result.claim : null;
+}
+
 function invalidProofOutcome(
   result: Extract<AppAttestVerificationResult, { status: "invalid" }>,
 ): IncludedOfferOutcome {
@@ -151,13 +180,20 @@ export function createIncludedOfferFence(
     now: Date,
   ): Promise<IncludedOfferClaim> {
     const settled =
-      (await composition.store.transitionClaim({
-        claimId: claim.claimId,
-        from: ["queued", "awaiting_device_token", "apple_pending", "reconcile_required"],
-        now,
-        to,
-        tokenDeadlineAt: null,
-      })) ?? claim;
+      appliedClaim(
+        await composition.store.transitionClaim({
+          claimId: claim.claimId,
+          from: [
+            "queued",
+            "awaiting_device_token",
+            "apple_pending",
+            "reconcile_required",
+          ],
+          now,
+          to,
+          tokenDeadlineAt: null,
+        }),
+      ) ?? claim;
     if (claim.queueMessageId) {
       // Releasing the head immediately is what lets the next account's claim run;
       // the worker also acks terminal claims defensively on redelivery.
@@ -203,14 +239,16 @@ export function createIncludedOfferFence(
     // only while the lease is provably still held, in the same statement. A
     // lease that lapsed mid-query could have been taken, used, and released by a
     // rival, leaving this reading stale and the device already spent.
-    const writing = await composition.store.transitionClaim({
-      applePhase: "update",
-      claimId: owned.claimId,
-      from: ["apple_pending"],
-      now,
-      requireWriterLease: true,
-      to: "apple_pending",
-    });
+    const writing = appliedClaim(
+      await composition.store.transitionClaim({
+        applePhase: "update",
+        claimId: owned.claimId,
+        from: ["apple_pending"],
+        now,
+        requireWriterLease: true,
+        to: "apple_pending",
+      }),
+    );
     if (!writing) {
       // Either the lease is gone or another call already owns this rendezvous.
       // Both mean this call may not touch Apple: the ownership record has to
@@ -242,14 +280,16 @@ export function createIncludedOfferFence(
       return outcomeFor(settled, now);
     }
     const deferred =
-      (await composition.store.transitionClaim({
-        attemptCount,
-        claimId: claim.claimId,
-        from: ["apple_pending"],
-        now,
-        to: "reconcile_required",
-        tokenDeadlineAt: null,
-      })) ?? claim;
+      appliedClaim(
+        await composition.store.transitionClaim({
+          attemptCount,
+          claimId: claim.claimId,
+          from: ["apple_pending"],
+          now,
+          to: "reconcile_required",
+          tokenDeadlineAt: null,
+        }),
+      ) ?? claim;
     return {
       claimId: deferred.claimId,
       paidPathAvailable: true,
@@ -306,13 +346,15 @@ export function createIncludedOfferFence(
         });
         if (consumed) {
           const reserved =
-            (await composition.store.transitionClaim({
-              claimId: claim.claimId,
-              from: ["queued"],
-              now,
-              to: "reserved",
-              tokenDeadlineAt: null,
-            })) ?? claim;
+            appliedClaim(
+              await composition.store.transitionClaim({
+                claimId: claim.claimId,
+                from: ["queued"],
+                now,
+                to: "reserved",
+                tokenDeadlineAt: null,
+              }),
+            ) ?? claim;
           return outcomeFor(reserved, now);
         }
       }
@@ -350,13 +392,15 @@ export function createIncludedOfferFence(
       if (claim.state !== "awaiting_device_token") return outcomeFor(claim, now);
       if (claim.tokenDeadlineAt && claim.tokenDeadlineAt.getTime() <= now.getTime()) {
         const requeued =
-          (await composition.store.transitionClaim({
-            claimId: claim.claimId,
-            from: ["awaiting_device_token"],
-            now,
-            to: "queued",
-            tokenDeadlineAt: null,
-          })) ?? claim;
+          appliedClaim(
+            await composition.store.transitionClaim({
+              claimId: claim.claimId,
+              from: ["awaiting_device_token"],
+              now,
+              to: "queued",
+              tokenDeadlineAt: null,
+            }),
+          ) ?? claim;
         return outcomeFor(requeued, now);
       }
 
@@ -372,14 +416,16 @@ export function createIncludedOfferFence(
 
       const attemptCount = claim.attemptCount + 1;
       const priorPhase = claim.applePhase;
-      const owned = await composition.store.transitionClaim({
-        applePhase: priorPhase ?? "query",
-        attemptCount,
-        claimId: claim.claimId,
-        from: ["awaiting_device_token", "reconcile_required"],
-        now,
-        to: "apple_pending",
-      });
+      const owned = appliedClaim(
+        await composition.store.transitionClaim({
+          applePhase: priorPhase ?? "query",
+          attemptCount,
+          claimId: claim.claimId,
+          from: ["awaiting_device_token", "reconcile_required"],
+          now,
+          to: "apple_pending",
+        }),
+      );
       if (!owned) {
         // A concurrent call for this same claim already owns the rendezvous and
         // holds the lease. Releasing it here would reopen Apple's window
@@ -419,6 +465,7 @@ export function createIncludedOfferRedemptionWorker(
     async advance() {
       const now = clock();
       const acked: string[] = [];
+      const erasing: string[] = [];
       const opened: string[] = [];
 
       // An unresolved write blocks every account, so a client that never comes
@@ -432,7 +479,7 @@ export function createIncludedOfferRedemptionWorker(
       const message = await composition.queue.claimHead({
         visibilityTimeoutSeconds,
       });
-      if (!message) return { acked, expired, opened };
+      if (!message) return { acked, erasing, expired, opened };
 
       const claim = await composition.store.findClaimById({
         claimId: message.envelope.claim_id,
@@ -440,7 +487,7 @@ export function createIncludedOfferRedemptionWorker(
       if (!claim || isTerminalIncludedOfferState(claim.state)) {
         await composition.queue.ack(message.messageId);
         acked.push(message.envelope.claim_id);
-        return { acked, expired, opened };
+        return { acked, erasing, expired, opened };
       }
 
       // Single-writer means one open rendezvous, not one message in flight.
@@ -452,20 +499,38 @@ export function createIncludedOfferRedemptionWorker(
       });
       if (inFlight) {
         await composition.queue.defer(message.messageId, visibilityTimeoutSeconds);
-        return { acked, expired, opened };
+        return { acked, erasing, expired, opened };
       }
 
       const deadline = new Date(now.getTime() + composition.tokenWindowMs);
-      const openedClaim = await composition.store.transitionClaim({
+      const transition = await composition.store.transitionClaim({
         claimId: claim.claimId,
-        from: ["queued", "awaiting_device_token", "apple_pending", "reconcile_required"],
+        from: [
+          "queued",
+          "awaiting_device_token",
+          "apple_pending",
+          "reconcile_required",
+        ],
         now,
         to: "awaiting_device_token",
         tokenDeadlineAt: deadline,
       });
-      if (openedClaim) opened.push(openedClaim.claimId);
+      switch (transition.status) {
+        case "applied":
+          opened.push(transition.claim.claimId);
+          break;
+        case "account_erasure_in_progress":
+          // Deferring rather than acking is what makes this self-healing: once
+          // erasure deletes the row, the redelivery finds no claim and the
+          // existing missing-claim path retires the message. Acking here would
+          // instead drop a message whose claim might yet outlive the erasure.
+          erasing.push(claim.claimId);
+          break;
+        case "not_applied":
+          break;
+      }
       await composition.queue.defer(message.messageId, visibilityTimeoutSeconds);
-      return { acked, expired, opened };
+      return { acked, erasing, expired, opened };
     },
   };
 }
