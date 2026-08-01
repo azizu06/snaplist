@@ -120,15 +120,12 @@ const envSchema = z.object({
   EBAY_SOLD_STALE_DAYS: z.string().min(1).optional(),
   EBAY_SOLD_HALFLIFE_DAYS: z.string().min(1).optional(),
 
-  // Background repricing and inbox sync. CRON_SECRET authenticates both routes:
-  // Vercel invokes daily repricing and Supabase pg_cron/pg_net invokes the
-  // five-minute inbox sync with the same bearer. With it UNSET the cron routes
-  // refuse to run — the safe default. The numeric knobs below are repricing
-  // policy (defaults: 14d window, batch 5, 10% drift).
+  // Inbox sync. CRON_SECRET authenticates the route: Supabase pg_cron/pg_net
+  // invokes the five-minute sync with this bearer. With it UNSET the cron route
+  // refuses to run — the safe default. Setting it can no longer arm an
+  // autonomous marketplace action: the repricing sweep it also gated was
+  // removed in #591 (AGENTS.md, ADR-0008).
   CRON_SECRET: z.string().min(1).optional(),
-  REPRICE_STALE_DAYS: z.string().min(1).optional(),
-  REPRICE_BATCH_SIZE: z.string().min(1).optional(),
-  REPRICE_DRIFT_THRESHOLD_PCT: z.string().min(1).optional(),
 
   // Supabase
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),
