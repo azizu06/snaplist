@@ -27,12 +27,26 @@ export async function register(): Promise<void> {
   // guarantee that holds everywhere is `resolveProvider` throwing when a model is
   // resolved — see ADR-0002. Sentry is initialized FIRST so the config failure
   // reaches alerting instead of only the platform's raw logs.
-  const { llmProviderConfigError } = await import("./lib/llm/registry");
+  const { SELLER_MEDIA_ROLES, llmProviderConfigError, resolveProvider, sellerMediaConfigError } =
+    await import("./lib/llm/registry");
   const providerError = llmProviderConfigError();
   if (providerError) {
     const error = new Error(providerError);
     captureError(error, { phase: "instrumentation.register" });
     throw error;
+  }
+
+  // A chosen provider still may not be a permissible one for SELLER MEDIA (#501).
+  // Safe to resolve now: the check above already rejected every env from which
+  // `resolveProvider` would throw.
+  const provider = resolveProvider();
+  for (const role of SELLER_MEDIA_ROLES) {
+    const mediaError = sellerMediaConfigError(role, provider);
+    if (mediaError) {
+      const error = new Error(mediaError);
+      captureError(error, { phase: "instrumentation.register" });
+      throw error;
+    }
   }
 }
 
