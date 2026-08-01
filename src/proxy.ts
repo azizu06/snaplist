@@ -9,8 +9,6 @@ import { NextResponse } from "next/server";
  *
  * RLS (never this proxy) is what gates data access; this is UX-level routing.
  */
-// /dev is the screenshot preview harness — its pages hard-404 in production
-// (see src/app/dev/preview), so whitelisting it here is dev-only in effect.
 // /api/ebay/account-deletion is called server-to-server by eBay (no session);
 // the route gates itself via eBay's signature verification (412 otherwise).
 // /api/internal/pipeline-worker, /api/internal/pipeline-maintenance and
@@ -38,7 +36,6 @@ const isPublic = createRouteMatcher([
   "/api/internal/pipeline-worker",
   "/api/internal/pipeline-maintenance",
   "/api/internal/included-offer-worker",
-  "/dev(.*)",
 ]);
 
 export const proxy = clerkMiddleware(async (auth, request) => {

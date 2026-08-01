@@ -33,8 +33,8 @@ export const metadata: Metadata = {
 };
 
 /**
- * Root layout is chrome-free (issue #49): the (marketing), (auth) and (app)
- * route groups each own their shell. Clerk components are themed here once —
+ * Root layout is chrome-free (issue #49): the (marketing) and (auth) route
+ * groups each own their shell. Clerk components are themed here once —
  * dark Darkroom surfaces so the auth cards never read as a stock white modal.
  */
 export default function RootLayout({

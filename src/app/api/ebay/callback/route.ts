@@ -80,5 +80,8 @@ export async function GET(request: NextRequest) {
     return fail("Couldn't save your eBay connection. Please try again.");
   }
 
-  return NextResponse.redirect(new URL("/settings?ebay=connected", request.url));
+  // #598 deleted the web settings page, so a completed exchange used to return
+  // the seller to a 404 with their connection already saved. The marketing home
+  // is the honest landing until #609 rules on this now-clientless web leg.
+  return NextResponse.redirect(new URL("/?ebay=connected", request.url));
 }

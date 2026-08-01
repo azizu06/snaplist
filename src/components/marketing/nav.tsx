@@ -115,7 +115,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           <ThemeIconToggle />
           {signedIn ? (
             <Link
-              href="/dashboard"
+              href="/"
               className="inline-flex items-center rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
             >
               Open app
@@ -187,7 +187,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
               );
             })}
             <Link
-              href={signedIn ? "/dashboard" : "/signup"}
+              href={signedIn ? "/" : "/signup"}
               tabIndex={open ? undefined : -1}
               onClick={() => setOpen(false)}
               className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[15px] font-semibold text-iris-ink"
