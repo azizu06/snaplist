@@ -120,11 +120,12 @@ const envSchema = z.object({
   EBAY_SOLD_STALE_DAYS: z.string().min(1).optional(),
   EBAY_SOLD_HALFLIFE_DAYS: z.string().min(1).optional(),
 
-  // Inbox sync. CRON_SECRET authenticates the route: Supabase pg_cron/pg_net
-  // invokes the five-minute sync with this bearer. With it UNSET the cron route
-  // refuses to run — the safe default. Setting it can no longer arm an
-  // autonomous marketplace action: the repricing sweep it also gated was
-  // removed in #591 (AGENTS.md, ADR-0008).
+  // Scheduled work. CRON_SECRET authenticates the internal pipeline worker,
+  // maintenance, and included-offer routes: Supabase pg_cron/pg_net invokes them
+  // with this bearer. With it UNSET those routes refuse to run — the safe
+  // default. Setting it cannot arm an autonomous marketplace action: the
+  // repricing sweep it once gated was removed in #591, and the buyer-inbox sync
+  // in #599 (AGENTS.md, ADR-0008).
   CRON_SECRET: z.string().min(1).optional(),
 
   // Supabase

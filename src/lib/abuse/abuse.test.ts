@@ -140,7 +140,7 @@ describe("abuse rate limiting", () => {
   it("enforceRateLimit returns a 429 with Retry-After once over the limit", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.stubEnv("RATE_LIMIT_FREE_PER_MINUTE", "1");
-    const req = new Request("https://snaplist.app/api/inbox/simulate", { method: "POST" });
+    const req = new Request("https://snaplist.app/api/search", { method: "POST" });
     expect(await enforceRateLimit(req, "user_a")).toBeNull(); // 1st allowed
     const blocked = await enforceRateLimit(req, "user_a"); // 2nd blocked
     expect(blocked).not.toBeNull();
@@ -188,7 +188,7 @@ describe("abuse fails OPEN when the store errors (availability > strictness)", (
         throw new Error("redis unreachable");
       },
     });
-    const req = new Request("https://snaplist.app/api/inbox/send", { method: "POST" });
+    const req = new Request("https://snaplist.app/api/search", { method: "POST" });
     expect(await enforceRateLimit(req, "user_a")).toBeNull();
   });
 });

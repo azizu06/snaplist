@@ -14,14 +14,15 @@ export const metadata: Metadata = {
 /**
  * /how-it-works (ui-r6-remotion) — the pipeline walkthrough at demo scale.
  * Owner round-6 feedback: the step clips were too small ("the user shouldn't
- * have to squint") and the buyer-Q&A band duplicated the step format. Now the
- * pipeline section breaks out of the content column (max-w-[1720px]) and the
- * clip takes ~3/4 of each row; buyer Q&A joined the same section as step 6
- * ("After it's live") in the identical alternating text/video format. Section
- * order: hero (headline only) → step-intro header → SIX step clips
- * (/demo/steps/*.mp4 + /demo/buyer-qa.mp4 via DemoClip: 16:9 desktop context
+ * have to squint"). The pipeline section breaks out of the content column
+ * (max-w-[1720px]) and the clip takes ~3/4 of each row. Section
+ * order: hero (headline only) → step-intro header → FIVE step clips
+ * (/demo/steps/*.mp4 via DemoClip: 16:9 desktop context
  * and 6:5 action-focused mobile crops,
- * alternating sides) → seller FAQ LAST → CTA. The FAQ (#faq anchor) was
+ * alternating sides) → seller FAQ LAST → CTA.
+
+ * The buyer-Q&A band was removed with the inbox (#599); buyer messaging is out
+ * of scope for the lean MVP (PRD "Out of Scope", ADR-0008). The FAQ (#faq anchor) was
  * relocated here when the About page was retired. The step clips embed their
  * own assigned items (see DEMO_SURFACE_ASSIGNMENTS). The live scanning
  * showcase now headlines the landing hero instead.
@@ -80,21 +81,11 @@ const STEPS = [
     poster: "Live on eBay, under your name.",
     label: "Demo clip: the Publish step of SnapList",
   },
-  {
-    n: "6",
-    src: "/demo/buyer-qa.mp4",
-    mobile: true,
-    glyph: "chat",
-    title: "Answer",
-    body: "Buyer questions, pre-answered. Incoming messages land in a live inbox with a reply already drafted from the item's real details, like edition, condition, and what's included. You approve, edit, or rewrite, and nothing sends without you.",
-    poster: "Drafted from the item's real details, sent by you.",
-    label: "Demo clip: a buyer question arrives and a reply drafted from the item's details awaits approval",
-  },
 ] as const;
 
 /**
  * Seller FAQ — relocated from the retired About page. Replaces the old
- * "Where the price comes from" waterfall section: the six step clips above
+ * "Where the price comes from" waterfall section: the five step clips above
  * already walk the pipeline, so this page closes on the questions sellers
  * actually ask (marketplaces, accuracy, privacy, publishing, cost, eBay).
  */
@@ -165,7 +156,7 @@ export default function HowItWorks() {
             return (
             <Reveal key={n} delay={0.05}>
               <div
-                id={`step-${glyph === "chat" ? "qa" : glyph}`}
+                id={`step-${glyph}`}
                 className={`grid scroll-mt-24 items-center gap-5 sm:gap-8 lg:gap-12 ${
                   i % 2 === 0
                     ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,2.4fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,2.9fr)]"

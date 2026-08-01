@@ -6,9 +6,7 @@ import {
   type ClerkTestUser,
 } from "./test-users";
 import {
-  getAutoReplyEnabled,
   getAutopilotEnabled,
-  setAutoReplyEnabled,
   setAutopilotEnabled,
 } from "../settings/user-settings";
 
@@ -85,21 +83,6 @@ describe("user_settings RLS + helpers", () => {
   it("defaults to autopilot ON when the user has no settings row", async () => {
     if (!reachable) return;
     await expect(getAutopilotEnabled(userA.client, userA.id)).resolves.toBe(true);
-  });
-
-  it("defaults the external-side-effecting buyer auto-reply preference OFF", async () => {
-    if (!reachable) return;
-    await expect(getAutoReplyEnabled(userA.client, userA.id)).resolves.toBe(false);
-  });
-
-  it("isolates the buyer auto-reply preference by tenant", async () => {
-    if (!reachable) return;
-    await setAutoReplyEnabled(userB.client, userB.id, true);
-    await expect(getAutoReplyEnabled(userB.client, userB.id)).resolves.toBe(true);
-    await expect(getAutoReplyEnabled(userA.client, userB.id)).resolves.toBe(false);
-    await expect(
-      setAutoReplyEnabled(userA.client, userB.id, true),
-    ).rejects.toThrow();
   });
 
   it("a user can set and read back their OWN autopilot switch (upsert create + update)", async () => {

@@ -55,22 +55,6 @@ export const RemotionRoot: React.FC = () => {
         durationInFrames={REAL_UI_CAPTURE_LEN}
         {...SUITE_SIZE}
       />
-      <Composition
-        id="buyer-qa"
-        component={RealUiCapture}
-        defaultProps={realUiDefaults("buyer-qa", "desktop")}
-        durationInFrames={REAL_UI_CAPTURE_LEN}
-        {...SUITE_SIZE}
-      />
-      {/* In-app empty-state teaser: the same real inbox component, captured
-          across list → drafted reply → sent-thread states. */}
-      <Composition
-        id="inbox-qa"
-        component={RealUiCapture}
-        defaultProps={realUiDefaults("inbox-qa", "desktop")}
-        durationInFrames={REAL_UI_CAPTURE_LEN}
-        {...SUITE_SIZE}
-      />
 
       {/* ---- phone-first action crops: /tour swaps to these under 768px. ---- */}
       <Composition
@@ -105,20 +89,6 @@ export const RemotionRoot: React.FC = () => {
         id="step-publish-mobile"
         component={RealUiCapture}
         defaultProps={realUiDefaults("publish", "mobile")}
-        durationInFrames={REAL_UI_CAPTURE_LEN}
-        {...MOBILE_SIZE}
-      />
-      <Composition
-        id="buyer-qa-mobile"
-        component={RealUiCapture}
-        defaultProps={realUiDefaults("buyer-qa", "mobile")}
-        durationInFrames={REAL_UI_CAPTURE_LEN}
-        {...MOBILE_SIZE}
-      />
-      <Composition
-        id="inbox-qa-mobile"
-        component={RealUiCapture}
-        defaultProps={realUiDefaults("inbox-qa", "mobile")}
         durationInFrames={REAL_UI_CAPTURE_LEN}
         {...MOBILE_SIZE}
       />
