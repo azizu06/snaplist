@@ -766,6 +766,8 @@ final class ItemRunSubmissionCoordinator {
             @MainActor ([StagedCapturePhoto]) async -> Bool
         let discardExactly:
             @MainActor ([StagedCapturePhoto]) async -> Bool
+        let retireAcceptedPhotosPreservingUnmatchedVoice:
+            @MainActor ([StagedCapturePhoto]) async -> Bool
     }
 
     private struct CapturedBearer {
@@ -785,11 +787,17 @@ final class ItemRunSubmissionCoordinator {
     }
 
     fileprivate struct Submission {
+        fileprivate enum IntakeCleanup {
+            case none
+            case wholeBundle
+            case photosPreservingUnmatchedVoice
+        }
+
         fileprivate let context: CapturedContext
         fileprivate let acceptedRun: AcceptedItemRun
         fileprivate let submittedPhotos: [StagedCapturePhoto]
         fileprivate let attempt: ItemRunSubmissionAttempt
-        fileprivate let canClearSubmittedIntake: Bool
+        fileprivate let intakeCleanup: IntakeCleanup
     }
 
     fileprivate enum Preparation {
@@ -865,6 +873,9 @@ final class ItemRunSubmissionCoordinator {
                 },
                 discardExactly: { photos in
                     (try? await draftStore.discardExactly(photos)) ?? false
+                },
+                retireAcceptedPhotosPreservingUnmatchedVoice: { _ in
+                    false
                 }
             ),
             isCurrent: { true }
@@ -888,6 +899,10 @@ final class ItemRunSubmissionCoordinator {
                 prepareDurableIntake: { _ in true },
                 discardExactly: { _ in
                     await principalContext.discardExactly()
+                },
+                retireAcceptedPhotosPreservingUnmatchedVoice: { _ in
+                    await principalContext
+                        .retireAcceptedPhotosPreservingUnmatchedVoice()
                 }
             ),
             isCurrent: isCurrent
@@ -1187,10 +1202,24 @@ final class ItemRunSubmissionCoordinator {
         switch outcome {
         case .created(let receipt), .replayed(let receipt):
             // Exact ordered photos establish the canonical item/run. Optional voice
-            // acceptance is a narrower cleanup authority: null or mismatched voice
-            // still surfaces the photo run while retaining the whole local bundle.
+            // acceptance is narrower cleanup authority. Null or mismatched voice
+            // still surfaces and retires the exact photo run, while its local bytes
+            // become deletion-only under their original scoped expiry.
             guard attempt.matchesPhotos(receipt: receipt) else {
                 return .retained(.receiptMismatch)
+            }
+            let intakeCleanup: Submission.IntakeCleanup
+            if !canClearSubmittedIntake {
+                intakeCleanup = .none
+            } else if attempt.permitsWholeIntakeCleanup(
+                receipt: receipt
+            ) {
+                intakeCleanup = .wholeBundle
+            } else if attempt.voiceContext != nil,
+                      context.voice != nil {
+                intakeCleanup = .photosPreservingUnmatchedVoice
+            } else {
+                intakeCleanup = .none
             }
             return .accepted(
                 Submission(
@@ -1203,11 +1232,7 @@ final class ItemRunSubmissionCoordinator {
                     ),
                     submittedPhotos: submittedPhotos,
                     attempt: attempt,
-                    canClearSubmittedIntake:
-                        canClearSubmittedIntake
-                        && attempt.permitsWholeIntakeCleanup(
-                            receipt: receipt
-                        )
+                    intakeCleanup: intakeCleanup
                 )
             )
         case .rejected:
@@ -1237,15 +1262,23 @@ final class ItemRunSubmissionCoordinator {
     fileprivate func finalize(
         _ submission: Submission
     ) async -> ItemRunAcceptance {
-        guard submission.canClearSubmittedIntake else {
+        let clearedIntake: Bool
+        switch submission.intakeCleanup {
+        case .none:
             return ItemRunAcceptance(
                 run: submission.acceptedRun,
                 clearedIntake: false
             )
+        case .wholeBundle:
+            clearedIntake = await submission.context.discardExactly(
+                submission.submittedPhotos
+            )
+        case .photosPreservingUnmatchedVoice:
+            clearedIntake = await submission.context
+                .retireAcceptedPhotosPreservingUnmatchedVoice(
+                    submission.submittedPhotos
+                )
         }
-        let clearedIntake = await submission.context.discardExactly(
-            submission.submittedPhotos
-        )
         // The key is only retired once the photos it stands for are gone. If they
         // survived, the seller can still submit these exact bytes, and keeping the
         // key makes that an idempotent replay of the run the server already made
