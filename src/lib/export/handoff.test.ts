@@ -30,7 +30,7 @@ interface HandoffRow {
 function fakeSupabase(
   rows: HandoffRow[],
   calls: { name: string; args: Record<string, unknown> }[] = [],
-  rpcError: { message: string } | null = null,
+  rpcError: { message: string; code?: string } | null = null,
   rpcData: unknown = null,
 ): SupabaseClient {
   return {

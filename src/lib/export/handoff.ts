@@ -224,5 +224,5 @@ export async function undoExportShared(
     p_source_review_revision: input.reviewContentRevision,
     p_expected_review_revision: input.reviewRevision,
   });
-  if (error) throw new Error(error.message);
+  if (error) refused(error);
 }

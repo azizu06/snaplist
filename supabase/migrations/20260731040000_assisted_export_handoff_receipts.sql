@@ -200,6 +200,15 @@ create index export_handoffs_item_revision_idx
 -- guard. `pg_trigger_depth()` is 1 at the top level and 2 when the sweep
 -- re-enters itself, which also correctly skips a cascade-driven delete:
 -- a cascade already removes every row the sweep would.
+--
+-- CONSTRAINT ON FUTURE CALLERS: the guard suppresses the sweep for a
+-- delete issued from inside ANY trigger, not only from this one. That is
+-- safe for every path today — the four invalidation RPCs are plain
+-- function bodies at depth 0, and the only cascade into `listings` comes
+-- from `items`, which removes every row anyway. But a future
+-- pack-invalidation delete placed inside a trigger body would silently
+-- not sweep, which is this very defect one level deeper. Keep
+-- pack invalidation in plain function bodies.
 -- ---------------------------------------------------------------------
 create or replace function private.sweep_assisted_export_packs()
 returns trigger
@@ -224,6 +233,9 @@ $$;
 
 comment on function private.sweep_assisted_export_packs() is
   'Invalidates an item''s remaining assisted export packs whenever any one of them is deleted, so a destination missing from an older call site cannot outlive the identity it described (issue #378).';
+
+revoke all on function private.sweep_assisted_export_packs()
+  from public, anon, authenticated, service_role;
 
 create trigger sweep_assisted_export_packs
 after delete on public.listings

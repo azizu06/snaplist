@@ -394,6 +394,24 @@ select extensions.is(
 -- 'mercari')`. Depop is not in that literal, so a Depop pack and its
 -- receipt would survive a correction they no longer describe unless the
 -- sweep keeps the assisted destinations coherent.
+--
+-- Restore the OWNING tenant's claims first: the block above left tenant B
+-- in the JWT, and reading the sweep's effect under the wrong identity
+-- would say nothing about the owner's data.
+--
+-- The delete itself runs as the session role rather than `authenticated`.
+-- Three of the four production paths are SECURITY INVOKER and would run
+-- the sweep under `listings_delete_own`, so a role-accurate variant would
+-- be stronger — but `authenticated` holds no delete or select grant on
+-- `public.listings` in the shared local stack, which is the same gap that
+-- already fails six pre-existing pgTAP files locally. Asserting the sweep
+-- here and the RLS policy separately is the honest split until that gap
+-- is resolved.
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"export-handoff-a","role":"authenticated"}',
+  true
+);
 reset role;
 delete from public.listings
 where item_id = 'e7100000-0000-4000-8000-000000000001'
