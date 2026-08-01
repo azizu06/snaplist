@@ -205,11 +205,16 @@ export function resolveProvider(env: EnvLike = process.env): LlmProvider {
  * bytes — rather than text derived from it.
  *
  * `vision` is the only one: `vision/extract.ts` and `vision/measurements.ts` are
- * the sole call sites that build `{ type: "image" }` parts, and the bytes they
+ * the product call sites that build `{ type: "image" }` parts, and the bytes they
  * send come straight out of the private `photos` bucket (`vision/photos.ts`).
- * Every other role receives text. `seller-media-fence.test.ts` scans the source
- * and fails if a new module starts sending media without joining this set, so the
- * fence below cannot be reopened by a role quietly gaining a media payload.
+ * Every other role receives text. `seller-media-fence.test.ts` scans the whole
+ * repository and fails if a new module starts sending media without joining this
+ * set or being recorded as an exemption, so the fence below cannot be reopened by
+ * a role quietly gaining a media payload.
+ *
+ * One media call site outside `src/` is exempt by decision: `scripts/spike/
+ * garment-measure.ts` sends other sellers' already-public eBay gallery photos, not
+ * a SnapList seller's own. ADR-0002 Amendment 2 records the reasoning.
  */
 export const SELLER_MEDIA_ROLES: ReadonlySet<LlmRole> = new Set<LlmRole>(["vision"]);
 
@@ -271,8 +276,11 @@ export function geminiBillingConfigError(env: EnvLike = process.env): string | u
  * by fallthrough: the photos crossing a developer's own machine are that
  * developer's own, which is the condition ADR-0002 records this trade resting on.
  * It stops holding the moment a photo they did not take enters a local pipeline —
- * a sourced gold set, a seeded corpus of real listing photos, or a TestFlight
- * build pointed at a dev configuration — and ADR-0002 says to revisit it then.
+ * a seeded corpus of real listing photos, a privately supplied gold set, or a
+ * TestFlight build pointed at a dev configuration — and ADR-0002 says to revisit
+ * it then. `scripts/spike/garment-measure.ts` already sends photos the developer
+ * did not take; it is exempt because those photos are their sellers' own public
+ * listing images, and ADR-0002 Amendment 2 records that as a decision.
  */
 export function sellerMediaConfigError(
   role: LlmRole,

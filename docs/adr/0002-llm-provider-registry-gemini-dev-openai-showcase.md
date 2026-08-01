@@ -172,7 +172,8 @@ Established by tracing the one path that carries media, not by inspecting config
 | Environment | Can real seller media reach a Gemini key? |
 | --- | --- |
 | Offline test suite (vitest) | **No.** `vision/extract.ts:202` takes `input.generate` by injection, so tests supply a fake and the registry is never reached. Recorded provider responses replay through `replayFixture`. Fixtures only. |
-| Local development (`next dev`, worker, bare script) | **Yes**, and permitted. `LLM_PROVIDER` may be unset and means Gemini. The photos are the developer's own — the condition below. |
+| Local development, product pipeline (`next dev`, worker) | **Yes**, and permitted. `LLM_PROVIDER` may be unset and means Gemini. Photos here are the developer's own — the condition below. |
+| Local development, `scripts/spike/garment-measure.ts` | **Yes**, and the photos are **not** the developer's own. See the exemption below; the "developer's own photos" premise does not cover this script. |
 | Any deploy (`next start`, Docker, Vercel, Render) | **Yes**, and this is what the fence closes. `LLM_PROVIDER=gemini` was accepted with no further question. |
 
 The media path itself: the durable pipeline worker composes vision stages
@@ -186,6 +187,35 @@ is the only role that sends media; every other role receives text derived from t
 `resolveSellerContextTranscriber` returns `unsupported` with no model injected — no transcription
 provider is wired. Transcription provider selection is decided separately (OpenAI
 `/v1/audio/transcriptions`) and is out of scope here.
+
+### The one media call site that is not a seller's photo, and why it stays exempt
+
+`scripts/spike/garment-measure.ts:85` resolves the `vision` role with `provider: "google"` pinned
+explicitly, and attaches `{ type: "image" }` parts at `:108`. Run as documented — `pnpm exec tsx
+scripts/spike/garment-measure.ts` — `NODE_ENV` is unset and no platform marker is present, so
+`isLocalDevelopment` reads true and the fence stands down. `scripts/spike/predictions.json` holds 16
+committed Gemini responses, so this is a path already exercised, not a prospective one. Amendment 1
+listed "a sourced (rather than self-shot) gold set" as a future trigger that would void the local
+allowance; it had in fact already landed.
+
+**The exemption stands, but by decision rather than by accident.** The bytes are other sellers' eBay
+gallery photos, fetched from those sellers' own listing URLs (`fetch-images.ts`, whose header says
+so) and already published publicly by them. What Google's unpaid terms then get is already-public
+third-party product imagery, not the in-home photo — faces, addresses, documents, surroundings — that
+this fence exists to protect. The script is run by hand from a developer's checkout, sits on no
+product path, and still resolves through the registry, so the fence bites it anywhere that is not a
+developer's own machine.
+
+Two consequences. First, the local-development row above is now split: the "photos are the
+developer's own" premise governs the product pipeline, and this script is named as the case it does
+not cover. Second, the exemption is recorded in code as well as here —
+`NON_SELLER_MEDIA_MODULES` in `llm/seller-media-fence.test.ts` carries the same reason, and its
+assertions stop the list becoming a way to silence the guard: an exempt module may not live under
+`src/`, and must resolve its model through the registry rather than constructing a provider inline.
+
+If the spike ever takes a photo a seller has not already published — a privately supplied gold set, a
+buyer's photo, a friend's testing image — this exemption ends and the script needs
+`GEMINI_BILLING_ENABLED=true` or another provider like anything else.
 
 ### Amended posture
 
@@ -213,8 +243,16 @@ provider is wired. Transcription provider selection is decided separately (OpenA
 The fence keys on the role, not on the bytes. It is therefore only as true as `SELLER_MEDIA_ROLES`
 is, and a role that quietly gained a media payload would slip past it invisibly. That is why
 `llm/seller-media-fence.test.ts` scans the source: every module building a media message part must be
-a known seller-media module resolving a covered role, so a new media call site fails the suite until
-someone decides deliberately what the fence should do about it.
+either a known seller-media module resolving a covered role or a recorded exemption, so a new media
+call site fails the suite until someone decides deliberately what the fence should do about it.
+
+**The guard's reach is every first-party `.ts`/`.tsx` file in the repository** — not just `src/`. It
+originally scanned `src/` only, which is precisely why the spike call site above went unnoticed by a
+guard written to catch that class of drift. It skips `node_modules`, dot-directories, `fixtures`, and
+test files, and it matches on source with comment lines dropped, so prose about media parts is not a
+hit. It reads text, so it cannot see a media part assembled dynamically (a computed `type`, a part
+built by a helper in another file); a call site determined to hide from it can. It is a guard against
+drift, not against intent.
 
 It also does not verify the attestation. `GEMINI_BILLING_ENABLED=true` is an operator's claim about
 an external fact, and a false claim buys exactly the exposure this fence exists to prevent. The error
@@ -223,11 +261,20 @@ text says so.
 ### Condition this rests on (restated, now load-bearing twice)
 
 The local Gemini allowance is sound only while the photos crossing a developer's machine are that
-developer's own. It stops holding the moment a photo they did not take enters the local pipeline —
-foreseeably via a sourced (rather than self-shot) gold set, a seeded corpus carrying real listing
-photos, or a TestFlight/friend-testing build pointed at a dev configuration. Amendment 1 already said
-to revisit the local default if any of those land; the media fence now rests on the same condition,
-so revisiting it means revisiting both.
+developer's own. It stops holding the moment a photo they did not take enters the local pipeline.
+
+**One of the triggers Amendment 1 listed as foreseeable has already fired.** A sourced (rather than
+self-shot) gold set exists: the spike above sends other sellers' eBay photos. It is exempt on the
+reasoning recorded there — those photos are already public, and the script is off every product path
+— not because the condition still holds universally. Amendment 1's wording, which described this as
+future, is left as written; it is a dated record of what was believed on 2026-07-25, and this
+amendment is where the correction lives.
+
+The triggers that have **not** fired, and that would end the local allowance outright rather than
+earning a narrow exemption: a seeded corpus carrying real listing photos on a product path, a
+privately supplied (unpublished) gold set, or a TestFlight/friend-testing build pointed at a dev
+configuration. Amendment 1 said to revisit the local default if any of those land; the media fence
+now rests on the same condition, so revisiting it means revisiting both.
 
 The "Known limit" above compounds here: a host that sets neither `NODE_ENV` nor a recognized platform
 marker reads as local, and would therefore bypass the media fence as well as the provider fence.

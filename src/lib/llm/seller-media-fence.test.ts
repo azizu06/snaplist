@@ -191,10 +191,19 @@ describe("parseEnv", () => {
  * quietly resume flowing to whatever provider is configured.
  *
  * So this reads the source instead of trusting the set: every module that builds
- * a media message part must be one of the known seller-media modules, and each of
- * those must resolve its model for a role the fence covers. A new media call site
- * fails here until someone decides, deliberately, what the fence should do about
- * it.
+ * a media message part must be either a known seller-media module resolving a
+ * role the fence covers, or a recorded exemption. A new media call site fails
+ * here until someone decides, deliberately, what the fence should do about it.
+ *
+ * It scans the WHOLE repository, not `src/`. Scanning `src/` only is how the
+ * spike call site in `scripts/` escaped a guard written to catch exactly this
+ * (#501 review): the blind spot was structural, so the guard passed while an
+ * unaccounted media call site sat one directory over.
+ */
+/**
+ * Matched against the file as a whole rather than line by line: `\s*` then spans
+ * newlines, so a literal Prettier or a human split across two lines still hits.
+ * Per-line matching let that walk straight through (#501 review).
  */
 const MEDIA_PART = /type:\s*"(image|file|audio)"/;
 const RESOLVE_ROLE = /resolveLanguageModel\(\s*"([A-Za-z]+)"/g;
@@ -205,11 +214,41 @@ const SELLER_MEDIA_MODULES: Record<string, LlmRole> = {
   "src/lib/vision/measurements.ts": "vision",
 };
 
+/**
+ * Modules that build a media part whose bytes are NOT a SnapList seller's own
+ * photo, and the reason each is exempt.
+ *
+ * The reason is required, and it is the point. `garment-measure.ts` was exempt
+ * from the fence for months by accident — it runs under `tsx` with no `NODE_ENV`
+ * and no platform marker, so `isLocalDevelopment` reads true and the fence stands
+ * down. An exemption nobody wrote down is not an exemption; it is the drift this
+ * guard exists to catch. The assertions below keep these entries from becoming a
+ * place to silence the guard: an exempt module may not live in the product source
+ * tree, and must still resolve its model through the registry so the fence
+ * applies to it anywhere that is not a developer's own machine.
+ */
+const NON_SELLER_MEDIA_MODULES: Record<string, string> = {
+  "scripts/spike/garment-measure.ts":
+    "Spike #104, run by hand from a developer's checkout and on no product path. Its bytes are " +
+    "other sellers' eBay gallery photos, already published publicly by those sellers and fetched " +
+    "from their listing URLs by fetch-images.ts — never a SnapList seller's own photo out of the " +
+    "private photos bucket. Exposure under Google's unpaid terms is real but is of already-public " +
+    "third-party imagery, not of the in-home photo the fence exists to protect. Recorded in " +
+    "ADR-0002 Amendment 2.",
+};
+
+/**
+ * Directories with no first-party source to scan. Dot-directories (`.git`,
+ * `.next`, `.claude`) are skipped wholesale — nothing a developer writes lives
+ * there, and `.next` would otherwise re-report generated copies of `src`.
+ */
+const SKIPPED_DIRS = new Set(["node_modules", "fixtures"]);
+
 function sourceFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name !== "node_modules" && entry.name !== "fixtures") sourceFiles(full, acc);
+      if (!SKIPPED_DIRS.has(entry.name) && !entry.name.startsWith(".")) sourceFiles(full, acc);
     } else if (/\.tsx?$/.test(entry.name) && !/\.(test|spec)\.tsx?$/.test(entry.name)) {
       acc.push(full);
     }
@@ -228,16 +267,32 @@ function codeLines(file: string): string[] {
 }
 
 describe("seller-media drift guard", () => {
-  const srcRoot = path.resolve(__dirname, "../..");
-  const repoRoot = path.resolve(srcRoot, "..");
+  const repoRoot = path.resolve(__dirname, "../../..");
 
-  it("finds media message parts only in the known seller-media modules", () => {
-    const found = sourceFiles(srcRoot)
-      .filter((file) => codeLines(file).some((line) => MEDIA_PART.test(line)))
+  it("finds media message parts only in modules that have been accounted for", () => {
+    const found = sourceFiles(repoRoot)
+      .filter((file) => MEDIA_PART.test(codeLines(file).join("\n")))
       .map((file) => path.relative(repoRoot, file))
       .sort();
 
-    expect(found).toEqual(Object.keys(SELLER_MEDIA_MODULES).sort());
+    expect(found).toEqual(
+      [...Object.keys(SELLER_MEDIA_MODULES), ...Object.keys(NON_SELLER_MEDIA_MODULES)].sort(),
+    );
+  });
+
+  it("keeps an exemption from becoming a way to silence the guard", () => {
+    for (const [relative, reason] of Object.entries(NON_SELLER_MEDIA_MODULES)) {
+      // Product code is never exempt. Only something off every product path can
+      // claim its bytes are not a seller's.
+      expect(relative.startsWith("src/"), `${relative} claims exemption`).toBe(false);
+      expect(reason.length, `${relative} must record why`).toBeGreaterThan(80);
+
+      // Still through the registry: an exempt script gets no inline provider, so
+      // the fence bites it too anywhere that is not a developer's own machine.
+      const source = readFileSync(path.join(repoRoot, relative), "utf8");
+      expect(source).toMatch(/resolveLanguageModel\(/);
+      expect(source).not.toMatch(/createGoogleGenerativeAI\(|createOpenAI\(/);
+    }
   });
 
   it("routes every seller-media module through a role the fence covers", () => {
