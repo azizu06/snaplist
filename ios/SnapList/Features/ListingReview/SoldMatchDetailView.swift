@@ -22,7 +22,8 @@ struct SoldMatchDetailView: View {
                 Text(
                     ListingReviewCurrency.string(
                         match.soldPrice,
-                        currencyCode: match.currency
+                        currencyCode: match.currency,
+                        locale: locale
                     )
                 )
                 .font(.title.weight(.bold).monospacedDigit())
