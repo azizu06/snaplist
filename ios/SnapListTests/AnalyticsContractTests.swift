@@ -324,6 +324,215 @@ final class AnalyticsContractTests: XCTestCase {
         XCTAssertTrue(AppDependencies.make(configuration: .preview).analyticsClient is NoOpAnalyticsClient)
     }
 
+    func testProductionCompositionBuildsTheRealClientOnlyWhenAKeyIsConfigured() {
+        let configured = AppDependencies.make(
+            configuration: .standard,
+            analyticsLaunchInputs: analyticsLaunchInputs(),
+            analyticsTransportFactory: RecordingPostHogTransportFactory()
+        )
+        XCTAssertTrue(configured.analyticsClient is PostHogAnalyticsClient)
+
+        for absent in [nil, "", "   "] as [String?] {
+            let dependencies = AppDependencies.make(
+                configuration: .standard,
+                analyticsLaunchInputs: analyticsLaunchInputs(key: absent),
+                analyticsTransportFactory: RecordingPostHogTransportFactory()
+            )
+            XCTAssertTrue(
+                dependencies.analyticsClient is NoOpAnalyticsClient,
+                "Expected an absent key (\(absent ?? "nil")) to stay no-op"
+            )
+        }
+
+        let unexpandedKey = AppDependencies.make(
+            configuration: .standard,
+            analyticsLaunchInputs: analyticsLaunchInputs(key: "$(SNAPLIST_POSTHOG_KEY)"),
+            analyticsTransportFactory: RecordingPostHogTransportFactory()
+        )
+        XCTAssertTrue(unexpandedKey.analyticsClient is NoOpAnalyticsClient)
+
+        let unexpandedHost = AppDependencies.make(
+            configuration: .standard,
+            analyticsLaunchInputs: analyticsLaunchInputs(host: "$(SNAPLIST_POSTHOG_HOST)"),
+            analyticsTransportFactory: RecordingPostHogTransportFactory()
+        )
+        XCTAssertTrue(unexpandedHost.analyticsClient is NoOpAnalyticsClient)
+
+        let fixture = AppDependencies.make(
+            configuration: .preview,
+            analyticsLaunchInputs: analyticsLaunchInputs(),
+            analyticsTransportFactory: RecordingPostHogTransportFactory()
+        )
+        XCTAssertTrue(fixture.analyticsClient is NoOpAnalyticsClient)
+    }
+
+    func testAnalyticsLaunchPolicyRefusesLocalTestAndUnusableConfiguration() throws {
+        XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(isDebugBuild: true)))
+        XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(hasLoadedXCTest: true)))
+        XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(key: nil)))
+        XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(key: "")))
+        XCTAssertNil(
+            AnalyticsLaunchPolicy.decide(
+                analyticsLaunchInputs(key: "$(SNAPLIST_POSTHOG_KEY)")
+            )
+        )
+        XCTAssertNil(
+            AnalyticsLaunchPolicy.decide(
+                analyticsLaunchInputs(host: "$(SNAPLIST_POSTHOG_HOST)")
+            )
+        )
+        XCTAssertNil(
+            AnalyticsLaunchPolicy.decide(
+                analyticsLaunchInputs(host: "http://us.i.posthog.com")
+            )
+        )
+        XCTAssertNil(
+            AnalyticsLaunchPolicy.decide(
+                analyticsLaunchInputs(host: "https://us.i.posthog.com/batch?token=leak")
+            )
+        )
+        XCTAssertNil(
+            AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(appVersion: "private-version"))
+        )
+        XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(build: "613A")))
+
+        let testFlight = try XCTUnwrap(
+            AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(key: "  phc_issue613_key\n"))
+        )
+        XCTAssertEqual(testFlight.projectToken, "phc_issue613_key")
+        XCTAssertEqual(testFlight.host, URL(string: "https://us.i.posthog.com"))
+        XCTAssertEqual(
+            testFlight.metadata,
+            AnalyticsMetadata(environment: .testFlight, appVersion: "1.0.0", build: "613")
+        )
+
+        let production = try XCTUnwrap(
+            AnalyticsLaunchPolicy.decide(
+                analyticsLaunchInputs(hasSandboxAppStoreReceipt: false)
+            )
+        )
+        XCTAssertEqual(production.metadata.environment, .production)
+
+        XCTAssertEqual(
+            AnalyticsLaunchPolicy.resolveEnvironment(
+                isDebugBuild: true,
+                hasSandboxAppStoreReceipt: false
+            ),
+            .local
+        )
+    }
+
+    func testProductionCompositionKeepsSellerContentOutOfEveryPayload() throws {
+        let photoPath =
+            "/var/mobile/Containers/Data/Application/8C6E1F/Documents/captures/IMG_0042.heic"
+        let listingText = "Vintage Levi's 501 selvedge denim jacket, size 42R"
+        let token = "v^1.1#i^1#f^0#r^0#I^3#t^H4sIAAAAAAAAAOVYa2wUVRTutg"
+        let factory = RecordingPostHogTransportFactory()
+        let identityStore = InMemoryAnalyticsIdentityStore()
+        let client = try XCTUnwrap(
+            AppDependencies.makeAnalyticsClient(
+                launchInputs: analyticsLaunchInputs(),
+                transportFactory: factory,
+                consentStore: InMemoryAnalyticsConsentStore(consent: .granted),
+                dedupeStore: InMemoryAnalyticsDedupeStore(),
+                identityStore: identityStore,
+                lifecycleStore: InMemoryAnalyticsTransportLifecycleStore(),
+                dataPurger: RecordingPostHogDataPurger()
+            ) as? PostHogAnalyticsClient
+        )
+
+        let eventID = try XCTUnwrap(UUID(uuidString: "61300000-0000-4000-8000-000000000001"))
+        client.capture(.guestRunStarted(eventID: eventID, entryPoint: .capture))
+        client.screen(.capture)
+        for poisoned in [photoPath, listingText, token] {
+            client.identify(clerkUserID: poisoned)
+        }
+        client.finishPendingWorkForTesting()
+
+        XCTAssertEqual(factory.creationCount, 1)
+        let transport = try XCTUnwrap(factory.transports.first)
+        XCTAssertTrue(transport.identifications.isEmpty)
+
+        let transmitted = transport.captures.flatMap { capture in
+            [capture.payload.name, capture.distinctID]
+                + Array(capture.payload.properties.keys)
+                + Array(capture.payload.properties.values)
+        }
+        for forbidden in [photoPath, listingText, token] {
+            XCTAssertFalse(
+                transmitted.contains { $0.contains(forbidden) },
+                "Expected \(forbidden) to reach no payload"
+            )
+        }
+
+        // A composition that transmitted nothing at all would also pass the
+        // absence assertions, so the diagnostics that must survive are asserted
+        // exactly rather than by presence.
+        let anonymousID = identityStore.identity.anonymousID.uuidString.lowercased()
+        XCTAssertEqual(transport.captures.map(\.distinctID), [anonymousID, anonymousID])
+        XCTAssertEqual(
+            transport.captures.first?.payload,
+            AnalyticsPayload(
+                name: "guest run started",
+                properties: [
+                    "event_id": eventID.uuidString.lowercased(),
+                    "entry_point": "capture",
+                    "environment": "testflight",
+                    "app_version": "1.0.0",
+                    "app_build": "613",
+                ]
+            )
+        )
+        XCTAssertEqual(
+            transport.captures.last?.payload,
+            AnalyticsPayload(
+                name: "screen viewed",
+                properties: [
+                    "screen": "capture",
+                    "environment": "testflight",
+                    "app_version": "1.0.0",
+                    "app_build": "613",
+                ]
+            )
+        )
+
+        // Seller content reaching the build metadata cannot become a property
+        // either: the composition refuses to build a transmitting client.
+        let poisonedMetadata = AppDependencies.makeAnalyticsClient(
+            launchInputs: analyticsLaunchInputs(appVersion: listingText),
+            transportFactory: factory,
+            consentStore: InMemoryAnalyticsConsentStore(consent: .granted),
+            dedupeStore: InMemoryAnalyticsDedupeStore(),
+            identityStore: InMemoryAnalyticsIdentityStore(),
+            lifecycleStore: InMemoryAnalyticsTransportLifecycleStore(),
+            dataPurger: RecordingPostHogDataPurger()
+        )
+        XCTAssertTrue(poisonedMetadata is NoOpAnalyticsClient)
+        XCTAssertEqual(factory.creationCount, 1)
+    }
+
+    private func analyticsLaunchInputs(
+        key: String? = "phc_issue613_key",
+        host: String? = "https://us.i.posthog.com",
+        appVersion: String = "1.0.0",
+        build: String = "613",
+        isDebugBuild: Bool = false,
+        hasSandboxAppStoreReceipt: Bool = true,
+        hasLoadedXCTest: Bool = false
+    ) -> AnalyticsLaunchInputs {
+        AnalyticsLaunchInputs(
+            projectKeyBundleValue: key,
+            hostBundleValue: host,
+            infoDictionary: [
+                "CFBundleShortVersionString": appVersion,
+                "CFBundleVersion": build,
+            ],
+            isDebugBuild: isDebugBuild,
+            hasSandboxAppStoreReceipt: hasSandboxAppStoreReceipt,
+            hasLoadedXCTest: hasLoadedXCTest
+        )
+    }
+
     func testDebugRuntimeDropsAbsentAndDeniedConsentWithoutRecording() {
         let consent = InMemoryAnalyticsConsentStore()
         let identity = InMemoryAnalyticsIdentityStore()
