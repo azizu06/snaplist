@@ -73,6 +73,9 @@ let upgradeSeller: ClerkTestUser;
 let upgradeConflictSeller: ClerkTestUser;
 let upgradeOverlapSeller: ClerkTestUser;
 let retryProjectionSeller: ClerkTestUser;
+let lockOrderRetrySeller: ClerkTestUser;
+let lockOrderStageSeller: ClerkTestUser;
+let lockRaceSeller: ClerkTestUser;
 const queueMessageIds = new Set<string>();
 
 function upgradeBackfillSql(): string {
@@ -226,6 +229,14 @@ async function cleanupManualRetryAllowancePeriods(
   });
   try {
     await database.connect();
+    // `cleanupClerkTestUsers` deletes reservations through PostgREST, where
+    // service_role has DELETE but no SELECT on the reservation table, so its
+    // filtered delete is refused and this delete would hit the period FK.
+    await database.query(
+      `delete from public.ai_item_credit_reservations
+       where user_id = any($1::text[])`,
+      [userIds],
+    );
     await database.query(
       `delete from public.ai_item_allowance_periods
        where user_id = any($1::text[])`,
@@ -313,6 +324,141 @@ async function waitForRelationLockWait(
   );
 }
 
+interface AdvisoryLockKey {
+  classid: string;
+  objid: string;
+}
+
+/**
+ * `pg_locks` splits a 64-bit advisory key across two 32-bit `oid` columns, so a
+ * lock-order assertion has to compare the halves rather than the key itself.
+ * `hashtextextended` returns a signed bigint, hence the mask on the high half.
+ */
+async function advisoryLockKey(
+  client: Client,
+  name: string,
+): Promise<AdvisoryLockKey> {
+  const key = await client.query<AdvisoryLockKey>(
+    `select ((hashtextextended($1, 0) >> 32) & 4294967295)::bigint::text
+              as classid,
+            (hashtextextended($1, 0) & 4294967295)::bigint::text as objid`,
+    [name],
+  );
+  return key.rows[0]!;
+}
+
+async function advisoryLockState(
+  observer: Client,
+  pid: number,
+  key: AdvisoryLockKey,
+): Promise<"granted" | "waiting" | "absent"> {
+  const held = await observer.query<{ granted: boolean }>(
+    `select granted
+       from pg_locks
+      where pid = $1
+        and locktype = 'advisory'
+        and classid::bigint = $2::bigint
+        and objid::bigint = $3::bigint`,
+    [pid, key.classid, key.objid],
+  );
+  const observed = held.rows[0];
+  if (!observed) return "absent";
+  return observed.granted ? "granted" : "waiting";
+}
+
+async function waitForAdvisoryLockWait(
+  observer: Client,
+  pid: number,
+  keys: AdvisoryLockKey | AdvisoryLockKey[],
+  label: string,
+): Promise<void> {
+  const candidates = Array.isArray(keys) ? keys : [keys];
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const states = await Promise.all(
+      candidates.map((key) => advisoryLockState(observer, pid, key)),
+    );
+    if (states.includes("waiting")) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const ungranted = await observer.query(
+    `select locktype, classid, objid
+       from pg_locks where pid = $1 and not granted`,
+    [pid],
+  );
+  throw new Error(
+    `Timed out waiting for backend ${pid} to block on ${label}: `
+      + JSON.stringify(ungranted.rows),
+  );
+}
+
+async function openLockSession(
+  applicationName: string,
+  claims?: Record<string, string>,
+): Promise<Client> {
+  const client = new Client({
+    application_name: applicationName,
+    connectionString: DATABASE_URL,
+  });
+  await client.connect();
+  if (claims) {
+    await client.query("select set_config('request.jwt.claims', $1, false)", [
+      JSON.stringify(claims),
+    ]);
+  }
+  return client;
+}
+
+async function holdAdvisoryLock(holder: Client, name: string): Promise<void> {
+  await holder.query("begin");
+  await holder.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    name,
+  ]);
+}
+
+async function failRun(run: StagedRun): Promise<void> {
+  const store = createSupabasePipelineWorkerStore(
+    admin as unknown as PipelineWorkerRpcClient,
+  );
+  const failedAttempt = acquired(
+    await store.acquire({
+      runId: run.run_id,
+      messageId: String(run.queue_message_id),
+      leaseSeconds: 60,
+    }),
+  );
+  await store.failAttempt({
+    runId: run.run_id,
+    leaseToken: failedAttempt.context.run.lease_token,
+    retryable: false,
+    retryAfterSeconds: 1,
+    failureCode: "invalid_pipeline_result",
+    safeFailureMessage: "The generated listing did not pass validation.",
+  });
+}
+
+function stagePipelineBatchArgs(
+  owner: ClerkTestUser,
+  key: string,
+  batchId: string,
+): [string, string, string] {
+  return [
+    owner.id,
+    batchId,
+    JSON.stringify([
+      {
+        idempotency_key: key,
+        source: "single",
+        autopilot_enabled: false,
+        photo_paths: [`${owner.id}/manual-retry/${batchId}/front.jpg`],
+        cost_basis: null,
+      },
+    ]),
+  ];
+}
+
+const STAGE_PIPELINE_BATCH_SQL =
+  "select * from public.stage_pipeline_batch($1, $2::uuid, $3::jsonb, 1000, 1000)";
+
 beforeAll(async () => {
   reachable = await stackReachable();
   if (!reachable) return;
@@ -327,6 +473,9 @@ beforeAll(async () => {
     upgradeConflictSeller,
     upgradeOverlapSeller,
     retryProjectionSeller,
+    lockOrderRetrySeller,
+    lockOrderStageSeller,
+    lockRaceSeller,
   ] = await Promise.all([
     provisionClerkTestUser(
       SUPABASE_URL,
@@ -363,6 +512,21 @@ beforeAll(async () => {
       ANON_KEY!,
       "manual_retry_credit_projection",
     ),
+    provisionClerkTestUser(
+      SUPABASE_URL,
+      ANON_KEY!,
+      "manual_retry_credit_lock_order_retry",
+    ),
+    provisionClerkTestUser(
+      SUPABASE_URL,
+      ANON_KEY!,
+      "manual_retry_credit_lock_order_stage",
+    ),
+    provisionClerkTestUser(
+      SUPABASE_URL,
+      ANON_KEY!,
+      "manual_retry_credit_lock_race",
+    ),
   ]);
 });
 
@@ -381,6 +545,9 @@ afterAll(async () => {
     upgradeConflictSeller.id,
     upgradeOverlapSeller.id,
     retryProjectionSeller.id,
+    lockOrderRetrySeller.id,
+    lockOrderStageSeller.id,
+    lockRaceSeller.id,
   ];
   await cleanupClerkTestUsers(admin, userIds);
   await cleanupManualRetryAllowancePeriods(userIds);
@@ -1089,4 +1256,241 @@ describe("manual retry AI-item credit accounting", () => {
       retry_restore_count: 0,
     });
   }, 20_000);
+
+  /**
+   * Row triggers on public.pipeline_runs fire in alphabetical name order, so a
+   * rename can silently re-invert the two per-seller advisory locks that
+   * staging and manual retry both take (#571). Assert the documented order —
+   * `ai-item-credit:<seller>` before `trophy-run-order:<seller>` — from outside
+   * the database functions: a write path parked on the credit lock must not
+   * already hold the ordering lock, whatever its triggers end up being called.
+   */
+  it("takes the seller credit lock before the run-ordering lock on both write paths", async () => {
+    if (!reachable) return;
+    const observer = await openLockSession("issue-571-lock-order-observer");
+    const holder = await openLockSession("issue-571-lock-order-holder");
+    const retrySession = await openLockSession("issue-571-lock-order-retry", {
+      role: "authenticated",
+      sub: lockOrderRetrySeller.id,
+    });
+    const stageSession = await openLockSession("issue-571-lock-order-stage", {
+      role: "service_role",
+    });
+    let retryCall: Promise<QueryResult> | undefined;
+    let stageCall: Promise<QueryResult> | undefined;
+    try {
+      await retrySession.query("set role authenticated");
+      const run = await stageRun("lock-order-retry", lockOrderRetrySeller);
+      await failRun(run);
+
+      const retryPid = await backendPid(retrySession);
+      const retryCredit = await advisoryLockKey(
+        observer,
+        `ai-item-credit:${lockOrderRetrySeller.id}`,
+      );
+      const retryOrdering = await advisoryLockKey(
+        observer,
+        `trophy-run-order:${lockOrderRetrySeller.id}`,
+      );
+      await holdAdvisoryLock(
+        holder,
+        `ai-item-credit:${lockOrderRetrySeller.id}`,
+      );
+      retryCall = retrySession.query<{ value: Record<string, unknown> }>(
+        "select public.retry_pipeline_run($1::uuid) as value",
+        [run.run_id],
+      );
+      await waitForAdvisoryLockWait(
+        observer,
+        retryPid,
+        retryCredit,
+        "ai-item-credit",
+      );
+      expect(await advisoryLockState(observer, retryPid, retryOrdering)).toBe(
+        "absent",
+      );
+      await holder.query("rollback");
+      const retried = (await retryCall) as QueryResult<{
+        value: Record<string, unknown>;
+      }>;
+      retryCall = undefined;
+      expect(retried.rows[0]?.value).toMatchObject({ status: "queued" });
+      queueMessageIds.add(String(retried.rows[0]?.value?.queueMessageId));
+
+      const stagePid = await backendPid(stageSession);
+      const stageCredit = await advisoryLockKey(
+        observer,
+        `ai-item-credit:${lockOrderStageSeller.id}`,
+      );
+      const stageOrdering = await advisoryLockKey(
+        observer,
+        `trophy-run-order:${lockOrderStageSeller.id}`,
+      );
+      await holdAdvisoryLock(
+        holder,
+        `ai-item-credit:${lockOrderStageSeller.id}`,
+      );
+      stageCall = stageSession.query<StagedRun>(
+        STAGE_PIPELINE_BATCH_SQL,
+        stagePipelineBatchArgs(
+          lockOrderStageSeller,
+          "lock-order-stage",
+          crypto.randomUUID(),
+        ),
+      );
+      await waitForAdvisoryLockWait(
+        observer,
+        stagePid,
+        stageCredit,
+        "ai-item-credit",
+      );
+      expect(await advisoryLockState(observer, stagePid, stageOrdering)).toBe(
+        "absent",
+      );
+      await holder.query("rollback");
+      const staged = (await stageCall) as QueryResult<StagedRun>;
+      stageCall = undefined;
+      queueMessageIds.add(String(staged.rows[0]!.queue_message_id));
+    } finally {
+      await holder.query("rollback").catch(() => undefined);
+      await Promise.all([
+        retryCall?.catch(() => undefined),
+        stageCall?.catch(() => undefined),
+      ]);
+      await Promise.all(
+        [observer, holder, retrySession, stageSession].map((session) =>
+          session.end().catch(() => undefined),
+        ),
+      );
+    }
+  }, 30_000);
+
+  /**
+   * Forces the exact interleaving that used to close an AB/BA cycle: a manual
+   * retry is already queued for the seller's credit lock when staging takes the
+   * run-ordering lock and asks for the credit lock behind it. Under one
+   * documented lock order this resolves into the ordinary credit contest
+   * instead of `deadlock detected`.
+   */
+  it("resolves a staging and manual retry lock race without deadlocking", async () => {
+    if (!reachable) return;
+    const observer = await openLockSession("issue-571-lock-race-observer");
+    const creditHolder = await openLockSession("issue-571-lock-race-credit");
+    const orderingHolder = await openLockSession("issue-571-lock-race-order");
+    const retrySession = await openLockSession("issue-571-lock-race-retry", {
+      role: "authenticated",
+      sub: lockRaceSeller.id,
+    });
+    const stageSession = await openLockSession("issue-571-lock-race-stage", {
+      role: "service_role",
+    });
+    let retrying:
+      | Promise<{
+          message: string | undefined;
+          rows: { value: Record<string, unknown> }[];
+        }>
+      | undefined;
+    let staging:
+      | Promise<{ message: string | undefined; rows: StagedRun[] }>
+      | undefined;
+    try {
+      await retrySession.query("set role authenticated");
+      const run = await stageRun("lock-race-retry", lockRaceSeller);
+      await failRun(run);
+
+      const credit = await advisoryLockKey(
+        observer,
+        `ai-item-credit:${lockRaceSeller.id}`,
+      );
+      const ordering = await advisoryLockKey(
+        observer,
+        `trophy-run-order:${lockRaceSeller.id}`,
+      );
+      const retryPid = await backendPid(retrySession);
+      const stagePid = await backendPid(stageSession);
+      await holdAdvisoryLock(creditHolder, `ai-item-credit:${lockRaceSeller.id}`);
+      await holdAdvisoryLock(
+        orderingHolder,
+        `trophy-run-order:${lockRaceSeller.id}`,
+      );
+
+      retrying = retrySession
+        .query<{ value: Record<string, unknown> }>(
+          "select public.retry_pipeline_run($1::uuid) as value",
+          [run.run_id],
+        )
+        .then(
+          (result) => ({ message: undefined, rows: result.rows }),
+          (error: Error) => ({
+            message: error.message,
+            rows: [] as { value: Record<string, unknown> }[],
+          }),
+        );
+      await waitForAdvisoryLockWait(observer, retryPid, credit, "ai-item-credit");
+
+      staging = stageSession
+        .query<StagedRun>(
+          STAGE_PIPELINE_BATCH_SQL,
+          stagePipelineBatchArgs(
+            lockRaceSeller,
+            "lock-race-competing",
+            crypto.randomUUID(),
+          ),
+        )
+        .then(
+          (result) => ({ message: undefined, rows: result.rows }),
+          (error: Error) => ({ message: error.message, rows: [] as StagedRun[] }),
+        );
+      await waitForAdvisoryLockWait(
+        observer,
+        stagePid,
+        [credit, ordering],
+        "either seller lock",
+      );
+
+      // Releasing the ordering lock is what used to close the cycle: staging
+      // takes it and then queues for the credit lock behind the retry, which
+      // in turn still needs the ordering lock staging now holds.
+      await orderingHolder.query("rollback");
+      await waitForAdvisoryLockWait(observer, stagePid, credit, "ai-item-credit");
+      await creditHolder.query("rollback");
+
+      const [stagingResult, retryingResult] = await Promise.all([
+        staging!,
+        retrying!,
+      ]);
+      const failures = [stagingResult, retryingResult].filter(
+        (result) => result.message !== undefined,
+      );
+      expect(
+        failures.map((failure) => failure.message).join(" | "),
+      ).not.toMatch(/deadlock/i);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]!.message).toMatch(
+        /restored-allowance-reused|snaplist-pro-required/i,
+      );
+      if (stagingResult.message === undefined) {
+        queueMessageIds.add(String(stagingResult.rows[0]!.queue_message_id));
+      }
+      if (retryingResult.message === undefined) {
+        queueMessageIds.add(
+          String(retryingResult.rows[0]?.value?.queueMessageId),
+        );
+      }
+    } finally {
+      await orderingHolder.query("rollback").catch(() => undefined);
+      await creditHolder.query("rollback").catch(() => undefined);
+      // Drain both racing calls before closing their sessions, so an early
+      // failure cannot leave a query in flight against a client we just ended.
+      await Promise.all([
+        retrying?.catch(() => undefined),
+        staging?.catch(() => undefined),
+      ]);
+      await Promise.all(
+        [observer, creditHolder, orderingHolder, retrySession, stageSession].map(
+          (session) => session.end().catch(() => undefined),
+        ),
+      );
+    }
+  }, 30_000);
 });

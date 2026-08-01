@@ -104,6 +104,31 @@ export const pricingPriceDisclosureSchema = z.enum([
   "asking-price-not-accepted-amount",
 ]);
 
+export const pricingEvidenceFormatSchema = z.enum([
+  "auction",
+  "buy-it-now",
+  "auction-with-buy-it-now",
+]);
+
+export const pricingEvidenceShippingSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("free") }).strict(),
+  z
+    .object({
+      type: z.literal("paid"),
+      price: z.number().positive().max(100_000_000).multipleOf(0.01),
+      currency: z.string().regex(/^[A-Z]{3}$/),
+    })
+    .strict(),
+  z.object({ type: z.literal("pickup") }).strict(),
+]);
+
+export type PricingEvidenceFormat = z.infer<
+  typeof pricingEvidenceFormatSchema
+>;
+export type PricingEvidenceShipping = z.infer<
+  typeof pricingEvidenceShippingSchema
+>;
+
 /**
  * One provider-neutral comparable carried out of pricing after retrieval,
  * matching, freshness, and robust-core selection have all accepted it.
@@ -122,6 +147,10 @@ export const pricingEvidenceRecordSchema = z
     currency: z.string().regex(/^[A-Z]{3}$/),
     condition: z.string().min(1).max(120).optional(),
     soldAt: z.number().int().nonnegative().optional(),
+    photoUrl: z.string().regex(/^https:\/\//).url().max(2_048).optional(),
+    size: z.string().min(1).max(120).optional(),
+    format: pricingEvidenceFormatSchema.optional(),
+    shipping: pricingEvidenceShippingSchema.optional(),
     kind: pricingEvidenceKindSchema,
     priceDisclosure: pricingPriceDisclosureSchema,
   })

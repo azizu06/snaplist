@@ -3,6 +3,12 @@ import {
   createListingReviewReader,
   type ListingReviewDataClient,
 } from "@/lib/listing-review";
+import {
+  synthesizeSoldResult,
+  type EbaySoldComp,
+} from "@/lib/pricing/providers/ebay-sold";
+import { buildPipelinePersistencePayload } from "@/lib/pipeline/persist";
+import type { PipelineResult } from "@/lib/pipeline/types";
 import { createMobileApiHandler, type MobileApiPrincipal } from "./app";
 import type { MobileRun } from "./contract";
 
@@ -108,6 +114,13 @@ function rawReview(userId = USER_ID) {
         currency: string;
         condition?: string;
         soldAt?: number;
+        photoUrl?: string;
+        size?: string;
+        format?: "auction" | "buy-it-now" | "auction-with-buy-it-now";
+        shipping?:
+          | { type: "free" }
+          | { type: "paid"; price: number; currency: string }
+          | { type: "pickup" };
         kind: string;
         priceDisclosure: string;
         evidenceAsOf: string;
@@ -143,35 +156,85 @@ function uncitedEvidenceReview() {
   return review;
 }
 
-function citedEvidenceReview() {
+function providerEvidenceReview(comps: EbaySoldComp[]) {
   const review = rawReview();
-  review.pricingSnapshot.priceResult = {
-    suggested: 145,
-    range: { min: 130, max: 160 },
-    confidence: 0.72,
-    sources: [{ url: "https://www.ebay.com/itm/cited" }],
-    tier: "ebay-sold",
-  };
-  review.pricingSnapshot.evidence = [
-    {
-      id: "cited-match",
-      sourceUrl: "https://www.ebay.com/itm/cited",
-      title: "Sony WH-1000XM4 Headphones",
-      price: 142.5,
-      currency: "USD",
+  const providerResult = synthesizeSoldResult(comps);
+  const pipelineResult = {
+    attributes: {
+      title: "Sony WH-1000XM4",
       condition: "Used",
-      soldAt: 1_785_283_200,
-      kind: "sold-comparable",
-      priceDisclosure: "displayed-sold-price",
-      evidenceAsOf: "2026-07-29T12:03:00.000Z",
     },
-  ];
+    price: providerResult,
+    confidence: {
+      score: providerResult.confidence,
+      band: "medium",
+      autopilotEligible: false,
+    },
+    listing: {
+      platform: "ebay",
+      title: "Sony WH-1000XM4",
+      description: "Provider evidence fixture",
+      fields: {},
+    },
+    model: "test-vision-model",
+    identification: {
+      label: "Sony WH-1000XM4",
+      confident: true,
+      evidence: 1,
+    },
+  } satisfies PipelineResult;
+  const snapshot = buildPipelinePersistencePayload(pipelineResult).pricing_snapshot;
+  review.pricingSnapshot.priceResult = snapshot.price_result;
+  review.pricingSnapshot.evidence = snapshot.evidence.map((record) => ({
+    ...record,
+    evidenceAsOf: "2026-07-29T12:03:00.000Z",
+  }));
   return review;
 }
 
+function completeProviderEvidenceReview() {
+  return providerEvidenceReview([
+    {
+      url: "https://www.ebay.com/itm/cited",
+      title: "Sony WH-1000XM4 Headphones",
+      price: 142.5,
+      condition: "Used",
+      soldAt: 1_785_283_200,
+      photoUrl: "https://i.ebayimg.com/images/g/cited/s-l500.jpg",
+      size: "One size",
+      format: "buy-it-now",
+      shipping: { type: "paid", price: 8.95, currency: "USD" },
+    },
+  ]);
+}
+
+function sparseProviderEvidenceReview() {
+  return providerEvidenceReview([
+    {
+      url: "https://www.ebay.com/itm/sparse-cited",
+      title: "Sparse provider comp",
+      price: 90,
+    },
+  ]);
+}
+
+function fiveProviderEvidenceReview() {
+  return providerEvidenceReview(
+    Array.from({ length: 5 }, (_, index) => ({
+      url: `https://www.ebay.com/itm/bounded-${index}`,
+      title: `Bounded sold comp ${index}`,
+      price: 90,
+    })),
+  );
+}
+
 function dataClient(review = rawReview()): ListingReviewDataClient {
+  const persistedReview = JSON.stringify(review);
   return {
-    readReview: vi.fn().mockResolvedValue({ data: review, error: null }),
+    readReview: vi.fn().mockImplementation(async () => ({
+      data: JSON.parse(persistedReview) as unknown,
+      error: null,
+    })),
     signPhotoUrls: vi.fn().mockImplementation(async (paths: string[]) =>
       paths.map((path, ordinal) => ({
         ordinal,
@@ -293,10 +356,28 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
     );
   });
 
-  it("returns one cited verified sold match through the public HTTP contract", async () => {
+  it.each([
+    {
+      name: "Clerk",
+      principal: { kind: "clerk", userId: USER_ID } satisfies MobileApiPrincipal,
+    },
+    {
+      name: "GuestBearer",
+      principal: {
+        kind: "verifiedGuest",
+        userId: USER_ID,
+        mintOperationToken: vi.fn()
+          .mockResolvedValueOnce("guest-run-jwt")
+          .mockResolvedValueOnce("guest-review-jwt")
+          .mockResolvedValueOnce("guest-photo-jwt"),
+      } satisfies MobileApiPrincipal,
+    },
+  ])("preserves complete provider-supplied sold facts for $name", async ({
+    principal,
+  }) => {
     const response = await handler({
-      principal: { kind: "clerk", userId: USER_ID },
-      reviewClient: dataClient(citedEvidenceReview()),
+      principal,
+      reviewClient: dataClient(completeProviderEvidenceReview()),
     })(
       new Request(`https://api.snaplist.dev/v1/runs/${RUN_ID}`, {
         headers: { authorization: "Bearer clerk-bearer" },
@@ -309,17 +390,92 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
         review: {
           verifiedSoldMatches: [
             {
-              id: "cited-match",
+              id: "https://www.ebay.com/itm/cited",
               sourceURL: "https://www.ebay.com/itm/cited",
               soldPrice: 142.5,
               currency: "USD",
               soldAt: 1_785_283_200,
+              photoURL: "https://i.ebayimg.com/images/g/cited/s-l500.jpg",
+              size: "One size",
+              format: "buy-it-now",
+              shipping: {
+                type: "paid",
+                price: 8.95,
+                currency: "USD",
+              },
             },
           ],
           soldEvidenceCopy: null,
         },
       },
     });
+  });
+
+  it("keeps provider-absent sold facts absent from the public response", async () => {
+    const response = await handler({
+      principal: { kind: "clerk", userId: USER_ID },
+      reviewClient: dataClient(sparseProviderEvidenceReview()),
+    })(
+      new Request(`https://api.snaplist.dev/v1/runs/${RUN_ID}`, {
+        headers: { authorization: "Bearer clerk-bearer" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      data: { review: { verifiedSoldMatches: unknown[] } };
+    };
+    expect(payload.data.review.verifiedSoldMatches).toEqual([
+      {
+        id: "https://www.ebay.com/itm/sparse-cited",
+        sourceURL: "https://www.ebay.com/itm/sparse-cited",
+        title: "Sparse provider comp",
+        soldPrice: 90,
+        currency: "USD",
+        condition: null,
+        soldAt: null,
+      },
+    ]);
+  });
+
+  it("returns the same strict persisted sold projection after JSON replay", async () => {
+    const handle = handler({
+      principal: { kind: "clerk", userId: USER_ID },
+      reviewClient: dataClient(completeProviderEvidenceReview()),
+    });
+    const request = () =>
+      new Request(`https://api.snaplist.dev/v1/runs/${RUN_ID}`, {
+        headers: { authorization: "Bearer clerk-bearer" },
+      });
+
+    const first = await handle(request());
+    const replay = await handle(request());
+
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(await first.json());
+  });
+
+  it("returns the exact five retained provider comparables without expanding the set", async () => {
+    const response = await handler({
+      principal: { kind: "clerk", userId: USER_ID },
+      reviewClient: dataClient(fiveProviderEvidenceReview()),
+    })(
+      new Request(`https://api.snaplist.dev/v1/runs/${RUN_ID}`, {
+        headers: { authorization: "Bearer clerk-bearer" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      data: { review: { verifiedSoldMatches: Array<{ id: string }> } };
+    };
+    expect(payload.data.review.verifiedSoldMatches.map(({ id }) => id)).toEqual(
+      Array.from(
+        { length: 5 },
+        (_, index) => `https://www.ebay.com/itm/bounded-${index}`,
+      ),
+    );
   });
 
   it.each([

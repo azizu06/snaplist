@@ -11,9 +11,23 @@ const preparationSchema = z.object({
   skippedForLock: z.boolean(),
 }).strict();
 
+/**
+ * Every cleanup source the database allows. A claim the executor cannot name is
+ * a claim it cannot delete safely, so this list must track the
+ * `pipeline_storage_cleanup_source_check` constraint exactly.
+ */
+export const PIPELINE_CLEANUP_SOURCE_TYPES = [
+  "staging",
+  "abandoned_item",
+  "guest_recovery",
+  "guest_claim_copy",
+  "raw_voice",
+] as const;
+
 const cleanupJobSchema = z.object({
   jobId: z.string().uuid(),
   leaseToken: z.string().uuid(),
+  sourceType: z.enum(PIPELINE_CLEANUP_SOURCE_TYPES),
   photoPaths: z.array(z.string().min(1).max(1_024)).min(1).max(800),
   attemptCount: z.number().int().positive(),
   maxAttempts: z.number().int().positive(),
@@ -43,6 +57,26 @@ const guestRecoveryExpirySchema = z.object({
   skippedForLock: z.boolean(),
 }).strict();
 
+const rawSellerVoiceRetentionSchema = z.object({
+  rawVoiceJobsQueued: z.number().int().nonnegative(),
+  skippedForLock: z.boolean(),
+}).strict();
+
+/** Terminal transcription outcomes, per docs/contracts/voice-context-v1.json. */
+export const RAW_SELLER_VOICE_TERMINAL_OUTCOMES = [
+  "transcribed",
+  "empty",
+  "unsupported",
+  "timed-out",
+  "failed",
+] as const;
+
+const terminalOutcomeSchema = z.enum(RAW_SELLER_VOICE_TERMINAL_OUTCOMES);
+
+export type RawSellerVoiceTranscriptionOutcome = z.infer<
+  typeof terminalOutcomeSchema
+>;
+
 const healthSchema = z.object({
   queueDepth: z.number().int().nonnegative(),
   oldestJobAgeSeconds: z.number().int().nonnegative(),
@@ -63,11 +97,16 @@ export type PipelineStorageCleanupAuthorization = z.infer<
 >;
 export type PipelineCleanupOutcome = z.infer<typeof cleanupOutcomeSchema>;
 export type GuestRecoveryExpiry = z.infer<typeof guestRecoveryExpirySchema>;
+export type RawSellerVoiceRetention = z.infer<
+  typeof rawSellerVoiceRetentionSchema
+>;
 export type PipelineOperationsHealth = z.infer<typeof healthSchema>;
 
 type PipelineOperationsRpcName =
   | "expire_guest_draft_recoveries"
   | "prepare_pipeline_retention"
+  | "prepare_raw_seller_voice_retention"
+  | "record_raw_seller_voice_transcription_outcome"
   | "claim_pipeline_storage_cleanup"
   | "authorize_pipeline_storage_cleanup"
   | "complete_pipeline_storage_cleanup"
@@ -91,6 +130,19 @@ export interface PipelineOperationsRpcClient {
 export interface PipelineOperationsStore {
   expireGuestRecoveries(batchSize: number): Promise<GuestRecoveryExpiry>;
   prepareRetention(batchSize: number): Promise<PipelineRetentionPreparation>;
+  prepareRawSellerVoiceRetention(
+    batchSize: number,
+  ): Promise<RawSellerVoiceRetention>;
+  /**
+   * Records the first durable terminal transcription outcome for a run and
+   * schedules its raw audio for deletion. Resolves false when the run holds no
+   * undeleted raw audio, so a redelivered queue message is not an error.
+   */
+  recordRawSellerVoiceTranscriptionOutcome(input: {
+    userId: string;
+    runId: string;
+    outcome: RawSellerVoiceTranscriptionOutcome;
+  }): Promise<boolean>;
   claimStorageCleanup(leaseSeconds: number): Promise<PipelineStorageCleanupClaim>;
   authorizeStorageCleanup(
     jobId: string,
@@ -136,6 +188,29 @@ export function createSupabasePipelineOperationsStore(
         p_batch_size: batchSize,
       });
       return preparationSchema.parse(rpcData("retention preparation", result));
+    },
+
+    async prepareRawSellerVoiceRetention(rawBatchSize) {
+      const batchSize = batchSizeSchema.parse(rawBatchSize);
+      const result = await client.rpc("prepare_raw_seller_voice_retention", {
+        p_batch_size: batchSize,
+      });
+      return rawSellerVoiceRetentionSchema.parse(
+        rpcData("raw seller voice retention", result),
+      );
+    },
+
+    async recordRawSellerVoiceTranscriptionOutcome(rawInput) {
+      const userId = z.string().min(1).max(255).parse(rawInput.userId);
+      const runId = z.string().uuid().parse(rawInput.runId);
+      const outcome = terminalOutcomeSchema.parse(rawInput.outcome);
+      const result = await client.rpc(
+        "record_raw_seller_voice_transcription_outcome",
+        { p_user_id: userId, p_run_id: runId, p_outcome: outcome },
+      );
+      return z.boolean().parse(
+        rpcData("raw seller voice transcription outcome", result),
+      );
     },
 
     async claimStorageCleanup(rawLeaseSeconds) {

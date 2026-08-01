@@ -7,8 +7,10 @@ import {
   type ExportPackGenerate,
 } from "./generate";
 import {
+  DEPOP_PLATFORM,
   FACEBOOK_PLATFORM,
   MERCARI_PLATFORM,
+  depopPackSchema,
   facebookPackSchema,
   mercariPackSchema,
 } from "./schema";
@@ -16,8 +18,8 @@ import {
 /**
  * Load-or-generate seam for the export page (issue #15): the packs are
  * generated once per coherent review-content revision and persisted as `listings` rows (platform
- * 'facebook' / 'mercari' — exactly the platforms the schema migration
- * anticipated), then served from those rows while that revision remains current. Identity or
+ * 'facebook' / 'mercari' / 'depop' — the three assisted destinations, all of
+ * which the seller finishes by hand), then served from those rows while that revision remains current. Identity or
  * other content edits advance the revision, so stale packs are ignored and regenerated. Price-only
  * edits reuse the generated copy, attach the current effective price, and are guarded by the full
  * review revision so an in-flight stale price fails closed. All reads and writes go through the
@@ -41,10 +43,18 @@ export interface ExportPackView {
   hashtags: string[];
 }
 
+/**
+ * What the export surface renders for Depop (issue #378). Structurally has NO
+ * `title`: Depop's listing form has no title field, so a renderer must not be
+ * able to show one. The type is the enforcement.
+ */
+export type DepopPackView = Omit<ExportPackView, "title">;
+
 export interface ExportPacksView {
   facebook: ExportPackView;
   mercari: ExportPackView;
-  /** True when both packs were served from persisted rows (no model call). */
+  depop: DepopPackView;
+  /** True when all three packs were served from persisted rows (no model call). */
   cached: boolean;
   /**
    * The generating model id — provenance is PERSISTED with each pack row
@@ -132,6 +142,26 @@ function rowToView(
 }
 
 /**
+ * Parse a persisted Depop row back into its renderable view. The stored copy
+ * block is served verbatim: unlike Facebook, the Depop block carries no price
+ * line (Depop's price is its own field), so there is no stale price to rebuild
+ * — the CURRENT effective price rides on `price` alone.
+ */
+function rowToDepopView(
+  row: ListingRow,
+  current: { price: number | null },
+): DepopPackView | null {
+  const copyBlock = row.copy?.["copyBlock"];
+  if (typeof copyBlock !== "string" || copyBlock.length === 0) return null;
+  const parsed = depopPackSchema.safeParse({
+    description: row.description,
+    hashtags: row.copy?.["hashtags"] ?? [],
+  });
+  if (!parsed.success) return null;
+  return { ...parsed.data, price: current.price, copyBlock };
+}
+
+/**
  * Serve both packs for an item: from persisted rows for the requested review
  * revision when both platforms are valid, otherwise generate and persist the
  * missing draft rows through the Clerk-derived, SECURITY INVOKER RPC. The RPC
@@ -151,7 +181,7 @@ export async function loadOrGenerateExportPacks(
     .select("platform, title, description, copy")
     .eq("item_id", input.itemId)
     .eq("source_review_revision", input.reviewContentRevision)
-    .in("platform", [FACEBOOK_PLATFORM, MERCARI_PLATFORM])
+    .in("platform", [FACEBOOK_PLATFORM, MERCARI_PLATFORM, DEPOP_PLATFORM])
     .order("created_at", { ascending: false });
   if (readErr) {
     throw new Error(`Failed to read export packs: ${readErr.message}`);
@@ -163,12 +193,15 @@ export async function loadOrGenerateExportPacks(
   };
   let storedFacebook: ExportPackView | null = null;
   let storedMercari: ExportPackView | null = null;
+  let storedDepop: DepopPackView | null = null;
   let storedModel: string | undefined;
   for (const row of (rows ?? []) as ListingRow[]) {
     if (row.platform === FACEBOOK_PLATFORM && !storedFacebook) {
       storedFacebook = rowToView(row, current);
     } else if (row.platform === MERCARI_PLATFORM && !storedMercari) {
       storedMercari = rowToView(row, current);
+    } else if (row.platform === DEPOP_PLATFORM && !storedDepop) {
+      storedDepop = rowToDepopView(row, current);
     } else {
       continue;
     }
@@ -180,11 +213,12 @@ export async function loadOrGenerateExportPacks(
     }
   }
 
-  if (storedFacebook && storedMercari) {
+  if (storedFacebook && storedMercari && storedDepop) {
     await assertSellerPriceRevision(supabase, input.itemId, input.reviewRevision);
     return {
       facebook: storedFacebook,
       mercari: storedMercari,
+      depop: storedDepop,
       cached: true,
       model: storedModel,
     };
@@ -223,6 +257,18 @@ export async function loadOrGenerateExportPacks(
             copy: { ...result.mercari.copy.fields, model: result.model },
           },
         ]),
+    ...(storedDepop
+      ? []
+      : [
+          {
+            platform: DEPOP_PLATFORM,
+            // Row identity only — never a Depop-facing field. See
+            // `depopPackToListingCopy`.
+            title: result.depop.copy.title,
+            description: result.depop.pack.description,
+            copy: { ...result.depop.copy.fields, model: result.model },
+          },
+        ]),
   ];
   if (inserts.length > 0) {
     const { error: insertErr } = await supabase.rpc("persist_export_packs", {
@@ -251,6 +297,12 @@ export async function loadOrGenerateExportPacks(
         ...result.mercari.pack,
         price,
         copyBlock: result.mercari.copyBlock,
+      },
+    depop:
+      storedDepop ?? {
+        ...result.depop.pack,
+        price,
+        copyBlock: result.depop.copyBlock,
       },
     cached: false,
     model: result.model,

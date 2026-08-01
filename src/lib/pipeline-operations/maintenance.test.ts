@@ -18,12 +18,17 @@ describe("pipeline maintenance", () => {
         httpRowsDeleted: 6,
         skippedForLock: false,
       }),
+      prepareRawSellerVoiceRetention: vi.fn().mockResolvedValue({
+        rawVoiceJobsQueued: 0,
+        skippedForLock: false,
+      }),
       claimStorageCleanup: vi.fn()
         .mockResolvedValueOnce({
           kind: "claimed",
           job: {
             jobId: "11111111-1111-4111-8111-111111111111",
             leaseToken: "22222222-2222-4222-8222-222222222222",
+            sourceType: "staging",
             photoPaths: [
               "guest_fixture/items/front.enc",
               "user_account/guest-claims/recovery/lease/1",
@@ -42,6 +47,7 @@ describe("pipeline maintenance", () => {
       }),
       completeStorageCleanup: vi.fn().mockResolvedValue(true),
       failStorageCleanup: vi.fn(),
+      recordRawSellerVoiceTranscriptionOutcome: vi.fn().mockResolvedValue(true),
       recordCleanupOutcome: vi.fn().mockResolvedValue(true),
       health: vi.fn().mockResolvedValue({
         queueDepth: 0,
@@ -56,20 +62,26 @@ describe("pipeline maintenance", () => {
         lastCleanupFailedObjects: 0,
       }),
     };
-    const photos = { remove: vi.fn().mockResolvedValue(undefined) };
+    const storage = {
+      remove: vi.fn().mockResolvedValue(undefined),
+      confirmAbsent: vi.fn().mockResolvedValue(undefined),
+    };
 
-    await expect(runPipelineMaintenance({ store, photos })).resolves.toMatchObject({
+    await expect(runPipelineMaintenance({ store, storage })).resolves.toMatchObject({
       claimedStorageJobs: 1,
       deletedObjects: 2,
       failedObjects: 0,
       guestRecoveryExpiry: { expiredCount: 2, skippedForLock: false },
       health: { queueDepth: 0 },
     });
-    expect(photos.remove).toHaveBeenCalledWith([
+    expect(storage.remove).toHaveBeenCalledWith([
       "guest_fixture/items/front.enc",
       "user_account/guest-claims/recovery/lease/1",
     ]);
     expect(store.completeStorageCleanup).toHaveBeenCalledOnce();
+    // Photo cleanup keeps its single-call shape: only raw seller voice pays for
+    // the extra read-back its retention row demands.
+    expect(storage.confirmAbsent).not.toHaveBeenCalled();
     expect(store.recordCleanupOutcome).toHaveBeenCalledWith(
       expect.objectContaining({ deletedObjects: 2, failedObjects: 0 }),
     );
@@ -91,12 +103,17 @@ describe("pipeline maintenance", () => {
         httpRowsDeleted: 0,
         skippedForLock: false,
       }),
+      prepareRawSellerVoiceRetention: vi.fn().mockResolvedValue({
+        rawVoiceJobsQueued: 0,
+        skippedForLock: false,
+      }),
       claimStorageCleanup: vi.fn()
         .mockResolvedValueOnce({
           kind: "claimed",
           job: {
             jobId: "11111111-1111-4111-8111-111111111111",
             leaseToken: "22222222-2222-4222-8222-222222222222",
+            sourceType: "staging",
             photoPaths: ["user/pipeline-staging/a/photo.jpg"],
             attemptCount: 5,
             maxAttempts: 5,
@@ -109,6 +126,7 @@ describe("pipeline maintenance", () => {
       }),
       completeStorageCleanup: vi.fn(),
       failStorageCleanup: vi.fn().mockResolvedValue(true),
+      recordRawSellerVoiceTranscriptionOutcome: vi.fn().mockResolvedValue(true),
       recordCleanupOutcome: vi.fn().mockResolvedValue(true),
       health: vi.fn().mockResolvedValue({
         queueDepth: 1,
@@ -123,11 +141,12 @@ describe("pipeline maintenance", () => {
         lastCleanupFailedObjects: 1,
       }),
     };
-    const photos = {
+    const storage = {
       remove: vi.fn().mockRejectedValue(new Error("provider token=secret-detail")),
+      confirmAbsent: vi.fn().mockResolvedValue(undefined),
     };
 
-    const result = await runPipelineMaintenance({ store, photos });
+    const result = await runPipelineMaintenance({ store, storage });
     expect(result.failedObjects).toBe(1);
     expect(store.failStorageCleanup).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
@@ -136,4 +155,110 @@ describe("pipeline maintenance", () => {
     );
     expect(JSON.stringify(result)).not.toContain("secret-detail");
   });
+
+  it("deletes raw seller voice only after an independent read proves absence", async () => {
+    const store = rawVoiceStore();
+    const storage = {
+      remove: vi.fn().mockResolvedValue(undefined),
+      confirmAbsent: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await runPipelineMaintenance({ store, storage });
+
+    expect(storage.remove).toHaveBeenCalledWith([RAW_VOICE_PATH]);
+    expect(storage.confirmAbsent).toHaveBeenCalledWith([RAW_VOICE_PATH]);
+    expect(store.completeStorageCleanup).toHaveBeenCalledOnce();
+    expect(result.deletedObjects).toBe(1);
+    expect(result.rawSellerVoiceRetention).toEqual({
+      rawVoiceJobsQueued: 1,
+      skippedForLock: false,
+    });
+    // `storageJobsQueued` keeps meaning what `prepare_pipeline_retention`
+    // returned. The ceiling reports its own count instead of inflating a
+    // persisted metric other readers already interpret.
+    expect(store.recordCleanupOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ storageJobsQueued: 0 }),
+    );
+  });
+
+  it("keeps raw seller voice deletion retryable when absence cannot be proven", async () => {
+    const store = rawVoiceStore();
+    const storage = {
+      remove: vi.fn().mockResolvedValue(undefined),
+      confirmAbsent: vi
+        .fn()
+        .mockRejectedValue(new Error("bucket token=secret-detail")),
+    };
+
+    const result = await runPipelineMaintenance({ store, storage });
+
+    expect(store.completeStorageCleanup).not.toHaveBeenCalled();
+    expect(store.failStorageCleanup).toHaveBeenCalledWith(
+      "33333333-3333-4333-8333-333333333333",
+      "44444444-4444-4444-8444-444444444444",
+      "Raw seller voice cleanup failed and will be retried.",
+    );
+    expect(result.deletedObjects).toBe(0);
+    expect(result.failedObjects).toBe(1);
+    expect(JSON.stringify(result)).not.toContain("secret-detail");
+  });
 });
+
+const RAW_VOICE_PATH =
+  "seller/pipeline-staging/9a1c1f2e-0000-4000-8000-000000000001/0/voice-abc.wav";
+
+function rawVoiceStore() {
+  return {
+    expireGuestRecoveries: vi.fn().mockResolvedValue({
+      expiredCount: 0,
+      skippedForLock: false,
+    }),
+    prepareRetention: vi.fn().mockResolvedValue({
+      queueMessagesDeleted: 0,
+      queueArchiveRowsDeleted: 0,
+      stagingIntentsProtected: 0,
+      storageJobsQueued: 0,
+      terminalRunsPruned: 0,
+      cronRowsDeleted: 0,
+      httpRowsDeleted: 0,
+      skippedForLock: false,
+    }),
+    prepareRawSellerVoiceRetention: vi.fn().mockResolvedValue({
+      rawVoiceJobsQueued: 1,
+      skippedForLock: false,
+    }),
+    claimStorageCleanup: vi.fn()
+      .mockResolvedValueOnce({
+        kind: "claimed",
+        job: {
+          jobId: "33333333-3333-4333-8333-333333333333",
+          leaseToken: "44444444-4444-4444-8444-444444444444",
+          sourceType: "raw_voice",
+          photoPaths: [RAW_VOICE_PATH],
+          attemptCount: 1,
+          maxAttempts: 5,
+        },
+      })
+      .mockResolvedValueOnce({ kind: "empty" }),
+    authorizeStorageCleanup: vi.fn().mockResolvedValue({
+      kind: "authorized",
+      photoPaths: [RAW_VOICE_PATH],
+    }),
+    completeStorageCleanup: vi.fn().mockResolvedValue(true),
+    failStorageCleanup: vi.fn().mockResolvedValue(true),
+    recordRawSellerVoiceTranscriptionOutcome: vi.fn().mockResolvedValue(true),
+    recordCleanupOutcome: vi.fn().mockResolvedValue(true),
+    health: vi.fn().mockResolvedValue({
+      queueDepth: 0,
+      oldestJobAgeSeconds: 0,
+      retries: 0,
+      terminalFailures: 0,
+      expiredWorkerLeases: 0,
+      cleanupPending: 0,
+      cleanupDeadLetters: 0,
+      lastCleanupAt: null,
+      lastCleanupDeletedObjects: 0,
+      lastCleanupFailedObjects: 0,
+    }),
+  };
+}

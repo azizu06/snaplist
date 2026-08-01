@@ -225,6 +225,15 @@ const FIXTURE_EXPORT: ExportData = {
       copyBlock:
         "Sony PlayStation 5 Console + DualSense Controller\n\nWhite-and-black PS5 console and matching controller shown together. Shipping available.\n\n#playstation5 #ps5 #gamingconsole",
     },
+    // Depop carries no title — its form has no title field (issue #378).
+    depop: {
+      description:
+        "Sony PlayStation 5. Condition: Good. Details: white-and-black DualSense controller included.",
+      hashtags: ["#sony", "#playstation5", "#ps5"],
+      price: 379,
+      copyBlock:
+        "Sony PlayStation 5. Condition: Good. Details: white-and-black DualSense controller included.\n\n#sony #playstation5 #ps5",
+    },
     cached: true,
     model: "gemini-2.5-flash",
   },

@@ -235,6 +235,71 @@ struct ListingReviewPricing: Codable, Equatable, Sendable {
     }
 }
 
+enum ListingReviewSoldFormat: String, Codable, Equatable, Sendable {
+    case auction
+    case buyItNow = "buy-it-now"
+    case auctionWithBuyItNow = "auction-with-buy-it-now"
+}
+
+enum ListingReviewSoldShipping: Codable, Equatable, Sendable {
+    case free
+    case paid(price: Decimal, currency: String)
+    case pickup
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case type
+        case price
+        case currency
+    }
+
+    private enum Kind: String, Codable {
+        case free
+        case paid
+        case pickup
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.runContractContainer(keyedBy: CodingKeys.self)
+        switch try values.decode(Kind.self, forKey: .type) {
+        case .free:
+            try values.require(
+                !values.contains(.price) && !values.contains(.currency),
+                forKey: .type
+            )
+            self = .free
+        case .paid:
+            let price = try values.decode(Decimal.self, forKey: .price)
+            let currency = try values.decode(String.self, forKey: .currency)
+            try values.require(price.isPositiveCurrency, forKey: .price)
+            try values.require(
+                currency.range(of: #"^[A-Z]{3}$"#, options: .regularExpression) != nil,
+                forKey: .currency
+            )
+            self = .paid(price: price, currency: currency)
+        case .pickup:
+            try values.require(
+                !values.contains(.price) && !values.contains(.currency),
+                forKey: .type
+            )
+            self = .pickup
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .free:
+            try values.encode(Kind.free, forKey: .type)
+        case let .paid(price, currency):
+            try values.encode(Kind.paid, forKey: .type)
+            try values.encode(price, forKey: .price)
+            try values.encode(currency, forKey: .currency)
+        case .pickup:
+            try values.encode(Kind.pickup, forKey: .type)
+        }
+    }
+}
+
 struct ListingReviewSoldMatch: Codable, Equatable, Sendable {
     let id: String
     let sourceURL: URL
@@ -243,6 +308,10 @@ struct ListingReviewSoldMatch: Codable, Equatable, Sendable {
     let currency: String
     let condition: String?
     let soldAt: Int?
+    let photoURL: URL?
+    let size: String?
+    let format: ListingReviewSoldFormat?
+    let shipping: ListingReviewSoldShipping?
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id
@@ -252,6 +321,10 @@ struct ListingReviewSoldMatch: Codable, Equatable, Sendable {
         case currency
         case condition
         case soldAt
+        case photoURL
+        case size
+        case format
+        case shipping
     }
 
     init(from decoder: Decoder) throws {
@@ -263,6 +336,18 @@ struct ListingReviewSoldMatch: Codable, Equatable, Sendable {
         currency = try values.decode(String.self, forKey: .currency)
         condition = try values.decodeRequiredIfPresent(String.self, forKey: .condition)
         soldAt = try values.decodeRequiredIfPresent(Int.self, forKey: .soldAt)
+        photoURL = try values.contains(.photoURL)
+            ? values.decode(URL.self, forKey: .photoURL)
+            : nil
+        size = try values.contains(.size)
+            ? values.decode(String.self, forKey: .size)
+            : nil
+        format = try values.contains(.format)
+            ? values.decode(ListingReviewSoldFormat.self, forKey: .format)
+            : nil
+        shipping = try values.contains(.shipping)
+            ? values.decode(ListingReviewSoldShipping.self, forKey: .shipping)
+            : nil
         try values.require(
             !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && id.utf16.count <= 2_048,
@@ -293,8 +378,23 @@ struct ListingReviewSoldMatch: Codable, Equatable, Sendable {
                 forKey: .soldAt
             )
         }
+        if let photoURL {
+            try values.require(
+                photoURL.scheme?.lowercased() == "https" && photoURL.host != nil
+                    && photoURL.absoluteString.utf16.count <= 2_048,
+                forKey: .photoURL
+            )
+        }
+        if let size {
+            try values.require(
+                !size.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && size.utf16.count <= 120,
+                forKey: .size
+            )
+        }
         try values.require(
-            sourceURL.scheme?.lowercased() == "https" && sourceURL.host != nil,
+            sourceURL.scheme?.lowercased() == "https" && sourceURL.host != nil
+                && sourceURL.absoluteString.utf16.count <= 2_048,
             forKey: .sourceURL
         )
     }

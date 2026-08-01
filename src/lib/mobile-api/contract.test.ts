@@ -328,6 +328,32 @@ describe("SwiftUI mobile HTTP contract", () => {
     );
 
     expect(openApiSchema).toEqual(runtimeSchema);
+
+    const pricingEvidenceRecord = contract.components.schemas
+      .PricingEvidenceRecord as {
+        properties: { photoUrl: { pattern?: string } };
+      };
+    const pricingComparable = contract.components.schemas.PricingComparable as {
+      properties: { photoUrl: { pattern?: string } };
+    };
+    const listingReview = contract.components.schemas.ListingReviewProjection as {
+      properties: {
+        verifiedSoldMatches: {
+          items: { properties: { photoURL: { pattern?: string } } };
+        };
+      };
+    };
+    const photoSchemas = [
+      pricingEvidenceRecord.properties.photoUrl,
+      pricingComparable.properties.photoUrl,
+      listingReview.properties.verifiedSoldMatches.items.properties.photoURL,
+    ] as Array<{ pattern?: string }>;
+    for (const photoSchema of photoSchemas) {
+      expect(photoSchema.pattern).toEqual(expect.any(String));
+      const httpsOnly = new RegExp(photoSchema.pattern!);
+      expect(httpsOnly.test("https://i.ebayimg.com/item.jpg")).toBe(true);
+      expect(httpsOnly.test("http://i.ebayimg.com/item.jpg")).toBe(false);
+    }
   });
 
   it("documents the standard Clerk token checks without inventing an audience", () => {
