@@ -79,9 +79,9 @@ select is(
 );
 select ok(
   public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'rc-original-a:2026-07-01', 'rc-original-a',
-    date_trunc('month', statement_timestamp()), date_trunc('month', statement_timestamp()) + interval '1 month', 'active', null,
-    24, 'rc-event-initial', 'INITIAL_PURCHASE', date_trunc('month', statement_timestamp()) + interval '1 minute'
+    'rc-user-a', 'rc-user-a', 'rc-original-a:p1', 'rc-original-a',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month', 'active', null,
+    24, 'rc-event-initial', 'INITIAL_PURCHASE', date_trunc('month', now()) + interval '1 minute'
   ),
   'an initial purchase creates one verified #168 period'
 );
@@ -93,17 +93,17 @@ select is(
 );
 select ok(
   not public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'rc-original-a:2026-07-01', 'rc-original-a',
-    date_trunc('month', statement_timestamp()), date_trunc('month', statement_timestamp()) + interval '1 month', 'active', null,
-    24, 'rc-event-initial', 'INITIAL_PURCHASE', date_trunc('month', statement_timestamp()) + interval '1 minute'
+    'rc-user-a', 'rc-user-a', 'rc-original-a:p1', 'rc-original-a',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month', 'active', null,
+    24, 'rc-event-initial', 'INITIAL_PURCHASE', date_trunc('month', now()) + interval '1 minute'
   ),
   'an exact duplicate provider delivery is idempotent'
 );
 select ok(
   public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'rc-original-a:2026-07-01', 'rc-original-a',
-    date_trunc('month', statement_timestamp()), date_trunc('month', statement_timestamp()) + interval '1 month', 'grace', date_trunc('month', statement_timestamp()) + interval '1 month 7 days',
-    24, 'rc-event-grace', 'BILLING_ISSUE', date_trunc('month', statement_timestamp()) + interval '1 month 1 minute'
+    'rc-user-a', 'rc-user-a', 'rc-original-a:p1', 'rc-original-a',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month', 'grace', date_trunc('month', now()) + interval '1 month 7 days',
+    24, 'rc-event-grace', 'BILLING_ISSUE', date_trunc('month', now()) + interval '1 month 1 minute'
   ),
   'verified grace advances the same period without resetting allowance'
 );
@@ -115,9 +115,9 @@ select is(
 );
 select ok(
   not public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'rc-original-a:2026-07-01', 'rc-original-a',
-    date_trunc('month', statement_timestamp()), date_trunc('month', statement_timestamp()) + interval '1 month', 'expired', null,
-    24, 'rc-event-late', 'EXPIRATION', date_trunc('month', statement_timestamp()) + interval '1 month' - interval '1 minute'
+    'rc-user-a', 'rc-user-a', 'rc-original-a:p1', 'rc-original-a',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month', 'expired', null,
+    24, 'rc-event-late', 'EXPIRATION', date_trunc('month', now()) + interval '1 month' - interval '1 minute'
   ),
   'late out-of-order lifecycle delivery cannot roll state backward'
 );
@@ -160,7 +160,7 @@ select throws_ok(
   $$
     select public.require_revenuecat_reconciliation(
       'rc-user-b', 'rc-user-b', 'rc-original-a', 'rc-cross-tenant-reconcile',
-      'PRODUCT_CHANGE', date_trunc('month', statement_timestamp()) + interval '1 month 1 day'
+      'PRODUCT_CHANGE', date_trunc('month', now()) + interval '1 month 1 day'
     )
   $$,
   '23514',
@@ -171,7 +171,7 @@ select throws_ok(
   $$
     select public.require_revenuecat_reconciliation(
       'rc-user-b', 'rc-user-a', 'rc-original-b', 'rc-original-user-mismatch',
-      'PRODUCT_CHANGE', date_trunc('month', statement_timestamp()) + interval '1 month 1 day'
+      'PRODUCT_CHANGE', date_trunc('month', now()) + interval '1 month 1 day'
     )
   $$,
   '23514',
@@ -184,15 +184,15 @@ select * from public.resolve_revenuecat_customer(
   'rc-user-late', 'rc-user-late', 'rc-original-late'
 );
 select public.record_verified_revenuecat_ai_item_period(
-  'rc-user-late', 'rc-user-late', 'rc-original-late:2026-07-01',
-  'rc-original-late', date_trunc('month', statement_timestamp()), date_trunc('month', statement_timestamp()) + interval '1 month',
+  'rc-user-late', 'rc-user-late', 'rc-original-late:p1',
+  'rc-original-late', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
   'active', null, 2, 'rc-late-active', 'INITIAL_PURCHASE',
-  date_trunc('month', statement_timestamp()) + interval '2 minutes'
+  date_trunc('month', now()) + interval '2 minutes'
 );
 select ok(
   public.require_revenuecat_reconciliation(
     'rc-user-late', 'rc-user-late', 'rc-original-late', 'rc-late-reconcile',
-    'PRODUCT_CHANGE', date_trunc('month', statement_timestamp()) + interval '1 minute'
+    'PRODUCT_CHANGE', date_trunc('month', now()) + interval '1 minute'
   ),
   'a late ambiguous event is recorded for explicit reconciliation'
 );
@@ -211,9 +211,9 @@ select is(
 select throws_ok(
   $$
     select public.record_verified_revenuecat_ai_item_period(
-      'rc-user-late', 'rc-user-late', 'rc-original-late:2026-08-01',
-      'rc-original-late', date_trunc('month', statement_timestamp()) + interval '1 month', date_trunc('month', statement_timestamp()) + interval '2 months',
-      'active', null, 2, 'rc-late-renewal', 'RENEWAL', date_trunc('month', statement_timestamp()) + interval '1 month 1 minute'
+      'rc-user-late', 'rc-user-late', 'rc-original-late:p2',
+      'rc-original-late', date_trunc('month', now()) + interval '1 month', date_trunc('month', now()) + interval '2 months',
+      'active', null, 2, 'rc-late-renewal', 'RENEWAL', date_trunc('month', now()) + interval '1 month 1 minute'
     )
   $$,
   '23514',
@@ -242,10 +242,10 @@ select * from public.resolve_revenuecat_customer(
 select throws_ok(
   $$
     select public.record_verified_revenuecat_ai_item_period(
-      'rc-user-stripe', 'rc-user-stripe', 'rc-original-stripe:2026-07-01',
-      'rc-original-stripe', date_trunc('month', statement_timestamp()), date_trunc('month', statement_timestamp()) + interval '1 month',
+      'rc-user-stripe', 'rc-user-stripe', 'rc-original-stripe:p1',
+      'rc-original-stripe', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
       'active', null, 24, 'rc-stripe-before-reconcile', 'INITIAL_PURCHASE',
-      date_trunc('month', statement_timestamp()) + interval '1 minute'
+      date_trunc('month', now()) + interval '1 minute'
     )
   $$,
   '23514',
@@ -271,10 +271,10 @@ select ok(
 );
 select ok(
   public.record_verified_revenuecat_ai_item_period(
-    'rc-user-stripe', 'rc-user-stripe', 'rc-original-stripe:2026-07-01',
-    'rc-original-stripe', date_trunc('month', statement_timestamp()), date_trunc('month', statement_timestamp()) + interval '1 month',
+    'rc-user-stripe', 'rc-user-stripe', 'rc-original-stripe:p1',
+    'rc-original-stripe', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
     'active', null, 24, 'rc-stripe-after-reconcile', 'INITIAL_PURCHASE',
-    date_trunc('month', statement_timestamp()) + interval '1 minute'
+    date_trunc('month', now()) + interval '1 minute'
   ),
   'verified native allowance starts only after explicit reconciliation'
 );
@@ -300,15 +300,15 @@ select * from public.resolve_revenuecat_customer(
   'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger'
 );
 select public.record_verified_revenuecat_ai_item_period(
-  'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger:2026-07-01',
-  'rc-original-ledger', date_trunc('month', statement_timestamp()), date_trunc('month', statement_timestamp()) + interval '1 month',
+  'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger:p1',
+  'rc-original-ledger', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
   'active', null, 2, 'rc-ledger-active', 'INITIAL_PURCHASE',
-  date_trunc('month', statement_timestamp()) + interval '1 minute'
+  date_trunc('month', now()) + interval '1 minute'
 );
 select ok(
   public.require_revenuecat_reconciliation(
     'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger',
-    'rc-ledger-ambiguous', 'PRODUCT_CHANGE', date_trunc('month', statement_timestamp()) + interval '30 seconds'
+    'rc-ledger-ambiguous', 'PRODUCT_CHANGE', date_trunc('month', now()) + interval '30 seconds'
   ),
   'ambiguous delivery preserves the verified ledger while blocking period advance'
 );
