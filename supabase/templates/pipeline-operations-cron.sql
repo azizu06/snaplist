@@ -80,6 +80,39 @@ select cron.schedule(
   $maintenance$
 );
 
+-- Issue #524. The included-offer redemption queue has exactly one writer, so
+-- this advances one head claim per tick and no more; running it concurrently
+-- would defeat the fence rather than drain it faster. Until a tick runs, no
+-- claim ever reaches `device_token_required`, so the promotion is unreachable
+-- however correct the rest of the fence is — this schedule is what makes it
+-- obtainable. A seller polls their claim while waiting, so this cadence bounds
+-- how long that wait can be; an owner who wants it tighter can use pg_cron's
+-- sub-minute interval syntax instead of the cron expression.
+select cron.schedule(
+  'snaplist-included-offer-worker',
+  '* * * * *',
+  $included_offer$
+    select net.http_post(
+      url := rtrim((
+        select decrypted_secret
+        from vault.decrypted_secrets
+        where name = 'snaplist_pipeline_origin'
+      ), '/') || '/api/internal/included-offer-worker',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer ' || (
+          select decrypted_secret
+          from vault.decrypted_secrets
+          where name = 'snaplist_pipeline_cron_secret'
+        )
+      ),
+      body := '{}'::jsonb,
+      timeout_milliseconds := 290000
+    );
+  $included_offer$
+);
+
 -- Safe disable/rollback (run manually; leaves queue/run truth intact):
 -- select cron.unschedule('snaplist-pipeline-worker');
 -- select cron.unschedule('snaplist-pipeline-maintenance');
+-- select cron.unschedule('snaplist-included-offer-worker');
