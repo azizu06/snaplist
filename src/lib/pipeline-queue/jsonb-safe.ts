@@ -8,7 +8,7 @@
  */
 
 /** PostgreSQL rejects this inside `jsonb` text (SQLSTATE 22P05). */
-const NUL = String.fromCodePoint(0);
+const NUL = String.fromCharCode(0);
 
 /**
  * `toWellFormed` replaces lone UTF-16 surrogates with U+FFFD — PostgREST refuses
@@ -24,6 +24,16 @@ function repairString(value: string): string {
 /**
  * Returns `value` with every string it contains — including object keys — made
  * safe to persist as `jsonb`. Non-string leaves are returned untouched.
+ *
+ * Expects plain JSON: the checkpoint stages are Zod-validated and every leaf
+ * originates as parsed model output, so only objects, arrays, strings, numbers,
+ * booleans and null arrive here. A `Date`, `Map`, or anything relying on
+ * `toJSON` would be walked as a plain object and flattened — do not put one in
+ * the open `listingCopySchema.fields` record.
+ *
+ * Repairing a key can collide with a sibling (`"a<NUL>b"` and `"ab"` both become
+ * `"ab"`). The later entry wins. That is deterministic and strictly better than
+ * dead-lettering the run, which is what the unrepaired key would have caused.
  */
 export function toJsonbSafe(value: unknown): unknown {
   if (typeof value === "string") return repairString(value);

@@ -75,6 +75,11 @@ export const pipelineWorkerCheckpointSchema = z
  * content `jsonb` refuses to store. Without it the RPC returns a generic error,
  * the worker classifies it as retryable, and the run re-runs the paid
  * identification stage into the same rejection until it dead-letters.
+ *
+ * Repair runs ahead of `.strict()`, so an unsafe *top-level* key would be
+ * repaired into a recognized one rather than rejected as unrecognized. The
+ * write input is assembled from typed stage objects, never raw model JSON, so
+ * no caller can reach that.
  */
 export const pipelineWorkerCheckpointWriteSchema = z.preprocess(
   toJsonbSafe,

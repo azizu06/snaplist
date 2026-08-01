@@ -200,6 +200,14 @@ export function createSupabasePipelineWorkerStore(
       return pipelineWorkerCheckpointSchema.parse(rpcData("checkpoint", result));
     },
 
+    /**
+     * `p_persistence` needs no separate `jsonb` repair, but only transitively:
+     * the durable processor assembles the result from checkpoint content it read
+     * back from `checkpoint_pipeline_run` (already repaired at the write
+     * boundary), and `assemble` is pure recomposition that introduces no new
+     * model strings. A future producer that reaches this RPC with fresh model
+     * output would need its own pass.
+     */
     async complete(input) {
       const parsed = z
         .object({
