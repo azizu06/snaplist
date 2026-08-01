@@ -244,6 +244,59 @@ final class ListingReviewStoreTests: XCTestCase {
         )
     }
 
+    func testAReviewSurvivesItsOwnEncoderWithEveryFactPopulated() throws {
+        let snapshot = try Self.makeSnapshot(soldMatches: 2)
+
+        // Hand-written encoders drop a field the day someone adds one to the
+        // read contract and forgets the other half. Re-reading the app's own
+        // output through the same strict contract is what notices.
+        let restored = try JSONDecoder().decode(
+            ListingReviewResult.self,
+            from: JSONEncoder().encode(snapshot)
+        )
+
+        XCTAssertEqual(restored, snapshot)
+        XCTAssertNil(restored.soldEvidenceCopy)
+        XCTAssertEqual(restored.verifiedSoldMatches.first?.title, nil)
+        XCTAssertEqual(restored.pricing.sellerPriceOverride, nil)
+    }
+
+    func testRelaunchRestoresADraftThroughTheOnDiskRecord() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot), .success(snapshot)]
+        )
+
+        let first = makeStore(
+            service: service,
+            persistence: LocalListingReviewDraftPersistence(rootDirectory: root)
+        )
+        let firstOpened = await first.open(snapshot)
+        XCTAssertTrue(firstOpened)
+        await first.setDescription("Locally staged description")
+        XCTAssertTrue(first.isDirty)
+
+        // A relaunch keeps the file and nothing else, so the record has to
+        // survive a round trip through the app's own encoder. The fixture
+        // carries no seller price override, which is the ordinary shape of a
+        // review the seller has not repriced yet.
+        let relaunched = makeStore(
+            service: service,
+            persistence: LocalListingReviewDraftPersistence(rootDirectory: root)
+        )
+        let relaunchedOpened = await relaunched.open(snapshot)
+        XCTAssertTrue(relaunchedOpened)
+        XCTAssertEqual(
+            relaunched.draft?.description,
+            "Locally staged description"
+        )
+        XCTAssertTrue(relaunched.isDirty)
+    }
+
     func testSemanticRevertBecomesCleanAndRelaunchRestoresDirtyDraft() async throws {
         let snapshot = try Self.makeSnapshot(
             photoURL: "https://media.snaplist.dev/items/expired-550-cover.jpg"
@@ -491,8 +544,23 @@ final class ListingReviewStoreTests: XCTestCase {
         revision: String = "55000000-0000-4000-8000-000000000004",
         title: String = "Sony WH-1000XM4 Noise-Canceling Headphones",
         photoURL: String =
-            "https://media.snaplist.dev/items/550-cover.jpg"
+            "https://media.snaplist.dev/items/550-cover.jpg",
+        soldMatches: Int = 0
     ) throws -> ListingReviewResult {
+        // One match carries every fact and one carries none, so a payload with
+        // comps behind it exercises both shapes the read contract allows.
+        let matches: [[String: Any]] = (0..<soldMatches).map { index in
+            let bare = index == 0
+            return [
+                "id": "sold-\(index + 1)",
+                "sourceURL": "https://example.com/sold/\(index + 1)",
+                "title": bare ? NSNull() as Any : "Sony WH-1000XM4" as Any,
+                "soldPrice": 140 + index,
+                "currency": "USD",
+                "condition": bare ? NSNull() as Any : "used" as Any,
+                "soldAt": bare ? NSNull() as Any : 1_750_000_000 as Any,
+            ]
+        }
         let object: [String: Any] = [
             "schemaVersion": 1,
             "binding": [
@@ -528,9 +596,11 @@ final class ListingReviewStoreTests: XCTestCase {
                 "effectivePrice": 145,
             ],
             "evidenceAsOf": "2026-07-29T12:03:00.000Z",
-            "verifiedSoldMatches": [],
+            "verifiedSoldMatches": matches,
             "startingPriceCopy": "Starting price estimate",
-            "soldEvidenceCopy": "No verified sold matches found.",
+            "soldEvidenceCopy": matches.isEmpty
+                ? "No verified sold matches found." as Any
+                : NSNull() as Any,
         ]
         return try JSONDecoder().decode(
             ListingReviewResult.self,
