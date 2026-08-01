@@ -1060,11 +1060,14 @@ begin
     limit 1
     for update;
 
-    -- A device-denied seller is told about the fence rather than about the
-    -- subscription, whatever the paid period's own state turns out to be: the
-    -- included run is what they are entitled to and cannot reach, and the
-    -- support override — not a purchase, and not waiting for a monthly reset —
-    -- is the remedy that would give it back.
+    -- A seller with no paid period at all is told about the fence rather than
+    -- about the subscription, because the included run is what they are
+    -- entitled to and cannot reach. That override stops here. Every
+    -- authenticated seller who has not consumed the promotion is device-denied
+    -- by construction — a web seller can never consume it — so carrying the
+    -- override into the branches below would tell a paying subscriber whose
+    -- monthly allowance is exhausted to go buy the subscription they already
+    -- have. Those branches report their own true reason.
     if not found then
       raise exception using
         errcode = 'P0001',
@@ -1083,10 +1086,7 @@ begin
     ) then
       raise exception using
         errcode = 'P0001',
-        message = case when v_device_denied
-          then 'AI item credit unavailable: device-fence-required'
-          else 'AI item credit unavailable: storekit-entitlement-unavailable'
-        end;
+        message = 'AI item credit unavailable: storekit-entitlement-unavailable';
     end if;
 
     select count(*) into v_used
@@ -1102,10 +1102,7 @@ begin
     if v_used >= v_period.allowance then
       raise exception using
         errcode = 'P0001',
-        message = case when v_device_denied
-          then 'AI item credit unavailable: device-fence-required'
-          else 'AI item credit unavailable: monthly-allowance-reached'
-        end;
+        message = 'AI item credit unavailable: monthly-allowance-reached';
     end if;
   elsif v_claim.claim_id is not null then
     update public.included_offer_device_claims

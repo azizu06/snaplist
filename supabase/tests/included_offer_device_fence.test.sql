@@ -146,9 +146,10 @@ select ok(
 );
 
 -- The promotion is denied, not the account: only once the paid period is also
--- exhausted does the seller hit a wall, and the wall names the fence rather
--- than the allowance, because the support override is the remedy that would
--- actually give this seller their included run back.
+-- exhausted does the seller hit a wall, and that wall names the allowance the
+-- seller actually ran out of. Device denial must not repaint a paid-path
+-- refusal, or a subscriber who exhausted the month is told to buy the
+-- subscription they are already paying for.
 select throws_ok(
   $$
     select *
@@ -167,8 +168,8 @@ select throws_ok(
     )
   $$,
   'P0001',
-  'AI item credit unavailable: device-fence-required',
-  'an exhausted paid period reports the fence, whose override is the remedy'
+  'AI item credit unavailable: monthly-allowance-reached',
+  'an exhausted paid period reports its own allowance, not the device fence'
 );
 
 select throws_ok(

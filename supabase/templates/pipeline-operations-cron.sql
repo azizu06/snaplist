@@ -80,11 +80,14 @@ select cron.schedule(
   $maintenance$
 );
 
--- Issue #524. The included-offer redemption queue has exactly one writer, so
--- this advances one head claim per tick and no more; running it concurrently
--- would defeat the fence rather than drain it faster. Until a tick runs, no
--- claim ever reaches `device_token_required`, so the promotion is unreachable
--- however correct the rest of the fence is — this schedule is what makes it
+-- Issue #524. The included-offer redemption queue has exactly one writer, and
+-- this advances one head claim per tick and no more. What enforces that is the
+-- singleton row behind `acquire_included_offer_writer_lease`, not this
+-- schedule: a minute cadence against a 290s timeout means pg_cron can and will
+-- start a tick while the last one is still running, and the extra tick simply
+-- fails to take the lease and returns. Until some tick runs, no claim ever
+-- reaches `device_token_required`, so the promotion is unreachable however
+-- correct the rest of the fence is — this schedule is what makes it
 -- obtainable. A seller polls their claim while waiting, so this cadence bounds
 -- how long that wait can be; an owner who wants it tighter can use pg_cron's
 -- sub-minute interval syntax instead of the cron expression.
