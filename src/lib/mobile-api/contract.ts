@@ -2,6 +2,7 @@ import { z } from "zod";
 import { homeProjectionSchema } from "@/lib/home/projection";
 import { pipelineConsumerSummarySchema } from "./worker-summary";
 import { guestClaimTerminalOutcomeSchema } from "@/lib/guest-recovery/service";
+import { includedOfferOutcomeSchema } from "@/lib/included-offer-fence/contract";
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import { listingReviewProjectionSchema } from "@/lib/listing-review";
 import { listingReviewSaveReceiptSchema } from "@/lib/listing-review/save";
@@ -250,4 +251,8 @@ export const workerSummaryEnvelopeSchema = z
 
 export const guestClaimEnvelopeSchema = z
   .object({ data: guestClaimTerminalOutcomeSchema, meta: apiMetaSchema })
+  .strict();
+
+export const includedOfferEnvelopeSchema = z
+  .object({ data: includedOfferOutcomeSchema, meta: apiMetaSchema })
   .strict();

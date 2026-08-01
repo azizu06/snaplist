@@ -2,6 +2,23 @@ begin;
 
 select plan(12);
 
+-- Issue #524 fences the included first AI run by physical device, so every
+-- non-guest tenant here needs the reserved claim a real redemption would have
+-- produced before it can stage a run.
+insert into public.included_offer_device_claims
+  (claim_id, user_id, idempotency_key, app_attest_key_id, state)
+select
+  gen_random_uuid(),
+  tenant,
+  gen_random_uuid()::text,
+  'pgtap-key-' || tenant,
+  'reserved'
+from unnest(array[
+  'user_test_mobile_submission_five',
+  'user_test_mobile_submission_six',
+  'user_test_batch_stays_four'
+]) as tenant;
+
 select set_config(
   'request.jwt.claims',
   '{"role":"service_role","sub":"mobile-submission-five-photos"}',

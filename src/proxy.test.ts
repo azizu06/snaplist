@@ -104,6 +104,32 @@ describe("auth proxy", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
+  it("lets an authorized included-offer-worker scheduler request reach its route handler", async () => {
+    process.env.CRON_SECRET = "configured-cron-secret";
+    const request = new NextRequest(
+      "https://snaplist.test/api/internal/included-offer-worker",
+      {
+        headers: { authorization: "Bearer configured-cron-secret" },
+      },
+    );
+
+    const response = await proxy(request, {} as NextFetchEvent);
+
+    if (!response) {
+      throw new Error("Expected the proxy to return a response");
+    }
+
+    // Issue #524's redemption queue has exactly one writer, and only this
+    // worker moves a claim to `awaiting_device_token`. A login redirect here
+    // does not merely slow the fence down: no seller is ever asked for a
+    // DeviceCheck token, so the included first AI run becomes unobtainable
+    // while the trigger keeps requiring a reserved claim. The route's own
+    // handler test cannot see this — it invokes the handler directly.
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   // The owner-only pg_cron template is the hosted activation path, so every
   // route it schedules has to survive this proxy. Deriving the list from the
   // template rather than restating it means a newly scheduled route cannot be
@@ -127,6 +153,7 @@ describe("auth proxy", () => {
       expect.arrayContaining([
         "/api/internal/pipeline-worker",
         "/api/internal/pipeline-maintenance",
+        "/api/internal/included-offer-worker",
       ]),
     );
 

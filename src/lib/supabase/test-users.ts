@@ -108,8 +108,35 @@ export async function provisionClerkTestUser(
   return { id, client };
 }
 
+/**
+ * Satisfies the #524 device fence for a test account.
+ *
+ * Since #524, reserving the *included* first AI run requires a durably reserved
+ * account/device claim, so a test that expects a free run must say which
+ * account has passed the fence. Call this only where the free run is incidental
+ * setup; a test that means to prove the fence must not call it.
+ */
+export async function grantIncludedOfferDeviceClaim(
+  admin: SupabaseClient,
+  userId: string,
+): Promise<void> {
+  // Through the audited RPC, not a table insert: no key holds direct write
+  // authority on the fence, so the fixture cannot mint a claim the product
+  // could not have minted itself.
+  const { error } = await admin.rpc("begin_included_offer_claim", {
+    p_app_attest_key_id: `fixture-key-${userId}`,
+    p_claim_id: crypto.randomUUID(),
+    p_idempotency_key: crypto.randomUUID(),
+    p_state: "reserved",
+    p_user_id: userId,
+  });
+  if (error) throw new Error(error.message);
+}
+
 /** Tables that carry user_id, children-first so item FKs never block deletes. */
 const OWNED_TABLES = [
+  "included_offer_device_claims",
+  "included_offer_support_overrides",
   "billing_checkout_reservations",
   "ai_item_credit_reservations",
   "ai_item_allowance_periods",

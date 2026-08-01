@@ -12,6 +12,7 @@ import {
 } from "@/lib/pipeline-queue/worker-store";
 import {
   cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
@@ -176,6 +177,13 @@ beforeAll(async () => {
       provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "credit_lifecycle"),
       provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "credit_legacy"),
     ]);
+  // #524 fences the included run on the device, not the ledger. These tests
+  // are about the ledger, so every tenant starts already past the fence.
+  await Promise.all(
+    [freeUser, concurrentUser, paidUser, stateUser, lifecycleUser, legacyUser].map(
+      (user) => grantIncludedOfferDeviceClaim(admin, user.id),
+    ),
+  );
 });
 
 afterAll(async () => {

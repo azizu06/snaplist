@@ -112,12 +112,50 @@ describe("lean-MVP release retention contract", () => {
       "app-attest-challenges",
       "app-attest-current-keys",
       "ai-item-credits",
+      "included-offer-device-claims",
+      "included-offer-support-overrides",
+      "included-offer-apple-device-bit",
       "mobile-ebay-oauth-session-state",
       "ebay-connections",
       "ebay-publish-receipts",
       "clerk-identity",
       "apple-revenuecat-references",
+      "account-erasure-receipt",
     ]);
+  });
+
+  // Account erasure keeps exactly one row after the account is gone, so the
+  // matrix has to say so. The risk it carries is not the retention but the
+  // identifiers: a receipt that outlived an account while still holding the
+  // Clerk id would be the erasure quietly failing at its own promise.
+  it("holds the erasure receipt to a scrubbed, bounded, self-pruned disposition", () => {
+    const receipt = contract.data.find(({ id }) => id === "account-erasure-receipt");
+    const disposition = receipt?.dispositions[0];
+
+    expect(disposition?.treatment).toBe("delete");
+    expect(disposition?.owner).toBe("snaplist-platform");
+    expect(disposition?.maximumRetention).toMatch(/^30 days after the erasure reaches a completed status/);
+    expect(disposition?.maximumRetention).toMatch(
+      /raw Clerk user id, RevenueCat app user ids, SnapList user id, and Idempotency-Key are removed at the moment a completed status is written/,
+    );
+
+    // The row promised a scrub the code does not perform for an erasure that is
+    // still unfinished — `deletion_needs_attention` keeps the raw identifiers
+    // because resuming needs them. Say that, rather than let the matrix claim a
+    // guarantee one of the five states does not honour.
+    expect(disposition?.maximumRetention).toMatch(
+      /still unfinished, including one parked in deletion_needs_attention, keeps those identifiers/,
+    );
+
+    // The named executor must be a job that actually exists and actually runs,
+    // or the completion proof is a sentence rather than a proof.
+    const migration = readFileSync(
+      resolve("supabase/migrations/20260801120000_durable_account_erasure.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("private.prune_account_erasure_receipts");
+    expect(migration).toContain("snaplist-account-erasure-receipt-retention-daily");
+    expect(migration).toMatch(/interval '30 days'/);
   });
 
   it("defines one exact mobile eBay OAuth session/state disposition", () => {

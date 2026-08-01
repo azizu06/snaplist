@@ -2,6 +2,21 @@ begin;
 
 select plan(45);
 
+-- Issue #524 fences the included first AI run by physical device, so every
+-- non-guest tenant here needs the reserved claim a real redemption would have
+-- produced before it can stage a run.
+insert into public.included_offer_device_claims
+  (claim_id, user_id, idempotency_key, app_attest_key_id, state)
+select
+  gen_random_uuid(),
+  tenant,
+  gen_random_uuid()::text,
+  'pgtap-key-' || tenant,
+  'reserved'
+from unnest(array[
+  'rc-user-ledger'
+]) as tenant;
+
 select ok(
   to_regclass('public.revenuecat_customer_bindings') is not null,
   'RevenueCat customer bindings exist'
@@ -299,6 +314,9 @@ select * from public.bind_revenuecat_customer('rc-user-ledger', 'rc-user-ledger'
 select * from public.resolve_revenuecat_customer(
   'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger'
 );
+-- The reservation below only lands while this StoreKit span actually covers
+-- now. Every span in this file is anchored to date_trunc('month', now()) for
+-- that reason -- now() is frozen at BEGIN, so all of them agree on one instant.
 select public.record_verified_revenuecat_ai_item_period(
   'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger:p1',
   'rc-original-ledger', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',

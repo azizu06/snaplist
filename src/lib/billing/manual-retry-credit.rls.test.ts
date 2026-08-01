@@ -10,6 +10,7 @@ import {
 } from "@/lib/pipeline-queue/worker-store";
 import {
   cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
@@ -528,6 +529,19 @@ beforeAll(async () => {
       "manual_retry_credit_lock_race",
     ),
   ]);
+  // Retry accounting, not the device fence (#524): every tenant here starts
+  // already past it so the included first run can reserve.
+  await Promise.all(
+    [
+      seller,
+      otherSeller,
+      concurrentSeller,
+      upgradeSeller,
+      upgradeConflictSeller,
+      upgradeOverlapSeller,
+      retryProjectionSeller,
+    ].map((user) => grantIncludedOfferDeviceClaim(admin, user.id)),
+  );
 });
 
 afterAll(async () => {

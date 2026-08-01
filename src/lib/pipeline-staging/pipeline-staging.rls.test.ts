@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
@@ -61,6 +62,13 @@ beforeAll(async () => {
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "pipeline_mixed_a"),
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "pipeline_mixed_b"),
   ]);
+  // Staging is not the device fence's seam; these tenants only need to have
+  // passed it so their included first run can reserve at all (#524).
+  await Promise.all(
+    [userA, userB, mixedUserA, mixedUserB].map((user) =>
+      grantIncludedOfferDeviceClaim(admin, user.id),
+    ),
+  );
 });
 
 afterAll(async () => {

@@ -80,6 +80,43 @@ select cron.schedule(
   $maintenance$
 );
 
+-- Issue #524. The included-offer redemption queue has exactly one writer, and
+-- this advances one head claim per tick and no more. What enforces that is the
+-- singleton row behind `acquire_included_offer_writer_lease`, not this
+-- schedule: a minute cadence against a 290s timeout means pg_cron can and will
+-- start a tick while the last one is still running, and the extra tick simply
+-- fails to take the lease and returns. Until some tick runs, no claim ever
+-- reaches `awaiting_device_token`, so the promotion stays unreachable however
+-- correct the rest of the fence is — this schedule is one of the two things
+-- that make it obtainable, the other being a seller-facing caller for the
+-- redemption client. A seller polls their claim while waiting, so this bounds
+-- how long that wait can be; an owner who wants it tighter can use pg_cron's
+-- sub-minute interval syntax instead of the cron expression.
+select cron.schedule(
+  'snaplist-included-offer-worker',
+  '* * * * *',
+  $included_offer$
+    select net.http_post(
+      url := rtrim((
+        select decrypted_secret
+        from vault.decrypted_secrets
+        where name = 'snaplist_pipeline_origin'
+      ), '/') || '/api/internal/included-offer-worker',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer ' || (
+          select decrypted_secret
+          from vault.decrypted_secrets
+          where name = 'snaplist_pipeline_cron_secret'
+        )
+      ),
+      body := '{}'::jsonb,
+      timeout_milliseconds := 290000
+    );
+  $included_offer$
+);
+
 -- Safe disable/rollback (run manually; leaves queue/run truth intact):
 -- select cron.unschedule('snaplist-pipeline-worker');
 -- select cron.unschedule('snaplist-pipeline-maintenance');
+-- select cron.unschedule('snaplist-included-offer-worker');
