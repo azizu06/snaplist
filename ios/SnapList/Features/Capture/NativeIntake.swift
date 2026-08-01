@@ -1480,9 +1480,12 @@ actor NativeIntake {
                 // through a successful read, so no path can surface, match, or
                 // return one to the seller. What it can still do is hold raw
                 // voice bytes with no deadline to read, and ADR-0012 caps
-                // those at 24 hours. Deletion is bounded to entries inside
-                // this principal's own store, under its validated storage
-                // anchor. Only schema version 1 is ever written, so if a
+                // those at 24 hours. Deletion is bounded to a deferred entry
+                // directory inside a root this app owns, checked against that
+                // root's own storage anchor. That reaches every principal's
+                // residual store rather than only the current one, which is
+                // what a 24-hour cap has to do to hold. Only schema version 1
+                // is ever written, so if a
                 // second version is added its writer must land before this
                 // sweep learns to tolerate it.
                 for entryRoot in expired + listing.unreadableRoots {
