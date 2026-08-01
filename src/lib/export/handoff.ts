@@ -1,0 +1,173 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { DEPOP_PLATFORM, FACEBOOK_PLATFORM, MERCARI_PLATFORM } from "./schema";
+
+/**
+ * Assisted-export handoff seam (issue #378).
+ *
+ * Facebook Marketplace, Mercari, and Depop are ASSISTED destinations: SnapList
+ * prepares platform-appropriate text and photos, the seller finishes the form.
+ * SnapList cannot observe those destinations, so nothing in this module may
+ * infer delivery. Opening the app, dismissing the share sheet, copying the
+ * text, and saving the photos all prove NOTHING — only the seller's explicit
+ * confirmation writes `shared`, and the database refuses that write when the
+ * pack is stale or the destination never received a handoff.
+ *
+ * Every mutation goes through the guarded RPCs rather than a table write, so a
+ * client can neither skip the revision guard nor mint a second receipt on
+ * retry. Reads go through RLS on the caller's user-scoped client.
+ */
+
+export const ASSISTED_EXPORT_PLATFORMS = [
+  FACEBOOK_PLATFORM,
+  MERCARI_PLATFORM,
+  DEPOP_PLATFORM,
+] as const;
+
+export type AssistedExportPlatform = (typeof ASSISTED_EXPORT_PLATFORMS)[number];
+
+/**
+ * What the seller is told about one destination. Deliberately only two values:
+ * SnapList knows it prepared the pack, and it knows whether the seller said
+ * they posted it. `published`, `listed`, `sold`, `synced`, and `verified` are
+ * not knowable and are therefore not representable.
+ */
+export type ExportHandoffState = "prepared" | "shared";
+
+export interface ExportHandoffView {
+  platform: AssistedExportPlatform;
+  state: ExportHandoffState;
+  /** When the seller handed the pack over; null when they have not yet. */
+  handedOffAt: string | null;
+  /** When the seller confirmed they posted it; null until they do. */
+  sharedAt: string | null;
+}
+
+export type ExportHandoffsView = Record<
+  AssistedExportPlatform,
+  ExportHandoffView
+>;
+
+export interface ExportHandoffRead {
+  itemId: string;
+  /** The content revision the packs were built at. */
+  reviewContentRevision: string;
+}
+
+export interface ExportHandoffMutation extends ExportHandoffRead {
+  platform: AssistedExportPlatform;
+  /** The full review revision the seller was looking at. */
+  reviewRevision: string;
+}
+
+interface HandoffRow {
+  platform: string;
+  handoff_at: string | null;
+  shared_at: string | null;
+}
+
+function preparedView(platform: AssistedExportPlatform): ExportHandoffView {
+  return { platform, state: "prepared", handedOffAt: null, sharedAt: null };
+}
+
+function assertAssisted(platform: AssistedExportPlatform): void {
+  if (!(ASSISTED_EXPORT_PLATFORMS as readonly string[]).includes(platform)) {
+    throw new Error(
+      `${platform} is not an assisted export destination — it never receives a handoff receipt.`,
+    );
+  }
+}
+
+/**
+ * The handoff state of all three destinations for one pack revision. A
+ * destination with no row is `prepared`, not missing or failed: SnapList did
+ * prepare the pack, the seller simply has not confirmed anything yet.
+ */
+export async function loadExportHandoffs(
+  supabase: SupabaseClient,
+  input: ExportHandoffRead,
+): Promise<ExportHandoffsView> {
+  const { data, error } = await supabase
+    .from("export_handoffs")
+    .select("platform, handoff_at, shared_at")
+    .eq("item_id", input.itemId)
+    .eq("source_review_revision", input.reviewContentRevision);
+  if (error) {
+    throw new Error(`Failed to read export handoffs: ${error.message}`);
+  }
+
+  const view = {
+    [FACEBOOK_PLATFORM]: preparedView(FACEBOOK_PLATFORM),
+    [MERCARI_PLATFORM]: preparedView(MERCARI_PLATFORM),
+    [DEPOP_PLATFORM]: preparedView(DEPOP_PLATFORM),
+  } as ExportHandoffsView;
+
+  for (const row of (data ?? []) as HandoffRow[]) {
+    if (!(row.platform in view)) continue;
+    const platform = row.platform as AssistedExportPlatform;
+    view[platform] = {
+      platform,
+      // Only a confirmation timestamp earns `shared`. A recorded handoff is
+      // evidence SnapList delivered the pack, never that a listing exists.
+      state: row.shared_at ? "shared" : "prepared",
+      handedOffAt: row.handoff_at,
+      sharedAt: row.shared_at,
+    };
+  }
+  return view;
+}
+
+/**
+ * Record that the seller handed the pack to a destination — the share sheet
+ * opened, the text was copied, the photos were saved. Idempotent: a retried
+ * handoff keeps the first timestamp.
+ */
+export async function recordExportHandoff(
+  supabase: SupabaseClient,
+  input: ExportHandoffMutation,
+): Promise<string> {
+  assertAssisted(input.platform);
+  const { data, error } = await supabase.rpc("record_export_handoff", {
+    p_item_id: input.itemId,
+    p_platform: input.platform,
+    p_source_review_revision: input.reviewContentRevision,
+    p_expected_review_revision: input.reviewRevision,
+  });
+  if (error) throw new Error(error.message);
+  return data as string;
+}
+
+/**
+ * The seller's explicit claim that they posted the listing. The rejection path
+ * matters as much as the success path: a refused confirmation (stale pack, no
+ * recorded handoff, another tenant) must surface as a failure so no caller can
+ * paint an optimistic `Shared` over a write that never happened.
+ */
+export async function markExportShared(
+  supabase: SupabaseClient,
+  input: ExportHandoffMutation,
+): Promise<string> {
+  assertAssisted(input.platform);
+  const { data, error } = await supabase.rpc("mark_export_shared", {
+    p_item_id: input.itemId,
+    p_platform: input.platform,
+    p_source_review_revision: input.reviewContentRevision,
+    p_expected_review_revision: input.reviewRevision,
+  });
+  if (error) throw new Error(error.message);
+  return data as string;
+}
+
+/** Take back a confirmation. The recorded handoff stands; the claim does not. */
+export async function undoExportShared(
+  supabase: SupabaseClient,
+  input: ExportHandoffMutation,
+): Promise<void> {
+  assertAssisted(input.platform);
+  const { error } = await supabase.rpc("undo_export_shared", {
+    p_item_id: input.itemId,
+    p_platform: input.platform,
+    p_source_review_revision: input.reviewContentRevision,
+    p_expected_review_revision: input.reviewRevision,
+  });
+  if (error) throw new Error(error.message);
+}

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Banner } from "@/components/ui/banner";
-import type { ExportPacksView, ExportPackView } from "@/lib/export";
+import type { DepopPackView, ExportPacksView } from "@/lib/export";
 import { CopyButton } from "./copy-button";
 
 /**
@@ -51,6 +51,13 @@ interface PlatformConfig {
   /** Neutral monogram mark glyph (single letter). */
   glyph: string;
   steps: string[];
+  /**
+   * Does this platform have a TITLE field? When false the paste preview drops
+   * the emphasized title band and renders the block as one body — showing a
+   * title band for a form with no title field would tell the seller to fill in
+   * something that isn't there (issue #378, Depop).
+   */
+  titled: boolean;
 }
 
 const FACEBOOK: PlatformConfig = {
@@ -63,6 +70,7 @@ const FACEBOOK: PlatformConfig = {
     "Add your photos from your camera roll (photos can't ride the clipboard).",
     "Paste — the first line is the title, the rest is the description — then set the price.",
   ],
+  titled: true,
 };
 
 const MERCARI: PlatformConfig = {
@@ -74,6 +82,23 @@ const MERCARI: PlatformConfig = {
     "In the Mercari app: Sell → take or add your photos.",
     "Paste the title and description, then set the price and shipping.",
   ],
+  titled: true,
+};
+
+const DEPOP: PlatformConfig = {
+  name: "Depop",
+  // Depop's form has no title field at all, and its search weights the opening
+  // words of the description — so the pack leads with the item name and ends
+  // with hashtags (issue #378).
+  note: "No title field — description leads with the item name, then hashtags.",
+  glyph: "d",
+  steps: [
+    "Copy the pack below.",
+    "In the Depop app: Sell → add your photos.",
+    "Paste the whole block into Description — Depop has no separate title.",
+    "Set the price, condition, and category yourself.",
+  ],
+  titled: false,
 };
 
 /** Quiet Shopify panel chrome: hairline border, surface fill, one soft shadow. */
@@ -122,12 +147,22 @@ function PackCard({
   pack,
 }: {
   config: PlatformConfig;
-  pack: ExportPackView;
+  /**
+   * `DepopPackView` is the structural subset (no `title`), so this accepts a
+   * titled platform's view too — the card only ever reads `copyBlock` and
+   * `hashtags`.
+   */
+  pack: DepopPackView;
 }) {
-  // The on-screen preview IS the clipboard payload, split for hierarchy:
-  // first line = title, the rest = body (kept verbatim, newlines preserved).
-  const [titleLine, ...rest] = pack.copyBlock.split("\n");
-  const body = rest.join("\n").replace(/^\n+/, "").trimEnd();
+  // The on-screen preview IS the clipboard payload. On a titled platform it
+  // splits for hierarchy — first line = title, the rest = body — but on an
+  // untitled one the whole block IS the description, so it renders as one body
+  // and no title band is drawn.
+  const [firstLine, ...rest] = pack.copyBlock.split("\n");
+  const titleLine = config.titled ? firstLine : null;
+  const body = config.titled
+    ? rest.join("\n").replace(/^\n+/, "").trimEnd()
+    : pack.copyBlock.trimEnd();
   const labelId = `pack-${config.glyph}`;
 
   return (
@@ -159,10 +194,13 @@ function PackCard({
       {/* body: receipt-style paste preview (faithful to clipboard) + steps */}
       <div className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,210px)] sm:p-5">
         <div className="rounded-xl border border-border bg-surface-2/60">
-          {/* boxed title — the receipt's emphasized TOTAL band (600) */}
-          <p className="border-b border-border px-4 py-3 text-[15.5px] font-semibold leading-snug text-fg-strong break-words">
-            {titleLine}
-          </p>
+          {/* boxed title — the receipt's emphasized TOTAL band (600). Omitted
+              entirely on a platform with no title field. */}
+          {titleLine !== null ? (
+            <p className="border-b border-border px-4 py-3 text-[15.5px] font-semibold leading-snug text-fg-strong break-words">
+              {titleLine}
+            </p>
+          ) : null}
           {body ? (
             <p className="whitespace-pre-wrap break-words px-4 py-3 text-[14.5px] leading-relaxed text-fg">
               {body}
@@ -229,9 +267,9 @@ export function ExportView({ data }: { data: ExportData }) {
       </header>
 
       <p className="text-[14px] leading-relaxed text-muted">
-        Facebook Marketplace and Mercari don&apos;t allow apps to post for you,
-        so SnapList prepares a ready-to-paste pack for each, written in that
-        platform&apos;s style, using only your verified item details
+        Facebook Marketplace, Mercari, and Depop don&apos;t allow apps to post
+        for you, so SnapList prepares a ready-to-paste pack for each, written in
+        that platform&apos;s style, using only your verified item details
         {data.price != null ? " and your stored price" : ""}.
       </p>
 
@@ -279,6 +317,7 @@ export function ExportView({ data }: { data: ExportData }) {
 
           <PackCard config={FACEBOOK} pack={data.packs.facebook} />
           <PackCard config={MERCARI} pack={data.packs.mercari} />
+          <PackCard config={DEPOP} pack={data.packs.depop} />
         </>
       ) : null}
     </main>

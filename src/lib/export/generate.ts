@@ -6,6 +6,9 @@ import {
 import { enforceTitleLength } from "../listing";
 import { resolveLanguageModel, resolveModelId } from "../llm";
 import {
+  DEPOP_DESCRIPTION_MAX_LENGTH,
+  DEPOP_MAX_HASHTAGS,
+  DEPOP_PLATFORM,
   FACEBOOK_DESCRIPTION_MAX_LENGTH,
   FACEBOOK_PLATFORM,
   FACEBOOK_TITLE_MAX_LENGTH,
@@ -13,9 +16,11 @@ import {
   MERCARI_MAX_HASHTAGS,
   MERCARI_PLATFORM,
   MERCARI_TITLE_MAX_LENGTH,
+  depopPackSchema,
   facebookPackSchema,
   mercariPackSchema,
   rawExportPacksSchema,
+  type DepopPack,
   type FacebookPack,
   type MercariPack,
   type RawExportPacks,
@@ -105,6 +110,12 @@ export interface ExportPackResult<P> {
 export interface GenerateExportPacksResult {
   facebook: ExportPackResult<FacebookPack>;
   mercari: ExportPackResult<MercariPack>;
+  /**
+   * The Depop pack (issue #378). Assembled entirely from the validated core —
+   * the model is never asked for Depop copy, so this destination adds no new
+   * free-text channel through which an invented attribute could reach a pack.
+   */
+  depop: ExportPackResult<DepopPack>;
   /** The model id used (logged for evaluation). */
   model: string;
 }
@@ -450,6 +461,49 @@ export function buildMercariDescription(attrs: ExtractedAttributes): string {
 }
 
 /**
+ * The PUBLISHED Depop description (issue #378). Depop has no title field and
+ * its search weights the OPENING words of the description most heavily, so the
+ * item's identity leads instead of a "For sale:" preamble. Built only from the
+ * validated core and capped at Depop's limit by word-boundary truncation.
+ */
+export function buildDepopDescription(attrs: ExtractedAttributes): string {
+  const name =
+    [attrs.brand, attrs.model].filter(Boolean).join(" ") ||
+    attrs.title ||
+    attrs.category ||
+    "Item for sale";
+  const sentences = [`${name}.`];
+  if (attrs.condition) sentences.push(`Condition: ${attrs.condition}.`);
+  if (attrs.specs && attrs.specs.length > 0) {
+    sentences.push(`Details: ${attrs.specs.join(", ")}.`);
+  }
+  return enforceTitleLength(sentences.join(" "), DEPOP_DESCRIPTION_MAX_LENGTH);
+}
+
+/**
+ * Depop hashtags: the same core-derived vocabulary Mercari uses, in the core's
+ * own priority order (brand → model → category → specs), normalized, deduped,
+ * and bounded at Depop's cap. No model text participates, so a Depop hashtag
+ * can never assert an attribute the core never established.
+ */
+export function deriveDepopHashtags(attrs: ExtractedAttributes): string[] {
+  const out: string[] = [];
+  const sources = [
+    attrs.brand,
+    attrs.model,
+    attrs.category,
+    ...(attrs.specs ?? []),
+  ];
+  for (const source of sources) {
+    if (!source) continue;
+    const tag = normalizeHashtag(source);
+    if (tag && !out.includes(tag)) out.push(tag);
+    if (out.length === DEPOP_MAX_HASHTAGS) break;
+  }
+  return out;
+}
+
+/**
  * Deterministic title built ONLY from the validated core — the fallback
  * published when a generated title makes an ungrounded numeric claim (e.g. a
  * mutated model number) on its final attempt. Grounded by construction.
@@ -506,6 +560,17 @@ export function mercariCopyBlock(pack: MercariPack): string {
   return parts.join("\n");
 }
 
+/**
+ * The Depop copy-paste block: the keyword-first description, then the
+ * core-derived hashtag line when any exist. No title line — Depop has no title
+ * field, and rendering one would describe a field the seller cannot fill.
+ */
+export function depopCopyBlock(pack: DepopPack): string {
+  const parts = [pack.description];
+  if (pack.hashtags.length > 0) parts.push("", pack.hashtags.join(" "));
+  return parts.join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // ListingCopy mapping (the persistable seam, same as the eBay slice)
 // ---------------------------------------------------------------------------
@@ -538,6 +603,26 @@ export function mercariPackToListingCopy(
   });
 }
 
+/**
+ * Map a validated Depop pack onto the generic `ListingCopy` seam. `title` is
+ * ROW IDENTITY only — the deterministic core name, so the persisted row is
+ * identifiable in storage. It is never rendered into the Depop copy block,
+ * because Depop's listing form has no title field to paste it into.
+ */
+export function depopPackToListingCopy(
+  pack: DepopPack,
+  copyBlock: string,
+  rowTitle: string,
+  price: number | null = null,
+): ListingCopy {
+  return listingCopySchema.parse({
+    platform: DEPOP_PLATFORM,
+    title: rowTitle,
+    description: pack.description,
+    fields: { hashtags: pack.hashtags, copyBlock, price },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // The generation entrypoint
 // ---------------------------------------------------------------------------
@@ -554,6 +639,7 @@ function resolveModel(model?: string): string {
 interface ReconciledPacks {
   facebook: FacebookPack;
   mercari: MercariPack;
+  depop: DepopPack;
 }
 
 /**
@@ -589,6 +675,11 @@ function reconcilePacks(
       description: buildMercariDescription(attributes),
       hashtags: reconcileHashtags(raw.mercari.hashtags, attributes),
     },
+    // Depop never consults `raw`: both fields come straight from the core.
+    depop: {
+      description: buildDepopDescription(attributes),
+      hashtags: deriveDepopHashtags(attributes),
+    },
   };
 }
 
@@ -603,6 +694,8 @@ function assembleResult(
     condition: input.attributes.condition,
   });
   const mercariBlock = mercariCopyBlock(packs.mercari);
+  const depopBlock = depopCopyBlock(packs.depop);
+  const depopRowTitle = fallbackTitle(input.attributes);
   return {
     facebook: {
       pack: packs.facebook,
@@ -615,6 +708,12 @@ function assembleResult(
       price,
       copyBlock: mercariBlock,
       copy: mercariPackToListingCopy(packs.mercari, mercariBlock, price),
+    },
+    depop: {
+      pack: packs.depop,
+      price,
+      copyBlock: depopBlock,
+      copy: depopPackToListingCopy(packs.depop, depopBlock, depopRowTitle, price),
     },
     model,
   };
@@ -658,16 +757,22 @@ export async function generateExportPacks(
 
     const fbParsed = facebookPackSchema.safeParse(reconciled.facebook);
     const mercariParsed = mercariPackSchema.safeParse(reconciled.mercari);
-    if (!fbParsed.success || !mercariParsed.success) {
+    const depopParsed = depopPackSchema.safeParse(reconciled.depop);
+    if (!fbParsed.success || !mercariParsed.success || !depopParsed.success) {
       lastError = [
         ...(fbParsed.success ? [] : fbParsed.error.issues),
         ...(mercariParsed.success ? [] : mercariParsed.error.issues),
+        ...(depopParsed.success ? [] : depopParsed.error.issues),
       ]
         .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
         .join("; ");
       continue;
     }
-    lastReconciled = { facebook: fbParsed.data, mercari: mercariParsed.data };
+    lastReconciled = {
+      facebook: fbParsed.data,
+      mercari: mercariParsed.data,
+      depop: depopParsed.data,
+    };
 
     // If the RAW output invented attributes on a PUBLISHED surface (an
     // underivable hashtag OR an ungrounded number/price in either title),

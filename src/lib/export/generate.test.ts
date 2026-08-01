@@ -10,6 +10,10 @@ import {
   MERCARI_TITLE_MAX_LENGTH,
   facebookPackSchema,
   mercariPackSchema,
+  DEPOP_DESCRIPTION_MAX_LENGTH,
+  DEPOP_MAX_HASHTAGS,
+  DEPOP_PLATFORM,
+  depopPackSchema,
   type RawExportPacks,
 } from "./schema";
 import {
@@ -773,5 +777,40 @@ describe("title guard rejects digit-free invented claims (#15 round 5)", () => {
     expect(packs.mercari.pack.title).not.toMatch(/waterproof/i);
     expect(packs.facebook.copyBlock).not.toMatch(/charger/i);
     expect(packs.mercari.copyBlock).not.toMatch(/waterproof/i);
+  });
+});
+
+/**
+ * DEPOP — the third honest export destination (issue #378). Depop has no title
+ * field and no publish API, so its pack is assembled ENTIRELY from the
+ * validated core: there is no model free-text channel at all, and therefore no
+ * new hallucination surface. The description is keyword-first (Depop's search
+ * weights the opening words heaviest) and capped at Depop's 1000-character
+ * limit; hashtags reuse the same core-derived whitelist as Mercari, bounded at
+ * Depop's 5.
+ */
+describe("generateExportPacks — Depop", () => {
+  it("returns a schema-valid, core-only Depop pack mapped onto ListingCopy", async () => {
+    const { generate } = scriptedGenerate([GOOD_RAW]);
+    const res = await generateExportPacks({
+      attributes: CORE,
+      price: 120,
+      generate,
+      model: "test-model",
+    });
+
+    expect(depopPackSchema.safeParse(res.depop.pack).success).toBe(true);
+    expect(res.depop.pack.description.length).toBeLessThanOrEqual(
+      DEPOP_DESCRIPTION_MAX_LENGTH,
+    );
+    expect(res.depop.pack.hashtags.length).toBeLessThanOrEqual(DEPOP_MAX_HASHTAGS);
+
+    // Keyword-first: the opening words are the core's own identity, not filler.
+    expect(res.depop.pack.description.startsWith("Sony WH-1000XM4")).toBe(true);
+
+    const copy = listingCopySchema.parse(res.depop.copy);
+    expect(copy.platform).toBe(DEPOP_PLATFORM);
+    expect(copy.fields["copyBlock"]).toBe(res.depop.copyBlock);
+    expect(res.depop.price).toBe(120);
   });
 });
