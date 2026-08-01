@@ -244,6 +244,33 @@ final class ListingReviewStoreTests: XCTestCase {
         )
     }
 
+    func testASavedReviewStopsCallingItselfUnsaved() async throws {
+        let snapshot = try Self.makeSnapshot()
+        let receipt = Self.receipt(for: snapshot)
+        let service = ListingReviewRecordingService(
+            saves: [.success(receipt)],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+        await store.setDescription("Seller edit that reaches the server")
+        let outcome = await store.done()
+
+        XCTAssertEqual(outcome, .saved(receipt))
+        // The server now holds this draft, so the pending strip has no business
+        // still saying otherwise while the review dismisses.
+        XCTAssertFalse(store.isDirty)
+
+        // And a second Done cannot buy a second write: the first one cleared
+        // the pending save, so a repeat would mint a fresh idempotency key.
+        let repeated = await store.done()
+        let saveRequests = await service.recordedSaveRequests()
+        XCTAssertEqual(repeated, .dismissedWithoutWrite)
+        XCTAssertEqual(saveRequests.count, 1)
+    }
+
     func testAReviewSurvivesItsOwnEncoderWithEveryFactPopulated() throws {
         let snapshot = try Self.makeSnapshot(soldMatches: 2)
 
