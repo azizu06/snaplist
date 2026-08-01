@@ -49,7 +49,8 @@ begin
 end;
 $$;
 
-revoke all on function private.lock_pipeline_run_tenant_scope(text) from public;
+revoke all on function private.lock_pipeline_run_tenant_scope(text)
+  from public, anon, authenticated, service_role;
 
 create or replace function public.stage_pipeline_batch(
   p_user_id text,
@@ -398,3 +399,13 @@ begin
   end loop;
 end;
 $$;
+
+-- `create or replace` preserves the existing ACL, so this restatement changes no
+-- privilege. Every prior redefinition of this function restates the pair so the
+-- migration file is auditable on its own.
+revoke all on function public.stage_pipeline_batch(
+  text, uuid, jsonb, integer, integer
+) from public, anon, authenticated, service_role;
+grant execute on function public.stage_pipeline_batch(
+  text, uuid, jsonb, integer, integer
+) to service_role;

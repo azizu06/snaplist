@@ -1384,6 +1384,15 @@ describe("manual retry AI-item credit accounting", () => {
     const stageSession = await openLockSession("issue-571-lock-race-stage", {
       role: "service_role",
     });
+    let retrying:
+      | Promise<{
+          message: string | undefined;
+          rows: { value: Record<string, unknown> }[];
+        }>
+      | undefined;
+    let staging:
+      | Promise<{ message: string | undefined; rows: StagedRun[] }>
+      | undefined;
     try {
       await retrySession.query("set role authenticated");
       const run = await stageRun("lock-race-retry", lockRaceSeller);
@@ -1405,7 +1414,7 @@ describe("manual retry AI-item credit accounting", () => {
         `trophy-run-order:${lockRaceSeller.id}`,
       );
 
-      const retrying = retrySession
+      retrying = retrySession
         .query<{ value: Record<string, unknown> }>(
           "select public.retry_pipeline_run($1::uuid) as value",
           [run.run_id],
@@ -1419,7 +1428,7 @@ describe("manual retry AI-item credit accounting", () => {
         );
       await waitForAdvisoryLockWait(observer, retryPid, credit, "ai-item-credit");
 
-      const staging = stageSession
+      staging = stageSession
         .query<StagedRun>(
           STAGE_PIPELINE_BATCH_SQL,
           stagePipelineBatchArgs(
@@ -1447,8 +1456,8 @@ describe("manual retry AI-item credit accounting", () => {
       await creditHolder.query("rollback");
 
       const [stagingResult, retryingResult] = await Promise.all([
-        staging,
-        retrying,
+        staging!,
+        retrying!,
       ]);
       const failures = [stagingResult, retryingResult].filter(
         (result) => result.message !== undefined,
@@ -1471,6 +1480,12 @@ describe("manual retry AI-item credit accounting", () => {
     } finally {
       await orderingHolder.query("rollback").catch(() => undefined);
       await creditHolder.query("rollback").catch(() => undefined);
+      // Drain both racing calls before closing their sessions, so an early
+      // failure cannot leave a query in flight against a client we just ended.
+      await Promise.all([
+        retrying?.catch(() => undefined),
+        staging?.catch(() => undefined),
+      ]);
       await Promise.all(
         [observer, creditHolder, orderingHolder, retrySession, stageSession].map(
           (session) => session.end().catch(() => undefined),
