@@ -1,6 +1,6 @@
 begin;
 
-select plan(43);
+select plan(44);
 
 -- Issue #384: erase one signed-in account durably and idempotently.
 --
@@ -461,18 +461,40 @@ values (
   '38400000-0000-4000-8000-0000000000e1', 'user_384_export',
   '38400000-0000-4000-8000-0000000000e3', 'content_sha256_set_v1', repeat('e', 64)
 );
+-- Two prepared packs, because `export_handoffs_pack_fkey` is composite on
+-- (item_id, platform, source_review_revision). The receipt refused below is a
+-- `facebook` one, and it has to be a receipt that WOULD be accepted on a
+-- healthy account — otherwise the composite key rejects it on its own and the
+-- assertion stops describing erasure at all.
 insert into public.listings (id, user_id, item_id, platform, source_review_revision)
 values (
   '38400000-0000-4000-8000-0000000000e2', 'user_384_export',
   '38400000-0000-4000-8000-0000000000e1', 'depop',
   '38400000-0000-4000-8000-0000000000e3'
+), (
+  '38400000-0000-4000-8000-0000000000e5', 'user_384_export',
+  '38400000-0000-4000-8000-0000000000e1', 'facebook',
+  '38400000-0000-4000-8000-0000000000e3'
 );
+
+-- Measured before the receipt exists, so the assertion below is a delta rather
+-- than a total. A total would read 0 after erasure whether or not the count
+-- function mentions `export_handoffs` at all.
+create temporary table export_receipt_probe as
+select private.account_erasure_owned_row_count('user_384_export') as before_receipt;
+
 insert into public.export_handoffs (
   user_id, item_id, platform, source_review_revision, handoff_at, shared_at
 )
 values (
   'user_384_export', '38400000-0000-4000-8000-0000000000e1', 'depop',
   '38400000-0000-4000-8000-0000000000e3', now(), now()
+);
+select is(
+  private.account_erasure_owned_row_count('user_384_export')
+    - (select before_receipt from export_receipt_probe),
+  1,
+  'recording an export receipt raises the count that has to reach zero before erasure may finish'
 );
 select public.begin_account_erasure(
   'user_384_export', '38400000-0000-4000-8000-0000000000e4'
@@ -496,7 +518,7 @@ select public.advance_account_erasure(
 select is(
   private.account_erasure_owned_row_count('user_384_export'),
   0,
-  'the export receipts the completion proof now counts are gone before it counts them'
+  'counting export receipts cannot leave an erasure with no way to reach zero'
 );
 rollback to savepoint export_receipt;
 

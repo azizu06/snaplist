@@ -1072,12 +1072,17 @@ begin
   delete from public.embeddings where user_id = v_generation.user_id;
   delete from public.pipeline_run_history_order_versions where user_id = v_generation.user_id;
   delete from public.pipeline_runs where user_id = v_generation.user_id;
-  -- Assisted-export receipts (migration 20260731040000) already cascade from
-  -- both `listings` and `items`, so this delete removes nothing today. It is
-  -- here because the completion proof now COUNTS the receipts: leaving their
-  -- removal to a foreign key declared in another migration means a later change
-  -- to that key would not fail a test, it would strand every erasure at
-  -- "Mandatory account erasure work is incomplete" with no way to finish.
+  -- Assisted-export receipts (migration 20260731040000) cascade from both
+  -- `listings` and `items`. This statement runs before either parent is gone,
+  -- so it removes the rows itself rather than watching a cascade remove them —
+  -- it changes no outcome, only where the guarantee lives. Do not delete it as
+  -- redundant. The completion proof now COUNTS these receipts, and it counts
+  -- them `where user_id = …`, which is the predicate below. Leaving the removal
+  -- to foreign keys declared in another migration would mean two things: a
+  -- later change to those keys fails no test here, and a receipt whose
+  -- denormalized `user_id` is this tenant while its item belongs to another is
+  -- counted but never reached by any cascade. Either one strands every erasure
+  -- at "Mandatory account erasure work is incomplete" with no way to finish.
   delete from public.export_handoffs where user_id = v_generation.user_id;
   delete from public.listings where user_id = v_generation.user_id;
   delete from public.items where user_id = v_generation.user_id;
