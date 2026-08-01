@@ -7028,6 +7028,76 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
+    func testBothLibraryIntakeEntryPointsShareEquivalentStagingSemantics() async {
+        for entryPoint in LibraryIntakeEntryPoint.all {
+            let capacityStore = TestCaptureStore()
+            let capacityModel = makeModel(store: capacityStore)
+
+            let capacityAdded = await entryPoint.stage(
+                capacityModel,
+                (1...7).map { Data([UInt8($0)]) }
+            )
+
+            XCTAssertEqual(capacityAdded, 5, entryPoint.name)
+            XCTAssertEqual(
+                capacityStore.stagedImageData.compactMap(\.first),
+                [1, 2, 3, 4, 5],
+                entryPoint.name
+            )
+            XCTAssertEqual(capacityModel.stagedPhotos.count, 5, entryPoint.name)
+            XCTAssertFalse(capacityModel.canTakePhoto, entryPoint.name)
+
+            let failureStore = AppendFailingCaptureStore(failingAppendIndex: 1)
+            let failureModel = CaptureFlowModel(
+                camera: TestCaptureCamera(isAvailable: true, authorization: .authorized),
+                evaluator: TestFramingEvaluator(observations: []),
+                store: failureStore
+            )
+
+            let failureAdded = await entryPoint.stage(
+                failureModel,
+                [Data([0x01]), Data([0x02]), Data([0x03])]
+            )
+
+            XCTAssertEqual(failureAdded, 1, entryPoint.name)
+            XCTAssertEqual(failureStore.stagedBytes, [0x01], entryPoint.name)
+            XCTAssertEqual(failureStore.attemptedBytes, [0x01, 0x02], entryPoint.name)
+            XCTAssertEqual(failureModel.stagedPhotos.count, 1, entryPoint.name)
+            XCTAssertEqual(failureModel.phase, .failed, entryPoint.name)
+
+            let sequentialStore = TestCaptureStore()
+            let sequentialModel = makeModel(store: sequentialStore)
+
+            let firstAdded = await entryPoint.stage(sequentialModel, [Data([0x01])])
+            let secondAdded = await entryPoint.stage(sequentialModel, [Data([0x02])])
+
+            XCTAssertEqual([firstAdded, secondAdded], [1, 1], entryPoint.name)
+            XCTAssertEqual(
+                sequentialStore.stagedImageData.compactMap(\.first),
+                [0x01, 0x02],
+                entryPoint.name
+            )
+
+            let cancelledStore = TestCaptureStore()
+            let cancelledModel = makeModel(store: cancelledStore)
+            guard let reservation = cancelledModel.reserveLibraryIntake() else {
+                XCTFail("Library intake must reserve before staging. \(entryPoint.name)")
+                return
+            }
+            cancelledModel.cancelLibraryIntake(reservation: reservation)
+
+            let cancelledAdded = await entryPoint.stage(
+                cancelledModel,
+                [Data([0x01])],
+                reservation
+            )
+
+            XCTAssertEqual(cancelledAdded, 0, entryPoint.name)
+            XCTAssertTrue(cancelledStore.stagedImageData.isEmpty, entryPoint.name)
+            XCTAssertTrue(cancelledModel.stagedPhotos.isEmpty, entryPoint.name)
+        }
+    }
+
     func testFifthSuccessfulAdditionPublishesTheExactLimitAnnouncementOnce() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let model = makeModel(camera: camera)
@@ -10253,6 +10323,124 @@ private final class DurableCountRecorder {
 
     func record(_ count: Int) {
         counts.append(count)
+    }
+}
+
+/// The two public library intake entry points, addressed identically so one contract can
+/// assert that both share the same staging lifecycle.
+private struct LibraryIntakeEntryPoint {
+    let name: String
+    private let stageSelection: @MainActor ([Data], CaptureFlowModel) async -> Int
+    private let stageReservedSelection: @MainActor ([Data], CaptureFlowModel, UUID) async -> Int
+
+    @MainActor
+    func stage(_ model: CaptureFlowModel, _ payloads: [Data]) async -> Int {
+        await stageSelection(payloads, model)
+    }
+
+    @MainActor
+    func stage(
+        _ model: CaptureFlowModel,
+        _ payloads: [Data],
+        _ reservation: UUID
+    ) async -> Int {
+        await stageReservedSelection(payloads, model, reservation)
+    }
+
+    static let all: [LibraryIntakeEntryPoint] = [
+        LibraryIntakeEntryPoint(
+            name: "byte-array intake",
+            stageSelection: { payloads, model in
+                await model.stageLibraryPhotos(payloads)
+            },
+            stageReservedSelection: { payloads, model, reservation in
+                await model.stageLibraryPhotos(payloads, reservation: reservation)
+            }
+        ),
+        LibraryIntakeEntryPoint(
+            name: "sequential loader intake",
+            stageSelection: { payloads, model in
+                await model.stageLibraryPhotos(payloads.map(makeLoader))
+            },
+            stageReservedSelection: { payloads, model, reservation in
+                await model.stageLibraryPhotos(
+                    payloads.map(makeLoader),
+                    reservation: reservation
+                )
+            }
+        )
+    ]
+
+    @MainActor
+    private static func makeLoader(for payload: Data) -> TestLibraryPhotoLoader {
+        TestLibraryPhotoLoader { payload }
+    }
+}
+
+/// Fails the durable append at a chosen position so partial progress and failure handling
+/// stay observable through either entry point.
+private final class AppendFailingCaptureStore: CaptureDraftStoring {
+    private let failingAppendIndex: Int
+    private var photos: [StagedCapturePhoto] = []
+    private(set) var stagedBytes: [UInt8] = []
+    private(set) var attemptedBytes: [UInt8] = []
+
+    init(failingAppendIndex: Int) {
+        self.failingAppendIndex = failingAppendIndex
+    }
+
+    func load() async throws -> StagedCapturePhoto? { photos.first }
+    func loadPhotos() async throws -> [StagedCapturePhoto] { photos }
+
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto {
+        photos = []
+        stagedBytes = []
+        return try await append(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt
+        ).appendedPhoto
+    }
+
+    func append(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftAppendResult {
+        let byte = try XCTUnwrap(imageData.first)
+        attemptedBytes.append(byte)
+        guard attemptedBytes.count - 1 != failingAppendIndex else {
+            throw TestCaptureError.failed
+        }
+        stagedBytes.append(byte)
+        let index = photos.count
+        let photo = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/append-failing-photo-\(index).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/append-failing-thumb-\(index).jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        photos.append(photo)
+        return CaptureDraftAppendResult(appendedPhoto: photo, photos: photos)
+    }
+
+    func discard() async throws {
+        photos = []
+        stagedBytes = []
+    }
+
+    func replace(
+        photoID: StagedCapturePhoto.ID,
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftReplaceResult {
+        throw CaptureDraftStoreError.photoNotStaged
+    }
+
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        self.photos = photos
     }
 }
 

@@ -1516,63 +1516,45 @@ final class CaptureFlowModel {
     }
 
     func stageLibraryPhotos(_ imageData: [Data], reservation intakeID: UUID) async -> Int {
-        guard activeIntakeID == intakeID, activeCaptureID == nil else { return 0 }
-        let expectedActivationID = activeIntakeActivationID
-        defer {
-            if activeIntakeID == intakeID {
-                activeIntakeID = nil
-                activeIntakeActivationID = nil
-            }
-        }
-        let phaseBeforeSelection = phase
-        let remainingCapacity = max(0, 5 - stagedPhotos.count)
-        if let intake {
-            guard let expectedActivationID else { return 0 }
-            let inputs = imageData.prefix(remainingCapacity).map { data in
-                NativeIntake.PhotoInput(
-                    isActive: { [weak self] in
-                        self?.activeIntakeID == intakeID
-                    }
-                ) { [weak self] in
-                    await MainActor.run {
-                        guard self?.activeIntakeID == intakeID else {
-                            return nil
-                        }
-                        return data
-                    }
+        await stageLibraryIntake(
+            imageData,
+            reservation: intakeID,
+            intakeInput: { data, isActive in
+                NativeIntake.PhotoInput(isActive: isActive) {
+                    await MainActor.run { isActive() ? data : nil }
                 }
-            }
-            guard !inputs.isEmpty else { return 0 }
-            let priorCount = stagedPhotos.count
-            let outcome = await performAndAwaitSnapshot(
-                .addPhotos(inputs),
-                using: intake,
-                expectedActivationID: expectedActivationID
-            )
-            guard finishLibraryIntake(
-                outcome: outcome,
-                phaseBeforeSelection: phaseBeforeSelection
-            ) else {
-                return 0
-            }
-            return stagedPhotos.count - priorCount
-        }
-        var addedCount = 0
-        for photoData in imageData.prefix(remainingCapacity) {
-            guard await persistLibraryPhoto(
-                photoData,
-                transferReceipt: nil,
-                phaseBeforeSelection: phaseBeforeSelection,
-                intakeID: intakeID
-            ) else { break }
-            addedCount += 1
-        }
-        return addedCount
+            },
+            loadDurablePayload: { $0 }
+        )
     }
 
     func stageLibraryPhotos<Photo: CaptureLibraryPhotoLoading>(
         _ photos: [Photo],
         reservation intakeID: UUID
+    ) async -> Int {
+        await stageLibraryIntake(
+            photos,
+            reservation: intakeID,
+            intakeInput: { [self] photo, isActive in
+                guardedPhotoInput(photo, while: isActive)
+            },
+            // A throwing or absent payload ends the selection at the last durable photo.
+            loadDurablePayload: { try? await $0.loadPhotoData() }
+        )
+    }
+
+    /// The one staging lifecycle both library intake entry points run. Selections differ only
+    /// in how an element becomes a durable payload, so reservation ownership, remaining
+    /// capacity, the durable append loop, added-count tracking, and failure handling stay
+    /// shared rather than mirrored.
+    private func stageLibraryIntake<Selection: Collection>(
+        _ selection: Selection,
+        reservation intakeID: UUID,
+        intakeInput: (
+            Selection.Element,
+            @escaping @MainActor @Sendable () -> Bool
+        ) -> NativeIntake.PhotoInput,
+        loadDurablePayload: (Selection.Element) async -> Data?
     ) async -> Int {
         guard activeIntakeID == intakeID, activeCaptureID == nil else { return 0 }
         let expectedActivationID = activeIntakeActivationID
@@ -1584,28 +1566,13 @@ final class CaptureFlowModel {
         }
         let phaseBeforeSelection = phase
         let remainingCapacity = max(0, 5 - stagedPhotos.count)
+        let admitted = selection.prefix(remainingCapacity)
+        let isActive: @MainActor @Sendable () -> Bool = { [weak self] in
+            self?.activeIntakeID == intakeID
+        }
         if let intake {
             guard let expectedActivationID else { return 0 }
-            let inputs = photos.prefix(remainingCapacity).map { photo in
-                NativeIntake.PhotoInput(
-                    isActive: { [weak self] in
-                        self?.activeIntakeID == intakeID
-                    }
-                ) { [weak self] in
-                    guard await MainActor.run(body: {
-                        self?.activeIntakeID == intakeID
-                    }) else {
-                        return nil
-                    }
-                    let imageData = try await photo.loadPhotoData()
-                    return await MainActor.run {
-                        guard self?.activeIntakeID == intakeID else {
-                            return nil
-                        }
-                        return imageData
-                    }
-                }
-            }
+            let inputs = admitted.map { intakeInput($0, isActive) }
             guard !inputs.isEmpty else { return 0 }
             let priorCount = stagedPhotos.count
             let outcome = await performAndAwaitSnapshot(
@@ -1622,22 +1589,15 @@ final class CaptureFlowModel {
             return stagedPhotos.count - priorCount
         }
         var addedCount = 0
-        for photo in photos.prefix(remainingCapacity) {
-            var imageData: Data?
-            do {
-                imageData = try await photo.loadPhotoData()
-            } catch {
-                break
-            }
-            guard imageData != nil else { break }
-            let didPersist = await persistLibraryPhoto(
-                imageData!,
+        // One payload is loaded, durably appended, and released before the next is requested.
+        for element in admitted {
+            guard let imageData = await loadDurablePayload(element) else { break }
+            guard await persistLibraryPhoto(
+                imageData,
                 transferReceipt: nil,
                 phaseBeforeSelection: phaseBeforeSelection,
                 intakeID: intakeID
-            )
-            imageData = nil
-            guard didPersist else { break }
+            ) else { break }
             addedCount += 1
         }
         return addedCount
