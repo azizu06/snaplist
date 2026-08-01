@@ -75,3 +75,7 @@ ios/**/xcuserdata/
 ios/DerivedData/
 ios/Artifacts/
 *.xcuserstate
+
+# Agent-to-agent coordination notes. These are working artifacts of whoever is
+# implementing an issue, not repository content, and must not reach main.
+.hub-relay/
