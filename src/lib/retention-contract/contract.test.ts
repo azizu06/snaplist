@@ -131,9 +131,17 @@ describe("lean-MVP release retention contract", () => {
 
     expect(disposition?.treatment).toBe("delete");
     expect(disposition?.owner).toBe("snaplist-platform");
-    expect(disposition?.maximumRetention).toMatch(/^30 days after the erasure reaches a terminal status/);
+    expect(disposition?.maximumRetention).toMatch(/^30 days after the erasure reaches a completed status/);
     expect(disposition?.maximumRetention).toMatch(
-      /raw Clerk user id, RevenueCat app user ids, SnapList user id, and Idempotency-Key are removed at the moment that status is written/,
+      /raw Clerk user id, RevenueCat app user ids, SnapList user id, and Idempotency-Key are removed at the moment a completed status is written/,
+    );
+
+    // The row promised a scrub the code does not perform for an erasure that is
+    // still unfinished — `deletion_needs_attention` keeps the raw identifiers
+    // because resuming needs them. Say that, rather than let the matrix claim a
+    // guarantee one of the five states does not honour.
+    expect(disposition?.maximumRetention).toMatch(
+      /still unfinished, including one parked in deletion_needs_attention, keeps those identifiers/,
     );
 
     // The named executor must be a job that actually exists and actually runs,

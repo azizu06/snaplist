@@ -31,14 +31,17 @@
 -- retention, then pipeline-daily / pipeline-minute, then ai-item-credit:<seller>,
 -- then trophy-run-order:<seller>. `account-erasure:<seller>` is appended to the
 -- END of that order, so this migration:
---   * names the fence trigger `zzz_...` so it fires after every other BEFORE row
---     trigger, and account-erasure is therefore taken last on mutation paths;
 --   * acquires snaplist:pipeline-retention and ai-item-credit:<seller> before
 --     account-erasure:<seller> inside `advance_account_erasure`;
 --   * never acquires trophy-run-order, because the only trigger that takes it
 --     fires on INSERT/UPDATE of public.pipeline_runs and erasure only deletes.
--- The fence takes no advisory lock at all while no generation row exists, so
--- ordinary traffic for every other tenant is unaffected.
+-- The fence itself takes no advisory lock in any branch — it is one indexed
+-- digest lookup — so it cannot participate in that order at all and cannot
+-- serialize traffic for tenants who are not being erased. The `zzz_` trigger
+-- name is still deliberate: firing after every other BEFORE row trigger means a
+-- mutation is rejected only once the triggers that would have taken seller
+-- locks have already run, so the fence never changes which locks a rejected
+-- statement had acquired.
 --
 -- Fencing is a committed-row check, not a lock handshake: a mutation that read
 -- its fence before `begin` committed may still land afterwards. `advance` and
@@ -613,10 +616,14 @@ as $$
     'retained_records', to_jsonb(generation.retained_records),
     'deferrals', to_jsonb(generation.deferrals),
     'attention_reasons', to_jsonb(generation.attention_reasons),
+    -- Absent identity is null, never an object with a null inside it. advance
+    -- is what captures clerk_user_id, so every payload before it — including
+    -- the one begin_account_erasure returns — would otherwise carry
+    -- {"clerk_user_id": null}, which the client's schema rejects. That failure
+    -- lands after the generation row has already committed and started
+    -- fencing, so the account would be left unwritable and unerasable.
     'identity', case
-      when generation.status in (
-        'deletion_completed', 'deletion_completed_with_retained_records'
-      ) then 'null'::jsonb
+      when generation.clerk_user_id is null then 'null'::jsonb
       else jsonb_build_object(
         'clerk_user_id', generation.clerk_user_id,
         'revenuecat_app_user_ids', to_jsonb(generation.revenuecat_app_user_ids)
@@ -975,6 +982,10 @@ begin
     update private.account_erasure_generations
     set status = 'deletion_in_progress',
         deferrals = v_deferrals,
+        -- Resuming is the whole point of this state, so leaving the previous
+        -- reasons attached would violate the biconditional that ties them to
+        -- deletion_needs_attention and strand the erasure here permanently.
+        attention_reasons = '{}'::text[],
         updated_at = statement_timestamp()
     where generation_id = p_generation_id;
     return private.account_erasure_payload(p_generation_id);
@@ -1122,12 +1133,27 @@ begin
   -- transaction. Close it the moment the deletes are proved.
   perform set_config('app.account_erasure_internal', 'false', true);
 
+  -- Both of these accumulate rather than overwrite, because advance runs again
+  -- on every resume and recomputes them from rows a previous pass already
+  -- deleted. Overwriting would mean a crash between advance and finalize
+  -- silently erases the provider ids the identity phase still needs and the
+  -- retained records that make deletion_completed_with_retained_records
+  -- truthful, leaving a flat deletion_completed claiming a provider deletion
+  -- that never happened. Evidence observed once does not stop being true
+  -- because the row that carried it is gone.
   update private.account_erasure_generations
   set status = 'deletion_in_progress',
       deferrals = '{}'::text[],
-      retained_records = v_retained,
+      retained_records = (
+        select coalesce(array_agg(distinct record order by record), '{}'::text[])
+        from unnest(retained_records || v_retained) as record
+      ),
       clerk_user_id = v_generation.user_id,
-      revenuecat_app_user_ids = v_revenuecat_ids,
+      revenuecat_app_user_ids = (
+        select coalesce(array_agg(distinct app_user_id order by app_user_id), '{}'::text[])
+        from unnest(revenuecat_app_user_ids || v_revenuecat_ids) as app_user_id
+      ),
+      attention_reasons = '{}'::text[],
       updated_at = statement_timestamp()
   where generation_id = p_generation_id;
 

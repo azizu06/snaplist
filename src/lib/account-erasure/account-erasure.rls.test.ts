@@ -279,8 +279,10 @@ async function mandatoryOwnerResidue(): Promise<number> {
  * These assertions run through PostgREST and Storage, so they need the current
  * `sb_publishable_`/`sb_secret_` key pair. A stack still issuing legacy JWT keys
  * cannot mint those, and the tests then pass without asserting anything — so say
- * so out loud. erasure-behavior.rls.test.ts proves the same acceptance
- * behaviours over the database connection and runs everywhere.
+ * so out loud. supabase/tests/account_erasure.test.sql proves the database half
+ * of these acceptance behaviours and does run in CI; the Storage and provider
+ * halves are proved only here, so a skip is a real gap in the evidence rather
+ * than a duplicate of something else.
  */
 function skip(reason: string): void {
   console.warn(`[account-erasure.rls.test] SKIPPED — ${reason}. Nothing here was proved.`);
@@ -464,11 +466,7 @@ describe("durable account erasure against local Supabase", () => {
       return;
     }
     const started = erasurePayload(first.data);
-    console.info("account-erasure generation", JSON.stringify({
-      generationId: started.generation_id,
-      storageObjects: started.storage_objects,
-    }));
-    expect(started.status).toBe("deleting");
+    expect(started.status).toBe("deletion_requested");
     expect(started.storage_objects).toHaveLength(1);
     expect(started.storage_objects[0]).toMatchObject({ bucket_id: "photos" });
 

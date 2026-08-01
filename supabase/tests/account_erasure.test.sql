@@ -1,6 +1,6 @@
 begin;
 
-select plan(34);
+select plan(39);
 
 -- Issue #384: erase one signed-in account durably and idempotently.
 --
@@ -51,6 +51,17 @@ select is(
   ),
   1,
   'the replay creates no second generation'
+);
+-- Absent identity is null, not an object holding a null. advance is what
+-- captures clerk_user_id, so the payload begin returns has none yet — and a
+-- client that rejects the shape fails *after* the generation committed and
+-- started fencing, leaving the account unwritable and unerasable.
+select is(
+  (
+    select public.begin_account_erasure('user_384_owner', '38400000-0000-4000-8000-000000000001')->'identity'
+  ),
+  'null'::jsonb,
+  'a generation with no captured identity yet reports none, not a null inside one'
 );
 select throws_ok(
   $$select public.begin_account_erasure('user_384_owner', '38400000-0000-4000-8000-0000000000ff')$$,
@@ -177,6 +188,67 @@ select is(
   array['clerk-identity-deletion-unverified'],
   'the reason it needs attention is recorded, not just the status'
 );
+
+-- ---------------------------------------------------------------------------
+-- Resuming. advance runs again on every retry, so it has to be idempotent
+-- against a generation that already advanced — the state a crash between
+-- advance and finalize leaves behind. These four assertions are the ones that
+-- were missing when both review axes found the resume path broken.
+-- ---------------------------------------------------------------------------
+
+savepoint resume_paths;
+
+-- A retry while the erasure needs attention must be able to leave that state.
+-- The reasons are tied to the status by a biconditional, so an advance that
+-- leaves them attached strands the account with no reachable terminal status.
+select lives_ok(
+  $$select public.advance_account_erasure(
+      (select generation_id from private.account_erasure_generations where user_id = 'user_384_owner')
+    )$$,
+  'an erasure that needs attention can be advanced again rather than stranded'
+);
+select is(
+  (
+    select attention_reasons from private.account_erasure_generations
+    where user_id = 'user_384_owner'
+  ),
+  '{}'::text[],
+  'advancing clears the reasons it is no longer blocked on'
+);
+
+-- advance recomputes the retained records and provider ids from rows a previous
+-- pass already deleted, so they must accumulate. Overwriting them lets a
+-- crash-and-retry drop the RevenueCat id, which drops finalize's proof
+-- requirement with it and completes flat while the customer still exists.
+insert into public.user_settings (user_id) values ('user_384_resume');
+insert into public.revenuecat_customer_bindings (user_id, revenuecat_app_user_id)
+values ('user_384_resume', 'rc_384_resume');
+select public.begin_account_erasure('user_384_resume', '38400000-0000-4000-8000-000000000003');
+select public.advance_account_erasure(
+  (select generation_id from private.account_erasure_generations where user_id = 'user_384_resume')
+);
+select public.advance_account_erasure(
+  (select generation_id from private.account_erasure_generations where user_id = 'user_384_resume')
+);
+select is(
+  (
+    select revenuecat_app_user_ids from private.account_erasure_generations
+    where user_id = 'user_384_resume'
+  ),
+  array['rc_384_resume'],
+  'a second advance keeps the provider id the first one captured'
+);
+select throws_ok(
+  $$select public.finalize_account_erasure(
+      (select generation_id from private.account_erasure_generations where user_id = 'user_384_resume'),
+      true, false
+    )$$,
+  '55000',
+  'RevenueCat customer absence is not proved',
+  'so completion still demands the provider proof after a resume'
+);
+
+rollback to savepoint resume_paths;
 
 -- ---------------------------------------------------------------------------
 -- Completion scrubs every raw identifier, and keeps fencing afterwards.

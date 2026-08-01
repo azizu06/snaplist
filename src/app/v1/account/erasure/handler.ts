@@ -7,8 +7,10 @@ import { createAccountErasureHandler } from "@/lib/account-erasure/http";
 
 function configuredAccountErasureOperations() {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const secretKey = process.env.SUPABASE_SECRET_KEY?.trim()
-    || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  // No SUPABASE_SERVICE_ROLE_KEY fallback: createConfiguredAccountErasureOperations
+  // rejects anything that is not an `sb_secret_` key, so falling back to the
+  // legacy variable only turns a clear "not configured" into an opaque one.
+  const secretKey = process.env.SUPABASE_SECRET_KEY?.trim();
   const clerkSecretKey = process.env.CLERK_SECRET_KEY?.trim();
   const revenueCatSecretKey = process.env.REVENUECAT_SECRET_API_KEY?.trim();
   if (!supabaseURL || !secretKey || !clerkSecretKey || !revenueCatSecretKey) {
@@ -51,6 +53,14 @@ const handler = createAccountErasureHandler({
   },
   erase(input) {
     return configuredAccountErasureOperations().erase(input);
+  },
+  // Every internal failure here reaches the seller as the same 503 telling them
+  // to retry with the same key, which is the right answer for a transient fault
+  // and a misleading one for a permanent fault. Without this the two are
+  // indistinguishable from the outside and silent from the inside — an erasure
+  // that can never succeed looks exactly like one that has not succeeded yet.
+  reportError(context, error) {
+    console.error(context, error);
   },
 });
 
