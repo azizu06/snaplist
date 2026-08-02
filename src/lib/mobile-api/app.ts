@@ -12,6 +12,8 @@ import {
   type ListingReviewSaver,
 } from "@/lib/listing-review/save";
 import {
+  GuidedCorrectionIdempotencyConflictError,
+  GuidedCorrectionInProgressError,
   GuidedCorrectionNotEditableError,
   GuidedCorrectionNotFoundError,
   GuidedCorrectionNotPricedError,
@@ -604,6 +606,12 @@ export function createMobileApiHandler(
         );
       }
       const runId = z.string().uuid().safeParse(guidedCorrectionPath[1]);
+      // A correction spends real pricing-provider budget, so the key that makes
+      // a retry free is required before the request is looked at any further.
+      const idempotencyKey = z
+        .string()
+        .uuid()
+        .safeParse(request.headers.get("idempotency-key")?.trim());
       let requestBody: unknown;
       try {
         requestBody = await request.json();
@@ -611,14 +619,16 @@ export function createMobileApiHandler(
         requestBody = null;
       }
       const intent = guidedCorrectionIntentSchema.safeParse(requestBody);
-      if (!runId.success || !intent.success) {
+      if (!runId.success || !idempotencyKey.success || !intent.success) {
         return errorResponse(
           requestId,
           400,
           "invalid_request",
-          runId.success
-            ? "A valid guided correction is required."
-            : "A valid run ID is required.",
+          !runId.success
+            ? "A valid run ID is required."
+            : !idempotencyKey.success
+              ? "A valid Idempotency-Key is required."
+              : "A valid guided correction is required.",
         );
       }
       const token = bearerToken(request);
@@ -653,8 +663,14 @@ export function createMobileApiHandler(
       try {
         const receipt = await dependencies.guidedCorrection.correct({
           runId: runId.data,
+          idempotencyKey: idempotencyKey.data,
           userId: principal.userId,
           bearerToken: token,
+          // A verified guest's capability bearer is not a project JWT, so
+          // without this every read and write a guest attempts is refused by
+          // PostgREST and surfaces as a 503 on the very path guest-first value
+          // depends on.
+          mintOperationToken: principal.mintOperationToken,
           intent: intent.data,
         });
         return json(
@@ -679,6 +695,8 @@ export function createMobileApiHandler(
           error instanceof GuidedCorrectionStaleError
           || error instanceof GuidedCorrectionNotEditableError
           || error instanceof GuidedCorrectionNotPricedError
+          || error instanceof GuidedCorrectionInProgressError
+          || error instanceof GuidedCorrectionIdempotencyConflictError
         ) {
           return errorResponse(requestId, 409, "conflict", error.message);
         }

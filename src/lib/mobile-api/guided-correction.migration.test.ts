@@ -1,0 +1,141 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const migration = readFileSync(
+  resolve(
+    "supabase/migrations/20260801230000_mobile_guided_correction_identity_and_idempotency.sql",
+  ),
+  "utf8",
+);
+
+const sharpenOrigin = readFileSync(
+  resolve(
+    "supabase/migrations/20260713003000_review_identity_regeneration.sql",
+  ),
+  "utf8",
+);
+
+const listingReviewSave = readFileSync(
+  resolve("supabase/migrations/20260730060000_mobile_listing_review_save.sql"),
+  "utf8",
+);
+
+describe("guided identity correction migration", () => {
+  it("is what makes a corrected identity reach the column the client reads", () => {
+    // The original RPC wrote `attributes` only, because the web sharpen it was
+    // built for never moved the identity — that went through
+    // `regenerate_review_listing`. `get_mobile_listing_review` projects
+    // `items.identification` verbatim, so on the native seam the seller was
+    // reading back the identity they had just replaced.
+    expect(sharpenOrigin).not.toMatch(
+      /create or replace function public\.sharpen_review_estimate[\s\S]*?identification = /i,
+    );
+    expect(migration).toMatch(
+      /update public\.items\s*set attributes = p_attributes,\s*identification = coalesce\(p_identification, identification\)/i,
+    );
+  });
+
+  it("leaves the identity alone when the seller only added specs", () => {
+    // `coalesce` is the whole contract for a specs-only sharpen: it re-prices,
+    // it does not re-identify, so the vision step's identification must survive.
+    expect(migration).toMatch(/p_identification jsonb default null/i);
+    expect(migration).toMatch(
+      /if p_identification is not null\s*and jsonb_typeof\(p_identification\) is distinct from 'object' then[\s\S]*?errcode = '22023'/i,
+    );
+  });
+
+  it("keeps every guard the correction already relied on", () => {
+    // Recreating a function is where guards quietly disappear. Each of these is
+    // load-bearing: the revision guard is the optimistic-concurrency contract,
+    // the listing lock plus publish check is what refuses a provider-owned
+    // listing, and the export-pack delete is what stops a stale pack shipping.
+    expect(migration).toMatch(
+      /review_revision is not distinct from p_expected_review_revision/i,
+    );
+    expect(migration).toMatch(
+      /if not found then[\s\S]*?errcode = 'P0002'[\s\S]*?Review changed\. Reload and try again\./i,
+    );
+    expect(migration).toMatch(/from public\.listings[\s\S]*?for update;/i);
+    expect(migration).toMatch(
+      /ebay_status is not distinct from 'publishing'[\s\S]*?ebay_status is not distinct from 'published'/i,
+    );
+    expect(migration).toMatch(/insert into public\.prediction_logs/i);
+    expect(migration).toMatch(
+      /delete from public\.listings[\s\S]*?platform in \('facebook', 'mercari'\)/i,
+    );
+    expect(migration).toMatch(/security invoker/i);
+  });
+
+  it("keeps the recreated function reachable from its existing callers", () => {
+    // Dropping and recreating changes the signature, so the old overload has to
+    // go and the new argument has to be last and defaulted — otherwise every
+    // named-argument caller stops resolving.
+    expect(migration).toMatch(
+      /drop function public\.sharpen_review_estimate\(\s*uuid, uuid, uuid, jsonb, numeric, jsonb, numeric, text, text, text, text, jsonb,\s*boolean, boolean\s*\);/i,
+    );
+    expect(migration).toMatch(
+      /grant execute on function public\.sharpen_review_estimate\([\s\S]*?boolean, boolean, jsonb\s*\) to authenticated;/i,
+    );
+    expect(migration).toMatch(
+      /revoke all on function public\.sharpen_review_estimate\([\s\S]*?\) from public, anon, service_role;/i,
+    );
+  });
+});
+
+describe("guided correction idempotency claim migration", () => {
+  it("reuses the durable claim shape PUT /review already proved", () => {
+    for (const pattern of [
+      /state text not null default 'pending'/i,
+      /check \(state in \('pending', 'completed', 'failed'\)\)/i,
+      /lease_expires_at timestamptz/i,
+      /primary key \(user_id, idempotency_key\)/i,
+      /references public\.pipeline_runs\(id\) on delete cascade/i,
+    ]) {
+      expect(listingReviewSave).toMatch(pattern);
+      expect(migration).toMatch(pattern);
+    }
+    expect(migration).toMatch(
+      /create table private\.mobile_guided_corrections/i,
+    );
+    expect(migration).toMatch(
+      /revoke all on table private\.mobile_guided_corrections\s*from public, anon, authenticated;/i,
+    );
+  });
+
+  it("refuses to let a second correction on one revision reach the provider", () => {
+    // This is the whole point of the claim: two POSTs holding the same
+    // `expectedReviewRevision` both clear the cheap pre-check, exactly one can
+    // win the revision guard, and the loser's pricing spend is billed and then
+    // discarded. `prepare` has to answer `in_progress` BEFORE any of that.
+    expect(migration).toMatch(
+      /competing\.expected_review_revision = p_expected_review_revision[\s\S]*?competing\.idempotency_key is distinct from p_idempotency_key[\s\S]*?competing\.state = 'pending'[\s\S]*?lease_expires_at > statement_timestamp\(\)[\s\S]*?\) then\s*return jsonb_build_object\('state', 'in_progress'\);/i,
+    );
+    expect(migration).toMatch(
+      /v_claim\.state = 'completed' then\s*return jsonb_build_object\('state', 'completed', 'receipt', v_claim\.receipt\);/i,
+    );
+    expect(migration).toMatch(/return jsonb_build_object\('state', 'proceed'\)/i);
+  });
+
+  it("refuses to answer one intent with another intent's receipt", () => {
+    expect(migration).toMatch(
+      /v_claim\.intent is distinct from p_intent[\s\S]*?already bound to a different correction/i,
+    );
+  });
+
+  it("bounds definer rights to the caller's own tenancy", () => {
+    // `security definer` plus a run lookup that is not tenant-scoped would turn
+    // the claim into a cross-tenant existence probe.
+    expect(migration).toMatch(/security definer/i);
+    expect(migration).toMatch(/set search_path = ''/i);
+    expect(migration).toMatch(
+      /from public\.pipeline_runs run\s*where run\.id = p_run_id\s*and run\.user_id = v_user_id\s*for update;/i,
+    );
+    expect(migration).toMatch(
+      /revoke all on function public\.claim_mobile_guided_correction\([\s\S]*?\) from public, anon, service_role;/i,
+    );
+    expect(migration).toMatch(
+      /grant execute on function public\.claim_mobile_guided_correction\([\s\S]*?\) to authenticated;/i,
+    );
+  });
+});

@@ -2,10 +2,22 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { effectivePrice } from "@/lib/pipeline/autopilot";
 import { buildPredictionLogRow, type PredictionLogRow } from "@/lib/pipeline/prediction-log";
-import { MAX_SPECS, repriceWithSpecs } from "@/lib/pipeline/reprice";
+import {
+  MAX_SPECS,
+  mergeIdentity,
+  repriceWithSpecs,
+  type ConfirmedIdentity,
+} from "@/lib/pipeline/reprice";
 import { isReviewRegenerationBlocked } from "@/lib/pipeline/review-regeneration-policy";
-import { extractedAttributesSchema, type PipelineResult } from "@/lib/pipeline/types";
+import {
+  extractedAttributesSchema,
+  identificationSchema,
+  type ExtractedAttributes,
+  type Identification,
+  type PipelineResult,
+} from "@/lib/pipeline/types";
 import type { ItemSignal, PriceResult } from "@/lib/pricing";
+import { deriveIdentification } from "@/lib/vision/extract";
 
 /**
  * Guided identity correction on the native seam — the behavior the PRD calls
@@ -25,7 +37,13 @@ import type { ItemSignal, PriceResult } from "@/lib/pricing";
  * use, so a native client cannot render a stale recommendation as the price.
  */
 
-const trimmedIdentity = z.string().trim().min(1).max(200);
+/**
+ * 120, not 200: the published contract has always bounded a confirmed brand,
+ * model, or category at 120, and a runtime that accepted more would have let a
+ * native client send a value the contract says is invalid — and the native model
+ * generated from that contract reject a value the server had already stored.
+ */
+const trimmedIdentity = z.string().trim().min(1).max(120);
 
 export const guidedCorrectionIntentSchema = z
   .object({
@@ -100,9 +118,17 @@ export interface GuidedCorrectionSnapshot {
    * carrying a provider listing id. Such a run is refused, never corrected.
    */
   publishState: "editable" | "authoritative";
+  /**
+   * Whether the item carries a priced prediction at all. `model` is nullable on
+   * legacy rows, so a missing model string is NOT evidence the item was never
+   * priced — only the absence of a usable price is.
+   */
+  priced: boolean;
   model: string | null;
   listingModel: string | null;
   autopilotEnabled: boolean | null;
+  /** The identity the item is currently showing, kept for a specs-only sharpen. */
+  identification: Identification | null;
 }
 
 /** The coherent write, in domain terms. The adapter owns the RPC argument names. */
@@ -111,21 +137,67 @@ export interface GuidedCorrectionCommit {
   expectedReviewRevision: string;
   runId: string;
   attributes: Record<string, unknown>;
+  /**
+   * The re-derived identity, present only when the seller actually confirmed
+   * one. `items.identification` is what `get_mobile_listing_review` projects
+   * into the native client, so a correction that stops at `attributes` leaves
+   * the seller looking at the identity they just replaced.
+   */
+  identification?: Identification;
   prediction: PredictionLogRow;
 }
 
-export interface GuidedCorrectionDataClient {
-  /** Tenant-scoped; `null` when the caller does not own the run. */
-  readRunSnapshot(runId: string): Promise<GuidedCorrectionSnapshot | null>;
-  commit(commit: GuidedCorrectionCommit): Promise<void>;
-}
-
-export interface GuidedCorrectionRequest {
+/**
+ * One seller intent, carried through every step so each durable operation can
+ * mint its own short-lived RLS token. A verified guest's `guestcap_` bearer is
+ * not a project JWT and PostgREST cannot verify it, so a guest correction only
+ * ever reaches its own rows through `mintOperationToken` — the same way
+ * `PUT /review` already reaches them.
+ */
+export interface GuidedCorrectionOperation {
   runId: string;
+  /** Scopes the durable claim that keeps a correction from paying twice. */
+  idempotencyKey: string;
   userId: string;
   bearerToken: string;
+  mintOperationToken?: () => Promise<string>;
   intent: GuidedCorrectionIntent;
 }
+
+/**
+ * The claim's answer, which decides whether provider work may run at all.
+ * `completed` carries the first attempt's receipt so a client retry is answered
+ * rather than re-priced; `in_progress` means another correction already holds
+ * this revision.
+ */
+export type GuidedCorrectionClaimResult =
+  | { state: "proceed" }
+  | { state: "in_progress" }
+  | { state: "completed"; receipt: GuidedCorrectionReceipt };
+
+export interface GuidedCorrectionDataClient {
+  /** Tenant-scoped; `null` when the caller does not own the run. */
+  readRunSnapshot(
+    operation: GuidedCorrectionOperation,
+  ): Promise<GuidedCorrectionSnapshot | null>;
+  /** `prepare` — the throttle. Returns before any provider work is allowed. */
+  claim(
+    operation: GuidedCorrectionOperation,
+  ): Promise<GuidedCorrectionClaimResult>;
+  commit(
+    operation: GuidedCorrectionOperation,
+    commit: GuidedCorrectionCommit,
+  ): Promise<void>;
+  /** `complete` — stores the receipt, so a replay costs nothing. */
+  settle(
+    operation: GuidedCorrectionOperation,
+    receipt: GuidedCorrectionReceipt,
+  ): Promise<void>;
+  /** `fail` — releases the lease so the seller can retry immediately. */
+  release(operation: GuidedCorrectionOperation): Promise<void>;
+}
+
+export type GuidedCorrectionRequest = GuidedCorrectionOperation;
 
 export interface GuidedCorrector {
   correct(input: GuidedCorrectionRequest): Promise<GuidedCorrectionReceipt>;
@@ -155,6 +227,18 @@ export class GuidedCorrectionNotPricedError extends Error {
   }
 }
 
+export class GuidedCorrectionInProgressError extends Error {
+  constructor() {
+    super("This correction is already in progress. Try again.");
+  }
+}
+
+export class GuidedCorrectionIdempotencyConflictError extends Error {
+  constructor() {
+    super("This Idempotency-Key is already bound to a different correction.");
+  }
+}
+
 export class GuidedCorrectionDataError extends Error {
   constructor(message = "Guided correction failed.") {
     super(message);
@@ -171,8 +255,156 @@ export interface GuidedCorrectionDependencies {
   newRunId?: () => string;
 }
 
+/**
+ * Retitle an item around the identity the seller just confirmed.
+ *
+ * `deriveIdentification` reads `title` FIRST when it builds the label, so
+ * merging a corrected brand/model while leaving the old title in place would
+ * store a fresh identification that still SAYS the replaced identity. The web
+ * identity correction rebuilds the title for exactly this reason
+ * (`applyIdentityCorrections`); this does the same, except it rebuilds from the
+ * MERGED identity rather than from the correction alone, because a native
+ * confirmation is partial — confirming only the model must not blank the brand
+ * the seller left alone.
+ *
+ * Returns the attributes unchanged when nothing was confirmed: a specs-only
+ * sharpen narrows the pricing search and makes no claim about what the item is.
+ */
+function applyConfirmedIdentity(
+  attributes: ExtractedAttributes,
+  confirmed: ConfirmedIdentity | undefined,
+): ExtractedAttributes {
+  if (!confirmed) return attributes;
+  const merged = mergeIdentity(attributes, confirmed);
+  const title = [merged.brand, merged.model].filter(Boolean).join(" ").trim()
+    || merged.category?.trim();
+  return title ? { ...merged, title } : merged;
+}
+
+/**
+ * The correction itself, once the claim has granted the right to run it.
+ *
+ * Everything that can throw happens BEFORE the durable write. Anything failing
+ * after the commit would be unrecoverable: the item has already advanced its
+ * revision, so the caller's retry carries a revision the item has moved past and
+ * 409s forever. A suggested price that rounds below a cent clears the RPC's
+ * `p_price > 0` guard and then fails price parsing, which is exactly how that
+ * trap was reachable.
+ */
+async function runCorrection(
+  client: GuidedCorrectionDataClient,
+  operation: GuidedCorrectionOperation,
+  snapshot: GuidedCorrectionSnapshot,
+  dependencies: GuidedCorrectionDependencies,
+  newRunId: () => string,
+): Promise<GuidedCorrectionReceipt> {
+  const { intent } = operation;
+
+  // Refuse cheaply, BEFORE any provider spend. The RPC re-checks all of these
+  // under the row lock, so they are a courtesy, never the enforcement.
+  if (snapshot.reviewRevision !== intent.expectedReviewRevision) {
+    throw new GuidedCorrectionStaleError();
+  }
+  if (snapshot.publishState === "authoritative") {
+    throw new GuidedCorrectionNotEditableError();
+  }
+  // A legacy prediction row can carry a null `model` and still be a real price.
+  // Refusing on the missing model string would make a genuinely priced item
+  // permanently uncorrectable on native, so the gate is whether a price exists
+  // — the same thing the web action gated on.
+  if (!snapshot.priced) throw new GuidedCorrectionNotPricedError();
+
+  const parsed = extractedAttributesSchema.safeParse(snapshot.attributes);
+  const autopilotEnabled = snapshot.autopilotEnabled ?? undefined;
+  // Retitle BEFORE pricing so the attributes that were priced are exactly the
+  // attributes that get persisted, rather than differing by a title.
+  const corrected = applyConfirmedIdentity(
+    parsed.success ? parsed.data : {},
+    intent.confirmedIdentity,
+  );
+  const reprice = await repriceWithSpecs({
+    attributes: corrected,
+    addedSpecs: intent.addedSpecs,
+    confirmedIdentity: intent.confirmedIdentity,
+    autopilotEnabled,
+    priceItem: dependencies.priceItem,
+  });
+
+  // Parsing strips unknown keys, so the persisted object is the RAW stored
+  // attributes with only what the correction actually changed applied over it:
+  // the merged specs, plus any identity the seller confirmed. Pricing with a
+  // corrected brand while storing the old one is exactly the incoherence this
+  // contract exists to prevent.
+  const attributes: Record<string, unknown> = {
+    ...snapshot.attributes,
+    ...intent.confirmedIdentity,
+    ...(corrected.title ? { title: corrected.title } : {}),
+    specs: reprice.mergedSpecs,
+  };
+  // The identity is re-derived from the corrected attributes through the SAME
+  // `deriveIdentification` the vision step and the web identity correction use —
+  // the photos did not change, so nothing here re-runs vision, it only restates
+  // what the seller confirmed.
+  const identification = intent.confirmedIdentity
+    ? deriveIdentification(reprice.attributes, {})
+    : undefined;
+
+  const runId = newRunId();
+  const result: PipelineResult = {
+    attributes: reprice.attributes,
+    price: reprice.price,
+    confidence: reprice.confidence,
+    listing: { platform: "ebay", title: "", description: "", fields: {} },
+    // The RPC requires model provenance, and a legacy row can be priced with
+    // none. "unknown" is the same honest placeholder the web action rode
+    // forward rather than refusing a real price.
+    model: snapshot.model ?? "unknown",
+    listingModel: snapshot.listingModel ?? undefined,
+    pricingModel: reprice.price.model,
+  };
+  const prediction = buildPredictionLogRow(
+    operation.userId,
+    snapshot.itemId,
+    result,
+    { autopilotEnabled, runId },
+  );
+
+  const price = effectivePrice(reprice.price.suggested, snapshot.priceOverride);
+  if (price == null) throw new GuidedCorrectionDataError();
+
+  const receipt = guidedCorrectionReceiptSchema.parse({
+    schemaVersion: 1,
+    runId,
+    itemId: snapshot.itemId,
+    reviewRevision: runId,
+    // The override outlives the correction because the RPC never writes it; the
+    // receipt resolves the same precedence publish and the export packs use.
+    effectivePrice: price,
+    suggestedPrice: reprice.price.suggested,
+    sellerPriceOverride: effectivePrice(null, snapshot.priceOverride),
+    priceRange: prediction.price_range,
+    confidence: {
+      score: reprice.confidence.score,
+      band: reprice.confidence.band,
+    },
+    tier: reprice.price.tier,
+    specs: reprice.mergedSpecs,
+  });
+
+  await client.commit(operation, {
+    itemId: snapshot.itemId,
+    expectedReviewRevision: intent.expectedReviewRevision,
+    runId,
+    attributes,
+    ...(identification ? { identification } : {}),
+    prediction,
+  });
+
+  return receipt;
+}
+
 export function createGuidedCorrectionService(
-  clientForBearer: (bearerToken: string) => GuidedCorrectionDataClient,
+  client: GuidedCorrectionDataClient,
   dependencies: GuidedCorrectionDependencies = {},
 ): GuidedCorrector {
   const newRunId = dependencies.newRunId ?? (() => globalThis.crypto.randomUUID());
@@ -180,86 +412,47 @@ export function createGuidedCorrectionService(
   return {
     async correct(input) {
       const intent = guidedCorrectionIntentSchema.parse(input.intent);
-      const client = clientForBearer(input.bearerToken);
+      const operation: GuidedCorrectionOperation = { ...input, intent };
 
-      const snapshot = await client.readRunSnapshot(input.runId);
+      const snapshot = await client.readRunSnapshot(operation);
       if (!snapshot) throw new GuidedCorrectionNotFoundError();
 
-      // Refuse cheaply, BEFORE any provider spend. The RPC re-checks both under
-      // the row lock, so these are a courtesy, never the enforcement.
-      if (snapshot.reviewRevision !== intent.expectedReviewRevision) {
-        throw new GuidedCorrectionStaleError();
+      // Claim BEFORE the revision guard and before any provider spend.
+      //
+      // Two corrections holding the same `expectedReviewRevision` both clear the
+      // cheap pre-check, but only one can win the RPC's atomic guard — so
+      // without this the loser still pays the PriceRouter and then throws the
+      // answer away. The claim is also what makes a client retry safe: a
+      // completed correction has already advanced the item past the revision its
+      // intent carries, so re-running it would 409 the seller off their own
+      // finished work instead of handing back its receipt.
+      const claim = await client.claim(operation);
+      if (claim.state === "completed") return claim.receipt;
+      if (claim.state === "in_progress") {
+        throw new GuidedCorrectionInProgressError();
       }
-      if (snapshot.publishState === "authoritative") {
-        throw new GuidedCorrectionNotEditableError();
+
+      let receipt: GuidedCorrectionReceipt;
+      try {
+        receipt = await runCorrection(
+          client,
+          operation,
+          snapshot,
+          dependencies,
+          newRunId,
+        );
+      } catch (error) {
+        // Nothing durable happened, so the lease must not outlive the failure —
+        // the seller's next attempt has to be legal immediately.
+        await client.release(operation).catch(() => undefined);
+        throw error;
       }
-      if (!snapshot.model) throw new GuidedCorrectionNotPricedError();
-
-      const parsed = extractedAttributesSchema.safeParse(snapshot.attributes);
-      const autopilotEnabled = snapshot.autopilotEnabled ?? undefined;
-      const reprice = await repriceWithSpecs({
-        attributes: parsed.success ? parsed.data : {},
-        addedSpecs: intent.addedSpecs,
-        confirmedIdentity: intent.confirmedIdentity,
-        autopilotEnabled,
-        priceItem: dependencies.priceItem,
-      });
-
-      // Parsing strips unknown keys, so the persisted object is the RAW stored
-      // attributes with only what the correction actually changed applied over
-      // it: the merged specs, plus any identity the seller confirmed. Pricing
-      // with a corrected brand while storing the old one is exactly the
-      // incoherence this contract exists to prevent.
-      const attributes: Record<string, unknown> = {
-        ...snapshot.attributes,
-        ...intent.confirmedIdentity,
-        specs: reprice.mergedSpecs,
-      };
-
-      const runId = newRunId();
-      const result: PipelineResult = {
-        attributes: reprice.attributes,
-        price: reprice.price,
-        confidence: reprice.confidence,
-        listing: { platform: "ebay", title: "", description: "", fields: {} },
-        model: snapshot.model,
-        listingModel: snapshot.listingModel ?? undefined,
-        pricingModel: reprice.price.model,
-      };
-      const prediction = buildPredictionLogRow(input.userId, snapshot.itemId, result, {
-        autopilotEnabled,
-        runId,
-      });
-
-      await client.commit({
-        itemId: snapshot.itemId,
-        expectedReviewRevision: intent.expectedReviewRevision,
-        runId,
-        attributes,
-        prediction,
-      });
-
-      // The override outlives the correction because the RPC never writes it;
-      // the receipt resolves the same precedence publish and the export packs use.
-      const price = effectivePrice(reprice.price.suggested, snapshot.priceOverride);
-      if (price == null) throw new GuidedCorrectionDataError();
-
-      return guidedCorrectionReceiptSchema.parse({
-        schemaVersion: 1,
-        runId,
-        itemId: snapshot.itemId,
-        reviewRevision: runId,
-        effectivePrice: price,
-        suggestedPrice: reprice.price.suggested,
-        sellerPriceOverride: effectivePrice(null, snapshot.priceOverride),
-        priceRange: prediction.price_range,
-        confidence: {
-          score: reprice.confidence.score,
-          band: reprice.confidence.band,
-        },
-        tier: reprice.price.tier,
-        specs: reprice.mergedSpecs,
-      });
+      // The write landed. Failing to RECORD that must never turn a successful
+      // correction into a 503: the item has advanced, and a caller told
+      // otherwise retries against a revision it has moved past. That is the same
+      // brick the pre-commit receipt closed, arriving one line later.
+      await client.settle(operation, receipt).catch(() => undefined);
+      return receipt;
     },
   };
 }
@@ -297,9 +490,61 @@ function mapCommitError(error: GuidedCorrectionRpcFailure): Error {
   return new GuidedCorrectionDataError();
 }
 
+function mapClaimError(error: GuidedCorrectionRpcFailure): Error {
+  // The claim RPC verifies run ownership itself, under definer rights bounded to
+  // the caller's own tenancy, so a run this seller does not own is refused there
+  // rather than proved absent by a second read.
+  if (/this run is unavailable/i.test(error.message)) {
+    return new GuidedCorrectionNotFoundError();
+  }
+  if (/already bound to a different correction/i.test(error.message)) {
+    return new GuidedCorrectionIdempotencyConflictError();
+  }
+  if (/review changed/i.test(error.message)) {
+    return new GuidedCorrectionStaleError();
+  }
+  return new GuidedCorrectionDataError();
+}
+
+const claimResultSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("proceed") }),
+  z.object({ state: z.literal("in_progress") }),
+  z.object({
+    state: z.literal("completed"),
+    receipt: guidedCorrectionReceiptSchema,
+  }),
+]);
+
+/**
+ * A guest presents a capability bearer PostgREST cannot verify, so every durable
+ * operation mints its own short-lived project JWT — the same per-operation mint
+ * `PUT /review` performs. A Clerk caller's bearer already is one.
+ */
+async function operationToken(
+  operation: GuidedCorrectionOperation,
+): Promise<string> {
+  return operation.mintOperationToken
+    ? operation.mintOperationToken()
+    : operation.bearerToken;
+}
+
+function claimArguments(
+  operation: GuidedCorrectionOperation,
+  action: "prepare" | "complete" | "fail",
+): Record<string, unknown> {
+  return {
+    p_action: action,
+    p_run_id: operation.runId,
+    p_idempotency_key: operation.idempotencyKey,
+    p_expected_review_revision: operation.intent.expectedReviewRevision,
+    p_intent: operation.intent,
+  };
+}
+
 const itemRowSchema = z
   .object({
     attributes: z.unknown(),
+    identification: z.unknown(),
     price_override: z.union([z.number(), z.string()]).nullable(),
     review_revision: z.string().uuid(),
   })
@@ -318,8 +563,17 @@ const predictionRowSchema = z
     model: z.string().nullable(),
     listing_model: z.string().nullable(),
     autopilot_enabled: z.boolean().nullable(),
+    /** `numeric` arrives as number or string; only its usability is read here. */
+    price: z.union([z.number(), z.string()]).nullable(),
   })
   .passthrough();
+
+/** A prediction counts as priced when it carries a usable, strictly positive price. */
+function isPriced(price: number | string | null | undefined): boolean {
+  if (price == null) return false;
+  const value = typeof price === "string" ? Number(price) : price;
+  return Number.isFinite(value) && value > 0;
+}
 
 /**
  * Every read and the commit run through the caller's own RLS-scoped client, so a
@@ -329,11 +583,16 @@ const predictionRowSchema = z
  * pipeline.
  */
 export function createSupabaseGuidedCorrectionDataClient(
-  client: SupabaseClient,
+  clientForBearer: (bearerToken: string) => SupabaseClient,
 ): GuidedCorrectionDataClient {
-  const rpcClient = client as unknown as GuidedCorrectionSupabaseClient;
+  const rpcFor = async (operation: GuidedCorrectionOperation) =>
+    clientForBearer(
+      await operationToken(operation),
+    ) as unknown as GuidedCorrectionSupabaseClient;
   return {
-    async readRunSnapshot(runId) {
+    async readRunSnapshot(operation) {
+      const client = clientForBearer(await operationToken(operation));
+      const runId = operation.runId;
       const run = await client
         .from("pipeline_runs")
         .select("id,item_id")
@@ -346,7 +605,7 @@ export function createSupabaseGuidedCorrectionDataClient(
       const [item, listings, prediction] = await Promise.all([
         client
           .from("items")
-          .select("attributes,price_override,review_revision")
+          .select("attributes,identification,price_override,review_revision")
           .eq("id", itemId)
           .maybeSingle(),
         client
@@ -356,7 +615,7 @@ export function createSupabaseGuidedCorrectionDataClient(
           .eq("platform", "ebay"),
         client
           .from("prediction_logs")
-          .select("model,listing_model,autopilot_enabled")
+          .select("model,listing_model,autopilot_enabled,price")
           .eq("item_id", itemId)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -397,6 +656,9 @@ export function createSupabaseGuidedCorrectionDataClient(
         )
           ? "authoritative"
           : "editable",
+        priced: parsedPrediction?.success
+          ? isPriced(parsedPrediction.data.price)
+          : false,
         model: parsedPrediction?.success ? parsedPrediction.data.model : null,
         listingModel: parsedPrediction?.success
           ? parsedPrediction.data.listing_model
@@ -404,15 +666,45 @@ export function createSupabaseGuidedCorrectionDataClient(
         autopilotEnabled: parsedPrediction?.success
           ? parsedPrediction.data.autopilot_enabled
           : null,
+        identification: identificationSchema.safeParse(
+          parsedItem.data.identification,
+        ).data ?? null,
       };
     },
-    async commit(commit) {
+    async claim(operation) {
+      const result = await (await rpcFor(operation)).rpc(
+        "claim_mobile_guided_correction",
+        claimArguments(operation, "prepare"),
+      );
+      if (result.error) throw mapClaimError(result.error);
+      const parsed = claimResultSchema.safeParse(result.data);
+      if (!parsed.success) throw new GuidedCorrectionDataError();
+      return parsed.data;
+    },
+    async settle(operation, receipt) {
+      const result = await (await rpcFor(operation)).rpc(
+        "claim_mobile_guided_correction",
+        { ...claimArguments(operation, "complete"), p_receipt: receipt },
+      );
+      if (result.error) throw mapClaimError(result.error);
+    },
+    async release(operation) {
+      const result = await (await rpcFor(operation)).rpc(
+        "claim_mobile_guided_correction",
+        claimArguments(operation, "fail"),
+      );
+      if (result.error) throw mapClaimError(result.error);
+    },
+    async commit(operation, commit) {
       const { prediction } = commit;
-      const result = await rpcClient.rpc("sharpen_review_estimate", {
+      const result = await (await rpcFor(operation)).rpc("sharpen_review_estimate", {
         p_item_id: commit.itemId,
         p_expected_review_revision: commit.expectedReviewRevision,
         p_run_id: commit.runId,
         p_attributes: commit.attributes,
+        // Null leaves `items.identification` untouched, which is what a
+        // specs-only sharpen must do — it re-prices, it does not re-identify.
+        p_identification: commit.identification ?? null,
         p_price: prediction.price,
         p_price_range: prediction.price_range,
         p_confidence: prediction.confidence,
@@ -442,8 +734,8 @@ export function createConfiguredSupabaseGuidedCorrector(input: {
       "Guided correction requires a current Supabase publishable key.",
     );
   }
-  return createGuidedCorrectionService((bearerToken) =>
-    createSupabaseGuidedCorrectionDataClient(
+  return createGuidedCorrectionService(
+    createSupabaseGuidedCorrectionDataClient((bearerToken) =>
       createClient(input.supabaseURL, input.publishableKey, {
         accessToken: async () => bearerToken,
         auth: { persistSession: false, autoRefreshToken: false },
