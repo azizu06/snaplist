@@ -64,23 +64,24 @@ export default function PrivacyPage() {
       <h2>How long it is kept</h2>
       <ul>
         <li>
-          <strong>Raw voice recordings are temporary.</strong> The audio is deleted once it has
-          been transcribed, and never later than 24 hours after SnapList accepts the item. Only
-          the short text transcript is kept, and it is deleted with the item.
+          <strong>Raw voice recordings are temporary.</strong> The audio is deleted after the first
+          durable terminal transcription outcome, and never later than 24 hours after SnapList
+          accepts the item. Its text transcript may remain with the item and is deleted if you
+          delete the voice context, an unclaimed result expires, or the item or account is deleted.
         </li>
         <li>
-          <strong>A result created before you sign up lasts 24 hours.</strong> If you use SnapList
-          without an account, the listing it produces stays available for 24 hours so you can come
-          back and claim it. After that it is deleted.
+          <strong>An unclaimed result created before you sign up expires after 24 hours.</strong> If
+          you use SnapList without an account, the listing it produces remains available while you
+          come back and claim it. If it is not claimed, SnapList deletes it at expiry.
         </li>
         <li>
           <strong>Photos and listings last as long as the item does.</strong> Deleting an item
           deletes its photos, its draft, its export packs, and its pricing evidence.
         </li>
         <li>
-          <strong>Operational records are capped at 30 days.</strong> Processing metadata that is
-          not part of your listing is discarded after 30 days at the latest, and sooner if you
-          delete the item or your account.
+          <strong>Operational checkpoints and capture metadata are capped at 30 days.</strong> They
+          are discarded no later than 30 days after a terminal outcome. The remaining run identity
+          is deleted when its item or account is deleted.
         </li>
       </ul>
 
@@ -97,8 +98,8 @@ export default function PrivacyPage() {
           in. Storage is private; photos are not published to the web by SnapList.
         </li>
         <li>
-          <strong>OpenAI and Google</strong> — the models that read the photos, transcribe the
-          voice note, and draft the listing text.
+          <strong>OpenAI and Google</strong> — models that may read photos and draft listing text.
+          <strong> OpenAI</strong> transcribes the voice note.
         </li>
         <li>
           <strong>Web search and sold-comp providers</strong> — these receive a description of the
@@ -119,18 +120,20 @@ export default function PrivacyPage() {
       <div className="mkt-doc__note">
         <p style={{ margin: 0 }}>
           Some records belong to those providers rather than to SnapList. A listing you published
-          to eBay is an eBay record, and a purchase is an Apple record. Deleting your SnapList
-          account removes SnapList&apos;s copy and its references; it does not delete the eBay
-          listing or the Apple purchase, which you manage in those accounts.
+          to eBay is an eBay record, a purchase is an Apple record, and a transcription provider
+          copy is an OpenAI record. SnapList cannot delete or report deletion of those records.
+          When account deletion completes, SnapList removes the account data it covers. It retains
+          a scrubbed deletion receipt with no raw identity for 30 days to prevent duplicate
+          requests.
         </p>
       </div>
 
       <h2>Deleting your data</h2>
       <p>
-        You can delete an individual item from the app, which deletes its photos, transcript,
-        draft, export packs, and pricing evidence. You can also delete your account, which removes
-        your items and your sign-in identity. Account deletion is not reported as complete until
-        every record it covers has actually been removed.
+        To request deletion of an item or your account, contact us using the method below. Item
+        deletion removes its photos, transcript, draft, export packs, and pricing evidence.
+        Account deletion is not reported as complete until every record it covers has actually been
+        removed.
       </p>
 
       <h2>Children</h2>
