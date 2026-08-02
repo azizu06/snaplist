@@ -129,6 +129,21 @@ struct CrashReportScrubber: Sendable {
         "os": ["name", "version", "build", "rooted"],
     ]
 
+    /// Pinned Sentry 9.24.0 emits these finite category values from its
+    /// breadcrumb trackers and network integration. Unknown categories can
+    /// carry seller text, including recovered breadcrumbs, so they become a
+    /// fixed safe value at the serialization boundary.
+    static let approvedBreadcrumbCategories: Set<String> = [
+        "default", "http", "device.event", "app.lifecycle", "started", "touch",
+        "ui.lifecycle", "device.connectivity", "device.orientation",
+    ]
+
+    /// The same pinned SDK emitters use only these fixed types. Drop all
+    /// others because `SentryBreadcrumb.type` accepts arbitrary strings.
+    static let approvedBreadcrumbTypes: Set<String> = [
+        "http", "system", "navigation", "debug", "user", "connectivity",
+    ]
+
     /// Rewrites `event` in place and returns it, which is the contract
     /// `beforeSend` expects.
     @discardableResult
@@ -154,6 +169,9 @@ struct CrashReportScrubber: Sendable {
         for breadcrumb in event.breadcrumbs ?? [] {
             breadcrumb.message = nil
             breadcrumb.data = nil
+            breadcrumb.category = Self.approvedBreadcrumbCategory(breadcrumb.category)
+                ?? "redacted"
+            breadcrumb.type = Self.approvedBreadcrumbType(breadcrumb.type)
         }
 
         event.fingerprint = nil
@@ -238,6 +256,17 @@ struct CrashReportScrubber: Sendable {
             accepted = false
         }
         return accepted ? value : nil
+    }
+
+    private static func approvedBreadcrumbCategory(_ value: String) -> String? {
+        approvedBreadcrumbCategories.contains(value) ? value : nil
+    }
+
+    private static func approvedBreadcrumbType(_ value: String?) -> String? {
+        guard let value, approvedBreadcrumbTypes.contains(value) else {
+            return nil
+        }
+        return value
     }
 
     private static func matches(_ value: String, _ pattern: String) -> Bool {

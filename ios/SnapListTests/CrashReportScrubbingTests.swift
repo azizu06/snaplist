@@ -235,6 +235,24 @@ final class CrashReportScrubbingTests: XCTestCase {
         )
     }
 
+    func testInstalledHookReplacesSellerTextBreadcrumbMetadata() throws {
+        let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        let breadcrumb = Breadcrumb(level: .info, category: Self.listingTitle)
+        breadcrumb.type = Self.listingTitle
+        event.breadcrumbs = [breadcrumb]
+
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let serializedBreadcrumb = try firstBreadcrumb(in: serialized)
+
+        XCTAssertEqual(serializedBreadcrumb["category"] as? String, "redacted")
+        XCTAssertNil(serializedBreadcrumb["type"])
+        XCTAssertFalse(
+            transmittedText(of: serialized).contains(Self.listingTitle),
+            "serialized breadcrumb metadata still transmits ordinary seller prose"
+        )
+    }
+
     func testInstalledHookDropsTheHTTPRequestAndUserContext() throws {
         let beforeSend = try installedBeforeSend()
 
@@ -499,6 +517,7 @@ final class CrashReportScrubbingTests: XCTestCase {
         )
         event.exceptions = [sourceException]
         let breadcrumb = Breadcrumb(level: .info, category: "ui.lifecycle")
+        breadcrumb.type = "navigation"
         breadcrumb.message = "Scan submitted"
         event.breadcrumbs = [breadcrumb]
         event.tags = ["environment": "testflight"]
@@ -528,6 +547,7 @@ final class CrashReportScrubbingTests: XCTestCase {
             serializedBreadcrumb["category"] as? String,
             "ui.lifecycle"
         )
+        XCTAssertEqual(serializedBreadcrumb["type"] as? String, "navigation")
         XCTAssertNil(serializedBreadcrumb["message"])
         XCTAssertEqual(tags["environment"], "testflight")
         XCTAssertEqual(
