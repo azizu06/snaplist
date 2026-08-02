@@ -386,6 +386,7 @@ set search_path = ''
 as $$
 declare
   v_user_id text := public.clerk_user_id();
+  v_guided_correction_consumed boolean := false;
 begin
   if coalesce(v_user_id, '') = ''
     or p_claim_run_id is null
@@ -416,6 +417,30 @@ begin
     raise exception using
       errcode = 'P0002',
       message = 'Guided correction attempt changed. Retry the request.';
+  end if;
+
+  -- A completed correction advances the editable listing to its completion run.
+  -- Fence the terminal allowance before the shared authorizer can reject that
+  -- now-stale listing binding, so a fresh key receives the stable allowance
+  -- denial instead of falling through to mutable-authority errors.
+  select reservation.guided_correction_completed_at is not null
+  into v_guided_correction_consumed
+  from public.ai_item_credit_reservations reservation
+  join public.items item
+    on item.id = reservation.item_id
+   and item.user_id = reservation.user_id
+  where reservation.user_id = v_user_id
+    and reservation.item_id = p_item_id
+    and reservation.state = 'settled'
+    and reservation.photo_identity_kind = item.photo_identity_kind
+    and reservation.photo_identity_fingerprint = item.photo_identity_fingerprint
+    and reservation.photo_identity_kind = 'content_sha256_set_v1'
+  order by reservation.settled_at desc
+  limit 1;
+  if coalesce(v_guided_correction_consumed, false) then
+    raise exception using
+      errcode = 'P0001',
+      message = 'The included guided correction is unavailable.';
   end if;
 
   return public.authorize_ai_item_guided_correction(
