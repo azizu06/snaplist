@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -105,6 +105,14 @@ function clientCalledPaths(): string[] {
   return [...new Set([...literalPaths, "/v1/account/erasure"])].sort();
 }
 
+/** Every path whose App Router route must exist. */
+function routeGuardPaths(): string[] {
+  return [
+    ...servedOperations().map(({ path }) => path),
+    ...clientCalledPaths(),
+  ];
+}
+
 /** `/v1/runs/{runId}/retry` -> `src/app/v1/runs/[runId]/retry/route.ts`. */
 function routeFileFor(path: string): string {
   const segments = path
@@ -139,15 +147,12 @@ function exportedMethods(routeFile: string): string[] {
 
 describe("mobile API contract to App Router routing", () => {
   it("serves every published contract or client-called v1 path", () => {
-    const unreachable = missingRoutePaths([
-      ...servedOperations().map(({ path }) => path),
-      ...clientCalledPaths(),
-    ]);
+    const unreachable = missingRoutePaths(routeGuardPaths());
 
     expect([...new Set(unreachable)]).toEqual([]);
   });
 
-  it("fails when a client-called path has no App Router route file", () => {
+  it("fails when a client-only path has no App Router route file", () => {
     const clientOnlyPaths = clientCalledPaths().filter(
       (path) => !servedOperations().some((operation) => operation.path === path),
     );
@@ -158,12 +163,19 @@ describe("mobile API contract to App Router routing", () => {
       "/v1/included-offer/redemptions/{claimId}/device-token",
     ]);
 
-    expect(
-      missingRoutePaths(
-        clientOnlyPaths,
-        () => resolve("src/app/v1/__missing_client_route__/route.ts"),
-      ),
-    ).toEqual(clientOnlyPaths);
+    // This client-only route is deliberately absent from the OpenAPI route
+    // table. Hide its real route file briefly so this exercises the guard's
+    // production population and real filesystem check, not a fake resolver.
+    const clientOnlyPath = "/v1/included-offer/redemptions";
+    const routeFile = routeFileFor(clientOnlyPath);
+    const hiddenRouteFile = `${routeFile}.mobile-api-routes-test-hidden`;
+
+    renameSync(routeFile, hiddenRouteFile);
+    try {
+      expect(missingRoutePaths(routeGuardPaths())).toEqual([clientOnlyPath]);
+    } finally {
+      renameSync(hiddenRouteFile, routeFile);
+    }
   });
 
   it("exports each contract method on the route that serves it", () => {

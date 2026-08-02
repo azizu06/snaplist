@@ -2927,12 +2927,15 @@ describe("finalizeVerifiedSoldResult — one shared seam for every retrieval ada
 
   it("weights the suggested price by canonical match score, not raw comp order", () => {
     const evidence = selectSoldCompEvidence(
-      [anchorComp("same-condition", 100), anchorComp("adjacent-condition", 200, undefined, "Like New")],
+      [anchorComp("adjacent-condition", 200, undefined, "Like New"), anchorComp("same-condition", 100)],
       BRANDED_SIGNAL,
     );
-    // The seller's "good" condition gives the first anchor a higher canonical
-    // score, so weighted median must prefer 100 over raw-order median 150.
+    // Raw order starts with the $200 adjacent-condition comp, but the seller's
+    // "good" condition gives the $100 same-condition comp a higher canonical
+    // score. Weighted median must therefore prefer $100, not raw first order.
+    expect(evidence.anchors.map(({ comp }) => comp.price)).toEqual([200, 100]);
     expect(evidence.anchors[0].score).not.toBe(evidence.anchors[1].score);
+    expect(evidence.anchors[1].score).toBeGreaterThan(evidence.anchors[0].score);
     expect(finalizeVerifiedSoldResult(evidence, FINALIZATION_FRESHNESS)!.suggested).toBe(100);
   });
 });
