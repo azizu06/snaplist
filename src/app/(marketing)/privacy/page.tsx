@@ -61,7 +61,8 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Launch waitlist email.</strong> If you join the launch waitlist, SnapList uses
-          your email address only to send one launch email.
+          your email address only to send one launch email and deletes it if you withdraw, within
+          30 days after that email, or after 24 months, whichever comes first.
         </li>
       </ul>
 

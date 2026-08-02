@@ -327,7 +327,7 @@ describe("App Review destinations", () => {
     const $ = load(renderToStaticMarkup(<PrivacyPage />));
 
     expect($("body").text()).toMatch(
-      /If you join the launch waitlist, SnapList uses your email address only to send one launch email\./,
+      /If you join the launch waitlist, SnapList uses your email address only to send one launch email and deletes it if you withdraw, within 30 days after that email, or after 24 months, whichever comes first\./,
     );
   });
 

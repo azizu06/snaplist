@@ -1,19 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const database = vi.hoisted(() => ({
-  from: vi.fn(),
-  insert: vi.fn(),
+  rpc: vi.fn(),
 }));
-const rateLimit = vi.hoisted(() => ({ limit: vi.fn() }));
 
 vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: () => ({ from: database.from }),
-}));
-vi.mock("@/lib/abuse/store", () => ({
-  createInMemoryLimiter: () => ({ limit: rateLimit.limit }),
-}));
-vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ "x-forwarded-for": "198.51.100.62, 10.0.0.1" }),
+  createAdminClient: () => ({ rpc: database.rpc }),
 }));
 
 import { submitWaitlistSignup } from "./actions";
@@ -32,17 +24,8 @@ function botSubmission(email: string): FormData {
 
 describe("waitlist server action", () => {
   beforeEach(() => {
-    database.from.mockReset();
-    database.insert.mockReset();
-    database.from.mockReturnValue({ insert: database.insert });
-    database.insert.mockResolvedValue({ error: null });
-    rateLimit.limit.mockReset();
-    rateLimit.limit.mockResolvedValue({
-      success: true,
-      limit: 5,
-      remaining: 4,
-      resetMs: 600_000,
-    });
+    database.rpc.mockReset();
+    database.rpc.mockResolvedValue({ data: true, error: null });
   });
 
   it("stores a valid normalized email through the privileged database path", async () => {
@@ -50,15 +33,16 @@ describe("waitlist server action", () => {
       submitWaitlistSignup({ status: "idle" }, submission("  Aziz@Example.COM  ")),
     ).resolves.toEqual({ status: "success" });
 
-    expect(database.from).toHaveBeenCalledWith("waitlist_signups");
-    expect(database.insert).toHaveBeenCalledWith({ email: "aziz@example.com" });
+    expect(database.rpc).toHaveBeenCalledWith(
+      "insert_waitlist_signup",
+      {
+        p_email: "aziz@example.com",
+        p_rate_limit: expect.any(Number),
+      },
+    );
   });
 
   it("returns the same quiet success when the normalized email already exists", async () => {
-    database.insert.mockResolvedValue({
-      error: { code: "23505", message: "duplicate key value violates unique constraint" },
-    });
-
     await expect(
       submitWaitlistSignup({ status: "idle" }, submission("AZIZ@example.com")),
     ).resolves.toEqual({ status: "success" });
@@ -71,7 +55,7 @@ describe("waitlist server action", () => {
         submitWaitlistSignup({ status: "idle" }, submission(email)),
       ).resolves.toEqual({ status: "invalid" });
 
-      expect(database.from).not.toHaveBeenCalled();
+      expect(database.rpc).not.toHaveBeenCalled();
     },
   );
 
@@ -80,23 +64,16 @@ describe("waitlist server action", () => {
       submitWaitlistSignup({ status: "idle" }, botSubmission("bot@example.com")),
     ).resolves.toEqual({ status: "success" });
 
-    expect(database.from).not.toHaveBeenCalled();
-    expect(rateLimit.limit).not.toHaveBeenCalled();
+    expect(database.rpc).not.toHaveBeenCalled();
   });
 
-  it("quietly accepts a rate-limited submission without writing", async () => {
-    rateLimit.limit.mockResolvedValue({
-      success: false,
-      limit: 5,
-      remaining: 0,
-      resetMs: 300_000,
-    });
+  it("quietly accepts a database-rate-limited submission without a second write path", async () => {
+    database.rpc.mockResolvedValue({ data: false, error: null });
 
     await expect(
       submitWaitlistSignup({ status: "idle" }, submission("person@example.com")),
     ).resolves.toEqual({ status: "success" });
 
-    expect(rateLimit.limit).toHaveBeenCalledWith("198.51.100.62");
-    expect(database.from).not.toHaveBeenCalled();
+    expect(database.rpc).toHaveBeenCalledTimes(1);
   });
 });

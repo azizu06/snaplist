@@ -143,7 +143,7 @@ describe("lean-MVP release retention contract", () => {
             ],
             maximumRetention:
               "24 months after signup, or 30 days after the one-time launch email is sent, whichever is earlier; a withdrawal request deletes the row sooner",
-            executor: "snaplist-operator-sql-waitlist-export-and-deletion-runbook",
+            executor: "snaplist-operator-direct-sql-export-and-delete",
             completionProof:
               "a direct SQL count proves the normalized address is absent after withdrawal or the age ceiling; after launch, a full-table SQL count proves no waitlist row remains",
             ownerDecision:
