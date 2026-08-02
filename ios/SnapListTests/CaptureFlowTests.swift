@@ -3390,6 +3390,43 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
+    func testDepartedPhotoReviewRestartsCameraForTheGuidedScanReturn() async {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000053")
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized
+        )
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [photo],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+
+        var receivedFocuses: [PhotoReviewScanFocus] = []
+        let didReturn = await AppShellDepartedPhotoReviewTransaction.perform(
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { receivedFocuses.append($0) }
+        )
+
+        XCTAssertTrue(didReturn)
+        XCTAssertEqual(camera.startCount, 1)
+        XCTAssertEqual(captureFlow.phase, .camera)
+        XCTAssertNil(host.session)
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+        XCTAssertEqual(receivedFocuses, [.addPhotoButton])
+    }
+
     func testPhotoReviewConditionalShellRemountPresentsPrepopulatedGuidedCamera() async {
         let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000051")
         let router = AppRouter(initialFullScreen: .guidedCamera)

@@ -69,8 +69,7 @@ final class HomeUITests: XCTestCase {
     }
 
     func testRunDetailShowsLoadedItemAndStageTruth() {
-        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=loaded"])
-        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+        let app = launch("RUN-02", extraArguments: ["--run-detail-fixture=loaded"])
 
         XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Processing"].exists)

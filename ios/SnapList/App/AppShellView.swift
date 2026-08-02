@@ -175,7 +175,9 @@ struct AppShellView: View {
             }
             awaitsCommittedEmptyDismissal = false
             guard captureFlow.stagedPhotos.isEmpty else { return }
-            _ = dismissActivePhotoReviewForDepartedIntake()
+            Task {
+                _ = await dismissActivePhotoReviewForDepartedIntake()
+            }
         }
         .task(id: onboardingCaptureRouteID) {
             guard configuration.usesOnboarding,
@@ -214,7 +216,7 @@ struct AppShellView: View {
                     if awaitsPrincipalReviewDismissal
                         || activeReviewDeparted {
                         awaitsPrincipalReviewDismissal = false
-                        _ = dismissActivePhotoReviewForDepartedIntake()
+                        _ = await dismissActivePhotoReviewForDepartedIntake()
                     } else if snapshot.photos.isEmpty,
                               photoReviewHost.session != nil {
                         photoReviewHost.session?
@@ -222,7 +224,7 @@ struct AppShellView: View {
                         if photoReviewHost.isCommitting {
                             awaitsCommittedEmptyDismissal = true
                         } else {
-                            _ = dismissActivePhotoReviewForDepartedIntake()
+                            _ = await dismissActivePhotoReviewForDepartedIntake()
                         }
                     } else {
                         photoReviewHost.session?.publishCommittedSnapshot(snapshot)
@@ -239,7 +241,8 @@ struct AppShellView: View {
         TabView(selection: $router.selectedTab) {
             ForEach(PrimaryTab.allCases) { tab in
                 NavigationStack(path: router.pathBinding(for: tab)) {
-                    if router.selectedTab == tab {
+                    if router.selectedTab == tab,
+                       router.presentedFullScreen == nil {
                         ZStack(alignment: .top) {
                             primaryFeature(for: tab)
 #if DEBUG
@@ -439,11 +442,15 @@ struct AppShellView: View {
     }
 
     @discardableResult
-    private func dismissActivePhotoReviewForDepartedIntake() -> Bool {
-        guard photoReviewHost.leaveForDepartedIntake(using: router) else {
+    private func dismissActivePhotoReviewForDepartedIntake() async -> Bool {
+        guard await AppShellDepartedPhotoReviewTransaction.perform(
+            captureFlow: captureFlow,
+            host: photoReviewHost,
+            router: router,
+            setReturnFocus: { pendingScanReturnFocus = $0 }
+        ) else {
             return false
         }
-        pendingScanReturnFocus = .addPhotoButton
         photoReviewIntake = nil
         return true
     }
@@ -551,6 +558,22 @@ enum AppShellPhotoReviewBackTransaction {
         }
 
         return outcome
+    }
+}
+
+@MainActor
+enum AppShellDepartedPhotoReviewTransaction {
+    static func perform(
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
+    ) async -> Bool {
+        guard host.session != nil else { return false }
+        setReturnFocus(.addPhotoButton)
+        guard host.leaveForDepartedIntake(using: router) else { return false }
+        await captureFlow.startCamera()
+        return true
     }
 }
 
