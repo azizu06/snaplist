@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(42);
+select extensions.plan(54);
 
 -- Issue #597: the native guided identity correction.
 --
@@ -15,9 +15,10 @@ select extensions.plan(42);
 --      silently did not happen, and the seller sees the old identity the
 --      moment the client refetches.
 --
---   2. Two corrections holding the same review revision must not both reach
---      the pricing provider. Exactly one can win the revision guard; without
---      the claim, the loser's provider spend is billed and then discarded.
+--   2. Two live corrections holding the same review revision must not both
+--      reach the pricing provider. An expired-lease replacement advances an
+--      attempt generation, so the older process can neither complete nor
+--      release the live replacement after both have already done provider work.
 --
 -- Everything runs inside one rolled-back transaction, so no fixture touches a
 -- shared database.
@@ -160,15 +161,33 @@ select extensions.function_privs_are(
 );
 select extensions.function_privs_are(
   'public', 'claim_mobile_guided_correction',
-  array['text', 'uuid', 'uuid', 'uuid', 'jsonb'],
+  array['text', 'uuid', 'uuid', 'uuid', 'jsonb', 'bigint'],
   'anon', array[]::text[],
   'an unauthenticated caller cannot claim a correction'
 );
 select extensions.function_privs_are(
   'public', 'claim_mobile_guided_correction',
-  array['text', 'uuid', 'uuid', 'uuid', 'jsonb'],
+  array['text', 'uuid', 'uuid', 'uuid', 'jsonb', 'bigint'],
   'authenticated', array['EXECUTE'],
   'a seller claims their own correction'
+);
+select extensions.function_privs_are(
+  'public', 'authorize_mobile_guided_correction',
+  array[
+    'uuid', 'uuid', 'bigint', 'uuid', 'uuid', 'uuid', 'uuid', 'uuid', 'text',
+    'timestamp with time zone'
+  ],
+  'anon', array[]::text[],
+  'an unauthenticated caller cannot authorize a mobile correction'
+);
+select extensions.function_privs_are(
+  'public', 'authorize_mobile_guided_correction',
+  array[
+    'uuid', 'uuid', 'bigint', 'uuid', 'uuid', 'uuid', 'uuid', 'uuid', 'text',
+    'timestamp with time zone'
+  ],
+  'authenticated', array['EXECUTE'],
+  'a seller may authorize only the current claimed attempt'
 );
 select extensions.table_privs_are(
   'private', 'mobile_guided_corrections', 'authenticated', array[]::text[],
@@ -176,13 +195,13 @@ select extensions.table_privs_are(
 );
 select extensions.function_privs_are(
   'public', 'complete_mobile_guided_correction',
-  array['text', 'uuid', 'jsonb', 'jsonb'],
+  array['text', 'uuid', 'bigint', 'jsonb', 'jsonb'],
   'authenticated', array[]::text[],
   'a seller cannot invoke the fixed privileged completion directly'
 );
 select extensions.function_privs_are(
   'public', 'complete_mobile_guided_correction',
-  array['text', 'uuid', 'jsonb', 'jsonb'],
+  array['text', 'uuid', 'bigint', 'jsonb', 'jsonb'],
   'service_role', array['EXECUTE'],
   'only the fixed internal completion client may consume a correction capability'
 );
@@ -435,7 +454,8 @@ select extensions.is(
     '59720000-0000-4000-8000-000000000001'::uuid,
     '59750000-0000-4000-8000-000000000002'::uuid,
     '59740000-0000-4000-8000-000000000002'::uuid,
-    '{"addedSpecs":["Over-ear"]}'::jsonb
+    '{"addedSpecs":["Over-ear"]}'::jsonb,
+    1
   )->>'state',
   'unchanged',
   'releasing a lease that was never granted changes nothing'
@@ -446,7 +466,8 @@ select extensions.is(
     '59720000-0000-4000-8000-000000000001'::uuid,
     '59750000-0000-4000-8000-000000000001'::uuid,
     '59740000-0000-4000-8000-000000000002'::uuid,
-    '{"addedSpecs":["Noise cancelling"]}'::jsonb
+    '{"addedSpecs":["Noise cancelling"]}'::jsonb,
+    1
   )->>'state',
   'failed',
   'the granted claim is released before a later correction of the same revision'
@@ -493,10 +514,23 @@ select extensions.is(
   'proceed',
   'the mobile correction claim is acquired before allowance authorization'
 );
+select extensions.is(
+  (
+    select attempt_generation
+    from private.mobile_guided_corrections
+    where user_id = 'guided_597_owner'
+      and idempotency_key = '59750000-0000-4000-8000-000000000010'
+  ),
+  1::bigint,
+  'the first provider attempt receives generation one'
+);
 
 select extensions.lives_ok(
   $$
-    select public.authorize_ai_item_guided_correction(
+    select public.authorize_mobile_guided_correction(
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59750000-0000-4000-8000-000000000010'::uuid,
+      1,
       '59710000-0000-4000-8000-000000000001'::uuid,
       '59770000-0000-4000-8000-000000000001'::uuid,
       '59740000-0000-4000-8000-000000000010'::uuid,
@@ -532,6 +566,7 @@ select extensions.throws_ok(
     select public.complete_mobile_guided_correction(
       repeat('a', 43),
       '59750000-0000-4000-8000-000000000010'::uuid,
+      1,
       '{
         "item_id":"59710000-0000-4000-8000-000000000001",
         "expected_review_revision":"59740000-0000-4000-8000-000000000002",
@@ -552,6 +587,15 @@ select extensions.throws_ok(
           "tier_fired":"ebay-sold","model":"vision-model",
           "listing_model":"listing-model","pricing_model":null,"sources":[],
           "autopilot_enabled":false,"autopilot_eligible":false
+        },
+        "pricing_snapshot":{
+          "schema_version":1,
+          "item":{"title":"Sony WH-1000XM4","condition":"good"},
+          "price_result":{
+            "suggested":180,"range":{"min":160,"max":200},"confidence":0.8,
+            "sources":[],"tier":"ebay-sold"
+          },
+          "evidence":[]
         }
       }'::jsonb,
       '{
@@ -605,11 +649,187 @@ select extensions.is(
 drop trigger zzzz_test_reject_mobile_correction_receipt
   on private.mobile_guided_corrections;
 
+update private.mobile_guided_corrections
+set lease_expires_at = statement_timestamp() - interval '1 second'
+where user_id = 'guided_597_owner'
+  and idempotency_key = '59750000-0000-4000-8000-000000000010';
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"guided_597_owner","role":"authenticated"}',
+  true
+);
+select extensions.is(
+  public.claim_mobile_guided_correction(
+    'prepare',
+    '59720000-0000-4000-8000-000000000001'::uuid,
+    '59750000-0000-4000-8000-000000000010'::uuid,
+    '59740000-0000-4000-8000-000000000002'::uuid,
+    '{"addedSpecs":["1TB SSD"]}'::jsonb,
+    null
+  )->>'attemptGeneration',
+  '2',
+  'an expired-lease reclaim advances the attempt generation'
+);
+
+select extensions.is(
+  public.claim_mobile_guided_correction(
+    'fail',
+    '59720000-0000-4000-8000-000000000001'::uuid,
+    '59750000-0000-4000-8000-000000000010'::uuid,
+    '59740000-0000-4000-8000-000000000002'::uuid,
+    '{"addedSpecs":["1TB SSD"]}'::jsonb,
+    1
+  )->>'state',
+  'unchanged',
+  'a stale attempt cannot release the reclaimed live attempt'
+);
+
+select extensions.is(
+  (
+    select jsonb_build_object(
+      'state', state,
+      'attemptGeneration', attempt_generation,
+      'guidedCorrectionCompleted', (
+        select reservation.guided_correction_completed_at is not null
+        from public.ai_item_credit_reservations reservation
+        where reservation.id = '59790000-0000-4000-8000-000000000001'
+      )
+    )
+    from private.mobile_guided_corrections
+    where user_id = 'guided_597_owner'
+      and idempotency_key = '59750000-0000-4000-8000-000000000010'
+  ),
+  '{"state":"pending","attemptGeneration":2,"guidedCorrectionCompleted":false}'::jsonb,
+  'the stale failure changes neither live claim nor allowance settlement'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.authorize_mobile_guided_correction(
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59750000-0000-4000-8000-000000000010'::uuid,
+      2,
+      '59710000-0000-4000-8000-000000000001'::uuid,
+      '59770000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000010'::uuid,
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000002'::uuid,
+      repeat('b', 43),
+      statement_timestamp() + interval '4 minutes'
+    )
+  $$,
+  'the reclaimed attempt replaces the expired completion capability'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.authorize_mobile_guided_correction(
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59750000-0000-4000-8000-000000000010'::uuid,
+      1,
+      '59710000-0000-4000-8000-000000000001'::uuid,
+      '59770000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000010'::uuid,
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000002'::uuid,
+      repeat('c', 43),
+      statement_timestamp() + interval '4 minutes'
+    )
+  $$,
+  'P0002',
+  'Guided correction attempt changed. Retry the request.',
+  'the replaced generation cannot overwrite the live completion capability'
+);
+select extensions.is(
+  (
+    select token_hash
+    from private.guided_correction_completion_capabilities
+    where reservation_id = '59790000-0000-4000-8000-000000000001'
+  ),
+  encode(sha256(convert_to(repeat('b', 43), 'UTF8')), 'hex'),
+  'the stale authorization leaves the replacement capability intact'
+);
+
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.throws_ok(
+  $$
+    select public.complete_mobile_guided_correction(
+      repeat('b', 43),
+      '59750000-0000-4000-8000-000000000010'::uuid,
+      1,
+      '{
+        "item_id":"59710000-0000-4000-8000-000000000001",
+        "expected_review_revision":"59740000-0000-4000-8000-000000000002",
+        "run_id":"59740000-0000-4000-8000-000000000010",
+        "attributes":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
+        "identification":{"label":"Sony WH-1000XM4","confident":true,"evidence":1},
+        "listing":{
+          "platform":"ebay","title":"Sony WH-1000XM4 Wireless Headphones",
+          "description":"Sony WH-1000XM4 headphones with Bluetooth 5.0.",
+          "copy":{"itemSpecifics":{"Brand":"Sony","Model":"WH-1000XM4"}}
+        },
+        "prediction":{
+          "extracted_attrs":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
+          "price":180,"price_range":{"low":160,"high":200},"confidence":0.8,
+          "tier_fired":"ebay-sold","model":"vision-model",
+          "listing_model":"listing-model","pricing_model":null,"sources":[],
+          "autopilot_enabled":false,"autopilot_eligible":false
+        },
+        "pricing_snapshot":{
+          "schema_version":1,
+          "item":{"title":"Sony WH-1000XM4","condition":"good"},
+          "price_result":{
+            "suggested":180,"range":{"min":160,"max":200},"confidence":0.8,
+            "sources":[],"tier":"ebay-sold"
+          },
+          "evidence":[]
+        }
+      }'::jsonb,
+      '{
+        "schemaVersion":1,"runId":"59740000-0000-4000-8000-000000000010",
+        "itemId":"59710000-0000-4000-8000-000000000001",
+        "reviewRevision":"59740000-0000-4000-8000-000000000010",
+        "effectivePrice":180
+      }'::jsonb
+    )
+  $$,
+  '22023',
+  'Invalid mobile guided correction completion',
+  'a stale generation cannot complete through the reclaimed capability'
+);
+
+select extensions.is(
+  (
+    select jsonb_build_object(
+      'state', claim.state,
+      'attemptGeneration', claim.attempt_generation,
+      'predictionCount', (
+        select count(*)
+        from public.prediction_logs prediction
+        where prediction.run_id = '59740000-0000-4000-8000-000000000010'
+      ),
+      'snapshotCount', (
+        select count(*)
+        from public.pricing_evidence_snapshots evidence
+        where evidence.run_id = '59740000-0000-4000-8000-000000000010'
+      )
+    )
+    from private.mobile_guided_corrections claim
+    where claim.user_id = 'guided_597_owner'
+      and claim.idempotency_key = '59750000-0000-4000-8000-000000000010'
+  ),
+  '{"state":"pending","attemptGeneration":2,"predictionCount":0,"snapshotCount":0}'::jsonb,
+  'the stale completion writes no state, prediction, or evidence snapshot'
+);
+
 select extensions.lives_ok(
   $$
     select public.complete_mobile_guided_correction(
-      repeat('a', 43),
+      repeat('b', 43),
       '59750000-0000-4000-8000-000000000010'::uuid,
+      2,
       '{
         "item_id":"59710000-0000-4000-8000-000000000001",
         "expected_review_revision":"59740000-0000-4000-8000-000000000002",
@@ -630,6 +850,15 @@ select extensions.lives_ok(
           "tier_fired":"ebay-sold","model":"vision-model",
           "listing_model":"listing-model","pricing_model":null,"sources":[],
           "autopilot_enabled":false,"autopilot_eligible":false
+        },
+        "pricing_snapshot":{
+          "schema_version":1,
+          "item":{"title":"Sony WH-1000XM4","condition":"good"},
+          "price_result":{
+            "suggested":180,"range":{"min":160,"max":200},"confidence":0.8,
+            "sources":[],"tier":"ebay-sold"
+          },
+          "evidence":[]
         }
       }'::jsonb,
       '{
@@ -658,7 +887,10 @@ select extensions.ok(
 select extensions.is(
   (
     select jsonb_build_object(
-      'title', title, 'description', description, 'copy', copy
+      'title', title,
+      'description', description,
+      'copy', copy,
+      'sourceReviewRevision', source_review_revision
     )
     from public.listings
     where id = '59770000-0000-4000-8000-000000000001'
@@ -669,9 +901,41 @@ select extensions.is(
     "copy":{
       "itemSpecifics":{"Brand":"Sony","Model":"WH-1000XM4"},
       "tags":["wireless headphones"]
-    }
+    },
+    "sourceReviewRevision":"59740000-0000-4000-8000-000000000010"
   }'::jsonb,
   'successful completion stores the regenerated eBay draft in the same transaction'
+);
+select extensions.is(
+  (
+    select jsonb_build_object(
+      'runKind', evidence.run_kind,
+      'userId', evidence.user_id,
+      'itemId', evidence.item_id,
+      'predictionId', evidence.prediction_id,
+      'listingId', evidence.listing_id,
+      'schemaVersion', evidence.schema_version,
+      'suggested', evidence.price_result->'suggested',
+      'evidenceAsOfPresent', evidence.evidence_as_of is not null
+    )
+    from public.pricing_evidence_snapshots evidence
+    where evidence.run_id = '59740000-0000-4000-8000-000000000010'
+  ),
+  jsonb_build_object(
+    'runKind', 'review-correction',
+    'userId', 'guided_597_owner',
+    'itemId', '59710000-0000-4000-8000-000000000001'::uuid,
+    'predictionId', (
+      select prediction.id
+      from public.prediction_logs prediction
+      where prediction.run_id = '59740000-0000-4000-8000-000000000010'
+    ),
+    'listingId', '59770000-0000-4000-8000-000000000001'::uuid,
+    'schemaVersion', 1,
+    'suggested', to_jsonb(180),
+    'evidenceAsOfPresent', true
+  ),
+  'successful completion stores one fully bound corrected evidence snapshot'
 );
 
 select set_config(
@@ -703,7 +967,10 @@ select extensions.is(
 );
 select extensions.throws_ok(
   $$
-    select public.authorize_ai_item_guided_correction(
+    select public.authorize_mobile_guided_correction(
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59750000-0000-4000-8000-000000000011'::uuid,
+      1,
       '59710000-0000-4000-8000-000000000001'::uuid,
       '59770000-0000-4000-8000-000000000001'::uuid,
       '59740000-0000-4000-8000-000000000011'::uuid,

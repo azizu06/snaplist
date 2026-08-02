@@ -22,6 +22,10 @@ import {
 } from "@/lib/pipeline/reprice";
 import { isReviewRegenerationBlocked } from "@/lib/pipeline/review-regeneration-policy";
 import {
+  buildPricingEvidenceSnapshotInput,
+  type PricingEvidenceSnapshotInput,
+} from "@/lib/pricing-evidence";
+import {
   extractedAttributesSchema,
   identificationSchema,
   type ExtractedAttributes,
@@ -169,6 +173,7 @@ export interface GuidedCorrectionCommit {
   identification?: Identification;
   listing: ListingCopy;
   prediction: PredictionLogRow;
+  pricingSnapshot: PricingEvidenceSnapshotInput;
 }
 
 type GuidedCorrectionAtomicCompletion = Omit<
@@ -196,10 +201,11 @@ export interface GuidedCorrectionOperation {
  * The claim's answer, which decides whether provider work may run at all.
  * `completed` carries the first attempt's receipt so a client retry is answered
  * rather than re-priced; `in_progress` means another correction already holds
- * this revision.
+ * this revision. `attemptGeneration` fences completion and failure release when
+ * an expired lease is reclaimed while its older process is still running.
  */
 export type GuidedCorrectionClaimResult =
-  | { state: "proceed" }
+  | { state: "proceed"; attemptGeneration: number }
   | { state: "in_progress" }
   | { state: "completed"; receipt: GuidedCorrectionReceipt };
 
@@ -216,6 +222,7 @@ export interface GuidedCorrectionDataClient {
   authorize(
     operation: GuidedCorrectionOperation,
     attempt: GuidedCorrectionAttemptIdentity,
+    attemptGeneration: number,
   ): Promise<GuidedCorrectionCapability>;
   /** One transaction: correction, included allowance, and replay receipt. */
   complete(
@@ -223,7 +230,10 @@ export interface GuidedCorrectionDataClient {
     completion: GuidedCorrectionAtomicCompletion,
   ): Promise<void>;
   /** `fail` — releases the lease so the seller can retry immediately. */
-  release(operation: GuidedCorrectionOperation): Promise<void>;
+  release(
+    operation: GuidedCorrectionOperation,
+    attemptGeneration: number,
+  ): Promise<void>;
 }
 
 export type GuidedCorrectionRequest = GuidedCorrectionOperation;
@@ -417,11 +427,9 @@ async function runCorrection(
   // the merged specs, plus any identity the seller confirmed. Pricing with a
   // corrected brand while storing the old one is exactly the incoherence this
   // contract exists to prevent.
-  const attributes: Record<string, unknown> = {
+  const attributes: PipelineResult["attributes"] & Record<string, unknown> = {
     ...snapshot.attributes,
-    ...confirmedIdentity,
-    ...(corrected.title ? { title: corrected.title } : {}),
-    specs: reprice.mergedSpecs,
+    ...reprice.attributes,
   };
   // The identity is re-derived from the corrected attributes through the SAME
   // `deriveIdentification` the vision step and the web identity correction use —
@@ -435,7 +443,7 @@ async function runCorrection(
   });
 
   const result: PipelineResult = {
-    attributes: reprice.attributes,
+    attributes,
     price: reprice.price,
     confidence: reprice.confidence,
     listing: generated.copy,
@@ -484,6 +492,7 @@ async function runCorrection(
       ...(identification ? { identification } : {}),
       listing: result.listing,
       prediction,
+      pricingSnapshot: buildPricingEvidenceSnapshotInput(result),
     },
     receipt,
   };
@@ -511,12 +520,15 @@ export function createGuidedCorrectionService(
       // answer away. The claim is also what makes a client retry safe: a
       // completed correction has already advanced the item past the revision its
       // intent carries, so re-running it would 409 the seller off their own
-      // finished work instead of handing back its receipt.
+      // finished work instead of handing back its receipt. A reclaimed lease
+      // advances `attemptGeneration`, so only the replacement may settle or
+      // release the shared claim.
       const claim = await client.claim(operation);
       if (claim.state === "completed") return claim.receipt;
       if (claim.state === "in_progress") {
         throw new GuidedCorrectionInProgressError();
       }
+      const attemptGeneration = claim.attemptGeneration;
 
       const runId = newRunId();
       try {
@@ -528,7 +540,11 @@ export function createGuidedCorrectionService(
           expectedRunId: snapshot.listingRunId,
           expectedReviewRevision: intent.expectedReviewRevision,
         };
-        const capability = await client.authorize(operation, attempt);
+        const capability = await client.authorize(
+          operation,
+          attempt,
+          attemptGeneration,
+        );
         const prepared = await runCorrection(
           operation,
           snapshot,
@@ -540,6 +556,7 @@ export function createGuidedCorrectionService(
           listingId: snapshot.listingId,
           capabilityToken: capability.token,
           idempotencyKey: operation.idempotencyKey,
+          attemptGeneration,
           commit: prepared.commit,
           receipt: prepared.receipt,
         };
@@ -548,7 +565,7 @@ export function createGuidedCorrectionService(
       } catch (error) {
         // Nothing durable happened, so the lease must not outlive the failure —
         // the seller's next attempt has to be legal immediately.
-        await client.release(operation).catch(() => undefined);
+        await client.release(operation, attemptGeneration).catch(() => undefined);
         throw error;
       }
     },
@@ -607,7 +624,9 @@ function mapClaimError(error: GuidedCorrectionRpcFailure): Error {
 function mapAuthorizationError(error: unknown): Error {
   if (
     error instanceof Error
-    && /review changed|guided correction authority changed/i.test(error.message)
+    && /review changed|guided correction (?:authority|attempt) changed/i.test(
+      error.message,
+    )
   ) {
     return new GuidedCorrectionStaleError();
   }
@@ -627,7 +646,10 @@ function mapAuthorizationError(error: unknown): Error {
 }
 
 const claimResultSchema = z.discriminatedUnion("state", [
-  z.object({ state: z.literal("proceed") }),
+  z.object({
+    state: z.literal("proceed"),
+    attemptGeneration: z.number().int().positive().safe(),
+  }),
   z.object({ state: z.literal("in_progress") }),
   z.object({
     state: z.literal("completed"),
@@ -651,6 +673,7 @@ async function operationToken(
 function claimArguments(
   operation: GuidedCorrectionOperation,
   action: "prepare" | "fail",
+  attemptGeneration: number | null,
 ): Record<string, unknown> {
   return {
     p_action: action,
@@ -658,6 +681,7 @@ function claimArguments(
     p_idempotency_key: operation.idempotencyKey,
     p_expected_review_revision: operation.intent.expectedReviewRevision,
     p_intent: operation.intent,
+    p_attempt_generation: attemptGeneration,
   };
 }
 
@@ -806,21 +830,26 @@ export function createSupabaseGuidedCorrectionDataClient(
     async claim(operation) {
       const result = await (await rpcFor(operation)).rpc(
         "claim_mobile_guided_correction",
-        claimArguments(operation, "prepare"),
+        claimArguments(operation, "prepare", null),
       );
       if (result.error) throw mapClaimError(result.error);
       const parsed = claimResultSchema.safeParse(result.data);
       if (!parsed.success) throw new GuidedCorrectionDataError();
       return parsed.data;
     },
-    async authorize(operation, attempt) {
+    async authorize(operation, attempt, attemptGeneration) {
       if (!completionClient) throw new GuidedCorrectionDataError();
       const client = clientForBearer(await operationToken(operation));
       try {
         return await createSupabaseGuidedCorrectionCompletionGateway(
           client,
           completionClient,
-        ).authorize(attempt);
+        ).authorizeMobile({
+          ...attempt,
+          claimRunId: operation.runId,
+          idempotencyKey: operation.idempotencyKey,
+          attemptGeneration,
+        });
       } catch (error) {
         throw mapAuthorizationError(error);
       }
@@ -839,10 +868,10 @@ export function createSupabaseGuidedCorrectionDataClient(
         throw new GuidedCorrectionDataError();
       }
     },
-    async release(operation) {
+    async release(operation, attemptGeneration) {
       const result = await (await rpcFor(operation)).rpc(
         "claim_mobile_guided_correction",
-        claimArguments(operation, "fail"),
+        claimArguments(operation, "fail", attemptGeneration),
       );
       if (result.error) throw mapClaimError(result.error);
     },

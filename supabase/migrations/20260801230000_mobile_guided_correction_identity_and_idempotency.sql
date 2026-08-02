@@ -1,5 +1,5 @@
 -- Issue #597: the native guided identity correction writes a COHERENT review,
--- and pays for provider work at most once per seller intent.
+-- and lets only the current provider attempt settle one seller intent.
 --
 -- Two defects, one migration, because they are the same seam.
 --
@@ -26,8 +26,11 @@
 --    one pending lease per intent, a stored receipt for replay, and an
 --    in-progress answer for a competing correction on the same revision.
 --
---    Unlike its sibling this row holds NO recovery state — only a throttle and
---    a receipt cache. The durable authority stays `items.review_revision`.
+--    Unlike its sibling this row holds NO domain recovery state — only a lease,
+--    attempt generation, and receipt cache. The generation advances whenever an
+--    expired or failed claim is reclaimed, so an older attempt can neither
+--    complete nor release its replacement. Durable review authority stays
+--    `items.review_revision`.
 --    That is why there is no guest-claim transfer trigger here: a claim row
 --    stranded under a pre-claim guest id cannot make a later write wrong, it
 --    can only fail to dedupe one correction across the account claim itself.
@@ -175,6 +178,7 @@ create table private.mobile_guided_corrections (
   run_id uuid not null references public.pipeline_runs(id) on delete cascade,
   expected_review_revision uuid not null,
   intent jsonb not null,
+  attempt_generation bigint not null default 1,
   state text not null default 'pending',
   lease_expires_at timestamptz
     default (statement_timestamp() + interval '5 minutes'),
@@ -182,6 +186,8 @@ create table private.mobile_guided_corrections (
   primary key (user_id, idempotency_key),
   constraint mobile_guided_correction_intent_check
     check (jsonb_typeof(intent) = 'object'),
+  constraint mobile_guided_correction_attempt_generation_check
+    check (attempt_generation > 0),
   constraint mobile_guided_correction_state_check
     check (state in ('pending', 'completed', 'failed')),
   constraint mobile_guided_correction_lease_check
@@ -209,7 +215,8 @@ create or replace function public.claim_mobile_guided_correction(
   p_run_id uuid,
   p_idempotency_key uuid,
   p_expected_review_revision uuid,
-  p_intent jsonb
+  p_intent jsonb,
+  p_attempt_generation bigint default null
 )
 returns jsonb
 language plpgsql
@@ -227,7 +234,9 @@ begin
     or p_run_id is null
     or p_idempotency_key is null
     or p_expected_review_revision is null
-    or p_idempotency_key is not distinct from p_expected_review_revision then
+    or p_idempotency_key is not distinct from p_expected_review_revision
+    or (p_action = 'prepare' and p_attempt_generation is not null)
+    or (p_action = 'fail' and coalesce(p_attempt_generation, 0) <= 0) then
     raise exception using
       errcode = '42501',
       message = 'Guided correction authorization is required.';
@@ -271,7 +280,9 @@ begin
   end if;
 
   if p_action = 'fail' then
-    if not v_claim_found or v_claim.state = 'completed' then
+    if not v_claim_found
+      or v_claim.state <> 'pending'
+      or v_claim.attempt_generation is distinct from p_attempt_generation then
       return jsonb_build_object('state', 'unchanged');
     end if;
     update private.mobile_guided_corrections
@@ -280,7 +291,8 @@ begin
         receipt = null
     where user_id = v_user_id
       and idempotency_key = p_idempotency_key
-      and state = 'pending';
+      and state = 'pending'
+      and attempt_generation = p_attempt_generation;
     return jsonb_build_object('state', 'failed');
   end if;
 
@@ -314,10 +326,12 @@ begin
     update private.mobile_guided_corrections
     set state = 'pending',
         expected_review_revision = p_expected_review_revision,
+        attempt_generation = attempt_generation + 1,
         lease_expires_at = statement_timestamp() + interval '5 minutes',
         receipt = null
     where user_id = v_user_id
-      and idempotency_key = p_idempotency_key;
+      and idempotency_key = p_idempotency_key
+    returning * into v_claim;
   else
     insert into private.mobile_guided_corrections (
       user_id,
@@ -331,18 +345,96 @@ begin
       p_run_id,
       p_expected_review_revision,
       p_intent
-    );
+    )
+    returning * into v_claim;
   end if;
 
-  return jsonb_build_object('state', 'proceed');
+  return jsonb_build_object(
+    'state', 'proceed',
+    'attemptGeneration', v_claim.attempt_generation
+  );
 end;
 $$;
 
 revoke all on function public.claim_mobile_guided_correction(
-  text, uuid, uuid, uuid, jsonb
+  text, uuid, uuid, uuid, jsonb, bigint
 ) from public, anon, service_role;
 grant execute on function public.claim_mobile_guided_correction(
-  text, uuid, uuid, uuid, jsonb
+  text, uuid, uuid, uuid, jsonb, bigint
+) to authenticated;
+
+-- A replacement attempt must also fence capability authorization, not only
+-- completion and failure. Otherwise an older process paused before this call
+-- can wake after a reclaim and overwrite the replacement's one reservation
+-- capability before either process reaches the pricing provider.
+create or replace function public.authorize_mobile_guided_correction(
+  p_claim_run_id uuid,
+  p_idempotency_key uuid,
+  p_attempt_generation bigint,
+  p_item_id uuid,
+  p_listing_id uuid,
+  p_completion_run_id uuid,
+  p_expected_run_id uuid,
+  p_expected_review_revision uuid,
+  p_completion_token text,
+  p_expires_at timestamptz
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+begin
+  if coalesce(v_user_id, '') = ''
+    or p_claim_run_id is null
+    or p_idempotency_key is null
+    or coalesce(p_attempt_generation, 0) <= 0 then
+    raise exception using
+      errcode = '42501',
+      message = 'Guided correction authorization is required.';
+  end if;
+
+  -- Match the claim RPC's run-then-claim lock order. Holding both locks through
+  -- the established allowance authorization makes the generation check and
+  -- capability replacement one atomic decision with respect to a reclaim.
+  perform 1
+  from public.pipeline_runs run
+  join private.mobile_guided_corrections claim
+    on claim.run_id = run.id
+   and claim.user_id = run.user_id
+  where run.id = p_claim_run_id
+    and run.user_id = v_user_id
+    and claim.idempotency_key = p_idempotency_key
+    and claim.expected_review_revision = p_expected_review_revision
+    and claim.attempt_generation = p_attempt_generation
+    and claim.state = 'pending'
+    and claim.lease_expires_at > statement_timestamp()
+  for update of run, claim;
+  if not found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'Guided correction attempt changed. Retry the request.';
+  end if;
+
+  return public.authorize_ai_item_guided_correction(
+    p_item_id,
+    p_listing_id,
+    p_completion_run_id,
+    p_expected_run_id,
+    p_expected_review_revision,
+    p_completion_token,
+    p_expires_at
+  );
+end;
+$$;
+
+revoke all on function public.authorize_mobile_guided_correction(
+  uuid, uuid, bigint, uuid, uuid, uuid, uuid, uuid, text, timestamptz
+) from public, anon, service_role;
+grant execute on function public.authorize_mobile_guided_correction(
+  uuid, uuid, bigint, uuid, uuid, uuid, uuid, uuid, text, timestamptz
 ) to authenticated;
 
 -- The provider-facing mobile route authorizes through the same settled-credit,
@@ -354,6 +446,7 @@ grant execute on function public.claim_mobile_guided_correction(
 create or replace function public.complete_mobile_guided_correction(
   p_completion_token text,
   p_idempotency_key uuid,
+  p_attempt_generation bigint,
   p_commit jsonb,
   p_receipt jsonb
 )
@@ -375,6 +468,8 @@ begin
   end if;
   if p_completion_token !~ '^[A-Za-z0-9_-]{43}$'
     or p_idempotency_key is null
+    or p_attempt_generation is null
+    or p_attempt_generation <= 0
     or jsonb_typeof(p_commit) is distinct from 'object'
     or octet_length(p_commit::text) > 262144
     or jsonb_typeof(p_receipt) is distinct from 'object'
@@ -466,6 +561,7 @@ begin
       is not distinct from v_cap.expected_review_revision
   for update of claim;
   if not found or v_claim.state <> 'pending'
+    or v_claim.attempt_generation is distinct from p_attempt_generation
     or p_receipt->>'itemId' is distinct from v_cap.item_id::text
     or p_receipt->>'runId' is distinct from v_cap.completion_run_id::text
     or p_receipt->>'reviewRevision'
@@ -542,7 +638,8 @@ begin
       receipt = p_receipt
   where user_id = v_cap.user_id
     and idempotency_key = p_idempotency_key
-    and state = 'pending';
+    and state = 'pending'
+    and attempt_generation = p_attempt_generation;
   if not found then
     raise exception using
       errcode = '55000',
@@ -554,10 +651,10 @@ end;
 $$;
 
 revoke all on function public.complete_mobile_guided_correction(
-  text, uuid, jsonb, jsonb
+  text, uuid, bigint, jsonb, jsonb
 ) from public, anon, authenticated;
 grant execute on function public.complete_mobile_guided_correction(
-  text, uuid, jsonb, jsonb
+  text, uuid, bigint, jsonb, jsonb
 ) to service_role;
 
 -- ---------------------------------------------------------------------------

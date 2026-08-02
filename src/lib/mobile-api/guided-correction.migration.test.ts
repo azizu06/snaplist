@@ -142,12 +142,55 @@ describe("guided correction idempotency claim migration", () => {
       /p_action not in \('prepare', 'fail'\)/i,
     );
     expect(migration).not.toMatch(/if p_action = 'complete' then/i);
-    expect(migration).toMatch(/return jsonb_build_object\('state', 'proceed'\)/i);
+    expect(migration).toMatch(
+      /return jsonb_build_object\(\s*'state', 'proceed',\s*'attemptGeneration', v_claim\.attempt_generation\s*\)/i,
+    );
   });
 
   it("refuses to answer one intent with another intent's receipt", () => {
     expect(migration).toMatch(
       /v_claim\.intent is distinct from p_intent[\s\S]*?already bound to a different correction/i,
+    );
+  });
+
+  it("fences an expired-lease reclaim with a new attempt generation", () => {
+    expect(migration).toMatch(
+      /attempt_generation bigint not null default 1/i,
+    );
+    expect(migration).toMatch(
+      /set state = 'pending',[\s\S]*?attempt_generation = attempt_generation \+ 1[\s\S]*?returning \* into v_claim/i,
+    );
+    expect(migration).toMatch(
+      /jsonb_build_object\(\s*'state', 'proceed',\s*'attemptGeneration', v_claim\.attempt_generation\s*\)/i,
+    );
+    expect(migration).toMatch(
+      /p_action = 'fail'[\s\S]*?v_claim\.attempt_generation is distinct from p_attempt_generation[\s\S]*?return jsonb_build_object\('state', 'unchanged'\)/i,
+    );
+
+    const completion = functionBlock(
+      listingRegenerationMigration,
+      "public.complete_mobile_guided_correction",
+    );
+    expect(completion).toMatch(/p_attempt_generation bigint/i);
+    expect(completion).toMatch(
+      /v_claim\.attempt_generation is distinct from p_attempt_generation/i,
+    );
+  });
+
+  it("fences allowance authorization to the current attempt generation", () => {
+    const authorization = functionBlock(
+      migration,
+      "public.authorize_mobile_guided_correction",
+    );
+    expect(authorization).toMatch(/p_attempt_generation bigint/i);
+    expect(authorization).toMatch(
+      /claim\.attempt_generation = p_attempt_generation[\s\S]*?claim\.state = 'pending'/i,
+    );
+    expect(authorization).toMatch(
+      /return public\.authorize_ai_item_guided_correction\(/i,
+    );
+    expect(migration).toMatch(
+      /grant execute on function public\.authorize_mobile_guided_correction\([\s\S]*?\) to authenticated;/i,
     );
   });
 
@@ -160,10 +203,10 @@ describe("guided correction idempotency claim migration", () => {
       /from public\.pipeline_runs run\s*where run\.id = p_run_id\s*and run\.user_id = v_user_id\s*for update;/i,
     );
     expect(migration).toMatch(
-      /revoke all on function public\.claim_mobile_guided_correction\(\s*text, uuid, uuid, uuid, jsonb\s*\) from public, anon, service_role;/i,
+      /revoke all on function public\.claim_mobile_guided_correction\(\s*text, uuid, uuid, uuid, jsonb, bigint\s*\) from public, anon, service_role;/i,
     );
     expect(migration).toMatch(
-      /grant execute on function public\.claim_mobile_guided_correction\(\s*text, uuid, uuid, uuid, jsonb\s*\) to authenticated;/i,
+      /grant execute on function public\.claim_mobile_guided_correction\(\s*text, uuid, uuid, uuid, jsonb, bigint\s*\) to authenticated;/i,
     );
   });
 });
@@ -189,6 +232,9 @@ describe("mobile guided correction atomic completion", () => {
     expect(receiptWrite).toBeGreaterThan(predictionWrite);
     expect(completion).toMatch(
       /set title = v_listing->>'title',\s*description = v_listing->>'description',\s*copy = v_listing->'copy',\s*status = 'draft',\s*run_id = v_cap\.completion_run_id/i,
+    );
+    expect(completion).toMatch(
+      /run_id = v_cap\.completion_run_id,\s*source_review_revision = v_cap\.completion_run_id/i,
     );
     expect(completion).toMatch(
       /where id = v_cap\.listing_id[\s\S]*?item_id = v_cap\.item_id[\s\S]*?user_id = v_cap\.user_id[\s\S]*?platform = 'ebay'[\s\S]*?run_id is not distinct from v_cap\.expected_run_id/i,
@@ -222,6 +268,26 @@ describe("mobile guided correction atomic completion", () => {
     );
   });
 
+  it("writes immutable corrected pricing evidence beside the fresh prediction", () => {
+    const completion = functionBlock(
+      listingRegenerationMigration,
+      "public.complete_mobile_guided_correction",
+    );
+    const predictionWrite = completion.indexOf(
+      "insert into public.prediction_logs",
+    );
+    const evidenceWrite = completion.indexOf(
+      "insert into public.pricing_evidence_snapshots",
+    );
+
+    expect(predictionWrite).toBeGreaterThan(-1);
+    expect(completion).toMatch(/returning id into v_prediction_id/i);
+    expect(evidenceWrite).toBeGreaterThan(predictionWrite);
+    expect(completion).toMatch(
+      /v_cap\.completion_run_id, null, 'review-correction', v_cap\.user_id,[\s\S]*?v_cap\.item_id, v_prediction_id, v_cap\.listing_id, 1,[\s\S]*?v_snapshot->'item', v_snapshot->'price_result', v_evidence, v_now/i,
+    );
+  });
+
   it("keeps completion behind the existing tenant-bound capability", () => {
     const completion = functionBlock(
       listingRegenerationMigration,
@@ -238,10 +304,10 @@ describe("mobile guided correction atomic completion", () => {
       /reservation\.photo_identity_kind = item\.photo_identity_kind[\s\S]*?reservation\.photo_identity_fingerprint = item\.photo_identity_fingerprint[\s\S]*?reservation\.photo_identity_kind = 'content_sha256_set_v1'/i,
     );
     expect(listingRegenerationMigration).toMatch(
-      /revoke all on function public\.complete_mobile_guided_correction\(\s*text, uuid, jsonb, jsonb\s*\) from public, anon, authenticated;/i,
+      /revoke all on function public\.complete_mobile_guided_correction\(\s*text, uuid, bigint, jsonb, jsonb\s*\) from public, anon, authenticated;/i,
     );
     expect(listingRegenerationMigration).toMatch(
-      /grant execute on function public\.complete_mobile_guided_correction\(\s*text, uuid, jsonb, jsonb\s*\) to service_role;/i,
+      /grant execute on function public\.complete_mobile_guided_correction\(\s*text, uuid, bigint, jsonb, jsonb\s*\) to service_role;/i,
     );
   });
 });

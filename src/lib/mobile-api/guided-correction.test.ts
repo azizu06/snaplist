@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { isDeepStrictEqual } from "node:util";
 import type { PriceResult } from "@/lib/pricing";
+import type {
+  PricingEvidenceProjection,
+  PricingEvidenceSnapshotInput,
+} from "@/lib/pricing-evidence";
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import type { ListingCopy } from "@/lib/pipeline/types";
 import { createMobileApiHandler, type MobileApiPrincipal } from "./app";
@@ -117,6 +122,8 @@ interface Harness {
   readBackListing: () => ListingCopy;
   /** Every token this correction actually presented to Postgres, in order. */
   rlsTokens: string[];
+  /** Attempt generations presented before any provider work begins. */
+  authorizationGenerations: Array<number | undefined>;
 }
 
 /** One row of `private.mobile_guided_corrections`, as the claim RPC keeps it. */
@@ -126,6 +133,7 @@ interface StoredClaim {
   /** Serialized so a replayed key can be compared against its bound intent. */
   intent: string;
   state: "pending" | "completed" | "failed";
+  attemptGeneration: number;
   receipt?: GuidedCorrectionReceipt;
 }
 
@@ -151,6 +159,42 @@ const REGENERATED_LISTING: ListingCopy = {
     tags: ["wireless headphones"],
   },
 };
+
+const CORRECTED_PRICING_SNAPSHOT: PricingEvidenceSnapshotInput = {
+  schema_version: 1,
+  item: { title: "Dell XPS 15" },
+  price_result: soldPrice(180),
+  evidence: [],
+};
+
+function pricingProjection(
+  suggested: number,
+  snapshot?: PricingEvidenceSnapshotInput,
+): PricingEvidenceProjection {
+  const priceResult = snapshot?.price_result ?? soldPrice(suggested);
+  return {
+    item: {
+      id: ITEM_ID,
+      title: snapshot?.item.title ?? "Dell XPS 15",
+      ...(snapshot?.item.condition
+        ? { condition: snapshot.item.condition }
+        : {}),
+    },
+    priceResult,
+    evidenceLevel: "limited",
+    evidenceAsOf: "2026-08-02T17:00:00.000Z",
+    evidenceAgeDays: 0,
+    isStale: false,
+    defaultWindow: "90D",
+    comparables: (snapshot?.evidence ?? []).map((record) => ({
+      ...record,
+      evidenceAsOf: "2026-08-02T17:00:00.000Z",
+    })),
+    estimatedFees: 0,
+    estimatedPayout: suggested,
+    chartBounds: null,
+  };
+}
 
 /**
  * One tenant owns the run. Every method resolves the token the operation would
@@ -200,15 +244,18 @@ function harness(
     confident: stored.identification?.confident ?? STORED_IDENTITY.confident,
   };
   let durableListing = structuredClone(STORED_LISTING);
+  let durablePricing = pricingProjection(170);
 
   /**
    * `private.mobile_guided_corrections`, modelled as the claim RPC keeps it:
    * one row per (seller, Idempotency-Key), a pending lease that blocks a
-   * competing correction on the same revision, and a stored receipt so a replay
-   * is answered rather than re-run.
+   * competing correction on the same revision, an attempt generation that
+   * fences reclaimed leases, and a stored receipt so a replay is answered
+   * rather than re-run.
    */
   const claims = new Map<string, StoredClaim>();
   const rlsTokens: string[] = [];
+  const authorizationGenerations: Array<number | undefined> = [];
   let allowanceCompleted = false;
   let settleFailures = input.settleFailures ?? 0;
 
@@ -273,12 +320,27 @@ function harness(
         expectedReviewRevision: operation.intent.expectedReviewRevision,
         intent,
         state: "pending",
+        attemptGeneration: (existing?.attemptGeneration ?? 0) + 1,
       });
-      return { state: "proceed" };
+      return {
+        state: "proceed",
+        attemptGeneration: (existing?.attemptGeneration ?? 0) + 1,
+      };
     },
-    async authorize(operation) {
+    async authorize(operation, _attempt, attemptGeneration) {
       const caller = await callerFor(operation);
       if (caller !== owner) throw new GuidedCorrectionNotFoundError();
+      authorizationGenerations.push(attemptGeneration);
+      const claim = claims.get(`${caller}:${operation.idempotencyKey}`);
+      if (
+        attemptGeneration !== undefined
+        && (
+          claim?.state !== "pending"
+          || claim.attemptGeneration !== attemptGeneration
+        )
+      ) {
+        throw new Error("Stale correction attempt.");
+      }
       if (allowanceCompleted) throw new GuidedCorrectionUnavailableError();
       return {
         token: "a".repeat(43),
@@ -297,6 +359,12 @@ function harness(
       const key = `${caller}:${operation.idempotencyKey}`;
       const existing = claims.get(key);
       if (!existing) throw new Error("No claim to settle.");
+      if (existing.attemptGeneration !== completion.attemptGeneration) {
+        throw new Error("Stale correction attempt.");
+      }
+      if (!isDeepStrictEqual(commit.attributes, commit.prediction.extracted_attrs)) {
+        throw new Error("Correction attributes and prediction diverged.");
+      }
       const receipt = completion.receipt as GuidedCorrectionReceipt;
 
       commits.push(commit);
@@ -306,15 +374,29 @@ function harness(
         durableIdentity.confident = written.confident;
       }
       durableListing = structuredClone(commit.listing);
+      const pricingSnapshot = (
+        commit as GuidedCorrectionCommit & {
+          pricingSnapshot?: PricingEvidenceSnapshotInput;
+        }
+      ).pricingSnapshot;
+      if (pricingSnapshot) {
+        durablePricing = pricingProjection(
+          pricingSnapshot.price_result.suggested,
+          pricingSnapshot,
+        );
+      }
       stored = { ...stored, reviewRevision: commit.runId };
       claims.set(key, { ...existing, state: "completed", receipt });
       allowanceCompleted = true;
     },
-    async release(operation) {
+    async release(operation, attemptGeneration) {
       const caller = await callerFor(operation);
       const key = `${caller}:${operation.idempotencyKey}`;
       const existing = claims.get(key);
-      if (existing?.state === "pending") {
+      if (
+        existing?.state === "pending"
+        && existing.attemptGeneration === attemptGeneration
+      ) {
         claims.set(key, { ...existing, state: "failed" });
       }
     },
@@ -340,6 +422,11 @@ function harness(
       priceItem,
       newRunId: () => newRunIds.shift() ?? LATER_RUN_ID,
     }),
+    pricingEvidence: {
+      async forItem({ userId, itemId }) {
+        return userId === owner && itemId === ITEM_ID ? durablePricing : null;
+      },
+    },
     worker: unavailableWorker,
   });
 
@@ -350,6 +437,7 @@ function harness(
     readBackIdentity: () => ({ ...durableIdentity }),
     readBackListing: () => structuredClone(durableListing),
     rlsTokens,
+    authorizationGenerations,
   };
 }
 
@@ -443,6 +531,24 @@ describe("POST /v1/runs/{runId}/sharpen — ownership", () => {
 });
 
 describe("POST /v1/runs/{runId}/sharpen — corrected identity", () => {
+  it("serves the corrected recommendation from GET pricing after completion", async () => {
+    const { handler } = harness({ price: soldPrice(180) });
+
+    const correction = await handler(correctionRequest(OWNER_TOKEN));
+    expect(correction.status).toBe(200);
+
+    const pricing = await handler(
+      new Request(`http://localhost/v1/items/${ITEM_ID}/pricing`, {
+        headers: { authorization: `Bearer ${OWNER_TOKEN}` },
+      }),
+    );
+
+    expect(pricing.status).toBe(200);
+    await expect(pricing.json()).resolves.toMatchObject({
+      data: { priceResult: { suggested: 180 } },
+    });
+  });
+
   it("regenerates the durable eBay draft from the corrected identity", async () => {
     const { handler, readBackListing } = harness();
 
@@ -502,6 +608,26 @@ describe("POST /v1/runs/{runId}/sharpen — corrected identity", () => {
       title: "Sony WH-1000XM4",
     });
     expect(commits[0].identification?.label).toBe("Sony WH-1000XM4");
+  });
+
+  it("preserves legacy attributes in the corrected item and prediction", async () => {
+    const legacyCatalogHint = { source: "operator-import", version: 1 };
+    const { handler, commits } = harness({
+      stored: snapshot({
+        attributes: {
+          ...snapshot().attributes,
+          legacyCatalogHint,
+        },
+      }),
+    });
+
+    const response = await handler(correctionRequest(OWNER_TOKEN));
+
+    expect(response.status).toBe(200);
+    expect(commits[0].attributes).toMatchObject({ legacyCatalogHint });
+    expect(commits[0].prediction.extracted_attrs).toMatchObject({
+      legacyCatalogHint,
+    });
   });
 
   it("carries a partial confirmation without losing the field left alone", async () => {
@@ -747,6 +873,15 @@ describe("POST /v1/runs/{runId}/sharpen — priced items", () => {
 });
 
 describe("POST /v1/runs/{runId}/sharpen — provider spend", () => {
+  it("binds authorization to the claimed attempt before provider work", async () => {
+    const { handler, authorizationGenerations } = harness();
+
+    const response = await handler(correctionRequest(OWNER_TOKEN));
+
+    expect(response.status).toBe(200);
+    expect(authorizationGenerations).toEqual([1]);
+  });
+
   it("pays for pricing once when two corrections race the same revision", async () => {
     const { handler, commits, priceItem } = harness();
 
@@ -977,6 +1112,51 @@ describe("POST /v1/runs/{runId}/sharpen — revision guard", () => {
 });
 
 describe("guided correction Supabase adapter", () => {
+  it("binds allowance authorization to the current mobile attempt generation", async () => {
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+    const authorizationClient = {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        return Promise.resolve({
+          data: { expiresAt: "2026-08-02T17:05:00.000Z" },
+          error: null,
+        });
+      },
+    };
+    const completionClient = {
+      rpc() {
+        return Promise.resolve({ data: true, error: null });
+      },
+    };
+
+    await createSupabaseGuidedCorrectionDataClient(
+      () => authorizationClient as never,
+      completionClient,
+    ).authorize(
+      operation(),
+      {
+        itemId: ITEM_ID,
+        listingId: LISTING_ID,
+        runId: NEXT_RUN_ID,
+        expectedRunId: LISTING_RUN_ID,
+        expectedReviewRevision: REVIEW_REVISION,
+      },
+      7,
+    );
+
+    expect(calls).toEqual([
+      {
+        name: "authorize_mobile_guided_correction",
+        args: expect.objectContaining({
+          p_claim_run_id: RUN_ID,
+          p_idempotency_key: IDEMPOTENCY_KEY,
+          p_attempt_generation: 7,
+          p_completion_run_id: NEXT_RUN_ID,
+        }),
+      },
+    ]);
+  });
+
   /**
    * Correction, included allowance, and replay receipt must reach the one fixed
    * internal RPC. Splitting any of them back into an authenticated write plus a
@@ -1012,6 +1192,7 @@ describe("guided correction Supabase adapter", () => {
         autopilot_enabled: false,
         autopilot_eligible: false,
       },
+      pricingSnapshot: CORRECTED_PRICING_SNAPSHOT,
     };
     const receipt = guidedCorrectionReceiptSchema.parse({
       schemaVersion: 1,
@@ -1029,6 +1210,7 @@ describe("guided correction Supabase adapter", () => {
     const completion = {
       capabilityToken: "a".repeat(43),
       idempotencyKey: IDEMPOTENCY_KEY,
+      attemptGeneration: 7,
       itemId: ITEM_ID,
       listingId: LISTING_ID,
       runId: NEXT_RUN_ID,
@@ -1047,6 +1229,7 @@ describe("guided correction Supabase adapter", () => {
     expect(calls[0].name).toBe("complete_mobile_guided_correction");
     expect(calls[0].args).toMatchObject({
       p_idempotency_key: IDEMPOTENCY_KEY,
+      p_attempt_generation: 7,
       p_commit: {
         item_id: ITEM_ID,
         expected_review_revision: REVIEW_REVISION,
@@ -1091,6 +1274,7 @@ describe("guided correction Supabase adapter", () => {
         autopilot_enabled: false,
         autopilot_eligible: false,
       },
+      pricingSnapshot: CORRECTED_PRICING_SNAPSHOT,
     };
 
     await expect(
@@ -1100,6 +1284,7 @@ describe("guided correction Supabase adapter", () => {
       ).complete(operation(), {
           capabilityToken: "a".repeat(43),
           idempotencyKey: IDEMPOTENCY_KEY,
+          attemptGeneration: 1,
           itemId: ITEM_ID,
           listingId: LISTING_ID,
           runId: NEXT_RUN_ID,
@@ -1116,7 +1301,9 @@ describe("guided correction Supabase adapter", () => {
       rpc() {
         return Promise.resolve({
           data: null,
-          error: { message: "Review changed. Reload and try again." },
+          error: {
+            message: "Guided correction attempt changed. Retry the request.",
+          },
         });
       },
     };
@@ -1136,7 +1323,7 @@ describe("guided correction Supabase adapter", () => {
         runId: NEXT_RUN_ID,
         expectedRunId: LISTING_RUN_ID,
         expectedReviewRevision: REVIEW_REVISION,
-      }),
+      }, 1),
     ).rejects.toThrow("This review changed. Reload and try again.");
   });
 });

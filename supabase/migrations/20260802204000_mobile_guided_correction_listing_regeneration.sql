@@ -3,6 +3,7 @@
 create or replace function public.complete_mobile_guided_correction(
   p_completion_token text,
   p_idempotency_key uuid,
+  p_attempt_generation bigint,
   p_commit jsonb,
   p_receipt jsonb
 )
@@ -16,6 +17,9 @@ declare
   v_claim private.mobile_guided_corrections%rowtype;
   v_listing jsonb;
   v_prediction jsonb;
+  v_snapshot jsonb;
+  v_evidence jsonb;
+  v_prediction_id uuid;
   v_now timestamptz := statement_timestamp();
 begin
   if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
@@ -25,6 +29,8 @@ begin
   end if;
   if p_completion_token !~ '^[A-Za-z0-9_-]{43}$'
     or p_idempotency_key is null
+    or p_attempt_generation is null
+    or p_attempt_generation <= 0
     or jsonb_typeof(p_commit) is distinct from 'object'
     or octet_length(p_commit::text) > 262144
     or jsonb_typeof(p_receipt) is distinct from 'object'
@@ -71,6 +77,7 @@ begin
   end if;
 
   v_prediction := p_commit->'prediction';
+  v_snapshot := p_commit->'pricing_snapshot';
   if jsonb_typeof(v_prediction) is distinct from 'object'
     or jsonb_typeof(v_prediction->'extracted_attrs') is distinct from 'object'
     or jsonb_typeof(v_prediction->'price_range') is distinct from 'object'
@@ -79,7 +86,17 @@ begin
     or jsonb_typeof(v_prediction->'confidence') is distinct from 'number'
     or (v_prediction->>'confidence')::numeric not between 0 and 1
     or nullif(btrim(v_prediction->>'tier_fired'), '') is null
-    or nullif(btrim(v_prediction->>'model'), '') is null then
+    or nullif(btrim(v_prediction->>'model'), '') is null
+    or jsonb_typeof(v_snapshot) is distinct from 'object'
+    or (v_snapshot->>'schema_version')::integer is distinct from 1
+    or jsonb_typeof(v_snapshot->'item') is distinct from 'object'
+    or jsonb_typeof(v_snapshot->'price_result') is distinct from 'object'
+    or jsonb_typeof(v_snapshot #> '{price_result,confidence}')
+      is distinct from 'number'
+    or (v_snapshot #>> '{price_result,confidence}')::numeric not between 0 and 1
+    or v_snapshot->'price_result' ? 'evidence'
+    or not private.pricing_evidence_rows_coarse(v_snapshot->'evidence')
+    or octet_length(v_snapshot::text) > 262144 then
     raise exception using
       errcode = '22023',
       message = 'Invalid mobile guided correction completion';
@@ -128,6 +145,7 @@ begin
       is not distinct from v_cap.expected_review_revision
   for update of claim;
   if not found or v_claim.state <> 'pending'
+    or v_claim.attempt_generation is distinct from p_attempt_generation
     or p_receipt->>'itemId' is distinct from v_cap.item_id::text
     or p_receipt->>'runId' is distinct from v_cap.completion_run_id::text
     or p_receipt->>'reviewRevision'
@@ -136,6 +154,24 @@ begin
     raise exception using
       errcode = '22023',
       message = 'Invalid mobile guided correction completion';
+  end if;
+
+  if v_prediction->'extracted_attrs' is distinct from p_commit->'attributes'
+    or v_snapshot #> '{price_result,suggested}'
+      is distinct from v_prediction->'price'
+    or v_snapshot #> '{price_result,range,min}'
+      is distinct from v_prediction #> '{price_range,low}'
+    or v_snapshot #> '{price_result,range,max}'
+      is distinct from v_prediction #> '{price_range,high}'
+    or v_snapshot #> '{price_result,confidence}'
+      is distinct from v_prediction->'confidence'
+    or v_snapshot #>> '{price_result,tier}'
+      is distinct from v_prediction->>'tier_fired'
+    or v_snapshot #> '{price_result,sources}'
+      is distinct from v_prediction->'sources' then
+    raise exception using
+      errcode = '22023',
+      message = 'Mobile guided correction persistence is incoherent';
   end if;
 
   update public.items
@@ -164,6 +200,7 @@ begin
       copy = v_listing->'copy',
       status = 'draft',
       run_id = v_cap.completion_run_id,
+      source_review_revision = v_cap.completion_run_id,
       ebay_publish_claim_id = null,
       ebay_publish_claimed_at = null
   where id = v_cap.listing_id
@@ -194,12 +231,32 @@ begin
     v_prediction->'sources',
     (v_prediction->>'autopilot_enabled')::boolean,
     (v_prediction->>'autopilot_eligible')::boolean
-  );
+  ) returning id into v_prediction_id;
 
   delete from public.listings
   where item_id = v_cap.item_id
     and user_id = v_cap.user_id
     and platform in ('facebook', 'mercari');
+
+  select coalesce(
+    jsonb_agg(
+      evidence_row.value || jsonb_build_object('evidenceAsOf', v_now)
+      order by evidence_row.ordinality
+    ),
+    '[]'::jsonb
+  ) into v_evidence
+  from jsonb_array_elements(v_snapshot->'evidence')
+    with ordinality evidence_row;
+
+  insert into public.pricing_evidence_snapshots (
+    run_id, pipeline_run_id, run_kind, user_id, item_id,
+    prediction_id, listing_id, schema_version,
+    item, price_result, evidence, evidence_as_of
+  ) values (
+    v_cap.completion_run_id, null, 'review-correction', v_cap.user_id,
+    v_cap.item_id, v_prediction_id, v_cap.listing_id, 1,
+    v_snapshot->'item', v_snapshot->'price_result', v_evidence, v_now
+  );
 
   update public.ai_item_credit_reservations
   set guided_correction_completed_at = v_now,
@@ -227,7 +284,8 @@ begin
       receipt = p_receipt
   where user_id = v_cap.user_id
     and idempotency_key = p_idempotency_key
-    and state = 'pending';
+    and state = 'pending'
+    and attempt_generation = p_attempt_generation;
   if not found then
     raise exception using
       errcode = '55000',
@@ -239,8 +297,8 @@ end;
 $$;
 
 revoke all on function public.complete_mobile_guided_correction(
-  text, uuid, jsonb, jsonb
+  text, uuid, bigint, jsonb, jsonb
 ) from public, anon, authenticated;
 grant execute on function public.complete_mobile_guided_correction(
-  text, uuid, jsonb, jsonb
+  text, uuid, bigint, jsonb, jsonb
 ) to service_role;
