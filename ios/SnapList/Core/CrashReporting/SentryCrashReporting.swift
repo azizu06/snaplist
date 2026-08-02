@@ -97,8 +97,6 @@ enum CrashReportingLaunchPolicy {
 /// bug this shape removes. `beforeSend` calls `scrub(_:)` and nothing else, so
 /// a test that drives `scrub(_:)` is driving what ships.
 struct CrashReportScrubber: Sendable {
-    static let redactionPlaceholder = "<redacted>"
-
     /// Tag keys whose values have a finite, non-seller-controlled shape. A
     /// known key alone is not safe: callers can still put listing text or file
     /// paths in its value.
@@ -115,14 +113,20 @@ struct CrashReportScrubber: Sendable {
         "device.model",
     ]
 
-    /// Context sections the Sentry SDK populates from the device and bundle.
-    static let approvedContextNames: Set<String> = [
-        "app",
-        "device",
-        "os",
-        "culture",
-        "trace",
-        "response",
+    /// Each context's finite field allowlist. The value validator below is a
+    /// second mandatory gate: adding a name here without a matching switch arm
+    /// still drops it through `default`.
+    static let approvedContextFieldNames: [String: Set<String>] = [
+        "app": [
+            "app_identifier", "app_version", "app_build", "in_foreground", "is_active",
+        ],
+        "device": [
+            "family", "arch", "model", "simulator", "low_power_mode", "charging",
+            "thermal_state", "orientation", "battery_level", "processor_count",
+            "free_memory", "usable_memory", "memory_size", "free_storage", "storage_size",
+            "screen_height_pixels", "screen_width_pixels",
+        ],
+        "os": ["name", "version", "build", "rooted"],
     ]
 
     /// Rewrites `event` in place and returns it, which is the contract
@@ -168,9 +172,25 @@ struct CrashReportScrubber: Sendable {
         event.extra = nil
         event.user = nil
         event.request = nil
-        event.context = (event.context ?? [:])
-            .filter { Self.approvedContextNames.contains($0.key) }
-            .mapValues { $0.mapValues(redactAny) }
+        event.context = (event.context ?? [:]).reduce(into: [:]) {
+            contexts,
+            section
+            in
+            let approvedFields = section.value.reduce(into: [String: Any]()) { fields, field in
+                guard let value = Self.approvedContextValue(
+                    field.value,
+                    in: section.key,
+                    named: field.key
+                ) else {
+                    return
+                }
+                fields[field.key] = value
+            }
+            guard !approvedFields.isEmpty else {
+                return
+            }
+            contexts[section.key] = approvedFields
+        }
         return event
     }
 
@@ -224,57 +244,109 @@ struct CrashReportScrubber: Sendable {
         value.range(of: pattern, options: .regularExpression) != nil
     }
 
-    /// A context field is `Any`, and only some of the shapes it arrives in are
-    /// strings: `app.view_names` is an array, an HTTP `response` section nests a
-    /// header dictionary, and both would carry text out untouched if only the
-    /// top level were redacted. Numbers, booleans, and dates are SDK
-    /// measurements and pass through as themselves.
-    private func redactAny(_ value: Any) -> Any {
-        switch value {
-        case let text as String:
-            return redact(text)
-        case let url as URL:
-            return redact(url.absoluteString)
-        case let nested as [String: Any]:
-            return nested.mapValues(redactAny)
-        case let list as [Any]:
-            return list.map(redactAny)
+    /// Retains a finite diagnostic skeleton from SDK-populated contexts. Each
+    /// rule validates both field name and value. `culture` carries localized
+    /// device strings, `trace` can carry dynamic transaction names, and
+    /// `response` can carry request-derived headers or bodies, so all three
+    /// are dropped rather than pattern-redacted.
+    private static func approvedContextValue(
+        _ value: Any,
+        in section: String,
+        named field: String
+    ) -> Any? {
+        guard approvedContextFieldNames[section]?.contains(field) == true else {
+            return nil
+        }
+        switch (section, field) {
+        case ("app", "app_identifier"):
+            return approvedString(value, matching: #"^dev\.snaplist\.ios$"#)
+        case ("app", "app_version"):
+            return approvedString(value, matching: #"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$"#)
+        case ("app", "app_build"):
+            return approvedString(value, matching: #"^[0-9]{1,12}$"#)
+        case ("app", "in_foreground"), ("app", "is_active"):
+            return approvedBoolean(value)
+
+        case ("device", "family"):
+            return approvedEnum(value, ["iOS"])
+        case ("device", "arch"):
+            return approvedEnum(
+                value,
+                ["arm", "arm64", "arm64e", "armv6", "armv7", "armv7s", "armv8", "x86", "x86_64", "x86_64h"]
+            )
+        case ("device", "model"):
+            return approvedString(
+                value,
+                matching: #"^(?:iPhone|iPad|iPod)[0-9]{1,2},[0-9]{1,2}$"#
+            )
+        case ("device", "simulator"), ("device", "low_power_mode"),
+             ("device", "charging"):
+            return approvedBoolean(value)
+        case ("device", "thermal_state"):
+            return approvedEnum(value, ["nominal", "fair", "serious", "critical"])
+        case ("device", "orientation"):
+            return approvedEnum(value, ["portrait", "landscape"])
+        case ("device", "battery_level"):
+            return approvedInteger(value, minimum: 0, maximum: 100)
+        case ("device", "processor_count"):
+            return approvedInteger(value, minimum: 1, maximum: 1_024)
+        case ("device", "free_memory"), ("device", "usable_memory"),
+             ("device", "memory_size"), ("device", "free_storage"),
+             ("device", "storage_size"):
+            return approvedInteger(value, minimum: 0, maximum: 1 << 60)
+        case ("device", "screen_height_pixels"), ("device", "screen_width_pixels"):
+            return approvedInteger(value, minimum: 1, maximum: 20_000)
+
+        case ("os", "name"):
+            return approvedEnum(value, ["iOS"])
+        case ("os", "version"):
+            return approvedString(value, matching: #"^[0-9]{1,2}(?:\.[0-9]{1,2}){1,2}$"#)
+        case ("os", "build"):
+            return approvedString(value, matching: #"^[0-9]{2}[A-Z][0-9]{1,5}[a-z]?$"#)
+        case ("os", "rooted"):
+            return approvedBoolean(value)
+
         default:
-            return value
+            return nil
         }
     }
 
-    /// Applied in order: structured carriers first, so a token embedded in a
-    /// URL is not half-consumed by the generic opaque-run rule that follows.
-    private static let redactionPatterns: [String] = [
-        // Web URLs, including any query string carrying a token.
-        #"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]+"#,
-        // Absolute file paths, which is how a captured photo would appear.
-        #"/(?:[A-Za-z0-9_.~%+-]+/)+[A-Za-z0-9_.~%+-]*"#,
-        // Email addresses.
-        #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#,
-        // Authorization headers and their value.
-        #"(?i)\b(?:bearer|basic)\s+\S+"#,
-        // eBay OAuth application/user tokens.
-        #"v\^\d+\.\d+#\S+"#,
-        // JSON Web Tokens.
-        #"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#,
-        // Publishable/secret key shapes used by Clerk, Stripe, and RevenueCat.
-        #"\b(?:pk|sk|rk|appl)_[A-Za-z0-9_-]{8,}"#,
-        // Any remaining long opaque run, which no legible crash reason needs.
-        #"[A-Za-z0-9_+/=-]{32,}"#,
-    ]
-
-    private func redact(_ text: String) -> String {
-        var redacted = text
-        for pattern in Self.redactionPatterns {
-            redacted = redacted.replacingOccurrences(
-                of: pattern,
-                with: Self.redactionPlaceholder,
-                options: .regularExpression
-            )
+    private static func approvedString(_ value: Any, matching pattern: String) -> String? {
+        guard let string = value as? String, matches(string, pattern) else {
+            return nil
         }
-        return redacted
+        return string
+    }
+
+    private static func approvedEnum(_ value: Any, _ values: Set<String>) -> String? {
+        guard let string = value as? String, values.contains(string) else {
+            return nil
+        }
+        return string
+    }
+
+    private static func approvedBoolean(_ value: Any) -> Bool? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else {
+            return nil
+        }
+        return number.boolValue
+    }
+
+    private static func approvedInteger(
+        _ value: Any,
+        minimum: Int64,
+        maximum: Int64
+    ) -> NSNumber? {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue.isFinite,
+              number.doubleValue.rounded() == number.doubleValue,
+              number.doubleValue >= Double(minimum),
+              number.doubleValue <= Double(maximum) else {
+            return nil
+        }
+        return number
     }
 }
 

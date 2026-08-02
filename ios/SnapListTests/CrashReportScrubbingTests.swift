@@ -357,31 +357,85 @@ final class CrashReportScrubbingTests: XCTestCase {
         )
     }
 
-    /// A context value is `Any`. Redacting only the string-typed ones let an
-    /// array element and a nested header dictionary carry text out intact.
-    func testInstalledHookRedactsNestedAndNonStringContextValues() throws {
+    func testInstalledHookDropsSellerTextAndUnknownFieldsFromApprovedContexts() throws {
         let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        event.context = [
+            "app": [
+                "app_identifier": "dev.snaplist.ios",
+                "listing_title": Self.listingTitle,
+            ],
+            "device": [
+                "family": "iOS",
+                "hostname": "azizs-iphone.local",
+            ],
+        ]
 
-        let scrubbed = try XCTUnwrap(beforeSend(sellerContentEvent()))
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let contexts = try XCTUnwrap(
+            serialized["contexts"] as? [String: [String: Any]]
+        )
+        let survivingText = transmittedText(of: serialized)
 
-        XCTAssertNil(scrubbed.context?["listing"])
-        let app = try XCTUnwrap(scrubbed.context?["app"])
-        XCTAssertEqual(app["app_identifier"] as? String, "dev.snaplist.ios")
-        XCTAssertEqual(
-            app["view_names"] as? [String],
-            ["ListingReview", "PhotoReview"]
+        XCTAssertEqual(contexts["app"]?["app_identifier"] as? String, "dev.snaplist.ios")
+        XCTAssertEqual(contexts["device"]?["family"] as? String, "iOS")
+        XCTAssertNil(contexts["app"]?["listing_title"])
+        XCTAssertNil(contexts["device"]?["hostname"])
+        XCTAssertFalse(survivingText.contains(Self.listingTitle))
+        XCTAssertFalse(survivingText.contains("azizs-iphone.local"))
+    }
+
+    func testInstalledHookKeepsValidatedContextSkeletonAndDropsHostileKnownValue() throws {
+        let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        event.context = [
+            "app": [
+                "app_identifier": "dev.snaplist.ios",
+                "app_version": "1.2.3",
+                "app_build": "123",
+                "in_foreground": true,
+                "is_active": false,
+            ],
+            "device": [
+                "family": "iOS",
+                "arch": "arm64",
+                "model": Self.listingTitle,
+                "simulator": false,
+                "memory_size": 6_442_450_944,
+                "hostname": "azizs-iphone.local",
+            ],
+            "os": [
+                "name": "iOS",
+                "version": "18.0.1",
+                "build": "22A3354",
+                "rooted": false,
+            ],
+        ]
+
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let contexts = try XCTUnwrap(
+            serialized["contexts"] as? [String: [String: Any]]
         )
-        let response = try XCTUnwrap(scrubbed.context?["response"])
-        XCTAssertEqual(
-            (response["headers"] as? [String: Any])?["Authorization"] as? String,
-            CrashReportScrubber.redactionPlaceholder
+
+        XCTAssertEqual(contexts["app"]?["app_identifier"] as? String, "dev.snaplist.ios")
+        XCTAssertEqual(contexts["app"]?["app_version"] as? String, "1.2.3")
+        XCTAssertEqual(contexts["app"]?["app_build"] as? String, "123")
+        XCTAssertEqual(contexts["app"]?["in_foreground"] as? Bool, true)
+        XCTAssertEqual(contexts["app"]?["is_active"] as? Bool, false)
+        XCTAssertEqual(contexts["device"]?["family"] as? String, "iOS")
+        XCTAssertEqual(contexts["device"]?["arch"] as? String, "arm64")
+        XCTAssertNil(contexts["device"]?["model"])
+        XCTAssertEqual(contexts["device"]?["simulator"] as? Bool, false)
+        XCTAssertEqual(contexts["device"]?["memory_size"] as? Int, 6_442_450_944)
+        XCTAssertEqual(contexts["os"]?["name"] as? String, "iOS")
+        XCTAssertEqual(contexts["os"]?["version"] as? String, "18.0.1")
+        XCTAssertEqual(contexts["os"]?["build"] as? String, "22A3354")
+        XCTAssertEqual(contexts["os"]?["rooted"] as? Bool, false)
+        XCTAssertNil(contexts["device"]?["hostname"])
+        XCTAssertFalse(
+            transmittedText(of: serialized).contains(Self.listingTitle),
+            "serialized context still transmits hostile approved-field value"
         )
-        XCTAssertEqual(
-            response["cookies"] as? [String],
-            ["session=" + CrashReportScrubber.redactionPlaceholder]
-        )
-        // A measured number is not text and passes through as itself.
-        XCTAssertEqual(response["status_code"] as? Int, 502)
     }
 
     func testInstalledHookKeepsOnlyApprovedTagsAndDropsTheMessage() throws {
