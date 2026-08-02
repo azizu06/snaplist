@@ -161,6 +161,27 @@ final class CrashReportScrubbingTests: XCTestCase {
         return try XCTUnwrap(breadcrumbs.first)
     }
 
+    private func firstFrame(
+        in serializedStacktrace: [String: Any]
+    ) throws -> [String: Any] {
+        let frames = try XCTUnwrap(
+            serializedStacktrace["frames"] as? [[String: Any]]
+        )
+        return try XCTUnwrap(frames.first)
+    }
+
+    private func firstThread(
+        in serializedEvent: [String: Any]
+    ) throws -> [String: Any] {
+        let threadContainer = try XCTUnwrap(
+            serializedEvent["threads"] as? [String: Any]
+        )
+        let threads = try XCTUnwrap(
+            threadContainer["values"] as? [[String: Any]]
+        )
+        return try XCTUnwrap(threads.first)
+    }
+
     func testInstalledHookRemovesSellerContentFromEveryChannel() throws {
         let beforeSend = try installedBeforeSend()
 
@@ -222,6 +243,65 @@ final class CrashReportScrubbingTests: XCTestCase {
         XCTAssertNil(scrubbed.request)
         XCTAssertNil(scrubbed.user)
         XCTAssertNil(scrubbed.extra)
+    }
+
+    func testInstalledHookDropsServerNameFromTheSerializedEvent() throws {
+        let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        event.serverName = "seller-macbook.local"
+
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+
+        XCTAssertNil(serialized["server_name"])
+        XCTAssertFalse(
+            transmittedText(of: serialized).contains("seller-macbook.local"),
+            "serialized event still transmits server name"
+        )
+    }
+
+    func testInstalledHookDropsFrameVariablesFromEverySerializedStacktrace() throws {
+        let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        let eventFrame = Frame()
+        eventFrame.function = "CrashReporting.captureEvent"
+        eventFrame.vars = ["listing_title": Self.listingTitle]
+        event.stacktrace = SentryStacktrace(frames: [eventFrame], registers: [:])
+
+        let threadFrame = Frame()
+        threadFrame.function = "CrashReporting.captureThread"
+        threadFrame.vars = ["photo_path": Self.photoPath]
+        let thread = SentryThread(threadId: NSNumber(value: 42))
+        thread.stacktrace = SentryStacktrace(frames: [threadFrame], registers: [:])
+        event.threads = [thread]
+
+        let exceptionFrame = Frame()
+        exceptionFrame.function = "CrashReporting.captureException"
+        exceptionFrame.vars = ["voice_transcript": Self.voiceTranscript]
+        let exception = Exception(value: "Fatal error", type: "EXC_BREAKPOINT")
+        exception.stacktrace = SentryStacktrace(
+            frames: [exceptionFrame],
+            registers: [:]
+        )
+        event.exceptions = [exception]
+
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let eventStacktrace = try XCTUnwrap(
+            serialized["stacktrace"] as? [String: Any]
+        )
+        let threadStacktrace = try XCTUnwrap(
+            firstThread(in: serialized)["stacktrace"] as? [String: Any]
+        )
+        let exceptionStacktrace = try XCTUnwrap(
+            firstException(in: serialized)["stacktrace"] as? [String: Any]
+        )
+
+        XCTAssertNil(try firstFrame(in: eventStacktrace)["vars"])
+        XCTAssertNil(try firstFrame(in: threadStacktrace)["vars"])
+        XCTAssertNil(try firstFrame(in: exceptionStacktrace)["vars"])
+        let survivingText = transmittedText(of: serialized)
+        XCTAssertFalse(survivingText.contains(Self.listingTitle))
+        XCTAssertFalse(survivingText.contains(Self.photoPath))
+        XCTAssertFalse(survivingText.contains(Self.voiceTranscript))
     }
 
     func testInstalledHookDropsExceptionValuesAndKeepsTypes() throws {
@@ -311,6 +391,22 @@ final class CrashReportScrubbingTests: XCTestCase {
 
         XCTAssertEqual(scrubbed.tags, ["environment": "testflight"])
         XCTAssertNil(scrubbed.message)
+    }
+
+    func testInstalledHookDropsHostileValueUnderAnApprovedTagName() throws {
+        let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        event.tags = ["environment": Self.listingTitle]
+
+        let scrubbed = try XCTUnwrap(beforeSend(event))
+        let serialized = scrubbed.serialize()
+
+        XCTAssertNil(scrubbed.tags?["environment"])
+        XCTAssertNil((serialized["tags"] as? [String: String])?["environment"])
+        XCTAssertFalse(
+            transmittedText(of: serialized).contains(Self.listingTitle),
+            "serialized event still transmits hostile approved-tag value"
+        )
     }
 
     func testInstalledHookDropsSellerProseFromEventLevelFields() throws {

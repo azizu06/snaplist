@@ -99,8 +99,9 @@ enum CrashReportingLaunchPolicy {
 struct CrashReportScrubber: Sendable {
     static let redactionPlaceholder = "<redacted>"
 
-    /// Tag keys the SDK and SnapList's own metadata own. Anything else is a
-    /// caller-supplied value and cannot be trusted to exclude seller content.
+    /// Tag keys whose values have a finite, non-seller-controlled shape. A
+    /// known key alone is not safe: callers can still put listing text or file
+    /// paths in its value.
     static let approvedTagNames: Set<String> = [
         "environment",
         "app_version",
@@ -109,7 +110,6 @@ struct CrashReportScrubber: Sendable {
         "release",
         "level",
         "handled",
-        "mechanism",
         "os.name",
         "device.family",
         "device.model",
@@ -130,6 +130,12 @@ struct CrashReportScrubber: Sendable {
     @discardableResult
     func scrub(_ event: Event) -> Event {
         event.message = nil
+        event.serverName = nil
+
+        scrub(event.stacktrace)
+        for thread in event.threads ?? [] {
+            scrub(thread.stacktrace)
+        }
 
         for exception in event.exceptions ?? [] {
             exception.value = nil
@@ -138,6 +144,7 @@ struct CrashReportScrubber: Sendable {
             // mechanism type and stack frames remain available.
             exception.mechanism?.data = nil
             exception.mechanism?.desc = nil
+            scrub(exception.stacktrace)
         }
 
         for breadcrumb in event.breadcrumbs ?? [] {
@@ -149,8 +156,14 @@ struct CrashReportScrubber: Sendable {
         event.transaction = nil
         event.logger = nil
         event.modules = nil
-        event.tags = (event.tags ?? [:]).filter {
-            Self.approvedTagNames.contains($0.key)
+        event.tags = (event.tags ?? [:]).reduce(into: [:]) { tags, tag in
+            guard let value = Self.approvedTagValue(
+                tag.value,
+                for: tag.key
+            ) else {
+                return
+            }
+            tags[tag.key] = value
         }
         event.extra = nil
         event.user = nil
@@ -159,6 +172,56 @@ struct CrashReportScrubber: Sendable {
             .filter { Self.approvedContextNames.contains($0.key) }
             .mapValues { $0.mapValues(redactAny) }
         return event
+    }
+
+    /// `SentryFrame.vars` serializes arbitrary values. Clear every stacktrace
+    /// model the pinned SDK serializes rather than attempting to recognize
+    /// seller content inside a frame-local dictionary.
+    private func scrub(_ stacktrace: SentryStacktrace?) {
+        for frame in stacktrace?.frames ?? [] {
+            frame.vars = nil
+        }
+    }
+
+    /// Retains only values from fixed diagnostic domains. Any new tag name or
+    /// value shape fails closed until it is explicitly reviewed here.
+    private static func approvedTagValue(
+        _ value: String,
+        for name: String
+    ) -> String? {
+        guard approvedTagNames.contains(name) else {
+            return nil
+        }
+
+        let accepted: Bool
+        switch name {
+        case "environment":
+            accepted = ["local", "testflight", "production"].contains(value)
+        case "app_version":
+            accepted = matches(value, #"^[0-9]+\.[0-9]+\.[0-9]+$"#)
+        case "app_build", "dist":
+            accepted = matches(value, #"^[0-9]{1,12}$"#)
+        case "release":
+            accepted = matches(
+                value,
+                #"^dev\.snaplist\.ios@[0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9]+)?$"#
+            )
+        case "level":
+            accepted = ["fatal", "error", "warning", "info", "debug"].contains(value)
+        case "handled":
+            accepted = ["true", "false"].contains(value)
+        case "os.name", "device.family":
+            accepted = value == "iOS"
+        case "device.model":
+            accepted = matches(value, #"^(?:iPhone|iPad|iPod)[0-9]+,[0-9]+$"#)
+        default:
+            accepted = false
+        }
+        return accepted ? value : nil
+    }
+
+    private static func matches(_ value: String, _ pattern: String) -> Bool {
+        value.range(of: pattern, options: .regularExpression) != nil
     }
 
     /// A context field is `Any`, and only some of the shapes it arrives in are
