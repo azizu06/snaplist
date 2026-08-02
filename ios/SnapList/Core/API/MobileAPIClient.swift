@@ -413,6 +413,106 @@ struct ZeroNetworkMobileAPIClient: MobileAPIClient, ContractOnlyFixtureProviding
     }
 }
 
+/// The build-supplied facts analytics client selection depends on. Every value
+/// is injected so the decision is provable without a bundle, a device, or a
+/// running SDK; `current` is the only place that reads the real build.
+struct AnalyticsLaunchInputs {
+    let projectKeyBundleValue: String?
+    let hostBundleValue: String?
+    let infoDictionary: [String: Any]
+    let isDebugBuild: Bool
+    let hasSandboxAppStoreReceipt: Bool
+    let hasLoadedXCTest: Bool
+
+    static var current: AnalyticsLaunchInputs {
+        let bundle = Bundle.main
+        let isDebugBuild: Bool
+#if DEBUG
+        isDebugBuild = true
+#else
+        isDebugBuild = false
+#endif
+        return AnalyticsLaunchInputs(
+            projectKeyBundleValue: bundle.object(
+                forInfoDictionaryKey: "SnapListPostHogKey"
+            ) as? String,
+            hostBundleValue: bundle.object(
+                forInfoDictionaryKey: "SnapListPostHogHost"
+            ) as? String,
+            infoDictionary: bundle.infoDictionary ?? [:],
+            isDebugBuild: isDebugBuild,
+            hasSandboxAppStoreReceipt:
+                bundle.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt",
+            hasLoadedXCTest: NSClassFromString("XCTestCase") != nil
+        )
+    }
+}
+
+/// Decides whether the production composition builds the real PostHog client
+/// and under which environment tag, or none at all.
+///
+/// Returning `nil` is what keeps local builds and test runs out of the funnel.
+/// A unit test is caught directly — the host app loads XCTest — but the app
+/// under a UI test is not: XCUITest drives it out of process through
+/// `testmanagerd` and injects nothing into it, so the build configuration is
+/// the only honest signal and the scheme's TestAction builds Debug. #483
+/// established both gates for the Sentry DSN; analytics reuses them rather than
+/// inventing a second answer to the same question.
+enum AnalyticsLaunchPolicy {
+    /// Which build channel produced this binary. Kept separate from `decide`
+    /// because the two answer different questions: this one names the channel,
+    /// `decide` says whether the channel may transmit.
+    static func resolveEnvironment(
+        isDebugBuild: Bool,
+        hasSandboxAppStoreReceipt: Bool
+    ) -> AnalyticsEnvironment {
+        if isDebugBuild {
+            return .local
+        }
+        return hasSandboxAppStoreReceipt ? .testFlight : .production
+    }
+
+    static func decide(
+        _ inputs: AnalyticsLaunchInputs
+    ) -> AnalyticsPostHogConfiguration? {
+        guard !inputs.isDebugBuild, !inputs.hasLoadedXCTest else {
+            return nil
+        }
+        guard let projectToken = usableBundleValue(inputs.projectKeyBundleValue),
+              let hostValue = usableBundleValue(inputs.hostBundleValue),
+              let host = URL(string: hostValue) else {
+            return nil
+        }
+        let environment = resolveEnvironment(
+            isDebugBuild: inputs.isDebugBuild,
+            hasSandboxAppStoreReceipt: inputs.hasSandboxAppStoreReceipt
+        )
+        guard let metadata = AnalyticsMetadata.resolve(
+            environment: environment,
+            infoDictionary: inputs.infoDictionary
+        ) else {
+            return nil
+        }
+        return AnalyticsPostHogConfiguration(
+            metadata: metadata,
+            projectToken: projectToken,
+            host: host
+        )
+    }
+
+    /// An unset build setting reaches the bundle as the literal `$(NAME)`, and
+    /// an xcconfig value keeps the whitespace around it. Both fail closed here
+    /// rather than becoming a project key or host the ingest endpoint rejects.
+    /// `AnalyticsPostHogConfiguration` validates the surviving value again.
+    static func usableBundleValue(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty, !trimmed.hasPrefix("$(") else {
+            return nil
+        }
+        return trimmed
+    }
+}
+
 struct AppDependencies {
     let mobileAPIClient: any MobileAPIClient
     let contractFixtureProvider: any ContractOnlyFixtureProviding
@@ -434,7 +534,10 @@ struct AppDependencies {
         apiOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
         tokenProvider: any BearerTokenProviding = UnavailableBearerTokenProvider(),
         nativeIntakeIdentitySource: NativeIntake.IdentitySource = .processPrivate,
-        nativeIntakeApplicationSupportDirectory: URL? = nil
+        nativeIntakeApplicationSupportDirectory: URL? = nil,
+        analyticsLaunchInputs: AnalyticsLaunchInputs = .current,
+        analyticsTransportFactory: any PostHogTransportBuilding =
+            PostHogSDKTransportFactory()
     ) -> AppDependencies {
         let cameraAuthorization: any CameraAuthorizationProviding
         if let fixtureStatus = configuration.cameraAuthorizationFixture {
@@ -481,6 +584,8 @@ struct AppDependencies {
                 nativeIntake: nativeIntake,
                 captureDraftStore: captureDraftStore,
                 subscriptionClient: FixtureSubscriptionClient(),
+                // A zero-network build must never transmit, whatever the build
+                // configured, so the fixture composition stays no-op.
                 analyticsClient: NoOpAnalyticsClient()
             )
         }
@@ -502,7 +607,43 @@ struct AppDependencies {
             nativeIntake: nativeIntake,
             captureDraftStore: captureDraftStore,
             subscriptionClient: RevenueCatSubscriptionClient(),
-            analyticsClient: NoOpAnalyticsClient()
+            analyticsClient: makeAnalyticsClient(
+                launchInputs: analyticsLaunchInputs,
+                transportFactory: analyticsTransportFactory
+            )
+        )
+    }
+
+    /// Builds the analytics client the production composition uses. The
+    /// dependencies are `@autoclosure` so a build that must not transmit never
+    /// constructs the durable stores — `UserDefaultsAnalyticsIdentityStore`
+    /// mints and persists an anonymous id in its initializer.
+    static func makeAnalyticsClient(
+        launchInputs: AnalyticsLaunchInputs = .current,
+        transportFactory: any PostHogTransportBuilding = PostHogSDKTransportFactory(),
+        consentStore: @autoclosure () -> any AnalyticsConsentStoring =
+            UserDefaultsAnalyticsConsentStore(),
+        dedupeStore: @autoclosure () -> any AnalyticsDedupeStoring =
+            UserDefaultsAnalyticsDedupeStore(),
+        identityStore: @autoclosure () -> any AnalyticsIdentityStoring =
+            UserDefaultsAnalyticsIdentityStore(),
+        lifecycleStore: @autoclosure () -> any AnalyticsTransportLifecycleStoring =
+            FileAnalyticsTransportLifecycleStore(),
+        dataPurger: @autoclosure () -> (any PostHogDurableDataPurging)? =
+            FileSystemPostHogDataPurger()
+    ) -> any AnalyticsClient {
+        guard let configuration = AnalyticsLaunchPolicy.decide(launchInputs),
+              let dataPurger = dataPurger() else {
+            return NoOpAnalyticsClient()
+        }
+        return PostHogAnalyticsClient(
+            configuration: configuration,
+            consentStore: consentStore(),
+            dedupeStore: dedupeStore(),
+            identityStore: identityStore(),
+            lifecycleStore: lifecycleStore(),
+            dataPurger: dataPurger,
+            transportFactory: transportFactory
         )
     }
 

@@ -4,3 +4,16 @@
 DEVELOPMENT_TEAM = 35YFS8XJRQ
 SNAPLIST_API_ORIGIN = https:/$()/snaplist.dev
 SNAPLIST_CLERK_PUBLISHABLE_KEY = pk_test_d2l0dHktd2FscnVzLTI3LmNsZXJrLmFjY291bnRzLmRldiQ
+// Public PostHog project key for the `snaplist` project (project 452798,
+// organization `azizu`). Like the Clerk publishable key it is write-only: it
+// identifies the project to the ingest endpoint and grants no read access, so
+// it belongs here rather than in a side channel. An empty or unexpanded value
+// makes the app build the no-op analytics client instead of a client that
+// cannot deliver.
+SNAPLIST_POSTHOG_KEY = phc_kCSPUChoXv8kmbK8Co5uJSmvogn7pGbhpS6kYsYChvRy
+// US cloud ingest host. Escape both slashes with $() — xcconfig treats a bare
+// // as the start of a comment and would silently truncate the value. This
+// follows the existing SNAPLIST_API_ORIGIN line. Only this exact origin is
+// reachable: PostHogNetworkGate pins scheme, host, and port, and
+// PostHogBatchOnlyURLProtocol allows nothing but /batch.
+SNAPLIST_POSTHOG_HOST = https:/$()/us.i.posthog.com
