@@ -348,7 +348,7 @@ struct LaunchConfiguration: Equatable {
     }
 
     var initialTab: PrimaryTab {
-        if visualState?.ownerIssue == 208 {
+        if visualState?.ownerIssue == 208 || visualState == .runDetail {
             return .trophyWall
         }
         return fixture.initialTab
