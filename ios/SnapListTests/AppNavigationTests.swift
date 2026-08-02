@@ -198,6 +198,16 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertFalse(capture.usesOnboarding)
     }
 
+    func testRunDetailVisualStateLaunchesItsCanonicalRouteInTheTrophyWallStack() {
+        let configuration = LaunchConfiguration.parse(arguments: ["--visual-state=RUN-02"])
+
+        XCTAssertEqual(configuration.initialTab, .trophyWall)
+        XCTAssertEqual(
+            configuration.initialRoute,
+            .home(.run(LaunchConfiguration.runDetailFixtureID))
+        )
+    }
+
     @MainActor
     func testEveryFoundationFixtureProducesItsTypedInitialState() {
         for fixture in FoundationFixture.allCases {

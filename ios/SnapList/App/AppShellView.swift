@@ -239,20 +239,22 @@ struct AppShellView: View {
         TabView(selection: $router.selectedTab) {
             ForEach(PrimaryTab.allCases) { tab in
                 NavigationStack(path: router.pathBinding(for: tab)) {
-                    ZStack(alignment: .top) {
-                        primaryFeature(for: tab)
+                    if router.selectedTab == tab {
+                        ZStack(alignment: .top) {
+                            primaryFeature(for: tab)
 #if DEBUG
-                        if configuration.keyboardProbe {
-                            TextField("Fixture keyboard probe", text: $keyboardProbeText)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                                .padding(SnapListMetrics.screenGutter)
-                                .accessibilityIdentifier("fixture.keyboard-probe")
-                        }
+                            if configuration.keyboardProbe {
+                                TextField("Fixture keyboard probe", text: $keyboardProbeText)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                                    .padding(SnapListMetrics.screenGutter)
+                                    .accessibilityIdentifier("fixture.keyboard-probe")
+                            }
 #endif
-                    }
-                    .navigationDestination(for: AppRoute.self) { route in
-                        destination(for: route)
+                        }
+                        .navigationDestination(for: AppRoute.self) { route in
+                            destination(for: route)
+                        }
                     }
                 }
                 .tag(tab)

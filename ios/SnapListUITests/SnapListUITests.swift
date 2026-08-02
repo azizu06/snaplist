@@ -65,6 +65,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
         addScreenshot(named: "CAPTURE-CAMERA-UNAVAILABLE.png")
         let library = app.buttons["scan.choose-library"]
+        XCTAssertEqual(app.buttons.matching(identifier: "scan.choose-library").count, 1)
         XCTAssertTrue(library.exists)
         XCTAssertEqual(library.label, "Choose from library")
         XCTAssertGreaterThanOrEqual(library.frame.width, 44)
@@ -91,12 +92,14 @@ final class SnapListUITests: XCTestCase {
 
         let photoCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts.matching(identifier: "scan.photo-count").count, 1)
         XCTAssertEqual(photoCount.label, "1 of 5")
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
         addScreenshot(named: "CAPTURE-RESTORED-DRAFT.png")
 
         let reviewButton = app.buttons["scan.review"]
         let window = app.windows.firstMatch.frame
+        XCTAssertEqual(app.buttons.matching(identifier: "scan.review").count, 1)
         XCTAssertTrue(reviewButton.exists)
         XCTAssertGreaterThanOrEqual(reviewButton.frame.minX, window.minX)
         XCTAssertLessThanOrEqual(reviewButton.frame.maxX, window.maxX)
@@ -117,9 +120,11 @@ final class SnapListUITests: XCTestCase {
 
         let scanCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(scanCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts.matching(identifier: "scan.photo-count").count, 1)
         XCTAssertEqual(scanCount.label, "1 of 5")
 
         let review = app.buttons["scan.review"]
+        XCTAssertEqual(app.buttons.matching(identifier: "scan.review").count, 1)
         XCTAssertTrue(review.exists)
         XCTAssertEqual(review.label, "Review 1 photo")
         review.tap()
