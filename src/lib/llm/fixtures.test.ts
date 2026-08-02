@@ -10,7 +10,7 @@ import { loadLlmFixture, replayFixture } from "./fixtures";
  * offline by replaying the checked-in fixtures.
  */
 
-/** Roles with recorded fixtures (the issue's named roles). export/clarify route */
+/** Roles with recorded fixtures (the issue's named roles). Export routes */
 /** through the same registry and are covered by their own module tests. */
 const FIXTURE_ROLES = ["vision", "listing", "pricingAgent", "judge"] as const;
 

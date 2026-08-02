@@ -4,7 +4,6 @@ import { ebayListingRawSchema } from "../listing/schema";
 import { rawExportPacksSchema } from "../export/schema";
 import { judgeScoresSchema } from "../eval/judge";
 import { webCompSchema } from "../pricing/providers/web-search";
-import { clarifyingOptionsRawSchema } from "../clarify/schema";
 import type { LlmRole } from "./registry";
 
 /**
@@ -31,5 +30,4 @@ export const ROLE_OUTPUT_SCHEMA = {
   export: rawExportPacksSchema,
   pricingAgent: pricingAgentOutputSchema,
   judge: judgeScoresSchema,
-  clarify: clarifyingOptionsRawSchema,
 } satisfies Record<LlmRole, z.ZodType>;

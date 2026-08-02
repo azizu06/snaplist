@@ -55,7 +55,7 @@ Developer portal → Application Keys → **Production**. Production keysets
 require the deletion endpoint above to be saved and passing. Note all three
 values: App ID (client id), Cert ID (client secret), and create a **RuName**
 (User Tokens → "Get a Token from eBay via Your Application") whose
-**auth-accepted URL** is `https://<host>/api/ebay/callback`.
+**auth-accepted URL** is `https://<host>/v1/ebay/oauth/callback`.
 
 ### 3. Flip the environment
 
