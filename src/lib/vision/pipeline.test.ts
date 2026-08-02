@@ -310,10 +310,11 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     expect(deterministic.pricingModel).toBeUndefined();
   });
 
-  it("routes the attribute-derived ItemSignal (incl. ISBN) to the pricer", async () => {
-    const isbnExtraction: ExtractItemAttributesResult = {
+  it("keeps passive ISBN and UPC recognition flowing from extraction into pricing", async () => {
+    const barcodeExtraction: ExtractItemAttributesResult = {
       attributes: {
         isbn: "9780131103627",
+        upc: "027242920866",
         category: "books",
         title: "The C Programming Language",
       },
@@ -327,10 +328,11 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     const priceItem = vi.fn<(signal: ItemSignal) => Promise<PriceResult>>(
       async () => STUB_PRICE,
     );
-    await makePipeline({ extract: fakeExtract(isbnExtraction), priceItem }).run({
+    await makePipeline({ extract: fakeExtract(barcodeExtraction), priceItem }).run({
       photos: ["u/a.jpg"],
     });
     expect(priceItem.mock.calls[0]?.[0].isbn).toBe("9780131103627");
+    expect(priceItem.mock.calls[0]?.[0].upc).toBe("027242920866");
   });
 
   it("surfaces the identification on the result (before pricing, for confirmation)", async () => {

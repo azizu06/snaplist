@@ -11,18 +11,14 @@ final class SnapListUITests: XCTestCase {
     func testPrimaryShellNavigationAndTypedDestinations() {
         let app = launch()
 
-        XCTAssertTrue(app.staticTexts["Home"].exists)
-        XCTAssertTrue(app.buttons["dock.home"].isSelected)
+        XCTAssertTrue(app.staticTexts["Scan"].exists)
+        XCTAssertTrue(app.buttons["dock.scan"].isSelected)
 
-        app.buttons["dock.listings"].tap()
-        XCTAssertTrue(app.staticTexts["Listings"].waitForExistence(timeout: 2))
+        app.buttons["dock.trophy-wall"].tap()
+        XCTAssertTrue(app.staticTexts["Trophy Wall"].waitForExistence(timeout: 2))
 
-        app.buttons["dock.inbox"].tap()
-        XCTAssertTrue(app.staticTexts["Inbox"].waitForExistence(timeout: 2))
-
-        app.buttons["dock.insights"].tap()
-        XCTAssertTrue(app.staticTexts["Insights"].waitForExistence(timeout: 2))
-
+        XCTAssertFalse(app.buttons["dock.inbox"].exists)
+        XCTAssertFalse(app.buttons["dock.insights"].exists)
         XCTAssertFalse(app.buttons["Runs"].exists)
         XCTAssertFalse(app.buttons["You"].exists)
     }
@@ -30,7 +26,7 @@ final class SnapListUITests: XCTestCase {
     func testCapturePresentsAndDismissesAnItemDrivenSheet() {
         let app = launch()
 
-        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.staticTexts["Scan"].exists)
         app.buttons["dock.capture"].tap()
         XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 2))
 
@@ -54,7 +50,7 @@ final class SnapListUITests: XCTestCase {
 
         app.buttons["capture.close"].tap()
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 1))
-        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.staticTexts["Scan"].exists)
     }
 
     func testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable() {
@@ -148,7 +144,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(thumbnail.isSelected)
 
         XCTAssertFalse(app.buttons["scan.review"].exists)
-        XCTAssertFalse(app.staticTexts["Home"].exists)
+        XCTAssertFalse(app.staticTexts["Scan"].exists)
     }
 
     func testLivePhotoReviewBackReturnsExactRestoredPhotoAndFocusesScanReview() {
@@ -1435,13 +1431,13 @@ final class SnapListUITests: XCTestCase {
         probe.tap()
 
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["dock.home"].exists)
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
     }
 
     func testAccessibilityDynamicTypeKeepsFoundationControlsReachable() {
         let app = launch(extraArguments: ["--dynamic-type=accessibility3"])
 
-        XCTAssertTrue(app.staticTexts["Home"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Scan"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["header.activity"].exists)
         XCTAssertTrue(app.buttons["header.account"].exists)
         XCTAssertTrue(app.buttons["dock.capture"].exists)
@@ -1498,7 +1494,7 @@ final class SnapListUITests: XCTestCase {
 
         app.buttons["button.primary.continue-to-capture"].tap()
         XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.staticTexts["Scan"].exists)
         XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
         XCTAssertTrue(app.buttons["capture.choose-library"].exists)
         XCTAssertFalse(app.staticTexts["Capture entry boundary"].exists)
@@ -1709,7 +1705,7 @@ final class SnapListUITests: XCTestCase {
         orientation: UIDeviceOrientation = .portrait
     ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--fixture=home", "--zero-network-fixtures"] + extraArguments
+        app.launchArguments = ["--fixture=scan", "--zero-network-fixtures"] + extraArguments
         app.launchAfterRetiringPriorInstance()
         guard orientation == .landscapeLeft || orientation == .landscapeRight else {
             return app

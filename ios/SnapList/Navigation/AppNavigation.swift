@@ -2,55 +2,54 @@ import Observation
 import SwiftUI
 
 enum PrimaryTab: String, CaseIterable, Identifiable {
-    case home
-    case listings
-    case inbox
-    case insights
+    case scan
+    case trophyWall = "trophy-wall"
 
     var id: String { rawValue }
 
     var title: String {
-        rawValue.capitalized
+        switch self {
+        case .scan: "Scan"
+        case .trophyWall: "Trophy Wall"
+        }
     }
 
     var systemImage: String {
         switch self {
-        case .home: "house"
-        case .listings: "list.bullet.rectangle"
-        case .inbox: "envelope"
-        case .insights: "chart.line.uptrend.xyaxis"
+        case .scan: "camera.viewfinder"
+        case .trophyWall: "list.bullet.rectangle"
         }
     }
 }
 
 enum DockDestination: String, CaseIterable, Identifiable {
-    case home
-    case listings
+    case scan
     case capture
-    case inbox
-    case insights
+    case trophyWall = "trophy-wall"
 
     var id: String { rawValue }
 
-    var title: String { rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .scan: "Scan"
+        case .capture: "Capture"
+        case .trophyWall: "Trophy Wall"
+        }
+    }
 
     var systemImage: String {
         switch self {
-        case .home: "house"
-        case .listings: "list.bullet.rectangle"
+        case .scan: "camera.viewfinder"
         case .capture: "camera"
-        case .inbox: "envelope"
-        case .insights: "chart.line.uptrend.xyaxis"
+        case .trophyWall: "list.bullet.rectangle"
         }
     }
 
     var tab: PrimaryTab? {
         switch self {
-        case .home: .home
-        case .listings: .listings
+        case .scan: .scan
         case .capture: nil
-        case .inbox: .inbox
-        case .insights: .insights
+        case .trophyWall: .trophyWall
         }
     }
 }
@@ -163,13 +162,11 @@ final class AppRouter {
     private(set) var captureBoundaryRequest: CaptureBoundaryRequest?
     private(set) var photoReviewScanReturn: PhotoReviewScanReturn?
 
-    private var homePath: [AppRoute] = []
-    private var listingsPath: [AppRoute] = []
-    private var inboxPath: [AppRoute] = []
-    private var insightsPath: [AppRoute] = []
+    private var scanPath: [AppRoute] = []
+    private var trophyWallPath: [AppRoute] = []
 
     init(
-        initialTab: PrimaryTab = .home,
+        initialTab: PrimaryTab = .scan,
         initialRoute: AppRoute? = nil,
         initialSheet: AppSheet? = nil,
         initialFullScreen: AppFullScreen? = nil
@@ -232,10 +229,10 @@ final class AppRouter {
         guard let deepLink = RunDeepLink(url: url) else { return false }
         switch deepLink {
         case .run(let runID):
-            selectedTab = .home
+            selectedTab = .trophyWall
             presentedSheet = nil
             presentedFullScreen = nil
-            setPath([.home(.run(runID))], for: .home)
+            setPath([.home(.run(runID))], for: .trophyWall)
         }
         return true
     }
@@ -252,19 +249,15 @@ final class AppRouter {
 
     private func path(for tab: PrimaryTab) -> [AppRoute] {
         switch tab {
-        case .home: homePath
-        case .listings: listingsPath
-        case .inbox: inboxPath
-        case .insights: insightsPath
+        case .scan: scanPath
+        case .trophyWall: trophyWallPath
         }
     }
 
     private func setPath(_ path: [AppRoute], for tab: PrimaryTab) {
         switch tab {
-        case .home: homePath = path
-        case .listings: listingsPath = path
-        case .inbox: inboxPath = path
-        case .insights: insightsPath = path
+        case .scan: scanPath = path
+        case .trophyWall: trophyWallPath = path
         }
     }
 }

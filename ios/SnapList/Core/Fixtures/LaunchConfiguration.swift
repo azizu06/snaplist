@@ -82,21 +82,17 @@ enum ApprovedVisualStateID: String, CaseIterable, Codable, Identifiable {
 
 enum FoundationFixture: String, CaseIterable {
     case onboarding
-    case home
+    case scan
     case trophyProcessing = "trophy-processing"
-    case listings
-    case inbox
-    case insights
+    case trophyWall = "trophy-wall"
     case account
     case activity
     case capture
 
     var initialTab: PrimaryTab {
         switch self {
-        case .onboarding, .home, .trophyProcessing, .account, .activity, .capture: .home
-        case .listings: .listings
-        case .inbox: .inbox
-        case .insights: .insights
+        case .onboarding, .scan, .account, .activity, .capture: .scan
+        case .trophyProcessing, .trophyWall: .trophyWall
         }
     }
 
@@ -104,8 +100,7 @@ enum FoundationFixture: String, CaseIterable {
         switch self {
         case .account: .account
         case .activity: .activity
-        case .onboarding, .home, .trophyProcessing,
-             .listings, .inbox, .insights, .capture:
+        case .onboarding, .scan, .trophyProcessing, .trophyWall, .capture:
             nil
         }
     }
@@ -230,7 +225,7 @@ struct LaunchConfiguration: Equatable {
     )
 
     static let preview = LaunchConfiguration(
-        fixture: .home,
+        fixture: .scan,
         visualState: nil,
         photoReviewState: nil,
         forceReducedMotion: false,
@@ -290,7 +285,7 @@ struct LaunchConfiguration: Equatable {
                     SubmissionAcknowledgmentNotificationName(rawValue: value)
             } else if argument.hasPrefix("--fixture=") {
                 let value = String(argument.dropFirst("--fixture=".count))
-                configuration.fixture = FoundationFixture(rawValue: value) ?? .home
+                configuration.fixture = FoundationFixture(rawValue: value) ?? .scan
             } else if argument.hasPrefix("--visual-state=") {
                 let value = String(argument.dropFirst("--visual-state=".count))
                 configuration.visualState = ApprovedVisualStateID(rawValue: value)

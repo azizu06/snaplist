@@ -16,6 +16,7 @@ struct AppShellView: View {
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
+    @State private var keyboardProbeText = ""
     @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
@@ -238,30 +239,17 @@ struct AppShellView: View {
         TabView(selection: $router.selectedTab) {
             ForEach(PrimaryTab.allCases) { tab in
                 NavigationStack(path: router.pathBinding(for: tab)) {
-                    Group {
-                        if tab == .home {
+                    ZStack(alignment: .top) {
+                        homeFeature
 #if DEBUG
-                            if configuration.keyboardProbe {
-                                FoundationPlaceholderView(
-                                    tab: tab,
-                                    configuration: configuration,
-                                    openActivity: { router.navigate(to: .activity) },
-                                    openAccount: { router.navigate(to: .account) }
-                                )
-                            } else {
-                                homeFeature
-                            }
-#else
-                            homeFeature
-#endif
-                        } else {
-                            FoundationPlaceholderView(
-                                tab: tab,
-                                configuration: configuration,
-                                openActivity: { router.navigate(to: .activity) },
-                                openAccount: { router.navigate(to: .account) }
-                            )
+                        if configuration.keyboardProbe {
+                            TextField("Fixture keyboard probe", text: $keyboardProbeText)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                                .padding(SnapListMetrics.screenGutter)
+                                .accessibilityIdentifier("fixture.keyboard-probe")
                         }
+#endif
                     }
                     .navigationDestination(for: AppRoute.self) { route in
                         destination(for: route)
@@ -752,7 +740,7 @@ enum AppCaptureHandoffCoordinator {
                     let didRollBackCapture = await captureFlow
                         .rollBackLibraryTransferAfterSourceConsumptionFailure()
                     if !didRollBackCapture {
-                        router.selectedTab = .home
+                        router.selectedTab = .scan
                         router.presentedSheet = .capture
                         return
                     }
@@ -761,7 +749,7 @@ enum AppCaptureHandoffCoordinator {
             guard onboardingModel.state.screen == .captureBoundary else { return }
         }
 
-        router.selectedTab = .home
+        router.selectedTab = .scan
         router.presentedSheet = .capture
     }
 }

@@ -251,7 +251,7 @@ final class HomeUITests: XCTestCase {
 
         XCTAssertTrue(search.waitForExistence(timeout: 3))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["dock.home"].exists)
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
 
         search.typeText("camera")
         XCTAssertTrue(app.staticTexts["1 result for “camera”"].waitForExistence(timeout: 2))
@@ -271,7 +271,7 @@ final class HomeUITests: XCTestCase {
     func testStandardHomeCanReachFocusedSearchWithoutAVisualStateFixture() {
         let app = XCUIApplication()
         app.launchArguments = [
-            "--fixture=home",
+            "--fixture=scan",
             "--zero-network-fixtures",
             "--reset-onboarding-progress"
         ]
@@ -283,7 +283,7 @@ final class HomeUITests: XCTestCase {
 
         XCTAssertTrue(app.textFields["home.search.field"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["dock.home"].exists)
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
     }
 
     func testHomeRemainsReachableAtAccessibilityTypeWithReducedMotion() {
