@@ -559,8 +559,9 @@ final class AssistedExportDomainTests: XCTestCase {
     }
 
     // The approved package is explicit about what updating the pack does:
-    // "The destination that was open before is restored, and every Shared
-    // record the seller wrote is kept." Landing the seller back on the bare
+    // "The destination that was open before is restored." Shared records stay
+    // when the replacement preserves the same pack text; replacement text
+    // clears its stale sharedAt claim. Landing the seller back on the bare
     // destination list would make them find their place again for an edit they
     // may not have made from this screen at all.
 
