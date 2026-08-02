@@ -8,7 +8,7 @@ import { EbayApiError } from "./types";
  * eBay quirk worth knowing: the `redirect_uri` parameter is NOT a URL — it is
  * the keyset's **RuName** (eBay's "Redirect URL name", e.g.
  * "Abduaziz_Umarov-Abduaziz-SnapLi-abcdef"). The actual callback URL
- * (https://<host>/api/ebay/callback) is configured against that RuName in the
+ * (https://<host>/v1/ebay/oauth/callback) is configured against that RuName in the
  * developer portal. Sandbox and production keysets have DIFFERENT RuNames, so
  * `EBAY_RU_NAME` flips alongside the credentials.
  */
