@@ -49,9 +49,6 @@ begin
       using errcode = '22023';
   end if;
 
-  delete from private.waitlist_signup_rate_limit_windows
-  where window_started_at < v_window_started_at - interval '1 hour';
-
   insert into private.waitlist_signup_rate_limit_windows (
     window_started_at,
     attempts
@@ -65,6 +62,9 @@ begin
   if v_attempts is null then
     return false;
   end if;
+
+  delete from private.waitlist_signup_rate_limit_windows
+  where window_started_at < v_window_started_at - interval '1 hour';
 
   insert into public.waitlist_signups (email)
   values (p_email)

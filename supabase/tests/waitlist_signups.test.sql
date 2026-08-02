@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(22);
+select extensions.plan(24);
 
 select extensions.has_table(
   'public', 'waitlist_signups',
@@ -142,6 +142,12 @@ select extensions.is(
   'the final address inside the shared rate window is admitted'
 );
 
+insert into private.waitlist_signup_rate_limit_windows (
+  window_started_at,
+  attempts
+)
+values ('2000-01-01 00:00:00+00'::timestamptz, 1);
+
 select extensions.is(
   public.insert_waitlist_signup('rate-limited@example.com', 2),
   false,
@@ -158,11 +164,23 @@ select extensions.is(
   'a rate-limited address writes no waitlist row'
 );
 
-insert into private.waitlist_signup_rate_limit_windows (
-  window_started_at,
-  attempts
-)
-values (date_trunc('minute', statement_timestamp()) - interval '2 hours', 1);
+select extensions.is(
+  (
+    select count(*)
+    from private.waitlist_signup_rate_limit_windows
+  ),
+  2::bigint,
+  'a rate-limited address leaves the rate-window table exactly unchanged'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from private.waitlist_signup_rate_limit_windows
+    where window_started_at = '2000-01-01 00:00:00+00'::timestamptz
+  ),
+  'a rate-limited address leaves the specific expired rate window intact'
+);
 
 select extensions.is(
   public.insert_waitlist_signup('cleanup@example.com', 3),
