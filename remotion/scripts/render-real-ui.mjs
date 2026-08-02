@@ -1,5 +1,5 @@
 /**
- * Render the real-UI marketing-tour and inbox media after capture-real-ui.mjs.
+ * Render the real-UI marketing-tour media after capture-real-ui.mjs.
  * Bundles Remotion once, then writes the exact paths consumed by the app.
  *
  *   pnpm demo:render-real-ui
@@ -28,8 +28,6 @@ const DESKTOP = [
   ["step-price", "demo/steps/price.mp4"],
   ["step-write", "demo/steps/write.mp4"],
   ["step-publish", "demo/steps/publish.mp4"],
-  ["buyer-qa", "demo/buyer-qa.mp4"],
-  ["inbox-qa", "demo/inbox-qa.mp4"],
 ];
 
 const MOBILE = [
@@ -38,8 +36,6 @@ const MOBILE = [
   ["step-price-mobile", "demo/steps/price-mobile.mp4"],
   ["step-write-mobile", "demo/steps/write-mobile.mp4"],
   ["step-publish-mobile", "demo/steps/publish-mobile.mp4"],
-  ["buyer-qa-mobile", "demo/buyer-qa-mobile.mp4"],
-  ["inbox-qa-mobile", "demo/inbox-qa-mobile.mp4"],
 ];
 
 const darkPath = (file) => file.replace(/\.mp4$/, "-dark.mp4");

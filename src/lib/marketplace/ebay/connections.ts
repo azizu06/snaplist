@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { drainMessagePhotoDeletionQueue } from "@/lib/inbox/attachment-cleanup";
+import { drainMessagePhotoDeletionQueue } from "./message-photo-erasure";
 import {
   decryptSecret,
   encryptSecret,

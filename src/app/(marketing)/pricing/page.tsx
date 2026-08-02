@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 const PRICING_FAQ = [
   {
     q: "What's the difference between Free and Seller Pro?",
-    a: "Both plans get the full pipeline: identification, source-backed pricing when available with clearly labeled estimates otherwise, listing generation, eBay publishing, export packs, and the buyer-Q&A inbox. Seller Pro raises the daily limit from 15 items to 200, adds bulk photo uploads, a priority research queue, listing and pricing analytics, and priority support. It's built for flippers and steady resellers.",
+    a: "Both plans get the full pipeline: identification, source-backed pricing when available with clearly labeled estimates otherwise, listing generation, eBay publishing, and export packs. Seller Pro raises the daily limit from 15 items to 200, adds bulk photo uploads, a priority research queue, listing and pricing analytics, and priority support. It's built for flippers and steady resellers.",
   },
   {
     q: "What does Seller Pro cost?",
@@ -53,7 +53,6 @@ const FREE_HIGHLIGHTS = [
   "eBay publishing from your own account",
   "Facebook & Mercari export packs",
   "High-confidence publish eligibility",
-  "Buyer-Q&A inbox with drafted replies",
 ] as const;
 
 const PRO_HIGHLIGHTS = [
@@ -102,9 +101,8 @@ const FEATURE_MATRIX: readonly FeatureGroup[] = [
     ],
   },
   {
-    group: "Messaging & insight",
+    group: "Insight",
     rows: [
-      { label: "Buyer-Q&A inbox with drafted replies", free: true, pro: true },
       { label: "Listing & pricing analytics", free: false, pro: true },
     ],
   },

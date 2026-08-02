@@ -32,7 +32,6 @@ const isPublic = createRouteMatcher([
   "/api/app-attest",
   "/api/app-attest/",
   "/api/ebay/account-deletion",
-  "/api/cron/inbox-sync",
   "/api/internal/pipeline-worker",
   "/api/internal/pipeline-maintenance",
   "/api/internal/included-offer-worker",

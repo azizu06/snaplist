@@ -3,7 +3,6 @@ import { visionResponseSchema } from "../vision/extract";
 import { ebayListingRawSchema } from "../listing/schema";
 import { rawExportPacksSchema } from "../export/schema";
 import { judgeScoresSchema } from "../eval/judge";
-import { buyerReplyRawSchema } from "../inbox/reply";
 import { webCompSchema } from "../pricing/providers/web-search";
 import { clarifyingOptionsRawSchema } from "../clarify/schema";
 import type { LlmRole } from "./registry";
@@ -32,6 +31,5 @@ export const ROLE_OUTPUT_SCHEMA = {
   export: rawExportPacksSchema,
   pricingAgent: pricingAgentOutputSchema,
   judge: judgeScoresSchema,
-  reply: buyerReplyRawSchema,
   clarify: clarifyingOptionsRawSchema,
 } satisfies Record<LlmRole, z.ZodType>;

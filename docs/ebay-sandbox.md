@@ -6,10 +6,6 @@ SnapList publishes listings to eBay through one adapter seam
 never sees eBay HTTP. **Sandbox ↔ production is config-only** — `EBAY_BASE_URL`
 plus credentials/policy ids. No code change.
 
-Pre-sale buyer questions and text replies/follow-ups use the same credential
-boundary through a separate marketplace-messaging adapter. Its two-user
-operator procedure is in [ebay-messaging-sandbox.md](./ebay-messaging-sandbox.md).
-
 ## What the adapter does
 
 `HttpEbayAdapter.publishListing()` runs the documented Sell Inventory flow:

@@ -1,8 +1,7 @@
 "use client";
 
 /**
- * DemoClip (subpages v3) — lazy demo-video frame for the how-it-works steps
- * and the buyer-Q&A section.
+ * DemoClip (subpages v3) — lazy demo-video frame for the how-it-works steps.
  *
  * The video engine is SeamlessThemeVideo: it lazy-mounts near the viewport,
  * plays/pauses with visibility, swaps the dark render in on dark mode, and
@@ -19,7 +18,6 @@ const POSTER_SHOTS: Record<string, string> = {
   price: "review-price",
   write: "review-write",
   publish: "publish-live",
-  "buyer-qa": "inbox-draft",
 };
 
 function posterShot(src: string): string {
