@@ -6,6 +6,7 @@ import { AppStoreButton } from "@/components/marketing/app-store-button";
 
 const NAV_LINKS = [
   { href: "#features", label: "Features" },
+  { href: "/pricing", label: "Pricing" },
   { href: "#faq", label: "FAQ" },
 ] as const;
 

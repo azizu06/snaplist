@@ -126,6 +126,48 @@ export const VALUE_CARDS = [
   },
 ] as const;
 
+/** v6-restyled continuation of the live MagicBento grid. */
+export const MARKETING_BENTO_CARDS = [
+  {
+    label: "Pricing evidence",
+    title: "Sold prices, not asking prices",
+    description:
+      "SnapList surfaces pricing from actual sold prices when evidence is available. When it is not, the estimate stays clearly labeled.",
+    className: "lg:col-span-2",
+  },
+  {
+    label: "Voice context",
+    title: "Add seller context with a voice note",
+    description:
+      "A voice note of up to 15 seconds adds seller context to your item. It does not replace the photos or verified evidence.",
+  },
+  {
+    label: "Review",
+    title: "Edit before anything leaves SnapList",
+    description:
+      "Review and edit the title, condition, item details, description, photos, and price before you confirm an eBay publish.",
+  },
+  {
+    label: "Export packs",
+    title: "Prepared for your share sheet",
+    description:
+      "Facebook Marketplace, Mercari, and Depop get prepared text and photos. You finish the destination form yourself.",
+    className: "lg:col-span-2",
+  },
+  {
+    label: "Confirmation",
+    title: "eBay publishes only after you confirm",
+    description:
+      "SnapList publishes to eBay only after your explicit confirmation.",
+  },
+  {
+    label: "Your draft",
+    title: "Keep one clear next step",
+    description:
+      "Trophy Wall keeps each item in one chronological place, from analyzing to ready to review to a prepared or published result.",
+  },
+] as const;
+
 /**
  * Trophy Wall rows shown in the illustrative phone.
  *

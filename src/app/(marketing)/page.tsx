@@ -4,7 +4,9 @@ import { AppStoreButton } from "@/components/marketing/app-store-button";
 import { Faq } from "@/components/marketing/faq";
 import { FeatureExplorer } from "@/components/marketing/feature-explorer";
 import { HeroArt } from "@/components/marketing/hero-art";
-import { ValueCards } from "@/components/marketing/value-cards";
+import { MarketingBento } from "@/components/marketing/marketing-bento";
+import { MarketplaceLoop } from "@/components/marketing/marketplace-loop";
+import { StorefrontHandoff } from "@/components/marketing/storefront-handoff";
 import {
   CTA,
   FAQ_TITLE,
@@ -18,11 +20,9 @@ import {
 /**
  * SnapList landing page (issue #191, implementing Claude Design v6).
  *
- * The page is a single scroll with no internal routes: Features and FAQ are
- * in-page anchors, and the only outbound destinations are the App Store, the
- * privacy policy, and support. That is deliberate — the product is an iOS app,
- * and a marketing page with signed-in destinations would advertise a web app
- * that no longer exists.
+ * The landing page is a scroll with in-page feature and FAQ anchors plus the
+ * intentionally small pricing teaser. It has no signed-in destinations: the
+ * launch client is the iOS app, not a web product.
  *
  * All copy lives in `src/lib/marketing/site.ts` so the honesty test can derive
  * its assertions from product capability rather than from pinned sentences.
@@ -60,9 +60,21 @@ export default function LandingPage() {
         <div className="mkt-shell mkt-shell--narrow">
           <h2 className="mkt-h2">{WHY.title}</h2>
           <p className="mkt-why__lede">{WHY.body}</p>
-          <ValueCards />
+          <MarketingBento />
         </div>
       </section>
+
+      <section className="mkt-loop-section" aria-labelledby="mkt-loop-title">
+        <div className="mkt-shell">
+          <div className="mkt-loop-section__heading">
+            <h2 id="mkt-loop-title">From camera roll to cash.</h2>
+            <p>Keep your item photos, then shape an editable draft you control.</p>
+          </div>
+        </div>
+        <MarketplaceLoop />
+      </section>
+
+      <StorefrontHandoff />
 
       <section id="trophy" className="mkt-section mkt-trophy">
         <div className="mkt-shell mkt-shell--narrow">

@@ -7,6 +7,7 @@ import { SiteFooter } from "@/components/marketing/site-footer";
 import { SiteHeader } from "@/components/marketing/site-header";
 import * as site from "@/lib/marketing/site";
 import LandingPage from "./page";
+import PricingPage from "./pricing/page";
 import PrivacyPage from "./privacy/page";
 import SupportPage from "./support/page";
 
@@ -94,6 +95,7 @@ function marketingBlocks(): string[] {
   const markup = [
     renderToStaticMarkup(<SiteHeader />),
     renderToStaticMarkup(<LandingPage />),
+    renderToStaticMarkup(<PricingPage />),
     renderToStaticMarkup(<PrivacyPage />),
     renderToStaticMarkup(<SupportPage />),
     renderToStaticMarkup(<SiteFooter />),
@@ -226,6 +228,23 @@ describe("marketing honesty", () => {
 });
 
 describe("marketing destinations", () => {
+  it("keeps pricing as an honest launch teaser", () => {
+    const $ = load(renderToStaticMarkup(<PricingPage />));
+    const text = $("body").text();
+
+    expect(text).toMatch(/Your first listing is free\./);
+    expect(text).toMatch(/SnapList Pro is an App Store subscription\./);
+    expect(text).toMatch(/Pricing will be announced at launch\./);
+    expect(text).not.toMatch(/\$\s*\d|\b(?:monthly|annual|allowance|tier)s?\b/i);
+  });
+
+  it("links pricing and does not revive the scrapped guide route", () => {
+    const $ = load(renderToStaticMarkup(<SiteHeader />));
+
+    expect($('a[href="/pricing"]').length).toBeGreaterThan(0);
+    expect($('a[href="/tour"]').length).toBe(0);
+  });
+
   it("renders no App Store link until a product page exists", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_STORE_URL", "");
     const $ = load(renderToStaticMarkup(<LandingPage />));

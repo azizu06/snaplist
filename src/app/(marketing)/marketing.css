@@ -29,6 +29,15 @@
   --action: #3665f3;
   --action-deep: #244cc0;
 
+  /* React Bits primitives retain their utility-class structure. Mapping their
+     semantic tokens here keeps every mounted marketing instance in v6 blue and
+     ink without changing app or auth surfaces. */
+  --color-line: var(--hairline-2);
+  --color-panel: var(--canvas);
+  --color-flash: var(--ink);
+  --color-flash-dim: var(--ink-2);
+  --color-flash-faint: var(--ink-3);
+
   --quint: cubic-bezier(0.22, 1, 0.36, 1);
   --decel: cubic-bezier(0, 0, 0.2, 1);
 
@@ -963,6 +972,240 @@ html:has(.mkt) {
 .mkt-h2--display {
   margin-bottom: 72px;
   font-size: clamp(28px, 3.6vw, 46px);
+}
+
+/* ------------------------------------------------------------ retained bits */
+
+.mkt-bento {
+  margin-top: 42px;
+}
+
+.mkt .mkt-bento .card {
+  min-height: 206px;
+  border-color: var(--hairline-2);
+  border-radius: 16px;
+  background: var(--canvas);
+  box-shadow: 0 10px 28px rgba(22, 24, 27, 0.06);
+}
+
+.mkt .mkt-bento .card h3 {
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.mkt .mkt-bento .card p {
+  color: var(--ink-2);
+}
+
+.mkt .mkt-bento .card > div:first-child > span:first-child {
+  background: var(--wash);
+  color: var(--action);
+}
+
+.mkt-loop-section {
+  padding: 0 0 clamp(64px, 7vw, 104px);
+  overflow: hidden;
+}
+
+.mkt-loop-section__heading {
+  margin-bottom: 28px;
+  text-align: center;
+}
+
+.mkt-loop-section__heading h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(26px, 3.2vw, 40px);
+  letter-spacing: -0.025em;
+}
+
+.mkt-loop-section__heading p {
+  margin: 12px auto 0;
+  max-width: 42ch;
+  color: var(--ink-2);
+}
+
+.mkt-loop {
+  overflow: hidden;
+  padding: 8px 0 14px;
+}
+
+.mkt-loop-card {
+  width: 176px;
+  overflow: hidden;
+  border: 1px solid var(--hairline-2);
+  border-radius: 14px;
+  background: var(--canvas);
+  box-shadow: 0 8px 22px rgba(22, 24, 27, 0.07);
+}
+
+.mkt-loop-card__image {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--soft);
+}
+
+.mkt-loop-card__image img {
+  object-fit: cover;
+}
+
+.mkt-loop-card__body {
+  padding: 12px;
+}
+
+.mkt-loop-card__body p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.mkt-loop-card__body span {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--action-deep);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mkt-storefronts {
+  background: linear-gradient(180deg, var(--canvas) 0%, var(--wash-3) 100%);
+}
+
+.mkt-storefronts__intro {
+  max-width: 580px;
+  margin: 0 auto 38px;
+  text-align: center;
+}
+
+.mkt-storefronts__intro p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.mkt-storefronts__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+  gap: clamp(24px, 5vw, 60px);
+  align-items: center;
+}
+
+.mkt-storefronts__photo {
+  position: relative;
+  min-height: 360px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--soft);
+  box-shadow: 0 18px 42px rgba(22, 24, 27, 0.1);
+}
+
+.mkt-storefronts__photo img {
+  object-fit: cover;
+}
+
+.mkt-storefronts__cards {
+  display: grid;
+  gap: 12px;
+}
+
+.mkt-storefront {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--hairline-2);
+  border-radius: 14px;
+  background: var(--canvas);
+}
+
+.mkt-storefront h3,
+.mkt-storefront p {
+  margin: 0;
+}
+
+.mkt-storefront h3 {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.mkt-storefront p {
+  margin-top: 5px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.mkt-storefront > span {
+  flex: 0 0 auto;
+  color: var(--action-deep);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.mkt-pricing {
+  padding-top: clamp(80px, 13vw, 160px);
+  padding-bottom: clamp(100px, 18vw, 220px);
+}
+
+.mkt-pricing__eyebrow {
+  margin: 0 0 14px;
+  color: var(--action-deep);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mkt-pricing .mkt-h1 {
+  font-size: clamp(42px, 6vw, 64px);
+}
+
+.mkt-pricing__card {
+  display: grid;
+  gap: 14px;
+  margin-top: 36px;
+  padding: clamp(24px, 5vw, 40px);
+  border: 1px solid var(--hairline-2);
+  border-radius: 18px;
+  background: var(--wash-2);
+}
+
+.mkt-pricing__card p {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(18px, 2vw, 22px);
+  font-weight: 600;
+}
+
+@media (min-width: 640px) {
+  .mkt-loop-card {
+    width: 252px;
+  }
+  .mkt-loop-card__body {
+    padding: 15px;
+  }
+  .mkt-loop-card__body p {
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 767px) {
+  .mkt-storefronts__grid {
+    grid-template-columns: 1fr;
+  }
+  .mkt-storefronts__photo {
+    min-height: 270px;
+  }
+  .mkt-storefront {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .mkt-storefront > span {
+    text-align: left;
+  }
 }
 
 /* The frame is drawn at 288x592 and scaled uniformly, so `scale()` needs a
