@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(39);
+select extensions.plan(40);
 
 -- Issue #597: the native guided identity correction.
 --
@@ -439,6 +439,17 @@ select extensions.is(
   )->>'state',
   'unchanged',
   'releasing a lease that was never granted changes nothing'
+);
+select extensions.is(
+  public.claim_mobile_guided_correction(
+    'fail',
+    '59720000-0000-4000-8000-000000000001'::uuid,
+    '59750000-0000-4000-8000-000000000001'::uuid,
+    '59740000-0000-4000-8000-000000000002'::uuid,
+    '{"addedSpecs":["Noise cancelling"]}'::jsonb
+  )->>'state',
+  'failed',
+  'the granted claim is released before a later correction of the same revision'
 );
 
 -- Definer rights stop at the caller's own tenancy, so the claim can never
