@@ -9,13 +9,15 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testPrimaryShellNavigationAndTypedDestinations() {
-        let app = launch()
+        let app = launch(extraArguments: ["--camera-status=unavailable"])
 
-        XCTAssertTrue(app.staticTexts["Scan"].exists)
+        XCTAssertTrue(app.staticTexts["scan.recovery-title"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.scrollViews["home.active"].exists)
         XCTAssertTrue(app.buttons["dock.scan"].isSelected)
 
         app.buttons["dock.trophy-wall"].tap()
-        XCTAssertTrue(app.staticTexts["Trophy Wall"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["scan.recovery-title"].exists)
 
         XCTAssertFalse(app.buttons["dock.inbox"].exists)
         XCTAssertFalse(app.buttons["dock.insights"].exists)
@@ -1406,6 +1408,7 @@ final class SnapListUITests: XCTestCase {
 
     func testHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets() {
         let app = launch()
+        app.buttons["dock.trophy-wall"].tap()
         let activity = app.buttons["header.activity"]
         let account = app.buttons["header.account"]
         let capture = app.buttons["dock.capture"]
@@ -1436,8 +1439,9 @@ final class SnapListUITests: XCTestCase {
 
     func testAccessibilityDynamicTypeKeepsFoundationControlsReachable() {
         let app = launch(extraArguments: ["--dynamic-type=accessibility3"])
+        app.buttons["dock.trophy-wall"].tap()
 
-        XCTAssertTrue(app.staticTexts["Scan"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["header.activity"].exists)
         XCTAssertTrue(app.buttons["header.account"].exists)
         XCTAssertTrue(app.buttons["dock.capture"].exists)

@@ -271,7 +271,7 @@ final class HomeUITests: XCTestCase {
     func testStandardHomeCanReachFocusedSearchWithoutAVisualStateFixture() {
         let app = XCUIApplication()
         app.launchArguments = [
-            "--fixture=scan",
+            "--fixture=trophy-wall",
             "--zero-network-fixtures",
             "--reset-onboarding-progress"
         ]

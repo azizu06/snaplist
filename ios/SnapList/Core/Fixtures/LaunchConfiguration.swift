@@ -347,6 +347,13 @@ struct LaunchConfiguration: Equatable {
         return fixture.initialRoute
     }
 
+    var initialTab: PrimaryTab {
+        if visualState?.ownerIssue == 208 {
+            return .trophyWall
+        }
+        return fixture.initialTab
+    }
+
     var initialOnboardingState: OnboardingFlowState {
         guard let visualState,
               let screen = OnboardingScreen(visualState: visualState) else {

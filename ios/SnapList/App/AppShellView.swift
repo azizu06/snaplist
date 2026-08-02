@@ -240,7 +240,7 @@ struct AppShellView: View {
             ForEach(PrimaryTab.allCases) { tab in
                 NavigationStack(path: router.pathBinding(for: tab)) {
                     ZStack(alignment: .top) {
-                        homeFeature
+                        primaryFeature(for: tab)
 #if DEBUG
                         if configuration.keyboardProbe {
                             TextField("Fixture keyboard probe", text: $keyboardProbeText)
@@ -312,6 +312,29 @@ struct AppShellView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
+        }
+    }
+
+    @ViewBuilder
+    private func primaryFeature(for tab: PrimaryTab) -> some View {
+        switch tab {
+        case .scan:
+            ScanCameraView(
+                flow: captureFlow,
+                returnFocus: $pendingScanReturnFocus
+            ) { destination, photos, opener in
+                router.openCaptureBoundary(
+                    destination: destination,
+                    photos: photos,
+                    opener: opener
+                )
+            }
+            .task(id: router.selectedTab) {
+                guard router.selectedTab == .scan else { return }
+                await captureFlow.startCamera()
+            }
+        case .trophyWall:
+            homeFeature
         }
     }
 
