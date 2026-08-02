@@ -129,9 +129,13 @@ struct AssistedExportView: View {
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 5) {
+                    // On the title rather than the banner, so it cannot
+                    // overwrite the identifier of the Update pack button
+                    // inside it. See the note in `workspace`.
                     Text(AssistedExportCopy.packOutOfDateTitle)
                         .snapListTypography(.rowTitle)
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .accessibilityIdentifier("assisted-export.pack-out-of-date")
                     Text(AssistedExportCopy.packOutOfDateDetail)
                         .snapListTypography(.status)
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
@@ -150,7 +154,6 @@ struct AssistedExportView: View {
         .background(SnapListColorToken.groupingFill.color)
         .padding(.horizontal, SnapListMetrics.screenGutter)
         .padding(.bottom, 16)
-        .accessibilityIdentifier("assisted-export.pack-out-of-date")
     }
 
     // MARK: - Rows
@@ -232,9 +235,19 @@ struct AssistedExportView: View {
 
     private func workspace(_ destination: AssistedExportDestination) -> some View {
         VStack(alignment: .leading, spacing: 14) {
+            // The identifier sits on this line rather than on the enclosing
+            // stack. An identifier applied to a container that is not itself an
+            // accessibility element propagates down and replaces the identifier
+            // of every control inside it, which left `Open`, `Copy listing
+            // text`, `Save photos`, `Share another way` and `Mark as shared`
+            // all reporting one name. This line exists exactly when the
+            // workspace does, so it anchors the same fact without erasing them.
             Text(domain.leadText(for: destination))
                 .snapListTypography(.body)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .accessibilityIdentifier(
+                    "assisted-export.workspace.\(destination.rawValue)"
+                )
 
             if let advisory = domain.advisory(for: destination) {
                 advisoryRow(advisory)
@@ -272,7 +285,6 @@ struct AssistedExportView: View {
         .overlay(alignment: .bottom) {
             Divider().overlay(SnapListColorToken.hairline.color)
         }
-        .accessibilityIdentifier("assisted-export.workspace.\(destination.rawValue)")
     }
 
     private func advisoryRow(_ text: String) -> some View {
@@ -283,12 +295,12 @@ struct AssistedExportView: View {
             Text(text)
                 .snapListTypography(.status)
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .accessibilityIdentifier("assisted-export.advisory")
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(SnapListColorToken.quietFill.color)
-        .accessibilityIdentifier("assisted-export.advisory")
     }
 
     /// Copy and Save report a device action and nothing more. Neither reveals
@@ -469,10 +481,15 @@ struct AssistedExportView: View {
     private var confirmSheet: some View {
         if let destination = domain.confirmSheet {
             VStack(alignment: .leading, spacing: 16) {
+                // On the question rather than the sheet, so the two confirm
+                // controls keep their own identifiers. The question is on
+                // screen exactly while the sheet is, so it still marks the
+                // sheet's presence. See the note in `workspace`.
                 Text(domain.confirmQuestion(for: destination))
                     .snapListTypography(.sectionHeader)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .padding(.top, 4)
+                    .accessibilityIdentifier("assisted-export.confirm-sheet")
                 // Addressed as `button.primary.yes,-mark-as-shared`; see the
                 // note on the open action about the component's own identifier.
                 SnapListPrimaryButton(title: AssistedExportCopy.confirmShared) {
@@ -488,7 +505,6 @@ struct AssistedExportView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .presentationDetents([.height(260)])
             .presentationDragIndicator(.visible)
-            .accessibilityIdentifier("assisted-export.confirm-sheet")
             .onAppear { onConfirmSheetPresented?() }
         }
     }
