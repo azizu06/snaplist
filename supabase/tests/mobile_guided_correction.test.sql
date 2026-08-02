@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(25);
+select extensions.plan(39);
 
 -- Issue #597: the native guided identity correction.
 --
@@ -35,7 +35,7 @@ insert into public.items (
   '{"brand":"Dell","model":"XPS 15","specs":["16GB RAM"]}'::jsonb,
   '{"label":"Dell XPS 15","confident":true,"evidence":0.75}'::jsonb,
   '59730000-0000-4000-8000-000000000001',
-  'legacy_path_v0',
+  'content_sha256_set_v1',
   encode(sha256(convert_to(
     array_to_json(array['guided_597_owner/items/photo-0.enc'])::text, 'UTF8'
   )), 'hex')
@@ -74,6 +74,77 @@ insert into public.pipeline_runs (
   statement_timestamp()
 );
 
+insert into public.prediction_logs (
+  id, user_id, item_id, run_id, extracted_attrs, price, price_range,
+  confidence, tier_fired, model, listing_model, sources
+) values (
+  '59760000-0000-4000-8000-000000000001',
+  'guided_597_owner',
+  '59710000-0000-4000-8000-000000000001',
+  '59720000-0000-4000-8000-000000000001',
+  '{"brand":"Dell","model":"XPS 15","specs":["16GB RAM"]}'::jsonb,
+  170,
+  '{"low":150,"high":190}'::jsonb,
+  0.75,
+  'ebay-sold',
+  'vision-model',
+  'listing-model',
+  '[]'::jsonb
+);
+
+insert into public.listings (
+  id, user_id, item_id, platform, title, description, copy, status,
+  run_id, source_review_revision
+) values (
+  '59770000-0000-4000-8000-000000000001',
+  'guided_597_owner',
+  '59710000-0000-4000-8000-000000000001',
+  'ebay',
+  'Dell XPS 15',
+  'Dell XPS 15 in good used condition.',
+  '{}'::jsonb,
+  'draft',
+  '59720000-0000-4000-8000-000000000001',
+  '59730000-0000-4000-8000-000000000001'
+);
+update public.pipeline_runs
+set listing_id = '59770000-0000-4000-8000-000000000001'
+where id = '59720000-0000-4000-8000-000000000001';
+
+insert into public.ai_item_allowance_periods (
+  id, user_id, source, period_key, period_start, expires_date, state, allowance
+) values (
+  '59780000-0000-4000-8000-000000000001',
+  'guided_597_owner',
+  'included', 'included-first-run', '-infinity', 'infinity', 'active', 1
+);
+
+insert into public.ai_item_credit_reservations (
+  id, user_id, pipeline_run_id, item_id, allowance_period_id,
+  logical_run_key, photo_set_fingerprint, photo_identity_kind,
+  photo_identity_fingerprint, state, settled_at,
+  settled_review_revision, listing_id, prediction_log_id
+) values (
+  '59790000-0000-4000-8000-000000000001',
+  'guided_597_owner',
+  '59720000-0000-4000-8000-000000000001',
+  '59710000-0000-4000-8000-000000000001',
+  '59780000-0000-4000-8000-000000000001',
+  'guided-597-run-1',
+  encode(sha256(convert_to(
+    array_to_json(array['guided_597_owner/items/photo-0.enc'])::text, 'UTF8'
+  )), 'hex'),
+  'content_sha256_set_v1',
+  encode(sha256(convert_to(
+    array_to_json(array['guided_597_owner/items/photo-0.enc'])::text, 'UTF8'
+  )), 'hex'),
+  'settled',
+  statement_timestamp(),
+  '59730000-0000-4000-8000-000000000001',
+  '59770000-0000-4000-8000-000000000001',
+  '59760000-0000-4000-8000-000000000001'
+);
+
 -- ---------------------------------------------------------------------------
 -- Reachability. `clerk_user_id()` reads the JWT claim, not the database role.
 -- ---------------------------------------------------------------------------
@@ -89,19 +160,31 @@ select extensions.function_privs_are(
 );
 select extensions.function_privs_are(
   'public', 'claim_mobile_guided_correction',
-  array['text', 'uuid', 'uuid', 'uuid', 'jsonb', 'jsonb'],
+  array['text', 'uuid', 'uuid', 'uuid', 'jsonb'],
   'anon', array[]::text[],
   'an unauthenticated caller cannot claim a correction'
 );
 select extensions.function_privs_are(
   'public', 'claim_mobile_guided_correction',
-  array['text', 'uuid', 'uuid', 'uuid', 'jsonb', 'jsonb'],
+  array['text', 'uuid', 'uuid', 'uuid', 'jsonb'],
   'authenticated', array['EXECUTE'],
   'a seller claims their own correction'
 );
 select extensions.table_privs_are(
   'private', 'mobile_guided_corrections', 'authenticated', array[]::text[],
   'the claim table is not reachable through the API'
+);
+select extensions.function_privs_are(
+  'public', 'complete_mobile_guided_correction',
+  array['text', 'uuid', 'jsonb', 'jsonb'],
+  'authenticated', array[]::text[],
+  'a seller cannot invoke the fixed privileged completion directly'
+);
+select extensions.function_privs_are(
+  'public', 'complete_mobile_guided_correction',
+  array['text', 'uuid', 'jsonb', 'jsonb'],
+  'service_role', array['EXECUTE'],
+  'only the fixed internal completion client may consume a correction capability'
 );
 
 select set_config(
@@ -318,17 +401,19 @@ select extensions.throws_ok(
   'one key cannot be reused for a different correction'
 );
 
-select extensions.is(
-  public.claim_mobile_guided_correction(
-    'complete',
-    '59720000-0000-4000-8000-000000000001'::uuid,
-    '59750000-0000-4000-8000-000000000001'::uuid,
-    '59740000-0000-4000-8000-000000000002'::uuid,
-    '{"addedSpecs":["Noise cancelling"]}'::jsonb,
-    '{"schemaVersion":1,"effectivePrice":180}'::jsonb
-  )->>'state',
-  'completed',
-  'a finished correction records its receipt'
+select extensions.throws_ok(
+  $$
+    select public.claim_mobile_guided_correction(
+      'complete',
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59750000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000002'::uuid,
+      '{"addedSpecs":["Noise cancelling"]}'::jsonb
+    )
+  $$,
+  '42501',
+  'Guided correction authorization is required.',
+  'an authenticated bearer cannot settle a replay receipt outside the atomic completion'
 );
 select extensions.is(
   public.claim_mobile_guided_correction(
@@ -337,9 +422,9 @@ select extensions.is(
     '59750000-0000-4000-8000-000000000001'::uuid,
     '59740000-0000-4000-8000-000000000002'::uuid,
     '{"addedSpecs":["Noise cancelling"]}'::jsonb
-  )->'receipt'->>'effectivePrice',
-  '180',
-  'a client retry is answered from the stored receipt instead of re-priced'
+  )->>'state',
+  'in_progress',
+  'the refused forged completion leaves the real claim pending'
 );
 
 -- A released lease has to leave the seller able to try again immediately —
@@ -380,6 +465,197 @@ select extensions.is(
   ),
   0,
   'the refused cross-tenant claim left no row behind'
+);
+
+-- ---------------------------------------------------------------------------
+-- 3. One included correction, committed atomically with its replay receipt.
+-- ---------------------------------------------------------------------------
+
+select extensions.is(
+  public.claim_mobile_guided_correction(
+    'prepare',
+    '59720000-0000-4000-8000-000000000001'::uuid,
+    '59750000-0000-4000-8000-000000000010'::uuid,
+    '59740000-0000-4000-8000-000000000002'::uuid,
+    '{"addedSpecs":["1TB SSD"]}'::jsonb
+  )->>'state',
+  'proceed',
+  'the mobile correction claim is acquired before allowance authorization'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.authorize_ai_item_guided_correction(
+      '59710000-0000-4000-8000-000000000001'::uuid,
+      '59770000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000010'::uuid,
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000002'::uuid,
+      repeat('a', 43),
+      statement_timestamp() + interval '4 minutes'
+    )
+  $$,
+  'mobile correction uses the existing one-correction allowance boundary'
+);
+
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+create function pg_temp.reject_mobile_correction_receipt()
+returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'forced late receipt failure';
+end;
+$$;
+create trigger zzzz_test_reject_mobile_correction_receipt
+before update on private.mobile_guided_corrections
+for each row
+when (
+  old.idempotency_key = '59750000-0000-4000-8000-000000000010'::uuid
+)
+execute function pg_temp.reject_mobile_correction_receipt();
+
+select extensions.throws_ok(
+  $$
+    select public.complete_mobile_guided_correction(
+      repeat('a', 43),
+      '59750000-0000-4000-8000-000000000010'::uuid,
+      '{
+        "item_id":"59710000-0000-4000-8000-000000000001",
+        "expected_review_revision":"59740000-0000-4000-8000-000000000002",
+        "run_id":"59740000-0000-4000-8000-000000000010",
+        "attributes":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
+        "identification":{"label":"Sony WH-1000XM4","confident":true,"evidence":1},
+        "prediction":{
+          "extracted_attrs":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
+          "price":180,"price_range":{"low":160,"high":200},"confidence":0.8,
+          "tier_fired":"ebay-sold","model":"vision-model",
+          "listing_model":"listing-model","pricing_model":null,"sources":[],
+          "autopilot_enabled":false,"autopilot_eligible":false
+        }
+      }'::jsonb,
+      '{
+        "schemaVersion":1,"runId":"59740000-0000-4000-8000-000000000010",
+        "itemId":"59710000-0000-4000-8000-000000000001",
+        "reviewRevision":"59740000-0000-4000-8000-000000000010",
+        "effectivePrice":180
+      }'::jsonb
+    )
+  $$,
+  'P0001',
+  'forced late receipt failure',
+  'a late receipt failure aborts the whole correction transaction'
+);
+
+select extensions.is(
+  (select review_revision from public.items
+   where id = '59710000-0000-4000-8000-000000000001'),
+  '59740000-0000-4000-8000-000000000002'::uuid,
+  'the failed atomic completion leaves the old review revision live'
+);
+select extensions.is(
+  (select guided_correction_completed_at from public.ai_item_credit_reservations
+   where id = '59790000-0000-4000-8000-000000000001'),
+  null::timestamptz,
+  'the failed atomic completion does not spend the included correction'
+);
+select extensions.is(
+  (select state from private.mobile_guided_corrections
+   where user_id = 'guided_597_owner'
+     and idempotency_key = '59750000-0000-4000-8000-000000000010'),
+  'pending',
+  'the failed atomic completion leaves no false replay receipt'
+);
+
+drop trigger zzzz_test_reject_mobile_correction_receipt
+  on private.mobile_guided_corrections;
+
+select extensions.lives_ok(
+  $$
+    select public.complete_mobile_guided_correction(
+      repeat('a', 43),
+      '59750000-0000-4000-8000-000000000010'::uuid,
+      '{
+        "item_id":"59710000-0000-4000-8000-000000000001",
+        "expected_review_revision":"59740000-0000-4000-8000-000000000002",
+        "run_id":"59740000-0000-4000-8000-000000000010",
+        "attributes":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
+        "identification":{"label":"Sony WH-1000XM4","confident":true,"evidence":1},
+        "prediction":{
+          "extracted_attrs":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
+          "price":180,"price_range":{"low":160,"high":200},"confidence":0.8,
+          "tier_fired":"ebay-sold","model":"vision-model",
+          "listing_model":"listing-model","pricing_model":null,"sources":[],
+          "autopilot_enabled":false,"autopilot_eligible":false
+        }
+      }'::jsonb,
+      '{
+        "schemaVersion":1,"runId":"59740000-0000-4000-8000-000000000010",
+        "itemId":"59710000-0000-4000-8000-000000000001",
+        "reviewRevision":"59740000-0000-4000-8000-000000000010",
+        "effectivePrice":180
+      }'::jsonb
+    )
+  $$,
+  'the same authorized operation succeeds after the failed transaction'
+);
+
+select extensions.is(
+  (select review_revision from public.items
+   where id = '59710000-0000-4000-8000-000000000001'),
+  '59740000-0000-4000-8000-000000000010'::uuid,
+  'successful completion advances the item in the receipt transaction'
+);
+select extensions.ok(
+  (select guided_correction_completed_at is not null
+   from public.ai_item_credit_reservations
+   where id = '59790000-0000-4000-8000-000000000001'),
+  'successful completion marks the one included correction consumed'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"guided_597_owner","role":"authenticated"}',
+  true
+);
+select extensions.is(
+  public.claim_mobile_guided_correction(
+    'prepare',
+    '59720000-0000-4000-8000-000000000001'::uuid,
+    '59750000-0000-4000-8000-000000000010'::uuid,
+    '59740000-0000-4000-8000-000000000002'::uuid,
+    '{"addedSpecs":["1TB SSD"]}'::jsonb
+  )->'receipt'->>'runId',
+  '59740000-0000-4000-8000-000000000010',
+  'an exact retry replays the receipt committed with the item'
+);
+select extensions.is(
+  public.claim_mobile_guided_correction(
+    'prepare',
+    '59720000-0000-4000-8000-000000000001'::uuid,
+    '59750000-0000-4000-8000-000000000011'::uuid,
+    '59740000-0000-4000-8000-000000000010'::uuid,
+    '{"addedSpecs":["2TB SSD"]}'::jsonb
+  )->>'state',
+  'proceed',
+  'a refreshed fresh-key request reaches the shared allowance boundary'
+);
+select extensions.throws_ok(
+  $$
+    select public.authorize_ai_item_guided_correction(
+      '59710000-0000-4000-8000-000000000001'::uuid,
+      '59770000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000011'::uuid,
+      '59720000-0000-4000-8000-000000000001'::uuid,
+      '59740000-0000-4000-8000-000000000010'::uuid,
+      repeat('b', 43),
+      statement_timestamp() + interval '4 minutes'
+    )
+  $$,
+  'P0001',
+  'The included guided correction is unavailable.',
+  'a refreshed fresh-key request cannot spend pricing a second time'
 );
 
 -- ---------------------------------------------------------------------------

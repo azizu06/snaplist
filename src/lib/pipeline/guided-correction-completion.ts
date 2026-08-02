@@ -8,7 +8,9 @@ export const GUIDED_CORRECTION_CAPABILITY_TTL_MS = 5 * 60 * 1_000;
 
 type GuidedCorrectionAuthorizationRpcName =
   "authorize_ai_item_guided_correction";
-type GuidedCorrectionCompletionRpcName = "complete_guided_review_correction";
+type GuidedCorrectionCompletionRpcName =
+  | "complete_guided_review_correction"
+  | "complete_mobile_guided_correction";
 
 interface GuidedCorrectionRpcResult {
   data: unknown;
@@ -49,11 +51,29 @@ export interface GuidedCorrectionCompletionInput
   result: PipelineResult;
 }
 
+export interface MobileGuidedCorrectionCompletionInput
+  extends GuidedCorrectionAttemptIdentity {
+  capabilityToken: string;
+  idempotencyKey: string;
+  commit: {
+    itemId: string;
+    expectedReviewRevision: string;
+    runId: string;
+    attributes: Record<string, unknown>;
+    identification?: unknown;
+    prediction: unknown;
+  };
+  receipt: Record<string, unknown>;
+}
+
 export interface GuidedCorrectionCompletionGateway {
   authorize(
     input: GuidedCorrectionAttemptIdentity,
   ): Promise<GuidedCorrectionCapability>;
   complete(input: GuidedCorrectionCompletionInput): Promise<void>;
+  completeMobile(
+    input: MobileGuidedCorrectionCompletionInput,
+  ): Promise<void>;
 }
 
 interface GuidedCorrectionGatewayDependencies {
@@ -81,6 +101,32 @@ const completionInputSchema = attemptIdentitySchema
     }),
   })
   .strict();
+const mobileCompletionInputSchema = attemptIdentitySchema
+  .extend({
+    capabilityToken: capabilityTokenSchema,
+    idempotencyKey: uuid,
+    commit: z
+      .object({
+        itemId: uuid,
+        expectedReviewRevision: uuid,
+        runId: uuid,
+        attributes: z.record(z.string(), z.unknown()),
+        identification: z.unknown().optional(),
+        prediction: z
+          .object({
+            price: z.number().positive(),
+            price_range: z.object({ low: z.number(), high: z.number() }),
+            confidence: z.number().min(0).max(1),
+            tier_fired: z.string().min(1),
+            model: z.string().min(1),
+            sources: z.array(z.unknown()),
+          })
+          .passthrough(),
+      })
+      .strict(),
+    receipt: z.record(z.string(), z.unknown()),
+  })
+  .strict();
 const authorizationResultSchema = z
   .object({ expiresAt: z.string().datetime({ offset: true }) })
   .strict();
@@ -94,6 +140,30 @@ function rpcData(operation: string, result: GuidedCorrectionRpcResult): unknown 
 
 function defaultTokenGenerator(): string {
   return randomBytes(32).toString("base64url");
+}
+
+export async function completeSupabaseMobileGuidedCorrection(
+  completionClient: GuidedCorrectionCompletionRpcClient,
+  rawInput: MobileGuidedCorrectionCompletionInput,
+): Promise<void> {
+  const input = mobileCompletionInputSchema.parse(rawInput);
+  const response = await completionClient.rpc(
+    "complete_mobile_guided_correction",
+    {
+      p_completion_token: input.capabilityToken,
+      p_idempotency_key: input.idempotencyKey,
+      p_commit: {
+        item_id: input.commit.itemId,
+        expected_review_revision: input.commit.expectedReviewRevision,
+        run_id: input.commit.runId,
+        attributes: input.commit.attributes,
+        identification: input.commit.identification ?? null,
+        prediction: input.commit.prediction,
+      },
+      p_receipt: input.receipt,
+    },
+  );
+  z.literal(true).parse(rpcData("mobile correction completion", response));
 }
 
 /**
@@ -171,6 +241,10 @@ export function createSupabaseGuidedCorrectionCompletionGateway(
         },
       );
       z.literal(true).parse(rpcData("completion", response));
+    },
+
+    async completeMobile(rawInput) {
+      await completeSupabaseMobileGuidedCorrection(completionClient, rawInput);
     },
   };
 }

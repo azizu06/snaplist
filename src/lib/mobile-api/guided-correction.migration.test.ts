@@ -132,8 +132,9 @@ describe("guided correction idempotency claim migration", () => {
       /competing\.expected_review_revision = p_expected_review_revision[\s\S]*?competing\.idempotency_key is distinct from p_idempotency_key[\s\S]*?competing\.state = 'pending'[\s\S]*?lease_expires_at > statement_timestamp\(\)[\s\S]*?\) then\s*return jsonb_build_object\('state', 'in_progress'\);/i,
     );
     expect(migration).toMatch(
-      /v_claim\.state = 'completed' then\s*return jsonb_build_object\('state', 'completed', 'receipt', v_claim\.receipt\);/i,
+      /p_action not in \('prepare', 'fail'\)/i,
     );
+    expect(migration).not.toMatch(/if p_action = 'complete' then/i);
     expect(migration).toMatch(/return jsonb_build_object\('state', 'proceed'\)/i);
   });
 
@@ -152,10 +153,62 @@ describe("guided correction idempotency claim migration", () => {
       /from public\.pipeline_runs run\s*where run\.id = p_run_id\s*and run\.user_id = v_user_id\s*for update;/i,
     );
     expect(migration).toMatch(
-      /revoke all on function public\.claim_mobile_guided_correction\([\s\S]*?\) from public, anon, service_role;/i,
+      /revoke all on function public\.claim_mobile_guided_correction\(\s*text, uuid, uuid, uuid, jsonb\s*\) from public, anon, service_role;/i,
     );
     expect(migration).toMatch(
-      /grant execute on function public\.claim_mobile_guided_correction\([\s\S]*?\) to authenticated;/i,
+      /grant execute on function public\.claim_mobile_guided_correction\(\s*text, uuid, uuid, uuid, jsonb\s*\) to authenticated;/i,
+    );
+  });
+});
+
+describe("mobile guided correction atomic completion", () => {
+  it("writes the correction, included allowance, and replay receipt in one RPC", () => {
+    const completion = functionBlock(
+      migration,
+      "public.complete_mobile_guided_correction",
+    );
+    const itemWrite = completion.indexOf("update public.items");
+    const allowanceWrite = completion.indexOf(
+      "update public.ai_item_credit_reservations",
+    );
+    const receiptWrite = completion.indexOf(
+      "update private.mobile_guided_corrections",
+    );
+
+    expect(itemWrite).toBeGreaterThan(-1);
+    expect(allowanceWrite).toBeGreaterThan(itemWrite);
+    expect(receiptWrite).toBeGreaterThan(allowanceWrite);
+    expect(completion).toMatch(
+      /set guided_correction_completed_at = v_now/i,
+    );
+    expect(completion).toMatch(
+      /set state = 'completed',\s*lease_expires_at = null,\s*receipt = p_receipt/i,
+    );
+    expect(completion).toMatch(
+      /item\.review_revision is not distinct from v_cap\.expected_review_revision/i,
+    );
+  });
+
+  it("keeps completion behind the existing tenant-bound capability", () => {
+    const completion = functionBlock(
+      migration,
+      "public.complete_mobile_guided_correction",
+    );
+
+    expect(completion).toMatch(
+      /from private\.guided_correction_completion_capabilities capability[\s\S]*?where capability\.token_hash = encode/i,
+    );
+    expect(completion).toMatch(
+      /reservation\.guided_correction_completed_at is null/i,
+    );
+    expect(completion).toMatch(
+      /reservation\.photo_identity_kind = item\.photo_identity_kind[\s\S]*?reservation\.photo_identity_fingerprint = item\.photo_identity_fingerprint[\s\S]*?reservation\.photo_identity_kind = 'content_sha256_set_v1'/i,
+    );
+    expect(migration).toMatch(
+      /revoke all on function public\.complete_mobile_guided_correction\(\s*text, uuid, jsonb, jsonb\s*\) from public, anon, authenticated;/i,
+    );
+    expect(migration).toMatch(
+      /grant execute on function public\.complete_mobile_guided_correction\(\s*text, uuid, jsonb, jsonb\s*\) to service_role;/i,
     );
   });
 });

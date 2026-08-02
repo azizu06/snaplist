@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ItemSignal, PriceResult } from "@/lib/pricing";
+import type { PriceResult } from "@/lib/pricing";
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import { createMobileApiHandler, type MobileApiPrincipal } from "./app";
 import {
   createGuidedCorrectionService,
   createSupabaseGuidedCorrectionDataClient,
+  guidedCorrectionReceiptSchema,
   GuidedCorrectionIdempotencyConflictError,
   GuidedCorrectionNotFoundError,
+  GuidedCorrectionUnavailableError,
   type GuidedCorrectionCommit,
   type GuidedCorrectionDataClient,
   type GuidedCorrectionOperation,
@@ -31,8 +33,11 @@ import {
 
 const RUN_ID = "59700000-0000-4000-8000-000000000001";
 const ITEM_ID = "59700000-0000-4000-8000-000000000002";
+const LISTING_ID = "59700000-0000-4000-8000-000000000006";
+const LISTING_RUN_ID = "59700000-0000-4000-8000-000000000007";
 const REVIEW_REVISION = "59700000-0000-4000-8000-000000000003";
 const NEXT_RUN_ID = "59700000-0000-4000-8000-000000000004";
+const LATER_RUN_ID = "59700000-0000-4000-8000-000000000005";
 
 const OWNER = "user_owner_597";
 const INTRUDER = "user_intruder_597";
@@ -77,6 +82,8 @@ function snapshot(
 ): GuidedCorrectionSnapshot {
   return {
     itemId: ITEM_ID,
+    listingId: LISTING_ID,
+    listingRunId: LISTING_RUN_ID,
     attributes: {
       brand: "Dell",
       model: "XPS 15",
@@ -137,14 +144,14 @@ function harness(
     owner?: string;
     price?: PriceResult;
     commitError?: Error;
-    settleError?: Error;
+    settleFailures?: number;
   } = {},
 ): Harness {
-  const stored = input.stored ?? snapshot();
+  let stored = input.stored ?? snapshot();
   const owner = input.owner ?? OWNER;
   const commits: GuidedCorrectionCommit[] = [];
   const priceItem = vi.fn(
-    async (_signal: ItemSignal) => input.price ?? soldPrice(180),
+    async () => input.price ?? soldPrice(180),
   );
 
   /**
@@ -177,6 +184,8 @@ function harness(
    */
   const claims = new Map<string, StoredClaim>();
   const rlsTokens: string[] = [];
+  let allowanceCompleted = false;
+  let settleFailures = input.settleFailures ?? 0;
 
   /**
    * The token the operation actually presents to Postgres. A guest's raw
@@ -242,13 +251,38 @@ function harness(
       });
       return { state: "proceed" };
     },
-    async settle(operation, receipt) {
-      if (input.settleError) throw input.settleError;
+    async authorize(operation) {
       const caller = await callerFor(operation);
+      if (caller !== owner) throw new GuidedCorrectionNotFoundError();
+      if (allowanceCompleted) throw new GuidedCorrectionUnavailableError();
+      return {
+        token: "a".repeat(43),
+        expiresAt: "2026-08-02T17:00:00.000Z",
+      };
+    },
+    async complete(operation, completion) {
+      const { commit } = completion;
+      const caller = await callerFor(operation);
+      if (caller !== owner) throw new Error("RLS refused a foreign write.");
+      if (settleFailures > 0) {
+        settleFailures -= 1;
+        throw new Error("The atomic correction commit failed.");
+      }
+      if (input.commitError) throw input.commitError;
       const key = `${caller}:${operation.idempotencyKey}`;
       const existing = claims.get(key);
       if (!existing) throw new Error("No claim to settle.");
+      const receipt = completion.receipt as GuidedCorrectionReceipt;
+
+      commits.push(commit);
+      const written = commit.identification;
+      if (written) {
+        durableIdentity.label = written.label;
+        durableIdentity.confident = written.confident;
+      }
+      stored = { ...stored, reviewRevision: commit.runId };
       claims.set(key, { ...existing, state: "completed", receipt });
+      allowanceCompleted = true;
     },
     async release(operation) {
       const caller = await callerFor(operation);
@@ -258,18 +292,9 @@ function harness(
         claims.set(key, { ...existing, state: "failed" });
       }
     },
-    async commit(operation, commit) {
-      const caller = await callerFor(operation);
-      if (caller !== owner) throw new Error("RLS refused a foreign write.");
-      if (input.commitError) throw input.commitError;
-      commits.push(commit);
-      const written = commit.identification;
-      if (written) {
-        durableIdentity.label = written.label;
-        durableIdentity.confident = written.confident;
-      }
-    },
   };
+
+  const newRunIds = [NEXT_RUN_ID, LATER_RUN_ID];
 
   const handler = createMobileApiHandler({
     async authenticate(token): Promise<MobileApiPrincipal> {
@@ -286,7 +311,7 @@ function harness(
     },
     guidedCorrection: createGuidedCorrectionService(dataClient, {
       priceItem,
-      newRunId: () => NEXT_RUN_ID,
+      newRunId: () => newRunIds.shift() ?? LATER_RUN_ID,
     }),
     worker: unavailableWorker,
   });
@@ -525,18 +550,22 @@ describe("POST /v1/runs/{runId}/sharpen — failure never bricks the item", () =
     expect(commits).toEqual([]);
   });
 
-  it("keeps a landed correction successful when recording the claim fails", async () => {
-    const { handler, commits } = harness({
-      settleError: new Error("The claim store is unavailable."),
-    });
+  it("rolls back a failed receipt commit so an exact retry can succeed", async () => {
+    const { handler, commits, priceItem } = harness({ settleFailures: 1 });
 
-    const response = await handler(correctionRequest(OWNER_TOKEN));
+    const first = await handler(correctionRequest(OWNER_TOKEN));
 
-    // The durable write already happened. Reporting 503 here would send the
-    // client back with a revision the item has moved past — the same permanent
-    // 409 the pre-commit receipt exists to prevent, one step later.
+    // Receipt and correction are one transaction. A failed transaction leaves
+    // the old revision live, so the exact request can retry instead of waiting
+    // out a lease only to hit a stale-revision conflict.
+    expect(first.status).toBe(503);
+    expect(commits).toEqual([]);
+
+    const retry = await handler(correctionRequest(OWNER_TOKEN));
+
+    expect(retry.status).toBe(200);
     expect(commits).toHaveLength(1);
-    expect(response.status).toBe(200);
+    expect(priceItem).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a retry after an unusable recommendation on the same revision", async () => {
@@ -600,7 +629,7 @@ describe("POST /v1/runs/{runId}/sharpen — priced items", () => {
       listings: [],
       prediction_logs: {
         model: null,
-        listing_model: null,
+        listing_model: "listing-model",
         autopilot_enabled: false,
         // `numeric` reaches the client as a string.
         price: "180.00",
@@ -716,6 +745,27 @@ describe("POST /v1/runs/{runId}/sharpen — provider spend", () => {
     const firstBody = (await first.json()) as { data: unknown };
     const replayBody = (await replay.json()) as { data: unknown };
     expect(replayBody.data).toEqual(firstBody.data);
+    expect(priceItem).toHaveBeenCalledTimes(1);
+    expect(commits).toHaveLength(1);
+  });
+
+  it("includes exactly one correction after the seller refreshes to the new revision", async () => {
+    const { handler, commits, priceItem } = harness();
+
+    const first = await handler(correctionRequest(OWNER_TOKEN));
+    const second = await handler(
+      correctionRequest(
+        OWNER_TOKEN,
+        {
+          expectedReviewRevision: NEXT_RUN_ID,
+          addedSpecs: ["1TB SSD"],
+        },
+        OTHER_IDEMPOTENCY_KEY,
+      ),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
     expect(priceItem).toHaveBeenCalledTimes(1);
     expect(commits).toHaveLength(1);
   });
@@ -885,25 +935,19 @@ describe("POST /v1/runs/{runId}/sharpen — revision guard", () => {
 
 describe("guided correction Supabase adapter", () => {
   /**
-   * The durable half of the contract — advancing `review_revision` and deleting
-   * the item's cached Facebook/Mercari export packs — belongs to the
-   * `sharpen_review_estimate` RPC, which `review-regeneration.rls.test.ts`
-   * already proves against a real database. What has to hold HERE is that the
-   * native seam commits through that exact RPC with the seller's expected
-   * revision, rather than through some private write that would skip both.
+   * Correction, included allowance, and replay receipt must reach the one fixed
+   * internal RPC. Splitting any of them back into an authenticated write plus a
+   * later settlement recreates the unrecoverable lost-receipt state.
    */
-  it("commits through sharpen_review_estimate with the revision guard", async () => {
+  it("commits correction and receipt through one fixed internal RPC", async () => {
     const calls: { name: string; args: Record<string, unknown> }[] = [];
-    const client = {
+    const completionClient = {
       rpc(name: string, args: Record<string, unknown>) {
         calls.push({ name, args });
-        return Promise.resolve({ data: null, error: null });
+        return Promise.resolve({ data: true, error: null });
       },
     };
-
-    await createSupabaseGuidedCorrectionDataClient(
-      () => client as never,
-    ).commit(operation(), {
+    const commit: GuidedCorrectionCommit = {
       itemId: ITEM_ID,
       expectedReviewRevision: REVIEW_REVISION,
       runId: NEXT_RUN_ID,
@@ -923,40 +967,128 @@ describe("guided correction Supabase adapter", () => {
         sources: [],
         autopilot_enabled: false,
         autopilot_eligible: false,
-      } as never,
+      },
+    };
+    const receipt = guidedCorrectionReceiptSchema.parse({
+      schemaVersion: 1,
+      runId: NEXT_RUN_ID,
+      itemId: ITEM_ID,
+      reviewRevision: NEXT_RUN_ID,
+      effectivePrice: 180,
+      suggestedPrice: 180,
+      sellerPriceOverride: null,
+      priceRange: { low: 160, high: 200 },
+      confidence: { score: 0.8, band: "high" },
+      tier: "ebay-sold",
+      specs: ["512GB SSD"],
     });
+    const completion = {
+      capabilityToken: "a".repeat(43),
+      idempotencyKey: IDEMPOTENCY_KEY,
+      itemId: ITEM_ID,
+      listingId: LISTING_ID,
+      runId: NEXT_RUN_ID,
+      expectedRunId: LISTING_RUN_ID,
+      expectedReviewRevision: REVIEW_REVISION,
+      commit,
+      receipt,
+    };
+
+    await createSupabaseGuidedCorrectionDataClient(
+      () => ({}) as never,
+      completionClient,
+    ).complete(operation(), completion);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].name).toBe("sharpen_review_estimate");
+    expect(calls[0].name).toBe("complete_mobile_guided_correction");
     expect(calls[0].args).toMatchObject({
-      p_item_id: ITEM_ID,
-      p_expected_review_revision: REVIEW_REVISION,
-      p_run_id: NEXT_RUN_ID,
-      p_price: 180,
+      p_idempotency_key: IDEMPOTENCY_KEY,
+      p_commit: {
+        item_id: ITEM_ID,
+        expected_review_revision: REVIEW_REVISION,
+        run_id: NEXT_RUN_ID,
+        prediction: { price: 180 },
+      },
+      p_receipt: receipt,
     });
   });
 
   it("reports a lost revision race as a stale review, not a server fault", async () => {
-    const client = {
+    const completionClient = {
       rpc() {
         return Promise.resolve({
           data: null,
-          error: { code: "P0002", message: "Review changed. Reload and try again." },
+          error: { code: "P0002", message: "Guided correction authority changed" },
         });
+      },
+    };
+    const commit: GuidedCorrectionCommit = {
+      itemId: ITEM_ID,
+      expectedReviewRevision: REVIEW_REVISION,
+      runId: NEXT_RUN_ID,
+      attributes: {},
+      prediction: {
+        user_id: OWNER,
+        item_id: ITEM_ID,
+        run_id: NEXT_RUN_ID,
+        extracted_attrs: {},
+        price: 180,
+        price_range: { low: 1, high: 2 },
+        confidence: 0.8,
+        tier_fired: "ebay-sold",
+        model: "vision-model",
+        listing_model: "listing-model",
+        pricing_model: null,
+        sources: [],
+        autopilot_enabled: false,
+        autopilot_eligible: false,
       },
     };
 
     await expect(
-      createSupabaseGuidedCorrectionDataClient(() => client as never).commit(
-        operation(),
-        {
+      createSupabaseGuidedCorrectionDataClient(
+        () => ({}) as never,
+        completionClient,
+      ).complete(operation(), {
+          capabilityToken: "a".repeat(43),
+          idempotencyKey: IDEMPOTENCY_KEY,
+          itemId: ITEM_ID,
+          listingId: LISTING_ID,
+          runId: NEXT_RUN_ID,
+          expectedRunId: LISTING_RUN_ID,
+          expectedReviewRevision: REVIEW_REVISION,
+          commit,
+          receipt: {},
+        }),
+    ).rejects.toThrow("This review changed. Reload and try again.");
+  });
+
+  it("reports an allowance-authorization revision race as stale", async () => {
+    const authorizationClient = {
+      rpc() {
+        return Promise.resolve({
+          data: null,
+          error: { message: "Review changed. Reload and try again." },
+        });
+      },
+    };
+    const completionClient = {
+      rpc() {
+        return Promise.resolve({ data: true, error: null });
+      },
+    };
+
+    await expect(
+      createSupabaseGuidedCorrectionDataClient(
+        () => authorizationClient as never,
+        completionClient,
+      ).authorize(operation(), {
         itemId: ITEM_ID,
-        expectedReviewRevision: REVIEW_REVISION,
+        listingId: LISTING_ID,
         runId: NEXT_RUN_ID,
-          attributes: {},
-          prediction: { price: 180, price_range: { low: 1, high: 2 } } as never,
-        },
-      ),
+        expectedRunId: LISTING_RUN_ID,
+        expectedReviewRevision: REVIEW_REVISION,
+      }),
     ).rejects.toThrow("This review changed. Reload and try again.");
   });
 });

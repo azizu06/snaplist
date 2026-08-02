@@ -18,6 +18,7 @@ import {
   GuidedCorrectionNotFoundError,
   GuidedCorrectionNotPricedError,
   GuidedCorrectionStaleError,
+  GuidedCorrectionUnavailableError,
   guidedCorrectionIntentSchema,
   type GuidedCorrector,
 } from "./guided-correction";
@@ -697,6 +698,7 @@ export function createMobileApiHandler(
           || error instanceof GuidedCorrectionNotPricedError
           || error instanceof GuidedCorrectionInProgressError
           || error instanceof GuidedCorrectionIdempotencyConflictError
+          || error instanceof GuidedCorrectionUnavailableError
         ) {
           return errorResponse(requestId, 409, "conflict", error.message);
         }

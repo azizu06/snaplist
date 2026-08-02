@@ -68,6 +68,7 @@ function configuredGuidedCorrection() {
     throw new Error("The mobile guided-correction adapter is not configured.");
   }
   return createConfiguredSupabaseGuidedCorrector({
+    completionClient: createInternalGuidedCorrectionCompletionRpcClient(),
     publishableKey,
     supabaseURL,
   });

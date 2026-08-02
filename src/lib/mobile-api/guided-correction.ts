@@ -3,6 +3,14 @@ import { z } from "zod";
 import { effectivePrice } from "@/lib/pipeline/autopilot";
 import { buildPredictionLogRow, type PredictionLogRow } from "@/lib/pipeline/prediction-log";
 import {
+  completeSupabaseMobileGuidedCorrection,
+  createSupabaseGuidedCorrectionCompletionGateway,
+  type GuidedCorrectionAttemptIdentity,
+  type GuidedCorrectionCapability,
+  type GuidedCorrectionCompletionRpcClient,
+  type MobileGuidedCorrectionCompletionInput,
+} from "@/lib/pipeline/guided-correction-completion";
+import {
   MAX_SPECS,
   mergeIdentity,
   repriceWithSpecs,
@@ -26,12 +34,11 @@ import { deriveIdentification } from "@/lib/vision/extract";
  * This module is transport-adjacent wiring, not a second correction. The
  * recommendation itself is `repriceWithSpecs`: the shared pricing router, the
  * shared calibrated confidence bridge, the shared spec/identity merge. Nothing
- * here reimplements any of them, and the durable write is the same
- * `sharpen_review_estimate` RPC the web action already commits through, which is
- * what advances `review_revision`, invalidates cached export packs, and refuses
- * an item whose eBay listing has become provider-authoritative.
+ * here reimplements any of them. The shared guided-correction completion gateway
+ * atomically advances `review_revision`, invalidates cached export packs, records
+ * the included correction, and stores the replay receipt.
  *
- * The seller's saved price override is never written by that RPC, so an override
+ * The seller's saved price override is never written by completion, so an override
  * survives a correction by construction; the receipt reports the effective price
  * through `effectivePrice`, the same precedence eBay publish and the export packs
  * use, so a native client cannot render a stale recommendation as the price.
@@ -116,6 +123,9 @@ export type GuidedCorrectionReceipt = z.infer<typeof guidedCorrectionReceiptSche
  */
 export interface GuidedCorrectionSnapshot {
   itemId: string;
+  /** The editable eBay draft the shared allowance capability binds. */
+  listingId: string | null;
+  listingRunId: string | null;
   attributes: Record<string, unknown>;
   reviewRevision: string;
   /** `numeric` arrives as number or string; `effectivePrice` normalizes it. */
@@ -154,12 +164,16 @@ export interface GuidedCorrectionCommit {
   prediction: PredictionLogRow;
 }
 
+type GuidedCorrectionAtomicCompletion = Omit<
+  MobileGuidedCorrectionCompletionInput,
+  "commit"
+> & { commit: GuidedCorrectionCommit };
+
 /**
- * One seller intent, carried through every step so each durable operation can
- * mint its own short-lived RLS token. A verified guest's `guestcap_` bearer is
- * not a project JWT and PostgREST cannot verify it, so a guest correction only
- * ever reaches its own rows through `mintOperationToken` — the same way
- * `PUT /review` already reaches them.
+ * One seller intent, carried through the RLS reads, claim, authorization, and
+ * release so each can mint its own short-lived token. A verified guest's
+ * `guestcap_` bearer is not a project JWT and PostgREST cannot verify it; the
+ * final write instead uses the separately minted guided-correction capability.
  */
 export interface GuidedCorrectionOperation {
   runId: string;
@@ -191,14 +205,15 @@ export interface GuidedCorrectionDataClient {
   claim(
     operation: GuidedCorrectionOperation,
   ): Promise<GuidedCorrectionClaimResult>;
-  commit(
+  /** Shared one-included-correction authority, acquired before provider work. */
+  authorize(
     operation: GuidedCorrectionOperation,
-    commit: GuidedCorrectionCommit,
-  ): Promise<void>;
-  /** `complete` — stores the receipt, so a replay costs nothing. */
-  settle(
+    attempt: GuidedCorrectionAttemptIdentity,
+  ): Promise<GuidedCorrectionCapability>;
+  /** One transaction: correction, included allowance, and replay receipt. */
+  complete(
     operation: GuidedCorrectionOperation,
-    receipt: GuidedCorrectionReceipt,
+    completion: GuidedCorrectionAtomicCompletion,
   ): Promise<void>;
   /** `fail` — releases the lease so the seller can retry immediately. */
   release(operation: GuidedCorrectionOperation): Promise<void>;
@@ -237,6 +252,12 @@ export class GuidedCorrectionNotPricedError extends Error {
 export class GuidedCorrectionInProgressError extends Error {
   constructor() {
     super("This correction is already in progress. Try again.");
+  }
+}
+
+export class GuidedCorrectionUnavailableError extends Error {
+  constructor() {
+    super("The included guided correction is unavailable.");
   }
 }
 
@@ -321,20 +342,20 @@ function applyConfirmedIdentity(
 /**
  * The correction itself, once the claim has granted the right to run it.
  *
- * Everything that can throw happens BEFORE the durable write. Anything failing
- * after the commit would be unrecoverable: the item has already advanced its
- * revision, so the caller's retry carries a revision the item has moved past and
- * 409s forever. A suggested price that rounds below a cent clears the RPC's
- * `p_price > 0` guard and then fails price parsing, which is exactly how that
- * trap was reachable.
+ * Every value that can be validated locally is built before the durable write.
+ * The final RPC owns item revision, prediction, credit completion, and receipt
+ * in one transaction, so an error cannot leave the item past the revision an
+ * exact retry still carries.
  */
 async function runCorrection(
-  client: GuidedCorrectionDataClient,
   operation: GuidedCorrectionOperation,
   snapshot: GuidedCorrectionSnapshot,
   dependencies: GuidedCorrectionDependencies,
-  newRunId: () => string,
-): Promise<GuidedCorrectionReceipt> {
+  runId: string,
+): Promise<{
+  commit: GuidedCorrectionCommit;
+  receipt: GuidedCorrectionReceipt;
+}> {
   const { intent } = operation;
 
   // Refuse cheaply, BEFORE any provider spend. The RPC re-checks all of these
@@ -390,7 +411,6 @@ async function runCorrection(
     ? deriveIdentification(reprice.attributes, {})
     : undefined;
 
-  const runId = newRunId();
   const result: PipelineResult = {
     attributes: reprice.attributes,
     price: reprice.price,
@@ -432,16 +452,17 @@ async function runCorrection(
     specs: reprice.mergedSpecs,
   });
 
-  await client.commit(operation, {
-    itemId: snapshot.itemId,
-    expectedReviewRevision: intent.expectedReviewRevision,
-    runId,
-    attributes,
-    ...(identification ? { identification } : {}),
-    prediction,
-  });
-
-  return receipt;
+  return {
+    commit: {
+      itemId: snapshot.itemId,
+      expectedReviewRevision: intent.expectedReviewRevision,
+      runId,
+      attributes,
+      ...(identification ? { identification } : {}),
+      prediction,
+    },
+    receipt,
+  };
 }
 
 export function createGuidedCorrectionService(
@@ -473,27 +494,39 @@ export function createGuidedCorrectionService(
         throw new GuidedCorrectionInProgressError();
       }
 
-      let receipt: GuidedCorrectionReceipt;
+      const runId = newRunId();
       try {
-        receipt = await runCorrection(
-          client,
+        if (!snapshot.listingId) throw new GuidedCorrectionNotEditableError();
+        const attempt: GuidedCorrectionAttemptIdentity = {
+          itemId: snapshot.itemId,
+          listingId: snapshot.listingId,
+          runId,
+          expectedRunId: snapshot.listingRunId,
+          expectedReviewRevision: intent.expectedReviewRevision,
+        };
+        const capability = await client.authorize(operation, attempt);
+        const prepared = await runCorrection(
           operation,
           snapshot,
           dependencies,
-          newRunId,
+          runId,
         );
+        const completion: GuidedCorrectionAtomicCompletion = {
+          ...attempt,
+          listingId: snapshot.listingId,
+          capabilityToken: capability.token,
+          idempotencyKey: operation.idempotencyKey,
+          commit: prepared.commit,
+          receipt: prepared.receipt,
+        };
+        await client.complete(operation, completion);
+        return prepared.receipt;
       } catch (error) {
         // Nothing durable happened, so the lease must not outlive the failure —
         // the seller's next attempt has to be legal immediately.
         await client.release(operation).catch(() => undefined);
         throw error;
       }
-      // The write landed. Failing to RECORD that must never turn a successful
-      // correction into a 503: the item has advanced, and a caller told
-      // otherwise retries against a revision it has moved past. That is the same
-      // brick the pre-commit receipt closed, arriving one line later.
-      await client.settle(operation, receipt).catch(() => undefined);
-      return receipt;
     },
   };
 }
@@ -522,7 +555,7 @@ interface GuidedCorrectionSupabaseClient {
 }
 
 function mapCommitError(error: GuidedCorrectionRpcFailure): Error {
-  if (/review changed/i.test(error.message)) {
+  if (/review changed|guided correction authority changed/i.test(error.message)) {
     return new GuidedCorrectionStaleError();
   }
   if (/editable ebay listing not found|published listing/i.test(error.message)) {
@@ -545,6 +578,28 @@ function mapClaimError(error: GuidedCorrectionRpcFailure): Error {
     return new GuidedCorrectionStaleError();
   }
   return new GuidedCorrectionDataError();
+}
+
+function mapAuthorizationError(error: unknown): Error {
+  if (
+    error instanceof Error
+    && /review changed|guided correction authority changed/i.test(error.message)
+  ) {
+    return new GuidedCorrectionStaleError();
+  }
+  if (
+    error instanceof Error
+    && /editable ebay listing not found|published listing/i.test(error.message)
+  ) {
+    return new GuidedCorrectionNotEditableError();
+  }
+  if (
+    error instanceof Error
+    && /included guided correction is unavailable/i.test(error.message)
+  ) {
+    return new GuidedCorrectionUnavailableError();
+  }
+  return error instanceof Error ? error : new GuidedCorrectionDataError();
 }
 
 const claimResultSchema = z.discriminatedUnion("state", [
@@ -571,7 +626,7 @@ async function operationToken(
 
 function claimArguments(
   operation: GuidedCorrectionOperation,
-  action: "prepare" | "complete" | "fail",
+  action: "prepare" | "fail",
 ): Record<string, unknown> {
   return {
     p_action: action,
@@ -593,6 +648,8 @@ const itemRowSchema = z
 
 const listingRowSchema = z
   .object({
+    id: z.string().uuid().optional(),
+    run_id: z.string().uuid().nullable().optional(),
     status: z.string().nullable(),
     ebay_listing_id: z.string().nullable(),
     ebay_status: z.string().nullable(),
@@ -625,6 +682,7 @@ function isPriced(price: number | string | null | undefined): boolean {
  */
 export function createSupabaseGuidedCorrectionDataClient(
   clientForBearer: (bearerToken: string) => SupabaseClient,
+  completionClient?: GuidedCorrectionCompletionRpcClient,
 ): GuidedCorrectionDataClient {
   const rpcFor = async (operation: GuidedCorrectionOperation) =>
     clientForBearer(
@@ -651,7 +709,7 @@ export function createSupabaseGuidedCorrectionDataClient(
           .maybeSingle(),
         client
           .from("listings")
-          .select("status,ebay_listing_id,ebay_status")
+          .select("id,run_id,status,ebay_listing_id,ebay_status")
           .eq("item_id", itemId)
           .eq("platform", "ebay"),
         client
@@ -678,8 +736,17 @@ export function createSupabaseGuidedCorrectionDataClient(
       if (!parsedListings.success) throw new GuidedCorrectionDataError();
 
       const attributes = parsedItem.data.attributes;
+      const editableListing = parsedListings.data.find((listing) =>
+        !isReviewRegenerationBlocked({
+          status: listing.status,
+          ebayListingId: listing.ebay_listing_id,
+          ebayStatus: listing.ebay_status,
+        }),
+      );
       return {
         itemId,
+        listingId: editableListing?.id ?? null,
+        listingRunId: editableListing?.run_id ?? null,
         attributes:
           attributes && typeof attributes === "object" && !Array.isArray(attributes)
             ? (attributes as Record<string, unknown>)
@@ -722,12 +789,31 @@ export function createSupabaseGuidedCorrectionDataClient(
       if (!parsed.success) throw new GuidedCorrectionDataError();
       return parsed.data;
     },
-    async settle(operation, receipt) {
-      const result = await (await rpcFor(operation)).rpc(
-        "claim_mobile_guided_correction",
-        { ...claimArguments(operation, "complete"), p_receipt: receipt },
-      );
-      if (result.error) throw mapClaimError(result.error);
+    async authorize(operation, attempt) {
+      if (!completionClient) throw new GuidedCorrectionDataError();
+      const client = clientForBearer(await operationToken(operation));
+      try {
+        return await createSupabaseGuidedCorrectionCompletionGateway(
+          client,
+          completionClient,
+        ).authorize(attempt);
+      } catch (error) {
+        throw mapAuthorizationError(error);
+      }
+    },
+    async complete(_operation, completion) {
+      if (!completionClient) throw new GuidedCorrectionDataError();
+      try {
+        await completeSupabaseMobileGuidedCorrection(
+          completionClient,
+          completion,
+        );
+      } catch (error) {
+        if (error instanceof Error) {
+          throw mapCommitError({ message: error.message });
+        }
+        throw new GuidedCorrectionDataError();
+      }
     },
     async release(operation) {
       const result = await (await rpcFor(operation)).rpc(
@@ -736,37 +822,17 @@ export function createSupabaseGuidedCorrectionDataClient(
       );
       if (result.error) throw mapClaimError(result.error);
     },
-    async commit(operation, commit) {
-      const { prediction } = commit;
-      const result = await (await rpcFor(operation)).rpc("sharpen_review_estimate", {
-        p_item_id: commit.itemId,
-        p_expected_review_revision: commit.expectedReviewRevision,
-        p_run_id: commit.runId,
-        p_attributes: commit.attributes,
-        // Null leaves `items.identification` untouched, which is what a
-        // specs-only sharpen must do — it re-prices, it does not re-identify.
-        p_identification: commit.identification ?? null,
-        p_price: prediction.price,
-        p_price_range: prediction.price_range,
-        p_confidence: prediction.confidence,
-        p_tier_fired: prediction.tier_fired,
-        p_model: prediction.model,
-        p_listing_model: prediction.listing_model,
-        p_pricing_model: prediction.pricing_model,
-        p_sources: prediction.sources,
-        p_autopilot_enabled: prediction.autopilot_enabled,
-        p_autopilot_eligible: prediction.autopilot_eligible,
-      });
-      if (result.error) throw mapCommitError(result.error);
-    },
   };
 }
 
 /**
- * Composed per request from the caller's bearer, so the RLS identity is the
- * seller's own and never a service-role client.
+ * Reads, claim, allowance authorization, and release use the caller's RLS
+ * bearer. The atomic write uses only the shared short-lived capability through
+ * the fixed internal completion client; callers never receive a generic admin
+ * client.
  */
 export function createConfiguredSupabaseGuidedCorrector(input: {
+  completionClient: GuidedCorrectionCompletionRpcClient;
   publishableKey: string;
   supabaseURL: string;
 }): GuidedCorrector {
@@ -781,6 +847,7 @@ export function createConfiguredSupabaseGuidedCorrector(input: {
         accessToken: async () => bearerToken,
         auth: { persistSession: false, autoRefreshToken: false },
       }),
+      input.completionClient,
     ),
   );
 }
