@@ -2,7 +2,11 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { buildPricingEvidenceSnapshotInput } from "../pricing-evidence";
 import { buildPredictionLogValues } from "./prediction-log";
-import { pipelineResultSchema, type PipelineResult } from "./types";
+import {
+  listingCopySchema,
+  pipelineResultSchema,
+  type PipelineResult,
+} from "./types";
 
 export const GUIDED_CORRECTION_CAPABILITY_TTL_MS = 5 * 60 * 1_000;
 
@@ -61,6 +65,7 @@ export interface MobileGuidedCorrectionCompletionInput
     runId: string;
     attributes: Record<string, unknown>;
     identification?: unknown;
+    listing: unknown;
     prediction: unknown;
   };
   receipt: Record<string, unknown>;
@@ -112,6 +117,7 @@ const mobileCompletionInputSchema = attemptIdentitySchema
         runId: uuid,
         attributes: z.record(z.string(), z.unknown()),
         identification: z.unknown().optional(),
+        listing: listingCopySchema,
         prediction: z
           .object({
             price: z.number().positive(),
@@ -158,6 +164,12 @@ export async function completeSupabaseMobileGuidedCorrection(
         run_id: input.commit.runId,
         attributes: input.commit.attributes,
         identification: input.commit.identification ?? null,
+        listing: {
+          copy: input.commit.listing.fields,
+          description: input.commit.listing.description,
+          platform: input.commit.listing.platform,
+          title: input.commit.listing.title,
+        },
         prediction: input.commit.prediction,
       },
       p_receipt: input.receipt,

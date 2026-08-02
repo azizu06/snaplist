@@ -9,6 +9,13 @@ const migration = readFileSync(
   "utf8",
 );
 
+const listingRegenerationMigration = readFileSync(
+  resolve(
+    "supabase/migrations/20260802204000_mobile_guided_correction_listing_regeneration.sql",
+  ),
+  "utf8",
+);
+
 const sharpenOrigin = readFileSync(
   resolve(
     "supabase/migrations/20260713003000_review_identity_regeneration.sql",
@@ -162,9 +169,35 @@ describe("guided correction idempotency claim migration", () => {
 });
 
 describe("mobile guided correction atomic completion", () => {
+  it("adds regenerated eBay copy to the existing atomic completion", () => {
+    const completion = functionBlock(
+      listingRegenerationMigration,
+      "public.complete_mobile_guided_correction",
+    );
+    const itemWrite = completion.indexOf("update public.items");
+    const listingWrite = completion.indexOf("update public.listings");
+    const predictionWrite = completion.indexOf(
+      "insert into public.prediction_logs",
+    );
+    const receiptWrite = completion.indexOf(
+      "update private.mobile_guided_corrections",
+    );
+
+    expect(itemWrite).toBeGreaterThan(-1);
+    expect(listingWrite).toBeGreaterThan(itemWrite);
+    expect(predictionWrite).toBeGreaterThan(listingWrite);
+    expect(receiptWrite).toBeGreaterThan(predictionWrite);
+    expect(completion).toMatch(
+      /set title = v_listing->>'title',\s*description = v_listing->>'description',\s*copy = v_listing->'copy',\s*status = 'draft',\s*run_id = v_cap\.completion_run_id/i,
+    );
+    expect(completion).toMatch(
+      /where id = v_cap\.listing_id[\s\S]*?item_id = v_cap\.item_id[\s\S]*?user_id = v_cap\.user_id[\s\S]*?platform = 'ebay'[\s\S]*?run_id is not distinct from v_cap\.expected_run_id/i,
+    );
+  });
+
   it("writes the correction, included allowance, and replay receipt in one RPC", () => {
     const completion = functionBlock(
-      migration,
+      listingRegenerationMigration,
       "public.complete_mobile_guided_correction",
     );
     const itemWrite = completion.indexOf("update public.items");
@@ -191,7 +224,7 @@ describe("mobile guided correction atomic completion", () => {
 
   it("keeps completion behind the existing tenant-bound capability", () => {
     const completion = functionBlock(
-      migration,
+      listingRegenerationMigration,
       "public.complete_mobile_guided_correction",
     );
 
@@ -204,10 +237,10 @@ describe("mobile guided correction atomic completion", () => {
     expect(completion).toMatch(
       /reservation\.photo_identity_kind = item\.photo_identity_kind[\s\S]*?reservation\.photo_identity_fingerprint = item\.photo_identity_fingerprint[\s\S]*?reservation\.photo_identity_kind = 'content_sha256_set_v1'/i,
     );
-    expect(migration).toMatch(
+    expect(listingRegenerationMigration).toMatch(
       /revoke all on function public\.complete_mobile_guided_correction\(\s*text, uuid, jsonb, jsonb\s*\) from public, anon, authenticated;/i,
     );
-    expect(migration).toMatch(
+    expect(listingRegenerationMigration).toMatch(
       /grant execute on function public\.complete_mobile_guided_correction\(\s*text, uuid, jsonb, jsonb\s*\) to service_role;/i,
     );
   });

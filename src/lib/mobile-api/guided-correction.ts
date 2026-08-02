@@ -1,5 +1,9 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import {
+  createRealFewShotRetrieval,
+  generateEbayListing,
+} from "@/lib/listing";
 import { effectivePrice } from "@/lib/pipeline/autopilot";
 import { buildPredictionLogRow, type PredictionLogRow } from "@/lib/pipeline/prediction-log";
 import {
@@ -22,10 +26,11 @@ import {
   identificationSchema,
   type ExtractedAttributes,
   type Identification,
+  type ListingCopy,
   type PipelineResult,
 } from "@/lib/pipeline/types";
 import type { ItemSignal, PriceResult } from "@/lib/pricing";
-import { deriveIdentification } from "@/lib/vision/extract";
+import { deriveIdentification, listingFactAttributes } from "@/lib/vision";
 
 /**
  * Guided identity correction on the native seam — the behavior the PRD calls
@@ -35,8 +40,9 @@ import { deriveIdentification } from "@/lib/vision/extract";
  * recommendation itself is `repriceWithSpecs`: the shared pricing router, the
  * shared calibrated confidence bridge, the shared spec/identity merge. Nothing
  * here reimplements any of them. The shared guided-correction completion gateway
- * atomically advances `review_revision`, invalidates cached export packs, records
- * the included correction, and stores the replay receipt.
+ * atomically stores the regenerated eBay draft, advances `review_revision`,
+ * invalidates cached export packs, records the included correction, and stores
+ * the replay receipt.
  *
  * The seller's saved price override is never written by completion, so an override
  * survives a correction by construction; the receipt reports the effective price
@@ -161,6 +167,7 @@ export interface GuidedCorrectionCommit {
    * the seller looking at the identity they just replaced.
    */
   identification?: Identification;
+  listing: ListingCopy;
   prediction: PredictionLogRow;
 }
 
@@ -280,7 +287,20 @@ export interface GuidedCorrectionDependencies {
    * it unset so `repriceWithSpecs` resolves the default PriceRouter.
    */
   priceItem?: (signal: ItemSignal) => Promise<PriceResult>;
+  generateListing?: (args: {
+    attributes: ExtractedAttributes;
+  }) => Promise<{ copy: ListingCopy; model: string }>;
   newRunId?: () => string;
+}
+
+async function defaultGenerateListing(args: {
+  attributes: ExtractedAttributes;
+}): Promise<{ copy: ListingCopy; model: string }> {
+  const { copy, model } = await generateEbayListing({
+    attributes: args.attributes,
+    retrieve: createRealFewShotRetrieval(),
+  });
+  return { copy, model };
 }
 
 /**
@@ -343,9 +363,9 @@ function applyConfirmedIdentity(
  * The correction itself, once the claim has granted the right to run it.
  *
  * Every value that can be validated locally is built before the durable write.
- * The final RPC owns item revision, prediction, credit completion, and receipt
- * in one transaction, so an error cannot leave the item past the revision an
- * exact retry still carries.
+ * The final RPC owns item revision, eBay draft, prediction, credit completion,
+ * and receipt in one transaction, so an error cannot leave the item past the
+ * revision an exact retry still carries.
  */
 async function runCorrection(
   operation: GuidedCorrectionOperation,
@@ -410,17 +430,20 @@ async function runCorrection(
   const identification = confirmedIdentity
     ? deriveIdentification(reprice.attributes, {})
     : undefined;
+  const generated = await (dependencies.generateListing ?? defaultGenerateListing)({
+    attributes: listingFactAttributes(reprice.attributes),
+  });
 
   const result: PipelineResult = {
     attributes: reprice.attributes,
     price: reprice.price,
     confidence: reprice.confidence,
-    listing: { platform: "ebay", title: "", description: "", fields: {} },
+    listing: generated.copy,
     // The RPC requires model provenance, and a legacy row can be priced with
     // none. "unknown" is the same honest placeholder the web action rode
     // forward rather than refusing a real price.
     model: snapshot.model ?? "unknown",
-    listingModel: snapshot.listingModel ?? undefined,
+    listingModel: generated.model,
     pricingModel: reprice.price.model,
   };
   const prediction = buildPredictionLogRow(
@@ -459,6 +482,7 @@ async function runCorrection(
       runId,
       attributes,
       ...(identification ? { identification } : {}),
+      listing: result.listing,
       prediction,
     },
     receipt,

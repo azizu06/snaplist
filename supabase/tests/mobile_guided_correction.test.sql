@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(40);
+select extensions.plan(42);
 
 -- Issue #597: the native guided identity correction.
 --
@@ -538,6 +538,14 @@ select extensions.throws_ok(
         "run_id":"59740000-0000-4000-8000-000000000010",
         "attributes":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
         "identification":{"label":"Sony WH-1000XM4","confident":true,"evidence":1},
+        "listing":{
+          "platform":"ebay","title":"Sony WH-1000XM4 Wireless Headphones",
+          "description":"Sony WH-1000XM4 headphones with Bluetooth 5.0.",
+          "copy":{
+            "itemSpecifics":{"Brand":"Sony","Model":"WH-1000XM4"},
+            "tags":["wireless headphones"]
+          }
+        },
         "prediction":{
           "extracted_attrs":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
           "price":180,"price_range":{"low":160,"high":200},"confidence":0.8,
@@ -578,6 +586,21 @@ select extensions.is(
   'pending',
   'the failed atomic completion leaves no false replay receipt'
 );
+select extensions.is(
+  (
+    select jsonb_build_object(
+      'title', title, 'description', description, 'copy', copy
+    )
+    from public.listings
+    where id = '59770000-0000-4000-8000-000000000001'
+  ),
+  '{
+    "title":"Dell XPS 15",
+    "description":"Dell XPS 15 in good used condition.",
+    "copy":{}
+  }'::jsonb,
+  'a late receipt failure rolls the regenerated eBay draft back too'
+);
 
 drop trigger zzzz_test_reject_mobile_correction_receipt
   on private.mobile_guided_corrections;
@@ -593,6 +616,14 @@ select extensions.lives_ok(
         "run_id":"59740000-0000-4000-8000-000000000010",
         "attributes":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
         "identification":{"label":"Sony WH-1000XM4","confident":true,"evidence":1},
+        "listing":{
+          "platform":"ebay","title":"Sony WH-1000XM4 Wireless Headphones",
+          "description":"Sony WH-1000XM4 headphones with Bluetooth 5.0.",
+          "copy":{
+            "itemSpecifics":{"Brand":"Sony","Model":"WH-1000XM4"},
+            "tags":["wireless headphones"]
+          }
+        },
         "prediction":{
           "extracted_attrs":{"brand":"Sony","model":"WH-1000XM4","specs":["1TB SSD"]},
           "price":180,"price_range":{"low":160,"high":200},"confidence":0.8,
@@ -623,6 +654,24 @@ select extensions.ok(
    from public.ai_item_credit_reservations
    where id = '59790000-0000-4000-8000-000000000001'),
   'successful completion marks the one included correction consumed'
+);
+select extensions.is(
+  (
+    select jsonb_build_object(
+      'title', title, 'description', description, 'copy', copy
+    )
+    from public.listings
+    where id = '59770000-0000-4000-8000-000000000001'
+  ),
+  '{
+    "title":"Sony WH-1000XM4 Wireless Headphones",
+    "description":"Sony WH-1000XM4 headphones with Bluetooth 5.0.",
+    "copy":{
+      "itemSpecifics":{"Brand":"Sony","Model":"WH-1000XM4"},
+      "tags":["wireless headphones"]
+    }
+  }'::jsonb,
+  'successful completion stores the regenerated eBay draft in the same transaction'
 );
 
 select set_config(

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PriceResult } from "@/lib/pricing";
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
+import type { ListingCopy } from "@/lib/pipeline/types";
 import { createMobileApiHandler, type MobileApiPrincipal } from "./app";
 import {
   createGuidedCorrectionService,
@@ -112,6 +113,8 @@ interface Harness {
    * commit above — the durable review the native client renders next.
    */
   readBackIdentity: () => { label: string; confident: boolean };
+  /** The durable eBay draft the native review reads after correction. */
+  readBackListing: () => ListingCopy;
   /** Every token this correction actually presented to Postgres, in order. */
   rlsTokens: string[];
 }
@@ -130,6 +133,23 @@ interface StoredClaim {
 const STORED_IDENTITY: { label: string; confident: boolean } = {
   label: "Dell XPS 15",
   confident: true,
+};
+
+const STORED_LISTING: ListingCopy = {
+  platform: "ebay",
+  title: "Dell XPS 15 Laptop",
+  description: "Dell XPS 15 with 16GB RAM.",
+  fields: { itemSpecifics: { Brand: "Dell", Model: "XPS 15" } },
+};
+
+const REGENERATED_LISTING: ListingCopy = {
+  platform: "ebay",
+  title: "Sony WH-1000XM4 Wireless Headphones",
+  description: "Sony WH-1000XM4 headphones with Bluetooth 5.0.",
+  fields: {
+    itemSpecifics: { Brand: "Sony", Model: "WH-1000XM4" },
+    tags: ["wireless headphones"],
+  },
 };
 
 /**
@@ -153,6 +173,10 @@ function harness(
   const priceItem = vi.fn(
     async () => input.price ?? soldPrice(180),
   );
+  const generateListing = vi.fn(async () => ({
+    copy: REGENERATED_LISTING,
+    model: "regenerated-listing-model",
+  }));
 
   /**
    * The durable `items.identification` column, modelled exactly as the two RPCs
@@ -175,6 +199,7 @@ function harness(
     label: stored.identification?.label ?? STORED_IDENTITY.label,
     confident: stored.identification?.confident ?? STORED_IDENTITY.confident,
   };
+  let durableListing = structuredClone(STORED_LISTING);
 
   /**
    * `private.mobile_guided_corrections`, modelled as the claim RPC keeps it:
@@ -280,6 +305,7 @@ function harness(
         durableIdentity.label = written.label;
         durableIdentity.confident = written.confident;
       }
+      durableListing = structuredClone(commit.listing);
       stored = { ...stored, reviewRevision: commit.runId };
       claims.set(key, { ...existing, state: "completed", receipt });
       allowanceCompleted = true;
@@ -310,6 +336,7 @@ function harness(
       throw new Error("Unknown bearer.");
     },
     guidedCorrection: createGuidedCorrectionService(dataClient, {
+      generateListing,
       priceItem,
       newRunId: () => newRunIds.shift() ?? LATER_RUN_ID,
     }),
@@ -321,6 +348,7 @@ function harness(
     commits,
     priceItem,
     readBackIdentity: () => ({ ...durableIdentity }),
+    readBackListing: () => structuredClone(durableListing),
     rlsTokens,
   };
 }
@@ -415,6 +443,21 @@ describe("POST /v1/runs/{runId}/sharpen — ownership", () => {
 });
 
 describe("POST /v1/runs/{runId}/sharpen — corrected identity", () => {
+  it("regenerates the durable eBay draft from the corrected identity", async () => {
+    const { handler, readBackListing } = harness();
+
+    const response = await handler(
+      correctionRequest(OWNER_TOKEN, {
+        expectedReviewRevision: REVIEW_REVISION,
+        addedSpecs: ["Bluetooth 5.0"],
+        confirmedIdentity: { brand: "Sony", model: "WH-1000XM4" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(readBackListing()).toEqual(REGENERATED_LISTING);
+  });
+
   it("shows the seller the identity they confirmed when the review is read back", async () => {
     const { handler, readBackIdentity } = harness();
 
@@ -952,6 +995,7 @@ describe("guided correction Supabase adapter", () => {
       expectedReviewRevision: REVIEW_REVISION,
       runId: NEXT_RUN_ID,
       attributes: { brand: "Dell", specs: ["512GB SSD"] },
+      listing: REGENERATED_LISTING,
       prediction: {
         user_id: OWNER,
         item_id: ITEM_ID,
@@ -1007,6 +1051,9 @@ describe("guided correction Supabase adapter", () => {
         item_id: ITEM_ID,
         expected_review_revision: REVIEW_REVISION,
         run_id: NEXT_RUN_ID,
+        listing: {
+          title: REGENERATED_LISTING.title,
+        },
         prediction: { price: 180 },
       },
       p_receipt: receipt,
@@ -1027,6 +1074,7 @@ describe("guided correction Supabase adapter", () => {
       expectedReviewRevision: REVIEW_REVISION,
       runId: NEXT_RUN_ID,
       attributes: {},
+      listing: REGENERATED_LISTING,
       prediction: {
         user_id: OWNER,
         item_id: ITEM_ID,
