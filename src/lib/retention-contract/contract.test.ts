@@ -122,6 +122,36 @@ describe("lean-MVP release retention contract", () => {
       "clerk-identity",
       "apple-revenuecat-references",
       "account-erasure-receipt",
+      "waitlist-email",
+    ]);
+  });
+
+  it("defines one bounded waitlist-email disposition", () => {
+    const matchingData = contract.data.filter(({ id }) => id === "waitlist-email");
+
+    expect(matchingData).toEqual([
+      {
+        id: "waitlist-email",
+        releaseDatum: true,
+        dispositions: [
+          {
+            treatment: "delete",
+            owner: "snaplist-platform",
+            deletionTriggers: [
+              "waitlist-withdrawal",
+              "one-time-launch-email-completes",
+              "signup-reaches-24-month-ceiling",
+            ],
+            maximumRetention:
+              "24 months after signup, or 30 days after the one-time launch email is sent, whichever is earlier; a withdrawal request deletes the row sooner",
+            executor: "snaplist-operator-direct-sql-export-and-delete",
+            completionProof:
+              "a direct SQL count proves the normalized address is absent after withdrawal or the age ceiling; after launch, a full-table SQL count proves no waitlist row remains",
+            ownerDecision:
+              "Issue #620 collects the address only for one launch email. The 24-month ceiling bounds a launch delay without adding a sender, provider, or admin surface to this issue.",
+          },
+        ],
+      },
     ]);
   });
 
