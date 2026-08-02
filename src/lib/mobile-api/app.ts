@@ -2,6 +2,11 @@ import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import type { NativeSubscriptionBridge } from "@/lib/billing";
 import type { HomeProjectionReader } from "@/lib/home/projection";
 import type { PricingEvidenceReader } from "@/lib/pricing-evidence";
+import {
+  ASSISTED_EXPORT_PLATFORMS,
+  type AssistedExportPlatform,
+  type ExportHandoffsView,
+} from "@/lib/export/handoff";
 import type { ListingReviewReader } from "@/lib/listing-review";
 import {
   ListingReviewIdempotencyConflictError,
@@ -54,6 +59,8 @@ import {
   mobileRunEnvelopeSchema,
   listingReviewSaveEnvelopeSchema,
   pricingEvidenceEnvelopeSchema,
+  exportHandoffActionSchema,
+  exportHandoffsEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
   ebayOauthSessionEnvelopeSchema,
   guidedCorrectionEnvelopeSchema,
@@ -71,6 +78,37 @@ export interface MobileApiPrincipal {
   kind?: "clerk" | "verifiedGuest";
   /** Guest principals mint one fresh project JWT for each protected RLS operation. */
   mintOperationToken?: () => Promise<string>;
+}
+
+/**
+ * The RLS-scoped assisted-export capability from #580, seen from transport.
+ *
+ * Every method takes the caller's identity and bearer so the adapter builds a
+ * user-scoped client; nothing here is a service-role path. The route composes
+ * no state of its own: after any mutation it re-reads through `load`, because
+ * each mutation RPC reports one timestamp and a view assembled from that would
+ * describe a destination by the last thing that happened to it rather than by
+ * what is true of it now.
+ */
+export interface AssistedExportHandoffGateway {
+  load(input: {
+    userId: string;
+    bearerToken: string;
+    itemId: string;
+    reviewContentRevision: string;
+  }): Promise<ExportHandoffsView>;
+  recordHandoff(input: AssistedExportGatewayMutation): Promise<string>;
+  markShared(input: AssistedExportGatewayMutation): Promise<string>;
+  undoShared(input: AssistedExportGatewayMutation): Promise<void>;
+}
+
+export interface AssistedExportGatewayMutation {
+  userId: string;
+  bearerToken: string;
+  itemId: string;
+  platform: AssistedExportPlatform;
+  reviewContentRevision: string;
+  reviewRevision: string;
 }
 
 export interface MobileApiDependencies {
@@ -123,6 +161,8 @@ export interface MobileApiDependencies {
   listingReviewSave?: ListingReviewSaver;
   /** Guided identity correction — the native "Sharpen the estimate" seam. */
   guidedCorrection?: GuidedCorrector;
+  /** Transport over the #580 assisted-export seam; it adds no authority. */
+  assistedExport?: AssistedExportHandoffGateway;
   workerSecret?: string;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
@@ -154,6 +194,51 @@ function errorResponse(
     }),
     status,
   );
+}
+
+/**
+ * Translate a refused assisted-export RPC into a status the native client can
+ * act on. The Postgres code is the machine-readable half of the refusal and
+ * collapsing it would leave the client unable to tell "your listing moved,
+ * reopen the sheet" from "this can never work". None of these messages may
+ * name a destination state, since a refusal is precisely the case where
+ * SnapList knows nothing new about it.
+ */
+function exportHandoffFailure(requestId: string, error: unknown): Response {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+  switch (code) {
+    case "P0002":
+      return errorResponse(
+        requestId,
+        409,
+        "conflict",
+        "This listing changed after the pack was prepared.",
+      );
+    case "22023":
+      return errorResponse(
+        requestId,
+        422,
+        "invalid_request",
+        "This destination does not accept an assisted handoff.",
+      );
+    case "42501":
+      return errorResponse(
+        requestId,
+        403,
+        "forbidden",
+        "This item belongs to another account.",
+      );
+    default:
+      return errorResponse(
+        requestId,
+        503,
+        "internal_error",
+        "Sharing to other marketplaces is temporarily unavailable.",
+      );
+  }
 }
 
 /**
@@ -940,6 +1025,148 @@ export function createMobileApiHandler(
           "internal_error",
           "Pricing evidence is temporarily unavailable.",
         );
+      }
+    }
+
+    const exportHandoffPath = pathname.match(
+      new RegExp(`^/${MOBILE_API_VERSION}/items/([^/]+)/export-handoffs$`),
+    );
+    if (exportHandoffPath) {
+      if (request.method !== "GET" && request.method !== "POST") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      const itemId = z.string().uuid().safeParse(exportHandoffPath[1]);
+      if (!itemId.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid item id is required.",
+        );
+      }
+
+      // A mutation and a read need different inputs, but both must name the
+      // pack revision. Parsing before authenticating keeps a malformed body
+      // from reaching the capability at all.
+      let mutation: z.infer<typeof exportHandoffActionSchema> | null = null;
+      let reviewContentRevision: string;
+      if (request.method === "POST") {
+        let body: unknown;
+        try {
+          body = await request.json();
+        } catch {
+          return errorResponse(
+            requestId,
+            400,
+            "invalid_request",
+            "A valid request body is required.",
+          );
+        }
+        const parsed = exportHandoffActionSchema.safeParse(body);
+        if (!parsed.success) {
+          return errorResponse(
+            requestId,
+            400,
+            "invalid_request",
+            "A valid assisted export action is required.",
+          );
+        }
+        mutation = parsed.data;
+        reviewContentRevision = parsed.data.reviewContentRevision;
+      } else {
+        const revision = z
+          .string()
+          .uuid()
+          .safeParse(
+            new URL(request.url).searchParams.get("reviewContentRevision"),
+          );
+        if (!revision.success) {
+          return errorResponse(
+            requestId,
+            400,
+            "invalid_request",
+            "A valid pack revision is required.",
+          );
+        }
+        reviewContentRevision = revision.data;
+      }
+
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      const assistedExport = dependencies.assistedExport;
+      if (!assistedExport) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Sharing to other marketplaces is temporarily unavailable.",
+        );
+      }
+
+      try {
+        if (mutation) {
+          const input = {
+            userId: principal.userId,
+            bearerToken: token,
+            itemId: itemId.data,
+            platform: mutation.platform,
+            reviewContentRevision: mutation.reviewContentRevision,
+            reviewRevision: mutation.reviewRevision,
+          };
+          if (mutation.action === "handoff") {
+            await assistedExport.recordHandoff(input);
+          } else if (mutation.action === "shared") {
+            await assistedExport.markShared(input);
+          } else {
+            await assistedExport.undoShared(input);
+          }
+        }
+        // Read after the write, never around it: the response describes what
+        // the database now holds, so a refused mutation can never be painted
+        // over with the state the client hoped for.
+        const view = await assistedExport.load({
+          userId: principal.userId,
+          bearerToken: token,
+          itemId: itemId.data,
+          reviewContentRevision,
+        });
+        return json(
+          exportHandoffsEnvelopeSchema.parse({
+            data: {
+              handoffs: ASSISTED_EXPORT_PLATFORMS.map(
+                (platform) => view[platform],
+              ),
+            },
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.export-handoffs", error);
+        return exportHandoffFailure(requestId, error);
       }
     }
 

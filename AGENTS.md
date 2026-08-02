@@ -39,8 +39,14 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   guardrails, not the native product promise. See ADR-0008.
 - **Vercel AI SDK behind a role-keyed provider registry** (`src/lib/llm`, ADR-0002). All model
   calls resolve through `resolveLanguageModel(role, …)`; the provider is a `LLM_PROVIDER` flip
-  (dev → Gemini for the free tier, showcase → OpenAI) — never construct a provider inline at a call
-  site. Structured output via `generateObject` + **Zod** — no ad-hoc JSON parsing of model output.
+  (dev → Gemini, showcase → OpenAI) that is **required in every deployed environment** — there is no
+  production default to fall through to — and never construct a provider inline at a call site.
+  Gemini's free tier is a **data** decision as well as a cost one: its unpaid terms let Google use
+  submitted content to improve its products and let human reviewers read API input and output. So
+  **seller media may not reach an unpaid Gemini project.** Outside local development the `vision`
+  role — the only role that sends the seller's own photo bytes — refuses Google unless
+  `GEMINI_BILLING_ENABLED=true` attests the project is billing-enabled (#501, ADR-0002).
+  Structured output via `generateObject` + **Zod** — no ad-hoc JSON parsing of model output.
   Embeddings are excluded from the switch (pgvector `vector(1536)` dimension lock).
 - **Pricing is a routing pipeline behind a `PricingProvider` interface** (ISBN lookup → **eBay
   sold comps** → web-search agent → depreciation → LLM fallback; see `docs/adr/0001`). Caffein Apify

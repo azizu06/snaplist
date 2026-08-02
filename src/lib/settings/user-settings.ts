@@ -35,41 +35,6 @@ export async function getAutopilotEnabled(
   return data?.autopilot_enabled ?? AUTOPILOT_DEFAULT;
 }
 
-/** Automatic buyer replies change external marketplace state, so opt-in is OFF. */
-export const AUTO_REPLY_DEFAULT = false;
-
-export async function getAutoReplyEnabled(
-  supabase: SupabaseClient,
-  userId: string,
-): Promise<boolean> {
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("auto_reply_enabled")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) {
-    throw new Error(`Failed to read user settings: ${error.message}`);
-  }
-  return data?.auto_reply_enabled ?? AUTO_REPLY_DEFAULT;
-}
-
-/** Set the one global, tenant-scoped buyer auto-reply preference. */
-export async function setAutoReplyEnabled(
-  supabase: SupabaseClient,
-  userId: string,
-  enabled: boolean,
-): Promise<void> {
-  const { error } = await supabase
-    .from("user_settings")
-    .upsert(
-      { user_id: userId, auto_reply_enabled: enabled },
-      { onConflict: "user_id" },
-    );
-  if (error) {
-    throw new Error(`Failed to update user settings: ${error.message}`);
-  }
-}
-
 /**
  * Set the user's publish-eligibility switch (legacy function/column name). Upserts so the first toggle creates
  * the row; RLS WITH CHECK rejects a spoofed user_id.

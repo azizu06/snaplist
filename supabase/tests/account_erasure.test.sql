@@ -1,6 +1,6 @@
 begin;
 
-select plan(51);
+select plan(52);
 
 -- Issue #384: erase one signed-in account durably and idempotently.
 --
@@ -22,7 +22,7 @@ select extensions.function_privs_are(
 );
 select extensions.function_privs_are(
   'public', 'finalize_account_erasure',
-  array['uuid', 'boolean', 'boolean', 'text[]'], 'authenticated',
+  array['uuid', 'boolean', 'boolean', 'boolean', 'text[]'], 'authenticated',
   array[]::text[], 'a seller cannot declare their own erasure complete'
 );
 select extensions.function_privs_are(
@@ -150,7 +150,7 @@ select set_config('app.account_erasure_internal', 'false', true);
 select throws_ok(
   $$select public.finalize_account_erasure(
       (select generation_id from private.account_erasure_generations where user_id = 'user_384_owner'),
-      true, true
+      true, true, true
     )$$,
   '55000',
   'Mandatory account erasure work is incomplete',
@@ -161,11 +161,21 @@ rollback to savepoint racing_write;
 select throws_ok(
   $$select public.finalize_account_erasure(
       (select generation_id from private.account_erasure_generations where user_id = 'user_384_owner'),
-      false, true
+      false, true, true
     )$$,
   '55000',
   'Clerk identity absence is not proved',
   'an unobserved provider deletion cannot finish the erasure'
+);
+
+select throws_ok(
+  $$select public.finalize_account_erasure(
+      (select generation_id from private.account_erasure_generations where user_id = 'user_384_owner'),
+      true, true, false
+    )$$,
+  '55000',
+  'PostHog person and event deletion is not proved',
+  'an unobserved analytics deletion cannot finish the erasure'
 );
 
 -- Provider-owned deletion that could not be observed is a state of its own, and
@@ -174,7 +184,7 @@ select is(
   (
     select public.finalize_account_erasure(
       (select generation_id from private.account_erasure_generations where user_id = 'user_384_owner'),
-      false, false, array['clerk-identity-deletion-unverified']
+      false, false, true, array['clerk-identity-deletion-unverified']
     )->>'status'
   ),
   'deletion_needs_attention',
@@ -241,7 +251,7 @@ select is(
 select throws_ok(
   $$select public.finalize_account_erasure(
       (select generation_id from private.account_erasure_generations where user_id = 'user_384_resume'),
-      true, false
+      true, false, true
     )$$,
   '55000',
   'RevenueCat customer absence is not proved',
@@ -258,7 +268,7 @@ select is(
   (
     select public.finalize_account_erasure(
       (select generation_id from private.account_erasure_generations where user_id = 'user_384_owner'),
-      true, true
+      true, true, true
     )->>'status'
   ),
   'deletion_completed',
@@ -324,7 +334,7 @@ select is(
         select generation_id from private.account_erasure_generations
         where user_id_digest = private.account_erasure_user_digest('user_384_owner')
       ),
-      true, true
+      true, true, true
     )->>'status'
   ),
   'deletion_completed',

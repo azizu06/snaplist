@@ -37,6 +37,7 @@ const TINT_CLASSES: Record<BentoTint, string> = {
 
 export interface BentoProps {
   cards: BentoCardData[];
+  className?: string;
   enableStars?: boolean;
   enableSpotlight?: boolean;
   enableBorderGlow?: boolean;
@@ -495,6 +496,7 @@ const useMobileDetection = () => {
 
 const MagicBento: React.FC<BentoProps> = ({
   cards,
+  className,
   enableStars = true,
   enableSpotlight = true,
   enableBorderGlow = true,
@@ -570,7 +572,7 @@ const MagicBento: React.FC<BentoProps> = ({
         />
       )}
 
-      <div className="bento-section grid w-full select-none gap-4 sm:grid-cols-2 lg:grid-cols-4" ref={gridRef}>
+      <div className={`bento-section grid w-full select-none gap-4 sm:grid-cols-2 lg:grid-cols-4 ${className ?? ''}`} ref={gridRef}>
         {cards.map((card, index) => (
           <ParticleCard
             key={index}

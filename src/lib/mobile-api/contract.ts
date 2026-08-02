@@ -7,6 +7,7 @@ import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import { listingReviewProjectionSchema } from "@/lib/listing-review";
 import { listingReviewSaveReceiptSchema } from "@/lib/listing-review/save";
 import { guidedCorrectionReceiptSchema } from "./guided-correction";
+import { ASSISTED_EXPORT_PLATFORMS } from "@/lib/export/handoff";
 
 export const MOBILE_API_VERSION = "v1" as const;
 
@@ -186,6 +187,46 @@ export const mobileRunCollectionEnvelopeSchema = z
 
 export const pricingEvidenceEnvelopeSchema = z
   .object({ data: pricingEvidenceProjectionSchema, meta: apiMetaSchema })
+  .strict();
+
+/**
+ * One assisted destination as the native client is allowed to describe it.
+ * `state` carries only what SnapList can actually know — it prepared a pack,
+ * and the seller either did or did not say they posted it. `published`,
+ * `listed`, `sold`, and `verified` are unknowable for Facebook Marketplace,
+ * Mercari, and Depop, so the wire format cannot express them.
+ */
+export const exportHandoffViewSchema = z
+  .object({
+    platform: z.enum(ASSISTED_EXPORT_PLATFORMS),
+    state: z.enum(["prepared", "shared"]),
+    handedOffAt: z.string().datetime({ offset: true }).nullable(),
+    sharedAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .strict();
+
+export const exportHandoffsEnvelopeSchema = z
+  .object({
+    data: z
+      .object({ handoffs: z.array(exportHandoffViewSchema).length(3) })
+      .strict(),
+    meta: apiMetaSchema,
+  })
+  .strict();
+
+/**
+ * The seller's three truthful actions. Each maps one-to-one onto a guarded
+ * RPC, and each carries both revisions so the database keeps the staleness
+ * decision. `shared` is separate from `handoff` on purpose: only the explicit
+ * confirmation is a claim, and no client may reach it by any other route.
+ */
+export const exportHandoffActionSchema = z
+  .object({
+    platform: z.enum(ASSISTED_EXPORT_PLATFORMS),
+    action: z.enum(["handoff", "shared", "undo"]),
+    reviewContentRevision: z.string().uuid(),
+    reviewRevision: z.string().uuid(),
+  })
   .strict();
 
 export const revenueCatConfigurationEnvelopeSchema = z

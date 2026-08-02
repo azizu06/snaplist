@@ -12,6 +12,11 @@
 # LLM_PROVIDER is required here even for a local container: the runner sets
 # NODE_ENV=production, so the provider must be chosen explicitly (#501). Without it
 # the server starts and then answers every route with a 500.
+#
+# NODE_ENV=production also means this is not "local development" to the seller-media
+# fence, so `-e LLM_PROVIDER=gemini` alone will refuse the vision role. Use
+# `-e LLM_PROVIDER=openai`, or add `-e GEMINI_BILLING_ENABLED=true` if the Google
+# project behind the key really is billing-enabled (#501, ADR-0002).
 
 FROM node:22-alpine AS base
 # pnpm via corepack, pinned by package.json's `packageManager` field.

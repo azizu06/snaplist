@@ -6,10 +6,6 @@ SnapList publishes listings to eBay through one adapter seam
 never sees eBay HTTP. **Sandbox ↔ production is config-only** — `EBAY_BASE_URL`
 plus credentials/policy ids. No code change.
 
-Pre-sale buyer questions and text replies/follow-ups use the same credential
-boundary through a separate marketplace-messaging adapter. Its two-user
-operator procedure is in [ebay-messaging-sandbox.md](./ebay-messaging-sandbox.md).
-
 ## What the adapter does
 
 `HttpEbayAdapter.publishListing()` runs the documented Sell Inventory flow:
@@ -64,10 +60,11 @@ call live eBay.
    (Developer console → "Sandbox user registration") and complete its seller
    onboarding at <https://sandbox.ebay.com>.
 3. **Auth (prefer the connected-seller path):**
-   - Set the Sandbox `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, and `EBAY_RU_NAME`
-     for the legacy Settings callback. Register a separate Sandbox RuName whose
-     auth-accepted URL is `https://<host>/v1/ebay/oauth/callback` and set it as
-     `EBAY_MOBILE_RU_NAME`; the mobile route fails closed if this is absent. Also
+   - Set the Sandbox `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET`. Register a
+     Sandbox RuName whose auth-accepted URL is
+     `https://<host>/v1/ebay/oauth/callback` and set it as
+     `EBAY_MOBILE_RU_NAME`; the mobile route fails closed if this is absent, and
+     the removed web Settings callback no longer needs a RuName of its own. Also
      set the HTTPS app universal link as `EBAY_MOBILE_OAUTH_RETURN_URL`; it
      must contain neither credentials nor a fragment. Set one stable
      `EBAY_TOKEN_ENCRYPTION_KEY`. In Settings, choose **Connect

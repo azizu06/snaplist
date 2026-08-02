@@ -37,26 +37,6 @@ describe("auth proxy", () => {
     delete process.env.CRON_SECRET;
   });
 
-  it("lets an authorized inbox-sync cron request reach its route handler", async () => {
-    process.env.CRON_SECRET = "configured-cron-secret";
-    const request = new NextRequest(
-      "https://snaplist.test/api/cron/inbox-sync",
-      {
-        headers: { authorization: "Bearer configured-cron-secret" },
-      },
-    );
-
-    const response = await proxy(request, {} as NextFetchEvent);
-
-    if (!response) {
-      throw new Error("Expected the proxy to return a response");
-    }
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("location")).toBeNull();
-  });
-
   it("lets an authorized pipeline-worker scheduler request reach its route handler", async () => {
     process.env.CRON_SECRET = "configured-cron-secret";
     const request = new NextRequest(
@@ -245,5 +225,18 @@ describe("auth proxy", () => {
     expect(dashboardResponse.headers.get("location")).toBe(
       "https://snaplist.test/login?next=%2Fdashboard",
     );
+  });
+
+  it("lets an unauthenticated visitor reach the public pricing page", async () => {
+    const pricingResponse = await proxy(
+      new NextRequest("https://snaplist.test/pricing"),
+      {} as NextFetchEvent,
+    );
+    if (!pricingResponse) {
+      throw new Error("Expected the proxy to return a response");
+    }
+    expect(pricingResponse.status).toBe(200);
+    expect(pricingResponse.headers.get("x-middleware-next")).toBe("1");
+    expect(pricingResponse.headers.get("location")).toBeNull();
   });
 });

@@ -23,16 +23,17 @@ import { NextResponse } from "next/server";
 // matching bearer.
 const isPublic = createRouteMatcher([
   "/",
-  "/tour",
-  "/features",
+  // Public marketing pages resolve without a session, so they must never
+  // answer a redirect to /login (issue #191).
   "/pricing",
+  "/privacy",
+  "/support",
   "/login(.*)",
   "/signup(.*)",
   "/api/health",
   "/api/app-attest",
   "/api/app-attest/",
   "/api/ebay/account-deletion",
-  "/api/cron/inbox-sync",
   "/api/internal/pipeline-worker",
   "/api/internal/pipeline-maintenance",
   "/api/internal/included-offer-worker",

@@ -4,7 +4,7 @@ Status: accepted · Issue #58
 
 > **Lean-MVP scope amendment (2026-07-21):** ADR-0008/#349 removes buyer messaging and
 > bulk/haul capture from launch scope. The controls below remain historical implementation and
-> defense-in-depth for any still-reachable legacy route; they do not authorize those product flows
+> defense-in-depth; they do not authorize those product flows
 > or make the legacy daily cap the native AI-item allowance promise.
 
 ## Context
@@ -23,17 +23,14 @@ Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `
   keyed by Clerk user id, IP fallback where a route provides it), `snaplist:rl` key prefix.
   `enforceRateLimit` returns a `429` with `Retry-After`; server actions redirect with an equivalent
   retry message. Applied to inbox `simulate`, foreground `sync`, approved `send`,
-  follow-up send, and both explicit delivery-retry routes; the bulk-capture
-  `POST /api/batch/item` run (one metered pipeline run per haul item, #100), seller-triggered review
+  follow-up send, and both explicit delivery-retry routes; seller-triggered review
   identity regeneration (#126), and eBay `publish` (external write). The ⌘K `search` route is
   **deliberately excluded** — it's a cheap RLS'd
-  DB read fired on every keystroke; rate-limiting it would break the palette. The bulk-capture
-  status poll (`GET /api/batch/status`) is likewise excluded — a cheap RLS'd read, not model work.
+  DB read fired on every keystroke; rate-limiting it would break the palette.
 - **Spend guardrail — a per-day counter** (`incrDaily`: Redis `INCR`+expiry | in-memory):
-  - **Per-user/day item cap** (the quota billing #64 gates) — checked in the upload action *and* the
-    bulk-capture batch-item route (#100) *before* any photo upload or model call; over-cap redirects
-    with a clear message (single-item) or returns a `quota` signal that blocks the rest of the batch
-    (bulk), so a haul can't spend past the cap (friendlier limit UI is deferred to the frontend issue).
+  - **Per-user/day item cap** (the quota billing #64 gates) — checked before any photo upload or
+    model call; over-cap returns a clear quota signal (friendlier limit UI is deferred to the frontend
+    issue).
   - **Global OpenAI budget alert** (distinct; warns, never blocks) — counts model-backed pipeline runs
     app-wide per day, including accepted review identity regenerations, and fires a ONE-TIME alert
     (log + Sentry) on the exact first breach. Regenerations rejected by preflight do not consume the

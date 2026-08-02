@@ -1,8 +1,9 @@
 /**
  * Public surface of the eBay marketplace adapter (issue #14).
  *
- * Callers import from here. Listing writes depend on `EbayAdapter`; pre-sale
- * messaging depends on the separate provider-neutral messaging adapter.
+ * Callers import from here. Listing writes depend on `EbayAdapter`. Buyer
+ * messaging was retired with the inbox (issue #599); this adapter now only
+ * publishes and revises listings.
  */
 export type {
   EbayAdapter,
@@ -18,7 +19,6 @@ export type {
 } from "./types";
 export { EbayApiError, EbayWriteAmbiguousError } from "./types";
 export { HttpEbayAdapter } from "./http";
-export { HttpEbayMessagingAdapter } from "./messaging";
 export { MockEbayAdapter } from "./mock";
 export { EnvTokenProvider, OperatorSandboxTokenProvider } from "./auth";
 export {
@@ -61,8 +61,6 @@ import type { EbayAdapter, EbayTokenProvider } from "./types";
 import { HttpEbayAdapter } from "./http";
 import { UserTokenProvider } from "./user-token-provider";
 import { getEbayConnectionStatus } from "./connections";
-import { HttpEbayMessagingAdapter } from "./messaging";
-import type { MarketplaceMessagingAdapter } from "../messaging";
 import { OperatorSandboxTokenProvider } from "./auth";
 
 /**
@@ -131,40 +129,14 @@ export async function createEbayAdapterForUser(
   });
 }
 
-/** Messaging composition uses connected seller tokens or one operator fallback. */
-export async function createEbayMessagingAdapterForUser(
-  supabase: SupabaseClient,
-  userId?: string,
-  options: { scheduled?: boolean; credentialClient?: SupabaseClient } = {},
-): Promise<MarketplaceMessagingAdapter> {
-  const { connected } = await getEbayConnectionStatus(
-    supabase,
-    userId,
-    options.scheduled,
-  );
-  if (connected) {
-    return new HttpEbayMessagingAdapter({
-      tokenProvider: new UserTokenProvider(options.credentialClient ?? supabase, {
-        userId,
-        scheduled: options.scheduled,
-      }),
-    });
-  }
-  return new HttpEbayMessagingAdapter({
-    tokenProvider: operatorSandboxTokenProvider(
-      options.credentialClient ?? supabase,
-      userId,
-      options.scheduled ?? false,
-      [
-        "https://api.ebay.com/oauth/api_scope",
-        "https://api.ebay.com/oauth/api_scope/commerce.message",
-        "https://api.ebay.com/oauth/api_scope/sell.inventory",
-      ],
-    ),
-  });
-}
-
-/** Whether this tenant may use the app-level Sandbox seller credentials. */
+/**
+ * Whether this tenant may use the app-level Sandbox seller credentials.
+ *
+ * Named for the messaging fallback it was introduced with, but it is the gate
+ * for every app-level Sandbox credential use — `assertOperatorSandboxFallback`
+ * below calls it on the publish path. It outlives the retired inbox (#599); the
+ * name is left alone so the publish path stays untouched by that removal.
+ */
 export function hasEbayMessagingSandboxFallback(
   userId?: string,
   env: Record<string, string | undefined> = process.env,
@@ -183,18 +155,6 @@ export function hasEbayMessagingSandboxFallback(
     env.EBAY_OAUTH_TOKEN ||
     (env.EBAY_REFRESH_TOKEN && env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET)
   );
-}
-
-export function ebayMessagingSyncUserIds(
-  connectedUserIds: Iterable<string>,
-  env: Record<string, string | undefined> = process.env,
-): string[] {
-  const userIds = new Set(connectedUserIds);
-  const operatorUserId = env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID;
-  if (operatorUserId && hasEbayMessagingSandboxFallback(operatorUserId, env)) {
-    userIds.add(operatorUserId);
-  }
-  return [...userIds];
 }
 
 function isExactEbaySandboxApiBase(baseUrl: string): boolean {
@@ -227,7 +187,6 @@ function operatorSandboxTokenProvider(
   supabase: SupabaseClient,
   userId: string | undefined,
   scheduled: boolean,
-  scopes?: string[],
 ): OperatorSandboxTokenProvider {
   const identity = assertOperatorSandboxFallback(userId);
   return new OperatorSandboxTokenProvider(
@@ -235,7 +194,6 @@ function operatorSandboxTokenProvider(
     identity.userId,
     identity.sellerId,
     scheduled,
-    scopes ? { scopes } : undefined,
   );
 }
 

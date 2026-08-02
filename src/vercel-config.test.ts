@@ -13,10 +13,6 @@ const config = JSON.parse(
 const scheduledPaths = (config.crons ?? []).map((entry) => entry.path);
 
 describe("Vercel deployment configuration", () => {
-  it("keeps five-minute inbox sync off the Hobby-limited Vercel scheduler", () => {
-    expect(scheduledPaths).not.toContain("/api/cron/inbox-sync");
-  });
-
   it("schedules no autonomous marketplace sweep", () => {
     expect(scheduledPaths).not.toContain("/api/cron/reprice");
   });

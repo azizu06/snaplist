@@ -5,17 +5,14 @@
 
 ## Current entry-point inventory
 
-The current routes remain valid web adapters. The v1 contract describes the future native transport;
-it does not silently declare these routes migrated.
+The remaining routes below are valid web adapters. Retired web-only batch and eBay OAuth routes are
+not part of this inventory; native transport uses its own v1 contracts.
 
 ### Seller/native-relevant HTTP routes
 
 | Current entry point | Current interface and implementation locality | Native contract disposition |
 | --- | --- | --- |
-| `POST /api/batch/item` | Cookie auth, quota, Storage, `createVisionPipeline`, `runPipelineAndPersist` | #159 owns durable `/v1/items/runs`; do not migrate here |
-| `GET /api/batch/status` | Cookie auth and direct RLS-scoped item/listing read | #159 owns `/v1/runs/{runId}` |
 | `POST /api/billing/checkout`, `POST /api/billing/portal` | Legacy Stripe web billing modules | Not native StoreKit entitlement |
-| `GET /api/ebay/connect`, `GET /api/ebay/callback` | Next cookie/redirect state around shared eBay modules | #17 owns the server OAuth session/callback; provider tokens never transit SwiftUI |
 | `GET/POST /api/ebay/publish` | RLS read plus shared `publishListingToEbayAndNotify` mutation seam | Later v1 adapter must reuse the shared mutation seam |
 | `/api/inbox/*` | RLS-scoped sync, attachment, explicit send/follow-up/retry modules | Later v1 adapters; no autonomous send |
 | `GET /api/search` | Cookie auth, RLS reads, signed photo URLs | Later native query contract |
@@ -31,7 +28,7 @@ future native HTTP needs, not authorization for #195 to extract their domain beh
 | --- | --- |
 | `POST /api/webhooks/stripe` | Raw-body Stripe signature then shared `handleStripeEvent`; legacy web billing |
 | `GET/POST /api/ebay/account-deletion` | Challenge/verified notice then `eraseEbayUserData` |
-| `GET /api/ebay/callback` | Browser OAuth callback; future v1 callback uses server-persisted state and opaque app completion |
+| `GET /v1/ebay/oauth/callback` | Native OAuth callback; server-persisted state and opaque app completion |
 | `POST /v1/webhooks/storekit` | Contract-only; #173 owns Apple-signed verification and entitlement mirror |
 | `POST /v1/guest/attestations` | Contract-only; #174 owns App Attest verification and guest capability |
 
@@ -41,7 +38,6 @@ future native HTTP needs, not authorization for #195 to extract their domain beh
 | --- | --- | --- |
 | `GET/POST /api/internal/pipeline-worker` | `createInternalPipelineWorker().consume()` | Existing adapter; #195 extracts shared composition only |
 | `GET/POST /api/internal/pipeline-maintenance` | `runInternalPipelineMaintenance()` | Existing operations surface; scheduled by the owner-only pg_cron template |
-| `GET/POST /api/cron/inbox-sync` | `syncInboxForSeller` with scheduled repositories/adapters | Existing operations surface |
 | `POST /internal/v1/pipeline/consume` | Same `createPipelineWorker().consume()` | Local proof; #162 owns hosted scheduling/health |
 
 ## Composition proof

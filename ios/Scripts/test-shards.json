@@ -61,6 +61,7 @@
       "SnapListUITests/SnapListUITests/testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave"
     ],
     "ui-2": [
+      "SnapListUITests/AssistedExportUITests/testAListingChangeTakesDownAConfirmSheetTheSellerIsLookingAt",
       "SnapListUITests/FidelityScreenshotTests/testFoundationShellScreenshot",
       "SnapListUITests/HomeUITests/testAttentionAndCurrentRunUseTypedFutureRoutes",
       "SnapListUITests/HomeUITests/testFailedRunDetailKeepsMaximumSellerSafeFailureReachableAtAccessibilityType",

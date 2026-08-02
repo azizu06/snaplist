@@ -151,14 +151,7 @@ function navigationTargets(): NavigationTarget[] {
  * the moment a listed path becomes routable, which forces the entry to be
  * deleted rather than silently outliving its reason.
  */
-const UNROUTED_BY_DESIGN = new Map<string, string>([
-  [
-    "/inbox",
-    "Written into a notification row by src/app/api/inbox/simulate/route.ts for "
-      + "the web inbox, which #598 deleted. The row is data, not a link this app "
-      + "renders. #609 owns retiring the server surfaces left clientless.",
-  ],
-]);
+const UNROUTED_BY_DESIGN = new Map<string, string>([]);
 
 describe("route integrity", () => {
   it("emits the routes the marketing and auth surfaces link to", () => {
