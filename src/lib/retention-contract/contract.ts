@@ -38,6 +38,7 @@ const PROVIDER_OBLIGATION_DATA = [
   "ebay-publish-receipts",
   "clerk-identity",
   "apple-revenuecat-references",
+  "posthog-analytics-person-and-events",
 ] as const;
 
 const releaseRetentionContractSchema = z

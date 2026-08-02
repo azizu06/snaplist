@@ -29,6 +29,13 @@ function identityStub() {
   };
 }
 
+function analyticsStub() {
+  return {
+    resolvePersonUUID: vi.fn().mockResolvedValue(null),
+    deletePersonAndEvents: vi.fn().mockResolvedValue({ confirmed: true }),
+  };
+}
+
 describe("durable account erasure service", () => {
   it("removes Storage, proves absence, deletes both identities, and completes", async () => {
     const store = {
@@ -39,6 +46,7 @@ describe("durable account erasure service", () => {
       advance: vi.fn().mockResolvedValue(state({
         identity: { clerkUserId: "user_384", revenueCatAppUserIds: ["rc_384"] },
       })),
+      recordPostHogPersonUUID: vi.fn(),
       finalize: vi.fn().mockResolvedValue(state({ status: "deletion_completed", identity: null })),
     };
     const storage = { remove: vi.fn().mockResolvedValue(undefined) };
@@ -46,7 +54,7 @@ describe("durable account erasure service", () => {
 
     const result = await eraseAccount(
       { userId: "user_384", idempotencyKey },
-      { store, storage, identity },
+      { store, storage, identity, analytics: analyticsStub() },
     );
 
     expect(storage.remove).toHaveBeenCalledWith(storageObject);
@@ -60,6 +68,7 @@ describe("durable account erasure service", () => {
       generationId,
       clerkIdentityAbsent: true,
       revenueCatCustomerAbsent: true,
+      postHogPersonAndEventsDeletionConfirmed: true,
       attentionReasons: [],
     });
     expect(result.status).toBe("deletion_completed");
@@ -71,6 +80,7 @@ describe("durable account erasure service", () => {
       begin: vi.fn().mockResolvedValue(state({ status: "deletion_requested", identity: null })),
       confirmStorageAbsence: vi.fn(),
       advance: vi.fn().mockResolvedValue(state({ retainedRecords: retained })),
+      recordPostHogPersonUUID: vi.fn(),
       finalize: vi.fn().mockResolvedValue(state({
         status: "deletion_completed_with_retained_records",
         retainedRecords: retained,
@@ -80,7 +90,12 @@ describe("durable account erasure service", () => {
 
     const result = await eraseAccount(
       { userId: "user_384", idempotencyKey },
-      { store, storage: { remove: vi.fn() }, identity: identityStub() },
+      {
+        store,
+        storage: { remove: vi.fn() },
+        identity: identityStub(),
+        analytics: analyticsStub(),
+      },
     );
 
     expect(result.status).toBe("deletion_completed_with_retained_records");
@@ -94,6 +109,7 @@ describe("durable account erasure service", () => {
       advance: vi.fn().mockResolvedValue(state({
         identity: { clerkUserId: "user_384", revenueCatAppUserIds: ["rc_384"] },
       })),
+      recordPostHogPersonUUID: vi.fn(),
       finalize: vi.fn().mockResolvedValue(state({
         status: "deletion_needs_attention",
         attentionReasons: ["revenuecat-customer-deletion-unverified"],
@@ -106,16 +122,92 @@ describe("durable account erasure service", () => {
 
     const result = await eraseAccount(
       { userId: "user_384", idempotencyKey },
-      { store, storage: { remove: vi.fn() }, identity },
+      { store, storage: { remove: vi.fn() }, identity, analytics: analyticsStub() },
     );
 
     expect(store.finalize).toHaveBeenCalledWith({
       generationId,
       clerkIdentityAbsent: true,
       revenueCatCustomerAbsent: false,
+      postHogPersonAndEventsDeletionConfirmed: true,
       attentionReasons: ["revenuecat-customer-deletion-unverified"],
     });
     expect(result.status).toBe("deletion_needs_attention");
+  });
+
+  it("withholds the erasure receipt when PostHog deletion is unconfirmed", async () => {
+    const store = {
+      begin: vi.fn().mockResolvedValue(state({ status: "deletion_requested", identity: null })),
+      confirmStorageAbsence: vi.fn(),
+      advance: vi.fn().mockResolvedValue(state()),
+      recordPostHogPersonUUID: vi.fn().mockResolvedValue(undefined),
+      finalize: vi.fn().mockResolvedValue(state({ status: "deletion_completed", identity: null })),
+    };
+    const analytics = {
+      resolvePersonUUID: vi.fn().mockResolvedValue(
+        "61700000-0000-4000-8000-000000000001",
+      ),
+      deletePersonAndEvents: vi.fn().mockResolvedValue({ confirmed: false }),
+    };
+    const dependencies = {
+      store,
+      storage: { remove: vi.fn() },
+      identity: identityStub(),
+      analytics,
+    };
+
+    await expect(
+      eraseAccount({ userId: "user_384", idempotencyKey }, dependencies),
+    ).rejects.toThrow("PostHog person and event deletion was not confirmed");
+
+    expect(analytics.resolvePersonUUID).toHaveBeenCalledWith({
+      distinctId: "user_384",
+    });
+    expect(store.recordPostHogPersonUUID).toHaveBeenCalledWith({
+      generationId,
+      personUUID: "61700000-0000-4000-8000-000000000001",
+    });
+    expect(analytics.deletePersonAndEvents).toHaveBeenCalledWith({
+      personUUID: "61700000-0000-4000-8000-000000000001",
+    });
+    expect(store.finalize).not.toHaveBeenCalled();
+  });
+
+  it("resumes PostHog verification from the persisted person UUID", async () => {
+    const persistedPersonUUID = "61700000-0000-4000-8000-000000000001";
+    const store = {
+      begin: vi.fn().mockResolvedValue(state({ status: "deletion_requested", identity: null })),
+      confirmStorageAbsence: vi.fn(),
+      advance: vi.fn().mockResolvedValue(state({
+        identity: {
+          clerkUserId: "user_384",
+          revenueCatAppUserIds: [],
+          postHogPersonUUID: persistedPersonUUID,
+        },
+      })),
+      recordPostHogPersonUUID: vi.fn(),
+      finalize: vi.fn(),
+    };
+    const analytics = {
+      resolvePersonUUID: vi.fn(),
+      deletePersonAndEvents: vi.fn().mockResolvedValue({ confirmed: false }),
+    };
+
+    await expect(eraseAccount(
+      { userId: "user_384", idempotencyKey },
+      {
+        store,
+        storage: { remove: vi.fn() },
+        identity: identityStub(),
+        analytics,
+      },
+    )).rejects.toThrow("PostHog person and event deletion was not confirmed");
+
+    expect(analytics.resolvePersonUUID).not.toHaveBeenCalled();
+    expect(store.recordPostHogPersonUUID).not.toHaveBeenCalled();
+    expect(analytics.deletePersonAndEvents).toHaveBeenCalledWith({
+      personUUID: persistedPersonUUID,
+    });
   });
 
   it("leaves a deferred erasure alone instead of deleting an identity early", async () => {
@@ -125,13 +217,14 @@ describe("durable account erasure service", () => {
       advance: vi.fn().mockResolvedValue(
         state({ deferrals: ["ebay-provider-authority-pending"] }),
       ),
+      recordPostHogPersonUUID: vi.fn(),
       finalize: vi.fn(),
     };
     const identity = identityStub();
 
     const result = await eraseAccount(
       { userId: "user_384", idempotencyKey },
-      { store, storage: { remove: vi.fn() }, identity },
+      { store, storage: { remove: vi.fn() }, identity, analytics: analyticsStub() },
     );
 
     expect(result.deferrals).toEqual(["ebay-provider-authority-pending"]);
@@ -152,13 +245,14 @@ describe("durable account erasure service", () => {
           storageObjects: [late],
         }))
         .mockResolvedValueOnce(state()),
+      recordPostHogPersonUUID: vi.fn(),
       finalize: vi.fn().mockResolvedValue(state({ status: "deletion_completed", identity: null })),
     };
     const storage = { remove: vi.fn().mockResolvedValue(undefined) };
 
     const result = await eraseAccount(
       { userId: "user_384", idempotencyKey },
-      { store, storage, identity: identityStub() },
+      { store, storage, identity: identityStub(), analytics: analyticsStub() },
     );
 
     expect(storage.remove.mock.calls).toEqual([[storageObject], [late]]);
@@ -172,6 +266,7 @@ describe("durable account erasure service", () => {
       ),
       confirmStorageAbsence: vi.fn().mockResolvedValue(true),
       advance: vi.fn().mockResolvedValue(state()),
+      recordPostHogPersonUUID: vi.fn(),
       finalize: vi.fn().mockResolvedValue(state({ status: "deletion_completed", identity: null })),
     };
     const storage = {
@@ -180,7 +275,12 @@ describe("durable account erasure service", () => {
         .mockResolvedValueOnce(undefined),
     };
 
-    const dependencies = { store, storage, identity: identityStub() };
+    const dependencies = {
+      store,
+      storage,
+      identity: identityStub(),
+      analytics: analyticsStub(),
+    };
     await expect(eraseAccount({ userId: "user_384", idempotencyKey }, dependencies))
       .rejects.toThrow("interrupted");
     await expect(eraseAccount({ userId: "user_384", idempotencyKey }, dependencies))
@@ -197,13 +297,14 @@ describe("durable account erasure service", () => {
       begin: vi.fn().mockResolvedValue(state({ status: "deletion_completed", identity: null })),
       confirmStorageAbsence: vi.fn(),
       advance: vi.fn(),
+      recordPostHogPersonUUID: vi.fn(),
       finalize: vi.fn(),
     };
     const identity = identityStub();
 
     const result = await eraseAccount(
       { userId: "user_384", idempotencyKey },
-      { store, storage: { remove: vi.fn() }, identity },
+      { store, storage: { remove: vi.fn() }, identity, analytics: analyticsStub() },
     );
 
     expect(result.status).toBe("deletion_completed");

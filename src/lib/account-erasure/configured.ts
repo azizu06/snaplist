@@ -3,6 +3,10 @@ import "server-only";
 import { createClerkClient } from "@clerk/nextjs/server";
 import { createClient } from "@supabase/supabase-js";
 import { createAccountErasureIdentity } from "./identity";
+import {
+  createPostHogAccountErasureAnalytics,
+  createPostHogPersonManagementClient,
+} from "./posthog";
 import { eraseAccount } from "./service";
 import { createSupabaseAccountErasureStore } from "./store";
 
@@ -11,6 +15,9 @@ export interface ConfiguredAccountErasureInput {
   secretKey: string;
   clerkSecretKey: string;
   revenueCatSecretKey: string;
+  postHogHost: string;
+  postHogProjectId: string;
+  postHogPersonalAPIKey: string;
   /**
    * Without it the RevenueCat absence read-back cannot run, and every erasure
    * holding a RevenueCat binding resolves to `deletion_needs_attention` rather
@@ -24,6 +31,9 @@ export function createConfiguredAccountErasureOperations(
 ): { erase: (request: { userId: string; idempotencyKey: string }) => ReturnType<typeof eraseAccount> } {
   if (!input.secretKey.startsWith("sb_secret_")) {
     throw new Error("Account erasure requires a current Supabase secret key.");
+  }
+  if (!input.postHogPersonalAPIKey.trim()) {
+    throw new Error("PostHog erasure requires a personal API key.");
   }
 
   const client = createClient(input.supabaseURL, input.secretKey, {
@@ -47,6 +57,13 @@ export function createConfiguredAccountErasureOperations(
         projectId: input.revenueCatProjectId,
       },
     }),
+    analytics: createPostHogAccountErasureAnalytics(
+      createPostHogPersonManagementClient({
+        host: input.postHogHost,
+        projectId: input.postHogProjectId,
+        personalAPIKey: input.postHogPersonalAPIKey,
+      }),
+    ),
   };
 
   return {

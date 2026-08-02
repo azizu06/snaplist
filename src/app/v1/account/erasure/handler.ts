@@ -13,7 +13,18 @@ function configuredAccountErasureOperations() {
   const secretKey = process.env.SUPABASE_SECRET_KEY?.trim();
   const clerkSecretKey = process.env.CLERK_SECRET_KEY?.trim();
   const revenueCatSecretKey = process.env.REVENUECAT_SECRET_API_KEY?.trim();
-  if (!supabaseURL || !secretKey || !clerkSecretKey || !revenueCatSecretKey) {
+  const postHogHost = process.env.POSTHOG_API_HOST?.trim();
+  const postHogProjectId = process.env.POSTHOG_PROJECT_ID?.trim();
+  const postHogPersonalAPIKey = process.env.POSTHOG_PERSONAL_API_KEY?.trim();
+  if (
+    !supabaseURL
+    || !secretKey
+    || !clerkSecretKey
+    || !revenueCatSecretKey
+    || !postHogHost
+    || !postHogProjectId
+    || !postHogPersonalAPIKey
+  ) {
     throw new Error("The account erasure adapter is not configured.");
   }
   return createConfiguredAccountErasureOperations({
@@ -22,6 +33,9 @@ function configuredAccountErasureOperations() {
     clerkSecretKey,
     revenueCatSecretKey,
     revenueCatProjectId: process.env.REVENUECAT_PROJECT_ID?.trim() || undefined,
+    postHogHost,
+    postHogProjectId,
+    postHogPersonalAPIKey,
   });
 }
 

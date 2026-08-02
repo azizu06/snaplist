@@ -42,6 +42,7 @@ export const accountErasureStorageObjectSchema = z.object({
 export const accountErasureIdentitySchema = z.object({
   clerkUserId: z.string().min(1),
   revenueCatAppUserIds: z.array(z.string().min(1)),
+  postHogPersonUUID: z.string().uuid().nullable().default(null),
 }).strict();
 
 export const accountErasureStateSchema = z.object({
@@ -80,10 +81,15 @@ export interface AccountErasureStore {
     input: AccountErasureStorageObject & { generationId: string },
   ): Promise<boolean>;
   advance(input: { generationId: string }): Promise<AccountErasureState>;
+  recordPostHogPersonUUID(input: {
+    generationId: string;
+    personUUID: string;
+  }): Promise<void>;
   finalize(input: {
     generationId: string;
     clerkIdentityAbsent: boolean;
     revenueCatCustomerAbsent: boolean;
+    postHogPersonAndEventsDeletionConfirmed: boolean;
     attentionReasons: AccountErasureAttentionReason[];
   }): Promise<AccountErasureState>;
 }
@@ -102,6 +108,14 @@ export interface AccountErasureIdentity {
   deleteRevenueCatCustomer(
     input: { appUserId: string },
   ): Promise<{ absent: boolean }>;
+}
+
+/** Server-only PostHog management API boundary. */
+export interface AccountErasureAnalytics {
+  resolvePersonUUID(input: { distinctId: string }): Promise<string | null>;
+  deletePersonAndEvents(input: {
+    personUUID: string;
+  }): Promise<{ confirmed: boolean }>;
 }
 
 const userIdSchema = z.string().min(1).max(255).regex(/^[A-Za-z0-9_-]+$/);
@@ -126,6 +140,7 @@ export async function eraseAccount(
     store: AccountErasureStore;
     storage: AccountErasureStorage;
     identity: AccountErasureIdentity;
+    analytics: AccountErasureAnalytics;
   },
 ): Promise<AccountErasureState> {
   const userId = userIdSchema.parse(rawInput.userId);
@@ -165,6 +180,25 @@ export async function eraseAccount(
 
   const attentionReasons: AccountErasureAttentionReason[] = [];
 
+  const postHogPersonUUID = state.identity.postHogPersonUUID
+    ?? await dependencies.analytics.resolvePersonUUID({
+      distinctId: state.identity.clerkUserId,
+    });
+  if (postHogPersonUUID !== null) {
+    if (state.identity.postHogPersonUUID === null) {
+      await dependencies.store.recordPostHogPersonUUID({
+        generationId: state.generationId,
+        personUUID: postHogPersonUUID,
+      });
+    }
+    const postHogResult = await dependencies.analytics.deletePersonAndEvents({
+      personUUID: postHogPersonUUID,
+    });
+    if (!postHogResult.confirmed) {
+      throw new Error("PostHog person and event deletion was not confirmed.");
+    }
+  }
+
   const clerkResult = await dependencies.identity.deleteClerkUser({
     clerkUserId: state.identity.clerkUserId,
   });
@@ -186,6 +220,7 @@ export async function eraseAccount(
       generationId: state.generationId,
       clerkIdentityAbsent: clerkResult.absent,
       revenueCatCustomerAbsent,
+      postHogPersonAndEventsDeletionConfirmed: true,
       attentionReasons,
     }),
   );
