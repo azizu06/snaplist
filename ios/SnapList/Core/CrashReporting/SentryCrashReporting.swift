@@ -1,105 +1,6 @@
 import Foundation
 import Sentry
 
-// MARK: - Provider-neutral crash report shape
-
-/// The seller-visible identity Sentry can attach to an event. SnapList never
-/// sends any of it, so the scrubber drops the whole value; the type exists so
-/// the scrubbing contract can be tested without linking the Sentry SDK.
-struct CrashReportUser: Equatable, Sendable {
-    var userID: String?
-    var email: String?
-    var username: String?
-    var ipAddress: String?
-}
-
-struct CrashReportBreadcrumb: Equatable, Sendable {
-    var category: String?
-    var message: String?
-    var data: [String: String]
-
-    init(
-        category: String? = nil,
-        message: String? = nil,
-        data: [String: String] = [:]
-    ) {
-        self.category = category
-        self.message = message
-        self.data = data
-    }
-}
-
-/// Every text-bearing field of a Sentry event that SnapList or the SDK can
-/// populate with app-supplied content. Stack frames are deliberately absent:
-/// their paths are compile-time source paths, never captured-photo paths, and
-/// redacting them would destroy the symbolication the report exists for.
-struct CrashReportEvent: Equatable, Sendable {
-    var message: String?
-    var exceptionValues: [String]
-    var breadcrumbs: [CrashReportBreadcrumb]
-    var tags: [String: String]
-    var extra: [String: String]
-    var contexts: [String: [String: String]]
-    var user: CrashReportUser?
-    var requestURL: String?
-
-    init(
-        message: String? = nil,
-        exceptionValues: [String] = [],
-        breadcrumbs: [CrashReportBreadcrumb] = [],
-        tags: [String: String] = [:],
-        extra: [String: String] = [:],
-        contexts: [String: [String: String]] = [:],
-        user: CrashReportUser? = nil,
-        requestURL: String? = nil
-    ) {
-        self.message = message
-        self.exceptionValues = exceptionValues
-        self.breadcrumbs = breadcrumbs
-        self.tags = tags
-        self.extra = extra
-        self.contexts = contexts
-        self.user = user
-        self.requestURL = requestURL
-    }
-
-    /// Every string the event would transmit, so a test can assert that a
-    /// forbidden value survives nowhere rather than field by field.
-    var allText: [String] {
-        var values: [String] = []
-        if let message {
-            values.append(message)
-        }
-        values.append(contentsOf: exceptionValues)
-        for breadcrumb in breadcrumbs {
-            breadcrumb.category.map { values.append($0) }
-            breadcrumb.message.map { values.append($0) }
-            values.append(contentsOf: breadcrumb.data.keys)
-            values.append(contentsOf: breadcrumb.data.values)
-        }
-        values.append(contentsOf: tags.keys)
-        values.append(contentsOf: tags.values)
-        values.append(contentsOf: extra.keys)
-        values.append(contentsOf: extra.values)
-        for (name, context) in contexts {
-            values.append(name)
-            values.append(contentsOf: context.keys)
-            values.append(contentsOf: context.values)
-        }
-        if let user {
-            values.append(
-                contentsOf: [
-                    user.userID, user.email, user.username, user.ipAddress,
-                ].compactMap { $0 }
-            )
-        }
-        if let requestURL {
-            values.append(requestURL)
-        }
-        return values
-    }
-}
-
 // MARK: - Launch policy
 
 struct CrashReportingLaunchDecision: Equatable, Sendable {
@@ -187,10 +88,16 @@ enum CrashReportingLaunchPolicy {
 ///
 /// Two rules, chosen by who authors the field. Fields SnapList or the network
 /// stack populate with arbitrary values — `extra`, `user`, `request`, breadcrumb
-/// `data`, and unapproved `tags`/`contexts` — are dropped wholesale, because no
-/// pattern can recognise a listing title. Fields that carry the crash reason
-/// itself survive with paths, URLs, tokens, and addresses redacted, because
-/// dropping them would leave an unusable report.
+/// `data`, exception `mechanism` data, and unapproved `tags`/`contexts` — are
+/// dropped wholesale, because no pattern can recognise a listing title. Fields
+/// that carry the crash reason itself survive with paths, URLs, tokens, and
+/// addresses redacted, because dropping them would leave an unusable report.
+///
+/// This operates on the SDK's own `Event` rather than a provider-neutral copy.
+/// A parallel value type would be the thing the tests could reach, and the two
+/// would then be free to disagree about the same input — which is exactly the
+/// bug this shape removes. `beforeSend` calls `scrub(_:)` and nothing else, so
+/// a test that drives `scrub(_:)` is driving what ships.
 struct CrashReportScrubber: Sendable {
     static let redactionPlaceholder = "<redacted>"
 
@@ -225,29 +132,61 @@ struct CrashReportScrubber: Sendable {
         "response",
     ]
 
-    func scrub(_ event: CrashReportEvent) -> CrashReportEvent {
-        var scrubbed = event
-        scrubbed.message = event.message.flatMap {
-            Self.approvedMessages.contains($0) ? $0 : nil
+    /// Rewrites `event` in place and returns it, which is the contract
+    /// `beforeSend` expects.
+    @discardableResult
+    func scrub(_ event: Event) -> Event {
+        event.message = event.message.flatMap {
+            Self.approvedMessages.contains($0.formatted) ? $0 : nil
         }
-        scrubbed.exceptionValues = event.exceptionValues.map(redact)
-        scrubbed.breadcrumbs = event.breadcrumbs.map { breadcrumb in
-            CrashReportBreadcrumb(
-                category: breadcrumb.category,
-                message: breadcrumb.message.map(redact),
-                data: [:]
-            )
+
+        for exception in event.exceptions ?? [] {
+            exception.value = exception.value.map(redact)
+            exception.type = exception.type.map(redact)
+            // `mechanism.data` is the raw `NSError.userInfo` and `desc` is the
+            // error's full description, so a failing request URL and its query
+            // token reach both (SentryClient.exceptionForError). The data is a
+            // grouping aid SnapList does not need; the description is kept
+            // redacted because it names the error.
+            exception.mechanism?.data = nil
+            exception.mechanism?.desc = exception.mechanism?.desc.map(redact)
         }
-        scrubbed.tags = event.tags.filter {
+
+        for breadcrumb in event.breadcrumbs ?? [] {
+            breadcrumb.message = breadcrumb.message.map(redact)
+            breadcrumb.data = nil
+        }
+
+        event.tags = (event.tags ?? [:]).filter {
             Self.approvedTagNames.contains($0.key)
         }
-        scrubbed.extra = [:]
-        scrubbed.contexts = event.contexts
+        event.extra = nil
+        event.user = nil
+        event.request = nil
+        event.context = (event.context ?? [:])
             .filter { Self.approvedContextNames.contains($0.key) }
-            .mapValues { $0.mapValues(redact) }
-        scrubbed.user = nil
-        scrubbed.requestURL = nil
-        return scrubbed
+            .mapValues { $0.mapValues(redactAny) }
+        return event
+    }
+
+    /// A context field is `Any`, and only some of the shapes it arrives in are
+    /// strings: `app.view_names` is an array, an HTTP `response` section nests a
+    /// header dictionary, and both would carry text out untouched if only the
+    /// top level were redacted. Numbers, booleans, and dates are SDK
+    /// measurements and pass through as themselves.
+    private func redactAny(_ value: Any) -> Any {
+        switch value {
+        case let text as String:
+            return redact(text)
+        case let url as URL:
+            return redact(url.absoluteString)
+        case let nested as [String: Any]:
+            return nested.mapValues(redactAny)
+        case let list as [Any]:
+            return list.map(redactAny)
+        default:
+            return value
+        }
     }
 
     /// Applied in order: structured carriers first, so a token embedded in a
@@ -346,8 +285,11 @@ enum CrashReporting {
         options.enableFileIOTracing = false
         options.enableCoreDataTracing = false
 
+        // The last gate: whatever the SDK still assembled is rewritten before
+        // it is handed to the transport. `scrubber.scrub` is the whole hook, so
+        // driving this closure in a test drives the shipped scrubbing.
         options.beforeSend = { event in
-            scrub(event)
+            scrubber.scrub(event)
         }
     }
 
@@ -357,83 +299,5 @@ enum CrashReporting {
 #else
         false
 #endif
-    }
-
-    /// The last gate: whatever the SDK still assembled is rewritten to the
-    /// scrubbed value before it is handed to the transport.
-    static func scrub(_ event: Event) -> Event {
-        apply(scrubber.scrub(reportEvent(from: event)), to: event)
-    }
-
-    private static func reportEvent(from event: Event) -> CrashReportEvent {
-        CrashReportEvent(
-            message: event.message?.formatted,
-            exceptionValues: (event.exceptions ?? []).map { $0.value ?? "" },
-            breadcrumbs: (event.breadcrumbs ?? []).map { breadcrumb in
-                CrashReportBreadcrumb(
-                    category: breadcrumb.category,
-                    message: breadcrumb.message,
-                    data: (breadcrumb.data ?? [:])
-                        .mapValues { String(describing: $0) }
-                )
-            },
-            tags: event.tags ?? [:],
-            extra: (event.extra ?? [:]).mapValues { String(describing: $0) },
-            contexts: (event.context ?? [:])
-                .mapValues { $0.mapValues { String(describing: $0) } },
-            user: event.user.map {
-                CrashReportUser(
-                    userID: $0.userId,
-                    email: $0.email,
-                    username: $0.username,
-                    ipAddress: $0.ipAddress
-                )
-            },
-            requestURL: event.request?.url
-        )
-    }
-
-    private static func apply(
-        _ scrubbed: CrashReportEvent,
-        to event: Event
-    ) -> Event {
-        event.message = scrubbed.message.map { SentryMessage(formatted: $0) }
-
-        for (index, exception) in (event.exceptions ?? []).enumerated()
-        where exception.value != nil
-            && index < scrubbed.exceptionValues.count {
-            exception.value = scrubbed.exceptionValues[index]
-        }
-
-        for (index, breadcrumb) in (event.breadcrumbs ?? []).enumerated()
-        where index < scrubbed.breadcrumbs.count {
-            breadcrumb.message = scrubbed.breadcrumbs[index].message
-            breadcrumb.data = nil
-        }
-
-        event.tags = scrubbed.tags
-        event.extra = nil
-        event.user = nil
-        event.request = nil
-        // Non-string context values are SDK-measured numbers and booleans; only
-        // the string ones can carry text, so only those take the redacted form.
-        event.context = (event.context ?? [:]).reduce(
-            into: [String: [String: Any]]()
-        ) { result, section in
-            guard let redacted = scrubbed.contexts[section.key] else {
-                return
-            }
-            result[section.key] = section.value.reduce(
-                into: [String: Any]()
-            ) { fields, field in
-                guard field.value is String,
-                      let replacement = redacted[field.key] else {
-                    fields[field.key] = field.value
-                    return
-                }
-                fields[field.key] = replacement
-            }
-        }
-        return event
     }
 }
