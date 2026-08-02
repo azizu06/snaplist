@@ -110,6 +110,7 @@ describe("lean-MVP release retention contract", () => {
       "per-run-telemetry",
       "posthog-analytics-person-and-events",
       "guest-recovery",
+      "guest-claim-handoffs",
       "app-attest-challenges",
       "app-attest-current-keys",
       "ai-item-credits",
@@ -282,6 +283,33 @@ describe("lean-MVP release retention contract", () => {
         ],
       },
     ]);
+  });
+
+  it("defines the short-lived guest claim handoff disposition", () => {
+    expect(
+      contract.data.find(({ id }) => id === "guest-claim-handoffs"),
+    ).toEqual({
+      id: "guest-claim-handoffs",
+      releaseDatum: true,
+      dispositions: [{
+        treatment: "delete",
+        owner: "guest-device-attestation",
+        deletionTriggers: [
+          "handoff-consumed",
+          "handoff-expires",
+          "guest-recovery-deleted",
+          "app-attest-key-deleted",
+        ],
+        maximumRetention:
+          "active only for the configured 60-to-600-second TTL; atomically deleted on consume, otherwise no later than one hour after expires_at",
+        executor:
+          "atomic-guest-handoff-consume-and-private-hourly-retention-capability",
+        completionProof:
+          "successful verification returns the bound guest identity only from the atomic delete; the private health view proves durable absence of every expired row, exact active hourly registration, and a successful cron.job_run_details entry no older than one hour",
+        ownerDecision:
+          "Issue #610 stores only a handoff-token digest, recovery-token hash, App Attest key ID, guest/recovery IDs, App ID/environment, and immutable photo-set fingerprint. Raw handoff tokens, raw recovery tokens, assertions, and attestation objects are never retained.",
+      }],
+    });
   });
 
   it("rejects omitted or duplicate App Attest retention dispositions", () => {
