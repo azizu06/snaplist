@@ -343,8 +343,29 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["run.detail"].exists)
         expandedDisclosure.tap()
 
-        XCTAssertTrue(rows[3].waitForNonExistence(timeout: 3))
-        XCTAssertTrue(rows[4].waitForNonExistence(timeout: 3))
+        let collapsedDisclosure = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Collapsed"),
+            object: expandedDisclosure
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [collapsedDisclosure], timeout: 5),
+            .completed
+        )
+
+        let hiddenRows = rowIdentifiers.suffix(2).map {
+            app.descendants(matching: .any)[$0]
+        }
+        for hiddenRow in hiddenRows {
+            let hidden = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"),
+                object: hiddenRow
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [hidden], timeout: 5),
+                .completed
+            )
+            XCTAssertFalse(hiddenRow.exists)
+        }
         XCTAssertTrue(rows[0].exists)
         XCTAssertTrue(rows[1].exists)
         XCTAssertTrue(rows[2].exists)

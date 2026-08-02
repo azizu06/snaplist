@@ -226,4 +226,17 @@ describe("auth proxy", () => {
       "https://snaplist.test/login?next=%2Fdashboard",
     );
   });
+
+  it("lets an unauthenticated visitor reach the public pricing page", async () => {
+    const pricingResponse = await proxy(
+      new NextRequest("https://snaplist.test/pricing"),
+      {} as NextFetchEvent,
+    );
+    if (!pricingResponse) {
+      throw new Error("Expected the proxy to return a response");
+    }
+    expect(pricingResponse.status).toBe(200);
+    expect(pricingResponse.headers.get("x-middleware-next")).toBe("1");
+    expect(pricingResponse.headers.get("location")).toBeNull();
+  });
 });

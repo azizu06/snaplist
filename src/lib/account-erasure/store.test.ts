@@ -21,7 +21,22 @@ function rpcState(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Supabase account erasure store", () => {
-  it("uses only the four fixed erasure RPCs", async () => {
+  it("persists the PostHog person UUID before external deletion", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    const store = createSupabaseAccountErasureStore({ rpc });
+
+    await expect(store.recordPostHogPersonUUID({
+      generationId,
+      personUUID: "61700000-0000-4000-8000-000000000001",
+    })).resolves.toBeUndefined();
+
+    expect(rpc).toHaveBeenCalledWith("record_account_erasure_posthog_person_uuid", {
+      p_generation_id: generationId,
+      p_person_uuid: "61700000-0000-4000-8000-000000000001",
+    });
+  });
+
+  it("uses only fixed erasure RPCs", async () => {
     const rpc = vi.fn()
       .mockResolvedValueOnce({
         data: rpcState({
@@ -52,6 +67,7 @@ describe("Supabase account erasure store", () => {
       generationId,
       clerkIdentityAbsent: true,
       revenueCatCustomerAbsent: true,
+      postHogPersonAndEventsDeletionConfirmed: true,
       attentionReasons: [],
     })).resolves.toMatchObject({ status: "deletion_completed" });
 
@@ -70,6 +86,7 @@ describe("Supabase account erasure store", () => {
         p_attention_reasons: [],
         p_clerk_identity_absent: true,
         p_generation_id: generationId,
+        p_posthog_person_and_events_deletion_confirmed: true,
         p_revenuecat_customer_absent: true,
       }],
     ]);
