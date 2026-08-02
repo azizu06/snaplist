@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(22);
+select extensions.plan(25);
 
 -- Issue #597: the native guided identity correction.
 --
@@ -381,6 +381,95 @@ select extensions.is(
   0,
   'the refused cross-tenant claim left no row behind'
 );
+
+-- ---------------------------------------------------------------------------
+-- 4. The claim table is tenant data, so account erasure has to reach it.
+--
+-- `account_erasure.test.sql` derives every table carrying a `user_id` into its
+-- erasure scope and asserts the catalog wiring: a fence trigger exists, and the
+-- completion proof names the table. That guard is what caught this table being
+-- added without either. Catalog wiring is not the contract though — these three
+-- assert the behaviour it is supposed to produce, the same way #384 asserted it
+-- for `public.export_handoffs` rather than trusting the derived guard alone.
+-- ---------------------------------------------------------------------------
+
+-- No savepoint here: this is the file's last block, and rolling back to one
+-- would discard pgTAP's own result rows along with the fixtures — the counter
+-- lives in a temp table and is as transactional as everything else. The outer
+-- `rollback` at the bottom is what keeps all of this off the shared database.
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+insert into public.user_settings (user_id) values ('guided_597_owner');
+
+-- Measured as a delta, not a total. A total reads zero after erasure whether or
+-- not `account_erasure_owned_row_count` mentions this table at all, so it would
+-- pass with the count line deleted.
+create temporary table guided_correction_erasure_probe as
+select private.account_erasure_owned_row_count('guided_597_owner') as before_claim;
+
+insert into private.mobile_guided_corrections (
+  user_id, idempotency_key, run_id, expected_review_revision, intent
+) values (
+  'guided_597_owner',
+  '59750000-0000-4000-8000-0000000000e1',
+  '59720000-0000-4000-8000-000000000001',
+  '59730000-0000-4000-8000-000000000001',
+  '{"addedSpecs":["Includes original charger"]}'::jsonb
+);
+select extensions.is(
+  private.account_erasure_owned_row_count('guided_597_owner')
+    - (select before_claim from guided_correction_erasure_probe),
+  1,
+  'an in-flight correction raises the count that has to reach zero before erasure may finish'
+);
+
+-- The row a cascade cannot reach. `run_id` cascades from `public.pipeline_runs`,
+-- but the completion proof counts `where user_id = …` — two different keys, and
+-- nothing cross-checks them, because the claim RPC enforces the match while the
+-- table itself does not. A row carrying this tenant's `user_id` against another
+-- tenant's run is therefore counted forever and deleted by no foreign key, which
+-- is what strands an erasure at "Mandatory account erasure work is incomplete".
+-- 20260801120000 argued exactly this for `public.export_handoffs`; the explicit
+-- delete is what makes it reachable, and this row is what proves the delete is
+-- load-bearing rather than a duplicate of the cascade.
+insert into private.mobile_guided_corrections (
+  user_id, idempotency_key, run_id, expected_review_revision, intent
+) values (
+  'guided_597_owner',
+  '59750000-0000-4000-8000-0000000000e4',
+  '59720000-0000-4000-8000-000000000002',
+  '59730000-0000-4000-8000-000000000002',
+  '{"addedSpecs":["Anything"]}'::jsonb
+);
+
+select public.begin_account_erasure(
+  'guided_597_owner', '59750000-0000-4000-8000-0000000000e2'
+);
+select extensions.throws_ok(
+  $$insert into private.mobile_guided_corrections (
+      user_id, idempotency_key, run_id, expected_review_revision, intent
+    )
+    values (
+      'guided_597_owner',
+      '59750000-0000-4000-8000-0000000000e3',
+      '59720000-0000-4000-8000-000000000001',
+      '59730000-0000-4000-8000-000000000001',
+      '{"addedSpecs":["Anything"]}'::jsonb
+    )$$,
+  '55000',
+  null,
+  'a correction cannot be claimed into an account already being erased'
+);
+
+select public.advance_account_erasure(
+  (select generation_id from private.account_erasure_generations
+   where user_id = 'guided_597_owner')
+);
+select extensions.is(
+  private.account_erasure_owned_row_count('guided_597_owner'),
+  0,
+  'counting corrections cannot leave an erasure with no way to reach zero'
+);
+
 
 select * from extensions.finish();
 rollback;

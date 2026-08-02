@@ -21,6 +21,26 @@ const listingReviewSave = readFileSync(
   "utf8",
 );
 
+const erasureOrigin = readFileSync(
+  resolve(
+    "supabase/migrations/20260801200000_included_offer_account_erasure_coverage.sql",
+  ),
+  "utf8",
+);
+
+/**
+ * Extracts one `create [or replace] function … $$ … $$;` block verbatim.
+ * Both erasure functions are `$$`-quoted and neither body contains a nested
+ * `$$`, which is what makes the naive scan exact rather than approximate.
+ */
+function functionBlock(source: string, qualifiedName: string): string {
+  const start = source.indexOf(`create or replace function ${qualifiedName}`);
+  expect(start, `${qualifiedName} is not redefined here`).toBeGreaterThan(-1);
+  const bodyOpen = source.indexOf("$$", start);
+  const bodyClose = source.indexOf("$$;", bodyOpen + 2);
+  return source.slice(start, bodyClose + 3);
+}
+
 describe("guided identity correction migration", () => {
   it("is what makes a corrected identity reach the column the client reads", () => {
     // The original RPC wrote `attributes` only, because the web sharpen it was
@@ -137,5 +157,50 @@ describe("guided correction idempotency claim migration", () => {
     expect(migration).toMatch(
       /grant execute on function public\.claim_mobile_guided_correction\([\s\S]*?\) to authenticated;/i,
     );
+  });
+});
+
+describe("account erasure coverage for the claim table", () => {
+  it("refuses a write and counts a row once the owner is being erased", () => {
+    // `account_erasure.test.sql` derives every `user_id`-bearing table into its
+    // erasure scope, so adding this table without both halves failed CI rather
+    // than shipping a tenant table erasure could neither fence nor finish.
+    expect(migration).toMatch(
+      /create trigger zzz_fence_account_erasure_tenant_mutation\s*before insert or update or delete on private\.mobile_guided_corrections\s*for each row execute function private\.fence_account_erasure_tenant_mutation\(\);/i,
+    );
+    expect(migration).toMatch(
+      /union all select count\(\*\)::integer from private\.mobile_guided_corrections where user_id = p_user_id/i,
+    );
+    // Not redundant with `run_id … on delete cascade`: the count predicate is
+    // `user_id` and the cascade travels `run_id`. A row whose denormalized
+    // `user_id` is the erasing tenant against another tenant's run is counted
+    // by a predicate no foreign key participates in, and pgTAP proves erasure
+    // strands on "Mandatory account erasure work is incomplete" without this.
+    expect(migration).toMatch(
+      /delete from private\.mobile_guided_corrections where user_id = v_generation\.user_id;/i,
+    );
+  });
+
+  it("re-declares the erasure engine without changing anything else in it", () => {
+    // Adding a counted table means reissuing two functions this issue does not
+    // own, because Postgres has no way to append a statement to a function
+    // body. That is the whole risk: a transcription slip here silently replaces
+    // account deletion for every tenant, and no test in this PR's own scope
+    // would notice. So the diff itself is the assertion — each function must be
+    // byte-identical to 20260801200000 apart from its one added line.
+    const additions: Record<string, string> = {
+      "private.account_erasure_owned_row_count":
+        "    union all select count(*)::integer from private.mobile_guided_corrections where user_id = p_user_id\n",
+      "public.advance_account_erasure":
+        "  delete from private.mobile_guided_corrections where user_id = v_generation.user_id;\n",
+    };
+
+    for (const [name, addedLine] of Object.entries(additions)) {
+      const reissued = functionBlock(migration, name);
+      expect(reissued).toContain(addedLine);
+      expect(reissued.replace(addedLine, "")).toBe(
+        functionBlock(erasureOrigin, name),
+      );
+    }
   });
 });
