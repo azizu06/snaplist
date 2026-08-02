@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SiteHeader } from "@/components/marketing/site-header";
+import { WaitlistFormView } from "@/components/marketing/waitlist-form";
 import * as site from "@/lib/marketing/site";
 import LandingPage from "./page";
 import PricingPage from "./pricing/page";
@@ -228,6 +229,31 @@ describe("marketing honesty", () => {
 });
 
 describe("marketing destinations", () => {
+  it("renders the launch waitlist form and its quiet states", () => {
+    const landing = load(renderToStaticMarkup(<LandingPage />));
+    const form = landing("form.mkt-waitlist");
+
+    expect(form.length).toBe(1);
+    expect(form.find('input[type="email"][name="email"][required]').length).toBe(1);
+    expect(form.find('input[name="company"][tabindex="-1"]').length).toBe(1);
+    expect(form.find('button[type="submit"]').text()).toBe("Join waitlist");
+    expect(form.text()).toMatch(/We'll email you once when SnapList launches\./);
+
+    const success = load(renderToStaticMarkup(
+      <WaitlistFormView state={{ status: "success" }} action={() => undefined} pending={false} />,
+    ));
+    expect(success('[role="status"]').text()).toBe(
+      "We'll email you once when SnapList launches.",
+    );
+    expect(success('input[name="email"]').length).toBe(0);
+
+    const invalid = load(renderToStaticMarkup(
+      <WaitlistFormView state={{ status: "invalid" }} action={() => undefined} pending={false} />,
+    ));
+    expect(invalid('[role="alert"]').text()).toBe("Enter a valid email address.");
+    expect(invalid('input[name="email"]').length).toBe(1);
+  });
+
   it("keeps pricing as an honest launch teaser", () => {
     const $ = load(renderToStaticMarkup(<PricingPage />));
     const text = $("body").text();
@@ -297,6 +323,14 @@ describe("marketing destinations", () => {
 });
 
 describe("App Review destinations", () => {
+  it("states the one use of a waitlist address", () => {
+    const $ = load(renderToStaticMarkup(<PrivacyPage />));
+
+    expect($("body").text()).toMatch(
+      /If you join the launch waitlist, SnapList uses your email address only to send one launch email\./,
+    );
+  });
+
   it("keeps the privacy and support URLs resolvable without a session", () => {
     // App Review fetches both signed out before the 15 August submission. If the
     // proxy stops treating them as public they answer a redirect to /login,

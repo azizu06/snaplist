@@ -25,7 +25,7 @@ export default function PrivacyPage() {
   return (
     <section className="mkt-shell mkt-shell--prose mkt-doc">
       <h1>Privacy Policy</h1>
-      <p className="mkt-doc__meta">Last updated 1 August 2026</p>
+      <p className="mkt-doc__meta">Last updated 2 August 2026</p>
 
       <p>
         SnapList turns photos of an item into an editable listing. This page describes what the
@@ -58,6 +58,10 @@ export default function PrivacyPage() {
         <li>
           <strong>Diagnostics.</strong> Crash reports and processing telemetry, with the contents
           of your listings removed before they are sent.
+        </li>
+        <li>
+          <strong>Launch waitlist email.</strong> If you join the launch waitlist, SnapList uses
+          your email address only to send one launch email.
         </li>
       </ul>
 

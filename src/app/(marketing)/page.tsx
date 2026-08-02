@@ -7,6 +7,7 @@ import { HeroArt } from "@/components/marketing/hero-art";
 import { MarketingBento } from "@/components/marketing/marketing-bento";
 import { MarketplaceLoop } from "@/components/marketing/marketplace-loop";
 import { StorefrontHandoff } from "@/components/marketing/storefront-handoff";
+import { WaitlistForm } from "@/components/marketing/waitlist-form";
 import {
   CTA,
   FAQ_TITLE,
@@ -130,9 +131,7 @@ export default function LandingPage() {
         <div className="mkt-shell mkt-shell--prose">
           <h2 className="mkt-cta__h2">{CTA.title}</h2>
           <p className="mkt-cta__body">{CTA.body}</p>
-          <div className="mkt-cta__row">
-            <AppStoreButton size="lg" />
-          </div>
+          <WaitlistForm />
         </div>
       </section>
     </>
