@@ -290,19 +290,27 @@ struct AssistedExportDomain: Equatable, Sendable {
         undoWindow = nil
     }
 
-    /// A freshly prepared pack for the current listing. Shared records carry
-    /// over untouched.
+    /// A freshly prepared pack for the current listing.
     ///
     /// A handoff receipt belongs to the pack text the seller actually handed
     /// over, which is what the content revision identifies — the same asymmetry
     /// the server keeps, where reads key on the content revision alone and the
     /// confirm guard on the full one. A price-only edit advances the review
-    /// revision without moving a word of the pack, so the receipt survives it. A
-    /// new content revision is different text, and confirming against that would
-    /// claim the seller posted words they never saw.
+    /// revision without moving a word of the pack, so the receipt survives it.
+    ///
+    /// A new content revision is different text, and everything the seller said
+    /// about the old text goes with it — the handoff and the `Shared` claim
+    /// alike. `loadExportHandoffs` keys on the content revision, so the server
+    /// returns no row for the new text and reads `prepared`; a client still
+    /// showing `Shared` would be the only thing in the system saying it, about
+    /// words the seller never saw. Keeping the claim while retiring the handoff
+    /// would be worse than either: `Mark as shared` is withheld from a
+    /// destination with no handoff, so the seller could neither correct the
+    /// line nor re-confirm it.
     mutating func updatePack(to pack: AssistedExportPack) {
         if pack.contentRevision != self.pack.contentRevision {
             handedOff = []
+            sharedAt = [:]
         }
         self.pack = pack
         currentReviewRevision = pack.reviewRevision

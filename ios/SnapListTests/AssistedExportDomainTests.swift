@@ -527,7 +527,14 @@ final class AssistedExportDomainTests: XCTestCase {
         XCTAssertEqual(domain.statusText(for: .mercari), "Shared Jul 25")
     }
 
-    func testUpdatingThePackClearsTheStaleStateAndKeepsSharedRecords() {
+    // A pack update that carries the same text is the case where the seller's
+    // claim genuinely survives, and it is the case the server agrees with:
+    // `loadExportHandoffs` keys on the content revision, so it returns the same
+    // receipt row before and after. A new pack text is the other case, and it
+    // retires the claim — see
+    // `testANewPackTextRetiresTheSharedClaimThatBelongedToTheOldOne`.
+
+    func testUpdatingThePackClearsTheStaleStateAndKeepsUnchangedSharedRecords() {
         var domain = AssistedExportDomain(pack: .fixture())
         domain.toggle(.mercari)
         domain.recordHandoff(.openedDestination, for: .mercari)
@@ -537,7 +544,7 @@ final class AssistedExportDomainTests: XCTestCase {
 
         domain.updatePack(
             to: .fixture(
-                contentRevision: Self.editedContentRevision,
+                contentRevision: AssistedExportPack.fixtureContentRevision,
                 reviewRevision: Self.editedReviewRevision
             )
         )
@@ -623,6 +630,76 @@ final class AssistedExportDomainTests: XCTestCase {
             domain.offersMarkAsShared(for: .facebookMarketplace),
             "The pack they copied is gone. Confirming against the new one "
                 + "would claim they posted words they never saw."
+        )
+    }
+
+    // The server keys handoff reads on the content revision alone, so a new
+    // pack text returns no row at all and the destination reads `prepared`
+    // again. A client that kept the old `Shared` line would be the only thing
+    // in the system still saying it, against text the seller never saw, and
+    // with no way to correct it: the handoff that unlocks `Mark as shared` was
+    // retired by the same edit. The claim goes with the words it was about.
+
+    func testANewPackTextRetiresTheSharedClaimThatBelongedToTheOldOne() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.toggle(.mercari)
+        domain.recordHandoff(.openedDestination, for: .mercari)
+        domain.presentConfirmSheet(for: .mercari)
+        XCTAssertEqual(domain.confirmShared(at: Self.julyTwentyFifth), .recorded)
+
+        domain.listingRevisionChanged(to: Self.editedReviewRevision)
+        domain.updatePack(
+            to: .fixture(
+                contentRevision: Self.editedContentRevision,
+                reviewRevision: Self.editedReviewRevision
+            )
+        )
+
+        XCTAssertEqual(
+            domain.handoff(for: .mercari),
+            .prepared,
+            "The seller said they posted the old text. The new text is not "
+                + "something they have said anything about."
+        )
+        XCTAssertEqual(domain.statusText(for: .mercari), "Not shared")
+        XCTAssertEqual(
+            domain.state,
+            .workspaceOpen(.mercari),
+            "The workspace comes back, and it comes back asking to be handed "
+                + "over rather than reading Shared."
+        )
+        XCTAssertEqual(
+            domain.accessibilityLabel(for: .mercari),
+            "Mercari, not shared, open"
+        )
+    }
+
+    func testTheSellerCanSayTheySharedTheNewPackTextAfterHandingItOver() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.toggle(.mercari)
+        domain.recordHandoff(.openedDestination, for: .mercari)
+        domain.presentConfirmSheet(for: .mercari)
+        domain.confirmShared(at: Self.julyTwentyFifth)
+
+        domain.listingRevisionChanged(to: Self.editedReviewRevision)
+        domain.updatePack(
+            to: .fixture(
+                contentRevision: Self.editedContentRevision,
+                reviewRevision: Self.editedReviewRevision
+            )
+        )
+        domain.recordHandoff(.openedDestination, for: .mercari)
+        domain.presentConfirmSheet(for: .mercari)
+
+        XCTAssertEqual(
+            domain.confirmShared(at: Self.julyTwentySixth),
+            .recorded,
+            "Retiring the old claim leaves the seller a way to make a new one, "
+                + "not a row they can neither correct nor re-confirm."
+        )
+        XCTAssertEqual(
+            domain.handoff(for: .mercari),
+            .shared(at: Self.julyTwentySixth)
         )
     }
 
