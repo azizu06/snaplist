@@ -86,12 +86,10 @@ enum CrashReportingLaunchPolicy {
 
 /// Removes seller content from a crash report before it leaves the device.
 ///
-/// Two rules, chosen by who authors the field. Fields SnapList or the network
-/// stack populate with arbitrary values — `extra`, `user`, `request`, breadcrumb
-/// `data`, exception `mechanism` data, and unapproved `tags`/`contexts` — are
-/// dropped wholesale, because no pattern can recognise a listing title. Fields
-/// that carry the crash reason itself survive with paths, URLs, tokens, and
-/// addresses redacted, because dropping them would leave an unusable report.
+/// Free-form values are dropped wholesale because no pattern can recognize a
+/// listing title. Exception types and stack frames, breadcrumb metadata, and
+/// approved SDK-authored tags and contexts retain the diagnostic skeleton used
+/// for symbolication and default grouping.
 ///
 /// This operates on the SDK's own `Event` rather than a provider-neutral copy.
 /// A parallel value type would be the thing the tests could reach, and the two
@@ -100,11 +98,6 @@ enum CrashReportingLaunchPolicy {
 /// a test that drives `scrub(_:)` is driving what ships.
 struct CrashReportScrubber: Sendable {
     static let redactionPlaceholder = "<redacted>"
-
-    /// `SentrySDK.capture(message:)` has no call site in SnapList today. When
-    /// one is added, put its exact static identifier here — a message that is
-    /// not listed cannot be proven free of seller text, so it is dropped.
-    static let approvedMessages: Set<String> = []
 
     /// Tag keys the SDK and SnapList's own metadata own. Anything else is a
     /// caller-supplied value and cannot be trusted to exclude seller content.
@@ -136,27 +129,26 @@ struct CrashReportScrubber: Sendable {
     /// `beforeSend` expects.
     @discardableResult
     func scrub(_ event: Event) -> Event {
-        event.message = event.message.flatMap {
-            Self.approvedMessages.contains($0.formatted) ? $0 : nil
-        }
+        event.message = nil
 
         for exception in event.exceptions ?? [] {
-            exception.value = exception.value.map(redact)
-            exception.type = exception.type.map(redact)
+            exception.value = nil
             // `mechanism.data` is the raw `NSError.userInfo` and `desc` is the
-            // error's full description, so a failing request URL and its query
-            // token reach both (SentryClient.exceptionForError). The data is a
-            // grouping aid SnapList does not need; the description is kept
-            // redacted because it names the error.
+            // error's free-form description. Neither is required when the
+            // mechanism type and stack frames remain available.
             exception.mechanism?.data = nil
-            exception.mechanism?.desc = exception.mechanism?.desc.map(redact)
+            exception.mechanism?.desc = nil
         }
 
         for breadcrumb in event.breadcrumbs ?? [] {
-            breadcrumb.message = breadcrumb.message.map(redact)
+            breadcrumb.message = nil
             breadcrumb.data = nil
         }
 
+        event.fingerprint = nil
+        event.transaction = nil
+        event.logger = nil
+        event.modules = nil
         event.tags = (event.tags ?? [:]).filter {
             Self.approvedTagNames.contains($0.key)
         }

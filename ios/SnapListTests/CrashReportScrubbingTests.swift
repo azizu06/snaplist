@@ -44,6 +44,10 @@ final class CrashReportScrubbingTests: XCTestCase {
     /// strings.
     private func sellerContentEvent() -> Event {
         let event = Event(level: .fatal)
+        event.fingerprint = [Self.listingTitle]
+        event.transaction = Self.listingTitle
+        event.logger = Self.listingTitle
+        event.modules = ["seller_content": Self.listingTitle]
 
         event.message = SentryMessage(
             formatted: "Pricing failed for \(Self.listingTitle)"
@@ -120,7 +124,7 @@ final class CrashReportScrubbingTests: XCTestCase {
     /// Every string the event would put on the wire. Reading the serialized
     /// form rather than a hand-picked field list is what makes the absence
     /// assertion total: a channel nobody thought to check cannot hide from it.
-    private func transmittedText(of event: Event) -> String {
+    private func transmittedText(of serializedEvent: [String: Any]) -> String {
         func strings(in value: Any) -> [String] {
             switch value {
             case let text as String:
@@ -133,15 +137,37 @@ final class CrashReportScrubbingTests: XCTestCase {
                 return [String(describing: value)]
             }
         }
-        return strings(in: event.serialize()).joined(separator: "\n")
+        return strings(in: serializedEvent).joined(separator: "\n")
+    }
+
+    private func firstException(
+        in serializedEvent: [String: Any]
+    ) throws -> [String: Any] {
+        let exceptionContainer = try XCTUnwrap(
+            serializedEvent["exception"] as? [String: Any]
+        )
+        let exceptions = try XCTUnwrap(
+            exceptionContainer["values"] as? [[String: Any]]
+        )
+        return try XCTUnwrap(exceptions.first)
+    }
+
+    private func firstBreadcrumb(
+        in serializedEvent: [String: Any]
+    ) throws -> [String: Any] {
+        let breadcrumbs = try XCTUnwrap(
+            serializedEvent["breadcrumbs"] as? [[String: Any]]
+        )
+        return try XCTUnwrap(breadcrumbs.first)
     }
 
     func testInstalledHookRemovesSellerContentFromEveryChannel() throws {
         let beforeSend = try installedBeforeSend()
 
-        let scrubbed = try XCTUnwrap(beforeSend(sellerContentEvent()))
-
-        let survivingText = transmittedText(of: scrubbed)
+        let serialized = try XCTUnwrap(
+            beforeSend(sellerContentEvent())?.serialize()
+        )
+        let survivingText = transmittedText(of: serialized)
         for secret in [
             Self.photoPath,
             Self.listingTitle,
@@ -157,21 +183,35 @@ final class CrashReportScrubbingTests: XCTestCase {
         }
     }
 
-    func testInstalledHookRedactsBreadcrumbMessagesAndDropsTheirData() throws {
+    func testInstalledHookDropsBreadcrumbMessagesAndData() throws {
         let beforeSend = try installedBeforeSend()
 
-        let scrubbed = try XCTUnwrap(beforeSend(sellerContentEvent()))
-
-        let breadcrumb = try XCTUnwrap(scrubbed.breadcrumbs?.first)
-        XCTAssertNil(breadcrumb.data)
-        XCTAssertEqual(
-            breadcrumb.message,
-            "POST \(CrashReportScrubber.redactionPlaceholder) "
-                + "Authorization=\(CrashReportScrubber.redactionPlaceholder)"
+        let serialized = try XCTUnwrap(
+            beforeSend(sellerContentEvent())?.serialize()
         )
+        let serializedBreadcrumb = try firstBreadcrumb(in: serialized)
+
+        XCTAssertNil(serializedBreadcrumb["data"])
+        XCTAssertNil(serializedBreadcrumb["message"])
         // The breadcrumb itself survives: dropping it would take the trail the
         // report exists to show.
-        XCTAssertEqual(breadcrumb.category, "http")
+        XCTAssertEqual(serializedBreadcrumb["category"] as? String, "http")
+    }
+
+    func testInstalledHookDropsOrdinarySellerProseFromBreadcrumbMessages() throws {
+        let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        let breadcrumb = Breadcrumb(level: .info, category: "listing.review")
+        breadcrumb.message = "Seller reviewed \(Self.listingTitle)"
+        event.breadcrumbs = [breadcrumb]
+
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let survivingText = transmittedText(of: serialized)
+
+        XCTAssertFalse(
+            survivingText.contains(Self.listingTitle),
+            "serialized breadcrumb still transmits ordinary seller prose"
+        )
     }
 
     func testInstalledHookDropsTheHTTPRequestAndUserContext() throws {
@@ -184,37 +224,57 @@ final class CrashReportScrubbingTests: XCTestCase {
         XCTAssertNil(scrubbed.extra)
     }
 
-    func testInstalledHookRedactsExceptionMessagesWithoutDroppingThem() throws {
+    func testInstalledHookDropsExceptionValuesAndKeepsTypes() throws {
         let beforeSend = try installedBeforeSend()
 
-        let scrubbed = try XCTUnwrap(beforeSend(sellerContentEvent()))
-
-        let exception = try XCTUnwrap(scrubbed.exceptions?.first)
-        XCTAssertEqual(
-            exception.value,
-            "Fatal error: could not read "
-                + CrashReportScrubber.redactionPlaceholder
+        let serialized = try XCTUnwrap(
+            beforeSend(sellerContentEvent())?.serialize()
         )
-        XCTAssertEqual(exception.type, "SnapListPipelineError")
+        let exception = try firstException(in: serialized)
+
+        XCTAssertNil(exception["value"])
+        XCTAssertEqual(exception["type"] as? String, "SnapListPipelineError")
     }
 
     /// `SentryClient.exceptionForError` fills `mechanism.data` with the raw
     /// `NSError.userInfo` and `mechanism.desc` with the error's description, so
     /// a failing request URL and its token reach both.
-    func testInstalledHookDropsMechanismDataAndRedactsItsDescription() throws {
+    func testInstalledHookDropsMechanismDataAndDescriptionAndKeepsType() throws {
         let beforeSend = try installedBeforeSend()
 
-        let scrubbed = try XCTUnwrap(beforeSend(sellerContentEvent()))
-
-        let mechanism = try XCTUnwrap(scrubbed.exceptions?.first?.mechanism)
-        XCTAssertNil(mechanism.data)
-        XCTAssertEqual(
-            mechanism.desc,
-            "The operation could not be completed. url="
-                + CrashReportScrubber.redactionPlaceholder
+        let serialized = try XCTUnwrap(
+            beforeSend(sellerContentEvent())?.serialize()
         )
+        let exception = try firstException(in: serialized)
+        let mechanism = try XCTUnwrap(
+            exception["mechanism"] as? [String: Any]
+        )
+
+        XCTAssertNil(mechanism["data"])
+        XCTAssertNil(mechanism["description"])
         // The grouping identity the mechanism exists for is untouched.
-        XCTAssertEqual(mechanism.type, "NSError")
+        XCTAssertEqual(mechanism["type"] as? String, "NSError")
+    }
+
+    func testInstalledHookDropsOrdinarySellerProseFromMechanismDescriptions() throws {
+        let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        let exception = Exception(
+            value: "Fatal error",
+            type: "SnapListPipelineError"
+        )
+        let mechanism = Mechanism(type: "NSError")
+        mechanism.desc = "Seller price missing for \(Self.listingTitle)"
+        exception.mechanism = mechanism
+        event.exceptions = [exception]
+
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let survivingText = transmittedText(of: serialized)
+
+        XCTAssertFalse(
+            survivingText.contains(Self.listingTitle),
+            "serialized mechanism still transmits ordinary seller prose"
+        )
     }
 
     /// A context value is `Any`. Redacting only the string-typed ones let an
@@ -253,45 +313,80 @@ final class CrashReportScrubbingTests: XCTestCase {
         XCTAssertNil(scrubbed.message)
     }
 
+    func testInstalledHookDropsSellerProseFromEventLevelFields() throws {
+        let beforeSend = try installedBeforeSend()
+        let event = Event(level: .fatal)
+        event.fingerprint = [Self.listingTitle]
+        event.transaction = Self.listingTitle
+        event.logger = Self.listingTitle
+        event.modules = ["seller_content": Self.listingTitle]
+
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let survivingText = transmittedText(of: serialized)
+
+        XCTAssertFalse(
+            survivingText.contains(Self.listingTitle),
+            "serialized event-level fields still transmit seller prose"
+        )
+    }
+
     /// A scrubber that erased everything would pass every absence assertion
     /// above, so the diagnostic skeleton a crash report exists for must survive
     /// alongside the removals.
     func testInstalledHookKeepsTheDiagnosticSkeleton() throws {
         let beforeSend = try installedBeforeSend()
         let event = Event(level: .fatal)
-        event.exceptions = [
-            Exception(value: "Fatal error: index out of range", type: "EXC_BREAKPOINT"),
-        ]
+        let frame = Frame()
+        frame.function = "CrashReporting.captureCrash"
+        frame.inApp = true
+        let sourceException = Exception(
+            value: "Fatal error: index out of range",
+            type: "EXC_BREAKPOINT"
+        )
+        sourceException.stacktrace = SentryStacktrace(
+            frames: [frame],
+            registers: [:]
+        )
+        event.exceptions = [sourceException]
         let breadcrumb = Breadcrumb(level: .info, category: "ui.lifecycle")
         breadcrumb.message = "Scan submitted"
         event.breadcrumbs = [breadcrumb]
         event.tags = ["environment": "testflight"]
         event.context = ["app": ["app_identifier": "dev.snaplist.ios"]]
 
-        let scrubbed = try XCTUnwrap(beforeSend(event))
-
-        XCTAssertEqual(
-            scrubbed.exceptions?.first?.value,
-            "Fatal error: index out of range"
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let exception = try firstException(in: serialized)
+        let stacktrace = try XCTUnwrap(
+            exception["stacktrace"] as? [String: Any]
         )
-        XCTAssertEqual(scrubbed.exceptions?.first?.type, "EXC_BREAKPOINT")
-        XCTAssertEqual(scrubbed.breadcrumbs?.first?.category, "ui.lifecycle")
-        XCTAssertEqual(scrubbed.breadcrumbs?.first?.message, "Scan submitted")
-        XCTAssertEqual(scrubbed.tags?["environment"], "testflight")
+        let frames = try XCTUnwrap(
+            stacktrace["frames"] as? [[String: Any]]
+        )
+        let serializedBreadcrumb = try firstBreadcrumb(in: serialized)
+        let tags = try XCTUnwrap(serialized["tags"] as? [String: String])
+        let contexts = try XCTUnwrap(
+            serialized["contexts"] as? [String: [String: Any]]
+        )
+
+        XCTAssertNil(exception["value"])
+        XCTAssertEqual(exception["type"] as? String, "EXC_BREAKPOINT")
         XCTAssertEqual(
-            scrubbed.context?["app"]?["app_identifier"] as? String,
+            frames.first?["function"] as? String,
+            "CrashReporting.captureCrash"
+        )
+        XCTAssertEqual(
+            serializedBreadcrumb["category"] as? String,
+            "ui.lifecycle"
+        )
+        XCTAssertNil(serializedBreadcrumb["message"])
+        XCTAssertEqual(tags["environment"], "testflight")
+        XCTAssertEqual(
+            contexts["app"]?["app_identifier"] as? String,
             "dev.snaplist.ios"
         )
     }
 
-    /// The honest limit of pattern redaction, pinned so it stays a decision
-    /// rather than a surprise: an exception value is kept because it is the
-    /// crash reason, and free-form prose inside one matches no pattern. Nothing
-    /// in SnapList interpolates seller text into a trap message today — every
-    /// `preconditionFailure` reachable from the app names a fixture or a path,
-    /// and paths are redacted. Closing this would mean dropping exception
-    /// values wholesale, which would leave an unusable report.
-    func testExceptionProseIsAKnownUnredactableChannel() throws {
+    func testInstalledHookDropsOrdinarySellerProseFromExceptionValues() throws {
         let beforeSend = try installedBeforeSend()
         let event = Event(level: .fatal)
         event.exceptions = [
@@ -301,11 +396,12 @@ final class CrashReportScrubbingTests: XCTestCase {
             ),
         ]
 
-        let scrubbed = try XCTUnwrap(beforeSend(event))
+        let serialized = try XCTUnwrap(beforeSend(event)?.serialize())
+        let survivingText = transmittedText(of: serialized)
 
-        XCTAssertEqual(
-            scrubbed.exceptions?.first?.value,
-            "Fatal error: price missing for \(Self.listingTitle)"
+        XCTAssertFalse(
+            survivingText.contains(Self.listingTitle),
+            "serialized exception still transmits ordinary seller prose"
         )
     }
 }
