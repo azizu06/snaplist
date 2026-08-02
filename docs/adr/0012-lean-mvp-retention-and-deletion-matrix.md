@@ -22,7 +22,8 @@ be inferred from current code or historical policy.
 covers local photos and voice, private Storage photos and raw voice, a possible hosted transcription
 copy, retained transcripts, items, eBay drafts, export packs, pipeline runs, pricing evidence,
 per-run telemetry, tenant user settings, guest recovery, AI-item credits, eBay connections and
-publish receipts, Clerk identity, and Apple/RevenueCat references.
+publish receipts, Clerk identity, Apple/RevenueCat references, and the PostHog person plus
+historical account-linked analytics events.
 
 Every release datum has exactly one disposition. A complete disposition names:
 
@@ -127,6 +128,33 @@ decision, and such a row is not pruned until it completes.
 And it expires: a daily private prune removes receipts 30 days after they complete. That window is
 an owner judgement, long enough for a client retrying a stalled erasure to resolve to its own
 generation and short enough that a digest does not become indefinite retention.
+
+### 7. Delete PostHog analytics through verified provider state
+
+Issue #617 selects PostHog's current real-deletion API, not suppression. Account erasure resolves
+the exact PostHog person UUID from the Clerk user ID, durably records that UUID before the external
+mutation, and calls `POST /api/projects/:project_id/persons/bulk_delete/` with `delete_events=true`,
+`delete_recordings=false`, and `keep_person=false`. Session replay is disabled in the native
+PostHog configuration, so there is no recording datum for this executor to delete. The server uses a
+private PostHog management API key with `person:read` and `person:write`; the public iOS project token
+is ingestion authority only and is never accepted by the erasure path.
+
+PostHog returns HTTP 202 because historical-event deletion is asynchronous. That response is not
+completion proof. The erasure receipt remains non-terminal until the matching person UUID has a
+`completed` deletion-status row with `delete_verified_at` and retrieving the person reports it
+absent. Only then does finalization write `posthog_person_and_events_deletion_proved_at` and scrub the
+working PostHog UUID. PostHog publishes no deletion-completion SLA, so the matrix makes no invented
+numeric provider promise; pending or unavailable proof keeps account erasure incomplete.
+
+The anonymous pre-identify ID has an explicit boundary. When PostHog ingests `$identify`, it merges
+the anonymous history into the Clerk-keyed person, so deleting that person UUID and its historical
+events covers both distinct IDs. Before that merge, the anonymous UUID may already label events in
+PostHog, but SnapList's server neither receives nor persists it and PostHog has no Clerk-ID
+association by which a later account erasure can discover that unlinked provider identity. The
+matrix says this limitation rather than claiming unreachable coverage.
+
+Current provider authority: [Persons API](https://posthog.com/docs/api/persons), including bulk
+deletion and deletion-status verification; retrieved 2026-08-02.
 
 ## Consequences
 

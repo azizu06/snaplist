@@ -105,12 +105,18 @@ async function advanceErasure(generationId: string): Promise<ErasurePayload> {
  */
 async function finalizeErasure(
   generationId: string,
-  proof: { clerk?: boolean; revenueCat?: boolean; attention?: string[] } = {},
+  proof: {
+    clerk?: boolean;
+    revenueCat?: boolean;
+    postHog?: boolean;
+    attention?: string[];
+  } = {},
 ): Promise<ErasurePayload> {
   const finalized = await admin.rpc("finalize_account_erasure", {
     p_attention_reasons: proof.attention ?? [],
     p_clerk_identity_absent: proof.clerk ?? true,
     p_generation_id: generationId,
+    p_posthog_person_and_events_deletion_confirmed: proof.postHog ?? true,
     p_revenuecat_customer_absent: proof.revenueCat ?? true,
   });
   expect(finalized.error).toBeNull();
@@ -123,10 +129,17 @@ async function erasureReceipt(userId: string): Promise<{
   user_id: string | null;
   idempotency_key: string | null;
   clerk_user_id: string | null;
+  posthog_person_uuid: string | null;
+  posthog_person_and_events_deletion_proved_at: Date | string | null;
+  completed_at: Date | string | null;
   retained_records: string[];
 } | null> {
   const { rows } = await database.query(
-    `select status, user_id, idempotency_key, clerk_user_id, retained_records
+    `select status, user_id, idempotency_key, clerk_user_id,
+            posthog_person_uuid,
+            posthog_person_and_events_deletion_proved_at,
+            completed_at,
+            retained_records
      from private.account_erasure_generations
      where user_id_digest = private.account_erasure_user_digest($1)`,
     [userId],
@@ -529,12 +542,29 @@ describe("durable account erasure against local Supabase", () => {
     expect(advanced.identity).toMatchObject({ clerk_user_id: ownerId });
     expect(await mandatoryOwnerResidue()).toBe(0);
 
+    // The PostHog completion proof is a receipt gate, not advisory metadata.
+    // Withhold it and no terminal receipt may be written.
+    const postHogUnproved = await admin.rpc("finalize_account_erasure", {
+      p_attention_reasons: [],
+      p_clerk_identity_absent: true,
+      p_generation_id: started.generation_id,
+      p_posthog_person_and_events_deletion_confirmed: false,
+      p_revenuecat_customer_absent: true,
+    });
+    expect(postHogUnproved.error).not.toBeNull();
+    expect(await erasureReceipt(ownerId)).toMatchObject({
+      status: "deletion_in_progress",
+      completed_at: null,
+      posthog_person_and_events_deletion_proved_at: null,
+    });
+
     // Provider-owned deletion is not SnapList deletion: without observed
     // absence there is no completion to report.
     const unproved = await admin.rpc("finalize_account_erasure", {
       p_attention_reasons: [],
       p_clerk_identity_absent: false,
       p_generation_id: started.generation_id,
+      p_posthog_person_and_events_deletion_confirmed: true,
       p_revenuecat_customer_absent: true,
     });
     expect(unproved.error).not.toBeNull();
@@ -553,11 +583,14 @@ describe("durable account erasure against local Supabase", () => {
 
     // The receipt survives so replay and the fence stay truthful, but it keeps
     // no raw identifier of the account it erased.
-    expect(await erasureReceipt(ownerId)).toEqual({
+    expect(await erasureReceipt(ownerId)).toMatchObject({
       status: "deletion_completed",
       user_id: null,
       idempotency_key: null,
       clerk_user_id: null,
+      posthog_person_uuid: null,
+      posthog_person_and_events_deletion_proved_at: expect.anything(),
+      completed_at: expect.anything(),
       retained_records: [],
     });
     const manifestResidue = await database.query<{ count: number }>(

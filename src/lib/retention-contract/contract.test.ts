@@ -108,6 +108,7 @@ describe("lean-MVP release retention contract", () => {
       "pipeline-runs",
       "pricing-evidence",
       "per-run-telemetry",
+      "posthog-analytics-person-and-events",
       "guest-recovery",
       "app-attest-challenges",
       "app-attest-current-keys",
@@ -122,6 +123,47 @@ describe("lean-MVP release retention contract", () => {
       "apple-revenuecat-references",
       "account-erasure-receipt",
     ]);
+  });
+
+  it("defines the PostHog analytics deletion disposition", () => {
+    const analytics = contract.data.find(
+      ({ id }) => id === "posthog-analytics-person-and-events",
+    );
+
+    expect(analytics).toEqual({
+      id: "posthog-analytics-person-and-events",
+      releaseDatum: true,
+      dispositions: [
+        {
+          treatment: "delete",
+          owner: "posthog-analytics-provider",
+          deletionTriggers: ["account-erasure"],
+          maximumRetention:
+            "no later than account-erasure completion; SnapList keeps the erasure incomplete while PostHog person or queued historical-event deletion remains unverified",
+          executor:
+            "snaplist-account-erasure-posthog-person-and-events-deletion-capability",
+          completionProof:
+            "the executor records posthog_person_and_events_deletion_proved_at on the erasure receipt only after the PostHog person read-back reports absence and the deletion-status endpoint reports completed with delete_verified_at for that person UUID; a distinct-ID lookup reporting no person is absence proof when no deletion target was previously recorded",
+          citations: [
+            {
+              url: "https://posthog.com/docs/api/persons",
+              clause: "Create persons bulk delete",
+              quote: "Only events captured before the request will be deleted.",
+              retrieved: "2026-08-02",
+            },
+            {
+              url: "https://posthog.com/docs/api/persons",
+              clause: "List all persons deletion status",
+              quote:
+                "Use this endpoint to check whether those deletions are still pending or have been completed.",
+              retrieved: "2026-08-02",
+            },
+          ],
+          ownerDecision:
+            "Issue #617 selects real deletion with delete_events=true, delete_recordings=false, and keep_person=false. SnapList session replay is disabled, so no recording datum exists to delete. Before a successful $identify merge, the anonymous distinct ID may label events in PostHog, but SnapList's server neither receives nor persists it and PostHog has no Clerk-ID association by which account erasure can discover it. If $identify reaches PostHog, it associates that anonymous ID with the Clerk-keyed person and deleting the recorded person UUID covers both distinct IDs; if it never reaches PostHog, the later Clerk-ID erasure cannot reach that unlinked anonymous person.",
+        },
+      ],
+    });
   });
 
   // Account erasure keeps exactly one row after the account is gone, so the
@@ -339,6 +381,7 @@ describe("lean-MVP release retention contract", () => {
       "ebay-publish-receipts",
       "clerk-identity",
       "apple-revenuecat-references",
+      "posthog-analytics-person-and-events",
     ];
 
     for (const id of providerObligations) {
@@ -369,6 +412,19 @@ describe("lean-MVP release retention contract", () => {
     const clerk = invalid.data.find(({ id }) => id === "clerk-identity");
     if (!clerk) throw new Error("Clerk identity release datum is missing");
     delete clerk.dispositions[0].citations;
+
+    expect(() => parseReleaseRetentionContract(invalid)).toThrow(
+      /must cite the published provider authority/i,
+    );
+  });
+
+  it("rejects PostHog analytics deletion without current provider authority", () => {
+    const invalid = structuredClone(contract);
+    const analytics = invalid.data.find(
+      ({ id }) => id === "posthog-analytics-person-and-events",
+    );
+    if (!analytics) throw new Error("PostHog analytics disposition is missing");
+    delete analytics.dispositions[0].citations;
 
     expect(() => parseReleaseRetentionContract(invalid)).toThrow(
       /must cite the published provider authority/i,
