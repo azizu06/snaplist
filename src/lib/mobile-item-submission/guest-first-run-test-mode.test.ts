@@ -19,11 +19,14 @@ describe("verified guest focused-selector execution mode", () => {
     expect(shouldSkipGuestFirstRunForOfflineCi(env)).toBe(expected);
   });
 
-  it("marks only the offline CI test step", () => {
+  it("separates offline verification from provisioned stack enforcement", () => {
     const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
 
     expect(workflow).toMatch(
-      /- name: Run the offline Vitest suite\s+env:\s+SNAPLIST_OFFLINE_VERIFY: "1"\s+SNAPLIST_REQUIRE_DB_STACK: "1"\s+run: pnpm test/i,
+      /- name: Run the offline Vitest suite\s+env:\s+SNAPLIST_OFFLINE_VERIFY: "1"\s+run: pnpm test/i,
+    );
+    expect(workflow).toMatch(
+      /- name: Require the provisioned Supabase stack for RLS coverage\s+env:\s+SNAPLIST_REQUIRE_DB_STACK: "1"/i,
     );
   });
 });

@@ -19,13 +19,13 @@ import { createSupabaseMobileItemSubmissionStaging } from "./store";
 import {
   DATABASE_URL,
   PUBLISHABLE_KEY,
+  SECRET_KEY,
   SUPABASE_URL,
   authorizeRemoveAndCompleteStagingCleanup,
   createSubmissionAdminControl,
   expireAndClaimStagingCleanup,
   fixedWavBytes,
   jpeg,
-  localSubmissionStackIsReachable,
   proveVerifiedGuestLostResponseRecovery,
   request,
   singlePhotoMultipart,
@@ -155,9 +155,13 @@ function createGuestSubmission(
 beforeAll(async () => {
   reachable = await stackReachable({
     apiKey: PUBLISHABLE_KEY,
-    requiredValues: [DATABASE_URL, PUBLISHABLE_KEY],
+    requiredValues: [
+      DATABASE_URL,
+      PUBLISHABLE_KEY?.startsWith("sb_publishable_"),
+      SECRET_KEY?.startsWith("sb_secret_"),
+      ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname),
+    ],
     url: SUPABASE_URL,
-    probe: localSubmissionStackIsReachable,
   });
   await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource("pipeline_jobs");

@@ -51,11 +51,23 @@ async function runFixture(requireStack: boolean) {
   }
 }
 
+async function listRootTests(testFile: string): Promise<string> {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [vitestBin, "list", testFile],
+  );
+  return stdout;
+}
+
 afterEach(async () => {
   await Promise.all(tempDirectories.splice(0).map((directory) => rm(directory, { force: true, recursive: true })));
 });
 
 describe("unreachable Supabase stack reporting", () => {
+  it("keeps the dead-port fixture out of the root test collection", async () => {
+    expect((await listRootTests(fixture)).trim()).toBe("");
+  });
+
   it("reports guarded tests as skipped instead of passed", async () => {
     const result = await runFixture(false);
 

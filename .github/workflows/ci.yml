@@ -30,13 +30,11 @@ jobs:
       # vitest does NOT typecheck — tsc is a separate, mandatory gate.
       - run: pnpm typecheck
 
-      # A skipped RLS suite is useful on a laptop but is not merge evidence.
-      # The shared Vitest reachability guard fails this job if the local stack
-      # is absent instead of letting a test body return before its assertion.
+      # This job intentionally has no Supabase stack. DB/RLS coverage is
+      # enforced by the database job after it provisions its local API.
       - name: Run the offline Vitest suite
         env:
           SNAPLIST_OFFLINE_VERIFY: "1"
-          SNAPLIST_REQUIRE_DB_STACK: "1"
         run: pnpm test
 
       # Eval harness, OFFLINE path: checked-in sample predictions scored
@@ -76,11 +74,10 @@ jobs:
       - run: pnpm prepare:supabase-loopback -- --source-only
 
       # The Supabase CLI is a devDependency, so CI runs the same version
-      # developers do — no second place to bump it. Only the database
-      # container starts: pgTAP talks to Postgres directly, and the `auth` and
-      # `storage` schemas the migrations depend on ship inside the database
-      # image rather than being created by the excluded services. `start`
-      # applies every migration in supabase/migrations, then seeds.
+      # developers do — no second place to bump it. Postgres plus the Auth API
+      # start here: pgTAP talks to Postgres, and the shared RLS reachability
+      # guard probes `/auth/v1/health`. `start` applies every migration in
+      # supabase/migrations, then seeds.
       #
       # An exclude name the CLI no longer recognises is only a warning — it
       # starts that container anyway and exits 0. A CLI upgrade could then
@@ -90,11 +87,33 @@ jobs:
         id: start
         run: |
           set -o pipefail
-          pnpm supabase start -x edge-runtime,gotrue,imgproxy,kong,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector 2>&1 | tee start.log
+          pnpm supabase start -x edge-runtime,imgproxy,logflare,mailpit,postgres-meta,postgrest,realtime,storage-api,studio,supavisor,vector 2>&1 | tee start.log
           if grep -q 'not valid to exclude' start.log; then
             echo "::error::supabase start rejected an exclude name; the container set has drifted"
             exit 1
           fi
+
+      - name: Export local Supabase credentials
+        run: |
+          set -a
+          source <(node tools/supabase-loopback/supabase.mjs status -o env)
+          set +a
+          {
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+
+      # A skipped RLS suite is useful on a laptop but not merge evidence.
+      # This is the only CI job with the local Auth API and its credentials;
+      # requiring it here makes an unreachable stack fail the job.
+      - name: Require the provisioned Supabase stack for RLS coverage
+        env:
+          SNAPLIST_REQUIRE_DB_STACK: "1"
+        run: >
+          pnpm exec tsx -e
+          'import { stackReachable } from "./src/test/supabase-stack";
+          void stackReachable();'
 
       # Same command as the local whole-suite run in
       # docs/runbooks/durable-pipeline-operations.md. pg_prove exits non-zero
