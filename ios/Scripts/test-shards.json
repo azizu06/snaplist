@@ -61,7 +61,12 @@
       "SnapListUITests/SnapListUITests/testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave"
     ],
     "ui-2": [
-      "SnapListUITests/AssistedExportUITests/testAListingChangeTakesDownAConfirmSheetTheSellerIsLookingAt",
+      "SnapListUITests/AssistedExportUITests/testAPackUpdateTakesDownAConfirmSheetTheSellerIsLookingAt",
+      "SnapListUITests/AssistedExportUITests/testConfirmationControlsRemainReachableAtAccessibilityFive",
+      "SnapListUITests/AssistedExportUITests/testFailedDestinationOpenShowsAdviceWithoutRecordingAHandoff",
+      "SnapListUITests/AssistedExportUITests/testListingReviewOpensThePreparedAssistedExportScreen",
+      "SnapListUITests/AssistedExportUITests/testPreparedHandedOffAndSharedStatesUseOnlyHonestWording",
+      "SnapListUITests/AssistedExportUITests/testRepeatedSaveTapsWritePhotosAndReceiptOnce",
       "SnapListUITests/FidelityScreenshotTests/testFoundationShellScreenshot",
       "SnapListUITests/HomeUITests/testAttentionAndCurrentRunUseTypedFutureRoutes",
       "SnapListUITests/HomeUITests/testFailedRunDetailKeepsMaximumSellerSafeFailureReachableAtAccessibilityType",

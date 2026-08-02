@@ -16,12 +16,14 @@ struct ListingReviewBinding: Codable, Equatable, Sendable {
     let runID: UUID
     let itemID: UUID
     let listingID: UUID
+    let reviewContentRevision: UUID
     let reviewRevision: UUID
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case runID = "runId"
         case itemID = "itemId"
         case listingID = "listingId"
+        case reviewContentRevision
         case reviewRevision
     }
 
@@ -30,6 +32,10 @@ struct ListingReviewBinding: Codable, Equatable, Sendable {
         runID = try values.decode(UUID.self, forKey: .runID)
         itemID = try values.decode(UUID.self, forKey: .itemID)
         listingID = try values.decode(UUID.self, forKey: .listingID)
+        reviewContentRevision = try values.decode(
+            UUID.self,
+            forKey: .reviewContentRevision
+        )
         reviewRevision = try values.decode(UUID.self, forKey: .reviewRevision)
     }
 }

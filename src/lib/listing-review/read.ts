@@ -86,6 +86,7 @@ export const listingReviewProjectionSchema = z
         runId: uuid,
         itemId: uuid,
         listingId: uuid,
+        reviewContentRevision: uuid,
         reviewRevision: uuid,
       })
       .strict(),
@@ -205,6 +206,10 @@ export interface ListingReviewDataClient {
     data: unknown;
     error: ListingReviewDataError | null;
   }>;
+  readReviewRevisions(itemId: string, bearerToken: string): PromiseLike<{
+    data: unknown;
+    error: ListingReviewDataError | null;
+  }>;
   signPhotoUrls(
     paths: string[],
     bearerToken: string,
@@ -229,6 +234,7 @@ function usablePriceOverride(raw: number | null): number | null {
 
 function projectReview(
   parsed: z.infer<typeof rawReviewSchema>,
+  reviewContentRevision: string,
   signedPhotos: Awaited<
     ReturnType<ListingReviewDataClient["signPhotoUrls"]>
   >,
@@ -309,6 +315,7 @@ function projectReview(
       runId: run.id,
       itemId: item.id,
       listingId: listing.id,
+      reviewContentRevision,
       reviewRevision: item.reviewRevision,
     },
     photos: signedPhotos.map(({ ordinal, signedUrl }) => ({
@@ -371,6 +378,33 @@ export function createListingReviewReader(
           "Listing Review result is malformed.",
         );
       }
+      const revisionToken = input.mintOperationToken
+        ? await input.mintOperationToken()
+        : input.bearerToken;
+      // The existing review RPC predates content-scoped export receipts. Read
+      // both revisions through the same tenant-RLS item path, then require its
+      // review revision to match the RPC snapshot so the additive projection
+      // cannot combine values from opposite sides of a concurrent edit.
+      const revisionsResult = await dataClient.readReviewRevisions(
+        raw.data.item.id,
+        revisionToken,
+      );
+      const revisions = z
+        .object({
+          reviewContentRevision: uuid,
+          reviewRevision: uuid,
+        })
+        .strict()
+        .safeParse(revisionsResult.data);
+      if (
+        revisionsResult.error
+        || !revisions.success
+        || revisions.data.reviewRevision !== raw.data.item.reviewRevision
+      ) {
+        throw new ListingReviewProjectionError(
+          "Listing Review revisions changed during projection.",
+        );
+      }
       const photoToken = input.mintOperationToken
         ? await input.mintOperationToken()
         : input.bearerToken;
@@ -378,7 +412,12 @@ export function createListingReviewReader(
         raw.data.item.photos,
         photoToken,
       );
-      return projectReview(raw.data, signedPhotos, input);
+      return projectReview(
+        raw.data,
+        revisions.data.reviewContentRevision,
+        signedPhotos,
+        input,
+      );
     },
   };
 }
@@ -413,6 +452,15 @@ export function createConfiguredSupabaseListingReviewReader(input: {
           p_run_id: runId,
         },
       );
+    },
+    async readReviewRevisions(itemId, bearerToken) {
+      return supabaseClient(input, bearerToken)
+        .from("items")
+        .select(
+          "reviewContentRevision:review_content_revision,reviewRevision:review_revision",
+        )
+        .eq("id", itemId)
+        .maybeSingle();
     },
     async signPhotoUrls(paths, bearerToken) {
       const signed = await signPhotoUrlMap(

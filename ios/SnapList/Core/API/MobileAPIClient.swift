@@ -528,6 +528,7 @@ struct AppDependencies {
     let captureDraftStore: any CaptureDraftStoring
     let subscriptionClient: any SubscriptionClient
     let analyticsClient: any AnalyticsClient
+    let assistedExportService: any AssistedExportServing
 
     static func make(
         configuration: LaunchConfiguration,
@@ -537,7 +538,8 @@ struct AppDependencies {
         nativeIntakeApplicationSupportDirectory: URL? = nil,
         analyticsLaunchInputs: AnalyticsLaunchInputs = .current,
         analyticsTransportFactory: any PostHogTransportBuilding =
-            PostHogSDKTransportFactory()
+            PostHogSDKTransportFactory(),
+        session: URLSession = .shared
     ) -> AppDependencies {
         let cameraAuthorization: any CameraAuthorizationProviding
         if let fixtureStatus = configuration.cameraAuthorizationFixture {
@@ -586,7 +588,8 @@ struct AppDependencies {
                 subscriptionClient: FixtureSubscriptionClient(),
                 // A zero-network build must never transmit, whatever the build
                 // configured, so the fixture composition stays no-op.
-                analyticsClient: NoOpAnalyticsClient()
+                analyticsClient: NoOpAnalyticsClient(),
+                assistedExportService: AssistedExportFixtureService()
             )
         }
 
@@ -610,6 +613,11 @@ struct AppDependencies {
             analyticsClient: makeAnalyticsClient(
                 launchInputs: analyticsLaunchInputs,
                 transportFactory: analyticsTransportFactory
+            ),
+            assistedExportService: AssistedExportAPIClient(
+                baseURL: origin,
+                tokenProvider: tokenProvider,
+                session: session
             )
         )
     }

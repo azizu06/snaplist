@@ -132,6 +132,10 @@ final class RunAPIClientTests: XCTestCase {
         XCTAssertEqual(review.binding.itemID, run.itemID)
         XCTAssertEqual(review.binding.listingID, run.listingID)
         XCTAssertEqual(
+            review.binding.reviewContentRevision,
+            UUID(uuidString: "37600000-0000-4000-8000-000000000005")
+        )
+        XCTAssertEqual(
             review.binding.reviewRevision,
             UUID(uuidString: "37600000-0000-4000-8000-000000000004")
         )
@@ -558,6 +562,7 @@ final class RunAPIClientTests: XCTestCase {
             "runId": "37600000-0000-4000-8000-000000000001",
             "itemId": "37600000-0000-4000-8000-000000000002",
             "listingId": "37600000-0000-4000-8000-000000000003",
+            "reviewContentRevision": "37600000-0000-4000-8000-000000000005",
             "reviewRevision": "37600000-0000-4000-8000-000000000004"
           },
           "photos": [

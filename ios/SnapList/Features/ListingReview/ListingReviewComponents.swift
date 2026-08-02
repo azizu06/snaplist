@@ -243,6 +243,8 @@ enum ListingReviewLaunchFixture {
                 "runId": runID.uuidString.lowercased(),
                 "itemId": "20800000-0000-4000-8000-000000000021",
                 "listingId": "20800000-0000-4000-8000-000000000022",
+                "reviewContentRevision":
+                    "20800000-0000-4000-8000-000000000025",
                 "reviewRevision":
                     "20800000-0000-4000-8000-000000000023",
             ],
@@ -329,6 +331,7 @@ enum ListingReviewFocus: Hashable {
     case condition
     case specifics
     case soldMatch(Int)
+    case assistedExport
     case secondary
     case done
 }
