@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -18,6 +18,7 @@ const contract = JSON.parse(
 };
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
+const SWIFT_CLIENT_ROOT = resolve("ios/SnapList");
 
 /**
  * `contract-only` operations publish a shape without claiming to serve it.
@@ -66,6 +67,44 @@ function servedOperations(): ContractOperation[] {
     );
 }
 
+/**
+ * Production Swift source is the source for mobile-client route coverage, not
+ * its XCTest assertions. Literal `"/v1/..."` calls are collected from every
+ * shipped source file; interpolated path segments normalize to App Router
+ * parameters. Account erasure is the one explicit public-native transport
+ * exception while its Swift UI adapter is not yet present: see
+ * `src/lib/account-erasure/http.ts`. It is intentionally kept here so its
+ * unlisted but live route cannot disappear behind an OpenAPI omission.
+ */
+function swiftSourceFiles(directory: string): string[] {
+  return readdirSync(directory).flatMap((entry) => {
+    const path = resolve(directory, entry);
+    return statSync(path).isDirectory()
+      ? swiftSourceFiles(path)
+      : path.endsWith(".swift")
+        ? [path]
+        : [];
+  });
+}
+
+function normalizeSwiftPath(path: string): string {
+  return path.replace(/\\\(([^)]*)\)/g, (_, expression: string) => {
+    const identifier = expression.match(/^[A-Za-z][A-Za-z0-9_]*/)?.[0] ?? "parameter";
+    return `{${identifier.replace(/ID$/, "Id")}}`;
+  });
+}
+
+function clientCalledPaths(): string[] {
+  const literalPaths = swiftSourceFiles(SWIFT_CLIENT_ROOT).flatMap((file) => {
+    const source = readFileSync(file, "utf8");
+    return [...source.matchAll(/"(\/v1\/[^"]*)"/g)].map((match) =>
+      normalizeSwiftPath(match[1]),
+    );
+  });
+
+  return [...new Set([...literalPaths, "/v1/account/erasure"])].sort();
+}
+
 /** `/v1/runs/{runId}/retry` -> `src/app/v1/runs/[runId]/retry/route.ts`. */
 function routeFileFor(path: string): string {
   const segments = path
@@ -80,6 +119,15 @@ function routeFileFor(path: string): string {
   return resolve("src/app/v1", ...segments, "route.ts");
 }
 
+function missingRoutePaths(
+  paths: readonly string[],
+  resolveRouteFile: (path: string) => string = routeFileFor,
+): string[] {
+  return paths
+    .filter((path) => !UNROUTED_BY_DESIGN.has(path))
+    .filter((path) => !existsSync(resolveRouteFile(path)));
+}
+
 function exportedMethods(routeFile: string): string[] {
   const source = readFileSync(routeFile, "utf8");
   return [
@@ -90,13 +138,32 @@ function exportedMethods(routeFile: string): string[] {
 }
 
 describe("mobile API contract to App Router routing", () => {
-  it("serves every contract path it claims to serve", () => {
-    const unreachable = servedOperations()
-      .filter(({ path }) => !UNROUTED_BY_DESIGN.has(path))
-      .filter(({ path }) => !existsSync(routeFileFor(path)))
-      .map(({ path, method }) => `${method} ${path}`);
+  it("serves every published contract or client-called v1 path", () => {
+    const unreachable = missingRoutePaths([
+      ...servedOperations().map(({ path }) => path),
+      ...clientCalledPaths(),
+    ]);
 
     expect([...new Set(unreachable)]).toEqual([]);
+  });
+
+  it("fails when a client-called path has no App Router route file", () => {
+    const clientOnlyPaths = clientCalledPaths().filter(
+      (path) => !servedOperations().some((operation) => operation.path === path),
+    );
+    expect(clientOnlyPaths).toEqual([
+      "/v1/account/erasure",
+      "/v1/included-offer/redemptions",
+      "/v1/included-offer/redemptions/{claimId}",
+      "/v1/included-offer/redemptions/{claimId}/device-token",
+    ]);
+
+    expect(
+      missingRoutePaths(
+        clientOnlyPaths,
+        () => resolve("src/app/v1/__missing_client_route__/route.ts"),
+      ),
+    ).toEqual(clientOnlyPaths);
   });
 
   it("exports each contract method on the route that serves it", () => {

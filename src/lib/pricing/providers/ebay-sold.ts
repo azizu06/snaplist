@@ -1240,10 +1240,10 @@ export function synthesizeSoldResult(
 export interface VerifiedSoldFinalizationOptions {
   /** Reference "now" (epoch ms). Omit to disable staleness filtering and age-decay. */
   now?: number;
-  /** Staleness cutoff in days; defaults to the freshness module default. */
-  staleDays?: number;
-  /** Recency half-life in days; defaults to the freshness module default. */
-  halfLifeDays?: number;
+  /** Staleness cutoff resolved explicitly by each retrieval adapter. */
+  staleDays: number;
+  /** Recency half-life resolved explicitly by each retrieval adapter. */
+  halfLifeDays: number;
 }
 
 /**
@@ -1260,7 +1260,7 @@ export interface VerifiedSoldFinalizationOptions {
  */
 export function finalizeVerifiedSoldResult<T extends EbaySoldComp>(
   evidence: SoldCompEvidence<T>,
-  options: VerifiedSoldFinalizationOptions = {},
+  options: VerifiedSoldFinalizationOptions,
 ): PriceResult | null {
   const { now, staleDays, halfLifeDays } = options;
   const anchors = evidence.anchors.map(({ comp }) => comp);

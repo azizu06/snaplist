@@ -18,9 +18,9 @@ not part of this inventory; native transport uses its own v1 contracts.
 | `GET /api/search` | Cookie auth, RLS reads, signed photo URLs | Later native query contract |
 | `GET /api/health` | Next-specific liveness | Proof adds provider-neutral `GET /v1/health` |
 
-The web UI also invokes Next server actions for upload, review save/regeneration, archive/delete,
-reprice, notification reads, publish, disconnect, and settings. Those actions are an inventory of
-future native HTTP needs, not authorization for #195 to extract their domain behavior.
+After #598, no seller web UI or its server actions remain. The only surviving Next server action is
+the marketing waitlist signup; it is not a seller/native transport surface or an inventory of future
+native HTTP needs.
 
 ### Provider callbacks and webhooks
 
