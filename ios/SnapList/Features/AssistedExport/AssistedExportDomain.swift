@@ -198,6 +198,20 @@ struct AssistedExportDomain: Equatable, Sendable {
     /// One combined label per row, so assistive technology hears the identity,
     /// the status, and the disclosure state as a single element rather than
     /// three fragments.
+    /// Whether this destination's workspace is on screen. A stale pack takes
+    /// every workspace down without forgetting which row the seller had open,
+    /// so `openDestination` alone is not the answer. The view and the row's
+    /// spoken label both read this, so they cannot disagree about what is
+    /// showing.
+    func isWorkspaceOpen(_ destination: AssistedExportDestination) -> Bool {
+        switch state {
+        case let .workspaceOpen(open), let .handedOff(open), let .shared(open):
+            return open == destination
+        case .destinationList, .packOutOfDate:
+            return false
+        }
+    }
+
     func accessibilityLabel(for destination: AssistedExportDestination) -> String {
         let status: String
         switch handoff(for: destination) {
@@ -206,7 +220,7 @@ struct AssistedExportDomain: Equatable, Sendable {
         case let .shared(at: date):
             status = AssistedExportCopy.sharedStatus(on: date).lowercased()
         }
-        let disclosure = openDestination == destination ? "open" : "closed"
+        let disclosure = isWorkspaceOpen(destination) ? "open" : "closed"
         return "\(destination.displayName), \(status), \(disclosure)"
     }
 

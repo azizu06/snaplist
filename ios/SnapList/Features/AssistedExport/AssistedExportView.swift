@@ -163,7 +163,7 @@ struct AssistedExportView: View {
             Divider().overlay(SnapListColorToken.hairline.color)
             ForEach(domain.destinations) { destination in
                 destinationRow(destination)
-                if isOpen(destination) {
+                if domain.isWorkspaceOpen(destination) {
                     workspace(destination)
                 }
             }
@@ -186,7 +186,7 @@ struct AssistedExportView: View {
                     statusLine(destination)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: isOpen(destination) ? "chevron.up" : "chevron.down")
+                Image(systemName: domain.isWorkspaceOpen(destination) ? "chevron.up" : "chevron.down")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     .accessibilityHidden(true)
@@ -518,15 +518,6 @@ struct AssistedExportView: View {
             change()
         } else {
             withAnimation(.easeOut(duration: 0.18), change)
-        }
-    }
-
-    private func isOpen(_ destination: AssistedExportDestination) -> Bool {
-        switch domain.state {
-        case let .workspaceOpen(open), let .handedOff(open), let .shared(open):
-            return open == destination
-        case .destinationList, .packOutOfDate:
-            return false
         }
     }
 }

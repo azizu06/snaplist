@@ -247,6 +247,30 @@ final class AssistedExportDomainTests: XCTestCase {
         XCTAssertGreaterThan(strings.count, 20, "The sweep must actually sweep.")
     }
 
+    /// A stale pack takes the workspace off screen. The row must not keep
+    /// announcing it as open, or a seller who cannot see the screen is told a
+    /// panel is expanded that is not there.
+    func testAStaleRowDoesNotAnnounceAWorkspaceThatIsNoLongerOnScreen() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.toggle(.facebookMarketplace)
+        XCTAssertTrue(
+            domain.isWorkspaceOpen(.facebookMarketplace),
+            "Precondition: the workspace is open before the listing moves."
+        )
+
+        domain.listingRevisionChanged(to: Self.editedReviewRevision)
+
+        XCTAssertFalse(
+            domain.isWorkspaceOpen(.facebookMarketplace),
+            "A stale pack hides the workspace, so nothing is open."
+        )
+        XCTAssertTrue(
+            domain.accessibilityLabel(for: .facebookMarketplace)
+                .hasSuffix("closed"),
+            "The row announces what is actually on screen."
+        )
+    }
+
     func testTheStaleAdvisoryAsksForAnUpdateRatherThanBlamingTheSeller() {
         XCTAssertEqual(
             AssistedExportCopy.packOutOfDateTitle,

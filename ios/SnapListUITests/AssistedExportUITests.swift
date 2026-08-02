@@ -74,12 +74,22 @@ final class AssistedExportUITests: XCTestCase {
                 .waitForExistence(timeout: 5),
             "The screen says the pack is out of date rather than going quiet."
         )
-        // Non-empty first, so this cannot pass by reading nothing at all.
+        // Assert what the row must say, not what it must avoid. `shared` is a
+        // substring of `not shared`, so a negative check on it fails against
+        // the correct label; and a row that had been confirmed would read
+        // `shared jul 25`, which does not contain `not shared`. The positive
+        // form is both accurate here and still able to fail.
         let label = row.label
-        XCTAssertFalse(label.isEmpty, "The row must still describe itself.")
-        XCTAssertFalse(
-            label.localizedCaseInsensitiveContains("shared"),
-            "Nothing was confirmed, so nothing reports Shared."
+        XCTAssertTrue(
+            label.localizedCaseInsensitiveContains("not shared"),
+            "Nothing was confirmed, so the row still reads not shared. Was: "
+                + "\"\(label)\""
+        )
+        // The workspace came down with the stale pack, so the row must not go
+        // on announcing an expanded panel that is not on screen.
+        XCTAssertTrue(
+            label.localizedCaseInsensitiveContains("closed"),
+            "The row announces what is actually on screen. Was: \"\(label)\""
         )
     }
 
