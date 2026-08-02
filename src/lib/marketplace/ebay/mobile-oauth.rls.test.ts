@@ -1,7 +1,8 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi, beforeEach } from "vitest";
 import { createMobileApiHandler } from "@/lib/mobile-api";
 import {
   cleanupClerkTestUsers,
@@ -27,20 +28,11 @@ const TEST_TIMEOUT_MS = 30_000;
 const OAUTH_ENCRYPTION_KEY = randomBytes(32).toString("base64");
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SECRET_KEY?.startsWith("sb_secret_")) return false;
-  try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let lease: ExclusiveTestResourceLease | undefined;
 let admin: SupabaseClient;
 let api: ReturnType<typeof createMobileApiHandler>;
@@ -64,8 +56,8 @@ function startSession(token: string, idempotencyKey: string) {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SECRET_KEY?.startsWith("sb_secret_")] });
+  await whenStackReachable(reachable, async () => {
 
   lease = await acquireExclusiveTestResource(
     `local-db:mobile-ebay-sandbox-oauth:${SUPABASE_URL}`,
@@ -123,7 +115,8 @@ beforeAll(async () => {
     },
     requestId: () => "req_mobile_ebay_387",
   });
-}, TEST_TIMEOUT_MS);
+
+  });}, TEST_TIMEOUT_MS);
 
 afterAll(async () => {
   try {
@@ -171,7 +164,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   });
 
   it("replays one session per verified tenant and key while separating another tenant", async () => {
-    if (!reachable) return;
+
     const idempotencyKey = randomUUID();
     const beforeCreate = Date.now();
 
@@ -203,7 +196,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   });
 
   it("rejects a mixed-tenant callback before any provider or connection mutation", async () => {
-    if (!reachable) return;
+
     const [tenantA, tenantB] = await Promise.all([
       startSession(tenantAToken, randomUUID()),
       startSession(tenantBToken, randomUUID()),
@@ -248,7 +241,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   });
 
   it("replays the durable terminal outcome instead of a conflicting callback query", async () => {
-    if (!reachable) return;
+
     const session = await startSession(tenantAToken, randomUUID());
     const sessionBody = await session.json();
     const state = new URL(sessionBody.data.authorizationUrl).searchParams.get(
@@ -285,7 +278,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   });
 
   it("keeps an active duplicate nonterminal before one encrypted connection wins", async () => {
-    if (!reachable) return;
+
     const session = await startSession(tenantAToken, randomUUID());
     const state = new URL(
       (await session.json()).data.authorizationUrl,
@@ -353,7 +346,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   });
 
   it("expires completing callbacks before in-progress truth or stale reclaim", async () => {
-    if (!reachable) return;
+
     const [codeSession, cancellationSession] = await Promise.all([
       startSession(tenantAToken, randomUUID()),
       startSession(tenantBToken, randomUUID()),
@@ -427,7 +420,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   });
 
   it("keeps a late provider completion from saving a connection after DB expiry", async () => {
-    if (!reachable) return;
+
     const session = await startSession(tenantBToken, randomUUID());
     const sessionBody = await session.json();
     const state = new URL(
@@ -508,7 +501,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   });
 
   it("keeps DB expiry durable when a held provider exchange rejects late", async () => {
-    if (!reachable) return;
+
     const session = await startSession(tenantBToken, randomUUID());
     const sessionBody = await session.json();
     const state = new URL(
@@ -583,7 +576,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   });
 
   it("reclaims one abandoned callback lease after the bounded DB interval", async () => {
-    if (!reachable) return;
+
     const session = await startSession(tenantBToken, randomUUID());
     const sessionBody = await session.json();
     const state = new URL(sessionBody.data.authorizationUrl).searchParams.get(

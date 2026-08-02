@@ -1,5 +1,6 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { createHash } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   buildPipelinePersistencePayload,
@@ -59,6 +60,10 @@ interface StagedRun {
 }
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let freeUser: ClerkTestUser;
 let concurrentUser: ClerkTestUser;
@@ -67,20 +72,6 @@ let stateUser: ClerkTestUser;
 let lifecycleUser: ClerkTestUser;
 let legacyUser: ClerkTestUser;
 const queueMessageIds = new Set<string>();
-
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
 
 function stageArgs(
   userId: string,
@@ -163,8 +154,8 @@ function acquired(
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -184,10 +175,12 @@ beforeAll(async () => {
       (user) => grantIncludedOfferDeviceClaim(admin, user.id),
     ),
   );
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   await Promise.all(
     [...queueMessageIds].map((messageId) =>
       admin.rpc("ack_pipeline_message", { p_message_id: messageId }),
@@ -201,11 +194,13 @@ afterAll(async () => {
     lifecycleUser.id,
     legacyUser.id,
   ]);
+
+  });
 });
 
 describe("AI-item credit ledger DB/RLS boundary", () => {
   it("reserves the included run once, replays it, and isolates both ledger tables", async () => {
-    if (!reachable) return;
+
     const args = stageArgs(freeUser.id, ["free-first"]);
     const first = await admin.rpc("stage_pipeline_batch", args);
     expect(first.error).toBeNull();
@@ -252,7 +247,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
   });
 
   it("serializes concurrent first-run reservations so only one can consume the credit", async () => {
-    if (!reachable) return;
+
     const [left, right] = await Promise.all([
       admin.rpc(
         "stage_pipeline_batch",
@@ -278,7 +273,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
   });
 
   it("uses a mid-period subscription for mixed entry points, preserves grace usage, and advances only on renewal", async () => {
-    if (!reachable) return;
+
     const now = Date.now();
     const periodOneStart = new Date(now - 10 * 24 * 60 * 60 * 1_000);
     const periodOneExpires = new Date(now + 60 * 60 * 1_000);
@@ -385,7 +380,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
   });
 
   it("fails closed on retry, expiration, revocation, refund, ambiguity and stale callbacks while honoring verified grace", async () => {
-    if (!reachable) return;
+
     const now = Date.now();
     await stage(stateUser.id, ["state-included"]);
     const start = new Date(now - 24 * 60 * 60 * 1_000);
@@ -483,7 +478,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
   });
 
   it("keeps one reservation through retry, settles with exact draft evidence, restores terminal failure once, and reuses one guided correction", async () => {
-    if (!reachable) return;
+
     const now = Date.now();
     const paidPeriod = await recordPeriod({
       userId: lifecycleUser.id,
@@ -816,7 +811,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
   }, 20_000);
 
   it("keeps a legacy run settle-compatible but fails closed for same-photo correction", async () => {
-    if (!reachable) return;
+
     const verifiedArgs = stageArgs(legacyUser.id, ["legacy-correction"]);
     const { p_photo_identities: _verifiedIdentity, ...legacyArgs } = verifiedArgs;
     void _verifiedIdentity;

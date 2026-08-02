@@ -1,5 +1,6 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
@@ -42,21 +43,11 @@ const CONNECTION_ENV = {
   EBAY_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
 };
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SECRET_KEY) return false;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -152,8 +143,8 @@ async function persistedRun(user: ClerkTestUser) {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SECRET_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SECRET_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -166,6 +157,8 @@ beforeAll(async () => {
     connectAndBind(serverA, "publish-a", ["EBAY_US", "EBAY_GB"]),
     connectAndBind(serverB, "publish-b", ["EBAY_US"]),
   ]);
+
+  });
 });
 
 afterAll(async () => {
@@ -187,7 +180,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("publishes via the adapter and persists ebay_listing_id + ebay_status on the row", async () => {
-    if (!reachable) return;
+
 
     const { listingId, result } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
@@ -231,7 +224,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("rejects publishing to a non-USD marketplace instead of relabeling the USD price", async () => {
-    if (!reachable) return;
+
 
     const { listingId } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
@@ -257,7 +250,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("is idempotent: an already-published listing returns the stored result without another eBay call", async () => {
-    if (!reachable) return;
+
 
     const { listingId } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
@@ -271,7 +264,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("persists ebay_status='failed' (and rethrows) when the adapter fails — local status untouched", async () => {
-    if (!reachable) return;
+
 
     const { listingId } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
@@ -306,7 +299,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("does not mark an acknowledged publish failed when generation-bound completion rejects", async () => {
-    if (!reachable) return;
+
 
     const { listingId } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
@@ -345,7 +338,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("RLS holds: user B cannot publish user A's listing (indistinguishable from missing)", async () => {
-    if (!reachable) return;
+
 
     const { listingId } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
@@ -365,7 +358,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("refuses to publish a non-eBay listing", async () => {
-    if (!reachable) return;
+
 
     const { itemId } = await persistedRun(userA);
     const { data: fb, error } = await userA.client
@@ -390,7 +383,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("fails fast and marks the listing failed when the item has NO photos (no eBay call)", async () => {
-    if (!reachable) return;
+
 
     // Hand-built item with an empty photos array, plus a price log so the
     // image check is the ONLY thing standing between us and the adapter.
@@ -442,7 +435,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("fails fast and marks the listing failed when EVERY photo URL fails to sign (no eBay call)", async () => {
-    if (!reachable) return;
+
 
     // Photo paths that don't exist in storage — every createSignedUrl fails.
     const { data: item } = await userA.client
@@ -495,7 +488,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("refuses to publish when no usable price exists for the item", async () => {
-    if (!reachable) return;
+
 
     // Hand-built item + listing with NO prediction_logs row (no pipeline run).
     const { data: item } = await userA.client
@@ -524,7 +517,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
   });
 
   it("rolls back the publish claim when persisted listing copy is malformed", async () => {
-    if (!reachable) return;
+
 
     const { itemId, listingId } = await persistedRun(userA);
     const [{ data: item }, { error: malformedCopyError }] = await Promise.all([

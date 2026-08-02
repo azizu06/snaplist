@@ -1,6 +1,7 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { readFileSync } from "node:fs";
 import { Client, type QueryResult } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { PipelineResult } from "@/lib/pipeline";
 import {
@@ -66,6 +67,10 @@ interface StagedRun {
 }
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let seller: ClerkTestUser;
 let otherSeller: ClerkTestUser;
@@ -86,23 +91,7 @@ function upgradeBackfillSql(): string {
     throw new Error("Manual retry upgrade backfill markers are missing");
   }
   return MIGRATION.slice(start + UPGRADE_BACKFILL_BEGIN.length, end);
-}
-
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
-
-function acquired(
+}function acquired(
   value: PipelineAttemptAcquisition,
 ): Extract<PipelineAttemptAcquisition, { kind: "acquired" }> {
   expect(value.kind).toBe("acquired");
@@ -461,8 +450,8 @@ const STAGE_PIPELINE_BATCH_SQL =
   "select * from public.stage_pipeline_batch($1, $2::uuid, $3::jsonb, 1000, 1000)";
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -542,10 +531,12 @@ beforeAll(async () => {
       retryProjectionSeller,
     ].map((user) => grantIncludedOfferDeviceClaim(admin, user.id)),
   );
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   await Promise.all(
     [...queueMessageIds].map((messageId) =>
       admin.rpc("ack_pipeline_message", { p_message_id: messageId }),
@@ -565,11 +556,13 @@ afterAll(async () => {
   ];
   await cleanupClerkTestUsers(admin, userIds);
   await cleanupManualRetryAllowancePeriods(userIds);
+
+  });
 });
 
 describe("manual retry AI-item credit accounting", () => {
   it("projects effective allowance and Retry from canonical reclaim truth", async () => {
-    if (!reachable) return;
+
     const run = await stageRun(
       "manual-retry-effective-projection",
       retryProjectionSeller,
@@ -650,7 +643,7 @@ describe("manual retry AI-item credit accounting", () => {
   }, 20_000);
 
   it("settles the same restored reservation after a failed run is retried", async () => {
-    if (!reachable) return;
+
     const run = await stageRun("manual-retry-after-failure", seller, true);
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
@@ -778,7 +771,7 @@ describe("manual retry AI-item credit accounting", () => {
   }, 20_000);
 
   it("restores a canceled retry once, reclaims it again, and ignores delayed completion replay", async () => {
-    if (!reachable) return;
+
     const run = await stageRun("manual-retry-after-cancel", otherSeller);
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
@@ -886,7 +879,7 @@ describe("manual retry AI-item credit accounting", () => {
   }, 20_000);
 
   it("serializes concurrent retry replay and a competing reservation", async () => {
-    if (!reachable) return;
+
     const run = await stageRun(
       "manual-retry-concurrency",
       concurrentSeller,
@@ -1019,7 +1012,7 @@ describe("manual retry AI-item credit accounting", () => {
   }, 20_000);
 
   it("reclaims a retry that waits behind the migration trigger fence", async () => {
-    if (!reachable) return;
+
     const run = await stageRun(
       "manual-retry-upgrade-overlap",
       upgradeOverlapSeller,
@@ -1110,7 +1103,7 @@ describe("manual retry AI-item credit accounting", () => {
   }, 20_000);
 
   it("reconciles a retry already active when the migration starts", async () => {
-    if (!reachable) return;
+
     const run = await stageRun("manual-retry-upgrade", upgradeSeller);
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
@@ -1205,7 +1198,7 @@ describe("manual retry AI-item credit accounting", () => {
   }, 20_000);
 
   it("fails the upgrade closed when an active legacy retry lost its allowance slot", async () => {
-    if (!reachable) return;
+
     const run = await stageRun(
       "manual-retry-upgrade-conflict",
       upgradeConflictSeller,
@@ -1280,7 +1273,7 @@ describe("manual retry AI-item credit accounting", () => {
    * already hold the ordering lock, whatever its triggers end up being called.
    */
   it("takes the seller credit lock before the run-ordering lock on both write paths", async () => {
-    if (!reachable) return;
+
     const observer = await openLockSession("issue-571-lock-order-observer");
     const holder = await openLockSession("issue-571-lock-order-holder");
     const retrySession = await openLockSession("issue-571-lock-order-retry", {
@@ -1387,7 +1380,7 @@ describe("manual retry AI-item credit accounting", () => {
    * instead of `deadlock detected`.
    */
   it("resolves a staging and manual retry lock race without deadlocking", async () => {
-    if (!reachable) return;
+
     const observer = await openLockSession("issue-571-lock-race-observer");
     const creditHolder = await openLockSession("issue-571-lock-race-credit");
     const orderingHolder = await openLockSession("issue-571-lock-race-order");

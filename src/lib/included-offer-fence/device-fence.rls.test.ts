@@ -1,5 +1,6 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import {
   cleanupClerkTestUsers,
   provisionClerkTestUser,
@@ -14,21 +15,11 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -74,8 +65,8 @@ async function reserveClaim(user: ClerkTestUser): Promise<string> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -83,10 +74,12 @@ beforeAll(async () => {
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "device_fence_a"),
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "device_fence_b"),
   ]);
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   await admin
     .from("included_offer_support_overrides")
     .delete()
@@ -96,11 +89,13 @@ afterAll(async () => {
     .delete()
     .in("user_id", [userA.id, userB.id]);
   await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
+
+  });
 });
 
 describe("included-offer device fence at the pre-spend reservation boundary", () => {
   it("refuses the included run for a second account on the same consumed device", async () => {
-    if (!reachable) return;
+
 
     // Account A redeems the promotion: its claim reached `reserved` because the
     // device's DeviceCheck bit0 was observed clear and then set.
@@ -136,7 +131,7 @@ describe("included-offer device fence at the pre-spend reservation boundary", ()
   });
 
   it("does not ask the device to pay twice when a restored credit is retried", async () => {
-    if (!reachable) return;
+
     await reserveClaim(userB);
     const first = await stageRun(userB, `restore-${crypto.randomUUID()}`);
     expect(first.error).toBeNull();
@@ -155,7 +150,7 @@ describe("included-offer device fence at the pre-spend reservation boundary", ()
   });
 
   it("keeps claim and override rows tenant-private and server-written", async () => {
-    if (!reachable) return;
+
     const claimId = await reserveClaim(userA);
     const overrideId = crypto.randomUUID();
     const granted = await admin.rpc("grant_included_offer_support_override", {
@@ -217,7 +212,7 @@ describe("included-offer device fence at the pre-spend reservation boundary", ()
   });
 
   it("consumes an audited support override once and only for its own account", async () => {
-    if (!reachable) return;
+
     const claimId = await reserveClaim(userB);
     const overrideId = crypto.randomUUID();
     const granted = await admin.rpc("grant_included_offer_support_override", {

@@ -24,6 +24,7 @@ import {
   acquireExclusiveTestResource,
   resolveLocalTestDatabaseUrl,
 } from "@/test/exclusive-resource-lock";
+import { stackReachable } from "@/test/supabase-stack";
 import {
   createListingReviewSaveDataClient,
   createListingReviewSaver,
@@ -100,20 +101,6 @@ const BASE_RESULT: PipelineResult = {
   model: "test-vision",
   listingModel: "test-listing",
 };
-
-async function stackReachable(): Promise<boolean> {
-  if (!PUBLISHABLE_KEY || !SECRET_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: PUBLISHABLE_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
 
 function rlsClient(token: string): SupabaseClient {
   return createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
@@ -598,8 +585,13 @@ describe("mobile Listing Review save RLS authority", () => {
     expect(selectorSource).toContain(normalizedReleaseCall);
   });
 
-  it("proves Clerk and Guest save parity through the fixed RPC transaction", async () => {
-    if (!(await stackReachable())) return;
+  it("proves Clerk and Guest save parity through the fixed RPC transaction", async (context) => {
+    const reachable = await stackReachable({
+      url: SUPABASE_URL,
+      apiKey: PUBLISHABLE_KEY,
+      requiredValues: [PUBLISHABLE_KEY, SECRET_KEY],
+    });
+    if (!reachable) context.skip();
     const lease = await acquireExclusiveTestResource(
       "snaplist-local-supabase-listing-review-save",
     );

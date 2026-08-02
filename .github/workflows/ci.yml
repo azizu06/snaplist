@@ -30,12 +30,13 @@ jobs:
       # vitest does NOT typecheck — tsc is a separate, mandatory gate.
       - run: pnpm typecheck
 
-      # DB-gated integration tests (the RLS tenancy suite) probe for a local
-      # Supabase stack and skip gracefully when it's absent — by design; they
-      # run locally via `pnpm supabase start`. Everything else is offline.
+      # A skipped RLS suite is useful on a laptop but is not merge evidence.
+      # The shared Vitest reachability guard fails this job if the local stack
+      # is absent instead of letting a test body return before its assertion.
       - name: Run the offline Vitest suite
         env:
           SNAPLIST_OFFLINE_VERIFY: "1"
+          SNAPLIST_REQUIRE_DB_STACK: "1"
         run: pnpm test
 
       # Eval harness, OFFLINE path: checked-in sample predictions scored

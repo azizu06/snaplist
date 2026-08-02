@@ -1,7 +1,8 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import {
   acquireExclusiveTestResource,
   resolveLocalTestDatabaseUrl,
@@ -19,27 +20,17 @@ const DATABASE_URL = resolveLocalTestDatabaseUrl();
 const TEST_TIMEOUT_MS = 30_000;
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let lease: ExclusiveTestResourceLease | undefined;
 let admin: SupabaseClient;
 let tenantAId = "";
 let tenantBId = "";
-const seededIds: string[] = [];
-
-async function stackReachable(): Promise<boolean> {
-  if (!SECRET_KEY?.startsWith("sb_secret_")) return false;
-  try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      signal: AbortSignal.timeout(2_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+const seededIds: string[] = [];beforeAll(async () => {
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: "", requiredValues: [SECRET_KEY?.startsWith("sb_secret_")] });
+  await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource(
     `local-db:mobile-ebay-oauth-retention:${SUPABASE_URL}`,
   );
@@ -49,7 +40,8 @@ beforeAll(async () => {
   const suffix = `${Date.now()}_${randomUUID().slice(0, 8)}`;
   tenantAId = `user_test_mobile_oauth_retention_395_a_${suffix}`;
   tenantBId = `user_test_mobile_oauth_retention_395_b_${suffix}`;
-}, TEST_TIMEOUT_MS);
+
+  });}, TEST_TIMEOUT_MS);
 
 afterAll(async () => {
   try {
@@ -102,7 +94,7 @@ afterAll(async () => {
 
 describe("mobile eBay OAuth retention (DB-gated)", () => {
   it("purges only bounded owned sessions and hands every remaining owned row to account erasure", async () => {
-    if (!reachable) return;
+
     const ids = {
       active: randomUUID(),
       expired: randomUUID(),

@@ -23,7 +23,7 @@ describe("verified guest focused-selector execution mode", () => {
     const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
 
     expect(workflow).toMatch(
-      /- name: Run the offline Vitest suite\s+env:\s+SNAPLIST_OFFLINE_VERIFY: "1"\s+run: pnpm test/i,
+      /- name: Run the offline Vitest suite\s+env:\s+SNAPLIST_OFFLINE_VERIFY: "1"\s+SNAPLIST_REQUIRE_DB_STACK: "1"\s+run: pnpm test/i,
     );
   });
 });

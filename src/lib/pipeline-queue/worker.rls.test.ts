@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { PipelineResult } from "@/lib/pipeline";
 import { buildPipelinePersistencePayload } from "@/lib/pipeline/persist";
@@ -133,20 +134,11 @@ const RESULT: PipelineResult = {
   listingModel: "offline-listing",
 };
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -168,8 +160,8 @@ const sleep = (milliseconds: number) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   queueLease = await acquireExclusiveTestResource(
     `local-pgmq:pipeline_jobs:${SUPABASE_URL}`,
   );
@@ -272,6 +264,8 @@ beforeAll(async () => {
     queue.enqueue(createPipelineQueueEnvelope(runRetry)),
   ]);
   messageIds.add(messageA).add(messageB).add(messageAdvance).add(messageRetry);
+
+  });
 });
 
 afterAll(async () => {
@@ -308,7 +302,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
   });
 
   it("rejects a forged run/message pair without touching either tenant", async () => {
-    if (!reachable) return;
+
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
     );
@@ -325,7 +319,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
   });
 
   it("preserves priced research time through retry and advances it only for a new pricing pass", async () => {
-    if (!reachable) return;
+
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
     );
@@ -700,7 +694,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
   }, 15_000);
 
   it("persists transient retry backoff, then an honest terminal failure", async () => {
-    if (!reachable) return;
+
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
     );
@@ -752,7 +746,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
   });
 
   it("rejects unknown-version work only for the message-paired run", async () => {
-    if (!reachable) return;
+
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
     );

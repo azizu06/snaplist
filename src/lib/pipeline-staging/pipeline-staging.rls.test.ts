@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
@@ -16,26 +17,16 @@ const ANON_KEY =
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
 let mixedUserA: ClerkTestUser;
 let mixedUserB: ClerkTestUser;
 const messageIds = new Set<string>();
-
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
 
 function entry(userId: string, key: string, source: "single" | "batch" = "single") {
   return {
@@ -51,8 +42,8 @@ function entry(userId: string, key: string, source: "single" | "batch" = "single
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -69,10 +60,12 @@ beforeAll(async () => {
       grantIncludedOfferDeviceClaim(admin, user.id),
     ),
   );
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   await Promise.all(
     [...messageIds].map((messageId) =>
       admin.rpc("ack_pipeline_message", { p_message_id: messageId }),
@@ -84,11 +77,13 @@ afterAll(async () => {
     mixedUserA.id,
     mixedUserB.id,
   ]);
+
+  });
 });
 
 describe("durable pipeline staging RPC and RLS", () => {
   it("records exact seller/batch staging paths through a service-only cleanup seam", async () => {
-    if (!reachable) return;
+
     const cleanupId = crypto.randomUUID();
     const batchId = crypto.randomUUID();
     const paths = [
@@ -135,7 +130,7 @@ describe("durable pipeline staging RPC and RLS", () => {
   });
 
   it("atomically stages ordered photos, one run, and one identifiers-only message", async () => {
-    if (!reachable) return;
+
     const batchId = crypto.randomUUID();
     const idempotencyKey = `stage-${crypto.randomUUID()}`;
     const args = {
@@ -233,7 +228,7 @@ describe("durable pipeline staging RPC and RLS", () => {
   });
 
   it("rejects seller RPC access, forged photo ownership, and atomic over-cap batches", async () => {
-    if (!reachable) return;
+
     const sellerCall = await userA.client.rpc("stage_pipeline_batch", {
       p_user_id: userA.id,
       p_batch_id: crypto.randomUUID(),
@@ -274,7 +269,7 @@ describe("durable pipeline staging RPC and RLS", () => {
   });
 
   it("releases daily capacity only once and only after failed/canceled terminal state", async () => {
-    if (!reachable) return;
+
     const staged = await admin.rpc("stage_pipeline_batch", {
       p_user_id: userB.id,
       p_batch_id: crypto.randomUUID(),
@@ -326,7 +321,7 @@ describe("durable pipeline staging RPC and RLS", () => {
   });
 
   it("shares daily capacity across legacy and durable entry points without crossing tenants", async () => {
-    if (!reachable) return;
+
     const legacyReservationId = crypto.randomUUID();
     const legacyArgs = {
       p_reservation_id: legacyReservationId,

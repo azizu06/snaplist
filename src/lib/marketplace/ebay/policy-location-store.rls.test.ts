@@ -1,7 +1,8 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { randomBytes } from "node:crypto";
 import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi, beforeEach } from "vitest";
 import { mintUserJwt } from "@/lib/supabase/test-users";
 import {
   acquireExclusiveTestResource,
@@ -35,22 +36,6 @@ const TEST_ENV = {
   EBAY_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
 };
 
-async function stackReachable(): Promise<boolean> {
-  if (!PUBLISHABLE_KEY?.startsWith("sb_publishable_")) return false;
-  if (!SECRET_KEY?.startsWith("sb_secret_")) return false;
-  const url = new URL(SUPABASE_URL);
-  if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) return false;
-  try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: PUBLISHABLE_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 function candidates(prefix: string) {
   const candidate = (kind: string, label: string) => ({
     id: `${prefix}-${kind}`,
@@ -81,6 +66,10 @@ function fixtureAdapter(
 }
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let lease: ExclusiveTestResourceLease | undefined;
 let admin: SupabaseClient;
 let tenantAId = "";
@@ -191,8 +180,8 @@ async function cleanExactFixtures(): Promise<void> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: PUBLISHABLE_KEY, requiredValues: [PUBLISHABLE_KEY?.startsWith("sb_publishable_"), SECRET_KEY?.startsWith("sb_secret_"), ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname)] });
+  await whenStackReachable(reachable, async () => {
 
   lease = await acquireExclusiveTestResource(
     `local-db:ebay-policy-location-binding:${SUPABASE_URL}`,
@@ -255,7 +244,8 @@ beforeAll(async () => {
   if (!contextA || !contextB) throw new Error("#388 test connections are required");
   accountGenerationA = contextA.accountGeneration;
   accountGenerationB = contextB.accountGeneration;
-}, TEST_TIMEOUT_MS);
+
+  });}, TEST_TIMEOUT_MS);
 
 afterAll(async () => {
   try {
@@ -277,7 +267,7 @@ describe("eBay policy/location binding (DB-gated)", () => {
   });
 
   it("persists injected offline discovery for two tenants without sharing seller IDs", async () => {
-    if (!reachable) return;
+
 
     [bindingA, bindingB] = await Promise.all([
       discoverAndBindEbayPolicyLocation({
@@ -323,7 +313,7 @@ describe("eBay policy/location binding (DB-gated)", () => {
   });
 
   it("keeps the save capability server-only, tenant-derived, and display-safe", async () => {
-    if (!reachable) return;
+
 
     const publicAttempt = await diagnosticStep(
       "public-authorization-rpc",
@@ -379,7 +369,7 @@ describe("eBay policy/location binding (DB-gated)", () => {
   }, TEST_TIMEOUT_MS);
 
   it("advances generation, clears discovery, and rejects a stale save on reconnect", async () => {
-    if (!reachable) return;
+
 
     const before = await diagnosticStep(
       "reconnect-read-before",

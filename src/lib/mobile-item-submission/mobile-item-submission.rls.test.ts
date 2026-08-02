@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -26,6 +26,7 @@ import {
   multipart,
   request,
 } from "./rls-test-fixture";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 
 vi.mock("server-only", () => ({}));
 
@@ -53,6 +54,10 @@ let itemId = "";
 let runId = "";
 let queueMessageId = "";
 let storagePaths: string[] = [];
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 
 async function assumeServiceRole(client: Client): Promise<void> {
   await client.query("select set_config('request.jwt.claims', $1, true)", [
@@ -265,25 +270,20 @@ async function waitForCleanupFence(
 }
 
 beforeAll(async () => {
-  if (
-    !PUBLISHABLE_KEY?.startsWith("sb_publishable_") ||
-    !SECRET_KEY?.startsWith("sb_secret_") ||
-    !new URL(SUPABASE_URL).hostname.match(/^(127\.0\.0\.1|localhost|::1)$/)
-  ) return;
-  try {
-    const health = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: PUBLISHABLE_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    if (!health.ok) return;
-  } catch {
-    return;
-  }
-
+  reachable = await stackReachable({
+    url: SUPABASE_URL,
+    apiKey: PUBLISHABLE_KEY,
+    requiredValues: [
+      PUBLISHABLE_KEY?.startsWith("sb_publishable_"),
+      SECRET_KEY?.startsWith("sb_secret_"),
+      new URL(SUPABASE_URL).hostname.match(/^(127\.0\.0\.1|localhost|::1)$/),
+    ],
+  });
+  await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource("pipeline_jobs");
   database = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
   await database.connect();
-  admin = createClient(SUPABASE_URL, SECRET_KEY, {
+  admin = createClient(SUPABASE_URL, SECRET_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   ownerId = `user_test_mobile_submit_owner_${Date.now()}`;
@@ -313,11 +313,11 @@ beforeAll(async () => {
     mintUserJwt(concurrentId),
     mintUserJwt(legacyReplayId),
   ]);
-  reachable = true;
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   const residue = await database.query<{ queue_message_id: string | null; storage_path: string | null }>(
     `select run.queue_message_id::text queue_message_id, null::text storage_path
      from public.pipeline_runs run where run.user_id = any($1::text[])
@@ -379,11 +379,11 @@ afterAll(async () => {
   );
   await database.end();
   await lease.release();
+  });
 });
 
 describe("authenticated mobile item submission against local Supabase", () => {
   it("supersedes cleanup published by preparation that serialized before replay", async () => {
-    if (!reachable) return;
     const submission = await createExpiredUploadingSubmission(
       preparationFirstId,
       preparationFirstToken,
@@ -514,7 +514,6 @@ describe("authenticated mobile item submission against local Supabase", () => {
   });
 
   it("makes preparation recheck authority when replay serialized first", async () => {
-    if (!reachable) return;
     const submission = await createExpiredUploadingSubmission(
       replayFirstId,
       replayFirstToken,
@@ -595,7 +594,6 @@ describe("authenticated mobile item submission against local Supabase", () => {
   });
 
   it("fences a claimed stale cleanup job when the exact submission resumes", async () => {
-    if (!reachable) return;
     const staging = createSupabaseMobileItemSubmissionStaging(admin);
     const tenant = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
       accessToken: async () => recoveryToken,
@@ -814,7 +812,6 @@ describe("authenticated mobile item submission against local Supabase", () => {
   });
 
   it("deletes an expired mobile upload when no exact replay resumes it", async () => {
-    if (!reachable) return;
     const staging = createSupabaseMobileItemSubmissionStaging(admin);
     const tenant = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
       accessToken: async () => abandonedToken,
@@ -900,7 +897,6 @@ describe("authenticated mobile item submission against local Supabase", () => {
   });
 
   it("serializes competing five-photo order under one durable run", async () => {
-    if (!reachable) return;
     const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
     const submitter = createConfiguredMobileItemSubmissionOperations({
       supabaseURL: SUPABASE_URL,
@@ -988,7 +984,6 @@ describe("authenticated mobile item submission against local Supabase", () => {
   });
 
   it("replays one committed photo-only v1 binding through the current v2 public handler", async () => {
-    if (!reachable) return;
     const key = crypto.randomUUID();
     const prepared = await prepareMobileItemSubmission(multipart());
     expect(prepared.voice).toBeNull();
@@ -1156,7 +1151,6 @@ describe("authenticated mobile item submission against local Supabase", () => {
   });
 
   it("returns one canonical run and matching voice receipt after ambiguous v2 replay", async () => {
-    if (!reachable) return;
     const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
     const submitter = createConfiguredMobileItemSubmissionOperations({
       supabaseURL: SUPABASE_URL,

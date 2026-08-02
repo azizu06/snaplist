@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -14,6 +14,7 @@ import { MockEbayAdapter } from "@/lib/marketplace/ebay/mock";
 import { publishListingToEbay } from "@/lib/marketplace/ebay/publish";
 import { runPipelineAndPersist } from "@/lib/pipeline/persist";
 import { StubPipeline } from "@/lib/pipeline/stub";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
 const PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
@@ -52,6 +53,10 @@ let foreignId = "";
 let ownerToken = "";
 let foreignToken = "";
 let releaseSecondUpload: () => void = () => {};
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -288,46 +293,21 @@ async function mandatoryOwnerResidue(): Promise<number> {
   return result.rows[0]!.count;
 }
 
-/**
- * These assertions run through PostgREST and Storage, so they need the current
- * `sb_publishable_`/`sb_secret_` key pair. A stack still issuing legacy JWT keys
- * cannot mint those, and the tests then pass without asserting anything — so say
- * so out loud. supabase/tests/account_erasure.test.sql proves the database half
- * of these acceptance behaviours and does run in CI; the Storage and provider
- * halves are proved only here, so a skip is a real gap in the evidence rather
- * than a duplicate of something else.
- */
-function skip(reason: string): void {
-  console.warn(`[account-erasure.rls.test] SKIPPED — ${reason}. Nothing here was proved.`);
-}
-
 beforeAll(async () => {
-  if (
-    !PUBLISHABLE_KEY?.startsWith("sb_publishable_") ||
-    !SECRET_KEY?.startsWith("sb_secret_") ||
-    !new URL(SUPABASE_URL).hostname.match(/^(127\.0\.0\.1|localhost|::1)$/)
-  ) {
-    skip("no local sb_publishable_/sb_secret_ key pair");
-    return;
-  }
-  try {
-    const health = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: PUBLISHABLE_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    if (!health.ok) {
-      skip(`auth health returned ${health.status}`);
-      return;
-    }
-  } catch {
-    skip("no reachable local Supabase");
-    return;
-  }
-
+  reachable = await stackReachable({
+    url: SUPABASE_URL,
+    apiKey: PUBLISHABLE_KEY,
+    requiredValues: [
+      PUBLISHABLE_KEY?.startsWith("sb_publishable_"),
+      SECRET_KEY?.startsWith("sb_secret_"),
+      new URL(SUPABASE_URL).hostname.match(/^(127\.0\.0\.1|localhost|::1)$/),
+    ],
+  });
+  await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource("pipeline_jobs");
   database = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
   await database.connect();
-  admin = createClient(SUPABASE_URL, SECRET_KEY, {
+  admin = createClient(SUPABASE_URL, SECRET_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   ownerId = `user_test_account_erasure_owner_${Date.now()}`;
@@ -336,13 +316,11 @@ beforeAll(async () => {
     mintUserJwt(ownerId),
     mintUserJwt(foreignId),
   ]);
-  reachable = true;
-
-  const foreign = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+  const foreign = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
     accessToken: async () => foreignToken,
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const owner = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+  const owner = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
     accessToken: async () => ownerToken,
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -359,11 +337,12 @@ beforeAll(async () => {
   expect(foreignSettings.error).toBeNull();
   expect(ownerSettings.error).toBeNull();
   expect(foreignObject.error).toBeNull();
+  });
 });
 
 afterAll(async () => {
   releaseSecondUpload();
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
 
   const objects = await database.query<{ bucket_id: string; name: string }>(
     `select bucket_id, name
@@ -394,11 +373,11 @@ afterAll(async () => {
   await cleanupClerkTestUsers(admin, [ownerId, foreignId]);
   await database.end();
   await lease.release();
+  });
 });
 
 describe("durable account erasure against local Supabase", () => {
   it("fences an active upload, resumes one generation, and preserves foreign bytes", async () => {
-    if (!reachable) return;
 
     const foreignBefore = await foreignState();
     const owner = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
@@ -620,7 +599,6 @@ describe("durable account erasure against local Supabase", () => {
   });
 
   it("blocks a new eBay publish before the adapter and never treats an existing listing as ended", async () => {
-    if (!reachable) return;
 
     const publishOwnerId = `user_test_account_erasure_ebay_${Date.now()}`;
     const publishOwnerToken = await mintUserJwt(publishOwnerId);
@@ -824,7 +802,6 @@ describe("durable account erasure against local Supabase", () => {
   });
 
   it("reconciles an active credit and removes exact live and archived queue identities", async () => {
-    if (!reachable) return;
 
     const creditOwnerId = `user_test_account_erasure_credit_${Date.now()}`;
     const creditForeignId = `user_test_account_erasure_credit_foreign_${Date.now()}`;
@@ -929,7 +906,6 @@ describe("durable account erasure against local Supabase", () => {
   });
 
   it("refuses to create an erasure generation until a pre-existing guest copy is released", async () => {
-    if (!reachable) return;
 
     const targetUserId = `user_test_account_erasure_preclaim_${Date.now()}`;
     const guestUserId = `guest_test_account_erasure_preclaim_${Date.now()}`;
@@ -1035,7 +1011,6 @@ describe("durable account erasure against local Supabase", () => {
   });
 
   it("rejects a guest claim before binding or copying into an erasing tenant", async () => {
-    if (!reachable) return;
 
     const targetUserId = `user_test_account_erasure_claim_${Date.now()}`;
     const guestUserId = `guest_test_account_erasure_claim_${Date.now()}`;

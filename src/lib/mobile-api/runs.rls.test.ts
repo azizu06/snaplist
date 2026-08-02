@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 import {
@@ -33,6 +34,10 @@ const DATABASE_URL = resolveLocalTestDatabaseUrl(
 );
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userAId = "";
 let userBId = "";
@@ -46,23 +51,7 @@ let reviewListingA = "";
 let reviewRunA = "";
 let reviewRevisionA = "";
 let guestOperationTokenA = "";
-let reviewQueueMessageA = "";
-
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForDatabaseBlock(observer: Client, blockedPid: number): Promise<void> {
+let reviewQueueMessageA = "";async function waitForDatabaseBlock(observer: Client, blockedPid: number): Promise<void> {
   const deadline = Date.now() + 3_000;
   while (Date.now() < deadline) {
     const result = await observer.query<{ blockers: number[] }>(
@@ -78,8 +67,8 @@ async function waitForDatabaseBlock(observer: Client, blockedPid: number): Promi
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -252,10 +241,12 @@ beforeAll(async () => {
     userAId,
     crypto.randomUUID(),
   );
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   if (reviewQueueMessageA) {
     await admin.rpc("ack_pipeline_message", {
       p_message_id: reviewQueueMessageA,
@@ -273,6 +264,8 @@ afterAll(async () => {
     await database.end();
   }
   await cleanupClerkTestUsers(admin, [userAId, userBId]);
+
+  });
 });
 
 describe("mobile durable-run RLS adapter", () => {
@@ -286,7 +279,7 @@ describe("mobile durable-run RLS adapter", () => {
   });
 
   it("hides another tenant's run while preserving the owner's canonical detail", async () => {
-    if (!reachable) return;
+
     const owner = createConfiguredSupabaseMobileRunOperations({
       supabaseURL: SUPABASE_URL,
       anonKey: ANON_KEY!,
@@ -339,7 +332,7 @@ describe("mobile durable-run RLS adapter", () => {
   it.each(["Clerk", "GuestBearer"])(
     "returns one coherent review only to the owning %s principal",
     async (principalKind) => {
-      if (!reachable) return;
+
       const ownerToken =
         principalKind === "Clerk" ? userAToken : guestOperationTokenA;
       const owner = createClient(SUPABASE_URL, ANON_KEY!, {
@@ -388,7 +381,7 @@ describe("mobile durable-run RLS adapter", () => {
   );
 
   it("replays cancel and retry on one logical run without deleting its photos", async () => {
-    if (!reachable) return;
+
     const operations = createConfiguredSupabaseMobileRunOperations({
       supabaseURL: SUPABASE_URL,
       anonKey: ANON_KEY!,
@@ -477,7 +470,7 @@ describe("mobile durable-run RLS adapter", () => {
   });
 
   it("waits for terminal credit restoration before deciding whether retry is legal", async () => {
-    if (!reachable) return;
+
     const fixtureUser = `user_test_mobile_run_race_${Date.now()}`;
     const itemId = crypto.randomUUID();
     const runId = crypto.randomUUID();

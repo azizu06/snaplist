@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
@@ -34,26 +35,15 @@ const ANON_KEY =
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
 const queueMessageIds = new Set<string>();
-const originalRunIds = new Map<string, string>();
-
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function seedReview(user: ClerkTestUser, label: string) {
+const originalRunIds = new Map<string, string>();async function seedReview(user: ClerkTestUser, label: string) {
   const batchId = crypto.randomUUID();
   const idempotencyKey = `review-${batchId}`;
   const staged = await admin.rpc("stage_pipeline_batch", {
@@ -337,8 +327,8 @@ async function correctionState(user: ClerkTestUser, itemIds: string[]) {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -365,16 +355,20 @@ beforeAll(async () => {
     // still what the first reservation draws on and what #524 now fences.
     await grantIncludedOfferDeviceClaim(admin, user.id);
   }
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   await Promise.all(
     [...queueMessageIds].map((messageId) =>
       admin.rpc("ack_pipeline_message", { p_message_id: messageId }),
     ),
   );
   await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
+
+  });
 });
 
 describe("review identity regeneration transaction + RLS", () => {
@@ -388,7 +382,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("atomically persists corrected identity/listing/log and preserves price override", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "owner");
     const { error: exportSeedError } = await userA.client.from("listings").insert({
       user_id: userA.id,
@@ -445,7 +439,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("accepts strict-reader-valid URL, Unicode, and JS whitespace at the authenticated correction seam", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "reader-valid-evidence");
     const runId = crypto.randomUUID();
     const commit = commitFor(
@@ -494,7 +488,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects malformed and mismatched capabilities at the real role without mutation", async () => {
-    if (!reachable) return;
+
     const owner = await seedReview(userA, "capability-owner");
     const sibling = await seedReview(userA, "capability-sibling");
     const foreign = await seedReview(userB, "capability-foreign");
@@ -680,7 +674,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects an expired capability without mutating review state", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "expired-capability");
     const token = "B".repeat(43);
     const runId = crypto.randomUUID();
@@ -715,7 +709,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("caps a clock-ahead capability expiry at the database five-minute maximum", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "clock-ahead-capability");
     const commit = commitFor(
       seeded.itemId,
@@ -744,7 +738,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("consumes one capability exactly once under concurrent completion", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "concurrent-capability");
     const commit = commitFor(
       seeded.itemId,
@@ -775,7 +769,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects evidence divergent from cited sources before privileged completion", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "divergent-evidence");
     const runId = crypto.randomUUID();
     const divergent = commitFor(
@@ -815,7 +809,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rolls back item/listing mutations when a cross-tenant run collision fails later", async () => {
-    if (!reachable) return;
+
     const owner = await seedReview(userA, "rollback-owner");
     const foreign = await seedReview(userB, "foreign");
     const runId = originalRunIds.get(foreign.itemId)!;
@@ -853,7 +847,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects a stale regeneration version and keeps the newer coherent run", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "stale-regeneration");
     const firstRunId = crypto.randomUUID();
     const first = commitFor(
@@ -886,7 +880,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects a zero-price recommendation and retains the previous coherent state", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "zero-price");
     const runId = crypto.randomUUID();
     const invalid = commitFor(
@@ -928,7 +922,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects authoritative live state and an in-flight publish claim", async () => {
-    if (!reachable) return;
+
 
     const live = await seedReview(userA, "authoritative-live");
     const { error: liveStateError } = await userA.client
@@ -991,7 +985,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects a sibling eBay listing for the same item", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "duplicate-ebay-listing");
     const { error: extraError } = await userA.client.from("listings").insert({
       user_id: userA.id,
@@ -1018,7 +1012,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects a listing attached to another tenant's item", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "cross-tenant-item-link");
 
     const { error } = await userB.client.from("listings").insert({
@@ -1040,7 +1034,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("checks and advances one review revision while ordinary save preserves identity", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "shared-review-revision");
     const savedRevision = crypto.randomUUID();
     const savedAttributes = {
@@ -1141,7 +1135,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects ordinary review saves for an authoritative live eBay listing", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "live-save-guard");
     const { error: liveStateError } = await userA.client
       .from("listings")
@@ -1187,7 +1181,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects sharpened estimates for an authoritative live eBay listing", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "live-sharpen-guard");
     const { error: liveStateError } = await userA.client
       .from("listings")
@@ -1234,7 +1228,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("advances write exclusion without invalidating export content on publish claim", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "publish-revision");
     const claim = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
@@ -1309,7 +1303,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("rejects an export pack persisted from an obsolete review revision", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "stale-export-pack");
     const currentRevision = crypto.randomUUID();
     const saved = await userA.client.rpc("save_review_edits", {
@@ -1361,7 +1355,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("replaces an invalid current export pack and prunes packs on save and sharpen", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "export-pack-lifecycle");
     const invalidPack = [
       {
@@ -1484,7 +1478,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("advances the review revision atomically with dashboard seller edits", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "dashboard-revision");
 
     const dashboardEdit = await userA.client.rpc("update_dashboard_review", {
@@ -1566,7 +1560,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("recovers an expired publish lease without letting the stale owner finalize", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "expired-publish-lease");
 
     const first = await userA.client.rpc("begin_ebay_publish", {
@@ -1619,7 +1613,7 @@ describe("review identity regeneration transaction + RLS", () => {
   });
 
   it("claims one seller price snapshot and rejects a concurrent price edit", async () => {
-    if (!reachable) return;
+
     const seeded = await seedReview(userA, "publish-price-snapshot");
     const edited = await userA.client.rpc("update_dashboard_review", {
       p_item_id: seeded.itemId,

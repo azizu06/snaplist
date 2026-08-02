@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -31,6 +31,7 @@ import {
   singlePhotoMultipart,
 } from "./rls-test-fixture";
 import { shouldSkipGuestFirstRunForOfflineCi } from "./guest-first-run-test-mode";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 
 vi.mock("server-only", () => ({}));
 
@@ -58,6 +59,10 @@ let expiredCapabilityId = "";
 let revokedCapabilityId = "";
 let claimedCapabilityId = "";
 let tombstonedCapabilityId = "";
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 
 const verifiedAssertion = {
   appId: "TEAMID1234.dev.snaplist.ios",
@@ -148,12 +153,13 @@ function createGuestSubmission(
 }
 
 beforeAll(async () => {
-  if (!(await localSubmissionStackIsReachable())) {
-    throw new Error(
-      "The focused verified-guest RLS test requires its leased local Supabase stack.",
-    );
-  }
-
+  reachable = await stackReachable({
+    apiKey: PUBLISHABLE_KEY,
+    requiredValues: [DATABASE_URL, PUBLISHABLE_KEY],
+    url: SUPABASE_URL,
+    probe: localSubmissionStackIsReachable,
+  });
+  await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource("pipeline_jobs");
   database = new Client({
     application_name: "issue-332-guest-first-run",
@@ -204,11 +210,11 @@ beforeAll(async () => {
       guestId,
     ],
   );
-  reachable = true;
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
 
   const residue = await database.query<{
     queue_message_id: string | null;
@@ -267,6 +273,7 @@ afterAll(async () => {
   );
   await database.end();
   await lease.release();
+  });
 });
 
 const describeVerifiedGuestFirstRun =

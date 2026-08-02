@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 
 /**
  * The tree-filtered half of the erasure coverage guard.
@@ -62,28 +63,27 @@ function tablesDeclaredInThisTree(): Set<string> {
 let reachable = false;
 let database: Client;
 
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
+
 beforeAll(async () => {
-  database = new Client({ connectionString: DATABASE_URL });
-  try {
-    await database.connect();
-    reachable = true;
-  } catch {
-    reachable = false;
-    console.warn(
-      "[fence-coverage.rls.test] No local database — skipping the account erasure "
-        + "fence coverage guard.",
-    );
-  }
+  reachable = await stackReachable({
+    requiredValues: [DATABASE_URL],
+    probe: async () => {
+      database = new Client({ connectionString: DATABASE_URL });
+      await database.connect();
+      return true;
+    },
+  });
 });
 
 afterAll(async () => {
-  if (reachable) await database.end();
+  await whenStackReachable(reachable, () => database.end());
 });
 
 describe.runIf(DATABASE_URL)("account erasure fence coverage", () => {
   it("fences and counts every tenant table this tree declares", async () => {
-    if (!reachable) return;
-
     const declared = tablesDeclaredInThisTree();
 
     const { rows: tenantTables } = await database.query<{ qualified: string }>(
