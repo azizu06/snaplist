@@ -308,6 +308,8 @@ struct AssistedExportDomain: Equatable, Sendable {
     /// destination with no handoff, so the seller could neither correct the
     /// line nor re-confirm it.
     mutating func updatePack(to pack: AssistedExportPack) {
+        confirmSheet = nil
+        undoWindow = nil
         if pack.contentRevision != self.pack.contentRevision {
             handedOff = []
             sharedAt = [:]

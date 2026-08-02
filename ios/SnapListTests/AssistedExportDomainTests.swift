@@ -588,6 +588,69 @@ final class AssistedExportDomainTests: XCTestCase {
         )
     }
 
+    func testReplacingAPackDismissesAMountedConfirmSheetAndUndoWindow() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.toggle(.mercari)
+        domain.recordHandoff(.copiedListingText, for: .mercari)
+        domain.presentConfirmSheet(for: .mercari)
+        XCTAssertEqual(domain.confirmSheet, .mercari)
+
+        domain.updatePack(
+            to: .fixture(
+                contentRevision: Self.editedContentRevision,
+                reviewRevision: Self.editedReviewRevision
+            )
+        )
+
+        XCTAssertNil(
+            domain.confirmSheet,
+            "Replacing the pack dismisses a question about text the seller may not have seen."
+        )
+        XCTAssertNil(
+            domain.undoWindow,
+            "Replacing the pack removes the old transient Undo control."
+        )
+    }
+
+    func testReplacingAPackDismissesAMountedConfirmSheetEvenWhenContentIsUnchanged() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.toggle(.mercari)
+        domain.recordHandoff(.copiedListingText, for: .mercari)
+        domain.presentConfirmSheet(for: .mercari)
+        XCTAssertEqual(domain.confirmSheet, .mercari)
+
+        domain.updatePack(
+            to: .fixture(
+                reviewRevision: Self.editedReviewRevision
+            )
+        )
+
+        XCTAssertNil(
+            domain.confirmSheet,
+            "Every replacement closes a mounted sheet before its new revision can be confirmed."
+        )
+    }
+
+    func testReplacingAPackClosesAnUndoWindow() {
+        var domain = AssistedExportDomain(pack: .fixture())
+        domain.toggle(.depop)
+        domain.recordHandoff(.copiedListingText, for: .depop)
+        domain.presentConfirmSheet(for: .depop)
+        XCTAssertEqual(domain.confirmShared(at: Self.julyTwentyFifth), .recorded)
+        XCTAssertEqual(domain.undoWindow, .depop)
+
+        domain.updatePack(
+            to: .fixture(
+                reviewRevision: Self.editedReviewRevision
+            )
+        )
+
+        XCTAssertNil(
+            domain.undoWindow,
+            "Every replacement closes the transient control tied to the prior pack."
+        )
+    }
+
     // A price-only edit advances the review revision without touching the pack
     // text, which is why the server keys handoff receipts on the content
     // revision alone and the confirm guard on the full one. The receipt belongs
