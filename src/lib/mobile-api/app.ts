@@ -17,6 +17,17 @@ import {
   type ListingReviewSaver,
 } from "@/lib/listing-review/save";
 import {
+  GuidedCorrectionIdempotencyConflictError,
+  GuidedCorrectionInProgressError,
+  GuidedCorrectionNotEditableError,
+  GuidedCorrectionNotFoundError,
+  GuidedCorrectionNotPricedError,
+  GuidedCorrectionStaleError,
+  GuidedCorrectionUnavailableError,
+  guidedCorrectionIntentSchema,
+  type GuidedCorrector,
+} from "./guided-correction";
+import {
   MobileRunConflictError,
   MobileRunInvalidCursorError,
   MobileRunNotFoundError,
@@ -52,6 +63,7 @@ import {
   exportHandoffsEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
   ebayOauthSessionEnvelopeSchema,
+  guidedCorrectionEnvelopeSchema,
   guestClaimEnvelopeSchema,
   revenueCatConfigurationEnvelopeSchema,
   sessionEnvelopeSchema,
@@ -147,6 +159,8 @@ export interface MobileApiDependencies {
   listingReview?: ListingReviewReader;
   /** One run-bound, idempotent Listing Review mutation. */
   listingReviewSave?: ListingReviewSaver;
+  /** Guided identity correction — the native "Sharpen the estimate" seam. */
+  guidedCorrection?: GuidedCorrector;
   /** Transport over the #580 assisted-export seam; it adds no authority. */
   assistedExport?: AssistedExportHandoffGateway;
   workerSecret?: string;
@@ -661,6 +675,124 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "Listing Review save is temporarily unavailable.",
+        );
+      }
+    }
+
+    const guidedCorrectionPath = pathname.match(
+      new RegExp(`^/${MOBILE_API_VERSION}/runs/([^/]+)/sharpen$`),
+    );
+    if (guidedCorrectionPath) {
+      if (request.method !== "POST") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const runId = z.string().uuid().safeParse(guidedCorrectionPath[1]);
+      // A correction spends real pricing-provider budget, so the key that makes
+      // a retry free is required before the request is looked at any further.
+      const idempotencyKey = z
+        .string()
+        .uuid()
+        .safeParse(request.headers.get("idempotency-key")?.trim());
+      let requestBody: unknown;
+      try {
+        requestBody = await request.json();
+      } catch {
+        requestBody = null;
+      }
+      const intent = guidedCorrectionIntentSchema.safeParse(requestBody);
+      if (!runId.success || !idempotencyKey.success || !intent.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          !runId.success
+            ? "A valid run ID is required."
+            : !idempotencyKey.success
+              ? "A valid Idempotency-Key is required."
+              : "A valid guided correction is required.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      if (!dependencies.guidedCorrection) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Sharpening an estimate is temporarily unavailable.",
+        );
+      }
+      try {
+        const receipt = await dependencies.guidedCorrection.correct({
+          runId: runId.data,
+          idempotencyKey: idempotencyKey.data,
+          userId: principal.userId,
+          bearerToken: token,
+          // A verified guest's capability bearer is not a project JWT, so
+          // without this every read and write a guest attempts is refused by
+          // PostgREST and surfaces as a 503 on the very path guest-first value
+          // depends on.
+          mintOperationToken: principal.mintOperationToken,
+          intent: intent.data,
+        });
+        return json(
+          guidedCorrectionEnvelopeSchema.parse({
+            data: receipt,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        // A run the caller cannot see and a run that exists but is no longer
+        // correctable are different answers: 404 leaks nothing about another
+        // tenant's run, 409 tells the owner their own view went stale.
+        if (error instanceof GuidedCorrectionNotFoundError) {
+          return errorResponse(
+            requestId,
+            404,
+            "not_found",
+            "This run is unavailable.",
+          );
+        }
+        if (
+          error instanceof GuidedCorrectionStaleError
+          || error instanceof GuidedCorrectionNotEditableError
+          || error instanceof GuidedCorrectionNotPricedError
+          || error instanceof GuidedCorrectionInProgressError
+          || error instanceof GuidedCorrectionIdempotencyConflictError
+          || error instanceof GuidedCorrectionUnavailableError
+        ) {
+          return errorResponse(requestId, 409, "conflict", error.message);
+        }
+        dependencies.reportError?.("mobile-api.guided-correction", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Sharpening an estimate is temporarily unavailable.",
         );
       }
     }

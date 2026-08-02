@@ -6,9 +6,14 @@ import { listingReviewProjectionSchema } from "@/lib/listing-review";
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import {
   apiErrorEnvelopeSchema,
+  guidedCorrectionEnvelopeSchema,
   mobileRunSchema,
   pricingEvidenceEnvelopeSchema,
 } from "./contract";
+import {
+  guidedCorrectionIntentSchema,
+  guidedCorrectionReceiptSchema,
+} from "./guided-correction";
 
 const serverContractSource = readFileSync(
   resolve("docs/contracts/mobile-api-v1.openapi.json"),
@@ -303,6 +308,38 @@ describe("SwiftUI mobile HTTP contract", () => {
     );
 
     expect(openApiSchema).toEqual(runtimeSchema);
+  });
+
+  it("keeps #597's guided correction schemas aligned with runtime JSON Schema", () => {
+    // The three schemas this route publishes were declared by hand and asserted
+    // by nothing, so the runtime accepted a confirmed identity a third longer
+    // than the contract allows — a value a native client generated from this
+    // file would refuse to send, and would refuse to decode once stored.
+    const pairs: [string, z.ZodType][] = [
+      ["GuidedCorrectionIntent", guidedCorrectionIntentSchema],
+      ["GuidedCorrectionReceipt", guidedCorrectionReceiptSchema],
+      ["GuidedCorrectionEnvelope", guidedCorrectionEnvelopeSchema],
+    ];
+
+    for (const [name, schema] of pairs) {
+      const generatedRuntimeSchema = z.toJSONSchema(schema) as Record<
+        string,
+        unknown
+      >;
+      delete generatedRuntimeSchema.$schema;
+
+      expect({
+        [name]: dereferenceContractSchema(contract.components.schemas[name]),
+      }).toEqual({ [name]: dereferenceContractSchema(generatedRuntimeSchema) });
+    }
+  });
+
+  it("requires an Idempotency-Key on the guided correction it pays a provider for", () => {
+    // A POST that spends real pricing budget has to be replayable, or a client
+    // retry is billed twice for one seller intent.
+    expect(
+      JSON.stringify(contract.paths["/v1/runs/{runId}/sharpen"]),
+    ).toContain("#/components/parameters/IdempotencyKey");
   });
 
   it("keeps #376's run review and principal contract aligned with runtime JSON Schema", () => {

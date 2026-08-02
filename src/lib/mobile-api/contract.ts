@@ -6,6 +6,7 @@ import { includedOfferOutcomeSchema } from "@/lib/included-offer-fence/contract"
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import { listingReviewProjectionSchema } from "@/lib/listing-review";
 import { listingReviewSaveReceiptSchema } from "@/lib/listing-review/save";
+import { guidedCorrectionReceiptSchema } from "./guided-correction";
 import { ASSISTED_EXPORT_PLATFORMS } from "@/lib/export/handoff";
 
 export const MOBILE_API_VERSION = "v1" as const;
@@ -146,6 +147,10 @@ export const mobileRunEnvelopeSchema = z
 
 export const listingReviewSaveEnvelopeSchema = z
   .object({ data: listingReviewSaveReceiptSchema, meta: apiMetaSchema })
+  .strict();
+
+export const guidedCorrectionEnvelopeSchema = z
+  .object({ data: guidedCorrectionReceiptSchema, meta: apiMetaSchema })
   .strict();
 
 export const mobileRunHistoryOrderKeySchema = z

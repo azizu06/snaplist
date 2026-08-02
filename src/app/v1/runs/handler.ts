@@ -6,6 +6,7 @@ import {
 } from "@/lib/listing-review";
 import { createInternalGuidedCorrectionCompletionRpcClient } from "@/lib/pipeline/guided-correction-internal";
 import {
+  createConfiguredSupabaseGuidedCorrector,
   createConfiguredSupabaseMobileRunOperations,
   createMobileApiHandler,
 } from "@/lib/mobile-api";
@@ -56,6 +57,20 @@ function configuredListingReviewSave() {
     publishableKey,
     supabaseURL,
     completionClient: createInternalGuidedCorrectionCompletionRpcClient(),
+  });
+}
+
+function configuredGuidedCorrection() {
+  const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY?.trim()
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!supabaseURL || !publishableKey) {
+    throw new Error("The mobile guided-correction adapter is not configured.");
+  }
+  return createConfiguredSupabaseGuidedCorrector({
+    completionClient: createInternalGuidedCorrectionCompletionRpcClient(),
+    publishableKey,
+    supabaseURL,
   });
 }
 
@@ -116,6 +131,11 @@ const handler = createMobileApiHandler({
   listingReviewSave: {
     save(input) {
       return configuredListingReviewSave().save(input);
+    },
+  },
+  guidedCorrection: {
+    correct(input) {
+      return configuredGuidedCorrection().correct(input);
     },
   },
   worker: unavailableWorker,
