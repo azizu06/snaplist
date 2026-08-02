@@ -328,6 +328,13 @@ describe("App Review destinations", () => {
 });
 
 describe("marketing in-page navigation", () => {
+  it("uses landing-page URLs for header sections", () => {
+    const $ = load(renderToStaticMarkup(<SiteHeader />));
+
+    expect($('a[href="/#features"]').length).toBeGreaterThan(0);
+    expect($('a[href="/#faq"]').length).toBeGreaterThan(0);
+  });
+
   it("points every in-page anchor at an element that exists", () => {
     const markup = [
       renderToStaticMarkup(<SiteHeader />),

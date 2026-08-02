@@ -3,7 +3,7 @@
  *
  * Every claim on the public site has to survive the PRD's out-of-scope list and
  * the export-pack honesty rule, so the copy lives here as data rather than
- * scattered through JSX. `src/app/(marketing)/copy-honesty.test.ts` reads these
+ * scattered through JSX. `src/app/(marketing)/marketing.test.tsx` reads these
  * exports and derives its assertions from product capability instead of pinning
  * literal sentences — the failure mode recorded on #191 was a copy test that
  * held a retired claim green because nobody remembered to update the literal

@@ -5,9 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppStoreButton } from "@/components/marketing/app-store-button";
 
 const NAV_LINKS = [
-  { href: "#features", label: "Features" },
+  { href: "/#features", label: "Features" },
   { href: "/pricing", label: "Pricing" },
-  { href: "#faq", label: "FAQ" },
+  { href: "/#faq", label: "FAQ" },
 ] as const;
 
 /** Scroll distance past which the header swaps to its opaque surface. */
