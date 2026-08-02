@@ -62,6 +62,13 @@ export const guidedCorrectionIntentSchema = z
      * Seller-confirmed identity. Provided values override the extracted
      * attributes, which raises identification completeness in the composite AND
      * narrows the pricing search. Omitted fields leave the extracted value alone.
+     *
+     * An object carrying no usable field is ACCEPTED and means "no identity
+     * change" — `usableIdentity` normalizes it before the correction reads it.
+     * Rejecting it would be a contract change against the native model
+     * generated from this schema, and normalizing it here is not available:
+     * this schema is emitted through `z.toJSONSchema`, which cannot represent a
+     * transform.
      */
     confirmedIdentity: z
       .object({
@@ -256,6 +263,34 @@ export interface GuidedCorrectionDependencies {
 }
 
 /**
+ * The confirmation the seller ACTUALLY made, or `undefined` when they made none.
+ *
+ * A correction reads the confirmed identity in four places — the title rebuild,
+ * the pricing merge, the persisted attributes, and the `items.identification`
+ * write — and every one of them gates on presence. An identity object that is
+ * present but carries no usable field clears all four gates while merging
+ * nothing: the title is rebuilt from `brand + model`, SHORTENING a richer stored
+ * title, and a re-derived identification replaces the column
+ * `get_mobile_listing_review` projects into the native client's `identity.label`
+ * — both off a confirmation that was never made.
+ *
+ * So the four reads resolve through one normalization rather than four presence
+ * checks. The predicate is deliberately the same one `mergeIdentity` applies a
+ * field under (a non-blank trimmed value), so "usable" here cannot drift from
+ * "actually merged" there. It cannot live in the Zod schema: that schema is
+ * emitted through `z.toJSONSchema` to generate the native contract, and a
+ * transform is not representable in JSON Schema.
+ */
+function usableIdentity(
+  confirmed: ConfirmedIdentity | undefined,
+): ConfirmedIdentity | undefined {
+  const usable =
+    confirmed
+    && Object.values(confirmed).some((value) => Boolean(value?.trim()));
+  return usable ? confirmed : undefined;
+}
+
+/**
  * Retitle an item around the identity the seller just confirmed.
  *
  * `deriveIdentification` reads `title` FIRST when it builds the label, so
@@ -269,6 +304,8 @@ export interface GuidedCorrectionDependencies {
  *
  * Returns the attributes unchanged when nothing was confirmed: a specs-only
  * sharpen narrows the pricing search and makes no claim about what the item is.
+ * Takes the value `usableIdentity` resolved, never the raw intent — a presence
+ * check against the raw intent would rebuild the title off an empty merge.
  */
 function applyConfirmedIdentity(
   attributes: ExtractedAttributes,
@@ -316,16 +353,20 @@ async function runCorrection(
 
   const parsed = extractedAttributesSchema.safeParse(snapshot.attributes);
   const autopilotEnabled = snapshot.autopilotEnabled ?? undefined;
+  // Resolved ONCE. Every step below reads this rather than the raw intent, so a
+  // fieldless identity object cannot mean "nothing confirmed" at one step and
+  // "something confirmed" at the next.
+  const confirmedIdentity = usableIdentity(intent.confirmedIdentity);
   // Retitle BEFORE pricing so the attributes that were priced are exactly the
   // attributes that get persisted, rather than differing by a title.
   const corrected = applyConfirmedIdentity(
     parsed.success ? parsed.data : {},
-    intent.confirmedIdentity,
+    confirmedIdentity,
   );
   const reprice = await repriceWithSpecs({
     attributes: corrected,
     addedSpecs: intent.addedSpecs,
-    confirmedIdentity: intent.confirmedIdentity,
+    confirmedIdentity,
     autopilotEnabled,
     priceItem: dependencies.priceItem,
   });
@@ -337,7 +378,7 @@ async function runCorrection(
   // contract exists to prevent.
   const attributes: Record<string, unknown> = {
     ...snapshot.attributes,
-    ...intent.confirmedIdentity,
+    ...confirmedIdentity,
     ...(corrected.title ? { title: corrected.title } : {}),
     specs: reprice.mergedSpecs,
   };
@@ -345,7 +386,7 @@ async function runCorrection(
   // `deriveIdentification` the vision step and the web identity correction use —
   // the photos did not change, so nothing here re-runs vision, it only restates
   // what the seller confirmed.
-  const identification = intent.confirmedIdentity
+  const identification = confirmedIdentity
     ? deriveIdentification(reprice.attributes, {})
     : undefined;
 

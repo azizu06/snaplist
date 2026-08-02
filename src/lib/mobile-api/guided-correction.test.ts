@@ -158,8 +158,16 @@ function harness(
    * attributes. Re-deriving here would make the assertion pass on a correction
    * that never reached the column, which is exactly the defect being asserted
    * against.
+   *
+   * Seeded from the snapshot, not from `STORED_IDENTITY`, so a case can store an
+   * identity that is NOT `brand + model`. A column hardwired to the default
+   * would let a correction that rewrote the label to exactly `brand + model`
+   * read back as untouched.
    */
-  const durableIdentity = { ...STORED_IDENTITY };
+  const durableIdentity = {
+    label: stored.identification?.label ?? STORED_IDENTITY.label,
+    confident: stored.identification?.confident ?? STORED_IDENTITY.confident,
+  };
 
   /**
    * `private.mobile_guided_corrections`, modelled as the claim RPC keeps it:
@@ -444,6 +452,50 @@ describe("POST /v1/runs/{runId}/sharpen — corrected identity", () => {
     // correction that blanked the untouched field would be a data loss the
     // seller never asked for.
     expect(readBackIdentity().label).toBe("Dell XPS 17");
+  });
+
+  it("treats an identity object carrying no confirmed field as no confirmation", async () => {
+    // The stored title is the vision step's full display title, which is
+    // strictly richer than `brand + model`. That gap is what makes the defect
+    // observable: rebuilding the title from the merged identity SHORTENS it.
+    const STORED_TITLE = "Dell XPS 15 9520 15.6in Touch Laptop";
+    const { handler, commits, readBackIdentity } = harness({
+      stored: snapshot({
+        attributes: {
+          brand: "Dell",
+          model: "XPS 15",
+          category: "electronics",
+          condition: "good",
+          specs: ["16GB RAM"],
+          title: STORED_TITLE,
+        },
+        identification: { label: STORED_TITLE, confident: true, evidence: 0.75 },
+      }),
+    });
+
+    const response = await handler(
+      correctionRequest(OWNER_TOKEN, {
+        expectedReviewRevision: REVIEW_REVISION,
+        addedSpecs: ["512GB SSD"],
+        confirmedIdentity: {},
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    // An identity object with no field in it confirms nothing, so this is a
+    // specs-only sharpen: it narrows the pricing search and makes no claim
+    // about what the item IS. Writing a re-derived identification here replaces
+    // the column `get_mobile_listing_review` projects into `identity.label`
+    // with a label the seller never confirmed.
+    expect(readBackIdentity()).toEqual({
+      label: STORED_TITLE,
+      confident: true,
+    });
+    expect(commits[0].identification).toBeUndefined();
+    // And the stored title survives. `items.attributes.title` is what eBay
+    // publish and every export pack read, so silently truncating it to
+    // `brand + model` degrades every outbound path.
+    expect(commits[0].attributes).toMatchObject({ title: STORED_TITLE });
   });
 
   it("leaves the identity alone when the seller only added specs", async () => {
