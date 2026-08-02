@@ -511,6 +511,133 @@ final class AnalyticsContractTests: XCTestCase {
         XCTAssertEqual(factory.creationCount, 1)
     }
 
+    func testBuiltBundleCarriesTheEscapedIngestHostAndRefusesTruncatedForms() throws {
+        // Reads what the build actually produced rather than what the xcconfig
+        // appears to say. xcconfig treats a bare `//` as the start of a
+        // comment, so `https://us.i.posthog.com` reaches the bundle as
+        // `https:` and `//us.i.posthog.com` reaches it empty; only the
+        // `$()`-escaped form in SnapList.xcconfig survives.
+        let built = AnalyticsLaunchInputs.current
+        let host = try XCTUnwrap(
+            AnalyticsLaunchPolicy.usableBundleValue(built.hostBundleValue)
+        )
+        let projectKey = try XCTUnwrap(
+            AnalyticsLaunchPolicy.usableBundleValue(built.projectKeyBundleValue)
+        )
+
+        XCTAssertEqual(host, "https://us.i.posthog.com")
+        XCTAssertTrue(
+            projectKey.hasPrefix("phc_"),
+            "Expected the built bundle to carry a filled PostHog project key"
+        )
+
+        let shipped = try XCTUnwrap(
+            AnalyticsLaunchPolicy.decide(
+                AnalyticsLaunchInputs(
+                    projectKeyBundleValue: built.projectKeyBundleValue,
+                    hostBundleValue: built.hostBundleValue,
+                    infoDictionary: built.infoDictionary,
+                    isDebugBuild: false,
+                    hasSandboxAppStoreReceipt: true,
+                    hasLoadedXCTest: false
+                )
+            )
+        )
+        XCTAssertEqual(shipped.host, URL(string: "https://us.i.posthog.com"))
+        XCTAssertEqual(shipped.projectToken, projectKey)
+
+        // Every value the comment trap can produce fails closed rather than
+        // shipping a client aimed at an endpoint that cannot receive events.
+        for truncated in ["https:", "https:/", "", "   "] {
+            XCTAssertNil(
+                AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(host: truncated)),
+                "Expected the truncated host \"\(truncated)\" to stay no-op"
+            )
+        }
+    }
+
+    func testEveryApprovedEventAndScreenEmitsOnlyClosedVocabularyValues() throws {
+        // Property-level rather than example-level: every payload the typed API
+        // can construct is checked, so a future event carrying seller text
+        // cannot pass by not being the one event a test happened to sample.
+        let sanitizer = AnalyticsSanitizer()
+        let eventID = try XCTUnwrap(UUID(uuidString: "61300000-0000-4000-8000-000000000002"))
+        let closedVocabulary = Set(AnalyticsEntryPoint.allCases.map(\.rawValue))
+            .union(AnalyticsAccountState.allCases.map(\.rawValue))
+            .union(AnalyticsPaywallTrigger.allCases.map(\.rawValue))
+            .union(AnalyticsCheckoutFlow.allCases.map(\.rawValue))
+            .union(AnalyticsBillingCadence.allCases.map(\.rawValue))
+            .union(AnalyticsScreen.allCases.map(\.rawValue))
+        let metadataValues: Set<String> = [
+            metadata.environment.rawValue,
+            metadata.appVersion,
+            metadata.build,
+        ]
+
+        // The closed vocabulary itself must stay incapable of carrying seller
+        // content, so an enum case added later cannot smuggle an address, a
+        // path, a token, or free prose into an otherwise "approved" value.
+        for value in closedVocabulary {
+            XCTAssertNotNil(
+                value.range(of: #"^[a-z][a-z0-9_]{0,31}$"#, options: .regularExpression),
+                "\(value) is not a bounded lowercase identifier"
+            )
+        }
+
+        var events: [AnalyticsEvent] = [.correctionCompleted(eventID: eventID)]
+        for entryPoint in AnalyticsEntryPoint.allCases {
+            events.append(.guestRunStarted(eventID: eventID, entryPoint: entryPoint))
+            events.append(.correctionOpened(eventID: eventID, entryPoint: entryPoint))
+        }
+        for accountState in AnalyticsAccountState.allCases {
+            events.append(.durableDraftViewed(eventID: eventID, accountState: accountState))
+            events.append(.publishIntent(eventID: eventID, accountState: accountState))
+        }
+        for trigger in AnalyticsPaywallTrigger.allCases {
+            events.append(.paywallViewed(eventID: eventID, trigger: trigger))
+        }
+        for flow in AnalyticsCheckoutFlow.allCases {
+            for cadence in AnalyticsBillingCadence.allCases {
+                events.append(
+                    .checkoutFlowStarted(eventID: eventID, flow: flow, cadence: cadence)
+                )
+            }
+        }
+        XCTAssertEqual(events.count, 17)
+
+        var payloads = try events.map { event in
+            try XCTUnwrap(sanitizer.sanitize(event: event, metadata: metadata))
+        }
+        payloads += try AnalyticsScreen.allCases.map { screen in
+            try XCTUnwrap(sanitizer.sanitize(screen: screen, metadata: metadata))
+        }
+        XCTAssertEqual(payloads.count, 22)
+
+        for payload in payloads {
+            XCTAssertTrue(AnalyticsSanitizer.approvedEventNames.contains(payload.name))
+            XCTAssertEqual(
+                Set(payload.properties.keys),
+                AnalyticsSanitizer.approvedPropertyNamesByEvent[payload.name]
+            )
+            for (name, value) in payload.properties {
+                switch name {
+                case "event_id":
+                    XCTAssertEqual(value, eventID.uuidString.lowercased())
+                case "environment", "app_version", "app_build":
+                    XCTAssertTrue(
+                        metadataValues.contains(value),
+                        "\(payload.name).\(name) emitted \(value), which is not build metadata"
+                    )
+                default:
+                    XCTAssertTrue(
+                        closedVocabulary.contains(value),
+                        "\(payload.name).\(name) emitted \(value), which no closed enum declares"
+                    )
+                }
+            }
+        }
+    }
+
     private func analyticsLaunchInputs(
         key: String? = "phc_issue613_key",
         host: String? = "https://us.i.posthog.com",
