@@ -29,4 +29,12 @@ describe("verified guest focused-selector execution mode", () => {
       /- name: Require the provisioned Supabase stack for RLS coverage\s+env:\s+SNAPLIST_REQUIRE_DB_STACK: "1"/i,
     );
   });
+
+  it("keeps REST, Storage, and current server credentials available to DB RLS suites", () => {
+    const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+
+    expect(workflow).not.toMatch(/pnpm supabase start -x [^\n]*\bpostgrest\b/i);
+    expect(workflow).not.toMatch(/pnpm supabase start -x [^\n]*\bstorage-api\b/i);
+    expect(workflow).toContain('echo "SUPABASE_SECRET_KEY=$SECRET_KEY"');
+  });
 });
