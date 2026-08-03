@@ -241,8 +241,7 @@ struct AppShellView: View {
         TabView(selection: $router.selectedTab) {
             ForEach(PrimaryTab.allCases) { tab in
                 NavigationStack(path: router.pathBinding(for: tab)) {
-                    if router.selectedTab == tab,
-                       router.presentedFullScreen == nil {
+                    if router.selectedTab == tab {
                         ZStack(alignment: .top) {
                             primaryFeature(for: tab)
 #if DEBUG
@@ -295,21 +294,6 @@ struct AppShellView: View {
                         pendingCapturePresentation = .stagedPhoto
                     }
                 )
-            }
-        }
-        .fullScreenCover(item: $router.presentedFullScreen) { destination in
-            switch destination {
-            case .guidedCamera:
-                ScanCameraView(
-                    flow: captureFlow,
-                    returnFocus: $pendingScanReturnFocus
-                ) { destination, photos, opener in
-                    router.openCaptureBoundary(
-                        destination: destination,
-                        photos: photos,
-                        opener: opener
-                    )
-                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in

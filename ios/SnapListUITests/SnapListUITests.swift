@@ -92,14 +92,22 @@ final class SnapListUITests: XCTestCase {
 
         let photoCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
-        XCTAssertEqual(app.staticTexts.matching(identifier: "scan.photo-count").count, 1)
+        XCTAssertEqual(
+            app.staticTexts.matching(identifier: "scan.photo-count").count,
+            1,
+            app.debugDescription
+        )
         XCTAssertEqual(photoCount.label, "1 of 5")
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
         addScreenshot(named: "CAPTURE-RESTORED-DRAFT.png")
 
         let reviewButton = app.buttons["scan.review"]
         let window = app.windows.firstMatch.frame
-        XCTAssertEqual(app.buttons.matching(identifier: "scan.review").count, 1)
+        XCTAssertEqual(
+            app.buttons.matching(identifier: "scan.review").count,
+            1,
+            app.debugDescription
+        )
         XCTAssertTrue(reviewButton.exists)
         XCTAssertGreaterThanOrEqual(reviewButton.frame.minX, window.minX)
         XCTAssertLessThanOrEqual(reviewButton.frame.maxX, window.maxX)
