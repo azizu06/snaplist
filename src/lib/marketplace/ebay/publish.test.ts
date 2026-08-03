@@ -185,7 +185,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     const { listingId, result } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
 
-    const outcome = await publishListingToEbay(userA.client, listingId, adapter);
+    const outcome = await publishListingToEbay(serverA, listingId, adapter);
 
     expect(outcome).toEqual({
       listingId,
@@ -233,7 +233,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     // would misprice the live listing — so EBAY_GB without an explicit currency
     // declaration must refuse BEFORE any eBay call.
     await expect(
-      publishListingToEbay(userA.client, listingId, adapter, {
+      publishListingToEbay(serverA, listingId, adapter, {
         env: () => ({ EBAY_MARKETPLACE_ID: "EBAY_GB" }),
       }),
     ).rejects.toThrowError(/relabeling|computed in USD/i);
@@ -241,7 +241,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     // An explicit EBAY_CURRENCY is the operator's declaration that persisted
     // prices ARE in that currency — then the publish proceeds with it.
-    const declared = await publishListingToEbay(userA.client, listingId, adapter, {
+    const declared = await publishListingToEbay(serverA, listingId, adapter, {
       env: () => ({ EBAY_MARKETPLACE_ID: "EBAY_GB", EBAY_CURRENCY: "GBP" }),
     });
     expect(declared.ebayStatus).toBe("published");
@@ -255,8 +255,8 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     const { listingId } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
 
-    const first = await publishListingToEbay(userA.client, listingId, adapter);
-    const second = await publishListingToEbay(userA.client, listingId, adapter);
+    const first = await publishListingToEbay(serverA, listingId, adapter);
+    const second = await publishListingToEbay(serverA, listingId, adapter);
 
     expect(adapter.requests).toHaveLength(1); // no second adapter call
     expect(second.alreadyPublished).toBe(true);
@@ -271,7 +271,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     adapter.failWith = new Error("eBay sandbox rejected the offer");
 
     await expect(
-      publishListingToEbay(userA.client, listingId, adapter),
+      publishListingToEbay(serverA, listingId, adapter),
     ).rejects.toThrowError(/sandbox rejected/);
 
     const { data: row } = await userA.client
@@ -287,7 +287,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     // The failed publish is RETRYABLE: clearing the failure publishes cleanly.
     adapter.failWith = undefined;
-    const retried = await publishListingToEbay(userA.client, listingId, adapter);
+    const retried = await publishListingToEbay(serverA, listingId, adapter);
     expect(retried.ebayStatus).toBe("published");
     const { data: after } = await userA.client
       .from("listings")
@@ -323,7 +323,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     } as unknown as SupabaseClient;
 
     await expect(
-      publishListingToEbay(userA.client, listingId, adapter, {
+      publishListingToEbay(serverA, listingId, adapter, {
         completionClient,
       }),
     ).rejects.toThrow(/generation-bound persistence failed/i);
@@ -344,7 +344,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     const adapter = new MockEbayAdapter();
 
     await expect(
-      publishListingToEbay(userB.client, listingId, adapter),
+      publishListingToEbay(serverB, listingId, adapter),
     ).rejects.toThrowError(/not found/i);
     expect(adapter.requests).toHaveLength(0);
 
@@ -377,7 +377,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     const adapter = new MockEbayAdapter();
     await expect(
-      publishListingToEbay(userA.client, fb!.id as string, adapter),
+      publishListingToEbay(serverA, fb!.id as string, adapter),
     ).rejects.toThrowError(/not eBay/);
     expect(adapter.requests).toHaveLength(0);
   });
@@ -418,7 +418,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     const adapter = new MockEbayAdapter();
     await expect(
-      publishListingToEbay(userA.client, listing!.id as string, adapter),
+      publishListingToEbay(serverA, listing!.id as string, adapter),
     ).rejects.toThrowError(/has no photos/i);
     expect(adapter.requests).toHaveLength(0); // never reached eBay
 
@@ -473,7 +473,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     const adapter = new MockEbayAdapter();
     await expect(
-      publishListingToEbay(userA.client, listing!.id as string, adapter),
+      publishListingToEbay(serverA, listing!.id as string, adapter),
     ).rejects.toThrowError(/none could be signed/i);
     expect(adapter.requests).toHaveLength(0); // never reached eBay
 
@@ -511,7 +511,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     const adapter = new MockEbayAdapter();
     await expect(
-      publishListingToEbay(userA.client, listing!.id as string, adapter),
+      publishListingToEbay(serverA, listing!.id as string, adapter),
     ).rejects.toThrowError(/no usable price/i);
     expect(adapter.requests).toHaveLength(0);
   });
@@ -528,7 +528,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     const adapter = new MockEbayAdapter();
     await expect(
-      publishListingToEbay(userA.client, listingId, adapter),
+      publishListingToEbay(serverA, listingId, adapter),
     ).rejects.toThrowError(/listing copy must be an object/i);
     expect(adapter.requests).toHaveLength(0);
 

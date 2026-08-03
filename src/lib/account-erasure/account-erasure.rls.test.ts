@@ -6,7 +6,11 @@ import {
   resolveLocalTestDatabaseUrl,
   type ExclusiveTestResourceLease,
 } from "@/test/exclusive-resource-lock";
-import { cleanupClerkTestUsers, mintUserJwt } from "@/lib/supabase/test-users";
+import {
+  cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
+  mintUserJwt,
+} from "@/lib/supabase/test-users";
 import { createMobileItemSubmissionHandler } from "@/lib/mobile-item-submission/http";
 import { createMobileItemSubmissionOperations } from "@/lib/mobile-item-submission/service";
 import { createSupabaseMobileItemSubmissionStaging } from "@/lib/mobile-item-submission/store";
@@ -157,6 +161,7 @@ async function stageCreditedRun(userId: string): Promise<{
   queueMessageId: string;
   allowancePeriodId: string;
 }> {
+  await grantIncludedOfferDeviceClaim(admin, userId);
   const idempotencyKey = crypto.randomUUID();
   const staged = await admin.rpc("stage_pipeline_batch", {
     p_batch_id: crypto.randomUUID(),
@@ -606,13 +611,16 @@ describe("durable account erasure against local Supabase", () => {
       accessToken: async () => publishOwnerToken,
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    const publishOwnerServer = createClient(SUPABASE_URL, SECRET_KEY!, {
+      accessToken: async () => publishOwnerToken,
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
     const paths = [
       `${publishOwnerId}/account-erasure-existing.jpg`,
       `${publishOwnerId}/account-erasure-draft.jpg`,
       `${publishOwnerId}/account-erasure-in-flight.jpg`,
     ];
     const inFlightClaimId = crypto.randomUUID();
-    const inFlightAttemptToken = crypto.randomUUID();
     let generationId = "";
 
     try {
@@ -648,11 +656,11 @@ describe("durable account erasure against local Supabase", () => {
          where id = $1 and user_id = $2`,
         [existing.listingId, publishOwnerId],
       );
-      const account = await database.query<{ generation: string }>(
-        "select (private.lock_ebay_messaging_account($1)).generation::text generation",
-        [publishOwnerId],
-      );
-      const accountGeneration = account.rows[0]!.generation;
+      const fallback = await publishOwnerServer.rpc("bind_ebay_sandbox_fallback", {
+        p_seller_id: `account-erasure-${publishOwnerId}`,
+      });
+      expect(fallback.error).toBeNull();
+      const accountGeneration = fallback.data as string;
       await database.query(
         `update public.listings
          set ebay_status = 'publishing',
@@ -661,14 +669,23 @@ describe("durable account erasure against local Supabase", () => {
          where id = $2 and user_id = $3`,
         [inFlightClaimId, inFlight.listingId, publishOwnerId],
       );
-      await database.query(
-        `insert into private.ebay_provider_dispatch_leases (
-           user_id, message_id, account_generation, dispatch_kind,
-           attempt_token, attempted_at, expires_at
-         ) values ($1, $2, $3, 'publish', $4, statement_timestamp(),
-           statement_timestamp() + interval '5 minutes')`,
-        [publishOwnerId, inFlight.listingId, accountGeneration, inFlightAttemptToken],
+      const startedDispatch = await publishOwnerServer.rpc(
+        "begin_ebay_transactional_dispatch",
+        {
+          p_connection_generation: null,
+          p_operation: "publish",
+          p_publish_binding: null,
+          p_publish_claim_id: inFlightClaimId,
+          p_resource_id: inFlight.listingId,
+        },
       );
+      expect(startedDispatch.error).toBeNull();
+      const dispatch = startedDispatch.data as {
+        account_generation: string;
+        attempt_token: string;
+      };
+      expect(dispatch.account_generation).toBe(accountGeneration);
+      const inFlightDispatchToken = dispatch.attempt_token;
 
       const startedResult = await admin.rpc("begin_account_erasure", {
         p_idempotency_key: crypto.randomUUID(),
@@ -684,7 +701,7 @@ describe("durable account erasure against local Supabase", () => {
         draftListingId: draft.listingId,
         inFlightListingId: inFlight.listingId,
         inFlightClaimId,
-        inFlightAttemptToken,
+        inFlightAttemptToken: inFlightDispatchToken,
         accountGeneration,
         paths,
       }));
@@ -727,14 +744,11 @@ describe("durable account erasure against local Supabase", () => {
         deferrals: ["ebay-provider-authority-pending"],
       });
 
-      const completionClient = createClient(SUPABASE_URL, SECRET_KEY!, {
-        accessToken: async () => publishOwnerToken,
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
-      const acknowledged = await completionClient.rpc("complete_ebay_publish_dispatch", {
+      const acknowledged = await publishOwnerServer.rpc("complete_ebay_publish_dispatch", {
         p_account_generation: accountGeneration,
-        p_attempt_token: inFlightAttemptToken,
+        p_attempt_token: inFlightDispatchToken,
         p_claim_id: inFlightClaimId,
+        p_connection_generation: null,
         p_ebay_listing_id: "EXTERNAL-EBAY-IN-FLIGHT-384",
         p_ebay_offer_id: "EXTERNAL-EBAY-OFFER-384",
         p_listed_price: 42,

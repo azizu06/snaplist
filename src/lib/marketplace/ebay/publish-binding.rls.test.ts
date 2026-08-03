@@ -398,10 +398,10 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
     });
 
     const [publishedA, publishedB] = await Promise.all([
-      publishListingToEbay(userA.client, listingA, adapterA, {
+      publishListingToEbay(serverA, listingA, adapterA, {
         completionClient: serverA,
       }),
-      publishListingToEbay(userB.client, listingB, adapterB, {
+      publishListingToEbay(serverB, listingB, adapterB, {
         completionClient: serverB,
       }),
     ]);
