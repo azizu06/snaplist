@@ -12,13 +12,19 @@ enum AssistedExportClientError: Error, Equatable {
     case httpStatus(Int)
 }
 
+struct AssistedExportServerPack: Equatable, Sendable {
+    let receipts: [AssistedExportReceipt]
+    let effectivePrice: Decimal
+    let reviewRevision: UUID
+}
+
 protocol AssistedExportServing: Sendable {
-    func load(pack: AssistedExportPack) async throws -> [AssistedExportReceipt]
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack
     func perform(
         _ action: AssistedExportServerAction,
         destination: AssistedExportDestination,
         pack: AssistedExportPack
-    ) async throws -> [AssistedExportReceipt]
+    ) async throws -> AssistedExportServerPack
 }
 
 struct AssistedExportAPIClient: AssistedExportServing {
@@ -36,7 +42,7 @@ struct AssistedExportAPIClient: AssistedExportServing {
         self.session = session
     }
 
-    func load(pack: AssistedExportPack) async throws -> [AssistedExportReceipt] {
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack {
         var components = URLComponents(
             url: endpoint(for: pack.itemID),
             resolvingAgainstBaseURL: false
@@ -56,7 +62,7 @@ struct AssistedExportAPIClient: AssistedExportServing {
         _ action: AssistedExportServerAction,
         destination: AssistedExportDestination,
         pack: AssistedExportPack
-    ) async throws -> [AssistedExportReceipt] {
+    ) async throws -> AssistedExportServerPack {
         var request = URLRequest(url: endpoint(for: pack.itemID))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -71,7 +77,7 @@ struct AssistedExportAPIClient: AssistedExportServing {
         return try await send(request)
     }
 
-    private func send(_ input: URLRequest) async throws -> [AssistedExportReceipt] {
+    private func send(_ input: URLRequest) async throws -> AssistedExportServerPack {
         var request = input
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(
@@ -112,7 +118,14 @@ struct AssistedExportAPIClient: AssistedExportServing {
               Set(receipts.map(\.destination)) == Set(AssistedExportDestination.allCases) else {
             throw AssistedExportClientError.invalidResponse
         }
-        return receipts
+        guard Self.isPositiveCentPrice(envelope.data.pack.effectivePrice) else {
+            throw AssistedExportClientError.invalidResponse
+        }
+        return AssistedExportServerPack(
+            receipts: receipts,
+            effectivePrice: envelope.data.pack.effectivePrice,
+            reviewRevision: envelope.data.pack.reviewRevision
+        )
     }
 
     private func endpoint(for itemID: UUID) -> URL {
@@ -136,6 +149,14 @@ struct AssistedExportAPIClient: AssistedExportServing {
         return date
     }
 
+    private static func isPositiveCentPrice(_ price: Decimal) -> Bool {
+        guard !price.isNaN, price > 0 else { return false }
+        var input = price
+        var normalized = Decimal()
+        NSDecimalRound(&normalized, &input, 2, .plain)
+        return normalized == price
+    }
+
     private struct ActionBody: Encodable {
         let platform: String
         let action: AssistedExportServerAction
@@ -146,6 +167,7 @@ struct AssistedExportAPIClient: AssistedExportServing {
     private struct Envelope: Decodable {
         struct DataBody: Decodable {
             let handoffs: [Handoff]
+            let pack: Pack
         }
 
         struct Handoff: Decodable {
@@ -155,6 +177,11 @@ struct AssistedExportAPIClient: AssistedExportServing {
             let sharedAt: String?
         }
 
+        struct Pack: Decodable {
+            let effectivePrice: Decimal
+            let reviewRevision: UUID
+        }
+
         let data: DataBody
     }
 }
@@ -162,26 +189,32 @@ struct AssistedExportAPIClient: AssistedExportServing {
 actor AssistedExportFixtureService: AssistedExportServing {
     private var receipts: [AssistedExportDestination: AssistedExportReceipt]
     private let didPerform: (@Sendable (AssistedExportServerAction) async -> Void)?
+    private let effectivePrice: Decimal?
+    private let reviewRevision: UUID?
 
     init(
         receipts: [AssistedExportReceipt] = [],
+        effectivePrice: Decimal? = nil,
+        reviewRevision: UUID? = nil,
         didPerform: (@Sendable (AssistedExportServerAction) async -> Void)? = nil
     ) {
         self.receipts = Dictionary(uniqueKeysWithValues: receipts.map {
             ($0.destination, $0)
         })
+        self.effectivePrice = effectivePrice
+        self.reviewRevision = reviewRevision
         self.didPerform = didPerform
     }
 
-    func load(pack: AssistedExportPack) async throws -> [AssistedExportReceipt] {
-        current
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack {
+        response(for: pack)
     }
 
     func perform(
         _ action: AssistedExportServerAction,
         destination: AssistedExportDestination,
         pack: AssistedExportPack
-    ) async throws -> [AssistedExportReceipt] {
+    ) async throws -> AssistedExportServerPack {
         await didPerform?(action)
         let existing = receipts[destination]
         switch action {
@@ -210,7 +243,7 @@ actor AssistedExportFixtureService: AssistedExportServing {
                 sharedAt: nil
             )
         }
-        return current
+        return response(for: pack)
     }
 
     private var current: [AssistedExportReceipt] {
@@ -221,5 +254,13 @@ actor AssistedExportFixtureService: AssistedExportServing {
                 sharedAt: nil
             )
         }
+    }
+
+    private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
+        AssistedExportServerPack(
+            receipts: current,
+            effectivePrice: effectivePrice ?? pack.effectivePrice,
+            reviewRevision: reviewRevision ?? pack.reviewRevision
+        )
     }
 }

@@ -136,6 +136,7 @@ struct AssistedExportFixtureView: View {
             reviewRevision: listingRevision,
             title: "Denim jacket, relaxed fit, size L",
             description: "A clean seller description.",
+            effectivePrice: 145,
             photoReferences: Self.photoReferences
         )
         // This is deliberately the public replacement seam under test. Merely
@@ -160,6 +161,7 @@ struct AssistedExportFixtureView: View {
             reviewRevision: reviewRevision,
             title: "Denim jacket, relaxed fit, size L",
             description: "A clean seller description.",
+            effectivePrice: 145,
             photoReferences: photoReferences
         )
     }

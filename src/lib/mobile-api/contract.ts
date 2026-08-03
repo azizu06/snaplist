@@ -208,7 +208,15 @@ export const exportHandoffViewSchema = z
 export const exportHandoffsEnvelopeSchema = z
   .object({
     data: z
-      .object({ handoffs: z.array(exportHandoffViewSchema).length(3) })
+      .object({
+        handoffs: z.array(exportHandoffViewSchema).length(3),
+        pack: z
+          .object({
+            effectivePrice: z.number().positive().multipleOf(0.01),
+            reviewRevision: z.string().uuid(),
+          })
+          .strict(),
+      })
       .strict(),
     meta: apiMetaSchema,
   })

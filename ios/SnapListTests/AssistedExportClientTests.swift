@@ -4,6 +4,38 @@ import XCTest
 
 @MainActor
 final class AssistedExportClientTests: XCTestCase {
+    func testServerEffectivePriceReplacesLocalPriceBeforeAnyHandoffTextIsAvailable() async {
+        let store = AssistedExportStore(
+            pack: .fixture(effectivePrice: 145),
+            service: AssistedExportFixtureService(effectivePrice: 177.77)
+        )
+
+        await store.load()
+
+        XCTAssertEqual(store.phase, .ready)
+        XCTAssertTrue(
+            store.domain.pack.listingText(for: .mercari).hasSuffix("Price: $177.77")
+        )
+    }
+
+    func testNewerServerRevisionLeavesTheMountedPackStaleAndDoesNotEnableActions() async {
+        let newerRevision = UUID(
+            uuidString: "58100000-0000-4000-8000-0000000000f3"
+        )!
+        let store = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportFixtureService(reviewRevision: newerRevision)
+        )
+
+        await store.load()
+        store.toggle(.mercari)
+        await store.recordHandoff(.copiedListingText, for: .mercari)
+
+        XCTAssertEqual(store.phase, .ready)
+        XCTAssertEqual(store.domain.state, .packOutOfDate)
+        XCTAssertFalse(store.domain.hasHandedOff(to: .mercari))
+    }
+
     func testTransportUsesTheGuardedPackRevisionsAndRestoresReceipts() async throws {
         let pack = AssistedExportPack.fixture()
         let session = makeSession { request in
@@ -47,10 +79,12 @@ final class AssistedExportClientTests: XCTestCase {
             pack: pack
         )
 
-        XCTAssertEqual(loaded.count, 3)
-        XCTAssertNil(loaded[1].handedOffAt)
-        XCTAssertNotNil(handedOff[1].handedOffAt)
-        XCTAssertNil(handedOff[1].sharedAt)
+        XCTAssertEqual(loaded.receipts.count, 3)
+        XCTAssertEqual(loaded.effectivePrice, 145)
+        XCTAssertEqual(loaded.reviewRevision, pack.reviewRevision)
+        XCTAssertNil(loaded.receipts[1].handedOffAt)
+        XCTAssertNotNil(handedOff.receipts[1].handedOffAt)
+        XCTAssertNil(handedOff.receipts[1].sharedAt)
     }
 
     func testARefusedConfirmNeverPaintsSharedOptimistically() async {
@@ -234,7 +268,7 @@ final class AssistedExportClientTests: XCTestCase {
           {"platform":"facebook","state":"prepared","handedOffAt":null,"sharedAt":null},
           {"platform":"mercari","state":"prepared","handedOffAt":\(handoff),"sharedAt":null},
           {"platform":"depop","state":"prepared","handedOffAt":null,"sharedAt":null}
-        ]},"meta":{"requestId":"test"}}
+        ],"pack":{"effectivePrice":145,"reviewRevision":"58100000-0000-4000-8000-0000000000a0"}},"meta":{"requestId":"test"}}
         """
         return (
             HTTPURLResponse(
@@ -272,15 +306,15 @@ private actor AssistedExportFlakyHandoffService: AssistedExportServing {
 
     var handoffAttempts: Int { attempts }
 
-    func load(pack: AssistedExportPack) async throws -> [AssistedExportReceipt] {
-        receipts
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack {
+        response(for: pack)
     }
 
     func perform(
         _ action: AssistedExportServerAction,
         destination: AssistedExportDestination,
         pack: AssistedExportPack
-    ) async throws -> [AssistedExportReceipt] {
+    ) async throws -> AssistedExportServerPack {
         guard action == .handoff else {
             throw AssistedExportClientError.invalidResponse
         }
@@ -289,7 +323,7 @@ private actor AssistedExportFlakyHandoffService: AssistedExportServing {
             throw AssistedExportClientError.httpStatus(503)
         }
         handedOff = true
-        return receipts
+        return response(for: pack)
     }
 
     private var receipts: [AssistedExportReceipt] {
@@ -303,6 +337,14 @@ private actor AssistedExportFlakyHandoffService: AssistedExportServing {
             )
         }
     }
+
+    private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
+        AssistedExportServerPack(
+            receipts: receipts,
+            effectivePrice: pack.effectivePrice,
+            reviewRevision: pack.reviewRevision
+        )
+    }
 }
 
 private struct AssistedExportTestBearer: BearerTokenProviding {
@@ -312,18 +354,18 @@ private struct AssistedExportTestBearer: BearerTokenProviding {
 private actor AssistedExportFailingSharedService: AssistedExportServing {
     private var handedOff = false
 
-    func load(pack: AssistedExportPack) async throws -> [AssistedExportReceipt] {
-        receipts
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack {
+        response(for: pack)
     }
 
     func perform(
         _ action: AssistedExportServerAction,
         destination: AssistedExportDestination,
         pack: AssistedExportPack
-    ) async throws -> [AssistedExportReceipt] {
+    ) async throws -> AssistedExportServerPack {
         if action == .shared { throw AssistedExportClientError.httpStatus(503) }
         handedOff = true
-        return receipts
+        return response(for: pack)
     }
 
     private var receipts: [AssistedExportReceipt] {
@@ -334,6 +376,14 @@ private actor AssistedExportFailingSharedService: AssistedExportServing {
                 sharedAt: nil
             )
         }
+    }
+
+    private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
+        AssistedExportServerPack(
+            receipts: receipts,
+            effectivePrice: pack.effectivePrice,
+            reviewRevision: pack.reviewRevision
+        )
     }
 }
 
@@ -360,15 +410,15 @@ private actor AssistedExportSuspendedSharedService: AssistedExportServing {
         releaseWaiter = nil
     }
 
-    func load(pack: AssistedExportPack) async throws -> [AssistedExportReceipt] {
-        receipts
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack {
+        response(for: pack)
     }
 
     func perform(
         _ action: AssistedExportServerAction,
         destination: AssistedExportDestination,
         pack: AssistedExportPack
-    ) async throws -> [AssistedExportReceipt] {
+    ) async throws -> AssistedExportServerPack {
         switch action {
         case .handoff:
             handedOff = true
@@ -385,7 +435,7 @@ private actor AssistedExportSuspendedSharedService: AssistedExportServing {
         case .undo:
             shared = false
         }
-        return receipts
+        return response(for: pack)
     }
 
     private var receipts: [AssistedExportReceipt] {
@@ -396,6 +446,14 @@ private actor AssistedExportSuspendedSharedService: AssistedExportServing {
                 sharedAt: $0 == .mercari && shared ? Self.sharedAt : nil
             )
         }
+    }
+
+    private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
+        AssistedExportServerPack(
+            receipts: receipts,
+            effectivePrice: pack.effectivePrice,
+            reviewRevision: pack.reviewRevision
+        )
     }
 }
 

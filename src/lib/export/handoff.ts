@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { effectivePrice } from "../pipeline";
 import { DEPOP_PLATFORM, FACEBOOK_PLATFORM, MERCARI_PLATFORM } from "./schema";
 
 /**
@@ -53,6 +54,13 @@ export interface ExportHandoffRead {
   reviewContentRevision: string;
 }
 
+/** Server-authoritative price and revision for one prepared export pack. */
+export interface ExportHandoffPackProjection {
+  handoffs: ExportHandoffsView;
+  effectivePrice: number;
+  reviewRevision: string;
+}
+
 export interface ExportHandoffMutation extends ExportHandoffRead {
   platform: AssistedExportPlatform;
   /** The full review revision the seller was looking at. */
@@ -63,6 +71,15 @@ interface HandoffRow {
   platform: string;
   handoff_at: string | null;
   shared_at: string | null;
+}
+
+interface ExportPackItemRow {
+  price_override: number | string | null;
+  review_revision: string;
+}
+
+interface ExportPackPredictionRow {
+  price: number | string | null;
 }
 
 function preparedView(platform: AssistedExportPlatform): ExportHandoffView {
@@ -169,6 +186,64 @@ export async function loadExportHandoffs(
     };
   }
   return view;
+}
+
+/**
+ * Receipts and outbound price share this RLS-scoped read. A valid override
+ * wins; otherwise the newest recommendation wins. The content-revision filter
+ * refuses a pack whose copy moved on instead of mixing old copy with new price.
+ */
+export async function loadExportHandoffPack(
+  supabase: SupabaseClient,
+  input: ExportHandoffRead,
+): Promise<ExportHandoffPackProjection> {
+  const [handoffs, itemResult, predictionResult] = await Promise.all([
+    loadExportHandoffs(supabase, input),
+    supabase
+      .from("items")
+      .select("price_override, review_revision")
+      .eq("id", input.itemId)
+      .eq("review_content_revision", input.reviewContentRevision)
+      .maybeSingle(),
+    supabase
+      .from("prediction_logs")
+      .select("price")
+      .eq("item_id", input.itemId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (itemResult.error) {
+    throw new ExportHandoffError(
+      `Failed to read the current export pack: ${itemResult.error.message}`,
+      itemResult.error.code,
+    );
+  }
+  if (predictionResult.error) {
+    throw new ExportHandoffError(
+      `Failed to read the current export price: ${predictionResult.error.message}`,
+      predictionResult.error.code,
+    );
+  }
+
+  const item = itemResult.data as ExportPackItemRow | null;
+  if (!item || typeof item.review_revision !== "string") {
+    throw new ExportHandoffError(
+      "This listing changed after the pack was prepared.",
+      "P0002",
+    );
+  }
+  const prediction = predictionResult.data as ExportPackPredictionRow | null;
+  const price = effectivePrice(prediction?.price, item.price_override);
+  if (price == null) {
+    throw new ExportHandoffError(
+      "This listing has no usable effective price.",
+      undefined,
+    );
+  }
+
+  return { handoffs, effectivePrice: price, reviewRevision: item.review_revision };
 }
 
 /**

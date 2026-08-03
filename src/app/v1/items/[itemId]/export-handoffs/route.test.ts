@@ -12,6 +12,7 @@ import { GET } from "./route";
 
 const ITEM_ID = "58100000-0000-4000-8000-000000000001";
 const CONTENT_REVISION = "58100000-0000-4000-8000-0000000000c0";
+const REVIEW_REVISION = "58100000-0000-4000-8000-0000000000a0";
 const CALLER_BEARER = "caller-clerk-bearer";
 
 describe("assisted export handoffs route composition", () => {
@@ -22,13 +23,51 @@ describe("assisted export handoffs route composition", () => {
     vi.stubEnv("CLERK_AUTHORIZED_PARTIES", "https://app.snaplist.test");
     verifyToken.mockResolvedValue({ sub: "user_581" });
     createClient.mockReturnValue({
-      from: vi.fn(() => ({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            eq: vi.fn(async () => ({ data: [], error: null })),
-          })),
-        })),
-      })),
+      from: vi.fn((table: string) => {
+        if (table === "export_handoffs") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(async () => ({ data: [], error: null })),
+              })),
+            })),
+          };
+        }
+        if (table === "items") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  maybeSingle: vi.fn(async () => ({
+                    data: {
+                      price_override: 177.77,
+                      review_revision: REVIEW_REVISION,
+                    },
+                    error: null,
+                  })),
+                })),
+              })),
+            })),
+          };
+        }
+        if (table === "prediction_logs") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  limit: vi.fn(() => ({
+                    maybeSingle: vi.fn(async () => ({
+                      data: { price: 145 },
+                      error: null,
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          };
+        }
+        throw new Error(`Unexpected table ${table}`);
+      }),
     });
   });
 
@@ -46,6 +85,9 @@ describe("assisted export handoffs route composition", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.clone().json()).resolves.toMatchObject({
+      data: { pack: { effectivePrice: 177.77, reviewRevision: REVIEW_REVISION } },
+    });
     expect(createClient).toHaveBeenCalledWith(
       "https://project.supabase.co",
       "sb_publishable_caller_only",

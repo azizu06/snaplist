@@ -632,6 +632,7 @@ struct ListingReviewView: View {
             reviewRevision: snapshot.binding.reviewRevision,
             title: draft.title,
             description: draft.description,
+            effectivePrice: snapshot.pricing.effectivePrice,
             photoReferences: snapshot.photos.sorted { $0.ordinal < $1.ordinal }
                 .map(\.url)
         )

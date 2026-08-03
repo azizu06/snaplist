@@ -23,6 +23,7 @@ import type { ExportHandoffsView } from "@/lib/export/handoff";
 const ITEM_ID = "58100000-0000-4000-8000-000000000001";
 const CONTENT_REVISION = "58100000-0000-4000-8000-0000000000c0";
 const REVIEW_REVISION = "58100000-0000-4000-8000-0000000000a0";
+const EFFECTIVE_PRICE = 177.77;
 const HANDED_OFF_AT = "2026-07-25T15:00:00.000Z";
 const SHARED_AT = "2026-07-25T16:00:00.000Z";
 
@@ -34,6 +35,13 @@ function allPrepared(): ExportHandoffsView {
   };
 }
 
+function currentPack() {
+  return {
+    effectivePrice: EFFECTIVE_PRICE,
+    reviewRevision: REVIEW_REVISION,
+  };
+}
+
 function handlerWith(gateway: Partial<AssistedExportHandoffGateway>) {
   return createMobileApiHandler({
     async authenticate() {
@@ -42,7 +50,7 @@ function handlerWith(gateway: Partial<AssistedExportHandoffGateway>) {
     worker: {} as never,
     assistedExport: {
       async load() {
-        return allPrepared();
+        return { handoffs: allPrepared(), ...currentPack() };
       },
       async recordHandoff() {
         throw new Error("recordHandoff was not stubbed for this test");
@@ -87,6 +95,13 @@ function sharedBody(platform = "mercari") {
 }
 
 describe("assisted export handoffs over the mobile API", () => {
+  it("serves the server-resolved effective price with the guarded pack", async () => {
+    const response = await handlerWith({})(get());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.pack).toEqual(currentPack());
+  });
+
   it("names all three assisted destinations even when nothing has happened yet", async () => {
     const handler = handlerWith({});
 
@@ -106,7 +121,7 @@ describe("assisted export handoffs over the mobile API", () => {
     const handler = handlerWith({
       async load(input) {
         seen.push(input);
-        return allPrepared();
+        return { handoffs: allPrepared(), ...currentPack() };
       },
     });
 
@@ -163,7 +178,7 @@ describe("assisted export handoffs over the mobile API", () => {
             sharedAt: SHARED_AT,
           };
         }
-        return view;
+        return { handoffs: view, ...currentPack() };
       },
     });
 
@@ -229,7 +244,7 @@ describe("assisted export handoffs over the mobile API", () => {
             sharedAt: null,
           };
         }
-        return view;
+        return { handoffs: view, ...currentPack() };
       },
     });
 
@@ -266,7 +281,7 @@ describe("assisted export handoffs over the mobile API", () => {
           handedOffAt: HANDED_OFF_AT,
           sharedAt: undone ? null : SHARED_AT,
         };
-        return view;
+        return { handoffs: view, ...currentPack() };
       },
     });
 

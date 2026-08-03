@@ -38,9 +38,13 @@ final class AssistedExportStore {
         actionMessage = nil
         completedAction = nil
         do {
-            let receipts = try await service.load(pack: requestedPack)
+            let response = try await service.load(pack: requestedPack)
             guard domain.pack == requestedPack else { return }
-            domain.synchronize(with: receipts)
+            guard synchronize(response, for: requestedPack) else {
+                // A newer server revision is XPORT-05, not a loading failure.
+                phase = .ready
+                return
+            }
             phase = .ready
         } catch {
             guard domain.pack == requestedPack else { return }
@@ -98,15 +102,14 @@ final class AssistedExportStore {
         actionMessage = nil
         defer { isWriting = false }
         do {
-            let receipts = try await service.perform(
+            let response = try await service.perform(
                 .handoff,
                 destination: destination,
                 pack: requestedPack
             )
-            guard domain.pack == requestedPack, !domain.isPackOutOfDate else {
+            guard synchronize(response, for: requestedPack), !domain.isPackOutOfDate else {
                 return
             }
-            domain.synchronize(with: receipts)
             switch action {
             case .copiedListingText:
                 showCompletion(action, for: destination)
@@ -144,15 +147,14 @@ final class AssistedExportStore {
             guard domain.pack == requestedPack, !domain.isPackOutOfDate else {
                 return
             }
-            let receipts = try await service.perform(
+            let response = try await service.perform(
                 .handoff,
                 destination: destination,
                 pack: requestedPack
             )
-            guard domain.pack == requestedPack, !domain.isPackOutOfDate else {
+            guard synchronize(response, for: requestedPack), !domain.isPackOutOfDate else {
                 return
             }
-            domain.synchronize(with: receipts)
             showCompletion(.savedPhotos, for: destination)
         } catch {
             actionMessage = AssistedExportCopy.actionFailed
@@ -185,21 +187,20 @@ final class AssistedExportStore {
         let requestedPack = domain.pack
         defer { isWriting = false }
         do {
-            let receipts = try await service.perform(
+            let response = try await service.perform(
                 .shared,
                 destination: destination,
                 pack: requestedPack
             )
-            guard domain.pack == requestedPack,
+            guard synchronize(response, for: requestedPack),
                   domain.confirmSheet == destination,
                   !domain.isPackOutOfDate else { return }
-            guard let sharedAt = receipts.first(where: {
+            guard let sharedAt = response.receipts.first(where: {
                 $0.destination == destination
             })?.sharedAt else {
                 throw AssistedExportClientError.invalidResponse
             }
             _ = domain.confirmShared(at: sharedAt)
-            domain.synchronize(with: receipts)
         } catch AssistedExportClientError.conflict {
             domain.dismissConfirmSheet()
             actionMessage = AssistedExportCopy.actionFailed
@@ -218,18 +219,38 @@ final class AssistedExportStore {
         let requestedPack = domain.pack
         defer { isWriting = false }
         do {
-            let receipts = try await service.perform(
+            let response = try await service.perform(
                 .undo,
                 destination: destination,
                 pack: requestedPack
             )
-            guard domain.pack == requestedPack, !domain.isPackOutOfDate else {
+            guard synchronize(response, for: requestedPack), !domain.isPackOutOfDate else {
                 return
             }
-            domain.synchronize(with: receipts)
             domain.closeUndoWindow()
         } catch {
             actionMessage = AssistedExportCopy.actionFailed
         }
+    }
+
+    /// The server owns effective-price precedence. A changed full revision is
+    /// stale even when the content revision remains reusable, so it only marks
+    /// the mounted pack out of date and never relaxes mutation guards.
+    private func synchronize(
+        _ response: AssistedExportServerPack,
+        for requestedPack: AssistedExportPack
+    ) -> Bool {
+        guard domain.pack == requestedPack else { return false }
+        guard response.reviewRevision == requestedPack.reviewRevision else {
+            domain.listingRevisionChanged(to: response.reviewRevision)
+            return false
+        }
+        if response.effectivePrice != requestedPack.effectivePrice {
+            domain.updatePack(
+                to: requestedPack.replacingEffectivePrice(response.effectivePrice)
+            )
+        }
+        domain.synchronize(with: response.receipts)
+        return true
     }
 }

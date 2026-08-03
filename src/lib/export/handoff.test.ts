@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   loadExportHandoffs,
+  loadExportHandoffPack,
   markExportShared,
   recordExportHandoff,
 } from "./handoff";
@@ -54,6 +55,69 @@ function fakeSupabase(
 }
 
 describe("assisted export handoffs", () => {
+  it.each([
+    { label: "seller override", priceOverride: 177.77, suggestedPrice: 145, expected: 177.77 },
+    { label: "latest recommendation", priceOverride: null, suggestedPrice: 145, expected: 145 },
+  ])("uses the $label as the effective export-pack price", async ({
+    priceOverride,
+    suggestedPrice,
+    expected,
+  }) => {
+    const client = {
+      from(table: string) {
+        if (table === "export_handoffs") {
+          return {
+            select: () => ({
+              eq: () => ({ eq: async () => ({ data: [], error: null }) }),
+            }),
+          };
+        }
+        if (table === "items") {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: async () => ({
+                    data: {
+                      price_override: priceOverride,
+                      review_revision: REVIEW_REVISION,
+                    },
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "prediction_logs") {
+          return {
+            select: () => ({
+              eq: () => ({
+                order: () => ({
+                  limit: () => ({
+                    maybeSingle: async () => ({
+                      data: { price: suggestedPrice },
+                      error: null,
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    } as unknown as SupabaseClient;
+
+    const projection = await loadExportHandoffPack(client, {
+      itemId: ITEM_ID,
+      reviewContentRevision: CONTENT_REVISION,
+    });
+
+    expect(projection.effectivePrice).toBe(expected);
+    expect(projection.reviewRevision).toBe(REVIEW_REVISION);
+  });
+
   it("reports every destination as prepared until the seller confirms it", async () => {
     const view = await loadExportHandoffs(
       fakeSupabase([

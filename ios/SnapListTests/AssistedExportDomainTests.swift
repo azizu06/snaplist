@@ -10,8 +10,9 @@ import XCTest
 /// Marketplace, Mercari, or Depop, so nothing short of the explicit confirm
 /// sheet may write it.
 final class AssistedExportDomainTests: XCTestCase {
-    func testPackCarriesTheListingTextAndOrderedPhotoReferences() {
+    func testPackCarriesTheAuthoritativeEffectivePriceInEveryDestinationText() {
         let pack = AssistedExportPack.fixture(
+            effectivePrice: 149.99,
             photoReferences: Array(AssistedExportPack.fixturePhotoReferences.prefix(2))
         )
 
@@ -27,11 +28,23 @@ final class AssistedExportDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             pack.listingText(for: .facebookMarketplace),
-            "Denim jacket, relaxed fit, size L\n\nA clean seller description."
+            "Denim jacket, relaxed fit, size L\n\nA clean seller description.\n\nPrice: $149.99"
+        )
+        XCTAssertEqual(
+            pack.listingText(for: .mercari),
+            "Denim jacket, relaxed fit, size L\n\nA clean seller description.\n\nPrice: $149.99"
         )
         XCTAssertEqual(
             pack.listingText(for: .depop),
-            "A clean seller description."
+            "A clean seller description.\n\nPrice: $149.99"
+        )
+    }
+
+    func testPackUsesRecommendationPriceWhenServerHasNoSellerOverride() {
+        let pack = AssistedExportPack.fixture(effectivePrice: 145)
+
+        XCTAssertTrue(
+            pack.listingText(for: .facebookMarketplace).hasSuffix("Price: $145.00")
         )
     }
 
@@ -857,6 +870,7 @@ extension AssistedExportPack {
         reviewRevision: UUID = fixtureReviewRevision,
         title: String = "Denim jacket, relaxed fit, size L",
         description: String = "A clean seller description.",
+        effectivePrice: Decimal = 145,
         photoReferences: [URL] = fixturePhotoReferences
     ) -> AssistedExportPack {
         AssistedExportPack(
@@ -865,6 +879,7 @@ extension AssistedExportPack {
             reviewRevision: reviewRevision,
             title: title,
             description: description,
+            effectivePrice: effectivePrice,
             photoReferences: photoReferences
         )
     }

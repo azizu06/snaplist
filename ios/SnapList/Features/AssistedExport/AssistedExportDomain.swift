@@ -50,6 +50,8 @@ struct AssistedExportPack: Equatable, Sendable {
     let reviewRevision: UUID
     let title: String
     let description: String
+    /// Server-resolved price: valid seller override, else recommendation.
+    let effectivePrice: Decimal
     /// Ordered, authenticated photo references supplied by the mobile listing
     /// review projection. The client resolves all of them before offering a
     /// share sheet, so a failed fetch can never become an empty handoff.
@@ -57,13 +59,36 @@ struct AssistedExportPack: Equatable, Sendable {
 
     var photoCount: Int { photoReferences.count }
 
+    func replacingEffectivePrice(_ price: Decimal) -> AssistedExportPack {
+        AssistedExportPack(
+            itemID: itemID,
+            contentRevision: contentRevision,
+            reviewRevision: reviewRevision,
+            title: title,
+            description: description,
+            effectivePrice: price,
+            photoReferences: photoReferences
+        )
+    }
+
     func listingText(for destination: AssistedExportDestination) -> String {
+        let price = Self.priceText(effectivePrice)
         switch destination {
         case .facebookMarketplace, .mercari:
-            return "\(title)\n\n\(description)"
+            return "\(title)\n\n\(description)\n\nPrice: \(price)"
         case .depop:
-            return description
+            return "\(description)\n\nPrice: \(price)"
         }
+    }
+
+    private static func priceText(_ price: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: price as NSDecimalNumber) ?? "$\(price)"
     }
 }
 
