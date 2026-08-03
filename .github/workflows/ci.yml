@@ -99,11 +99,14 @@ jobs:
           set -a
           source <(node tools/supabase-loopback/supabase.mjs status -o env)
           set +a
+          echo "::add-mask::$PUBLISHABLE_KEY"
+          echo "::add-mask::$SECRET_KEY"
           {
             echo "SUPABASE_URL=$API_URL"
-            echo "SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_PUBLISHABLE_KEY=$PUBLISHABLE_KEY"
+            echo "SUPABASE_ANON_KEY=$PUBLISHABLE_KEY"
             echo "SUPABASE_SECRET_KEY=$SECRET_KEY"
-            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SECRET_KEY"
           } >> "$GITHUB_ENV"
 
       # A skipped RLS suite is useful on a laptop but not merge evidence.

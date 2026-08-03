@@ -30,11 +30,16 @@ describe("verified guest focused-selector execution mode", () => {
     );
   });
 
-  it("keeps REST, Storage, and current server credentials available to DB RLS suites", () => {
+  it("keeps REST, Storage, and current credentials available to DB RLS suites", () => {
     const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
 
     expect(workflow).not.toMatch(/pnpm supabase start -x [^\n]*\bpostgrest\b/i);
     expect(workflow).not.toMatch(/pnpm supabase start -x [^\n]*\bstorage-api\b/i);
+    expect(workflow).toContain('echo "SUPABASE_PUBLISHABLE_KEY=$PUBLISHABLE_KEY"');
+    expect(workflow).toContain('echo "SUPABASE_ANON_KEY=$PUBLISHABLE_KEY"');
     expect(workflow).toContain('echo "SUPABASE_SECRET_KEY=$SECRET_KEY"');
+    expect(workflow).toContain('echo "SUPABASE_SERVICE_ROLE_KEY=$SECRET_KEY"');
+    expect(workflow).toContain('echo "::add-mask::$PUBLISHABLE_KEY"');
+    expect(workflow).toContain('echo "::add-mask::$SECRET_KEY"');
   });
 });
