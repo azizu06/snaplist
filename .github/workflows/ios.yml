@@ -51,6 +51,9 @@ jobs:
       - name: Validate deep-link configuration
         run: zsh ios/Scripts/deep-link-contract.test.sh
 
+      - name: Validate app icon asset catalog
+        run: zsh ios/Scripts/app-icon-contract.test.sh
+
   shard:
     name: shard (${{ matrix.shard }})
     if: github.event_name == 'pull_request'
@@ -108,6 +111,9 @@ jobs:
       - name: Validate deep-link configuration
         run: zsh ios/Scripts/deep-link-contract.test.sh
 
+      - name: Validate app icon asset catalog
+        run: zsh ios/Scripts/app-icon-contract.test.sh
+
       - name: Build app and run complete serial test suite
         run: ios/Scripts/test.sh
 
@@ -151,6 +157,9 @@ jobs:
 
       - name: Validate exact-head deep-link configuration
         run: zsh test-target/ios/Scripts/deep-link-contract.test.sh
+
+      - name: Validate exact-head app icon asset catalog
+        run: zsh test-target/ios/Scripts/app-icon-contract.test.sh
 
       - name: Build app and run one focused test
         env:
