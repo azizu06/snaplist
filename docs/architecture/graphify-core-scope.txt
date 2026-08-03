@@ -54,14 +54,9 @@ next.config.ts
 package.json
 pnpm-lock.yaml
 pnpm-workspace.yaml
-src/app/api/batch/enqueue/route.ts
-src/app/api/batch/item/route.ts
-src/app/api/batch/status/route.ts
 src/app/api/billing/checkout/route.ts
 src/app/api/billing/portal/route.ts
 src/app/api/ebay/account-deletion/route.ts
-src/app/api/ebay/callback/route.ts
-src/app/api/ebay/connect/route.ts
 src/app/api/ebay/publish/route.ts
 src/app/api/health/route.ts
 src/app/api/internal/pipeline-maintenance/route.ts
@@ -76,8 +71,6 @@ src/lib/abuse/index.ts
 src/lib/abuse/store.ts
 src/lib/api/errors.ts
 src/lib/auth.ts
-src/lib/batch/orchestrate.ts
-src/lib/batch/status.ts
 src/lib/billing/adapter.ts
 src/lib/billing/config.ts
 src/lib/billing/entitlement.ts
@@ -87,8 +80,6 @@ src/lib/billing/lifecycle.ts
 src/lib/billing/revenuecat-store.ts
 src/lib/billing/revenuecat.ts
 src/lib/billing/webhook.ts
-src/lib/clarify/generate.ts
-src/lib/clarify/schema.ts
 src/lib/confidence/confidence.ts
 src/lib/confidence/from-price.ts
 src/lib/crypto/secretbox.ts
@@ -114,7 +105,6 @@ src/lib/llm/contracts.ts
 src/lib/llm/index.ts
 src/lib/llm/registry.ts
 src/lib/marketplace/ebay/auth.ts
-src/lib/marketplace/ebay/callback-outcome.ts
 src/lib/marketplace/ebay/connections.ts
 src/lib/marketplace/ebay/deletion.ts
 src/lib/marketplace/ebay/errors.ts

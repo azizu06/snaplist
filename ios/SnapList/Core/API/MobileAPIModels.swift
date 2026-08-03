@@ -259,13 +259,15 @@ struct IncludedOfferDeviceTokenBody: Encodable {
     let deviceToken: String
 }
 
-enum ContractOnlyOperation: String, CaseIterable, Codable {
-    case verifyGuestAttestation
+enum ContractOnlyOperation: CaseIterable, Equatable {
+    static let allCases: [ContractOnlyOperation] = []
+
+    var operationID: String {
+        fatalError("No contract-only mobile API operation is currently declared.")
+    }
 
     var ownerIssue: Int {
-        switch self {
-        case .verifyGuestAttestation: 174
-        }
+        fatalError("No contract-only mobile API operation is currently declared.")
     }
 }
 

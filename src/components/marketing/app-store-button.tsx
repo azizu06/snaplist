@@ -1,8 +1,8 @@
 import { appStoreURL } from "@/lib/marketing/site";
 
 /**
- * The page's only call to action, in the three sizes the v6 composition uses:
- * header (`sm`), mobile menu (`md`), hero (default), final CTA (`lg`).
+ * App Store destination control in the sizes the v6 composition uses: header
+ * (`sm`), mobile menu (`md`), hero (default), and any future large placement (`lg`).
  *
  * SnapList has no App Store product page until #380 submits one, which the
  * design carries as the inert token APP_STORE_DESTINATION_PENDING. Rather than

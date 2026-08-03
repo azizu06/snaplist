@@ -483,6 +483,25 @@
           "ownerDecision": "The receipt is the one row account erasure deliberately does not delete with the account, so it is named here rather than left implicit. It exists because a durable erasure must answer a replayed Idempotency-Key with the generation it already resolved to, and must keep refusing writes to an account that is gone; both answers are impossible once the record itself is deleted. It is not tenant data and is not reachable by the tenant: it lives in `private`, is keyed by a SHA-256 digest of a fixed constant prefix and the user id rather than by the id, and is scrubbed of every raw identifier the instant a completed status is written, so what outlives the account cannot re-identify the person. The digest is deliberately not described as salted: the prefix is a domain separator carried in the migration source, not a secret, and what defeats enumeration is the entropy of a Clerk user id rather than anything withheld from an attacker who has the source. An erasure that has not completed still holds the raw identifiers, because resuming the deletion needs them; that is a bounded window on unfinished work rather than a retention decision, and the row is pruned only after it completes. The 30-day window is an owner judgement, not a provider requirement: long enough that a client retrying a stalled erasure still resolves to its own generation, short enough that the digest does not become indefinite retention. Issue #384 owns it."
         }
       ]
+    },
+    {
+      "id": "waitlist-email",
+      "releaseDatum": true,
+      "dispositions": [
+        {
+          "treatment": "delete",
+          "owner": "snaplist-platform",
+          "deletionTriggers": [
+            "waitlist-withdrawal",
+            "one-time-launch-email-completes",
+            "signup-reaches-24-month-ceiling"
+          ],
+          "maximumRetention": "24 months after signup, or 30 days after the one-time launch email is sent, whichever is earlier; a withdrawal request deletes the row sooner",
+          "executor": "snaplist-operator-direct-sql-export-and-delete",
+          "completionProof": "a direct SQL count proves the normalized address is absent after withdrawal or the age ceiling; after launch, a full-table SQL count proves no waitlist row remains",
+          "ownerDecision": "Issue #620 collects the address only for one launch email. The 24-month ceiling bounds a launch delay without adding a sender, provider, or admin surface to this issue."
+        }
+      ]
     }
   ],
   "blockers": []
