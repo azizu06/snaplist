@@ -105,15 +105,13 @@ jobs:
           } >> "$GITHUB_ENV"
 
       # A skipped RLS suite is useful on a laptop but not merge evidence.
-      # This is the only CI job with the local Auth API and its credentials;
-      # requiring it here makes an unreachable stack fail the job.
+      # This is the only CI job with the local Auth API and its credentials.
+      # Run every RLS suite plus each other shared-stack consumer here, where an
+      # unreachable stack fails inside the suites instead of dropping coverage.
       - name: Require the provisioned Supabase stack for RLS coverage
         env:
           SNAPLIST_REQUIRE_DB_STACK: "1"
-        run: >
-          pnpm exec tsx -e
-          'import { stackReachable } from "./src/test/supabase-stack";
-          void stackReachable();'
+        run: pnpm exec tsx scripts/run-db-rls-vitest.ts
 
       # Same command as the local whole-suite run in
       # docs/runbooks/durable-pipeline-operations.md. pg_prove exits non-zero
