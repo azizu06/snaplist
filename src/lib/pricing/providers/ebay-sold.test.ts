@@ -25,6 +25,10 @@ import {
 import { createApifySoldPricingProvider } from "./apify-sold";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
 import {
+  SOLD_HALFLIFE_DAYS_DEFAULT,
+  SOLD_STALE_DAYS_DEFAULT,
+} from "../freshness";
+import {
   createInMemoryTtlCache,
   createUpstashTtlCache,
   type TtlCache,
@@ -2859,17 +2863,22 @@ function anchorComp(
   id: string,
   price: number,
   soldAt?: number,
+  condition = "Pre-Owned",
 ): EbaySoldComp {
   return {
     url: `https://www.ebay.com/itm/${id}`,
     title: "Sony WH-1000XM4 Wireless Headphones",
     price,
-    condition: "Pre-Owned",
+    condition,
     ...(soldAt != null ? { soldAt } : {}),
   };
 }
 
 const STALE_SOLD_AT = NOW - 400 * DAY;
+const FINALIZATION_FRESHNESS = {
+  staleDays: SOLD_STALE_DAYS_DEFAULT,
+  halfLifeDays: SOLD_HALFLIFE_DAYS_DEFAULT,
+};
 
 describe("finalizeVerifiedSoldResult — one shared seam for every retrieval adapter (#363)", () => {
   it("declines when fewer than two verified anchors survive", () => {
@@ -2879,7 +2888,7 @@ describe("finalizeVerifiedSoldResult — one shared seam for every retrieval ada
     );
 
     expect(evidence.anchors).toHaveLength(1);
-    expect(finalizeVerifiedSoldResult(evidence)).toBeNull();
+    expect(finalizeVerifiedSoldResult(evidence, FINALIZATION_FRESHNESS)).toBeNull();
   });
 
   it("retains at most five deterministically ranked verified matches, never padded", () => {
@@ -2890,7 +2899,7 @@ describe("finalizeVerifiedSoldResult — one shared seam for every retrieval ada
     );
     const evidence = selectSoldCompEvidence(comps, BRANDED_SIGNAL);
 
-    const result = finalizeVerifiedSoldResult(evidence);
+    const result = finalizeVerifiedSoldResult(evidence, FINALIZATION_FRESHNESS);
 
     expect(evidence.anchors).toHaveLength(7);
     expect(result!.evidence!.map((entry) => entry.sourceUrl)).toEqual([
@@ -2911,22 +2920,23 @@ describe("finalizeVerifiedSoldResult — one shared seam for every retrieval ada
     );
 
     // Without a clock there is no age-decay layer, so both anchors stand.
-    expect(finalizeVerifiedSoldResult(evidence)!.sources).toHaveLength(2);
+    expect(finalizeVerifiedSoldResult(evidence, FINALIZATION_FRESHNESS)!.sources).toHaveLength(2);
     // With one, the stale sale is dropped and the survivor is below the gate.
-    expect(finalizeVerifiedSoldResult(evidence, { now: NOW })).toBeNull();
+    expect(finalizeVerifiedSoldResult(evidence, { ...FINALIZATION_FRESHNESS, now: NOW })).toBeNull();
   });
 
   it("weights the suggested price by canonical match score, not raw comp order", () => {
     const evidence = selectSoldCompEvidence(
-      [anchorComp("a", 100), anchorComp("b", 200)],
+      [anchorComp("adjacent-condition", 200, undefined, "Like New"), anchorComp("same-condition", 100)],
       BRANDED_SIGNAL,
     );
-    // Every anchor here scores identically, so the weighted median reduces to
-    // the plain median — the documented no-op the adapters both relied on.
-    expect(finalizeVerifiedSoldResult(evidence)!.suggested).toBe(150);
-    expect(
-      evidence.anchors.every((match) => match.score === evidence.anchors[0].score),
-    ).toBe(true);
+    // Raw order starts with the $200 adjacent-condition comp, but the seller's
+    // "good" condition gives the $100 same-condition comp a higher canonical
+    // score. Weighted median must therefore prefer $100, not raw first order.
+    expect(evidence.anchors.map(({ comp }) => comp.price)).toEqual([200, 100]);
+    expect(evidence.anchors[0].score).not.toBe(evidence.anchors[1].score);
+    expect(evidence.anchors[1].score).toBeGreaterThan(evidence.anchors[0].score);
+    expect(finalizeVerifiedSoldResult(evidence, FINALIZATION_FRESHNESS)!.suggested).toBe(100);
   });
 });
 
