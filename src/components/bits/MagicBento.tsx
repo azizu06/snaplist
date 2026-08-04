@@ -17,7 +17,6 @@ import { gsap } from 'gsap';
 export type BentoTint = 'violet' | 'amber' | 'blue' | 'green';
 
 export interface BentoCardData {
-  label: string;
   title: string;
   description: string;
   /** Small duotone icon rendered inside the tinted chip. */
@@ -593,10 +592,7 @@ const MagicBento: React.FC<BentoProps> = ({
         {cards.map((card, index) => (
           <ParticleCard
             key={index}
-            // One internal rhythm for every card: header → mt-4 title →
-            // mt-2 description, top-aligned. (justify-between used to
-            // stretch the label↔title gap differently per card height —
-            // the bento spacing bug.)
+            // One internal rhythm for every card: icon tile, title, description.
             className={`card ${enableBorderGlow ? 'card--border-glow' : ''} flex min-h-[190px] flex-col rounded-2xl border border-line bg-panel p-6 shadow-card transition-colors duration-300 ${card.className ?? ''}`}
             disableAnimations={shouldDisableAnimations}
             particleCount={enableStars ? particleCount : 0}
@@ -605,15 +601,12 @@ const MagicBento: React.FC<BentoProps> = ({
             clickEffect={clickEffect}
             enableMagnetism={enableMagnetism}
           >
-            <div className="relative flex items-center gap-2.5">
+            <div className="relative">
               <span
-                className={`flex size-8 items-center justify-center rounded-lg ${TINT_CLASSES[card.tint ?? 'violet']}`}
+                className={`mkt-bento__icon flex size-9 items-center justify-center rounded-xl ${TINT_CLASSES[card.tint ?? 'violet']}`}
                 aria-hidden
               >
                 {card.icon ?? <span className="size-1.5 rounded-full bg-current" />}
-              </span>
-              <span className="text-[12px] font-bold uppercase tracking-[0.12em] text-flash-faint">
-                {card.label}
               </span>
             </div>
             <div className="relative mt-4 flex flex-col">
