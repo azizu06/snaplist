@@ -312,14 +312,19 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
       };
       await complete?.(result, {
         accountGeneration: "55555555-5555-4555-8555-555555555555",
-        connectionGeneration: "55555555-5555-4555-8555-555555555555",
+        connectionGeneration: request.connectionGeneration,
         publishClaimId: request.publishClaimId,
         attemptToken: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
       });
       return result;
     };
     const completionClient = {
-      rpc: async () => ({ data: null, error: { message: "generation changed" } }),
+      rpc: async (name: string, params?: Record<string, unknown>) => {
+        if (name === "complete_ebay_publish_dispatch") {
+          return { data: null, error: { message: "generation changed" } };
+        }
+        return serverA.rpc(name, params);
+      },
     } as unknown as SupabaseClient;
 
     await expect(
