@@ -94,43 +94,35 @@ export const FEATURE_STEPS = [
     /** Marks a screen the design package has not frozen for the native client. */
     candidate: false,
     body:
-      "Take 1 to 5 photos yourself and control the shutter. Keep the views you want, "
-      + "add another angle when the item needs it, and decide when the photo set is "
-      + "ready for a draft.",
+      "Take 1 to 5 photos, add another angle when needed, then choose when the set is ready.",
   },
   {
     id: "photo-review",
     title: "Photo Review",
     candidate: true,
     body:
-      "Reorder, crop, rotate, and remove photos before SnapList drafts the listing. "
-      + "Review the complete set, make your local edits, and choose the final order "
-      + "before the photos move forward.",
+      "Reorder, crop, rotate, or remove photos before SnapList drafts the listing.",
   },
   {
     id: "listing-review",
     title: "Listing Review",
     candidate: false,
     body:
-      "Review and edit the title, condition, item details, description, photos, and "
-      + "price. Compare every field with the item in front of you, then confirm the "
-      + "version you want to use.",
+      "Review and edit the title, condition, details, photos, and price before you publish.",
   },
   {
     id: "publish",
     title: "Publish",
     candidate: false,
     body:
-      "Confirm to publish directly to eBay. For Mercari, Facebook Marketplace, and "
-      + "Depop, SnapList prepares a handoff that you finish yourself, so nothing "
-      + "leaves for those marketplaces without you.",
+      "For Facebook Marketplace, Mercari, and Depop, SnapList prepares a handoff you finish.",
   },
   {
     id: "trophy-wall",
     title: TROPHY_WALL.title,
     candidate: false,
     body:
-      "Follow each item from analysis to an editable draft. Keep confirmed eBay results and prepared handoffs together, so you can see what needs your next decision.",
+      "Follow each item from analysis to review, then see confirmed eBay results or prepared handoffs you finish.",
   },
 ] as const;
 
