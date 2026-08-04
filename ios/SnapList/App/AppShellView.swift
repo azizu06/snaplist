@@ -23,10 +23,19 @@ struct AppShellView: View {
     @State private var photoReviewIntake: PhotoReviewIntake?
     @State private var awaitsPrincipalReviewDismissal = false
     @State private var awaitsCommittedEmptyDismissal = false
+    @State private var proGateStore: ProGateStore?
+    @State private var proGateFocusRequest: UUID?
+    @State private var handlingProGateEventID: UUID?
 
     var body: some View {
         Group {
-            if shouldShowOnboarding {
+            if let proGateFixture = configuration.proGateFixture {
+#if DEBUG
+                ProGateFixtureHostView(fixture: proGateFixture)
+#else
+                shell
+#endif
+            } else if shouldShowOnboarding {
                 OnboardingFlowView(
                     model: onboardingModel,
                     configuration: configuration,
@@ -69,8 +78,10 @@ struct AppShellView: View {
                     store: session.store,
                     isCommitting: photoReviewHost.isCommitting,
                     submissionPresentation: PhotoReviewSubmissionPresentation(
-                        host: submissionHost
+                        host: submissionHost,
+                        proGateIntakeAdvisory: proGateStore?.intakeAdvisory
                     ),
+                    focusStartListingRequest: proGateFocusRequest,
                     acknowledgeSubmissionPresentation: { eventID in
                         submissionHost.acknowledgePresentation(eventID: eventID)
                     },
@@ -111,6 +122,11 @@ struct AppShellView: View {
                              .reviewConflictedSubmission:
                             return
                         }
+                        if event == .startListing,
+                           proGateStore?.intakeAdvisory != nil {
+                            Task { await reopenProGate() }
+                            return
+                        }
                         Task {
                             await AppShellPhotoReviewSubmissionTransaction.perform(
                                 primaryAction: event,
@@ -131,6 +147,24 @@ struct AppShellView: View {
             }
         }
         .modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
+        .sheet(
+            isPresented: proGatePresentationBinding,
+            onDismiss: restoreProGateStartListingFocus
+        ) {
+            if let proGateStore {
+                ProGateSheet(
+                    store: proGateStore,
+                    listingSummary: nil,
+                    startListing: resumeProGatedListing,
+                    fallbackToPhotoReview: fallbackFromPresentedProGate
+                )
+                .modifier(
+                    OptionalDynamicTypeModifier(
+                        size: configuration.dynamicTypeSize
+                    )
+                )
+            }
+        }
         .onOpenURL { url in
             router.open(url)
         }
@@ -167,6 +201,7 @@ struct AppShellView: View {
             switch phase {
             case .active:
                 homeStore.resumeUpdates()
+                Task { await proGateStore?.refreshPendingVerification() }
             case .background:
                 homeStore.suspendUpdates()
             case .inactive:
@@ -174,6 +209,16 @@ struct AppShellView: View {
             @unknown default:
                 break
             }
+        }
+        .onChange(
+            of: submissionHost.pendingPresentationEvent,
+            initial: true
+        ) { _, event in
+            guard case .destinationHandoff(
+                eventID: let eventID,
+                handoff: .pay01
+            )? = event else { return }
+            Task { await presentProGate(eventID: eventID) }
         }
         .onChange(of: photoReviewHost.isCommitting) { _, isCommitting in
             guard !isCommitting, awaitsCommittedEmptyDismissal else {
@@ -241,6 +286,75 @@ struct AppShellView: View {
                 }
             }
         }
+    }
+
+    private var proGatePresentationBinding: Binding<Bool> {
+        Binding(
+            get: { proGateStore?.isPresented == true },
+            set: { presented in
+                guard !presented else { return }
+                proGateStore?.dismiss()
+            }
+        )
+    }
+
+    private func restoreProGateStartListingFocus() {
+        if case .needsPro(let eventID)? = proGateStore?.intakeAdvisory {
+            proGateFocusRequest = eventID
+        }
+    }
+
+    private func makeProGateStoreIfNeeded() -> ProGateStore {
+        if let proGateStore { return proGateStore }
+        let store = ProGateStore(
+            mobileAPIClient: dependencies.mobileAPIClient,
+            subscriptionClient: dependencies.subscriptionClient
+        )
+        proGateStore = store
+        return store
+    }
+
+    private func presentProGate(eventID: UUID) async {
+        guard handlingProGateEventID != eventID else { return }
+        handlingProGateEventID = eventID
+        defer { handlingProGateEventID = nil }
+        let store = makeProGateStoreIfNeeded()
+        await AppShellProGateTransaction.present(
+            eventID: eventID,
+            store: store,
+            submissionHost: submissionHost
+        )
+    }
+
+    private func reopenProGate() async {
+        let store = makeProGateStoreIfNeeded()
+        if await store.prepare() == .fallbackToPhotoReview {
+            submissionHost.publishProGatePhotoReviewFallback()
+        }
+    }
+
+    private func resumeProGatedListing() {
+        guard let store = proGateStore,
+              let session = photoReviewHost.session else { return }
+        Task {
+            await AppShellProGateTransaction.resume(store: store) {
+                await AppShellPhotoReviewSubmissionTransaction.perform(
+                    primaryAction: .startListing,
+                    session: session,
+                    captureFlow: captureFlow,
+                    host: photoReviewHost,
+                    router: router,
+                    submissionHost: submissionHost,
+                    setReturnFocus: { pendingScanReturnFocus = $0 }
+                )
+            }
+        }
+    }
+
+    private func fallbackFromPresentedProGate() {
+        proGateStore?.fallbackToPhotoReview()
+        submissionHost.publishProGatePhotoReviewFallback()
+        proGateFocusRequest = UUID()
     }
 
     private var shell: some View {
@@ -557,6 +671,38 @@ enum AppShellPhotoReviewBackTransaction {
         }
 
         return outcome
+    }
+}
+
+@MainActor
+enum AppShellProGateTransaction {
+    static func present(
+        eventID: UUID,
+        store: ProGateStore,
+        submissionHost: ItemRunSubmissionHost
+    ) async {
+        switch await store.prepare() {
+        case .presented:
+            guard submissionHost.consumeDestinationHandoff(eventID: eventID)
+                    == .pay01 else {
+                store.fallbackToPhotoReview()
+                return
+            }
+        case .fallbackToPhotoReview:
+            _ = submissionHost
+                .replaceProGateHandoffWithPhotoReviewFallback(
+                    eventID: eventID
+                )
+        }
+    }
+
+    static func resume(
+        store: ProGateStore,
+        perform: () async -> Void
+    ) async {
+        guard store.consumeResumeIntent() else { return }
+        await Task.yield()
+        await perform()
     }
 }
 

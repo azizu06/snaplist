@@ -80,8 +80,14 @@ final class RevenueCatSubscriptionClient: SubscriptionClient, @unchecked Sendabl
     }
 
     func restore() async throws -> SubscriptionAdvisoryOutcome {
-        guard configuration != nil else { throw SubscriptionClientError.unconfigured }
-        _ = try await Purchases.shared.restorePurchases()
+        guard let configuration,
+              let entitlementID = configuration.entitlementID else {
+            throw SubscriptionClientError.unconfigured
+        }
+        let customerInfo = try await Purchases.shared.restorePurchases()
+        guard customerInfo.entitlements[entitlementID]?.isActive == true else {
+            return .nothingToRestore
+        }
         return .awaitingServerVerification
     }
 }

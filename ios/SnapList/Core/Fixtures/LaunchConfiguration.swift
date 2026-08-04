@@ -151,6 +151,17 @@ enum SubmissionFixture: String, Equatable {
     case rateLimited = "rate-limited"
 }
 
+enum ProGateFixtureState: String, Equatable {
+    case pay01 = "PAY-01"
+    case pay03 = "PAY-03"
+    case pay04a = "PAY-04a"
+    case pay04b = "PAY-04b"
+    case pay06 = "PAY-06"
+    case pay07 = "PAY-07"
+    case pay08 = "PAY-08"
+    case pay10 = "PAY-10"
+}
+
 struct SubmissionAcknowledgmentNotificationName: Equatable {
     static let prefix = "dev.snaplist.ios.test.submission-ack."
 
@@ -219,6 +230,7 @@ struct LaunchConfiguration: Equatable {
     var listingReviewFixture: ListingReviewFixture?
     var resetListingReviewDraft: Bool
     var assistedExportFixture: AssistedExportFixture?
+    var proGateFixture: ProGateFixtureState?
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -237,7 +249,8 @@ struct LaunchConfiguration: Equatable {
         runDetailFixture: nil,
         listingReviewFixture: nil,
         resetListingReviewDraft: false,
-        assistedExportFixture: nil
+        assistedExportFixture: nil,
+        proGateFixture: nil
     )
 
     static let preview = LaunchConfiguration(
@@ -257,7 +270,8 @@ struct LaunchConfiguration: Equatable {
         runDetailFixture: .loaded,
         listingReviewFixture: nil,
         resetListingReviewDraft: false,
-        assistedExportFixture: nil
+        assistedExportFixture: nil,
+        proGateFixture: nil
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -350,6 +364,15 @@ struct LaunchConfiguration: Equatable {
                 if configuration.assistedExportFixture != nil {
                     configuration.usesZeroNetworkFixtures = true
                 }
+            } else if argument.hasPrefix("--pro-gate-fixture=") {
+                let value = String(
+                    argument.dropFirst("--pro-gate-fixture=".count)
+                )
+                configuration.proGateFixture =
+                    ProGateFixtureState(rawValue: value)
+                if configuration.proGateFixture != nil {
+                    configuration.usesZeroNetworkFixtures = true
+                }
             }
         }
 
@@ -361,6 +384,9 @@ struct LaunchConfiguration: Equatable {
             return false
         }
         if assistedExportFixture != nil {
+            return false
+        }
+        if proGateFixture != nil {
             return false
         }
         if let visualState {

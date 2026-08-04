@@ -3033,6 +3033,206 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(pendingScanFocus, .addPhotoButton)
     }
 
+    func testVerifiedProRestoreReplaysTheBlockedLiveSubmissionExactlyOnce() async throws {
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-pro-gate-live-replay",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemIndigo,
+                    rightColor: .systemMint
+                ),
+            ]
+        )
+        defer { try? scenario.fileManager.removeItem(at: scenario.root) }
+
+        let intake = SubmissionIntakeFixture(
+            stagedPhotos: scenario.displayedPhotos
+        )
+        let acceptedReceipt = intake.receipt
+        let intendedKey = UUID()
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [
+                .creditDenied(reason: "snaplist-pro-required"),
+                .created(acceptedReceipt),
+            ],
+            attemptStore: attemptStore
+        )
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: scenario.draftStore,
+                tokenProvider: CaptureFlowBearerTokenProvider(),
+                readData: intake.read,
+                newIdempotencyKey: { intendedKey }
+            )
+        )
+
+        await scenario.perform(submissionHost: submissionHost)
+
+        guard case .destinationHandoff(
+            eventID: let eventID,
+            handoff: .pay01
+        )? = submissionHost.pendingPresentationEvent else {
+            return XCTFail("Expected the canonical readable Pro denial.")
+        }
+
+        let product = SubscriptionProductMetadata(
+            id: "fixture-monthly",
+            localizedTitle: "SnapList Pro",
+            localizedDescription: "Fixture metadata",
+            localizedPrice: "$9.99",
+            billingPeriod: .init(value: 1, unit: .month)
+        )
+        let entitlementAPI = ProGateReplayMobileAPIStub()
+        let proGateStore = ProGateStore(
+            mobileAPIClient: entitlementAPI,
+            subscriptionClient: FixtureSubscriptionClient(products: [product]),
+            verificationAttempts: 1,
+            sleep: { _ in }
+        )
+
+        await AppShellProGateTransaction.present(
+            eventID: eventID,
+            store: proGateStore,
+            submissionHost: submissionHost
+        )
+        XCTAssertEqual(
+            proGateStore.state,
+            .offer(product: product, advisory: nil, isRestoring: false)
+        )
+        XCTAssertNil(submissionHost.pendingPresentationEvent)
+
+        _ = await proGateStore.restore()
+        XCTAssertEqual(
+            proGateStore.state,
+            .ready(source: .restoredPurchase)
+        )
+
+        let savedStateObserved = expectation(
+            description: "Verified replay reaches one accepted run"
+        )
+        withObservationTracking {
+            _ = submissionHost.pendingPresentationEvent
+        } onChange: {
+            savedStateObserved.fulfill()
+        }
+        let replay = Task {
+            await AppShellProGateTransaction.resume(store: proGateStore) {
+                await scenario.perform(submissionHost: submissionHost)
+            }
+        }
+        defer { replay.cancel() }
+
+        await fulfillment(of: [savedStateObserved], timeout: 3)
+        guard case .itemSaved(let savedEventID, _)? =
+            submissionHost.pendingPresentationEvent else {
+            return XCTFail("Expected one accepted replay.")
+        }
+        submissionHost.acknowledgePresentation(eventID: savedEventID)
+        await replay.value
+
+        await AppShellProGateTransaction.resume(store: proGateStore) {
+            await scenario.perform(submissionHost: submissionHost)
+        }
+
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 2)
+        XCTAssertEqual(
+            payloads.map(\.attempt.idempotencyKey),
+            [intendedKey, intendedKey]
+        )
+        let attemptSaveCount = await attemptStore.saveCount
+        XCTAssertEqual(attemptSaveCount, 1)
+        XCTAssertEqual(submissionHost.acceptedRun?.runID, acceptedReceipt.runId)
+        XCTAssertTrue(submissionHost.clearedIntake)
+    }
+
+    func testProGatePreparationIgnoresASecondLiveStartListing() async throws {
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-pro-gate-overlapping-denial",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemPurple,
+                    rightColor: .systemOrange
+                ),
+            ]
+        )
+        defer { try? scenario.fileManager.removeItem(at: scenario.root) }
+
+        let intake = SubmissionIntakeFixture(
+            stagedPhotos: scenario.displayedPhotos
+        )
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [
+                .creditDenied(reason: "snaplist-pro-required"),
+                .creditDenied(reason: "snaplist-pro-required"),
+            ],
+            attemptStore: attemptStore
+        )
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: scenario.draftStore,
+                tokenProvider: CaptureFlowBearerTokenProvider(),
+                readData: intake.read,
+                newIdempotencyKey: { UUID() }
+            )
+        )
+        await scenario.perform(submissionHost: submissionHost)
+        guard case .destinationHandoff(
+            eventID: let eventID,
+            handoff: .pay01
+        )? = submissionHost.pendingPresentationEvent else {
+            return XCTFail("Expected the first readable Pro denial.")
+        }
+
+        let product = SubscriptionProductMetadata(
+            id: "fixture-monthly",
+            localizedTitle: "SnapList Pro",
+            localizedDescription: "Fixture metadata",
+            localizedPrice: "$9.99",
+            billingPeriod: .init(value: 1, unit: .month)
+        )
+        let entitlementAPI = SuspendedProGateMobileAPIStub()
+        let proGateStore = ProGateStore(
+            mobileAPIClient: entitlementAPI,
+            subscriptionClient: FixtureSubscriptionClient(products: [product]),
+            verificationAttempts: 1,
+            sleep: { _ in }
+        )
+        let preparation = Task {
+            await AppShellProGateTransaction.present(
+                eventID: eventID,
+                store: proGateStore,
+                submissionHost: submissionHost
+            )
+        }
+        defer { preparation.cancel() }
+        await entitlementAPI.waitUntilEntitlementStarts()
+
+        await scenario.perform(submissionHost: submissionHost)
+
+        let payloadsDuringPreparation = await submitter.payloads
+        XCTAssertEqual(payloadsDuringPreparation.count, 1)
+        XCTAssertEqual(
+            submissionHost.pendingPresentationEvent,
+            .destinationHandoff(eventID: eventID, handoff: .pay01)
+        )
+
+        await entitlementAPI.finishEntitlement()
+        await preparation.value
+
+        XCTAssertEqual(
+            proGateStore.state,
+            .offer(product: product, advisory: nil, isRestoring: false)
+        )
+        XCTAssertNil(submissionHost.pendingPresentationEvent)
+    }
+
     /// The lock, not the submitter: this proves the transaction returns early when a
     /// commit is already held and does not release a lock it never took. The genuine
     /// double-submit case is `ItemRunSubmissionTests.testStartListingTappedTwiceSubmitsOnce`.
@@ -9372,6 +9572,120 @@ private final class PhotoReviewDragAnimatorStub: NSObject, UIDragAnimating {
 
     func complete(at position: UIViewAnimatingPosition) {
         completions.forEach { $0(position) }
+    }
+}
+
+private actor ProGateReplayMobileAPIStub: MobileAPIClient {
+    private var entitlementCalls = 0
+
+    func getHealth() async throws -> HealthEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
+    func getSession() async throws -> SessionEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
+    func getRevenueCatConfiguration() async throws
+        -> RevenueCatConfigurationEnvelope {
+        RevenueCatConfigurationEnvelope(
+            data: .init(
+                configured: true,
+                appUserId: "fixture-user",
+                publicSdkKey: "appl_fixture",
+                entitlementId: "pro",
+                monthlyProductId: "fixture-monthly",
+                offeringId: "current",
+                transitionState: .notRequired,
+                legacyStripeStatus: nil
+            ),
+            meta: .init(requestId: "fixture-configuration")
+        )
+    }
+
+    func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope {
+        entitlementCalls += 1
+        let isVerifiedRestore = entitlementCalls > 1
+        return AiItemEntitlementEnvelope(
+            data: .init(
+                billingSource: isVerifiedRestore ? .storeKit : .included,
+                status: isVerifiedRestore ? .active : .included,
+                remainingItems: isVerifiedRestore ? 7 : 0,
+                periodStart: nil,
+                periodEnd: nil,
+                gracePeriodEnd: nil,
+                transitionState: .notRequired,
+                legacyStripeStatus: nil
+            ),
+            meta: .init(requestId: "fixture-entitlement")
+        )
+    }
+}
+
+private actor SuspendedProGateMobileAPIStub: MobileAPIClient {
+    private var entitlementStarted = false
+    private var entitlementStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var entitlementContinuation:
+        CheckedContinuation<AiItemEntitlementEnvelope, Never>?
+
+    func getHealth() async throws -> HealthEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
+    func getSession() async throws -> SessionEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
+    func getRevenueCatConfiguration() async throws
+        -> RevenueCatConfigurationEnvelope {
+        RevenueCatConfigurationEnvelope(
+            data: .init(
+                configured: true,
+                appUserId: "fixture-user",
+                publicSdkKey: "appl_fixture",
+                entitlementId: "pro",
+                monthlyProductId: "fixture-monthly",
+                offeringId: "current",
+                transitionState: .notRequired,
+                legacyStripeStatus: nil
+            ),
+            meta: .init(requestId: "fixture-configuration")
+        )
+    }
+
+    func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope {
+        entitlementStarted = true
+        entitlementStartWaiters.forEach { $0.resume() }
+        entitlementStartWaiters.removeAll()
+        return await withCheckedContinuation { continuation in
+            entitlementContinuation = continuation
+        }
+    }
+
+    func waitUntilEntitlementStarts() async {
+        guard !entitlementStarted else { return }
+        await withCheckedContinuation { continuation in
+            entitlementStartWaiters.append(continuation)
+        }
+    }
+
+    func finishEntitlement() {
+        entitlementContinuation?.resume(
+            returning: AiItemEntitlementEnvelope(
+                data: .init(
+                    billingSource: .included,
+                    status: .included,
+                    remainingItems: 0,
+                    periodStart: nil,
+                    periodEnd: nil,
+                    gracePeriodEnd: nil,
+                    transitionState: .notRequired,
+                    legacyStripeStatus: nil
+                ),
+                meta: .init(requestId: "fixture-entitlement")
+            )
+        )
+        entitlementContinuation = nil
     }
 }
 

@@ -1457,6 +1457,67 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["dock.scan"].exists)
     }
 
+    func testProGateOfferKeepsTheApprovedLabelAndDecisionControlsReachable() {
+        let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
+
+        let title = app.staticTexts["pro-gate.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 3))
+        XCTAssertEqual(title.label, "This item needs SnapList Pro")
+        XCTAssertEqual(
+            app.staticTexts["pro-gate.what-pro-does"].label,
+            "What Pro does"
+        )
+
+        for control in [
+            app.buttons["pro-gate.primary"],
+            app.buttons["pro-gate.restore-purchase"],
+            app.buttons["pro-gate.not-now"],
+        ] {
+            XCTAssertTrue(control.exists, control.identifier)
+            XCTAssertTrue(control.isHittable, control.identifier)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+    }
+
+    func testProGateAccessibilityTypeScalesAndKeepsActionsInTheSheetScroll() {
+        let standardApp = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
+        let standardTitle = standardApp.staticTexts["pro-gate.title"]
+        XCTAssertTrue(standardTitle.waitForExistence(timeout: 3))
+        let standardTitleHeight = standardTitle.frame.height
+
+        let app = launch(
+            extraArguments: [
+                "--pro-gate-fixture=PAY-01",
+                "--dynamic-type=accessibility3",
+            ]
+        )
+        let title = app.staticTexts["pro-gate.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(title.frame.height, standardTitleHeight * 1.5)
+
+        let primary = app.buttons["pro-gate.primary"]
+        for _ in 0..<5 where !primary.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(primary.isHittable)
+        XCTAssertGreaterThanOrEqual(primary.frame.height, 44)
+        XCTAssertTrue(app.buttons["pro-gate.restore-purchase"].isHittable)
+        XCTAssertTrue(app.buttons["pro-gate.not-now"].isHittable)
+    }
+
+    func testProGatePurchasePendingHasNoDismissOrRestoreAction() {
+        let app = launch(extraArguments: ["--pro-gate-fixture=PAY-03"])
+
+        XCTAssertTrue(
+            app.staticTexts["pro-gate.title"].waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["pro-gate.confirming"].exists
+        )
+        XCTAssertFalse(app.buttons["pro-gate.restore-purchase"].exists)
+        XCTAssertFalse(app.buttons["pro-gate.not-now"].exists)
+    }
+
     func testAccessibilityDynamicTypeKeepsFoundationControlsReachable() {
         let app = launch(extraArguments: ["--dynamic-type=accessibility3"])
         app.buttons["dock.trophy-wall"].tap()

@@ -80,12 +80,23 @@ final class ItemRunSubmissionTests: XCTestCase {
             (.attemptNotPersisted, .photoReview(.sub06)),
             (.rejected, .photoReview(.sub07)),
             (.intakeUnavailable, .photoReview(.sub07)),
-            (.creditDenied(reason: "opaque"), .handoff(.pay01)),
+            (
+                .creditDenied(reason: "snaplist-pro-required"),
+                .handoff(.pay01)
+            ),
+            (
+                .creditDenied(reason: "storekit-entitlement-unavailable"),
+                .photoReview(.sub06)
+            ),
+            (
+                .creditDenied(reason: "monthly-allowance-reached"),
+                .photoReview(.sub06)
+            ),
             (.receiptMismatch, .handoff(.pay08)),
             (.authenticationRequired, .handoff(.accountClaim12aThrough12c)),
         ]
 
-        XCTAssertEqual(cases.count, 10)
+        XCTAssertEqual(cases.count, 12)
 
         for testCase in cases {
             XCTAssertEqual(
@@ -107,7 +118,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             ItemRunSubmissionDestinationDecision(
                 retention: .creditDenied(reason: nil)
             ),
-            .handoff(.pay01)
+            .photoReview(.sub06)
         )
 
         let handoffs = cases.compactMap {
@@ -132,9 +143,9 @@ final class ItemRunSubmissionTests: XCTestCase {
         )] = [
             (
                 "pay-01",
-                .creditDenied(reason: "opaque-not-presentation-authority"),
+                .creditDenied(reason: "snaplist-pro-required"),
                 .pay01,
-                { _ in .creditDenied(reason: "opaque-not-presentation-authority") }
+                { _ in .creditDenied(reason: "snaplist-pro-required") }
             ),
             (
                 "pay-08",
@@ -251,6 +262,58 @@ final class ItemRunSubmissionTests: XCTestCase {
         }
 
         XCTAssertEqual(Set(observedEventIDs).count, cases.count)
+    }
+
+    func testUnavailableProGateReplacesOnlyItsMatchingHandoffWithPhotoReviewFallback() async throws {
+        let intake = SubmissionIntakeFixture(photoCount: 2, seed: "pro-fallback")
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.creditDenied(reason: "snaplist-pro-required")]
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: attemptStore,
+                submitter: submitter,
+                draftStore: draftStore,
+                keys: [Self.firstKey]
+            )
+        )
+
+        await host.startListing(photos: intake.photos)
+
+        guard case .destinationHandoff(
+            eventID: let eventID,
+            handoff: .pay01
+        )? = host.pendingPresentationEvent else {
+            return XCTFail("Expected the readable Pro denial handoff.")
+        }
+        XCTAssertFalse(
+            host.replaceProGateHandoffWithPhotoReviewFallback(
+                eventID: UUID()
+            )
+        )
+        XCTAssertTrue(
+            host.replaceProGateHandoffWithPhotoReviewFallback(eventID: eventID)
+        )
+        guard case .submissionRejected(
+            eventID: _,
+            retention: .submissionUnavailable
+        )? = host.pendingPresentationEvent else {
+            return XCTFail("Expected the approved Photo Review fallback.")
+        }
+        let presentation = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(presentation.primaryActionLabel, "Try again")
+        XCTAssertTrue(presentation.rendersSubmittedMedia)
+        let retainedPhotos = try await draftStore.loadPhotos()
+        let retainedAttempt = try await attemptStore.loadAttempt()
+        XCTAssertEqual(retainedPhotos, intake.photos)
+        XCTAssertNotNil(retainedAttempt)
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+        let discardCount = await draftStore.discardCount
+        XCTAssertEqual(discardCount, 0)
     }
 
     // MARK: Persisted attempt identity
