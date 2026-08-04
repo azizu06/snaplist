@@ -124,11 +124,6 @@ const SERVED_STATUSES = new Set(["implemented", "proof"]);
  */
 const UNROUTED_BY_DESIGN = new Map<string, string>([
   [
-    "/v1/guest/claims",
-    "Issue #593 owns the Clerk/RLS guest-claim route composition; #610 supplies "
-      + "its production App Attest handoff verifier without taking that route surface.",
-  ],
-  [
     "/v1/webhooks/revenuecat",
     "Served by src/app/api/webhooks/revenuecat/route.ts. Moving the provider's "
       + "configured callback URL is a RevenueCat-side change, not an App Router one.",
