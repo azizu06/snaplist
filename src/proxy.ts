@@ -30,6 +30,8 @@ const isPublic = createRouteMatcher([
   "/terms",
   "/support",
   "/manifest.webmanifest",
+  "/.well-known/apple-app-site-association",
+  "/mobile/ebay/oauth",
   "/login(.*)",
   "/signup(.*)",
   "/api/health",

@@ -21,6 +21,7 @@
       "SnapListTests"
     ],
     "ui-1": [
+      "SnapListUITests/SnapListUITests/testPhotoReviewHardwareKeyboardControlLeftMovesSelectedSecondPhotoToCoverWithReducedMotion",
       "SnapListUITests/HomeUITests/testApprovedSellerStatesRenderTheirDurableTruth",
       "SnapListUITests/HomeUITests/testCompletedRunOffersReviewCopyOnlyWhenServerAllowsIt",
       "SnapListUITests/HomeUITests/testExactCustomRunDeepLinkOpensDetailAndBackReturnsHome",
@@ -45,7 +46,6 @@
       "SnapListUITests/SnapListUITests/testLivePhotoReviewBackReturnsExactRestoredPhotoAndFocusesScanReview",
       "SnapListUITests/SnapListUITests/testLivePhotoReviewKeepsStartListingStickyBelowTheScrollingReviewContent",
       "SnapListUITests/SnapListUITests/testOnboardingAccessibilityAtLargeDynamicTypeKeepsTargetsAndSafeAreas",
-      "SnapListUITests/SnapListUITests/testPhotoReviewHardwareKeyboardControlLeftMovesSelectedSecondPhotoToCoverWithReducedMotion",
       "SnapListUITests/SnapListUITests/testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity",
       "SnapListUITests/SnapListUITests/testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion",
       "SnapListUITests/SnapListUITests/testPhotoReviewNativeDragSourcePreservesNonCoverThumbnailTapActions",

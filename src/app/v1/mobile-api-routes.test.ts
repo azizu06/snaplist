@@ -170,7 +170,7 @@ function swiftSourceFiles(directory: string): string[] {
 }
 
 function normalizeSwiftPath(path: string): string {
-  return path.replace(/\\\(([^)]*)\)/g, (_, expression: string) => {
+  return path.replace(/\\\(((?:[^()]|\([^()]*\))*)\)/g, (_, expression: string) => {
     const identifier = expression.match(/^[A-Za-z][A-Za-z0-9_]*/)?.[0] ?? "parameter";
     return `{${identifier.replace(/ID$/, "Id")}}`;
   });

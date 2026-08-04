@@ -3098,7 +3098,7 @@ describe("mobile API v1 provider-neutral handler", () => {
   });
 
   it("keeps a permanent and a transient guest-claim denial distinguishable", async () => {
-    const messages = await Promise.all(
+    const outcomes = await Promise.all(
       [new GuestClaimAllowanceSpentError(), new GuestClaimAllowanceInFlightError()]
         .map(async (error) => {
           const response = await handler({
@@ -3114,16 +3114,27 @@ describe("mobile API v1 provider-neutral handler", () => {
               },
             }),
           );
-          const body = await response.json() as { error: { message: string } };
-          return body.error.message;
+          const body = await response.json() as {
+            error: { message: string; details?: { reason?: string } };
+          };
+          return {
+            message: body.error.message,
+            reason: body.error.details?.reason,
+          };
         }),
     );
 
     // Pinned, not merely distinct: this is the wire contract, and it would
     // otherwise move silently with an edit to the Error subclass constructor.
-    expect(messages).toEqual([
-      "The account's included item credit is already spent on another run.",
-      "The account's included item credit is reserved by a run in flight.",
+    expect(outcomes).toEqual([
+      {
+        message: "The account's included item credit is already spent on another run.",
+        reason: "guest_claim_allowance_spent",
+      },
+      {
+        message: "The account's included item credit is reserved by a run in flight.",
+        reason: "guest_claim_allowance_in_flight",
+      },
     ]);
   });
 

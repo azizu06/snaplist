@@ -111,6 +111,7 @@ export const ebayPublishPreflightSchema = z
   .object({
     listingId: z.string().uuid(),
     title: z.string().min(1).max(80),
+    description: z.string(),
     effectivePrice: z
       .object({
         amount: z.number().positive().multipleOf(0.01),

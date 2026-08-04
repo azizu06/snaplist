@@ -379,7 +379,15 @@ struct AppShellView: View {
                     listingReviewStore: listingReviewStore,
                     correctionAvailable:
                         configuration.listingReviewCorrectionAvailable,
-                    forceReducedMotion: configuration.forceReducedMotion
+                    forceReducedMotion: configuration.forceReducedMotion,
+                    goToTrophyWall: {
+                        router.reset(tab: .trophyWall)
+                        router.selectedTab = .trophyWall
+                    },
+                    startNewItem: {
+                        router.reset(tab: .scan)
+                        router.selectedTab = .scan
+                    }
                 )
             default:
                 HomeRouteBoundaryView(route: route)

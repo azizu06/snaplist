@@ -112,6 +112,34 @@ final class GuestRecoveryAuthorityTests: XCTestCase {
         XCTAssertNil(reloaded)
     }
 
+    func testProductionClaimAuthoritySurvivesAnIndependentStoreRelaunch()
+        async throws {
+        let authority = GuestClaimAuthority(
+            recoveryID: UUID(),
+            recoveryToken: rawToken,
+            itemID: UUID(),
+            runID: UUID(),
+            draftID: UUID(),
+            reviewRevision: UUID(),
+            photoIdentity: GuestPhotoIdentity(
+                kind: "content_sha256_set_v1",
+                fingerprint: String(repeating: "d", count: 64)
+            )
+        )
+        let firstStore = KeychainGuestClaimAuthorityStore()
+        try await firstStore.save(authority, listingID: authority.draftID)
+        addTeardownBlock {
+            try? await KeychainGuestClaimAuthorityStore().purge(
+                recoveryID: authority.recoveryID
+            )
+        }
+
+        let relaunched = try await KeychainGuestClaimAuthorityStore()
+            .authority(listingID: authority.draftID)
+
+        XCTAssertEqual(relaunched, authority)
+    }
+
     func testGuestMultipartCarriesRecoveryIDAndHashButNeverRawToken()
         throws {
         let tokenHash = SHA256.hash(data: Data(rawToken.utf8))

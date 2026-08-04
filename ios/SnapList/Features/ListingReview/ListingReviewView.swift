@@ -7,6 +7,7 @@ private enum ListingReviewDestination: Identifiable, Hashable {
     case specifics
     case sold(Int)
     case correction
+    case ebayPublish
     case assistedExport
 
     var id: String {
@@ -17,6 +18,7 @@ private enum ListingReviewDestination: Identifiable, Hashable {
         case .specifics: "specifics"
         case .sold(let index): "sold-\(index)"
         case .correction: "correction"
+        case .ebayPublish: "ebay-publish"
         case .assistedExport: "assisted-export"
         }
     }
@@ -28,6 +30,8 @@ struct ListingReviewView: View {
     let correctionAvailable: Bool
     let forceReducedMotion: Bool
     let dismissReview: () -> Void
+    let goToTrophyWall: () -> Void
+    let startNewItem: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -182,6 +186,8 @@ struct ListingReviewView: View {
                 identityAndPricing(snapshot: snapshot, draft: draft)
 
                 details(snapshot: snapshot, draft: draft)
+
+                ebayPublishEntry
 
                 assistedExportEntry
             }
@@ -564,6 +570,57 @@ struct ListingReviewView: View {
         .accessibilityIdentifier("listing-review.assisted-export")
     }
 
+    private var ebayPublishEntry: some View {
+        Button {
+            guard !store.isDirty else {
+                ListingReviewAnnouncement.post(
+                    "Save your changes before publishing to eBay.",
+                    assertive: true
+                )
+                return
+            }
+            returnFocus = .ebayPublish
+            destination = .ebayPublish
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "shippingbox")
+                    .font(.headline)
+                    .foregroundStyle(SnapListColorToken.action.color)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Publish to eBay")
+                        .font(.headline)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    Text("Connect, review, and post when you are ready.")
+                        .font(.caption)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .accessibilityHidden(true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(SnapListColorToken.canvas.color)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(SnapListColorToken.hairline.color)
+        }
+        .accessibilityHint(
+            store.isDirty
+                ? "Save your changes before publishing to eBay."
+                : "Opens eBay connection and publish review"
+        )
+        .accessibilityFocused($focusedElement, equals: .ebayPublish)
+        .accessibilityIdentifier("listing-review.ebay-publish")
+    }
+
     private var footer: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
@@ -609,6 +666,19 @@ struct ListingReviewView: View {
             }
         case .correction:
             ListingReviewCorrectionBoundaryView()
+        case .ebayPublish:
+            if let snapshot = store.snapshot,
+               store.draft != nil,
+               !store.isDirty {
+                EbayPublishJourneyHost(
+                    listingID: snapshot.binding.listingID,
+                    dependencies: dependencies,
+                    forceReducedMotion: forceReducedMotion,
+                    backToListing: { self.destination = nil },
+                    goToTrophyWall: goToTrophyWall,
+                    startNewItem: startNewItem
+                )
+            }
         case .assistedExport:
             if let pack = assistedExportPack,
                let summary = assistedExportSummary {

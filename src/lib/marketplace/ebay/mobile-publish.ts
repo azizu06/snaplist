@@ -58,6 +58,7 @@ export interface MobileEbayPublishGateway {
 export interface MobileEbayPublishPreflight {
   listingId: string;
   title: string;
+  description: string;
   effectivePrice: { amount: number; label: "What will be listed" };
   photoCount: number;
   marketplace: string;
@@ -141,6 +142,7 @@ export function createMobileEbayPublishService(input: {
       return {
         listingId: listing.id,
         title: snapshot.listing.title,
+        description: snapshot.listing.description ?? "",
         effectivePrice: { amount: price, label: "What will be listed" },
         photoCount: Array.isArray(item.photos) ? item.photos.length : 0,
         marketplace: (input.env?.() ?? process.env).EBAY_MARKETPLACE_ID ?? "EBAY_US",
