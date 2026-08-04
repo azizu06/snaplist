@@ -16,18 +16,11 @@
  */
 
 export const HERO = {
-  title: "Meet SnapList",
-  lede: "Turn photos into a listing you approve.",
-  body:
-    "Take 1 to 5 photos. SnapList drafts an editable listing with sold-price "
-    + "evidence when it exists.",
+  title: "Turn photos into a listing you approve.",
 } as const;
 
 export const WHY = {
   title: "Why choose SnapList?",
-  body:
-    "SnapList turns your photos into a draft you can review, edit, price, and "
-    + "confirm before publishing.",
 } as const;
 
 /**
@@ -42,19 +35,12 @@ export const WHY = {
  */
 export const TROPHY_WALL = {
   title: "Trophy Wall",
-  accent: "One place for every item.",
-  body:
-    "Every item you scan lands in one chronological place, from analyzing to "
-    + "ready to review to published on eBay.",
 } as const;
 
 export const FAQ_TITLE = "Frequently asked questions";
 
-export const CTA = {
-  title: "Try SnapList with one item.",
-  body:
-    "Your first AI item and first confirmed eBay publish are free. When you are "
-    + "ready for the next one, SnapList Pro picks up from there.",
+export const FOOTER = {
+  title: "Get first access to SnapList.",
 } as const;
 
 export const FEATURES_TITLE = "What does SnapList include?";

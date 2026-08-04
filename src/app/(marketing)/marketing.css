@@ -82,6 +82,7 @@ html:has(.mkt) {
 
 .mkt-main {
   flex: 1 1 auto;
+  padding-top: 80px;
 }
 
 .mkt :focus-visible {
@@ -91,13 +92,16 @@ html:has(.mkt) {
 }
 
 .mkt a {
-  color: var(--action);
+  color: var(--ink);
   text-decoration: none;
 }
 
 .mkt a:hover {
-  color: var(--action-deep);
+  color: var(--ink);
   text-decoration: underline;
+  text-decoration-color: var(--action);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 .mkt button {
@@ -152,53 +156,50 @@ html:has(.mkt) {
 /* ------------------------------------------------------------------- header */
 
 .mkt-header {
-  position: sticky;
+  position: fixed;
   top: 0;
+  right: 0;
+  left: 0;
   z-index: 50;
-  background-color: rgba(255, 255, 255, 0.18);
-  border-bottom: 1px solid rgba(236, 237, 239, 0.45);
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.6);
-  -webkit-backdrop-filter: blur(28px) saturate(140%);
-  backdrop-filter: blur(28px) saturate(140%);
+  background-color: transparent;
+  border-bottom: 1px solid transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   transition:
-    background-color 240ms ease,
-    border-color 240ms ease,
-    box-shadow 240ms ease;
+    background-color 300ms ease,
+    border-color 300ms ease,
+    backdrop-filter 300ms ease;
 }
 
 /* Boolean threshold, not a scroll-linked animation: the class flips once past
    32px and the surface transitions between two fixed states. */
 .mkt-header[data-opaque="true"] {
-  background-color: rgba(244, 247, 255, 0.56);
+  background-color: rgba(255, 255, 255, 0.8);
   border-bottom-color: rgba(54, 101, 243, 0.12);
-  box-shadow:
-    0 8px 28px rgba(22, 24, 27, 0.1),
-    inset 0 1px rgba(255, 255, 255, 0.72);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
-  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
 }
 
 /* Which bar renders is a media query, not a measured viewport width, so the
    server paint already matches the device. */
-.mkt-header__narrow {
-  display: none;
-}
-
-@media (max-width: 767px) {
-  .mkt-header__desktop {
-    display: none;
-  }
-  .mkt-header__narrow {
-    display: block;
-  }
-}
-
 .mkt-header__bar {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 16px;
   height: 80px;
+}
+
+.mkt-header__nav {
+  justify-self: center;
+}
+
+.mkt-header__actions {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .mkt-lockup {
@@ -209,7 +210,7 @@ html:has(.mkt) {
   text-decoration: none;
 }
 
-.mkt-lockup:hover {
+.mkt .mkt-lockup:hover {
   color: var(--ink);
   text-decoration: none;
 }
@@ -252,47 +253,15 @@ html:has(.mkt) {
 
 .mkt-navlink:hover {
   color: var(--ink);
-  text-decoration: none;
-}
-
-.mkt-underline {
-  position: relative;
-  display: inline-block;
-}
-
-.mkt-underline::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -3px;
-  height: 2px;
-  background: var(--action);
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 200ms var(--quint);
-}
-
-.mkt-navlink:hover .mkt-underline::after,
-.mkt-navlink:focus-visible .mkt-underline::after {
-  transform: scaleX(1);
 }
 
 /* ------------------------------------------------------------- mobile menu */
 
-.mkt-header__bar--narrow {
-  min-height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .mkt-burger {
+  display: none;
   flex: 0 0 auto;
   width: 44px;
   height: 44px;
-  display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
@@ -300,6 +269,41 @@ html:has(.mkt) {
   padding: 0;
   cursor: pointer;
   color: var(--ink);
+}
+
+@media (max-width: 767px) {
+  .mkt-main {
+    padding-top: 64px;
+  }
+  .mkt-header__bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    height: 64px;
+  }
+
+  .mkt-header__nav {
+    display: none;
+  }
+
+  .mkt-header__actions {
+    gap: 6px;
+  }
+
+  .mkt-burger {
+    display: inline-flex;
+  }
+
+  .mkt-lockup {
+    gap: 7px;
+  }
+
+  .mkt-lockup__mark {
+    height: 38px;
+  }
+
+  .mkt-lockup__word {
+    font-size: 21px;
+  }
 }
 
 .mkt-burger__box {
@@ -397,7 +401,6 @@ html:has(.mkt) {
 
 .mkt-menu__link:hover {
   color: var(--ink);
-  text-decoration: none;
 }
 
 /* -------------------------------------------------------- App Store control */
@@ -520,24 +523,6 @@ html:has(.mkt) {
   line-height: 1.02;
   letter-spacing: -0.03em;
   font-weight: 700;
-}
-
-.mkt-lede {
-  margin: 0 0 18px;
-  font-size: clamp(21px, 2.4vw, 28px);
-  line-height: 1.25;
-  letter-spacing: -0.015em;
-  font-weight: 600;
-  text-wrap: balance;
-}
-
-.mkt-sub {
-  margin: 0 0 30px;
-  font-size: clamp(17px, 1.6vw, 20px);
-  line-height: 1.5;
-  color: var(--ink-2);
-  max-width: 32em;
-  text-wrap: pretty;
 }
 
 /* The two-phone hero arrangement only reads at width; below 880 the design
@@ -986,6 +971,18 @@ html:has(.mkt) {
   border-radius: 16px;
   background: var(--canvas);
   box-shadow: 0 10px 28px rgba(22, 24, 27, 0.06);
+  animation: mkt-bento-enter 520ms var(--quint) both;
+}
+
+.mkt .mkt-bento .card:nth-child(2) { animation-delay: 70ms; }
+.mkt .mkt-bento .card:nth-child(3) { animation-delay: 140ms; }
+.mkt .mkt-bento .card:nth-child(4) { animation-delay: 210ms; }
+.mkt .mkt-bento .card:nth-child(5) { animation-delay: 280ms; }
+.mkt .mkt-bento .card:nth-child(6) { animation-delay: 350ms; }
+
+@keyframes mkt-bento-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .mkt .mkt-bento .card h3 {
@@ -1019,19 +1016,45 @@ html:has(.mkt) {
   letter-spacing: -0.025em;
 }
 
-.mkt-loop-section__heading p {
-  margin: 12px auto 0;
-  max-width: 42ch;
-  color: var(--ink-2);
-}
-
 .mkt-loop {
   overflow: hidden;
   padding: 8px 0 14px;
 }
 
+.mkt-loop__motion {
+  display: grid;
+  justify-items: center;
+}
+
+.mkt-loop__motion-control {
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  color: var(--ink);
+  background: var(--canvas);
+  border: 1px solid var(--hairline-2);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mkt-loop__motion-control:hover {
+  border-color: var(--action);
+}
+
+.mkt-loop--static {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 20px;
+}
+
 .mkt-loop-card {
-  width: 176px;
+  width: 232px;
+  height: 320px;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--hairline-2);
   border-radius: 14px;
@@ -1041,7 +1064,7 @@ html:has(.mkt) {
 
 .mkt-loop-card__image {
   position: relative;
-  aspect-ratio: 1;
+  aspect-ratio: 1 / 0.9;
   background: var(--soft);
 }
 
@@ -1051,6 +1074,10 @@ html:has(.mkt) {
 
 .mkt-loop-card__body {
   padding: 12px;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .mkt-loop-card__body p {
@@ -1061,129 +1088,15 @@ html:has(.mkt) {
   line-height: 1.35;
 }
 
-.mkt-loop-card__body span {
-  display: inline-block;
-  margin-top: 8px;
-  color: var(--action-deep);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.mkt-storefronts {
-  background: linear-gradient(180deg, var(--canvas) 0%, var(--wash-3) 100%);
-}
-
-.mkt-storefronts__intro {
-  max-width: 580px;
-  margin: 0 auto 38px;
-  text-align: center;
-}
-
-.mkt-storefronts__intro p {
-  margin: 0;
-  color: var(--ink-2);
-}
-
-.mkt-storefronts__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
-  gap: clamp(24px, 5vw, 60px);
-  align-items: center;
-}
-
-.mkt-storefronts__photo {
-  position: relative;
-  min-height: 360px;
-  overflow: hidden;
-  border-radius: 18px;
-  background: var(--soft);
-  box-shadow: 0 18px 42px rgba(22, 24, 27, 0.1);
-}
-
-.mkt-storefronts__photo img {
-  object-fit: cover;
-}
-
-.mkt-storefronts__cards {
-  display: grid;
-  gap: 12px;
-}
-
-.mkt-storefront {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 18px;
-  border: 1px solid var(--hairline-2);
-  border-radius: 14px;
-  background: var(--canvas);
-}
-
-.mkt-storefront h3,
-.mkt-storefront p {
-  margin: 0;
-}
-
-.mkt-storefront h3 {
-  color: var(--ink);
-  font-size: 16px;
-}
-
-.mkt-storefront p {
-  margin-top: 5px;
-  color: var(--ink-2);
-  font-size: 14px;
-  line-height: 1.45;
-}
-
-.mkt-storefront > span {
-  flex: 0 0 auto;
-  color: var(--action-deep);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: right;
-}
-
-.mkt-pricing {
-  padding-top: clamp(80px, 13vw, 160px);
-  padding-bottom: clamp(100px, 18vw, 220px);
-}
-
-.mkt-pricing__eyebrow {
-  margin: 0 0 14px;
-  color: var(--action-deep);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.mkt-pricing .mkt-h1 {
-  font-size: clamp(42px, 6vw, 64px);
-}
-
-.mkt-pricing__card {
-  display: grid;
-  gap: 14px;
-  margin-top: 36px;
-  padding: clamp(24px, 5vw, 40px);
-  border: 1px solid var(--hairline-2);
-  border-radius: 18px;
-  background: var(--wash-2);
-}
-
-.mkt-pricing__card p {
-  margin: 0;
-  color: var(--ink);
-  font-size: clamp(18px, 2vw, 22px);
-  font-weight: 600;
+.mkt-loop-card__marketplace-logo {
+  display: block;
+  width: 104px;
+  height: 22px;
+  object-fit: contain;
+  object-position: left center;
 }
 
 @media (min-width: 640px) {
-  .mkt-loop-card {
-    width: 252px;
-  }
   .mkt-loop-card__body {
     padding: 15px;
   }
@@ -1192,19 +1105,10 @@ html:has(.mkt) {
   }
 }
 
-@media (max-width: 767px) {
-  .mkt-storefronts__grid {
-    grid-template-columns: 1fr;
-  }
-  .mkt-storefronts__photo {
-    min-height: 270px;
-  }
-  .mkt-storefront {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .mkt-storefront > span {
-    text-align: left;
+@media (max-width: 420px) {
+  .mkt-loop-card {
+    width: 204px;
+    height: 292px;
   }
 }
 
@@ -1494,16 +1398,6 @@ html:has(.mkt) {
   background: var(--canvas);
 }
 
-.mkt-why__lede {
-  margin: 0 auto clamp(36px, 5vw, 56px);
-  text-align: center;
-  font-size: clamp(17px, 1.6vw, 20px);
-  line-height: 1.5;
-  color: var(--ink-2);
-  max-width: 30em;
-  text-wrap: pretty;
-}
-
 .mkt-cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1607,26 +1501,6 @@ html:has(.mkt) {
   font-weight: 700;
 }
 
-.mkt-trophy__accent {
-  margin: 0 0 14px;
-  font-size: clamp(22px, 3.4vw, 28px);
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  font-weight: 600;
-  color: var(--action);
-  max-width: 14ch;
-  text-wrap: balance;
-}
-
-.mkt-trophy__body {
-  margin: 0;
-  font-size: 18px;
-  line-height: 1.6;
-  color: var(--ink-2);
-  max-width: 38ch;
-  text-wrap: pretty;
-}
-
 .mkt-trophy__scout {
   height: 80px;
   width: auto;
@@ -1727,10 +1601,6 @@ html:has(.mkt) {
 @media (max-width: 899px) {
   .mkt-trophy__copy {
     text-align: center;
-  }
-  .mkt-trophy__accent,
-  .mkt-trophy__body {
-    margin-inline: auto;
   }
   .mkt-trophy__scout {
     height: clamp(68px, 20vw, 76px);
@@ -1853,32 +1723,6 @@ html:has(.mkt) {
   text-wrap: pretty;
 }
 
-/* ---------------------------------------------------------------- final CTA */
-
-.mkt-cta {
-  background: var(--soft);
-  border-top: 1px solid var(--hairline);
-  text-align: center;
-}
-
-.mkt-cta__h2 {
-  margin: 0 0 16px;
-  font-size: clamp(26px, 3.8vw, 42px);
-  line-height: 1.08;
-  letter-spacing: -0.025em;
-  font-weight: 700;
-  text-wrap: balance;
-}
-
-.mkt-cta__body {
-  margin: 0 auto 30px;
-  font-size: 18px;
-  line-height: 1.55;
-  color: var(--ink-2);
-  max-width: 40em;
-  text-wrap: pretty;
-}
-
 .mkt-waitlist {
   position: relative;
   width: min(100%, 620px);
@@ -1983,94 +1827,81 @@ html:has(.mkt) {
 
 /* ------------------------------------------------------------------- footer */
 
-/* The page's only crisp boundary. */
 .mkt-footer {
-  border-top: 1px solid var(--hairline);
   background: var(--soft);
+  overflow: hidden;
 }
 
 .mkt-footer__inner {
   padding-block: clamp(40px, 5vw, 64px);
-}
-
-.mkt-footer__row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: center;
-  justify-items: center;
-  column-gap: clamp(24px, 4vw, 48px);
-  row-gap: 28px;
-  max-width: 820px;
-  margin: 0 auto;
-}
-
-.mkt-footer__brand {
-  order: -1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.mkt-footer__brand .mkt-lockup__mark {
-  height: clamp(46px, 12vw, 60px);
-}
-
-.mkt-footer__brand .mkt-lockup__word {
-  font-size: clamp(26px, 6vw, 34px);
-}
-
-.mkt-footer__col {
   text-align: center;
 }
 
-.mkt-footer__head {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink);
-  margin-bottom: 12px;
+.mkt-footer__title {
+  max-width: 18ch;
+  margin: 0 auto 26px;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
 }
 
-.mkt-footer__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.mkt-footer__links {
   display: flex;
-  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 28px;
+  color: var(--ink-3);
+  font-size: 14px;
 }
 
 .mkt-footer__link {
-  color: var(--ink-2);
-  font-size: 15px;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-}
-
-.mkt-footer__link:hover {
-  color: var(--action-deep);
+  color: var(--ink);
 }
 
 .mkt-footer__legal {
-  margin-top: clamp(28px, 4vw, 40px);
-  padding-top: 24px;
-  border-top: 1px solid var(--hairline);
-  text-align: center;
+  margin-top: 18px;
   font-size: 14px;
   color: var(--ink-2);
 }
 
-@media (max-width: 699px) {
-  .mkt-footer__row {
-    grid-template-columns: 1fr 1fr;
-    max-width: 400px;
-    column-gap: 24px;
-  }
-  .mkt-footer__brand {
-    grid-column: 1 / -1;
-  }
+.mkt-footer__landscape {
+  position: relative;
+  height: clamp(120px, 16vw, 190px);
+  background: #dce8d4;
+}
+
+.mkt-footer__hill {
+  position: absolute;
+  bottom: -30px;
+  width: 70%;
+  height: 140px;
+  border-radius: 50% 50% 0 0;
+}
+
+.mkt-footer__hill--back {
+  left: -18%;
+  background: #c6dabd;
+  transform: rotate(4deg);
+}
+
+.mkt-footer__hill--front {
+  right: -20%;
+  height: 118px;
+  background: #afcda3;
+  transform: rotate(-5deg);
+}
+
+.mkt-footer__scout {
+  position: absolute;
+  z-index: 2;
+  bottom: -18px;
+  left: 50%;
+  width: auto;
+  height: clamp(116px, 18vw, 190px);
+  transform: translateX(-50%);
 }
 
 /* ------------------------------------------------------- document (legal) */
@@ -2154,13 +1985,13 @@ html:has(.mkt) {
    here hides a state or drops a transition that carries meaning. */
 @media (prefers-reduced-motion: reduce) {
   .mkt-skip,
-  .mkt-underline::after,
   .mkt-header,
   .mkt-burger__line,
   .mkt-menu,
   .mkt-menu__clip,
   .mkt-tab,
   .mkt-card,
+  .mkt .mkt-bento .card,
   .mkt-dots__dot,
   .mkt-faq__chevron,
   .mkt-faq__clip,
@@ -2175,9 +2006,12 @@ html:has(.mkt) {
   .mkt-tab[aria-selected="true"],
   .mkt-tab[aria-selected="true"]:hover,
   .mkt-card:hover,
+  .mkt .mkt-bento .card,
+  .mkt .mkt-bento .card:hover,
   .mkt-explorer__slide,
   .mkt-explorer__slide[data-active="true"] {
     transform: none !important;
+    animation: none !important;
   }
 
   .mkt-tab[aria-selected="true"],

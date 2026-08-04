@@ -30,6 +30,8 @@ export interface LogoLoopProps {
   logoHeight?: number;
   gap?: number;
   pauseOnHover?: boolean;
+  pauseOnFocus?: boolean;
+  paused?: boolean;
   hoverSpeed?: number;
   fadeOut?: boolean;
   fadeOutColor?: string;
@@ -128,6 +130,7 @@ const useAnimationLoop = (
   seqHeight: number,
   isHovered: boolean,
   hoverSpeed: number | undefined,
+  isPaused: boolean,
   isVertical: boolean
 ) => {
   const rafRef = useRef<number | null>(null);
@@ -172,7 +175,9 @@ const useAnimationLoop = (
       const deltaTime = Math.max(0, timestamp - lastTimestampRef.current) / 1000;
       lastTimestampRef.current = timestamp;
 
-      const target = isHovered && hoverSpeed !== undefined ? hoverSpeed : targetVelocity;
+      const target = isPaused ? 0 : isHovered && hoverSpeed !== undefined ? hoverSpeed : targetVelocity;
+
+      if (isPaused) velocityRef.current = 0;
 
       const easingFactor = 1 - Math.exp(-deltaTime / ANIMATION_CONFIG.SMOOTH_TAU);
       velocityRef.current += (target - velocityRef.current) * easingFactor;
@@ -203,7 +208,7 @@ const useAnimationLoop = (
       }
       lastTimestampRef.current = null;
     };
-  }, [targetVelocity, seqWidth, seqHeight, isHovered, hoverSpeed, isVertical, trackRef]);
+  }, [targetVelocity, seqWidth, seqHeight, isHovered, hoverSpeed, isPaused, isVertical, trackRef]);
 };
 
 export const LogoLoop = React.memo<LogoLoopProps>(
@@ -215,6 +220,8 @@ export const LogoLoop = React.memo<LogoLoopProps>(
     logoHeight = 28,
     gap = 32,
     pauseOnHover,
+    pauseOnFocus = false,
+    paused = false,
     hoverSpeed,
     fadeOut = false,
     fadeOutColor,
@@ -232,6 +239,7 @@ export const LogoLoop = React.memo<LogoLoopProps>(
     const [seqHeight, setSeqHeight] = useState<number>(0);
     const [copyCount, setCopyCount] = useState<number>(ANIMATION_CONFIG.MIN_COPIES);
     const [isHovered, setIsHovered] = useState<boolean>(false);
+    const [isFocused, setIsFocused] = useState<boolean>(false);
 
     const effectiveHoverSpeed = useMemo(() => {
       if (hoverSpeed !== undefined) return hoverSpeed;
@@ -292,7 +300,9 @@ export const LogoLoop = React.memo<LogoLoopProps>(
 
     useImageLoader(seqRef, updateDimensions, [logos, gap, logoHeight, isVertical]);
 
-    useAnimationLoop(trackRef, targetVelocity, seqWidth, seqHeight, isHovered, effectiveHoverSpeed, isVertical);
+    const isPaused = paused || (isHovered && effectiveHoverSpeed === 0) || (isFocused && pauseOnFocus);
+
+    useAnimationLoop(trackRef, targetVelocity, seqWidth, seqHeight, isHovered, effectiveHoverSpeed, isPaused, isVertical);
 
     const cssVariables = useMemo(
       () =>
@@ -325,6 +335,12 @@ export const LogoLoop = React.memo<LogoLoopProps>(
     const handleMouseLeave = useCallback(() => {
       if (effectiveHoverSpeed !== undefined) setIsHovered(false);
     }, [effectiveHoverSpeed]);
+    const handleFocus = useCallback(() => {
+      if (pauseOnFocus) setIsFocused(true);
+    }, [pauseOnFocus]);
+    const handleBlur = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+      if (pauseOnFocus && !event.currentTarget.contains(event.relatedTarget)) setIsFocused(false);
+    }, [pauseOnFocus]);
 
     const renderLogoItem = useCallback(
       (item: LogoItem, key: React.Key) => {
@@ -450,7 +466,16 @@ export const LogoLoop = React.memo<LogoLoopProps>(
     );
 
     return (
-      <div ref={containerRef} className={rootClasses} style={containerStyle} role="region" aria-label={ariaLabel}>
+      <div
+        ref={containerRef}
+        className={rootClasses}
+        style={containerStyle}
+        role="region"
+        aria-label={ariaLabel}
+        tabIndex={pauseOnFocus ? 0 : undefined}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+      >
         {fadeOut && (
           <>
             {isVertical ? (

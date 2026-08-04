@@ -6,7 +6,7 @@ import { AppStoreButton } from "@/components/marketing/app-store-button";
 
 const NAV_LINKS = [
   { href: "/#features", label: "Features" },
-  { href: "/pricing", label: "Pricing" },
+  { href: "/#why", label: "Why SnapList" },
   { href: "/#faq", label: "FAQ" },
 ] as const;
 
@@ -87,48 +87,38 @@ export function SiteHeader() {
 
   return (
     <header ref={header} className="mkt-header" data-opaque={opaque}>
-      <div className="mkt-shell mkt-header__desktop">
+      <div className="mkt-shell">
         <div className="mkt-header__bar">
           <a href="#top" className="mkt-lockup" style={{ justifySelf: "start" }}>
             <Lockup />
           </a>
-          <nav aria-label="Primary" style={{ justifySelf: "center" }}>
+          <nav aria-label="Primary" className="mkt-header__nav">
             <ul className="mkt-navlist">
               {NAV_LINKS.map((link) => (
                 <li key={link.href}>
-                  <a className="mkt-navlink" href={link.href}>
-                    <span className="mkt-underline">{link.label}</span>
-                  </a>
+                  <a className="mkt-navlink" href={link.href}>{link.label}</a>
                 </li>
               ))}
             </ul>
           </nav>
-          <span style={{ justifySelf: "end" }}>
+          <div className="mkt-header__actions">
             <AppStoreButton size="sm" />
-          </span>
-        </div>
-      </div>
-
-      <div className="mkt-shell mkt-header__narrow">
-        <div className="mkt-header__bar--narrow">
-          <a href="#top" className="mkt-lockup">
-            <Lockup />
-          </a>
-          <button
-            ref={toggle}
-            type="button"
-            className="mkt-burger"
-            aria-label="Menu"
-            aria-expanded={menuOpen}
-            aria-controls="mkt-menu"
-            onClick={() => (menuOpen ? close(false) : openMenu())}
-          >
-            <span aria-hidden="true" className="mkt-burger__box">
-              <span className="mkt-burger__line" />
-              <span className="mkt-burger__line" />
-              <span className="mkt-burger__line" />
-            </span>
-          </button>
+            <button
+              ref={toggle}
+              type="button"
+              className="mkt-burger"
+              aria-label="Menu"
+              aria-expanded={menuOpen}
+              aria-controls="mkt-menu"
+              onClick={() => (menuOpen ? close(false) : openMenu())}
+            >
+              <span aria-hidden="true" className="mkt-burger__box">
+                <span className="mkt-burger__line" />
+                <span className="mkt-burger__line" />
+                <span className="mkt-burger__line" />
+              </span>
+            </button>
+          </div>
         </div>
         <div
           id="mkt-menu"
@@ -149,12 +139,9 @@ export function SiteHeader() {
                   href={link.href}
                   onClick={() => close(false)}
                 >
-                  <span className="mkt-underline">{link.label}</span>
+                  {link.label}
                 </a>
               ))}
-              <div style={{ paddingTop: 14 }}>
-                <AppStoreButton size="md" />
-              </div>
             </nav>
           </div>
         </div>
