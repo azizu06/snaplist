@@ -276,6 +276,7 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(preflightSchema.required).toEqual([
       "listingId",
       "title",
+      "description",
       "effectivePrice",
       "photoCount",
       "marketplace",

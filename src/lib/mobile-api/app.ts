@@ -202,10 +202,16 @@ function errorResponse(
   status: number,
   code: ApiErrorCode,
   message: string,
+  details?: Record<string, unknown>,
 ): Response {
   return json(
     apiErrorEnvelopeSchema.parse({
-      error: { code, message, requestId },
+      error: {
+        code,
+        message,
+        requestId,
+        ...(details ? { details } : {}),
+      },
     }),
     status,
   );
@@ -728,11 +734,15 @@ export function createMobileApiHandler(
           error instanceof PublishReviewRevisionConflictError
           || error instanceof PublishedReplayConflictError
         ) {
+          const reason = error instanceof PublishedReplayConflictError
+            ? "ebay_published_authority_changed"
+            : "ebay_review_revision_changed";
           return errorResponse(
             requestId,
             409,
             "conflict",
             error.message,
+            { reason },
           );
         }
         dependencies.reportError?.("mobile-api.ebay-publish", error);
@@ -1541,7 +1551,24 @@ export function createMobileApiHandler(
           || error instanceof GuestClaimAllowanceSpentError
           || error instanceof GuestClaimAllowanceInFlightError
         ) {
-          return errorResponse(requestId, 409, "conflict", error.message);
+          const reason = error instanceof GuestClaimAllowanceSpentError
+            ? "guest_claim_allowance_spent"
+            : error instanceof GuestClaimAllowanceInFlightError
+              ? "guest_claim_allowance_in_flight"
+              : error instanceof GuestClaimInProgressError
+                ? "guest_claim_in_progress"
+                : "guest_claim_idempotency_conflict";
+          const claimStage = error instanceof GuestClaimAllowanceSpentError
+              || error instanceof GuestClaimAllowanceInFlightError
+            ? error.claimStage
+            : undefined;
+          return errorResponse(
+            requestId,
+            409,
+            "conflict",
+            error.message,
+            { reason, ...(claimStage ? { claimStage } : {}) },
+          );
         }
         dependencies.reportError?.("mobile-api.guest-claim", error);
         return errorResponse(

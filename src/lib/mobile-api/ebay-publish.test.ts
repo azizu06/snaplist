@@ -428,6 +428,7 @@ describe("mobile eBay publish boundary", () => {
       error: {
         code: "conflict",
         message: "The listing changed since it was opened. Refresh before publishing.",
+        details: { reason: "ebay_review_revision_changed" },
       },
     });
     expect(adapter.requests).toHaveLength(0);
@@ -528,6 +529,7 @@ describe("mobile eBay publish boundary", () => {
       data: {
         listingId: LISTING_ID,
         title: "Nintendo Switch OLED",
+        description: "Complete console in good condition.",
         effectivePrice: { amount: 177.77, label: "What will be listed" },
         photoCount: 1,
         marketplace: "EBAY_US",
@@ -546,6 +548,7 @@ describe("mobile eBay publish boundary", () => {
     const fixture = publishFixtureClient();
     fixture.beforeReviewSnapshot(() => {
       fixture.listing.title = "Updated Switch OLED";
+      fixture.listing.description = "Current seller-confirmed description.";
       fixture.listing.copy = { itemSpecifics: { Brand: "Nintendo", Edition: "White" } };
       fixture.item.condition = "good";
       fixture.item.price_override = "188.88";
@@ -568,6 +571,7 @@ describe("mobile eBay publish boundary", () => {
     expect(await response.json()).toMatchObject({
       data: {
         title: "Updated Switch OLED",
+        description: "Current seller-confirmed description.",
         effectivePrice: { amount: 188.88 },
         ebayCondition: "USED_GOOD",
         itemSpecifics: { Brand: ["Nintendo"], Edition: ["White"] },
@@ -683,6 +687,7 @@ describe("mobile eBay publish boundary", () => {
         code: "conflict",
         message:
           "This published listing remains outside SnapList control after its eBay connection changed.",
+        details: { reason: "ebay_published_authority_changed" },
       },
     });
 
@@ -693,6 +698,7 @@ describe("mobile eBay publish boundary", () => {
       error: {
         code: "conflict",
         message: "The eBay connection changed after this listing was published.",
+        details: { reason: "ebay_published_authority_changed" },
       },
     });
     expect(adapter.requests).toHaveLength(1);

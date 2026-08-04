@@ -331,6 +331,7 @@ enum ListingReviewFocus: Hashable {
     case condition
     case specifics
     case soldMatch(Int)
+    case ebayPublish
     case assistedExport
     case secondary
     case done

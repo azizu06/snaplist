@@ -529,6 +529,11 @@ struct AppDependencies {
     let subscriptionClient: any SubscriptionClient
     let analyticsClient: any AnalyticsClient
     let assistedExportService: any AssistedExportServing
+    let ebayPublishService: any EbayPublishFeatureServing
+    let guestClaimService: any GuestClaimServing
+    let guestAccountAuthenticator: any GuestAccountAuthenticating
+    let guestClaimAuthorityStore: any GuestClaimAuthorityStoring
+    let ebayOAuthCallbackURL: URL
 
     static func make(
         configuration: LaunchConfiguration,
@@ -589,12 +594,28 @@ struct AppDependencies {
                 // A zero-network build must never transmit, whatever the build
                 // configured, so the fixture composition stays no-op.
                 analyticsClient: NoOpAnalyticsClient(),
-                assistedExportService: AssistedExportFixtureService()
+                assistedExportService: AssistedExportFixtureService(),
+                ebayPublishService: UnavailableEbayPublishFeatureService(),
+                guestClaimService: UnavailableGuestClaimService(),
+                guestAccountAuthenticator:
+                    UnavailableGuestAccountAuthenticator(),
+                guestClaimAuthorityStore: NoopGuestClaimAuthorityStore(),
+                ebayOAuthCallbackURL: URL(
+                    string: "https://snaplist.dev/mobile/ebay/oauth"
+                )!
             )
         }
 
         let origin = apiOrigin ?? URL(string: "http://127.0.0.1:3001")!
 
+        let appAttest = AppAttestClient(
+            appID: "35YFS8XJRQ.dev.snaplist.ios",
+            environment: .production,
+            server: URLSessionAppAttestServerClient(
+                apiOrigin: origin,
+                session: session
+            )
+        )
         return AppDependencies(
             mobileAPIClient: URLSessionMobileAPIClient(
                 baseURL: origin,
@@ -618,6 +639,23 @@ struct AppDependencies {
                 baseURL: origin,
                 tokenProvider: tokenProvider,
                 session: session
+            ),
+            ebayPublishService: EbayPublishAPIClient(
+                baseURL: origin,
+                tokenProvider: tokenProvider,
+                session: session
+            ),
+            guestClaimService: GuestClaimAPIClient(
+                baseURL: origin,
+                proofProvider: appAttest,
+                tokenProvider: tokenProvider,
+                handoffStore: KeychainGuestClaimHandoffStore(),
+                session: session
+            ),
+            guestAccountAuthenticator: ClerkGuestAccountAuthenticator(),
+            guestClaimAuthorityStore: KeychainGuestClaimAuthorityStore(),
+            ebayOAuthCallbackURL: origin.appending(
+                path: "/mobile/ebay/oauth"
             )
         )
     }

@@ -3098,7 +3098,7 @@ describe("mobile API v1 provider-neutral handler", () => {
   });
 
   it("keeps a permanent and a transient guest-claim denial distinguishable", async () => {
-    const messages = await Promise.all(
+    const outcomes = await Promise.all(
       [new GuestClaimAllowanceSpentError(), new GuestClaimAllowanceInFlightError()]
         .map(async (error) => {
           const response = await handler({
@@ -3114,18 +3114,62 @@ describe("mobile API v1 provider-neutral handler", () => {
               },
             }),
           );
-          const body = await response.json() as { error: { message: string } };
-          return body.error.message;
+          const body = await response.json() as {
+            error: { message: string; details?: { reason?: string } };
+          };
+          return {
+            message: body.error.message,
+            reason: body.error.details?.reason,
+          };
         }),
     );
 
     // Pinned, not merely distinct: this is the wire contract, and it would
     // otherwise move silently with an edit to the Error subclass constructor.
-    expect(messages).toEqual([
-      "The account's included item credit is already spent on another run.",
-      "The account's included item credit is reserved by a run in flight.",
+    expect(outcomes).toEqual([
+      {
+        message: "The account's included item credit is already spent on another run.",
+        reason: "guest_claim_allowance_spent",
+      },
+      {
+        message: "The account's included item credit is reserved by a run in flight.",
+        reason: "guest_claim_allowance_in_flight",
+      },
     ]);
   });
+
+  it.each([
+    [
+      new GuestClaimAllowanceSpentError("post_copy"),
+      "guest_claim_allowance_spent",
+    ],
+    [
+      new GuestClaimAllowanceInFlightError("post_copy"),
+      "guest_claim_allowance_in_flight",
+    ],
+  ] as const)(
+    "preserves the late post-copy stage for an actionable allowance denial",
+    async (error, reason) => {
+      const response = await handler({
+        claimGuestRecovery: vi.fn().mockRejectedValue(error),
+      })(
+        new Request("http://localhost/v1/guest/claims", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer signed-account-jwt",
+            "idempotency-key": "55555555-5555-4555-8555-555555555555",
+            "x-snaplist-guest-handoff": "opaque-174-handoff",
+          },
+        }),
+      );
+
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          details: { reason, claimStage: "post_copy" },
+        },
+      });
+    },
+  );
 
   it("requires authentication before either native billing seam", async () => {
     for (const [url, method] of [

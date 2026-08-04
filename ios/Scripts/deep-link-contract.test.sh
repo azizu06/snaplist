@@ -9,8 +9,11 @@ info_plist_file=${script_directory:h}/SnapList/Info.plist
 /usr/bin/plutil -convert json -o - "$entitlements_file" |
   ruby -rjson -e '
     domains = JSON.parse(STDIN.read).fetch("com.apple.developer.associated-domains")
-    expected = ["webcredentials:witty-walrus-27.clerk.accounts.dev"]
-    abort "associated domains must preserve only Clerk webcredentials" unless domains == expected
+    expected = [
+      "webcredentials:snaplist.dev",
+      "webcredentials:witty-walrus-27.clerk.accounts.dev",
+    ]
+    abort "associated domains must preserve only approved webcredentials" unless domains == expected
   '
 
 url_scheme=$(

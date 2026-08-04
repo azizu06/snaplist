@@ -239,4 +239,36 @@ describe("auth proxy", () => {
     expect(pricingResponse.headers.get("x-middleware-next")).toBe("1");
     expect(pricingResponse.headers.get("location")).toBeNull();
   });
+
+  it("lets Apple fetch the app-site association without a Clerk redirect", async () => {
+    const response = await proxy(
+      new NextRequest(
+        "https://snaplist.test/.well-known/apple-app-site-association",
+      ),
+      {} as NextFetchEvent,
+    );
+    if (!response) {
+      throw new Error("Expected the proxy to return a response");
+    }
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("lets the legacy native OAuth callback bridge bypass Clerk", async () => {
+    const response = await proxy(
+      new NextRequest(
+        "https://snaplist.test/mobile/ebay/oauth?result=connected",
+      ),
+      {} as NextFetchEvent,
+    );
+    if (!response) {
+      throw new Error("Expected the proxy to return a response");
+    }
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+  });
 });
