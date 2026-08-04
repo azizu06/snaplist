@@ -210,7 +210,7 @@ html:has(.mkt) {
   text-decoration: none;
 }
 
-.mkt-lockup:hover {
+.mkt .mkt-lockup:hover {
   color: var(--ink);
   text-decoration: none;
 }
