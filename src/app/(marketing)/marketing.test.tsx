@@ -5,6 +5,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SiteHeader } from "@/components/marketing/site-header";
+import { MarketingBento } from "@/components/marketing/marketing-bento";
+import { MarketplaceLoop } from "@/components/marketing/marketplace-loop";
 import { WaitlistFormView } from "@/components/marketing/waitlist-form";
 import * as site from "@/lib/marketing/site";
 import LandingPage from "./page";
@@ -261,9 +263,13 @@ describe("marketing destinations", () => {
 
   it("keeps the navbar fixed, transparent at top, and frosted after scroll", () => {
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const opaqueRule = css.match(/\.mkt-header\[data-opaque="true"\]\s*\{[^}]*\}/)?.[0] ?? "";
 
     expect(css).toMatch(/\.mkt-header\s*\{[\s\S]*position:\s*fixed;[\s\S]*background-color:\s*transparent;[\s\S]*border-bottom:\s*1px solid transparent;[\s\S]*300ms/);
-    expect(css).toMatch(/\.mkt-header\[data-opaque="true"\]\s*\{[\s\S]*background-color:\s*rgba\(255, 255, 255, 0\.[78]\);[\s\S]*backdrop-filter:\s*blur/);
+    expect(opaqueRule).toMatch(/background-color:\s*rgba\(255, 255, 255, 0\.[78]\)/);
+    expect(opaqueRule).toMatch(/border-bottom-color:/);
+    expect(opaqueRule).toMatch(/-webkit-backdrop-filter:\s*blur/);
+    expect(opaqueRule).toMatch(/backdrop-filter:\s*blur/);
   });
 
   it("keeps its only App Store badge in the navbar", () => {
@@ -308,6 +314,16 @@ describe("marketing destinations", () => {
     expect($(".mkt-loop-card").text()).not.toMatch(/Editable draft/);
   });
 
+  it("gives the moving marketplace examples a keyboard-reachable pause control", () => {
+    const $ = load(renderToStaticMarkup(<MarketplaceLoop />));
+    const control = $("button.mkt-loop__motion-control");
+
+    expect(control.length).toBe(1);
+    expect(control.attr("type")).toBe("button");
+    expect(control.attr("aria-pressed")).toBe("false");
+    expect(control.text()).toMatch(/Pause motion/);
+  });
+
   it("places animated React Bits bento between Trophy Wall and FAQ", () => {
     const $ = load(renderToStaticMarkup(<LandingPage />));
     const sections = $("section").toArray().map((section) => $(section).attr("id") ?? "");
@@ -315,6 +331,19 @@ describe("marketing destinations", () => {
     expect(sections.indexOf("why")).toBeGreaterThan(sections.indexOf("trophy"));
     expect(sections.indexOf("why")).toBeLessThan(sections.indexOf("faq"));
     expect($(".mkt-bento .card").length).toBe(site.MARKETING_BENTO_CARDS.length);
+  });
+
+  it("keeps a motion affordance and static reduced-motion fallback for the bento", () => {
+    const bento = readFileSync(resolve("src/components/marketing/marketing-bento.tsx"), "utf8");
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const $ = load(renderToStaticMarkup(<MarketingBento />));
+
+    expect($(".mkt-bento .card").length).toBe(site.MARKETING_BENTO_CARDS.length);
+    expect(bento).toMatch(/enableBorderGlow/);
+    expect(bento).toMatch(/enableSpotlight/);
+    expect(bento).toMatch(/enableTilt/);
+    expect(css).toMatch(/\.mkt\s+\.mkt-bento\s+\.card\s*\{[^}]*animation:\s*mkt-bento-enter/);
+    expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.mkt\s+\.mkt-bento\s+\.card[^{]*\{[^}]*animation:\s*none !important;[^}]*\}/);
   });
 
   it("refuses a configured destination that is not an absolute https URL", () => {
