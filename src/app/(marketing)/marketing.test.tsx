@@ -291,8 +291,10 @@ describe("marketing destinations", () => {
     expect($(".mkt-loop-section__heading h2").text()).toBe(site.LOOP_TITLE);
     expect($(".mkt-storefronts").length).toBe(0);
     expect($(".mkt-trophy").length).toBe(0);
-    expect($(".mkt-bento").text()).toContain(site.TROPHY_WALL.title);
-    expect($(".mkt-bento").text()).toContain(site.TROPHY_WALL.body);
+    expect($(".mkt-bento").text()).not.toContain(site.TROPHY_WALL.title);
+    expect($(".mkt-bento").text()).not.toContain(site.TROPHY_WALL.body);
+    expect($(".mkt-tablist").text()).toContain(site.TROPHY_WALL.title);
+    expect($(".mkt-tablist").text()).toContain(site.TROPHY_WALL.body);
   });
 
   it("uses one blue serif italic accent word in the rescaled hero with a bounded focus ring", () => {
@@ -354,22 +356,41 @@ describe("marketing destinations", () => {
     expect($(".mkt-bento .mkt-bento__label").length).toBe(0);
   });
 
-  it("uses the current Facebook Marketplace mark and leaves bento copy fully visible", () => {
+  it("uses the vendored Facebook Marketplace wordmark and leaves bento copy fully visible", () => {
     const marketplaceMark = readFileSync(resolve("public/marketplaces/facebook-marketplace.svg"), "utf8");
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
     const $ = load(renderToStaticMarkup(<MarketplaceLoop />));
     const bentoRules = css.match(/\.mkt\s+\.mkt-bento\s+\.card(?:\s+(?:h3|p))?\s*\{[^}]*\}/g)?.join("\n") ?? "";
 
-    expect(marketplaceMark).not.toMatch(/3a589e|facebook wordmark/i);
+    expect(marketplaceMark).toMatch(/worldvectorlogo\.com\/logo\/marketplace-facebook/i);
+    expect(marketplaceMark).toMatch(/fill="#[0-9a-f]{6}"/i);
     expect(marketplaceMark).toMatch(/Marketplace/i);
-    expect(marketplaceMark).toMatch(/M1\.712 2\.439A2\.156 2\.156/);
-    expect(marketplaceMark).toMatch(/facebook\.com\/marketplace/);
-    expect($(".mkt-loop-card__marketplace-name").length).toBeGreaterThan(0);
-    expect($(".mkt-loop-card__marketplace-name").toArray().map((name) => $(name).text()))
-      .toEqual(expect.arrayContaining(["Facebook Marketplace"]));
-    expect($(".mkt-loop-card__marketplace-name").first()
-      .siblings(".mkt-loop-card__marketplace-logo").attr("alt")).toBe("");
+    expect(marketplaceMark).toMatch(/viewBox="-\.83 -\.04 65\.2 69\.73"/);
+    expect($(".mkt-loop-card__marketplace-name").length).toBe(0);
+    const visibleSequence = $(".mkt-loop ul").first();
+
+    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo[alt='Facebook Marketplace']")).toHaveLength(1);
+    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo[alt=''][aria-hidden='true']")).toHaveLength(2);
+    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook")).toHaveLength(3);
+    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook").toArray().map((mark) => $(mark).attr("width")))
+      .toEqual(["65", "65", "65"]);
+    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook").toArray().map((mark) => $(mark).attr("height")))
+      .toEqual(["70", "70", "70"]);
+    expect(css).toMatch(/\.mkt-loop-card__marketplace-logo--facebook\s*\{[^}]*height:\s*52px;[^}]*width:\s*auto;[^}]*align-self:\s*flex-start/);
     expect(bentoRules).not.toMatch(/line-clamp|text-overflow|white-space:\s*nowrap|overflow:\s*hidden/);
+  });
+
+  it("fills every bento row at tablet and desktop widths", () => {
+    const cards = site.MARKETING_BENTO_CARDS;
+
+    expect(cards).toHaveLength(5);
+    expect(cards.map((card) => card.className)).toEqual([
+      "sm:col-span-2 lg:col-span-2",
+      "sm:col-span-2 lg:col-span-2",
+      "sm:col-span-2 lg:col-span-2",
+      "sm:col-span-2 lg:col-span-2",
+      "sm:col-span-2 lg:col-span-4",
+    ]);
   });
 
   it("covers every served app icon with the rounded-corner generator", async () => {

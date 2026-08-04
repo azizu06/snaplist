@@ -125,6 +125,12 @@ export const FEATURE_STEPS = [
       + "Depop, SnapList prepares a handoff that you finish yourself, so nothing "
       + "leaves for those marketplaces without you.",
   },
+  {
+    id: "trophy-wall",
+    title: TROPHY_WALL.title,
+    candidate: false,
+    body: TROPHY_WALL.body,
+  },
 ] as const;
 
 export type FeatureStep = (typeof FEATURE_STEPS)[number];
@@ -160,40 +166,35 @@ export const MARKETING_BENTO_CARDS = [
     title: "Sold prices, not asking prices",
     description:
       "See sold-price evidence when it is available. Estimates stay clearly labeled when it is not.",
-    className: "lg:col-span-2",
+    className: "sm:col-span-2 lg:col-span-2",
   },
   {
     icon: "mic" as const,
     title: "Add seller context with a voice note",
     description:
       "Add up to 15 seconds of context. Photos and verified evidence remain the source of truth.",
-    className: "lg:col-span-2",
+    className: "sm:col-span-2 lg:col-span-2",
   },
   {
     icon: "pencil" as const,
     title: "Edit before anything leaves SnapList",
     description:
       "Review the title, condition, details, photos, and price before you confirm an eBay publish.",
-    className: "lg:col-span-2",
+    className: "sm:col-span-2 lg:col-span-2",
   },
   {
     icon: "share" as const,
     title: "Prepared for your share sheet",
     description:
       "Facebook Marketplace, Mercari, and Depop get prepared text and photos. You finish each form yourself.",
-    className: "lg:col-span-2",
+    className: "sm:col-span-2 lg:col-span-2",
   },
   {
     icon: "check" as const,
     title: "You confirm before eBay publishes",
     description:
       "SnapList publishes to eBay only after your explicit confirmation.",
-    className: "lg:col-span-2",
-  },
-  {
-    icon: "trophy" as const,
-    title: TROPHY_WALL.title,
-    description: TROPHY_WALL.body,
+    className: "sm:col-span-2 lg:col-span-4",
   },
 ] as const;
 

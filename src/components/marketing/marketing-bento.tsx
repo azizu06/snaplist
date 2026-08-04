@@ -27,7 +27,6 @@ function BentoIcon({ name }: { name: BentoIconName }) {
     pencil: <><path {...shared} d="m14 5 5 5M5 19l3.8-.8L19 8a2.1 2.1 0 0 0-3-3L5.8 15.2z" /><path {...shared} d="M4 21h16" /></>,
     share: <><circle {...shared} cx="18" cy="5" r="2" /><circle {...shared} cx="6" cy="12" r="2" /><circle {...shared} cx="18" cy="19" r="2" /><path {...shared} d="m8 11 8-5m-8 7 8 5" /></>,
     check: <><circle {...shared} cx="12" cy="12" r="8" /><path {...shared} d="m8.5 12 2.4 2.5 4.8-5" /></>,
-    trophy: <><path {...shared} d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5v1a3 3 0 0 0 3 3m8-4h3v1a3 3 0 0 1-3 3m-4 3v4m-4 2h8" /></>,
   };
 
   return <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">{paths[name]}</svg>;

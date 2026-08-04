@@ -7,9 +7,10 @@ import {
   PhotoReviewScreen,
   PublishScreen,
   ScanScreen,
+  TrophyWallScreen,
 } from "@/components/marketing/phone-screens";
 
-const SCREENS = [ScanScreen, PhotoReviewScreen, ListingReviewScreen, PublishScreen] as const;
+const SCREENS = [ScanScreen, PhotoReviewScreen, ListingReviewScreen, PublishScreen, TrophyWallScreen] as const;
 
 /** Vertical list, but Left/Right are accepted too because the dots read horizontal. */
 const STEP: Record<string, number> = {
@@ -20,17 +21,17 @@ const STEP: Record<string, number> = {
 };
 
 /**
- * The signature section: four selector cards drive one illustrative phone.
+ * The signature section: five selector cards drive one illustrative phone.
  *
  * Semantics are a WAI-ARIA tablist with a single tabpanel. Two consequences are
  * deliberate:
  *
  * - Roving tabindex. Only the selected card is tabbable, so Tab moves past the
- *   whole group in one press and Arrow/Home/End move within it. Four separately
+ *   whole group in one press and Arrow/Home/End move within it. Five separately
  *   tabbable cards would make the section a keyboard obstacle.
  * - Exactly one screen is exposed. The inactive slides stay mounted so the swap
  *   can cross-fade, but they are `visibility: hidden`, which takes them out of
- *   the accessibility tree — otherwise a screen reader would read four screens'
+ *   the accessibility tree — otherwise a screen reader would read five screens'
  *   worth of text for one visible phone.
  *
  * Activation follows focus (arrowing selects), which is the APG default for tabs
