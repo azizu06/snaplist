@@ -17,6 +17,7 @@ const RUN_ID = "33333333-3333-4333-8333-333333333333";
 const REVIEW_REVISION = "44444444-4444-4444-8444-444444444444";
 const CLAIM_ID = "55555555-5555-4555-8555-555555555555";
 const CONNECTION_GENERATION = "66666666-6666-4666-8666-666666666666";
+const RECONNECTED_GENERATION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const IDEMPOTENCY_KEY = "77777777-7777-4777-8777-777777777777";
 
 class AmbiguousThenRecoveringAdapter extends MockEbayAdapter {
@@ -74,9 +75,14 @@ function publishFixtureClient() {
     photos: ["user-1/item-1.jpg"],
     price_override: "177.77",
   };
-  const binding = {
+  const prediction = {
+    price: 199.99,
+    autopilot_enabled: true as boolean | null,
+    autopilot_eligible: true as boolean | null,
+  };
+  const bindingFor = (connectionGeneration: string) => ({
     marketplaceId: "EBAY_US",
-    connectionGeneration: CONNECTION_GENERATION,
+    connectionGeneration,
     state: "ready",
     fulfillmentPolicy: {
       state: "bound",
@@ -99,15 +105,17 @@ function publishFixtureClient() {
       candidates: [{ id: "location-1", label: "Location", providerDefault: false }],
     },
     discoveredAt: "2026-08-03T12:00:00.000Z",
-  };
-  const connection = {
-    connection_generation: CONNECTION_GENERATION,
+  });
+  const connectionFor = (connectionGeneration: string) => ({
+    connection_generation: connectionGeneration,
     ebay_username: "sandbox-seller",
-    policy_location_bindings: { EBAY_US: binding },
+    policy_location_bindings: { EBAY_US: bindingFor(connectionGeneration) },
+  });
+  let activeConnectionGeneration = CONNECTION_GENERATION;
+  const connectionState: { current: ReturnType<typeof connectionFor> | null } = {
+    current: connectionFor(activeConnectionGeneration),
   };
-  const connectionState: { current: typeof connection | null } = {
-    current: connection,
-  };
+  const notifications: Array<Record<string, unknown>> = [];
   let beforeReviewSnapshot: (() => void) | undefined;
   let failPublishedPersistence = false;
 
@@ -184,7 +192,12 @@ function publishFixtureClient() {
         };
       }
       if (table === "notifications") {
-        return { insert: async () => ({ error: null }) };
+        return {
+          insert: async (notification: Record<string, unknown>) => {
+            notifications.push(notification);
+            return { error: null };
+          },
+        };
       }
       throw new Error(`Unexpected table ${table}`);
     },
@@ -195,7 +208,7 @@ function publishFixtureClient() {
           data: {
             item: { ...item },
             listing: { ...listing },
-            prediction: { price: 199.99 },
+            prediction: { ...prediction },
             reviewBlocked: listing.ebay_status === "publishing",
           },
           error: null,
@@ -203,6 +216,7 @@ function publishFixtureClient() {
       }
       if (name === "disconnect_ebay_connection") {
         const disconnected = connectionState.current !== null;
+        activeConnectionGeneration = RECONNECTED_GENERATION;
         connectionState.current = null;
         return { data: disconnected, error: null };
       }
@@ -287,6 +301,8 @@ function publishFixtureClient() {
   return {
     client,
     connectionState,
+    notifications,
+    prediction,
     item,
     listing,
     beforeReviewSnapshot(hook: () => void) {
@@ -294,6 +310,9 @@ function publishFixtureClient() {
     },
     failPublishedPersistence() {
       failPublishedPersistence = true;
+    },
+    reconnect() {
+      connectionState.current = connectionFor(activeConnectionGeneration);
     },
   };
 }
@@ -354,7 +373,7 @@ function confirmedPublishRequest(
 
 describe("mobile eBay publish boundary", () => {
   it("replays an unacknowledged provider mutation with one mutation and one canonical identity", async () => {
-    const { client } = publishFixtureClient();
+    const { client, notifications } = publishFixtureClient();
     const adapter = new AmbiguousThenRecoveringAdapter();
     const handler = ebayHandler({
       adapter,
@@ -385,6 +404,9 @@ describe("mobile eBay publish boundary", () => {
     });
     expect(adapter.requests).toHaveLength(2);
     expect(adapter.mutationCount).toBe(1);
+    expect(notifications).not.toContainEqual(
+      expect.objectContaining({ kind: "listing_failed" }),
+    );
   });
 
   it("fails closed with 409 when confirmation uses a stale review revision", async () => {
@@ -479,6 +501,9 @@ describe("mobile eBay publish boundary", () => {
     });
     expect(fixture.listing.ebay_listing_id).toBeNull();
     expect(adapter.requests).toHaveLength(1);
+    expect(fixture.notifications).not.toContainEqual(
+      expect.objectContaining({ kind: "listing_failed" }),
+    );
   });
 
   it("preflights server-mapped listing truth without a marketplace mutation", async () => {
@@ -509,6 +534,8 @@ describe("mobile eBay publish boundary", () => {
         ebayCondition: "LIKE_NEW",
         itemSpecifics: { Brand: ["Nintendo"], Model: ["Switch OLED"] },
         reviewRevision: REVIEW_REVISION,
+        connection: { connected: true, ebayUsername: "sandbox-seller" },
+        publishEligibility: { enabled: true, eligible: true },
       },
       meta: { requestId: "request-628-preflight" },
     });
@@ -549,6 +576,33 @@ describe("mobile eBay publish boundary", () => {
     });
   });
 
+  it("preflights disconnected and ineligible server truth without inventing readiness", async () => {
+    const fixture = publishFixtureClient();
+    fixture.connectionState.current = null;
+    fixture.prediction.autopilot_enabled = false;
+    fixture.prediction.autopilot_eligible = false;
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: fixture.client,
+      requestId: "request-628-blocked-preflight",
+    });
+
+    const response = await handler(
+      new Request(
+        `https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/preflight`,
+        { headers: { authorization: "Bearer clerk-jwt" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        connection: { connected: false, ebayUsername: null },
+        publishEligibility: { enabled: false, eligible: false },
+      },
+    });
+  });
+
   it("reports an ambiguous durable publish as outcome not yet known", async () => {
     const { client, listing } = publishFixtureClient();
     listing.ebay_status = "publishing";
@@ -582,7 +636,8 @@ describe("mobile eBay publish boundary", () => {
   });
 
   it("reads and disconnects the account, then rejects replay from the old generation", async () => {
-    const { client, connectionState } = publishFixtureClient();
+    const fixture = publishFixtureClient();
+    const { client, connectionState } = fixture;
     const adapter = new MockEbayAdapter();
     const handler = ebayHandler({
       adapter,
@@ -621,12 +676,23 @@ describe("mobile eBay publish boundary", () => {
       data: { connected: false, ebayUsername: null },
     });
 
-    const replay = await publishRequest();
-    expect(replay.status).toBe(409);
-    expect(await replay.json()).toMatchObject({
+    const disconnectedReplay = await publishRequest();
+    expect(disconnectedReplay.status).toBe(409);
+    expect(await disconnectedReplay.json()).toMatchObject({
       error: {
         code: "conflict",
-        message: "Connect eBay before replaying this published listing.",
+        message:
+          "This published listing remains outside SnapList control after its eBay connection changed.",
+      },
+    });
+
+    fixture.reconnect();
+    const reconnectedReplay = await publishRequest();
+    expect(reconnectedReplay.status).toBe(409);
+    expect(await reconnectedReplay.json()).toMatchObject({
+      error: {
+        code: "conflict",
+        message: "The eBay connection changed after this listing was published.",
       },
     });
     expect(adapter.requests).toHaveLength(1);

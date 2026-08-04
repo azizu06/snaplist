@@ -100,6 +100,13 @@ export const ebayPublishStatusEnvelopeSchema = z
   .object({ data: ebayPublishStatusSchema, meta: apiMetaSchema })
   .strict();
 
+export const ebayConnectionStatusSchema = z
+  .object({
+    connected: z.boolean(),
+    ebayUsername: z.string().min(1).nullable(),
+  })
+  .strict();
+
 export const ebayPublishPreflightSchema = z
   .object({
     listingId: z.string().uuid(),
@@ -123,18 +130,18 @@ export const ebayPublishPreflightSchema = z
     ]),
     itemSpecifics: z.record(z.string(), z.array(z.string().min(1))),
     reviewRevision: z.string().uuid(),
+    connection: ebayConnectionStatusSchema,
+    publishEligibility: z
+      .object({
+        enabled: z.boolean().nullable(),
+        eligible: z.boolean().nullable(),
+      })
+      .strict(),
   })
   .strict();
 
 export const ebayPublishPreflightEnvelopeSchema = z
   .object({ data: ebayPublishPreflightSchema, meta: apiMetaSchema })
-  .strict();
-
-export const ebayConnectionStatusSchema = z
-  .object({
-    connected: z.boolean(),
-    ebayUsername: z.string().min(1).nullable(),
-  })
   .strict();
 
 export const ebayConnectionStatusEnvelopeSchema = z

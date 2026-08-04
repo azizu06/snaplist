@@ -106,6 +106,8 @@ export class PublishedReplayConflictError extends PublishValidationError {}
 
 export class PublishReviewRevisionConflictError extends PublishValidationError {}
 
+class EbayPublishOutcomeUnknownError extends Error {}
+
 /**
  * `publishListingToEbay` + the seller's activity-feed notifications, shared by
  * BOTH entry points (the /listings/[listingId] server action and the
@@ -126,7 +128,11 @@ export async function publishListingToEbayAndNotify(
   try {
     outcome = await publishListingToEbay(supabase, listingId, adapter, options);
   } catch (err) {
-    if (err instanceof PublishedReplayConflictError) {
+    if (
+      err instanceof PublishedReplayConflictError
+      || err instanceof EbayWriteAmbiguousError
+      || err instanceof EbayPublishOutcomeUnknownError
+    ) {
       throw err;
     }
     // An AUTH failure (expired/invalid token) has ONE fix — reconnect eBay in
@@ -420,7 +426,13 @@ export async function publishListingToEbay(
       if (!providerAcknowledged && !(err instanceof EbayWriteAmbiguousError)) {
         await markPublishFailed(supabase, listingId, claimId, offerBinding);
       }
-      throw err;
+      throw providerAcknowledged
+        ? new EbayPublishOutcomeUnknownError(
+            err instanceof Error
+              ? err.message
+              : "eBay may have accepted this listing, but SnapList could not save the result.",
+          )
+        : err;
     }
   }
 

@@ -64,6 +64,11 @@ export interface MobileEbayPublishPreflight {
   ebayCondition: ReturnType<typeof toEbayCondition>;
   itemSpecifics: Record<string, string[]>;
   reviewRevision: string;
+  connection: EbayConnectionStatus;
+  publishEligibility: {
+    enabled: boolean | null;
+    eligible: boolean | null;
+  };
 }
 
 export class MobileEbayListingNotFoundError extends Error {}
@@ -110,7 +115,10 @@ export function createMobileEbayPublishService(input: {
       if (!listing || listing.platform !== "ebay") {
         throw new MobileEbayListingNotFoundError();
       }
-      const snapshot = await loadReviewSnapshot(client, listing.item_id);
+      const [snapshot, connection] = await Promise.all([
+        loadReviewSnapshot(client, listing.item_id),
+        getEbayConnectionStatus(client),
+      ]);
       if (
         !snapshot
         || snapshot.listing?.id !== listing.id
@@ -143,6 +151,11 @@ export function createMobileEbayPublishService(input: {
             : {},
         ),
         reviewRevision: item.review_revision,
+        connection,
+        publishEligibility: {
+          enabled: prediction?.autopilot_enabled ?? null,
+          eligible: prediction?.autopilot_eligible ?? null,
+        },
       };
     },
     async status(operation) {
@@ -163,7 +176,7 @@ export function createMobileEbayPublishService(input: {
         const connection = await getEbayConnectionStatus(client);
         if (!connection.connected) {
           throw new PublishedReplayConflictError(
-            "Connect eBay before replaying this published listing.",
+            "This published listing remains outside SnapList control after its eBay connection changed.",
           );
         }
       }

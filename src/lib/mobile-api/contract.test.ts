@@ -269,6 +269,10 @@ describe("SwiftUI mobile HTTP contract", () => {
     });
 
     const preflightSchema = contract.components.schemas.EbayPublishPreflight;
+    const preflightProperties = preflightSchema.properties as Record<
+      string,
+      unknown
+    >;
     expect(preflightSchema.required).toEqual([
       "listingId",
       "title",
@@ -278,9 +282,18 @@ describe("SwiftUI mobile HTTP contract", () => {
       "ebayCondition",
       "itemSpecifics",
       "reviewRevision",
+      "connection",
+      "publishEligibility",
     ]);
-    expect(preflightSchema.properties).not.toHaveProperty("categoryId");
-    expect(preflightSchema.properties).not.toHaveProperty("currency");
+    expect(preflightProperties.connection).toEqual({
+      $ref: "#/components/schemas/EbayConnectionStatus",
+    });
+    expect(preflightProperties.publishEligibility).toMatchObject({
+      required: ["enabled", "eligible"],
+      additionalProperties: false,
+    });
+    expect(preflightProperties).not.toHaveProperty("categoryId");
+    expect(preflightProperties).not.toHaveProperty("currency");
     expect(
       (contract.components.schemas.EbayPublishStatus.properties as {
         outcome: { enum: string[] };
