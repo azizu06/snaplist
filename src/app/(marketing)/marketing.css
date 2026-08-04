@@ -1121,11 +1121,26 @@ html:has(.mkt) {
   object-position: left center;
 }
 
-/* Logotyp's Mercari SVG includes generous transparent padding. Size only its
- * width so its visible wordmark remains legible while the SVG keeps its ratio. */
-.mkt-loop-card__marketplace-logo--mercari {
-  width: 72px !important;
-  height: auto !important;
+.mkt-loop-card__marketplace-lockup--facebook {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  align-self: flex-start;
+  gap: 5px;
+}
+
+.mkt-loop-card__marketplace-logo--facebook-glyph {
+  width: auto !important;
+  height: 24px !important;
+  flex: 0 0 auto;
+}
+
+.mkt-loop-card__marketplace-wordmark {
+  color: #3a589e;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
 }
 
 .mkt-loop-card__marketplace-name {

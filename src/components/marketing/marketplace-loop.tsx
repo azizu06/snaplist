@@ -12,7 +12,7 @@ const LISTINGS = DEMO_SURFACE_ASSIGNMENTS["landing-carousel"].map(
 
 const MARKETPLACES = [
   { name: "eBay", asset: "/marketplaces/ebay.svg", width: 207, height: 84 },
-  { name: "Facebook Marketplace", asset: "/marketplaces/facebook-marketplace.svg", width: 2271, height: 2500 },
+  { name: "Facebook Marketplace", asset: "/marketplaces/facebook-marketplace.svg", width: 65, height: 58 },
   { name: "Mercari", asset: "/marketplaces/mercari.svg", width: 560, height: 400 },
   { name: "Depop", asset: "/marketplaces/depop.svg", width: 1295, height: 333 },
 ] as const;
@@ -33,7 +33,7 @@ function ListingCard({
 }) {
   const product = DEMO_PRODUCTS_BY_SLUG[slug];
   const title = MARKETING_CAROUSEL_TITLES[slug] ?? product.title;
-  const isMercari = marketplace.name === "Mercari";
+  const isFacebookMarketplace = marketplace.name === "Facebook Marketplace";
   return (
     <article className="mkt-loop-card">
       <div className="mkt-loop-card__image">
@@ -46,14 +46,33 @@ function ListingCard({
       </div>
       <div className="mkt-loop-card__body">
         <p>{title}</p>
-        <Image
-          className={`mkt-loop-card__marketplace-logo${isMercari ? " mkt-loop-card__marketplace-logo--mercari" : ""}`}
-          src={marketplace.asset}
-          alt={isDecorativeMarketplaceLabel ? "" : marketplace.name}
-          aria-hidden={isDecorativeMarketplaceLabel || undefined}
-          width={marketplace.width}
-          height={marketplace.height}
-        />
+        {isFacebookMarketplace ? (
+          <span
+            className="mkt-loop-card__marketplace-lockup mkt-loop-card__marketplace-lockup--facebook"
+            role={isDecorativeMarketplaceLabel ? undefined : "img"}
+            aria-label={isDecorativeMarketplaceLabel ? undefined : marketplace.name}
+            aria-hidden={isDecorativeMarketplaceLabel || undefined}
+          >
+            <Image
+              className="mkt-loop-card__marketplace-logo mkt-loop-card__marketplace-logo--facebook-glyph"
+              src={marketplace.asset}
+              alt=""
+              aria-hidden="true"
+              width={marketplace.width}
+              height={marketplace.height}
+            />
+            <span className="mkt-loop-card__marketplace-wordmark" aria-hidden="true">Marketplace</span>
+          </span>
+        ) : (
+          <Image
+            className="mkt-loop-card__marketplace-logo"
+            src={marketplace.asset}
+            alt={isDecorativeMarketplaceLabel ? "" : marketplace.name}
+            aria-hidden={isDecorativeMarketplaceLabel || undefined}
+            width={marketplace.width}
+            height={marketplace.height}
+          />
+        )}
       </div>
     </article>
   );
