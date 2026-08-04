@@ -85,6 +85,17 @@ export function createMobileItemSubmissionHandler(
         "Submit 1–5 valid JPEG, PNG, or WebP photos and an optional cost basis.",
       );
     }
+    if (
+      (principal.kind === "verifiedGuest" && prepared.guestRecoveryIdentity === null)
+      || (principal.kind === "clerk" && prepared.guestRecoveryIdentity !== null)
+    ) {
+      return errorResponse(
+        requestId,
+        400,
+        "invalid_request",
+        "Guest recovery identity must match the verified submission principal.",
+      );
+    }
 
     try {
       const result = await dependencies.itemSubmission.submit({
@@ -92,6 +103,7 @@ export function createMobileItemSubmissionHandler(
         idempotencyKey: idempotencyKey.data,
         legacyRequestFingerprint: prepared.legacyRequestFingerprint,
         requestFingerprint: prepared.requestFingerprint,
+        guestRecoveryIdentity: prepared.guestRecoveryIdentity,
         costBasis: prepared.costBasis,
         photos: prepared.photos,
         voice: prepared.voice,

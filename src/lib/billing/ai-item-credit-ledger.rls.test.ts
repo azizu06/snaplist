@@ -655,7 +655,8 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
     });
     const incompletePersistence = buildPipelinePersistencePayload(RESULT, false);
     incompletePersistence.item.identification = null;
-    const incomplete = await admin.rpc("complete_pipeline_run", {
+    const incomplete = await admin.rpc("complete_pipeline_run_with_guest_recovery", {
+      p_guest_recovery_registration: null,
       p_lease_token: incoherentAttempt.context.run.lease_token,
       p_persistence: incompletePersistence,
       p_run_id: incoherentRun.run_id,

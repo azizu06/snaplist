@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { recoveryRegistrationSchema } from "@/lib/guest-recovery/recovery-store";
 import {
   buildPipelinePersistencePayload,
   pipelineResultSchema,
@@ -47,6 +48,8 @@ const workerRunSchema = z.object({
   lease_token: z.string().uuid(),
   lease_expires_at: z.string().min(1),
   next_attempt_at: z.string().nullable(),
+  recovery_id: z.string().uuid().nullable(),
+  recovery_token_hash: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
 });
 
 const workerContextSchema = z.object({
@@ -55,6 +58,8 @@ const workerContextSchema = z.object({
     id: z.string().uuid(),
     user_id: z.string().min(1),
     photos: z.array(z.string()),
+    photo_identity_kind: z.literal("content_sha256_set_v1"),
+    photo_identity_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
     attributes: z.record(z.string(), z.unknown()),
     condition: z.string().nullable(),
     cost_basis: z.union([z.string(), z.number()]).nullable(),
@@ -96,7 +101,8 @@ export type PipelineAttemptFailureResult = z.infer<typeof failureResultSchema>;
 type PipelineWorkerRpcName =
   | "claim_pipeline_run_attempt"
   | "checkpoint_pipeline_run"
-  | "complete_pipeline_run"
+  | "stage_guest_recovery_upload_cleanup"
+  | "complete_pipeline_run_with_guest_recovery"
   | "finish_pipeline_run_attempt"
   | "reject_pipeline_message";
 
@@ -126,11 +132,17 @@ export interface PipelineWorkerStore {
     checkpoint: PipelineWorkerCheckpointWrite;
     leaseSeconds: number;
   }): Promise<PipelineWorkerCheckpoint>;
+  stageGuestRecoveryUploadCleanup(input: {
+    runId: string;
+    leaseToken: string;
+    paths: string[];
+  }): Promise<void>;
   complete(input: {
     runId: string;
     leaseToken: string;
     result: PipelineResult;
     autopilotEnabled: boolean;
+    guestRecoveryRegistration?: z.infer<typeof recoveryRegistrationSchema> | null;
   }): Promise<{ listingId: string }>;
   failAttempt(input: {
     runId: string;
@@ -200,6 +212,23 @@ export function createSupabasePipelineWorkerStore(
       return pipelineWorkerCheckpointSchema.parse(rpcData("checkpoint", result));
     },
 
+    async stageGuestRecoveryUploadCleanup(input) {
+      const parsed = z
+        .object({
+          runId: z.string().uuid(),
+          leaseToken: z.string().uuid(),
+          paths: z.array(z.string().min(1).max(1_024)).min(1).max(5),
+        })
+        .strict()
+        .parse(input);
+      const result = await client.rpc("stage_guest_recovery_upload_cleanup", {
+        p_lease_token: parsed.leaseToken,
+        p_photo_paths: parsed.paths,
+        p_run_id: parsed.runId,
+      });
+      z.literal(true).parse(rpcData("guest recovery upload cleanup staging", result));
+    },
+
     /**
      * `p_persistence` needs no separate `jsonb` repair, but only transitively:
      * the durable processor assembles the result from checkpoint content it read
@@ -215,6 +244,7 @@ export function createSupabasePipelineWorkerStore(
           leaseToken: z.string().uuid(),
           result: pipelineResultSchema,
           autopilotEnabled: z.boolean(),
+          guestRecoveryRegistration: recoveryRegistrationSchema.nullable().optional().default(null),
         })
         .strict()
         .parse(input);
@@ -222,7 +252,8 @@ export function createSupabasePipelineWorkerStore(
         parsed.result,
         parsed.autopilotEnabled,
       );
-      const result = await client.rpc("complete_pipeline_run", {
+      const result = await client.rpc("complete_pipeline_run_with_guest_recovery", {
+        p_guest_recovery_registration: parsed.guestRecoveryRegistration,
         p_lease_token: parsed.leaseToken,
         p_persistence: persistence,
         p_run_id: parsed.runId,

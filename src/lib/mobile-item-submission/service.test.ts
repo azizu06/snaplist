@@ -640,6 +640,8 @@ describe("mobile item submission HTTP composition", () => {
     });
     const body = new FormData();
     body.append("photo", new File([JPEG], "front.jpg", { type: "image/jpeg" }));
+    body.append("recoveryId", "33210000-0000-4000-8000-000000000002");
+    body.append("recoveryTokenHash", "f".repeat(64));
     const response = await handler(new Request("http://localhost/v1/items/runs", {
       method: "POST",
       headers: {
@@ -736,6 +738,8 @@ describe("mobile item submission HTTP composition", () => {
     const request = () => {
       const body = new FormData();
       body.append("photo", new File([JPEG], "front.jpg", { type: "image/jpeg" }));
+      body.append("recoveryId", "33200000-0000-4000-8000-000000000021");
+      body.append("recoveryTokenHash", "f".repeat(64));
       return new Request("http://localhost/v1/items/runs", {
         method: "POST",
         headers: {

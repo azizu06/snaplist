@@ -155,6 +155,44 @@ final class MobileAPIContractTests: XCTestCase {
         )
     }
 
+    func testDebugAppTransportAllowsOnlyValidatedLoopbackHTTPOrigins() throws {
+        let transportSecurity = try XCTUnwrap(
+            Bundle.main.object(
+                forInfoDictionaryKey: "NSAppTransportSecurity"
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(
+            transportSecurity["NSAllowsLocalNetworking"] as? Bool,
+            true
+        )
+
+        let debugConfiguration = try NativeAppConfiguration.resolve(
+            environment: ["SNAPLIST_API_ORIGIN": "http://127.0.0.1:3001"],
+            apiOriginBundleValue: nil,
+            clerkPublishableKeyBundleValue: "pk_test_fixture",
+            allowsLocalDevelopment: true
+        )
+        XCTAssertEqual(
+            debugConfiguration.apiOrigin,
+            URL(string: "http://127.0.0.1:3001")
+        )
+        XCTAssertThrowsError(
+            try NativeAppConfiguration.resolve(
+                environment: [
+                    "SNAPLIST_API_ORIGIN": "http://127.0.0.1:3001",
+                ],
+                apiOriginBundleValue: nil,
+                clerkPublishableKeyBundleValue: "pk_test_fixture",
+                allowsLocalDevelopment: false
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? NativeAppConfigurationError,
+                .invalidAPIOrigin
+            )
+        }
+    }
+
     func testZeroNetworkClientProvidesProofFixtures() async throws {
         let client = ZeroNetworkMobileAPIClient()
 

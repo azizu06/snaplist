@@ -63,13 +63,13 @@ describe("configured mobile item submission", () => {
       args?: Record<string, unknown>,
     ) => {
       void args;
-      if (name === "find_mobile_item_submission_v2") {
+      if (name === "find_mobile_item_submission_v3") {
         return { data: [], error: null };
       }
-      if (name === "begin_mobile_item_submission_v2") {
+      if (name === "begin_mobile_item_submission_v3") {
         return { data: true, error: null };
       }
-      if (name === "commit_mobile_item_submission_v2") {
+      if (name === "commit_mobile_item_submission_v3") {
         return {
           data: [{
             denial_reason: null,
@@ -134,6 +134,10 @@ describe("configured mobile item submission", () => {
     await expect(operations.submit({
       costBasis: null,
       idempotencyKey: "33200000-0000-4000-8000-000000000001",
+      guestRecoveryIdentity: {
+        recoveryId: "33200000-0000-4000-8000-000000000003",
+        recoveryTokenHash: "b".repeat(64),
+      },
       photos: [{
         byteLength: jpeg.byteLength,
         bytes: jpeg,
@@ -154,9 +158,9 @@ describe("configured mobile item submission", () => {
 
     expect(secretRpc).not.toHaveBeenCalled();
     expect(guestRpc.mock.calls.map(([name]) => name)).toEqual([
-      "find_mobile_item_submission_v2",
-      "begin_mobile_item_submission_v2",
-      "commit_mobile_item_submission_v2",
+      "find_mobile_item_submission_v3",
+      "begin_mobile_item_submission_v3",
+      "commit_mobile_item_submission_v3",
     ]);
     expect(mintOperationToken).toHaveBeenCalledTimes(5);
     expect(new Set(tokens).size).toBe(5);
@@ -174,7 +178,7 @@ describe("configured mobile item submission", () => {
 
   it("stops before Storage when capability re-resolution rejects the next operation token", async () => {
     const guestRpc = vi.fn(async (name: string) => ({
-      data: name === "find_mobile_item_submission_v2" ? [] : true,
+      data: name === "find_mobile_item_submission_v3" ? [] : true,
       error: null,
     }));
     const providerStorageCalls = vi.fn();
@@ -223,6 +227,10 @@ describe("configured mobile item submission", () => {
     await expect(operations.submit({
       costBasis: null,
       idempotencyKey: "33200000-0000-4000-8000-000000000021",
+      guestRecoveryIdentity: {
+        recoveryId: "33200000-0000-4000-8000-000000000023",
+        recoveryTokenHash: "c".repeat(64),
+      },
       photos: [{
         byteLength: jpeg.byteLength,
         bytes: jpeg,
@@ -242,8 +250,8 @@ describe("configured mobile item submission", () => {
     })).rejects.toThrow(/inactive guest capability/i);
 
     expect(guestRpc.mock.calls.map(([name]) => name)).toEqual([
-      "find_mobile_item_submission_v2",
-      "begin_mobile_item_submission_v2",
+      "find_mobile_item_submission_v3",
+      "begin_mobile_item_submission_v3",
     ]);
     expect(mintOperationToken).toHaveBeenCalledTimes(4);
     expect(providerStorageCalls).not.toHaveBeenCalled();

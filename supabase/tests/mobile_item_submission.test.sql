@@ -57,31 +57,38 @@ select ok(
 );
 
 select has_function(
-  'public', 'find_mobile_item_submission', array['text', 'uuid', 'text'],
-  'producer has a fixed replay lookup'
+  'public', 'find_mobile_item_submission_v3',
+  array['text', 'uuid', 'text', 'text', 'uuid', 'text'],
+  'producer has a fixed replay lookup with an explicit recovery decision'
 );
 select has_function(
-  'public', 'begin_mobile_item_submission',
-  array['text', 'uuid', 'text', 'uuid', 'uuid', 'numeric', 'jsonb'],
-  'producer atomically binds uploading truth and cleanup intent'
+  'public', 'begin_mobile_item_submission_v3',
+  array[
+    'text', 'uuid', 'text', 'text', 'uuid', 'uuid', 'numeric',
+    'jsonb', 'jsonb', 'uuid', 'text'
+  ],
+  'producer atomically binds uploading truth, cleanup, and recovery decision'
 );
 select has_function(
-  'public', 'commit_mobile_item_submission',
-  array['text', 'uuid', 'text', 'uuid', 'uuid', 'numeric', 'integer', 'integer', 'jsonb', 'jsonb'],
-  'producer has one fixed atomic commit'
+  'public', 'commit_mobile_item_submission_v3',
+  array[
+    'text', 'uuid', 'text', 'text', 'uuid', 'uuid', 'numeric',
+    'integer', 'integer', 'jsonb', 'jsonb', 'jsonb', 'uuid', 'text'
+  ],
+  'producer has one fixed recovery-aware atomic commit'
 );
 select ok(
   has_function_privilege(
     'service_role',
-    'public.begin_mobile_item_submission(text,uuid,text,uuid,uuid,numeric,jsonb)',
+    'public.begin_mobile_item_submission_v3(text,uuid,text,text,uuid,uuid,numeric,jsonb,jsonb,uuid,text)',
     'execute'
   ),
-  'service role may invoke the fixed pre-upload binding'
+  'service role may invoke the recovery-aware pre-upload binding'
 );
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.begin_mobile_item_submission(text,uuid,text,uuid,uuid,numeric,jsonb)',
+    'public.begin_mobile_item_submission_v3(text,uuid,text,text,uuid,uuid,numeric,jsonb,jsonb,uuid,text)',
     'execute'
   ),
   'seller tokens cannot bind server submission truth'
@@ -89,15 +96,15 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.commit_mobile_item_submission(text,uuid,text,uuid,uuid,numeric,integer,integer,jsonb,jsonb)',
+    'public.commit_mobile_item_submission_v3(text,uuid,text,text,uuid,uuid,numeric,integer,integer,jsonb,jsonb,jsonb,uuid,text)',
     'execute'
   ),
-  'service role may invoke only the fixed commit capability'
+  'service role may invoke only the fixed recovery-aware commit capability'
 );
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.commit_mobile_item_submission(text,uuid,text,uuid,uuid,numeric,integer,integer,jsonb,jsonb)',
+    'public.commit_mobile_item_submission_v3(text,uuid,text,text,uuid,uuid,numeric,integer,integer,jsonb,jsonb,jsonb,uuid,text)',
     'execute'
   ),
   'seller tokens cannot invoke the service commit capability'
@@ -105,7 +112,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.find_mobile_item_submission(text,uuid,text)',
+    'public.find_mobile_item_submission_v3(text,uuid,text,text,uuid,text)',
     'execute'
   ),
   'seller tokens cannot read server idempotency truth'
@@ -125,10 +132,11 @@ select set_config(
 
 select lives_ok(
   $$
-    select public.begin_mobile_item_submission(
+    select public.begin_mobile_item_submission_v3(
       'user_test_mobile_submission_round_3',
       '33460000-0000-4000-8000-000000000001'::uuid,
       repeat('d', 64),
+      null,
       '33460000-0000-4000-8000-000000000001'::uuid,
       '33460000-0000-4000-8000-000000000002'::uuid,
       null,
@@ -141,7 +149,10 @@ select lives_ok(
         'content_sha256', repeat('c', 64),
         'byte_length', 4,
         'media_type', 'image/jpeg'
-      ))
+      )),
+      null,
+      null,
+      null
     )
   $$,
   'the first request durably binds an uploading submission and cleanup intent'
@@ -154,10 +165,11 @@ where intent.cleanup_id = '33460000-0000-4000-8000-000000000002'::uuid;
 
 select lives_ok(
   $$
-    select public.begin_mobile_item_submission(
+    select public.begin_mobile_item_submission_v3(
       'user_test_mobile_submission_round_3',
       '33460000-0000-4000-8000-000000000001'::uuid,
       repeat('d', 64),
+      null,
       '33460000-0000-4000-8000-000000000001'::uuid,
       '33460000-0000-4000-8000-000000000002'::uuid,
       null,
@@ -170,7 +182,10 @@ select lives_ok(
         'content_sha256', repeat('c', 64),
         'byte_length', 4,
         'media_type', 'image/jpeg'
-      ))
+      )),
+      null,
+      null,
+      null
     )
   $$,
   'exact pending replay renews the expired cleanup intent atomically'

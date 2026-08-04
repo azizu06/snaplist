@@ -55,14 +55,18 @@ from (
 
 select lives_ok(
   $$
-    select public.begin_mobile_item_submission(
+    select public.begin_mobile_item_submission_v3(
       'user_test_mobile_submission_five',
       '35260000-0000-4000-8000-000000000001'::uuid,
       repeat('a', 64),
+      null,
       '35260000-0000-4000-8000-000000000001'::uuid,
       '35260000-0000-4000-8000-000000000002'::uuid,
       12.34,
-      (select receipts from issue352_input)
+      (select receipts from issue352_input),
+      null,
+      null,
+      null
     )
   $$,
   'five verified receipts bind one durable pre-upload cleanup intent'
@@ -84,10 +88,11 @@ select lives_ok(
   $$
     create temporary table issue352_commit on commit drop as
     select *
-    from public.commit_mobile_item_submission(
+    from public.commit_mobile_item_submission_v3(
       'user_test_mobile_submission_five',
       '35260000-0000-4000-8000-000000000001'::uuid,
       repeat('a', 64),
+      null,
       '35260000-0000-4000-8000-000000000001'::uuid,
       '35260000-0000-4000-8000-000000000002'::uuid,
       12.34,
@@ -97,7 +102,10 @@ select lives_ok(
         'kind', 'content_sha256_set_v1',
         'fingerprint', (select fingerprint from issue352_input)
       ),
-      (select receipts from issue352_input)
+      (select receipts from issue352_input),
+      null,
+      null,
+      null
     )
   $$,
   'five verified receipts atomically create one item, reservation, run, and queue message'
@@ -154,10 +162,11 @@ select lives_ok(
   $$
     create temporary table issue352_replay on commit drop as
     select *
-    from public.commit_mobile_item_submission(
+    from public.commit_mobile_item_submission_v3(
       'user_test_mobile_submission_five',
       '35260000-0000-4000-8000-000000000001'::uuid,
       repeat('a', 64),
+      null,
       '35260000-0000-4000-8000-000000000001'::uuid,
       '35260000-0000-4000-8000-000000000002'::uuid,
       12.34,
@@ -167,7 +176,10 @@ select lives_ok(
         'kind', 'content_sha256_set_v1',
         'fingerprint', (select fingerprint from issue352_input)
       ),
-      (select receipts from issue352_input)
+      (select receipts from issue352_input),
+      null,
+      null,
+      null
     )
   $$,
   'the exact five-photo commit is replayable after an ambiguous response'
@@ -187,10 +199,11 @@ select is(
 
 select throws_ok(
   $$
-    select public.begin_mobile_item_submission(
+    select public.begin_mobile_item_submission_v3(
       'user_test_mobile_submission_five',
       '35260000-0000-4000-8000-000000000001'::uuid,
       repeat('b', 64),
+      null,
       '35260000-0000-4000-8000-000000000001'::uuid,
       '35260000-0000-4000-8000-000000000002'::uuid,
       12.34,
@@ -199,7 +212,10 @@ select throws_ok(
         from issue352_input input,
           jsonb_array_elements(input.receipts) with ordinality receipt(value, position)
         where receipt.position <= 4
-      )
+      ),
+      null,
+      null,
+      null
     )
   $$,
   '23514',
@@ -209,10 +225,11 @@ select throws_ok(
 
 select throws_ok(
   $$
-    select public.begin_mobile_item_submission(
+    select public.begin_mobile_item_submission_v3(
       'user_test_mobile_submission_six',
       '35260000-0000-4000-8000-000000000006'::uuid,
       repeat('c', 64),
+      null,
       '35260000-0000-4000-8000-000000000006'::uuid,
       '35260000-0000-4000-8000-000000000007'::uuid,
       null,
@@ -231,7 +248,10 @@ select throws_ok(
           select ordinal, lpad(to_hex(ordinal + 1), 64, '0') as digest
           from generate_series(0, 5) ordinal
         ) photo
-      )
+      ),
+      null,
+      null,
+      null
     )
   $$,
   '22023',

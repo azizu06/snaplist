@@ -114,6 +114,25 @@ function storage(
 }
 
 describe("guest claim-or-expire orchestrator", () => {
+  it("accepts a 50 MiB photo plus its 37-byte envelope in a claim copy plan", () => {
+    const boundaryPlan = {
+      ...plan,
+      objects: [{
+        ...plan.objects[0],
+        byteLength: 50 * 1_024 * 1_024 + 37,
+      }],
+    };
+
+    expect(guestClaimStartSchema.safeParse(boundaryPlan).success).toBe(true);
+    expect(guestClaimStartSchema.safeParse({
+      ...boundaryPlan,
+      objects: [{
+        ...boundaryPlan.objects[0],
+        byteLength: boundaryPlan.objects[0].byteLength + 1,
+      }],
+    }).success).toBe(false);
+  });
+
   it("preserves five ordered objects through guest claim and account recovery contracts", () => {
     const objects = Array.from({ length: 5 }, (_, ordinal) => ({
       sourcePath: `guest_fixture/items/photo-${ordinal}.enc`,

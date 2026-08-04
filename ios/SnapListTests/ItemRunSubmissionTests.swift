@@ -1,3 +1,4 @@
+import CryptoKit
 import Observation
 import UIKit
 import XCTest
@@ -3379,6 +3380,198 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertNil(host.pendingPresentationEvent)
     }
 
+    func testGuestSubmissionMintsHashOnlyIdentityAndBindsAcceptedRun()
+        async throws {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 2,
+            seed: "guest-recovery"
+        )
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let rawToken = "raw-token-only-in-keychain"
+        let recoveryID = UUID(
+            uuidString: "63850000-0000-4000-8000-000000000001"
+        )!
+        let tokenHash = SHA256.hash(data: Data(rawToken.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let recoveryStore = RecordingGuestRecoveryCredentialStore(
+            identity: GuestRecoverySubmissionIdentity(
+                recoveryID: recoveryID,
+                recoveryTokenHash: tokenHash
+            )
+        )
+        let canonicalPhotoDigests = intake.expectedReceiptPhotos
+            .map(\.contentSha256)
+            .map { $0.lowercased() }
+            .sorted()
+            .joined(separator: "\n")
+        let photoFingerprint = SHA256.hash(
+            data: Data(canonicalPhotoDigests.utf8)
+        )
+        .map { String(format: "%02x", $0) }
+        .joined()
+        let receipt = MobileItemSubmissionEnvelope.DataPayload(
+            itemId: Self.canonicalItemID,
+            runId: Self.canonicalRunID,
+            status: "queued",
+            stage: "queued",
+            photoIdentity: .init(
+                kind: "content_sha256_set_v1",
+                fingerprint: photoFingerprint
+            ),
+            photos: intake.expectedReceiptPhotos,
+            voiceContext: nil
+        )
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.created(receipt)]
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: RecordingCaptureDraftStore(
+                    photos: intake.photos
+                ),
+                tokenProvider: TestBearerTokenProvider {
+                    "guestcap_\(String(repeating: "A", count: 43))"
+                },
+                guestRecoveryCredentials: recoveryStore,
+                readData: intake.read,
+                newIdempotencyKey: { Self.firstKey }
+            )
+        )
+
+        let submission = Task {
+            await host.startListing(photos: intake.photos)
+        }
+        defer { submission.cancel() }
+        guard let savedEvent = await waitForPendingItemSavedEvent(on: host)
+        else {
+            return
+        }
+        host.acknowledgePresentation(eventID: savedEvent.eventID)
+        await submission.value
+
+        let payloads = await submitter.payloads
+        let payload = try XCTUnwrap(payloads.first)
+        XCTAssertEqual(
+            payload.attempt.guestRecoveryIdentity,
+            GuestRecoverySubmissionIdentity(
+                recoveryID: recoveryID,
+                recoveryTokenHash: tokenHash
+            )
+        )
+        XCTAssertFalse(
+            String(
+                decoding: try JSONEncoder().encode(payload.attempt),
+                as: UTF8.self
+            ).contains(rawToken)
+        )
+        let mintCount = await recoveryStore.mintCount()
+        XCTAssertEqual(mintCount, 1)
+        let binding = await recoveryStore.recordedBinding()
+        XCTAssertEqual(
+            binding,
+            .init(
+                itemID: Self.canonicalItemID,
+                runID: Self.canonicalRunID,
+                photoIdentity: GuestPhotoIdentity(
+                    kind: "content_sha256_set_v1",
+                    fingerprint: photoFingerprint
+                )
+            )
+        )
+    }
+
+    func testGuestRetryWithLegacyAttemptFailsClosedWithoutMintingNewRun()
+        async throws {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 2,
+            seed: "legacy-guest-recovery"
+        )
+        let legacyAttempt = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: zip(intake.photos, intake.expectedReceiptPhotos).map {
+                photo, receipt in
+                ItemRunSubmissionPhoto(
+                    photoID: photo.id,
+                    ordinal: receipt.ordinal,
+                    contentSha256: receipt.contentSha256,
+                    byteLength: receipt.byteLength,
+                    mediaType: .jpeg
+                )
+            },
+            schemaVersion: 2
+        )
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore(
+            attempt: legacyAttempt
+        )
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let recoveryStore = RecordingGuestRecoveryCredentialStore(
+            identity: GuestRecoverySubmissionIdentity(
+                recoveryID: UUID(),
+                recoveryTokenHash: String(repeating: "a", count: 64)
+            )
+        )
+        let coordinator = ItemRunSubmissionCoordinator(
+            submitter: submitter,
+            attemptStore: attemptStore,
+            draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+            tokenProvider: TestBearerTokenProvider {
+                "guestcap_\(String(repeating: "A", count: 43))"
+            },
+            guestRecoveryCredentials: recoveryStore,
+            readData: intake.read,
+            newIdempotencyKey: { Self.secondKey }
+        )
+
+        let outcome = await coordinator.submit(photos: intake.photos)
+        let payloads = await submitter.payloads
+        let storedAttempt = try await attemptStore.loadAttempt()
+        let mintCount = await recoveryStore.mintCount()
+
+        XCTAssertEqual(outcome, .retained(.attemptNotPersisted))
+        XCTAssertTrue(payloads.isEmpty)
+        XCTAssertEqual(storedAttempt, legacyAttempt)
+        XCTAssertEqual(mintCount, 0)
+    }
+
+    func testGuestConflictPurgesTheRetiredRecoveryCredential() async throws {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 1,
+            seed: "guest-recovery-conflict"
+        )
+        let recoveryID = UUID(
+            uuidString: "63850000-0000-4000-8000-000000000021"
+        )!
+        let recoveryStore = RecordingGuestRecoveryCredentialStore(
+            identity: GuestRecoverySubmissionIdentity(
+                recoveryID: recoveryID,
+                recoveryTokenHash: String(repeating: "f", count: 64)
+            )
+        )
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let coordinator = ItemRunSubmissionCoordinator(
+            submitter: RecordingItemRunSubmitter(outcomes: [.conflict]),
+            attemptStore: attemptStore,
+            draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+            tokenProvider: TestBearerTokenProvider {
+                "guestcap_\(String(repeating: "A", count: 43))"
+            },
+            guestRecoveryCredentials: recoveryStore,
+            readData: intake.read,
+            newIdempotencyKey: { Self.firstKey }
+        )
+
+        let outcome = await coordinator.submit(photos: intake.photos)
+
+        XCTAssertEqual(outcome, .retained(.conflict))
+        let storedAttempt = try await attemptStore.loadAttempt()
+        let purgedRecoveryIDs = await recoveryStore.purgedRecoveryIDs()
+        XCTAssertNil(storedAttempt)
+        XCTAssertEqual(purgedRecoveryIDs, [recoveryID])
+    }
+
     /// `403`, `429`, and `409` each reach the live boundary as their own typed value,
     /// and none of them leaves anything behind that reads as acceptance.
     func testStartListingSurfacesTypedRecoveryWithoutARun() async {
@@ -3622,6 +3815,61 @@ final class ItemRunSubmissionTests: XCTestCase {
 private enum SavedPresentationEffectObservation: Equatable {
     case announcement(String, eventID: UUID)
     case acknowledgment(UUID)
+}
+
+private actor RecordingGuestRecoveryCredentialStore:
+    GuestRecoveryCredentialStoring {
+    struct Binding: Equatable {
+        let itemID: UUID
+        let runID: UUID
+        let photoIdentity: GuestPhotoIdentity
+    }
+
+    private let identity: GuestRecoverySubmissionIdentity
+    private var mints = 0
+    private var binding: Binding?
+    private var purged: [UUID] = []
+
+    init(identity: GuestRecoverySubmissionIdentity) {
+        self.identity = identity
+    }
+
+    func mintCredential() throws -> GuestRecoverySubmissionIdentity {
+        mints += 1
+        return identity
+    }
+
+    func contains(_ identity: GuestRecoverySubmissionIdentity) -> Bool {
+        identity == self.identity
+    }
+
+    func bind(
+        _ identity: GuestRecoverySubmissionIdentity,
+        itemID: UUID,
+        runID: UUID,
+        photoIdentity: GuestPhotoIdentity
+    ) throws {
+        guard identity == self.identity else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        binding = Binding(
+            itemID: itemID,
+            runID: runID,
+            photoIdentity: photoIdentity
+        )
+    }
+
+    func credential(runID: UUID) -> GuestRecoveryCredential? { nil }
+
+    func credential(recoveryID: UUID) -> GuestRecoveryCredential? { nil }
+
+    func setExpiry(recoveryID: UUID, expiresAt: Date) {}
+
+    func purge(recoveryID: UUID) { purged.append(recoveryID) }
+
+    func mintCount() -> Int { mints }
+    func recordedBinding() -> Binding? { binding }
+    func purgedRecoveryIDs() -> [UUID] { purged }
 }
 
 private struct TestBearerTokenProvider: BearerTokenProviding {

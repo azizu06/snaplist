@@ -55,6 +55,26 @@ enum ItemRunSubmissionMultipart {
                 body.append(Data("\r\n".utf8))
             }
         }
+        if let recovery = payload.attempt.guestRecoveryIdentity {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(
+                Data(
+                    "Content-Disposition: form-data; name=\"recoveryId\"\r\n\r\n"
+                        .utf8
+                )
+            )
+            body.append(Data(recovery.recoveryID.uuidString.lowercased().utf8))
+            body.append(Data("\r\n".utf8))
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(
+                Data(
+                    "Content-Disposition: form-data; name=\"recoveryTokenHash\"\r\n\r\n"
+                        .utf8
+                )
+            )
+            body.append(Data(recovery.recoveryTokenHash.utf8))
+            body.append(Data("\r\n".utf8))
+        }
         body.append(Data("--\(boundary)--\r\n".utf8))
         return body
     }

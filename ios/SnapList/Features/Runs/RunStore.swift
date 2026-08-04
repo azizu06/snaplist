@@ -15,15 +15,30 @@ final class RunDetailStore {
 
     private let service: any RunServing
     private let tokenProvider: any BearerTokenProviding
+    private let guestRecoveryCredentials:
+        any GuestRecoveryCredentialStoring
+    private let guestClaimAuthorities:
+        any GuestClaimAuthorityStoring
+    private let now: @Sendable () -> Date
     private var requestedRunID: UUID?
     private var requestGeneration = 0
 
     init(
         service: any RunServing,
-        tokenProvider: any BearerTokenProviding
+        tokenProvider: any BearerTokenProviding,
+        guestRecoveryCredentials:
+            any GuestRecoveryCredentialStoring =
+                KeychainGuestRecoveryCredentialStore(),
+        guestClaimAuthorities:
+            any GuestClaimAuthorityStoring =
+                KeychainGuestClaimAuthorityStore(),
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.service = service
         self.tokenProvider = tokenProvider
+        self.guestRecoveryCredentials = guestRecoveryCredentials
+        self.guestClaimAuthorities = guestClaimAuthorities
+        self.now = now
     }
 
     func load(runID: UUID) async {
@@ -45,6 +60,57 @@ final class RunDetailStore {
             let run = try await service.fetchRun(id: runID, bearerToken: token)
             guard generation == requestGeneration, requestedRunID == runID else { return }
             guard run.id == runID else { throw RunAPIError.invalidResponse }
+            if let credential = try await guestRecoveryCredentials
+                .credential(runID: runID) {
+                if !token.hasPrefix("guestcap_") {
+                    try await guestClaimAuthorities.purge(
+                        recoveryID: credential.recoveryID
+                    )
+                    try await guestRecoveryCredentials.purge(
+                        recoveryID: credential.recoveryID
+                    )
+                } else if run.status == .failed || run.status == .canceled {
+                    try await guestClaimAuthorities.purge(
+                        recoveryID: credential.recoveryID
+                    )
+                    try await guestRecoveryCredentials.purge(
+                        recoveryID: credential.recoveryID
+                    )
+                } else if run.status == .succeeded {
+                    guard let completedAt = run.timestamps.completedAt,
+                          let completed = Self.date(from: completedAt) else {
+                        throw RunAPIError.invalidResponse
+                    }
+                    let expiresAt = completed.addingTimeInterval(24 * 60 * 60)
+                    if expiresAt <= now() {
+                        try await guestClaimAuthorities.purge(
+                            recoveryID: credential.recoveryID
+                        )
+                        try await guestRecoveryCredentials.purge(
+                            recoveryID: credential.recoveryID
+                        )
+                    } else {
+                        try await guestRecoveryCredentials.setExpiry(
+                            recoveryID: credential.recoveryID,
+                            expiresAt: expiresAt
+                        )
+                        guard let binding = run.review?.binding else {
+                            throw RunAPIError.invalidResponse
+                        }
+                        guard let authority = GuestClaimAuthorityAssembler
+                            .assemble(
+                                credential: credential,
+                                binding: binding
+                            ) else {
+                            throw RunAPIError.invalidResponse
+                        }
+                        try await guestClaimAuthorities.save(
+                            authority,
+                            listingID: binding.listingID
+                        )
+                    }
+                }
+            }
             state = .loaded(run)
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
@@ -53,6 +119,18 @@ final class RunDetailStore {
             guard generation == requestGeneration else { return }
             state = .unavailable
         }
+    }
+
+    private static func date(from value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [
+            .withInternetDateTime,
+            .withFractionalSeconds,
+        ]
+        if let parsed = fractional.date(from: value) { return parsed }
+        let wholeSeconds = ISO8601DateFormatter()
+        wholeSeconds.formatOptions = [.withInternetDateTime]
+        return wholeSeconds.date(from: value)
     }
 }
 

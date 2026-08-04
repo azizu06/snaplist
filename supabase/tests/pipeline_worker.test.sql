@@ -27,8 +27,17 @@ select ok(
   'authenticated sellers cannot write worker checkpoints'
 );
 select ok(
-  has_function_privilege('service_role', 'public.complete_pipeline_run(uuid,uuid,jsonb)', 'execute'),
-  'service_role may complete a lease-fenced run'
+  has_function_privilege(
+    'service_role',
+    'public.complete_pipeline_run_with_guest_recovery(uuid,uuid,jsonb,jsonb)',
+    'execute'
+  )
+  and not has_function_privilege(
+    'service_role',
+    'public.complete_pipeline_run(uuid,uuid,jsonb)',
+    'execute'
+  ),
+  'service_role completes only through the lease-fenced recovery-aware seam'
 );
 select ok(
   not has_function_privilege('authenticated', 'public.complete_pipeline_run(uuid,uuid,jsonb)', 'execute'),

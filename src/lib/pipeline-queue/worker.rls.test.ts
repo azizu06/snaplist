@@ -456,7 +456,8 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       },
     ];
     for (const rejected of rejectedPersistencePayloads) {
-      const completion = await admin.rpc("complete_pipeline_run", {
+      const completion = await admin.rpc("complete_pipeline_run_with_guest_recovery", {
+        p_guest_recovery_registration: null,
         p_run_id: runA,
         p_lease_token: resumed.context.run.lease_token,
         p_persistence: rejected.persistence,

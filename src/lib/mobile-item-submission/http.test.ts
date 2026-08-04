@@ -514,6 +514,88 @@ describe("POST /v1/items/runs", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("accepts recovery identity only for a verified guest submission", async () => {
+    const recoveryId = "63800000-0000-4000-8000-000000000001";
+    const recoveryTokenHash = "a".repeat(64);
+    const submit = vi.fn(async (
+      input: Parameters<MobileItemSubmissionOperations["submit"]>[0],
+    ) => ({
+      outcome: "created" as const,
+      receipt: {
+        itemId: "63800000-0000-4000-8000-000000000002",
+        runId: "63800000-0000-4000-8000-000000000003",
+        status: "queued" as const,
+        stage: "queued" as const,
+        photoIdentity: {
+          kind: "content_sha256_set_v1" as const,
+          fingerprint: "b".repeat(64),
+        },
+        photos: input.photos.map(
+          ({ ordinal, contentSha256, byteLength, mediaType }) => ({
+            ordinal,
+            contentSha256,
+            byteLength,
+            mediaType,
+          }),
+        ),
+        voiceContext: null,
+      },
+    }));
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => "req_guest_recovery_identity",
+      itemSubmission: {
+        async resolvePrincipal(bearerToken) {
+          if (bearerToken === "guestcap_verified") {
+            return {
+              kind: "verifiedGuest",
+              userId: "guest_638",
+              capabilityId: "63800000-0000-4000-8000-000000000004",
+              mintOperationToken: async () => bearerToken,
+            };
+          }
+          return { kind: "clerk", userId: "user_638", bearerToken };
+        },
+        submit,
+      },
+    });
+    const request = (
+      bearerToken: string,
+      recoveryIdentity: "present" | "missing",
+    ) => {
+      const body = new FormData();
+      body.append(
+        "photo",
+        new File(
+          [new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer],
+          "item.jpg",
+          { type: "image/jpeg" },
+        ),
+      );
+      if (recoveryIdentity === "present") {
+        body.set("recoveryId", recoveryId);
+        body.set("recoveryTokenHash", recoveryTokenHash);
+      }
+      return new Request("http://localhost/v1/items/runs", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bearerToken}`,
+          "idempotency-key": "63800000-0000-4000-8000-000000000005",
+        },
+        body,
+      });
+    };
+
+    expect((await handler(request("guestcap_verified", "present"))).status).toBe(202);
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({
+      guestRecoveryIdentity: { recoveryId, recoveryTokenHash },
+      principal: expect.objectContaining({ kind: "verifiedGuest" }),
+    }));
+
+    expect((await handler(request("guestcap_verified", "missing"))).status).toBe(400);
+    expect((await handler(request("clerk_token", "present"))).status).toBe(400);
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts one and five verified photos and rejects zero or six before durable submission", async () => {
     const submit = vi.fn(async (
       input: Parameters<MobileItemSubmissionOperations["submit"]>[0],
@@ -560,6 +642,8 @@ describe("POST /v1/items/runs", () => {
           new Uint8Array([0xff, 0xd8, 0xff, ordinal]).buffer,
         ], `photo-${ordinal}.jpg`, { type: "image/jpeg" }));
       }
+      body.set("recoveryId", "35200000-0000-4000-8000-000000000010");
+      body.set("recoveryTokenHash", "d".repeat(64));
       return new Request("http://localhost/v1/items/runs", {
         method: "POST",
         headers: {

@@ -1343,10 +1343,12 @@ describe("authenticated mobile item submission against local Supabase", () => {
     ]);
     expect(foreignItems.data).toEqual([]);
     expect(foreignRuns.data).toEqual([]);
-    const foreignReplay = await foreign.rpc("find_mobile_item_submission_v2", {
+    const foreignReplay = await foreign.rpc("find_mobile_item_submission_v3", {
       p_idempotency_key: key,
       p_legacy_request_fingerprint: null,
       p_request_fingerprint: durable.rows[0]!.request_fingerprint,
+      p_recovery_id: null,
+      p_recovery_token_hash: null,
     });
     expect(foreignReplay.data).toBeNull();
     expect(foreignReplay.error).toMatchObject({

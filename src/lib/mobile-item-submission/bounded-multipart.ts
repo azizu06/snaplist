@@ -10,12 +10,14 @@ import {
 } from "./contract";
 import { MAX_MOBILE_ITEM_VOICE_BYTES } from "./voice";
 
-const MAX_TEXT_FIELDS = 2;
+const MAX_TEXT_FIELDS = 4;
 const MAX_FILE_PARTS = MAX_MOBILE_ITEM_PHOTOS + 1;
 const MAX_PARTS = MAX_TEXT_FIELDS + MAX_FILE_PARTS;
 const MAX_FIELD_NAME_BYTES = 32;
 const MAX_COST_BASIS_BYTES = 64;
 const MAX_LOCALE_BYTES = 255;
+const MAX_RECOVERY_ID_BYTES = 36;
+const MAX_RECOVERY_TOKEN_HASH_BYTES = 64;
 const MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024;
 
 export const MAX_MOBILE_ITEM_MULTIPART_BYTES =
@@ -25,7 +27,13 @@ export const MAX_MOBILE_ITEM_MULTIPART_BYTES =
 
 interface OrderedEntry {
   index: number;
-  name: "costBasis" | "photo" | "voiceContext" | "voiceContextLocale";
+  name:
+    | "costBasis"
+    | "photo"
+    | "recoveryId"
+    | "recoveryTokenHash"
+    | "voiceContext"
+    | "voiceContextLocale";
   value: File | string;
 }
 
@@ -116,6 +124,8 @@ export async function parseBoundedMobileItemSubmissionMultipart(
   let voiceCount = 0;
   let costBasisCount = 0;
   let localeCount = 0;
+  let recoveryIdCount = 0;
+  let recoveryTokenHashCount = 0;
   let invalid: Error | null = null;
   let totalExceeded = false;
   const reject = () => {
@@ -130,6 +140,8 @@ export async function parseBoundedMobileItemSubmissionMultipart(
       name !== "photo" &&
       name !== "voiceContext" &&
       name !== "costBasis" &&
+      name !== "recoveryId" &&
+      name !== "recoveryTokenHash" &&
       name !== "voiceContextLocale"
     ) {
       reject();
@@ -186,10 +198,22 @@ export async function parseBoundedMobileItemSubmissionMultipart(
     }
 
     const maximumBytes =
-      name === "costBasis" ? MAX_COST_BASIS_BYTES : MAX_LOCALE_BYTES;
+      name === "costBasis"
+        ? MAX_COST_BASIS_BYTES
+        : name === "recoveryId"
+          ? MAX_RECOVERY_ID_BYTES
+          : name === "recoveryTokenHash"
+            ? MAX_RECOVERY_TOKEN_HASH_BYTES
+            : MAX_LOCALE_BYTES;
     if (name === "costBasis") {
       costBasisCount += 1;
       if (costBasisCount > 1) reject();
+    } else if (name === "recoveryId") {
+      recoveryIdCount += 1;
+      if (recoveryIdCount > 1) reject();
+    } else if (name === "recoveryTokenHash") {
+      recoveryTokenHashCount += 1;
+      if (recoveryTokenHashCount > 1) reject();
     } else {
       localeCount += 1;
       if (localeCount > 1) reject();
@@ -202,7 +226,7 @@ export async function parseBoundedMobileItemSubmissionMultipart(
       }
       const bytes = collector.finish();
       if (!bytes) {
-        if (name === "costBasis") reject();
+        if (name !== "voiceContextLocale") reject();
         return;
       }
       try {
@@ -212,7 +236,7 @@ export async function parseBoundedMobileItemSubmissionMultipart(
           value: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
         });
       } catch {
-        if (name === "costBasis") reject();
+        if (name !== "voiceContextLocale") reject();
       }
     };
   };

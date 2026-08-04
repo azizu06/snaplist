@@ -316,7 +316,11 @@ actor LocalItemRunSubmissionAttemptStore: ItemRunSubmissionAttemptStoring {
                 == ItemRunSubmissionAttempt.currentSchemaVersion
         let isCompatiblePhotoOnlyV1 =
             version?.schemaVersion == 1 && stored.voiceContext == nil
-        guard isCurrent || isCompatiblePhotoOnlyV1 else {
+        let isCompatibleAuthenticatedV2 =
+            version?.schemaVersion == 2
+                && stored.guestRecoveryIdentity == nil
+        guard isCurrent || isCompatiblePhotoOnlyV1
+                || isCompatibleAuthenticatedV2 else {
             return try discardUnusableAttempt()
         }
         return stored

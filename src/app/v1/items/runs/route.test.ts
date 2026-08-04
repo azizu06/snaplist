@@ -234,6 +234,8 @@ describe("production mobile item submission route", () => {
         type: "image/jpeg",
       }),
     );
+    body.append("recoveryId", "63840000-0000-4000-8000-000000000001");
+    body.append("recoveryTokenHash", "c".repeat(64));
     const guestBearer = `guestcap_${"A".repeat(43)}`;
 
     const response = await POST(new Request("https://snaplist.example/v1/items/runs", {
@@ -264,6 +266,10 @@ describe("production mobile item submission route", () => {
         kind: "verifiedGuest",
         userId: "guest_0123456789abcdef0123456789abcdef0123456789abcdef",
       }),
+      guestRecoveryIdentity: {
+        recoveryId: "63840000-0000-4000-8000-000000000001",
+        recoveryTokenHash: "c".repeat(64),
+      },
     }));
     expect(JSON.stringify(submit.mock.calls)).not.toContain(guestBearer);
   });
