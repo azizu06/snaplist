@@ -11,10 +11,10 @@ const LISTINGS = DEMO_SURFACE_ASSIGNMENTS["landing-carousel"].map(
 );
 
 const MARKETPLACES = [
-  { name: "eBay", asset: "/marketplaces/ebay.svg" },
-  { name: "Facebook Marketplace", asset: "/marketplaces/facebook-marketplace.svg" },
-  { name: "Mercari", asset: "/marketplaces/mercari.svg" },
-  { name: "Depop", asset: "/marketplaces/depop.svg" },
+  { name: "eBay", asset: "/marketplaces/ebay.svg", width: 207, height: 84 },
+  { name: "Facebook Marketplace", asset: "/marketplaces/facebook-marketplace.svg", width: 2271, height: 2500 },
+  { name: "Mercari", asset: "/marketplaces/mercari.svg", width: 560, height: 400 },
+  { name: "Depop", asset: "/marketplaces/depop.svg", width: 1295, height: 333 },
 ] as const;
 
 /**
@@ -33,8 +33,7 @@ function ListingCard({
 }) {
   const product = DEMO_PRODUCTS_BY_SLUG[slug];
   const title = MARKETING_CAROUSEL_TITLES[slug] ?? product.title;
-  const isFacebookMarketplace = marketplace.name === "Facebook Marketplace";
-
+  const isMercari = marketplace.name === "Mercari";
   return (
     <article className="mkt-loop-card">
       <div className="mkt-loop-card__image">
@@ -48,12 +47,12 @@ function ListingCard({
       <div className="mkt-loop-card__body">
         <p>{title}</p>
         <Image
-          className={`mkt-loop-card__marketplace-logo${isFacebookMarketplace ? " mkt-loop-card__marketplace-logo--facebook" : ""}`}
+          className={`mkt-loop-card__marketplace-logo${isMercari ? " mkt-loop-card__marketplace-logo--mercari" : ""}`}
           src={marketplace.asset}
           alt={isDecorativeMarketplaceLabel ? "" : marketplace.name}
           aria-hidden={isDecorativeMarketplaceLabel || undefined}
-          width={isFacebookMarketplace ? 2271 : 104}
-          height={isFacebookMarketplace ? 2500 : 22}
+          width={marketplace.width}
+          height={marketplace.height}
         />
       </div>
     </article>
