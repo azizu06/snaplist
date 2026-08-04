@@ -373,9 +373,9 @@ describe("marketing destinations", () => {
     expect(visibleSequence.find(".mkt-loop-card__marketplace-logo[alt=''][aria-hidden='true']")).toHaveLength(2);
     expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook")).toHaveLength(3);
     expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook").toArray().map((mark) => $(mark).attr("width")))
-      .toEqual(["65.2", "65.2", "65.2"]);
+      .toEqual(["2271", "2271", "2271"]);
     expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook").toArray().map((mark) => $(mark).attr("height")))
-      .toEqual(["69.73", "69.73", "69.73"]);
+      .toEqual(["2500", "2500", "2500"]);
     expect(css).toMatch(/\.mkt-loop-card__marketplace-logo--facebook\s*\{[^}]*height:\s*52px;[^}]*width:\s*auto;[^}]*align-self:\s*flex-start/);
     expect(bentoRules).not.toMatch(/line-clamp|text-overflow|white-space:\s*nowrap|overflow:\s*hidden/);
   });
