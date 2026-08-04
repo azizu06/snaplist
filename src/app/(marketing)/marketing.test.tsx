@@ -259,6 +259,13 @@ describe("marketing destinations", () => {
     expect($(".mkt-appstore").length).toBe(1);
   });
 
+  it("keeps the navbar fixed, transparent at top, and frosted after scroll", () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+
+    expect(css).toMatch(/\.mkt-header\s*\{[\s\S]*position:\s*fixed;[\s\S]*background-color:\s*transparent;[\s\S]*border-bottom:\s*1px solid transparent;[\s\S]*300ms/);
+    expect(css).toMatch(/\.mkt-header\[data-opaque="true"\]\s*\{[\s\S]*background-color:\s*rgba\(255, 255, 255, 0\.[78]\);[\s\S]*backdrop-filter:\s*blur/);
+  });
+
   it("keeps its only App Store badge in the navbar", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_STORE_URL", "");
     const $ = load(renderToStaticMarkup(<SiteHeader />));
@@ -271,11 +278,14 @@ describe("marketing destinations", () => {
   it("makes waitlist the primary hero action and keeps its final form in the footer", () => {
     const landing = load(renderToStaticMarkup(<LandingPage />));
     const footer = load(renderToStaticMarkup(<SiteFooter />));
+    const combined = load(`${landing.html()}${footer.html()}`);
+    const ids = combined("input[id]").map((_, input) => combined(input).attr("id") ?? "").get();
 
     expect(landing(".mkt-hero form.mkt-waitlist").length).toBe(1);
     expect(landing(".mkt-cta").length).toBe(0);
     expect(footer("form.mkt-waitlist").length).toBe(1);
     expect(footer(".mkt-footer__landscape .mkt-footer__scout").length).toBe(1);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("uses one heading per landing section without stacked ledes", () => {

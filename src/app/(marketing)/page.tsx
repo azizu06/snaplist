@@ -38,7 +38,7 @@ export default function LandingPage() {
           <div className="mkt-hero__grid">
             <div className="mkt-hero__copy">
               <h1 className="mkt-h1">{HERO.title}</h1>
-              <WaitlistForm />
+              <WaitlistForm idPrefix="hero-waitlist" />
             </div>
             <HeroArt />
           </div>

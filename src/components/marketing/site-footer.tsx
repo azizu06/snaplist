@@ -9,7 +9,7 @@ export function SiteFooter() {
     <footer className="mkt-footer">
       <div className="mkt-shell mkt-footer__inner">
         <h2 className="mkt-footer__title">{FOOTER.title}</h2>
-        <WaitlistForm />
+        <WaitlistForm idPrefix="footer-waitlist" />
         <nav className="mkt-footer__links" aria-label="Company and legal">
           <Link className="mkt-footer__link" href="/privacy">Privacy</Link>
           <span aria-hidden="true">·</span>

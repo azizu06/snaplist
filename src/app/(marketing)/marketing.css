@@ -82,6 +82,7 @@ html:has(.mkt) {
 
 .mkt-main {
   flex: 1 1 auto;
+  padding-top: 80px;
 }
 
 .mkt :focus-visible {
@@ -155,30 +156,29 @@ html:has(.mkt) {
 /* ------------------------------------------------------------------- header */
 
 .mkt-header {
-  position: sticky;
+  position: fixed;
   top: 0;
+  right: 0;
+  left: 0;
   z-index: 50;
-  background-color: rgba(255, 255, 255, 0.18);
-  border-bottom: 1px solid rgba(236, 237, 239, 0.45);
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.6);
-  -webkit-backdrop-filter: blur(28px) saturate(140%);
-  backdrop-filter: blur(28px) saturate(140%);
+  background-color: transparent;
+  border-bottom: 1px solid transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   transition:
-    background-color 240ms ease,
-    border-color 240ms ease,
-    box-shadow 240ms ease;
+    background-color 300ms ease,
+    border-color 300ms ease,
+    backdrop-filter 300ms ease;
 }
 
 /* Boolean threshold, not a scroll-linked animation: the class flips once past
    32px and the surface transitions between two fixed states. */
 .mkt-header[data-opaque="true"] {
-  background-color: rgba(244, 247, 255, 0.56);
+  background-color: rgba(255, 255, 255, 0.8);
   border-bottom-color: rgba(54, 101, 243, 0.12);
-  box-shadow:
-    0 8px 28px rgba(22, 24, 27, 0.1),
-    inset 0 1px rgba(255, 255, 255, 0.72);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
-  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
 }
 
 /* Which bar renders is a media query, not a measured viewport width, so the
@@ -255,45 +255,13 @@ html:has(.mkt) {
   color: var(--ink);
 }
 
-.mkt-underline {
-  position: relative;
-  display: inline-block;
-}
-
-.mkt-underline::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -3px;
-  height: 2px;
-  background: var(--action);
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 200ms var(--quint);
-}
-
-.mkt-navlink:hover .mkt-underline::after,
-.mkt-navlink:focus-visible .mkt-underline::after {
-  transform: scaleX(1);
-}
-
 /* ------------------------------------------------------------- mobile menu */
-
-.mkt-header__bar--narrow {
-  min-height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
 
 .mkt-burger {
   display: none;
   flex: 0 0 auto;
   width: 44px;
   height: 44px;
-  display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
@@ -304,6 +272,9 @@ html:has(.mkt) {
 }
 
 @media (max-width: 767px) {
+  .mkt-main {
+    padding-top: 64px;
+  }
   .mkt-header__bar {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
@@ -430,7 +401,6 @@ html:has(.mkt) {
 
 .mkt-menu__link:hover {
   color: var(--ink);
-  text-decoration: none;
 }
 
 /* -------------------------------------------------------- App Store control */
@@ -1987,7 +1957,6 @@ html:has(.mkt) {
    here hides a state or drops a transition that carries meaning. */
 @media (prefers-reduced-motion: reduce) {
   .mkt-skip,
-  .mkt-underline::after,
   .mkt-header,
   .mkt-burger__line,
   .mkt-menu,
