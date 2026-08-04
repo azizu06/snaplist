@@ -134,6 +134,8 @@ class AcceptanceStore implements PipelineWorkerStore {
     return checkpoint;
   }
 
+  async stageGuestRecoveryUploadCleanup() {}
+
   async complete(input: { runId: string; leaseToken: string }) {
     const run = this.currentLease(input.runId, input.leaseToken);
     if (run.status !== "succeeded") {
@@ -205,11 +207,15 @@ class AcceptanceStore implements PipelineWorkerStore {
         next_attempt_at: run.nextAttemptAt === null
           ? null
           : new Date(run.nextAttemptAt).toISOString(),
+        recovery_id: null,
+        recovery_token_hash: null,
       },
       item: {
         id: run.itemId,
         user_id: "acceptance-user",
         photos: [`acceptance-user/${run.itemId}.jpg`],
+        photo_identity_kind: "content_sha256_set_v1",
+        photo_identity_fingerprint: "a".repeat(64),
         attributes: {},
         condition: null,
         cost_basis: null,

@@ -61,12 +61,16 @@ function context(overrides: Partial<PipelineWorkerContext["run"]> = {}): Pipelin
       lease_token: "33333333-3333-4333-8333-333333333333",
       lease_expires_at: "2026-07-15T04:10:00.000Z",
       next_attempt_at: null,
+      recovery_id: null,
+      recovery_token_hash: null,
       ...overrides,
     },
     item: {
       id: ITEM_ID,
       user_id: "user_a",
       photos: ["user_a/photo.jpg"],
+      photo_identity_kind: "content_sha256_set_v1",
+      photo_identity_fingerprint: "a".repeat(64),
       attributes: {},
       condition: null,
       cost_basis: null,
@@ -109,6 +113,7 @@ function storeWith(
     loadContext: vi.fn(),
     acquire: vi.fn(async () => acquisition),
     checkpoint: vi.fn(async (input) => databaseClock.stamp(input.checkpoint)),
+    stageGuestRecoveryUploadCleanup: vi.fn(async () => undefined),
     complete: vi.fn(async () => ({ listingId: "66666666-6666-4666-8666-666666666666" })),
     failAttempt: vi.fn(async () => failure),
     rejectMessage: vi.fn(async () => true),
@@ -175,6 +180,84 @@ describe("durable pipeline queue consumer", () => {
       queue.ack.mock.invocationCallOrder[0]!,
     );
     expect(queue.ack).toHaveBeenCalledWith("41");
+  });
+
+  it("prepares one guest recovery registration before atomic completion and skips it on redelivery", async () => {
+    const guest = context({
+      user_id: "guest_0123456789abcdef0123456789abcdef0123456789abcdef",
+      recovery_id: "63800000-0000-4000-8000-000000000003",
+      recovery_token_hash: "b".repeat(64),
+    });
+    guest.item.user_id = guest.run.user_id;
+    const queue = queueWith();
+    const runs = storeWith({ kind: "acquired", context: guest });
+    const registration = {
+      recoveryId: guest.run.recovery_id!,
+      guestUserId: guest.run.user_id,
+      pipelineRunId: guest.run.id,
+      recoveryTokenHash: guest.run.recovery_token_hash!,
+      encryptedArtifact: {
+        version: 1 as const,
+        algorithm: "aes-256-gcm" as const,
+        keyId: "guest-recovery-key-v1",
+        keyEnvelope: Buffer.alloc(32).toString("base64"),
+        nonce: Buffer.alloc(12, 1).toString("base64"),
+        tag: Buffer.alloc(16, 2).toString("base64"),
+        ciphertext: Buffer.from("artifact").toString("base64"),
+      },
+      storageManifest: [{
+        sourcePath: `${guest.run.user_id}/guest-recovery/${guest.run.recovery_id}/0-photo.enc`,
+        sha256: "c".repeat(64),
+        byteLength: 8,
+        encryption: {
+          algorithm: "aes-256-gcm" as const,
+          keyId: "guest-recovery-key-v1",
+          nonce: Buffer.alloc(12, 3).toString("base64"),
+          tag: Buffer.alloc(16, 4).toString("base64"),
+        },
+      }],
+    };
+    const recovery = {
+      prepare: vi.fn(async ({ stageUploadCleanup }) => {
+        await stageUploadCleanup(
+          registration.storageManifest.map(({ sourcePath }) => sourcePath),
+        );
+        return registration;
+      }),
+    };
+
+    await consumePipelineQueue({
+      queue,
+      runs,
+      processor: processor(),
+      guestRecovery: recovery,
+    });
+    (runs.acquire as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      kind: "terminal",
+      status: "succeeded",
+    });
+    await consumePipelineQueue({
+      queue,
+      runs,
+      processor: processor(),
+      guestRecovery: recovery,
+    });
+
+    expect(recovery.prepare).toHaveBeenCalledTimes(1);
+    expect(runs.stageGuestRecoveryUploadCleanup).toHaveBeenCalledWith({
+      runId: guest.run.id,
+      leaseToken: guest.run.lease_token,
+      paths: registration.storageManifest.map(({ sourcePath }) => sourcePath),
+    });
+    expect(runs.complete).toHaveBeenCalledTimes(1);
+    const stageCleanupMock = runs.stageGuestRecoveryUploadCleanup as unknown as ReturnType<typeof vi.fn>;
+    const completeMock = runs.complete as unknown as ReturnType<typeof vi.fn>;
+    expect(stageCleanupMock.mock.invocationCallOrder[0]).toBeLessThan(
+      completeMock.mock.invocationCallOrder[0]!,
+    );
+    expect(runs.complete).toHaveBeenCalledWith(expect.objectContaining({
+      guestRecoveryRegistration: registration,
+    }));
   });
 
   it("turns a transient error into a bounded retry and extends visibility without ack", async () => {

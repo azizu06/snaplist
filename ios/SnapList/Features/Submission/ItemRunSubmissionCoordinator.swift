@@ -772,6 +772,8 @@ final class ItemRunSubmissionCoordinator {
 
     private struct CapturedBearer {
         let token: String
+
+        var isGuest: Bool { token.hasPrefix("guestcap_") }
     }
 
     private enum BearerAcquisition {
@@ -810,6 +812,8 @@ final class ItemRunSubmissionCoordinator {
     private let attemptStore: any ItemRunSubmissionAttemptStoring
     private let draftStore: any CaptureDraftStoring
     private let tokenProvider: any BearerTokenProviding
+    private let guestRecoveryCredentials:
+        any GuestRecoveryCredentialStoring
     private let readData: @Sendable (URL) throws -> Data
     private let voiceLocaleHint: @Sendable () -> String?
     private let newIdempotencyKey: @Sendable () -> UUID
@@ -819,6 +823,9 @@ final class ItemRunSubmissionCoordinator {
         attemptStore: any ItemRunSubmissionAttemptStoring,
         draftStore: any CaptureDraftStoring,
         tokenProvider: any BearerTokenProviding,
+        guestRecoveryCredentials:
+            any GuestRecoveryCredentialStoring =
+                KeychainGuestRecoveryCredentialStore(),
         readData: @escaping @Sendable (URL) throws -> Data = {
             try Data(contentsOf: $0)
         },
@@ -831,6 +838,7 @@ final class ItemRunSubmissionCoordinator {
         self.attemptStore = attemptStore
         self.draftStore = draftStore
         self.tokenProvider = tokenProvider
+        self.guestRecoveryCredentials = guestRecoveryCredentials
         self.readData = readData
         self.voiceLocaleHint = voiceLocaleHint
         self.newIdempotencyKey = newIdempotencyKey
@@ -1010,23 +1018,61 @@ final class ItemRunSubmissionCoordinator {
             return .retained(.intakeUnavailable)
         }
         let attempt: ItemRunSubmissionAttempt
+        let storedAttemptMatches = storedAttempt?.standsFor(
+            snapshot,
+            voiceContext: intake.voiceContext
+        ) ?? false
         if let storedAttempt,
-           storedAttempt.standsFor(
-               snapshot,
-               voiceContext: intake.voiceContext
-           ) {
+           storedAttemptMatches,
+           (storedAttempt.guestRecoveryIdentity != nil)
+                != capturedBearer.isGuest {
+            // A response for this exact key may already have committed. Legacy
+            // guest attempts did not persist recovery identity, so inventing a
+            // new key here could create a second run and spend another credit.
+            return .retained(.attemptNotPersisted)
+        }
+        if let storedAttempt,
+           storedAttemptMatches {
+            if let identity = storedAttempt.guestRecoveryIdentity {
+                do {
+                    guard try await guestRecoveryCredentials.contains(identity)
+                    else {
+                        return .retained(.attemptNotPersisted)
+                    }
+                } catch {
+                    return .retained(.attemptNotPersisted)
+                }
+            }
             attempt = storedAttempt
         } else {
+            let guestRecoveryIdentity: GuestRecoverySubmissionIdentity?
+            if capturedBearer.isGuest {
+                do {
+                    guestRecoveryIdentity = try await guestRecoveryCredentials
+                        .mintCredential()
+                } catch {
+                    return .retained(.attemptNotPersisted)
+                }
+            } else {
+                guestRecoveryIdentity = nil
+            }
             attempt = ItemRunSubmissionAttempt(
                 idempotencyKey: newIdempotencyKey(),
                 photos: snapshot,
-                voiceContext: intake.voiceContext
+                voiceContext: intake.voiceContext,
+                guestRecoveryIdentity: guestRecoveryIdentity
             )
         }
         if attempt != storedAttempt {
             do {
                 try await context.attemptStore.saveAttempt(attempt)
             } catch {
+                if let identity = attempt.guestRecoveryIdentity,
+                   storedAttempt?.guestRecoveryIdentity != identity {
+                    try? await guestRecoveryCredentials.purge(
+                        recoveryID: identity.recoveryID
+                    )
+                }
                 return .retained(.attemptNotPersisted)
             }
         }
@@ -1208,6 +1254,25 @@ final class ItemRunSubmissionCoordinator {
             guard attempt.matchesPhotos(receipt: receipt) else {
                 return .retained(.receiptMismatch)
             }
+            if let recoveryIdentity = attempt.guestRecoveryIdentity {
+                guard let photoIdentity = attempt.verifiedGuestPhotoIdentity(
+                    receipt: receipt
+                ) else {
+                    return .retained(.receiptMismatch)
+                }
+                do {
+                    try await guestRecoveryCredentials.bind(
+                        recoveryIdentity,
+                        itemID: receipt.itemId,
+                        runID: receipt.runId,
+                        photoIdentity: photoIdentity
+                    )
+                } catch {
+                    // The server may already own the run. Keep the exact attempt
+                    // and replay it until its local claim authority is durable.
+                    return .retained(.attemptNotPersisted)
+                }
+            }
             let intakeCleanup: Submission.IntakeCleanup
             if !canClearSubmittedIntake {
                 intakeCleanup = .none
@@ -1244,7 +1309,16 @@ final class ItemRunSubmissionCoordinator {
         case .conflict:
             // This key is bound to other bytes and can never accept these, so retiring
             // it is the only way the seller's retained photos stay submittable.
-            try? await context.attemptStore.clearAttempt(attempt)
+            do {
+                try await context.attemptStore.clearAttempt(attempt)
+                if let identity = attempt.guestRecoveryIdentity {
+                    try? await guestRecoveryCredentials.purge(
+                        recoveryID: identity.recoveryID
+                    )
+                }
+            } catch {
+                return .retained(.attemptNotPersisted)
+            }
             return .retained(.conflict)
         case .rateLimited(let reason):
             return .retained(.rateLimited(reason: reason))

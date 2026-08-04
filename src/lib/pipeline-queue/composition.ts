@@ -4,6 +4,7 @@ import {
   type DownloadClient,
   type VisionPipelineStages,
 } from "@/lib/vision";
+import type { GuestRecoveryRegistrationProducer } from "@/lib/guest-recovery/producer";
 import { createDurableVisionPipelineProcessor } from "./durable-processor";
 import type { PipelineQueue } from "./queue";
 import type { PipelineWorkerStore } from "./worker-store";
@@ -16,6 +17,7 @@ export interface PipelineWorkerCapabilities {
   queue: PipelineQueue;
   runs: PipelineWorkerStore;
   photos: DownloadClient;
+  guestRecovery: GuestRecoveryRegistrationProducer;
 }
 
 export interface PipelineWorker {
@@ -51,6 +53,7 @@ export function createPipelineWorker(input: {
           queue: input.capabilities.queue,
           runs: input.capabilities.runs,
           processor,
+          guestRecovery: input.capabilities.guestRecovery,
         },
         input.consumerOptions,
       ),

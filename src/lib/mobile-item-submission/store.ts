@@ -14,9 +14,9 @@ import type {
 import { MAX_MOBILE_ITEM_VOICE_BYTES } from "./voice";
 
 type MobileItemSubmissionRpcName =
-  | "find_mobile_item_submission_v2"
-  | "begin_mobile_item_submission_v2"
-  | "commit_mobile_item_submission_v2"
+  | "find_mobile_item_submission_v3"
+  | "begin_mobile_item_submission_v3"
+  | "commit_mobile_item_submission_v3"
   | "resolve_pipeline_staging_cleanup_intent";
 
 interface RpcResult {
@@ -184,6 +184,20 @@ function legacyRequestFingerprint(value: string | null): string | null {
   return z.string().regex(/^[0-9a-f]{64}$/).nullable().parse(value);
 }
 
+function recoveryIdentityArgs(
+  identity: Parameters<MobileItemSubmissionStaging["findSubmission"]>[0]["guestRecoveryIdentity"],
+) {
+  if (identity == null) {
+    return { p_recovery_id: null, p_recovery_token_hash: null };
+  }
+  return {
+    p_recovery_id: z.string().uuid().parse(identity.recoveryId),
+    p_recovery_token_hash: z.string().regex(/^[0-9a-f]{64}$/).parse(
+      identity.recoveryTokenHash,
+    ),
+  };
+}
+
 function receiptFromRow(raw: unknown) {
   const row = submissionRowSchema.parse(raw);
   return mobileItemSubmissionReceiptSchema.parse({
@@ -221,12 +235,13 @@ export function createSupabaseMobileItemSubmissionStaging(
   const authority = options.authority ?? "service-role";
   return {
     async findSubmission(input) {
-      const result = await client.rpc("find_mobile_item_submission_v2", {
+      const result = await client.rpc("find_mobile_item_submission_v3", {
         p_idempotency_key: z.string().uuid().parse(input.idempotencyKey),
         p_legacy_request_fingerprint: legacyRequestFingerprint(
           input.legacyRequestFingerprint,
         ),
         p_request_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(input.requestFingerprint),
+        ...recoveryIdentityArgs(input.guestRecoveryIdentity),
         ...(authority === "service-role"
           ? { p_user_id: z.string().min(1).max(255).parse(input.userId) }
           : {}),
@@ -238,7 +253,7 @@ export function createSupabaseMobileItemSubmissionStaging(
     },
 
     async beginSubmission(input) {
-      const result = await client.rpc("begin_mobile_item_submission_v2", {
+      const result = await client.rpc("begin_mobile_item_submission_v3", {
         p_batch_id: z.string().uuid().parse(input.batchId),
         p_cleanup_id: z.string().uuid().parse(input.cleanupId),
         p_cost_basis: input.costBasis,
@@ -248,6 +263,7 @@ export function createSupabaseMobileItemSubmissionStaging(
         ),
         p_photo_receipts: toRpcPhotoReceipts(input.photoReceipts),
         p_request_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(input.requestFingerprint),
+        ...recoveryIdentityArgs(input.guestRecoveryIdentity),
         p_voice_receipt: toRpcVoiceReceipt(input.voiceReceipt),
         ...(authority === "service-role"
           ? { p_user_id: z.string().min(1).max(255).parse(input.userId) }
@@ -264,7 +280,7 @@ export function createSupabaseMobileItemSubmissionStaging(
     },
 
     async commitSubmission(input) {
-      const result = await client.rpc("commit_mobile_item_submission_v2", {
+      const result = await client.rpc("commit_mobile_item_submission_v3", {
         p_batch_id: input.batchId,
         p_cleanup_id: input.cleanupId,
         p_cost_basis: input.costBasis,
@@ -277,6 +293,7 @@ export function createSupabaseMobileItemSubmissionStaging(
         p_photo_identity: input.photoIdentity,
         p_photo_receipts: toRpcPhotoReceipts(input.photoReceipts),
         p_request_fingerprint: input.requestFingerprint,
+        ...recoveryIdentityArgs(input.guestRecoveryIdentity),
         p_voice_receipt: toRpcVoiceReceipt(input.voiceReceipt),
         ...(authority === "service-role" ? { p_user_id: input.userId } : {}),
       });

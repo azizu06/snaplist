@@ -50,11 +50,23 @@ export interface PreparedMobileSubmissionPhoto {
 
 export interface PreparedMobileItemSubmission {
   costBasis: number | null;
+  guestRecoveryIdentity: GuestRecoverySubmissionIdentity | null;
   legacyRequestFingerprint: string | null;
   photos: PreparedMobileSubmissionPhoto[];
   requestFingerprint: string;
   voice: PreparedMobileSubmissionVoice | null;
 }
+
+export const guestRecoverySubmissionIdentitySchema = z
+  .object({
+    recoveryId: z.string().uuid(),
+    recoveryTokenHash: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .strict();
+
+export type GuestRecoverySubmissionIdentity = z.infer<
+  typeof guestRecoverySubmissionIdentitySchema
+>;
 
 export const mobileSubmissionVoiceReceiptSchema = z
   .object({
@@ -118,6 +130,7 @@ export interface MobileItemSubmissionOperations {
     legacyRequestFingerprint: string | null;
     requestFingerprint: string;
     costBasis: number | null;
+    guestRecoveryIdentity: GuestRecoverySubmissionIdentity | null;
     photos: PreparedMobileSubmissionPhoto[];
     voice: PreparedMobileSubmissionVoice | null;
   }): Promise<{
@@ -227,12 +240,19 @@ function requestFingerprint(
   photos: readonly PreparedMobileSubmissionPhoto[],
   costBasis: number | null,
   voice: PreparedMobileSubmissionVoice | null,
+  guestRecoveryIdentity: GuestRecoverySubmissionIdentity | null,
 ): string {
   const hash = createHash("sha256");
-  hash.update("snaplist-mobile-item-submission-v2\0", "utf8");
+  hash.update(
+    guestRecoveryIdentity === null
+      ? "snaplist-mobile-item-submission-v2\0"
+      : "snaplist-mobile-item-submission-v3\0",
+    "utf8",
+  );
   hash.update(
     JSON.stringify({
       costBasisCents: costBasis == null ? null : Math.round(costBasis * 100),
+      ...(guestRecoveryIdentity === null ? {} : { guestRecoveryIdentity }),
       photoCount: photos.length,
       voice:
         voice === null
@@ -284,6 +304,8 @@ export async function prepareMobileItemSubmission(
     "costBasis",
     "voiceContext",
     "voiceContextLocale",
+    "recoveryId",
+    "recoveryTokenHash",
   ]);
   for (const key of formData.keys()) {
     if (!allowedFields.has(key)) {
@@ -304,6 +326,22 @@ export async function prepareMobileItemSubmission(
   if (formData.getAll("voiceContextLocale").length > 1) {
     throw new Error("Submit voice locale at most once.");
   }
+  if (
+    formData.getAll("recoveryId").length > 1
+    || formData.getAll("recoveryTokenHash").length > 1
+  ) {
+    throw new Error("Submit guest recovery identity at most once.");
+  }
+
+  const rawRecoveryId = formData.get("recoveryId");
+  const rawRecoveryTokenHash = formData.get("recoveryTokenHash");
+  const guestRecoveryIdentity =
+    rawRecoveryId === null && rawRecoveryTokenHash === null
+      ? null
+      : guestRecoverySubmissionIdentitySchema.parse({
+          recoveryId: rawRecoveryId,
+          recoveryTokenHash: rawRecoveryTokenHash,
+        });
 
   const costBasis = parseCostBasis(formData.get("costBasis"));
   const voice =
@@ -341,12 +379,18 @@ export async function prepareMobileItemSubmission(
 
   return {
     costBasis,
+    guestRecoveryIdentity,
     legacyRequestFingerprint:
-      voice === null
+      voice === null && guestRecoveryIdentity === null
         ? legacyPhotoOnlyRequestFingerprint(photos, costBasis)
         : null,
     photos,
-    requestFingerprint: requestFingerprint(photos, costBasis, voice),
+    requestFingerprint: requestFingerprint(
+      photos,
+      costBasis,
+      voice,
+      guestRecoveryIdentity,
+    ),
     voice,
   };
 }

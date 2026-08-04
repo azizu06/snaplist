@@ -43,6 +43,11 @@
 	<string>Your photos stay on this device until you choose to create a listing.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Voice notes are recorded and stored on this phone.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save your prepared listing photos when you choose Save photos.</string>
 	<key>SnapListAPIOrigin</key>

@@ -17,6 +17,10 @@ describe("DB-backed RLS Vitest suite selection", () => {
       content: 'import { stackReachable } from "@/test/supabase-stack";',
     },
     {
+      path: "src/lib/pipeline-queue/internal.guest-recovery.test.ts",
+      content: 'import { stackReachable } from "@/test/supabase-stack";',
+    },
+    {
       path: "src/test/fixtures/supabase-stack-unreachable.test.ts",
       content: 'import { stackReachable } from "@/test/supabase-stack";',
     },
@@ -29,6 +33,7 @@ describe("DB-backed RLS Vitest suite selection", () => {
   it("runs every RLS suite and every non-fixture shared-stack consumer", () => {
     expect(selectDbRlsSuites(files)).toEqual([
       "src/lib/billing/ledger.rls.test.ts",
+      "src/lib/pipeline-queue/internal.guest-recovery.test.ts",
       "src/lib/pipeline/persist.test.ts",
       "src/lib/supabase/rls.test.ts",
     ]);

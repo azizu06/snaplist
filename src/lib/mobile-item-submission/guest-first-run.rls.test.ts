@@ -83,6 +83,19 @@ function stableGuestPrincipal(assertion: VerifiedAssertion): string {
     .slice(0, 48)}`;
 }
 
+function guestMultipart(idempotencyKey: string): FormData {
+  const body = singlePhotoMultipart();
+  body.append("recoveryId", idempotencyKey);
+  body.append("recoveryTokenHash", guestRecoveryTokenHash(idempotencyKey));
+  return body;
+}
+
+function guestRecoveryTokenHash(idempotencyKey: string): string {
+  return createHash("sha256")
+    .update(`guest-recovery:${idempotencyKey}`)
+    .digest("hex");
+}
+
 function observedFetch(
   observed: ObservedGuestRequest[],
 ): typeof fetch {
@@ -584,7 +597,7 @@ describeVerifiedGuestFirstRun(
       requestId: () => crypto.randomUUID(),
     });
     const revokedBetweenResponse = await revokedBetweenHandler(
-      request(guestBearer, revokedBetweenKey, singlePhotoMultipart()),
+      request(guestBearer, revokedBetweenKey, guestMultipart(revokedBetweenKey)),
     );
     expect(revokedBetweenResponse.status).toBe(503);
     const revokedBetweenAuthority = await database.query<{
@@ -679,8 +692,8 @@ describeVerifiedGuestFirstRun(
     });
     const idempotencyKeys = [crypto.randomUUID(), crypto.randomUUID()];
     const voiceBytes = fixedWavBytes(541);
-    const voiceMultipart = () => {
-      const body = singlePhotoMultipart();
+    const voiceMultipart = (idempotencyKey: string) => {
+      const body = guestMultipart(idempotencyKey);
       body.append(
         "voiceContext",
         new File(
@@ -696,17 +709,17 @@ describeVerifiedGuestFirstRun(
     expect(guestBearer).not.toContain(guestId);
     const responses = await Promise.all(
       idempotencyKeys.map((key) =>
-        handler(request(guestBearer, key, voiceMultipart())),
+        handler(request(guestBearer, key, voiceMultipart(key))),
       ),
     );
     expect(
       observedRequests.filter((entry) =>
-        entry.path.endsWith("/rpc/find_mobile_item_submission_v2"),
+        entry.path.endsWith("/rpc/find_mobile_item_submission_v3"),
       ),
     ).toHaveLength(2);
     expect(
       observedRequests.filter((entry) =>
-        entry.path.endsWith("/rpc/begin_mobile_item_submission_v2"),
+        entry.path.endsWith("/rpc/begin_mobile_item_submission_v3"),
       ),
     ).toHaveLength(2);
     const storageRequests = observedRequests.filter((entry) =>
@@ -725,7 +738,7 @@ describeVerifiedGuestFirstRun(
     ]);
     expect(
       observedRequests.filter((entry) =>
-        entry.path.endsWith("/rpc/commit_mobile_item_submission_v2"),
+        entry.path.endsWith("/rpc/commit_mobile_item_submission_v3"),
       ),
     ).toHaveLength(2);
     expect(observedRequests.filter((entry) =>
@@ -761,7 +774,7 @@ describeVerifiedGuestFirstRun(
       request(
         guestBearer,
         idempotencyKeys[winnerIndex]!,
-        voiceMultipart(),
+        voiceMultipart(idempotencyKeys[winnerIndex]!),
       ),
     );
     expect(replay.status).toBe(200);
@@ -774,13 +787,13 @@ describeVerifiedGuestFirstRun(
     });
     expect(
       observedRequests.filter((entry) =>
-        entry.path.endsWith("/rpc/find_mobile_item_submission_v2"),
+        entry.path.endsWith("/rpc/find_mobile_item_submission_v3"),
       ),
     ).toHaveLength(3);
     expect(
       observedRequests.slice(requestsBeforeReplay).map((entry) => entry.path),
     ).toEqual([
-      expect.stringMatching(/\/rpc\/find_mobile_item_submission_v2$/),
+      expect.stringMatching(/\/rpc\/find_mobile_item_submission_v3$/),
     ]);
     expect(
       observedRequests.filter((entry) =>
@@ -892,7 +905,7 @@ describeVerifiedGuestFirstRun(
       requestId: () => crypto.randomUUID(),
     });
     const failedCleanupResponse = await failedCleanupHandler(
-      request(guestBearer, failedCleanupKey, singlePhotoMultipart()),
+      request(guestBearer, failedCleanupKey, guestMultipart(failedCleanupKey)),
     );
     expect(failedCleanupResponse.status).toBe(403);
     const deniedAuthority = await database.query<{
@@ -950,13 +963,17 @@ describeVerifiedGuestFirstRun(
     });
     expect(claimedJob.photoPaths).toEqual(denied.intent_paths);
 
-    const replayBegin = await tenant.rpc("begin_mobile_item_submission", {
+    const replayBegin = await tenant.rpc("begin_mobile_item_submission_v3", {
       p_batch_id: denied.batch_id,
       p_cleanup_id: denied.cleanup_id,
       p_cost_basis: denied.cost_basis,
       p_idempotency_key: denied.idempotency_key,
+      p_legacy_request_fingerprint: null,
       p_photo_receipts: denied.photo_receipts,
       p_request_fingerprint: denied.request_fingerprint,
+      p_recovery_id: denied.idempotency_key,
+      p_recovery_token_hash: guestRecoveryTokenHash(denied.idempotency_key),
+      p_voice_receipt: null,
     });
     expect(replayBegin.error).toBeNull();
     expect(replayBegin.data).toBe(false);
@@ -1011,13 +1028,14 @@ describeVerifiedGuestFirstRun(
       )
       .digest("hex");
     const deniedRetryCommit = await tenant.rpc(
-      "commit_mobile_item_submission",
+      "commit_mobile_item_submission_v3",
       {
         p_batch_id: denied.batch_id,
         p_cleanup_id: denied.cleanup_id,
         p_cost_basis: denied.cost_basis,
         p_daily_limit: 20,
         p_idempotency_key: denied.idempotency_key,
+        p_legacy_request_fingerprint: null,
         p_per_minute_limit: 20,
         p_photo_identity: {
           fingerprint: retryFingerprint,
@@ -1025,6 +1043,9 @@ describeVerifiedGuestFirstRun(
         },
         p_photo_receipts: denied.photo_receipts,
         p_request_fingerprint: denied.request_fingerprint,
+        p_recovery_id: denied.idempotency_key,
+        p_recovery_token_hash: guestRecoveryTokenHash(denied.idempotency_key),
+        p_voice_receipt: null,
       },
     );
     expect(deniedRetryCommit.error).toBeNull();

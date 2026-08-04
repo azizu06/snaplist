@@ -33,6 +33,7 @@ describe("provider-neutral pipeline worker composition", () => {
         },
         runs: {} as PipelineWorkerStore,
         photos: {} as never,
+        guestRecovery: { prepare: vi.fn() },
       },
       createStages: () => unusedStages(),
       consumerOptions: { batchSize: 2, visibilityTimeoutSeconds: 120 },

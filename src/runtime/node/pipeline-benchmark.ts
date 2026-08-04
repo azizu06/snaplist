@@ -184,11 +184,15 @@ export async function runOfflinePipelineBenchmark(input: {
                 lease_token: LEASE_TOKEN,
                 lease_expires_at: "2026-07-16T20:05:00.000Z",
                 next_attempt_at: null,
+                recovery_id: null,
+                recovery_token_hash: null,
               },
               item: {
                 id: ITEM_ID,
                 user_id: "benchmark_user",
                 photos: photoPaths,
+                photo_identity_kind: "content_sha256_set_v1",
+                photo_identity_fingerprint: "a".repeat(64),
                 attributes: {},
                 condition: null,
                 cost_basis: null,
@@ -209,7 +213,7 @@ export async function runOfflinePipelineBenchmark(input: {
           error: null,
         };
       }
-      if (functionName === "complete_pipeline_run") {
+      if (functionName === "complete_pipeline_run_with_guest_recovery") {
         counters.completedRuns += 1;
         return { data: { listingId: LISTING_ID }, error: null };
       }
@@ -236,6 +240,7 @@ export async function runOfflinePipelineBenchmark(input: {
       queue: createSupabasePgmqPipelineQueue(queueRpc),
       runs: createSupabasePipelineWorkerStore(workerRpc),
       photos,
+      guestRecovery: { prepare: async () => null },
     },
     createStages: ({ supabase }) =>
       createVisionPipelineStages({

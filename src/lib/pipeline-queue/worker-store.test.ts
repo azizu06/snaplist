@@ -85,6 +85,8 @@ describe("run-scoped pipeline worker store", () => {
         lease_token: LEASE_TOKEN,
         lease_expires_at: "2026-07-15T04:10:00.000Z",
         next_attempt_at: null,
+        recovery_id: null,
+        recovery_token_hash: null,
       },
       item: {
         id: ITEM_ID,
@@ -93,6 +95,8 @@ describe("run-scoped pipeline worker store", () => {
           { length: 5 },
           (_, ordinal) => `user_a/photo-${ordinal}.jpg`,
         ),
+        photo_identity_kind: "legacy_path_v0",
+        photo_identity_fingerprint: "a".repeat(64),
         attributes: {},
         condition: null,
         cost_basis: null,
@@ -136,7 +140,7 @@ describe("run-scoped pipeline worker store", () => {
     };
     const client = rpcClient({
       checkpoint_pipeline_run: persistedCheckpoint,
-      complete_pipeline_run: { listingId: LISTING_ID },
+      complete_pipeline_run_with_guest_recovery: { listingId: LISTING_ID },
     });
     const store = createSupabasePipelineWorkerStore(client);
 
@@ -159,7 +163,7 @@ describe("run-scoped pipeline worker store", () => {
     ).resolves.toEqual({ listingId: LISTING_ID });
 
     const completion = client.rpc.mock.calls.find(
-      ([name]) => name === "complete_pipeline_run",
+      ([name]) => name === "complete_pipeline_run_with_guest_recovery",
     )?.[1] as Record<string, unknown>;
     expect(client.rpc).toHaveBeenCalledWith("checkpoint_pipeline_run", {
       p_checkpoint: checkpoint,
@@ -197,6 +201,30 @@ describe("run-scoped pipeline worker store", () => {
     };
     expect(persistence.pricing_snapshot.price_result).not.toHaveProperty("evidence");
     expect(persistence.pricing_snapshot.evidence.map(({ id }) => id)).toEqual(["sold-1"]);
+  });
+
+  it("stages bounded orphan cleanup through the acquired run and lease", async () => {
+    const client = rpcClient({
+      stage_guest_recovery_upload_cleanup: true,
+    });
+    const store = createSupabasePipelineWorkerStore(client);
+    const paths = [
+      "guest_0123456789abcdef0123456789abcdef0123456789abcdef/guest-recovery/63800000-0000-4000-8000-000000000003/0-front.enc",
+    ];
+
+    await expect(store.stageGuestRecoveryUploadCleanup({
+      runId: RUN_ID,
+      leaseToken: LEASE_TOKEN,
+      paths,
+    })).resolves.toBeUndefined();
+    expect(client.rpc).toHaveBeenCalledWith(
+      "stage_guest_recovery_upload_cleanup",
+      {
+        p_lease_token: LEASE_TOKEN,
+        p_photo_paths: paths,
+        p_run_id: RUN_ID,
+      },
+    );
   });
 
   it("never sends a PostgreSQL-unsafe checkpoint string to the RPC", async () => {

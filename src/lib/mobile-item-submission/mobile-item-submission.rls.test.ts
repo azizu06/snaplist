@@ -158,14 +158,18 @@ async function beginExactReplay(
   submission: ExpiredUploadingSubmission,
 ): Promise<boolean> {
   const result = await client.query<{ began: boolean }>(
-    `select public.begin_mobile_item_submission(
-       $1,
+    `select public.begin_mobile_item_submission_v3(
+       $1::text,
        $2::uuid,
-       $3,
+       $3::text,
+       null::text,
        $4::uuid,
        $5::uuid,
        $6::numeric,
-       $7::jsonb
+       $7::jsonb,
+       null::jsonb,
+       null::uuid,
+       null::text
      ) as began`,
     [
       userId,
@@ -764,14 +768,18 @@ describe("authenticated mobile item submission against local Supabase", () => {
         await replay.query<{ pid: number }>("select pg_backend_pid() as pid")
       ).rows[0]!.pid;
       const resumed = await replay.query<{ began: boolean }>(
-        `select public.begin_mobile_item_submission(
-           $1,
+        `select public.begin_mobile_item_submission_v3(
+           $1::text,
            $2::uuid,
-           $3,
+           $3::text,
+           null::text,
            $4::uuid,
            $5::uuid,
            $6::numeric,
-           $7::jsonb
+           $7::jsonb,
+           null::jsonb,
+           null::uuid,
+           null::text
          ) as began`,
         [
           recoveryId,
@@ -999,7 +1007,7 @@ describe("authenticated mobile item submission against local Supabase", () => {
     }
   });
 
-  it("replays one committed photo-only v1 binding through the current v2 public handler", async () => {
+  it("replays one committed photo-only legacy binding through the current v3 public handler", async () => {
     const key = crypto.randomUUID();
     const prepared = await prepareMobileItemSubmission(multipart());
     expect(prepared.voice).toBeNull();
@@ -1020,14 +1028,18 @@ describe("authenticated mobile item submission against local Supabase", () => {
       byte_length: photo.byteLength,
       media_type: photo.mediaType,
     }));
-    const began = await admin.rpc("begin_mobile_item_submission", {
+    const began = await admin.rpc("begin_mobile_item_submission_v3", {
       p_user_id: legacyReplayId,
       p_idempotency_key: key,
       p_request_fingerprint: prepared.legacyRequestFingerprint!,
+      p_legacy_request_fingerprint: null,
       p_batch_id: key,
       p_cleanup_id: cleanupId,
       p_cost_basis: prepared.costBasis,
       p_photo_receipts: photoReceipts,
+      p_voice_receipt: null,
+      p_recovery_id: null,
+      p_recovery_token_hash: null,
     });
     expect(began).toMatchObject({ data: true, error: null });
 
@@ -1051,10 +1063,11 @@ describe("authenticated mobile item submission against local Supabase", () => {
       prepared.photos.map((photo) => photo.contentSha256),
     );
     const commitThenLoseResponse = async (): Promise<never> => {
-      const committed = await admin.rpc("commit_mobile_item_submission", {
+      const committed = await admin.rpc("commit_mobile_item_submission_v3", {
         p_user_id: legacyReplayId,
         p_idempotency_key: key,
         p_request_fingerprint: prepared.legacyRequestFingerprint!,
+        p_legacy_request_fingerprint: null,
         p_batch_id: key,
         p_cleanup_id: cleanupId,
         p_cost_basis: prepared.costBasis,
@@ -1062,6 +1075,9 @@ describe("authenticated mobile item submission against local Supabase", () => {
         p_per_minute_limit: 20,
         p_photo_identity: photoIdentity,
         p_photo_receipts: photoReceipts,
+        p_voice_receipt: null,
+        p_recovery_id: null,
+        p_recovery_token_hash: null,
       });
       if (committed.error) throw committed.error;
       throw new Error("response lost after durable v1 commit");
@@ -1343,10 +1359,12 @@ describe("authenticated mobile item submission against local Supabase", () => {
     ]);
     expect(foreignItems.data).toEqual([]);
     expect(foreignRuns.data).toEqual([]);
-    const foreignReplay = await foreign.rpc("find_mobile_item_submission_v2", {
+    const foreignReplay = await foreign.rpc("find_mobile_item_submission_v3", {
       p_idempotency_key: key,
       p_legacy_request_fingerprint: null,
       p_request_fingerprint: durable.rows[0]!.request_fingerprint,
+      p_recovery_id: null,
+      p_recovery_token_hash: null,
     });
     expect(foreignReplay.data).toBeNull();
     expect(foreignReplay.error).toMatchObject({

@@ -3,6 +3,7 @@ import {
   encryptedGuestRecoveryArtifactSchema,
   guestRecoveryObjectEncryptionSchema,
   guestRecoveryTerminalOutcomeSchema,
+  MAX_GUEST_RECOVERY_PHOTO_ENVELOPE_BYTES,
   MAX_GUEST_RECOVERY_PHOTOS,
 } from "./service";
 
@@ -23,7 +24,11 @@ export const guestRecoveryStorageManifestSchema = z
           .max(1_024)
           .refine((value) => !value.includes("://") && !/[?#]/.test(value)),
         sha256: sha256Schema,
-        byteLength: z.number().int().positive().max(50 * 1_024 * 1_024),
+        byteLength: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_GUEST_RECOVERY_PHOTO_ENVELOPE_BYTES),
         encryption: guestRecoveryObjectEncryptionSchema,
       })
       .strict(),
@@ -120,7 +125,7 @@ const identitySchema = z.object({
   recoveryTokenHash: sha256Schema,
 });
 
-const recoveryRegistrationSchema = identitySchema
+export const recoveryRegistrationSchema = identitySchema
   .extend({
     pipelineRunId: z.string().uuid(),
     encryptedArtifact: encryptedGuestRecoveryArtifactSchema,

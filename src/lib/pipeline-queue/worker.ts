@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { GuestRecoveryRegistrationProducer } from "@/lib/guest-recovery/producer";
 import type { PipelineResult } from "@/lib/pipeline";
 import { PIPELINE_OPERATIONS_POLICY } from "@/lib/pipeline-operations/policy";
 import { pipelineQueueEnvelopeSchema } from "./envelope";
@@ -94,6 +95,7 @@ export async function consumePipelineQueue(
     queue: PipelineQueue;
     runs: PipelineWorkerStore;
     processor: DurablePipelineProcessor;
+    guestRecovery?: GuestRecoveryRegistrationProducer;
   },
   options: Partial<z.input<typeof optionsSchema>> = {},
 ): Promise<PipelineConsumerSummary> {
@@ -166,11 +168,25 @@ export async function consumePipelineQueue(
           return persisted;
         },
       });
+      const guestRecoveryRegistration = dependencies.guestRecovery
+        ? await dependencies.guestRecovery.prepare({
+            context,
+            result,
+            stageUploadCleanup: async (paths) => {
+              await dependencies.runs.stageGuestRecoveryUploadCleanup({
+                runId: context.run.id,
+                leaseToken: context.run.lease_token,
+                paths,
+              });
+            },
+          })
+        : null;
       await dependencies.runs.complete({
         runId: context.run.id,
         leaseToken: context.run.lease_token,
         result,
         autopilotEnabled: context.run.autopilot_enabled,
+        guestRecoveryRegistration,
       });
       completed = true;
     } catch (error) {

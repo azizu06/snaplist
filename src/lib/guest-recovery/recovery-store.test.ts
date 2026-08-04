@@ -41,6 +41,19 @@ describe("guest encrypted recovery fixed-RPC store", () => {
     expect(guestRecoveryStorageManifestSchema.parse(manifest)).toEqual(manifest);
   });
 
+  it("accepts a 50 MiB photo plus its 37-byte encryption envelope", () => {
+    const boundaryObject = {
+      ...storageManifest[0],
+      byteLength: 50 * 1_024 * 1_024 + 37,
+    };
+
+    expect(guestRecoveryStorageManifestSchema.safeParse([boundaryObject]).success).toBe(true);
+    expect(guestRecoveryStorageManifestSchema.safeParse([{
+      ...boundaryObject,
+      byteLength: boundaryObject.byteLength + 1,
+    }]).success).toBe(false);
+  });
+
   it("rejects an unlabeled Storage object as recoverable ciphertext", () => {
     expect(guestRecoveryStorageManifestSchema.safeParse([{
       sourcePath: "guest_fixture/item/front.enc",

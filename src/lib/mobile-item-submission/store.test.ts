@@ -25,11 +25,17 @@ describe("fixed mobile item submission RPC capability", () => {
       idempotencyKey: "33220000-0000-4000-8000-000000000001",
       legacyRequestFingerprint: "d".repeat(64),
       requestFingerprint: "c".repeat(64),
+      guestRecoveryIdentity: {
+        recoveryId: "33220000-0000-4000-8000-000000000005",
+        recoveryTokenHash: "e".repeat(64),
+      },
     })).resolves.toBeNull();
 
-    expect(rpc).toHaveBeenCalledWith("find_mobile_item_submission_v2", {
+    expect(rpc).toHaveBeenCalledWith("find_mobile_item_submission_v3", {
       p_idempotency_key: "33220000-0000-4000-8000-000000000001",
       p_legacy_request_fingerprint: "d".repeat(64),
+      p_recovery_id: "33220000-0000-4000-8000-000000000005",
+      p_recovery_token_hash: "e".repeat(64),
       p_request_fingerprint: "c".repeat(64),
     });
   });
@@ -49,6 +55,10 @@ describe("fixed mobile item submission RPC capability", () => {
       batchId: "33220000-0000-4000-8000-000000000001",
       cleanupId: "33220000-0000-4000-8000-000000000004",
       costBasis: 12.34,
+      guestRecoveryIdentity: {
+        recoveryId: "33220000-0000-4000-8000-000000000005",
+        recoveryTokenHash: "e".repeat(64),
+      },
       photoReceipts: [{
         ...photoReceipts[0],
         storagePath:
@@ -57,7 +67,7 @@ describe("fixed mobile item submission RPC capability", () => {
       voiceReceipt: null,
     });
 
-    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission_v2", {
+    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission_v3", {
       p_batch_id: "33220000-0000-4000-8000-000000000001",
       p_cleanup_id: "33220000-0000-4000-8000-000000000004",
       p_cost_basis: 12.34,
@@ -71,6 +81,8 @@ describe("fixed mobile item submission RPC capability", () => {
         byte_length: 6,
         media_type: "image/jpeg",
       }],
+      p_recovery_id: "33220000-0000-4000-8000-000000000005",
+      p_recovery_token_hash: "e".repeat(64),
       p_request_fingerprint: "c".repeat(64),
       p_voice_receipt: null,
     });
@@ -111,6 +123,10 @@ describe("fixed mobile item submission RPC capability", () => {
       costBasis: 12.34,
       dailyLimit: 15,
       perMinuteLimit: 20,
+      guestRecoveryIdentity: {
+        recoveryId: "33220000-0000-4000-8000-000000000005",
+        recoveryTokenHash: "e".repeat(64),
+      },
       photoIdentity: {
         kind: "content_sha256_set_v1",
         fingerprint: "b".repeat(64),
@@ -123,7 +139,7 @@ describe("fixed mobile item submission RPC capability", () => {
       voiceReceipt: null,
     });
 
-    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission_v2", {
+    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission_v3", {
       p_batch_id: "33220000-0000-4000-8000-000000000001",
       p_cleanup_id: "33220000-0000-4000-8000-000000000004",
       p_cost_basis: 12.34,
@@ -143,6 +159,8 @@ describe("fixed mobile item submission RPC capability", () => {
         byte_length: 6,
         media_type: "image/jpeg",
       }],
+      p_recovery_id: "33220000-0000-4000-8000-000000000005",
+      p_recovery_token_hash: "e".repeat(64),
       p_request_fingerprint: "c".repeat(64),
       p_voice_receipt: null,
     });
@@ -288,7 +306,7 @@ describe("fixed mobile item submission RPC capability", () => {
       voiceReceipt: null,
     });
 
-    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission_v2", {
+    expect(rpc).toHaveBeenCalledWith("begin_mobile_item_submission_v3", {
       p_batch_id: "33420000-0000-4000-8000-000000000001",
       p_cleanup_id: "33420000-0000-4000-8000-000000000004",
       p_cost_basis: 12.34,
@@ -302,6 +320,8 @@ describe("fixed mobile item submission RPC capability", () => {
         media_type: "image/jpeg",
       }],
       p_request_fingerprint: "c".repeat(64),
+      p_recovery_id: null,
+      p_recovery_token_hash: null,
       p_user_id: "user_334",
       p_voice_receipt: null,
     });
@@ -357,7 +377,7 @@ describe("fixed mobile item submission RPC capability", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain("storagePath");
-    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission_v2", {
+    expect(rpc).toHaveBeenCalledWith("commit_mobile_item_submission_v3", {
       p_batch_id: "33420000-0000-4000-8000-000000000001",
       p_cleanup_id: "33420000-0000-4000-8000-000000000004",
       p_cost_basis: 12.34,
@@ -379,6 +399,8 @@ describe("fixed mobile item submission RPC capability", () => {
         },
       ],
       p_request_fingerprint: "c".repeat(64),
+      p_recovery_id: null,
+      p_recovery_token_hash: null,
       p_user_id: "user_334",
       p_voice_receipt: null,
     });
@@ -451,7 +473,7 @@ describe("fixed mobile item submission RPC capability", () => {
     });
     expect(JSON.stringify(result.receipt)).not.toMatch(/storage|locale/i);
     expect(rpc).toHaveBeenCalledWith(
-      "commit_mobile_item_submission_v2",
+      "commit_mobile_item_submission_v3",
       expect.objectContaining({
         p_voice_receipt: {
           version: 1,

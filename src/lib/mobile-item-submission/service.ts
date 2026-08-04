@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
 import {
   mobileItemSubmissionReceiptSchema,
+  type GuestRecoverySubmissionIdentity,
   type MobileItemSubmissionOperations,
   type MobileItemSubmissionReceipt,
   type MobileSubmissionMediaType,
@@ -37,6 +38,7 @@ export interface MobileItemSubmissionStaging {
     idempotencyKey: string;
     legacyRequestFingerprint: string | null;
     requestFingerprint: string;
+    guestRecoveryIdentity?: GuestRecoverySubmissionIdentity | null;
   }): Promise<MobileItemSubmissionReceipt | null>;
   beginSubmission(input: {
     cleanupId: string;
@@ -46,6 +48,7 @@ export interface MobileItemSubmissionStaging {
     requestFingerprint: string;
     batchId: string;
     costBasis: number | null;
+    guestRecoveryIdentity?: GuestRecoverySubmissionIdentity | null;
     photoReceipts: StoredMobileSubmissionPhotoReceipt[];
     voiceReceipt: StoredMobileSubmissionVoiceReceipt | null;
   }): Promise<boolean | void>;
@@ -60,6 +63,7 @@ export interface MobileItemSubmissionStaging {
     costBasis: number | null;
     dailyLimit: number;
     perMinuteLimit: number;
+    guestRecoveryIdentity?: GuestRecoverySubmissionIdentity | null;
     photoIdentity: {
       kind: "content_sha256_set_v1";
       fingerprint: string;
@@ -196,6 +200,12 @@ export function createMobileItemSubmissionOperations(
       if (!/^[A-Za-z0-9_-]{1,255}$/.test(input.principal.userId)) {
         throw new Error("The resolved submission principal is invalid.");
       }
+      if (
+        (input.principal.kind === "verifiedGuest" && input.guestRecoveryIdentity === null)
+        || (input.principal.kind === "clerk" && input.guestRecoveryIdentity !== null)
+      ) {
+        throw new Error("Guest recovery identity does not match the submission principal.");
+      }
 
       const staging = composition.stagingFor?.(input.principal) ?? composition.staging;
       const replay = await staging.findSubmission({
@@ -203,6 +213,7 @@ export function createMobileItemSubmissionOperations(
         idempotencyKey: input.idempotencyKey,
         legacyRequestFingerprint: input.legacyRequestFingerprint,
         requestFingerprint: input.requestFingerprint,
+        guestRecoveryIdentity: input.guestRecoveryIdentity,
       });
       if (replay) {
         return {
@@ -235,6 +246,7 @@ export function createMobileItemSubmissionOperations(
         requestFingerprint: input.requestFingerprint,
         batchId,
         costBasis: input.costBasis,
+        guestRecoveryIdentity: input.guestRecoveryIdentity,
         photoReceipts,
         voiceReceipt,
       });
@@ -260,6 +272,7 @@ export function createMobileItemSubmissionOperations(
         costBasis: input.costBasis,
         dailyLimit: composition.limits.dailyLimit,
         perMinuteLimit: composition.limits.perMinuteLimit,
+        guestRecoveryIdentity: input.guestRecoveryIdentity,
         photoIdentity,
         photoReceipts,
         voiceReceipt,

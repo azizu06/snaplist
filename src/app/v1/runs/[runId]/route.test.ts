@@ -212,6 +212,10 @@ describe("production mobile durable-run route composition", () => {
       bearerToken: "guestcap_abcdefghijklmnopqrstuvwxyzABCDEFGH123456789",
       mintOperationToken,
     });
+    expect(createConfiguredSupabaseListingReviewReader).toHaveBeenCalledWith({
+      publishableKey: "sb_publishable_release",
+      supabaseURL: "https://project.supabase.co",
+    });
   });
 
   it("dispatches the production retry route through the same authenticated adapter", async () => {

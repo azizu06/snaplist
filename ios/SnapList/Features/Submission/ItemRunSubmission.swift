@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// The image types `POST /v1/items/runs` accepts. The server sniffs the bytes and
@@ -89,22 +90,27 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
     /// Bumped when the persisted shape changes. A record written by another version is
     /// recognisably stale rather than corrupt, so it can be discarded instead of
     /// blocking the seller.
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     let idempotencyKey: UUID
     let photos: [ItemRunSubmissionPhoto]
     let voiceContext: ItemRunSubmissionVoice?
+    /// Hash-only server identity. The corresponding raw token lives only in
+    /// Keychain and is never encoded with the durable submission attempt.
+    let guestRecoveryIdentity: GuestRecoverySubmissionIdentity?
     var schemaVersion = ItemRunSubmissionAttempt.currentSchemaVersion
 
     init(
         idempotencyKey: UUID,
         photos: [ItemRunSubmissionPhoto],
         voiceContext: ItemRunSubmissionVoice? = nil,
+        guestRecoveryIdentity: GuestRecoverySubmissionIdentity? = nil,
         schemaVersion: Int = ItemRunSubmissionAttempt.currentSchemaVersion
     ) {
         self.idempotencyKey = idempotencyKey
         self.photos = photos
         self.voiceContext = voiceContext
+        self.guestRecoveryIdentity = guestRecoveryIdentity
         self.schemaVersion = schemaVersion
     }
 
@@ -170,6 +176,29 @@ struct ItemRunSubmissionAttempt: Codable, Equatable, Sendable {
                 && received.byteLength == submitted.byteLength
                 && received.mediaType == submitted.mediaType.rawValue
         }
+    }
+
+    func verifiedGuestPhotoIdentity(
+        receipt: MobileItemSubmissionEnvelope.DataPayload
+    ) -> GuestPhotoIdentity? {
+        guard receipt.photoIdentity.kind == "content_sha256_set_v1" else {
+            return nil
+        }
+        let canonical = photos
+            .map(\.contentSha256)
+            .map { $0.lowercased() }
+            .sorted()
+            .joined(separator: "\n")
+        let fingerprint = SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        guard fingerprint == receipt.photoIdentity.fingerprint else {
+            return nil
+        }
+        return GuestPhotoIdentity(
+            kind: receipt.photoIdentity.kind,
+            fingerprint: fingerprint
+        )
     }
 
     /// Whole-bundle deletion is safe only when the nullable voice receipt accounts

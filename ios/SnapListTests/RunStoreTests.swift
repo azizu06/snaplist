@@ -99,6 +99,154 @@ final class RunStoreTests: XCTestCase {
         XCTAssertEqual(requests.map(\.runID), [first.id, second.id])
     }
 
+    func testReadyGuestRunPersistsLocallyAssembledClaimAuthority()
+        async throws {
+        let review = try Self.makeReview()
+        let run = Self.makeRun(
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            listingID: review.binding.listingID,
+            review: review
+        )
+        let credential = GuestRecoveryCredential(
+            recoveryID: UUID(
+                uuidString: "63860000-0000-4000-8000-000000000001"
+            )!,
+            recoveryToken: "raw-token-only-in-keychain",
+            recoveryTokenHash: String(repeating: "a", count: 64),
+            itemID: review.binding.itemID,
+            runID: review.binding.runID,
+            photoIdentity: GuestPhotoIdentity(
+                kind: "content_sha256_set_v1",
+                fingerprint: String(repeating: "b", count: 64)
+            )
+        )
+        let credentials = RunStoreGuestRecoveryCredentials(
+            credential: credential
+        )
+        let authorities = RunStoreGuestClaimAuthorities()
+        let store = RunDetailStore(
+            service: RecordingRunService(results: [.success(run)]),
+            tokenProvider: RunStoreBearerTokenProvider { "guestcap_token" },
+            guestRecoveryCredentials: credentials,
+            guestClaimAuthorities: authorities
+        )
+
+        await store.load(runID: run.id)
+
+        XCTAssertEqual(store.state, .loaded(run))
+        let saved = await authorities.savedAuthority(
+            listingID: review.binding.listingID
+        )
+        XCTAssertEqual(
+            saved,
+            GuestClaimAuthority(
+                recoveryID: credential.recoveryID,
+                recoveryToken: credential.recoveryToken,
+                itemID: review.binding.itemID,
+                runID: review.binding.runID,
+                draftID: review.binding.listingID,
+                reviewRevision: review.binding.reviewRevision,
+                photoIdentity: credential.photoIdentity!
+            )
+        )
+        let recordedExpiry = await credentials.recordedExpiry(
+            recoveryID: credential.recoveryID
+        )
+        XCTAssertEqual(
+            recordedExpiry,
+            ISO8601DateFormatter.snapListDate(
+                from: run.timestamps.completedAt!
+            )!.addingTimeInterval(24 * 60 * 60)
+        )
+    }
+
+    func testClaimedRunLoadedWithClerkPurgesAndCannotRecreateAuthority()
+        async throws {
+        let review = try Self.makeReview()
+        let run = Self.makeRun(
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            listingID: review.binding.listingID,
+            review: review
+        )
+        let credential = GuestRecoveryCredential(
+            recoveryID: UUID(
+                uuidString: "63860000-0000-4000-8000-000000000011"
+            )!,
+            recoveryToken: "raw-token-only-in-keychain",
+            recoveryTokenHash: String(repeating: "d", count: 64),
+            itemID: review.binding.itemID,
+            runID: review.binding.runID,
+            photoIdentity: GuestPhotoIdentity(
+                kind: "content_sha256_set_v1",
+                fingerprint: String(repeating: "e", count: 64)
+            )
+        )
+        let credentials = RunStoreGuestRecoveryCredentials(
+            credential: credential
+        )
+        let authorities = RunStoreGuestClaimAuthorities()
+        let store = RunDetailStore(
+            service: RecordingRunService(results: [.success(run)]),
+            tokenProvider: RunStoreBearerTokenProvider { "clerk-session-token" },
+            guestRecoveryCredentials: credentials,
+            guestClaimAuthorities: authorities
+        )
+
+        await store.load(runID: run.id)
+
+        XCTAssertEqual(store.state, .loaded(run))
+        let saved = await authorities.savedAuthority(
+            listingID: review.binding.listingID
+        )
+        let purgedCredentials = await credentials.purgedRecoveryIDs()
+        let purgedAuthorities = await authorities.purgedRecoveryIDs()
+        XCTAssertNil(saved)
+        XCTAssertEqual(purgedCredentials, [credential.recoveryID])
+        XCTAssertEqual(purgedAuthorities, [credential.recoveryID])
+    }
+
+    func testTerminalGuestFailurePurgesUnusedRecoveryAuthority()
+        async throws {
+        let run = Self.makeRun(status: .failed, stage: .completed)
+        let credential = GuestRecoveryCredential(
+            recoveryID: UUID(
+                uuidString: "63860000-0000-4000-8000-000000000012"
+            )!,
+            recoveryToken: "raw-token-only-in-keychain",
+            recoveryTokenHash: String(repeating: "d", count: 64),
+            itemID: run.itemID,
+            runID: run.id,
+            photoIdentity: GuestPhotoIdentity(
+                kind: "content_sha256_set_v1",
+                fingerprint: String(repeating: "e", count: 64)
+            )
+        )
+        let credentials = RunStoreGuestRecoveryCredentials(
+            credential: credential
+        )
+        let authorities = RunStoreGuestClaimAuthorities()
+        let store = RunDetailStore(
+            service: RecordingRunService(results: [.success(run)]),
+            tokenProvider: RunStoreBearerTokenProvider {
+                "guestcap_\(String(repeating: "A", count: 43))"
+            },
+            guestRecoveryCredentials: credentials,
+            guestClaimAuthorities: authorities
+        )
+
+        await store.load(runID: run.id)
+
+        XCTAssertEqual(store.state, .loaded(run))
+        let purgedCredentials = await credentials.purgedRecoveryIDs()
+        let purgedAuthorities = await authorities.purgedRecoveryIDs()
+        XCTAssertEqual(purgedCredentials, [credential.recoveryID])
+        XCTAssertEqual(purgedAuthorities, [credential.recoveryID])
+    }
+
     func testFailedRunDetailDisclosesFullSellerSafeFailure() throws {
         let detail = String(String(repeating: "Retry detail remains visible. ", count: 18).prefix(500))
         let safeFailure = try JSONDecoder().decode(
@@ -124,12 +272,14 @@ final class RunStoreTests: XCTestCase {
         status: DurableRunStatus = .running,
         stage: DurableRunStage = .generating,
         safeFailure: RunSafeFailure? = nil,
-        canOpenReview: Bool = false
+        canOpenReview: Bool = false,
+        listingID: UUID? = nil,
+        review: ListingReviewResult? = nil
     ) -> DurableRun {
         DurableRun(
             id: id,
             itemID: UUID(uuidString: "31700000-0000-4000-8000-000000000011")!,
-            listingID: nil,
+            listingID: listingID,
             status: status,
             stage: stage,
             attemptCount: 1,
@@ -142,7 +292,9 @@ final class RunStoreTests: XCTestCase {
                 startedAt: "2026-07-20T12:00:02.000Z",
                 lastAttemptedAt: "2026-07-20T12:00:02.000Z",
                 nextAttemptAt: nil,
-                completedAt: nil,
+                completedAt: status == .succeeded
+                    ? "2026-08-04T12:00:00.000Z"
+                    : nil,
                 retentionCleanedAt: nil
             ),
             item: RunItemTruth(title: "Canon AE-1 film camera", photoCount: 3),
@@ -157,8 +309,132 @@ final class RunStoreTests: XCTestCase {
                 canStartNewCapture: false
             ),
             lastMeaningfulUpdateAt: "2026-07-20T12:01:00.000Z",
-            retentionCleanedAt: nil
+            retentionCleanedAt: nil,
+            review: review
         )
+    }
+
+    private static func makeReview() throws -> ListingReviewResult {
+        try JSONDecoder().decode(
+            ListingReviewResult.self,
+            from: Data(
+                """
+                {
+                  "schemaVersion":1,
+                  "binding":{
+                    "runId":"31700000-0000-4000-8000-000000000010",
+                    "itemId":"31700000-0000-4000-8000-000000000011",
+                    "listingId":"63860000-0000-4000-8000-000000000002",
+                    "reviewContentRevision":"63860000-0000-4000-8000-000000000003",
+                    "reviewRevision":"63860000-0000-4000-8000-000000000004"
+                  },
+                  "photos":[{"ordinal":0,"url":"https://snaplist.test/photo.jpg"}],
+                  "identity":{"label":"Sony headphones","confident":true},
+                  "listing":{
+                    "title":"Sony headphones",
+                    "description":"Used headphones.",
+                    "condition":"good",
+                    "specifics":[]
+                  },
+                  "pricing":{
+                    "suggestedPrice":50,
+                    "range":{"minimum":40,"maximum":60},
+                    "confidence":0.5,
+                    "sellerPriceOverride":null,
+                    "effectivePrice":50
+                  },
+                  "evidenceAsOf":"2026-08-04T12:00:00.000Z",
+                  "verifiedSoldMatches":[],
+                  "startingPriceCopy":"Starting price estimate",
+                  "soldEvidenceCopy":"No verified sold matches found."
+                }
+                """.utf8
+            )
+        )
+    }
+}
+
+private actor RunStoreGuestRecoveryCredentials:
+    GuestRecoveryCredentialStoring {
+    private let storedCredential: GuestRecoveryCredential
+    private var expiries: [UUID: Date] = [:]
+    private var purged: [UUID] = []
+
+    init(credential: GuestRecoveryCredential) {
+        storedCredential = credential
+    }
+
+    func mintCredential() throws -> GuestRecoverySubmissionIdentity {
+        throw CancellationError()
+    }
+
+    func contains(_ identity: GuestRecoverySubmissionIdentity) -> Bool {
+        identity.recoveryID == storedCredential.recoveryID
+    }
+
+    func bind(
+        _ identity: GuestRecoverySubmissionIdentity,
+        itemID: UUID,
+        runID: UUID,
+        photoIdentity: GuestPhotoIdentity
+    ) throws {
+        throw CancellationError()
+    }
+
+    func credential(runID: UUID) -> GuestRecoveryCredential? {
+        storedCredential.runID == runID ? storedCredential : nil
+    }
+
+    func credential(recoveryID: UUID) -> GuestRecoveryCredential? {
+        storedCredential.recoveryID == recoveryID ? storedCredential : nil
+    }
+
+    func setExpiry(recoveryID: UUID, expiresAt: Date) {
+        expiries[recoveryID] = expiresAt
+    }
+
+    func purge(recoveryID: UUID) {
+        purged.append(recoveryID)
+    }
+
+    func recordedExpiry(recoveryID: UUID) -> Date? {
+        expiries[recoveryID]
+    }
+
+    func purgedRecoveryIDs() -> [UUID] { purged }
+}
+
+private actor RunStoreGuestClaimAuthorities: GuestClaimAuthorityStoring {
+    private var authorities: [UUID: GuestClaimAuthority] = [:]
+    private var purged: [UUID] = []
+
+    func authority(listingID: UUID) -> GuestClaimAuthority? {
+        authorities[listingID]
+    }
+
+    func save(_ authority: GuestClaimAuthority, listingID: UUID) {
+        authorities[listingID] = authority
+    }
+
+    func purge(recoveryID: UUID) {
+        purged.append(recoveryID)
+        authorities = authorities.filter {
+            $0.value.recoveryID != recoveryID
+        }
+    }
+
+    func savedAuthority(listingID: UUID) -> GuestClaimAuthority? {
+        authorities[listingID]
+    }
+
+    func purgedRecoveryIDs() -> [UUID] { purged }
+}
+
+private extension ISO8601DateFormatter {
+    static func snapListDate(from value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value)
     }
 }
 

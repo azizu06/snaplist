@@ -2,6 +2,8 @@ import { Buffer } from "node:buffer";
 import { z } from "zod";
 
 export const MAX_GUEST_RECOVERY_PHOTOS = 5;
+export const MAX_GUEST_RECOVERY_PHOTO_ENVELOPE_BYTES =
+  50 * 1_024 * 1_024 + 37;
 
 interface Base64Bounds {
   exactBytes?: number;
@@ -94,7 +96,11 @@ export const guestClaimObjectSchema = z
     sourcePath: storagePathSchema,
     destinationPath: storagePathSchema,
     sha256: sha256Schema,
-    byteLength: z.number().int().positive().max(50 * 1_024 * 1_024),
+    byteLength: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_GUEST_RECOVERY_PHOTO_ENVELOPE_BYTES),
     encryption: guestRecoveryObjectEncryptionSchema,
   })
   .strict();
