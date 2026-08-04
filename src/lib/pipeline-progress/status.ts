@@ -46,7 +46,7 @@ export interface PipelineProgressStep {
 }
 
 const STEPS = [
-  { key: "queued", label: "Queued" },
+  { key: "queued", label: "Accepted" },
   { key: "identifying", label: "Read photos" },
   { key: "pricing", label: "Research price" },
   { key: "generating", label: "Draft listing" },
@@ -72,15 +72,15 @@ export function pipelineProgressView(run: PipelineProgressRun): PipelineProgress
     && (run.status === "failed" || run.status === "canceled")
   ) {
     return {
-      label: "Expired",
-      detail: "This saved run has expired. Start a new capture to try again.",
+      label: "Needs retry",
+      detail: "This saved item expired. Start a new capture to try again.",
       tone: "neutral",
       pulse: false,
     };
   }
   if (run.status === "succeeded") {
     return {
-      label: "Ready for review",
+      label: "Ready to review",
       detail: "Your draft is saved. Review it before anything posts.",
       tone: "success",
       pulse: false,
@@ -88,34 +88,32 @@ export function pipelineProgressView(run: PipelineProgressRun): PipelineProgress
   }
   if (run.status === "failed") {
     return {
-      label: "Failed",
-      detail:
-        run.safe_failure_message ??
-        "We could not finish this draft. Your photos are still saved.",
+      label: "Needs retry",
+      detail: "We could not finish this item. Your photos are still saved.",
       tone: "danger",
       pulse: false,
     };
   }
   if (run.status === "canceled") {
     return {
-      label: "Canceled",
-      detail: "Processing stopped. Your saved status will stay here.",
+      label: "Needs retry",
+      detail: "This item was stopped. Try again when you are ready.",
       tone: "neutral",
       pulse: false,
     };
   }
   if (run.status === "retrying") {
     return {
-      label: "Retrying",
-      detail: "The last attempt stopped. SnapList will try again. Your photos are still saved.",
+      label: "Analyzing",
+      detail: "We are trying this item again. Your photos are still saved.",
       tone: "warning",
       pulse: true,
     };
   }
   if (run.status === "queued") {
     return {
-      label: "Queued",
-      detail: "Your photos are saved. Processing will start when a worker is ready.",
+      label: "Accepted",
+      detail: "Your photos are saved and ready to analyze.",
       tone: "info",
       pulse: false,
     };
@@ -124,21 +122,21 @@ export function pipelineProgressView(run: PipelineProgressRun): PipelineProgress
   switch (run.stage) {
     case "identifying":
       return {
-        label: "Reading your photos",
+        label: "Analyzing",
         detail: "SnapList is checking the item, condition, and any visible barcode.",
         tone: "info",
         pulse: true,
       };
     case "pricing":
       return {
-        label: "Researching the price",
+        label: "Analyzing",
         detail: "SnapList is checking used-market evidence and building a price range.",
         tone: "info",
         pulse: true,
       };
     case "generating":
       return {
-        label: "Drafting the listing",
+        label: "Analyzing",
         detail: "SnapList is writing the title and description from the saved item details.",
         tone: "info",
         pulse: true,
@@ -146,15 +144,15 @@ export function pipelineProgressView(run: PipelineProgressRun): PipelineProgress
     case "persisting":
     case "completed":
       return {
-        label: "Saving the draft",
+        label: "Analyzing",
         detail: "SnapList is saving the listing and price research for your review.",
         tone: "info",
         pulse: true,
       };
     case "queued":
       return {
-        label: "Queued",
-        detail: "Your photos are saved. Processing will start when a worker is ready.",
+        label: "Accepted",
+        detail: "Your photos are saved and ready to analyze.",
         tone: "info",
         pulse: false,
       };

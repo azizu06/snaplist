@@ -4,6 +4,7 @@ import {
   pipelineProgressView,
   type PipelineProgressRun,
 } from "./status";
+import { sellerCopyViolations } from "../seller-copy";
 
 const BASE: PipelineProgressRun = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -21,20 +22,20 @@ const BASE: PipelineProgressRun = {
 
 describe("pipeline progress copy", () => {
   it.each([
-    ["queued", "queued", "Queued"],
-    ["running", "identifying", "Reading your photos"],
-    ["running", "pricing", "Researching the price"],
-    ["running", "generating", "Drafting the listing"],
-    ["running", "persisting", "Saving the draft"],
-    ["retrying", "pricing", "Retrying"],
-    ["succeeded", "completed", "Ready for review"],
-    ["failed", "generating", "Failed"],
-    ["canceled", "queued", "Canceled"],
+    ["queued", "queued", "Accepted"],
+    ["running", "identifying", "Analyzing"],
+    ["running", "pricing", "Analyzing"],
+    ["running", "generating", "Analyzing"],
+    ["running", "persisting", "Analyzing"],
+    ["retrying", "pricing", "Analyzing"],
+    ["succeeded", "completed", "Ready to review"],
+    ["failed", "generating", "Needs retry"],
+    ["canceled", "queued", "Needs retry"],
   ] as const)("maps %s/%s to %s", (status, stage, label) => {
     expect(pipelineProgressView({ ...BASE, status, stage }).label).toBe(label);
   });
 
-  it("uses only the bounded seller-safe failure summary", () => {
+  it("uses fixed seller copy instead of arbitrary stored failure text", () => {
     const view = pipelineProgressView({
       ...BASE,
       status: "failed",
@@ -42,7 +43,7 @@ describe("pipeline progress copy", () => {
       safe_failure_message: "Price research timed out. Try this item again.",
     });
 
-    expect(view.detail).toBe("Price research timed out. Try this item again.");
+    expect(view.detail).toBe("We could not finish this item. Your photos are still saved.");
   });
 
   it("keeps publish approval explicit after success", () => {
@@ -59,9 +60,35 @@ describe("pipeline progress copy", () => {
     });
 
     expect(view).toMatchObject({
-      label: "Expired",
-      detail: "This saved run has expired. Start a new capture to try again.",
+      label: "Needs retry",
+      detail: "This saved item expired. Start a new capture to try again.",
     });
+  });
+});
+
+describe("pipeline progress copy — seller-visible contract (#243)", () => {
+  it.each([
+    ["queued", "queued"],
+    ["running", "identifying"],
+    ["retrying", "pricing"],
+    ["succeeded", "completed"],
+    ["failed", "generating"],
+    ["canceled", "queued"],
+  ] as const)("maps %s/%s without internal or synthetic copy", (status, stage) => {
+    const view = pipelineProgressView({ ...BASE, status, stage });
+
+    expect(sellerCopyViolations(`${view.label}\n${view.detail}`)).toEqual([]);
+  });
+
+  it("does not pass through a stored failure message that leaks an internal error", () => {
+    const view = pipelineProgressView({
+      ...BASE,
+      status: "failed",
+      safe_failure_message: "PostgrestError: worker lease timed out",
+    });
+
+    expect(view.label).toBe("Needs retry");
+    expect(view.detail).toBe("We could not finish this item. Your photos are still saved.");
   });
 });
 

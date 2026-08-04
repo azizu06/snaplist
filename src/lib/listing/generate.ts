@@ -6,6 +6,11 @@ import {
 } from "../pipeline/types";
 import type { FewShotExamples } from "../rag";
 import {
+  safeSellerCoreValue,
+  sellerCopyViolations,
+  sellerTitleViolations,
+} from "../seller-copy";
+import {
   EBAY_PLATFORM,
   EBAY_TITLE_MAX_LENGTH,
   ebayListingRawSchema,
@@ -123,10 +128,14 @@ export interface GenerateEbayListingResult {
  */
 function coreSpecifics(attrs: ExtractedAttributes): Record<string, string> {
   const out: Record<string, string> = {};
-  if (attrs.brand) out["Brand"] = attrs.brand;
-  if (attrs.model) out["Model"] = attrs.model;
-  if (attrs.category) out["Type"] = attrs.category;
-  if (attrs.condition) out["Condition"] = attrs.condition;
+  const brand = safeSellerCoreValue(attrs.brand);
+  const model = safeSellerCoreValue(attrs.model);
+  const category = safeSellerCoreValue(attrs.category);
+  const condition = safeSellerCoreValue(attrs.condition);
+  if (brand) out["Brand"] = brand;
+  if (model) out["Model"] = model;
+  if (category) out["Type"] = category;
+  if (condition) out["Condition"] = condition;
   return out;
 }
 
@@ -195,6 +204,39 @@ export function enforceTitleLength(
   return cut.trimEnd();
 }
 
+function fallbackListingName(attributes: ExtractedAttributes): string {
+  return (
+    [safeSellerCoreValue(attributes.brand), safeSellerCoreValue(attributes.model)]
+      .filter(Boolean)
+      .join(" ") ||
+    safeSellerCoreValue(attributes.title) ||
+    safeSellerCoreValue(attributes.category) ||
+    "Item for sale"
+  );
+}
+
+/** A factual description assembled only from the validated attribute core. */
+export function buildCoreListingDescription(attributes: ExtractedAttributes): string {
+  const sentences = [`Item: ${fallbackListingName(attributes)}.`];
+  const condition = safeSellerCoreValue(attributes.condition);
+  if (condition) sentences.push(`Condition: ${condition}.`);
+  const specs = (attributes.specs ?? [])
+    .map((spec) => safeSellerCoreValue(spec))
+    .filter((spec): spec is string => Boolean(spec));
+  if (specs.length > 0) sentences.push(`Details: ${specs.join(", ")}.`);
+  return sentences.join(" ");
+}
+
+/** The bounded-retry fallback: a complete eBay listing made only from validated facts. */
+export function fallbackEbayListing(attributes: ExtractedAttributes): EbayListing {
+  return {
+    title: enforceTitleLength(fallbackListingName(attributes)),
+    itemSpecifics: reconcileSpecifics(attributes),
+    description: buildCoreListingDescription(attributes),
+    tags: [],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The generation entrypoint
 // ---------------------------------------------------------------------------
@@ -258,11 +300,30 @@ export async function generateEbayListing(
     // Deterministic constraint repair: title length + structured-specifics
     // reconciliation. After this, the candidate cannot violate the title cap and its
     // identity specifics cannot contradict / exceed the core.
-    const reconciled: EbayListing = {
-      ...raw,
-      title: enforceTitleLength(raw.title),
-      itemSpecifics: reconcileSpecifics(attributes),
-    };
+    const titleCore = [
+      attributes.brand,
+      attributes.model,
+      attributes.category,
+      attributes.condition,
+      attributes.title,
+      ...(attributes.specs ?? []),
+    ];
+    const modelCopyViolates =
+      sellerTitleViolations(raw.title, titleCore).length > 0 ||
+      sellerCopyViolations(raw.description).length > 0;
+    const modelTagsViolate = raw.tags.some(
+      (tag) => sellerTitleViolations(tag, titleCore).length > 0,
+    );
+    const reconciled: EbayListing = modelCopyViolates || modelTagsViolate
+      ? fallbackEbayListing(attributes)
+      : {
+          ...raw,
+          title: enforceTitleLength(raw.title),
+          itemSpecifics: reconcileSpecifics(attributes),
+          // Descriptions cannot be completely fact-checked after generation. Build
+          // this seller-visible field from the validated core instead.
+          description: buildCoreListingDescription(attributes),
+        };
 
     const parsed = ebayListingSchema.safeParse(reconciled);
     if (!parsed.success) {
@@ -276,8 +337,13 @@ export async function generateEbayListing(
     // If the RAW model output tried to invent identity attributes, prefer a retry so
     // the model can self-correct; the reconciled candidate is already clean, so we
     // keep it as the fallback for the final attempt.
-    if (listingHallucinatesAttributes(raw, attributes) && attempt < attempts - 1) {
-      lastError = "generated listing introduced attributes beyond the validated core";
+    if (
+      (listingHallucinatesAttributes(raw, attributes) || modelCopyViolates || modelTagsViolate) &&
+      attempt < attempts - 1
+    ) {
+      lastError = modelCopyViolates || modelTagsViolate
+        ? "generated listing violated the seller-visible copy contract"
+        : "generated listing introduced attributes beyond the validated core";
       continue;
     }
 

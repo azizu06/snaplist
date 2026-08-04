@@ -5,6 +5,7 @@ import {
 } from "../pipeline/types";
 import { enforceTitleLength } from "../listing";
 import { resolveLanguageModel, resolveModelId } from "../llm";
+import { safeSellerCoreValue, sellerCopyViolations } from "../seller-copy";
 import {
   DEPOP_DESCRIPTION_MAX_LENGTH,
   DEPOP_MAX_HASHTAGS,
@@ -30,9 +31,9 @@ import {
  * Facebook Marketplace + Mercari export packs (issue #15). One Zod-validated
  * attribute core → two platform-conventional, copy-paste-ready packs:
  *
- *  - FACEBOOK: casual tone, short blurb, LOCAL-PICKUP framing;
- *  - MERCARI: short keyword-first title (≤ 40 chars), shipping-oriented
- *    description, up to 3 hashtags;
+ *  - FACEBOOK: concise title and factual description;
+ *  - MERCARI: short keyword-first title (≤ 40 chars), factual description,
+ *    and up to 3 hashtags;
  *
  * each rendered as one clean copy-paste BLOCK (a single string).
  *
@@ -363,6 +364,8 @@ export function titlesViolateGrounding(
 ): boolean {
   const grounding = buildNumericGrounding(attrs);
   return (
+    sellerCopyViolations(raw.facebook.title).length > 0 ||
+    sellerCopyViolations(raw.mercari.title).length > 0 ||
     titleViolations(raw.facebook.title, grounding).length > 0 ||
     titleViolations(raw.mercari.title, grounding).length > 0
   );
@@ -401,28 +404,6 @@ export function packsHallucinateAttributes(
  * aren't in the validated core or any shipping settings, so asserting them
  * would be exactly the hallucination this feature guards against.
  */
-export const MERCARI_SHIPPING_SUFFIX = "Shipping available.";
-
-/** The deterministic Facebook local-pickup line — always the block's last line. */
-export const FACEBOOK_PICKUP_LINE = "Local pickup, message me if interested!";
-
-/**
- * Repair the Mercari description so the returned pack is ALWAYS ≤ the cap AND
- * shipping-oriented: if the (possibly truncated) text never mentions shipping,
- * the neutral platform-true suffix is appended — a Mercari-mechanics statement,
- * not an item attribute, so it cannot hallucinate facts about the item.
- */
-export function repairMercariDescription(raw: string): string {
-  const trimmed = raw.trim();
-  if (/ship/i.test(trimmed) && trimmed.length <= MERCARI_DESCRIPTION_MAX_LENGTH) {
-    return trimmed;
-  }
-  const budget = MERCARI_DESCRIPTION_MAX_LENGTH - MERCARI_SHIPPING_SUFFIX.length - 1;
-  const cut = enforceTitleLength(trimmed, budget);
-  if (/ship/i.test(cut)) return cut;
-  return cut.length > 0 ? `${cut} ${MERCARI_SHIPPING_SUFFIX}` : MERCARI_SHIPPING_SUFFIX;
-}
-
 /**
  * Deterministic description built ONLY from the validated core — the ONLY
  * source of published description text. Every word traces to a core field, so
@@ -432,14 +413,20 @@ export function repairMercariDescription(raw: string): string {
  */
 export function buildCoreDescription(attrs: ExtractedAttributes): string {
   const name =
-    [attrs.brand, attrs.model].filter(Boolean).join(" ") ||
-    attrs.title ||
-    attrs.category ||
+    [safeSellerCoreValue(attrs.brand), safeSellerCoreValue(attrs.model)]
+      .filter(Boolean)
+      .join(" ") ||
+    safeSellerCoreValue(attrs.title) ||
+    safeSellerCoreValue(attrs.category) ||
     "this item";
   const sentences = [`For sale: ${name}.`];
-  if (attrs.condition) sentences.push(`Condition: ${attrs.condition}.`);
-  if (attrs.specs && attrs.specs.length > 0) {
-    sentences.push(`Details: ${attrs.specs.join(", ")}.`);
+  const condition = safeSellerCoreValue(attrs.condition);
+  if (condition) sentences.push(`Condition: ${condition}.`);
+  const specs = (attrs.specs ?? [])
+    .map((spec) => safeSellerCoreValue(spec))
+    .filter((spec): spec is string => Boolean(spec));
+  if (specs.length > 0) {
+    sentences.push(`Details: ${specs.join(", ")}.`);
   }
   return sentences.join(" ");
 }
@@ -453,11 +440,11 @@ export function buildFacebookDescription(attrs: ExtractedAttributes): string {
 }
 
 /**
- * The PUBLISHED Mercari description: the core-only description routed through
- * the standard Mercari repair, so it is ≤ the cap AND shipping-oriented.
+ * The PUBLISHED Mercari description: core-only text capped at the platform limit.
+ * Shipping is a seller policy, not an item fact, so this pack never claims it.
  */
 export function buildMercariDescription(attrs: ExtractedAttributes): string {
-  return repairMercariDescription(buildCoreDescription(attrs));
+  return enforceTitleLength(buildCoreDescription(attrs), MERCARI_DESCRIPTION_MAX_LENGTH);
 }
 
 /**
@@ -468,14 +455,20 @@ export function buildMercariDescription(attrs: ExtractedAttributes): string {
  */
 export function buildDepopDescription(attrs: ExtractedAttributes): string {
   const name =
-    [attrs.brand, attrs.model].filter(Boolean).join(" ") ||
-    attrs.title ||
-    attrs.category ||
+    [safeSellerCoreValue(attrs.brand), safeSellerCoreValue(attrs.model)]
+      .filter(Boolean)
+      .join(" ") ||
+    safeSellerCoreValue(attrs.title) ||
+    safeSellerCoreValue(attrs.category) ||
     "Item for sale";
   const sentences = [`${name}.`];
-  if (attrs.condition) sentences.push(`Condition: ${attrs.condition}.`);
-  if (attrs.specs && attrs.specs.length > 0) {
-    sentences.push(`Details: ${attrs.specs.join(", ")}.`);
+  const condition = safeSellerCoreValue(attrs.condition);
+  if (condition) sentences.push(`Condition: ${condition}.`);
+  const specs = (attrs.specs ?? [])
+    .map((spec) => safeSellerCoreValue(spec))
+    .filter((spec): spec is string => Boolean(spec));
+  if (specs.length > 0) {
+    sentences.push(`Details: ${specs.join(", ")}.`);
   }
   return enforceTitleLength(sentences.join(" "), DEPOP_DESCRIPTION_MAX_LENGTH);
 }
@@ -510,9 +503,11 @@ export function deriveDepopHashtags(attrs: ExtractedAttributes): string[] {
  */
 export function fallbackTitle(attrs: ExtractedAttributes): string {
   return (
-    [attrs.brand, attrs.model].filter(Boolean).join(" ") ||
-    attrs.title ||
-    attrs.category ||
+    [safeSellerCoreValue(attrs.brand), safeSellerCoreValue(attrs.model)]
+      .filter(Boolean)
+      .join(" ") ||
+    safeSellerCoreValue(attrs.title) ||
+    safeSellerCoreValue(attrs.category) ||
     "Item for sale"
   );
 }
@@ -533,26 +528,23 @@ export function formatPrice(price: number): string {
 }
 
 /**
- * The Facebook Marketplace copy-paste block: title, blank line, the short
- * casual description, then deterministic meta lines — the core's condition
- * (only if the core established one), the effective price (only if the caller
- * passed one), and the constant local-pickup line. Every fact line is
- * assembled here from validated inputs, never model free text.
+ * The Facebook Marketplace copy-paste block: title, blank line, factual
+ * description, then the validated condition and caller-resolved price when present.
  */
 export function facebookCopyBlock(
   pack: FacebookPack,
   opts: { price?: number; condition?: string } = {},
 ): string {
   const meta: string[] = [];
-  if (opts.condition) meta.push(`Condition: ${opts.condition}`);
+  const condition = safeSellerCoreValue(opts.condition);
+  if (condition) meta.push(`Condition: ${condition}`);
   if (opts.price != null) meta.push(`Asking ${formatPrice(opts.price)}`);
-  meta.push(FACEBOOK_PICKUP_LINE);
   return [pack.title, "", pack.description, "", ...meta].join("\n");
 }
 
 /**
- * The Mercari copy-paste block: short title, blank line, shipping-oriented
- * description, then the (core-whitelisted) hashtag line when any survived.
+ * The Mercari copy-paste block: short title, blank line, factual description,
+ * then the core-whitelisted hashtag line when any survived.
  */
 export function mercariCopyBlock(pack: MercariPack): string {
   const parts = [pack.title, "", pack.description];
