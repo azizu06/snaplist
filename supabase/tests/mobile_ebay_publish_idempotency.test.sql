@@ -4,7 +4,7 @@ create extension if not exists pgtap with schema extensions;
 
 -- CI builds a clean stack from migrations and sets this flag, so it must test
 -- the installed migration surface without replacing it. A shared local stack
--- cannot apply an older-timestamp branch migration without reset; there the
+-- may not have applied this branch migration without reset; there the
 -- same DDL is injected only inside this transaction and rolled back at EOF.
 select to_regclass('pgtap_ci.require_installed_migrations') is not null
   as require_installed_migration \gset
