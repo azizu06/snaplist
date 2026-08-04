@@ -83,9 +83,10 @@ struct AssistedExportPack: Equatable, Sendable {
 
     private static func priceText(_ price: Decimal) -> String {
         let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.locale = Locale(identifier: "en_US")
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
+        formatter.currencySymbol = "$"
         formatter.minimumFractionDigits = 2
         formatter.maximumFractionDigits = 2
         return formatter.string(from: price as NSDecimalNumber) ?? "$\(price)"

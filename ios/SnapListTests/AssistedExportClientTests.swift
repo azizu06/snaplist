@@ -175,6 +175,30 @@ final class AssistedExportClientTests: XCTestCase {
         XCTAssertTrue(store.domain.hasHandedOff(to: .facebookMarketplace))
     }
 
+    func testRepeatedSuccessfulSaveDoesNotWriteAnotherReceipt() async {
+        let recorder = AssistedExportSaveRecorder()
+        let store = AssistedExportStore(
+            pack: .fixture(),
+            service: AssistedExportFixtureService(didPerform: { action in
+                await recorder.recordServerAction(action)
+            })
+        )
+        await store.load()
+        store.toggle(.facebookMarketplace)
+
+        await store.savePhotos(for: .facebookMarketplace) {
+            try await recorder.writePhotos()
+        }
+        await store.savePhotos(for: .facebookMarketplace) {
+            try await recorder.writePhotos()
+        }
+
+        let counts = await recorder.counts
+        XCTAssertEqual(counts.photoWrites, 1)
+        XCTAssertEqual(counts.handoffWrites, 1)
+        XCTAssertTrue(store.domain.hasHandedOff(to: .facebookMarketplace))
+    }
+
     func testRetryAfterReceiptFailureDoesNotWritePhotosAgain() async {
         let recorder = AssistedExportSaveRecorder()
         let service = AssistedExportFlakyHandoffService()

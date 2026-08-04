@@ -147,13 +147,15 @@ final class AssistedExportStore {
             guard domain.pack == requestedPack, !domain.isPackOutOfDate else {
                 return
             }
-            let response = try await service.perform(
-                .handoff,
-                destination: destination,
-                pack: requestedPack
-            )
-            guard synchronize(response, for: requestedPack), !domain.isPackOutOfDate else {
-                return
+            if !domain.hasHandedOff(to: destination) {
+                let response = try await service.perform(
+                    .handoff,
+                    destination: destination,
+                    pack: requestedPack
+                )
+                guard synchronize(response, for: requestedPack), !domain.isPackOutOfDate else {
+                    return
+                }
             }
             showCompletion(.savedPhotos, for: destination)
         } catch {
