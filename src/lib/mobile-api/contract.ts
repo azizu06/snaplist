@@ -74,6 +74,27 @@ export const ebayOauthSessionEnvelopeSchema = z
   .object({ data: ebayOauthSessionSchema, meta: apiMetaSchema })
   .strict();
 
+export const ebayPublishConfirmationSchema = z
+  .object({
+    confirmation: z.literal("publish_to_ebay"),
+    expectedReviewRevision: z.string().uuid(),
+  })
+  .strict();
+
+export const ebayPublishStatusSchema = z
+  .object({
+    listingId: z.string().uuid(),
+    outcome: z.literal("published"),
+    ebayListingId: z.string().min(1),
+    ebayOfferId: z.string().min(1).nullable(),
+    alreadyPublished: z.boolean(),
+  })
+  .strict();
+
+export const ebayPublishStatusEnvelopeSchema = z
+  .object({ data: ebayPublishStatusSchema, meta: apiMetaSchema })
+  .strict();
+
 export const homeProjectionEnvelopeSchema = z
   .object({ data: homeProjectionSchema, meta: apiMetaSchema })
   .strict();

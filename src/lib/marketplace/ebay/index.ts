@@ -31,8 +31,15 @@ export {
 export {
   publishListingToEbay,
   publishListingToEbayAndNotify,
+  PublishedReplayConflictError,
+  PublishReviewRevisionConflictError,
   type PublishOutcome,
 } from "./publish";
+export {
+  createMobileEbayPublishService,
+  type MobileEbayPublishGateway,
+  type MobileEbayPublishStatus,
+} from "./mobile-publish";
 export {
   PublishValidationError,
   isEbayAuthError,

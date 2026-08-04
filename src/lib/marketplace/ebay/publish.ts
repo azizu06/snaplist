@@ -57,6 +57,8 @@ export interface PublishOptions {
    */
   signedUrlTtlSeconds?: number;
   completionClient?: SupabaseClient;
+  /** Client-observed review token. Mobile publish must supply this and fail closed when stale. */
+  expectedReviewRevision?: string;
 }
 
 interface PublishClaimSnapshot {
@@ -98,7 +100,9 @@ const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
  */
 const PRICING_CURRENCY = "USD";
 
-class PublishedReplayConflictError extends PublishValidationError {}
+export class PublishedReplayConflictError extends PublishValidationError {}
+
+export class PublishReviewRevisionConflictError extends PublishValidationError {}
 
 /**
  * `publishListingToEbay` + the seller's activity-feed notifications, shared by
@@ -240,6 +244,16 @@ export async function publishListingToEbay(
       `Failed to load item for listing ${listingId}: ${itemErr?.message ?? "not found"}`,
     );
   }
+  const expectedReviewRevision =
+    options.expectedReviewRevision ?? (item.review_revision as string);
+  if (
+    options.expectedReviewRevision
+    && item.review_revision !== options.expectedReviewRevision
+  ) {
+    throw new PublishReviewRevisionConflictError(
+      "The listing changed since it was opened. Refresh before publishing.",
+    );
+  }
 
   // The persisted price is a currency-less numeric produced by the pricing
   // pipeline, whose comps are USD. Publishing it under another marketplace's
@@ -261,7 +275,7 @@ export async function publishListingToEbay(
   const { data: claimData, error: claimErr } = await supabase.rpc("begin_ebay_publish", {
     p_listing_id: listingId,
     p_expected_run_id: (listing.run_id as string | null) ?? null,
-    p_expected_review_revision: item.review_revision as string,
+    p_expected_review_revision: expectedReviewRevision,
   });
   if (claimErr) {
     if (claimErr.code === "P0002") {
@@ -354,10 +368,12 @@ export async function publishListingToEbay(
   //    ebay_status='failed' (then rethrown); persistence problems after a
   //    SUCCESSFUL publish must NOT be marked failed — the eBay listing is live.
   let providerAcknowledged = false;
+  let acknowledgedResult: EbayPublishResult | null = null;
   let result: EbayPublishResult;
   try {
     result = await adapter.publishListing(request, async (acknowledgement, context) => {
       providerAcknowledged = true;
+      acknowledgedResult = acknowledgement;
       await persistPublishedListing(
         options.completionClient ?? supabase,
         listingId,
@@ -369,13 +385,14 @@ export async function publishListingToEbay(
       );
     });
   } catch (err) {
-    if (
-      !providerAcknowledged
-      && !(err instanceof EbayWriteAmbiguousError)
-    ) {
-      await markPublishFailed(supabase, listingId, claimId, offerBinding);
+    if (providerAcknowledged && acknowledgedResult) {
+      result = acknowledgedResult;
+    } else {
+      if (!(err instanceof EbayWriteAmbiguousError)) {
+        await markPublishFailed(supabase, listingId, claimId, offerBinding);
+      }
+      throw err;
     }
-    throw err;
   }
 
   return {

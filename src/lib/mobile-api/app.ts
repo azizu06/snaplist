@@ -49,6 +49,7 @@ import {
   includedOfferRedeemRequestSchema,
 } from "@/lib/included-offer-fence/http";
 import type { IncludedOfferFence } from "@/lib/included-offer-fence/service";
+import type { MobileEbayPublishGateway } from "@/lib/marketplace/ebay/mobile-publish";
 import {
   MOBILE_API_VERSION,
   apiErrorEnvelopeSchema,
@@ -63,6 +64,8 @@ import {
   exportHandoffsEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
   ebayOauthSessionEnvelopeSchema,
+  ebayPublishConfirmationSchema,
+  ebayPublishStatusEnvelopeSchema,
   guidedCorrectionEnvelopeSchema,
   guestClaimEnvelopeSchema,
   revenueCatConfigurationEnvelopeSchema,
@@ -132,6 +135,8 @@ export interface MobileApiDependencies {
       errorDescription: string | null;
     }): Promise<{ redirectUrl: string }>;
   };
+  /** RLS-scoped server truth and exact-once eBay publish service. */
+  ebayPublish?: MobileEbayPublishGateway;
   /** #174 verifies the opaque App Attest/auth handoff; #175 consumes only this result. */
   verifyGuestClaimHandoff?: (token: string) => Promise<VerifiedGuestHandoff>;
   /** Authoritative #175 claim service. The target always comes from authenticate(). */
@@ -526,6 +531,96 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "eBay connection is temporarily unavailable.",
+        );
+      }
+    }
+
+    const ebayPublishPath = pathname.match(
+      new RegExp(`^/${MOBILE_API_VERSION}/listings/([^/]+)/ebay/publish$`),
+    );
+    if (ebayPublishPath) {
+      if (request.method !== "POST") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const listingId = z.string().uuid().safeParse(ebayPublishPath[1]);
+      const idempotencyKey = z
+        .string()
+        .uuid()
+        .safeParse(request.headers.get("idempotency-key")?.trim());
+      const confirmation = ebayPublishConfirmationSchema.safeParse(
+        await request.json().catch(() => null),
+      );
+      if (!listingId.success || !idempotencyKey.success || !confirmation.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A confirmed publish, current review revision, and Idempotency-Key are required.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      if (principal.kind === "verifiedGuest") {
+        return errorResponse(
+          requestId,
+          403,
+          "forbidden",
+          "Publishing to eBay requires an account.",
+        );
+      }
+      if (!dependencies.ebayPublish) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay publishing is temporarily unavailable.",
+        );
+      }
+      try {
+        const outcome = await dependencies.ebayPublish.publish({
+          userId: principal.userId,
+          bearerToken: token,
+          listingId: listingId.data,
+          expectedReviewRevision: confirmation.data.expectedReviewRevision,
+          idempotencyKey: idempotencyKey.data,
+        });
+        return json(
+          ebayPublishStatusEnvelopeSchema.parse({
+            data: outcome,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.ebay-publish", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay publishing is temporarily unavailable.",
         );
       }
     }
