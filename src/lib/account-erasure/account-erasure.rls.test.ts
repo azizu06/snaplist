@@ -299,6 +299,25 @@ async function mandatoryOwnerResidue(): Promise<number> {
   return result.rows[0]!.count;
 }
 
+async function publishCompletionState(listingId: string): Promise<unknown> {
+  const result = await database.query<{ state: unknown }>(
+    `select jsonb_build_object(
+       'listing', (
+         select to_jsonb(listing)
+         from public.listings listing
+         where listing.id = $1
+       ),
+       'leases', coalesce((
+         select jsonb_agg(to_jsonb(lease) order by lease.user_id, lease.message_id)
+         from private.ebay_provider_dispatch_leases lease
+         where lease.message_id = $1
+       ), '[]'::jsonb)
+     ) state`,
+    [listingId],
+  );
+  return result.rows[0]!.state;
+}
+
 beforeAll(async () => {
   reachable = await stackReachable({
     url: SUPABASE_URL,
@@ -619,12 +638,21 @@ describe("durable account erasure against local Supabase", () => {
       accessToken: async () => publishOwnerToken,
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    const publishOwnerTenantOnly = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
+      accessToken: async () => publishOwnerToken,
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const serverOnly = createClient(SUPABASE_URL, SECRET_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
     const paths = [
       `${publishOwnerId}/account-erasure-existing.jpg`,
       `${publishOwnerId}/account-erasure-draft.jpg`,
       `${publishOwnerId}/account-erasure-in-flight.jpg`,
+      `${publishOwnerId}/account-erasure-other-in-flight.jpg`,
     ];
     const inFlightClaimId = crypto.randomUUID();
+    const otherInFlightClaimId = crypto.randomUUID();
     let generationId = "";
 
     try {
@@ -635,7 +663,7 @@ describe("durable account erasure against local Supabase", () => {
         });
         expect(uploaded.error).toBeNull();
       }
-      const [existing, draft, inFlight] = await Promise.all([
+      const [existing, draft, inFlight, otherInFlight] = await Promise.all([
         runPipelineAndPersist(
           publishOwner,
           { userId: publishOwnerId, photos: [paths[0]!] },
@@ -649,6 +677,11 @@ describe("durable account erasure against local Supabase", () => {
         runPipelineAndPersist(
           publishOwner,
           { userId: publishOwnerId, photos: [paths[2]!] },
+          new StubPipeline(),
+        ),
+        runPipelineAndPersist(
+          publishOwner,
+          { userId: publishOwnerId, photos: [paths[3]!] },
           new StubPipeline(),
         ),
       ]);
@@ -673,6 +706,14 @@ describe("durable account erasure against local Supabase", () => {
          where id = $2 and user_id = $3`,
         [inFlightClaimId, inFlight.listingId, publishOwnerId],
       );
+      await database.query(
+        `update public.listings
+         set ebay_status = 'publishing',
+             ebay_publish_claim_id = $1,
+             ebay_publish_claimed_at = statement_timestamp()
+         where id = $2 and user_id = $3`,
+        [otherInFlightClaimId, otherInFlight.listingId, publishOwnerId],
+      );
       const startedDispatch = await publishOwnerServer.rpc(
         "begin_ebay_transactional_dispatch",
         {
@@ -690,6 +731,23 @@ describe("durable account erasure against local Supabase", () => {
       };
       expect(dispatch.account_generation).toBe(accountGeneration);
       const inFlightDispatchToken = dispatch.attempt_token;
+      const startedOtherDispatch = await publishOwnerServer.rpc(
+        "begin_ebay_transactional_dispatch",
+        {
+          p_connection_generation: null,
+          p_operation: "publish",
+          p_publish_binding: null,
+          p_publish_claim_id: otherInFlightClaimId,
+          p_resource_id: otherInFlight.listingId,
+        },
+      );
+      expect(startedOtherDispatch.error).toBeNull();
+      const otherDispatch = startedOtherDispatch.data as {
+        account_generation: string;
+        attempt_token: string;
+      };
+      expect(otherDispatch.account_generation).toBe(accountGeneration);
+      const otherInFlightDispatchToken = otherDispatch.attempt_token;
 
       const startedResult = await admin.rpc("begin_account_erasure", {
         p_idempotency_key: crypto.randomUUID(),
@@ -706,6 +764,9 @@ describe("durable account erasure against local Supabase", () => {
         inFlightListingId: inFlight.listingId,
         inFlightClaimId,
         inFlightAttemptToken: inFlightDispatchToken,
+        otherInFlightListingId: otherInFlight.listingId,
+        otherInFlightClaimId,
+        otherInFlightAttemptToken: otherInFlightDispatchToken,
         accountGeneration,
         paths,
       }));
@@ -748,7 +809,7 @@ describe("durable account erasure against local Supabase", () => {
         deferrals: ["ebay-provider-authority-pending"],
       });
 
-      const acknowledged = await publishOwnerServer.rpc("complete_ebay_publish_dispatch", {
+      const inFlightCompletion = {
         p_account_generation: accountGeneration,
         p_attempt_token: inFlightDispatchToken,
         p_claim_id: inFlightClaimId,
@@ -758,7 +819,57 @@ describe("durable account erasure against local Supabase", () => {
         p_listed_price: 42,
         p_listing_id: inFlight.listingId,
         p_priced_at: "2026-07-22T21:00:00Z",
-      });
+      };
+
+      // Every refusal targets this otherwise-valid dispatch. Its eventual
+      // full-authority completion proves these probes cannot pass or fail for
+      // an unrelated invalid-row reason.
+      const beforeTenantOnly = await publishCompletionState(inFlight.listingId);
+      const tenantOnly = await publishOwnerTenantOnly.rpc(
+        "complete_ebay_publish_dispatch",
+        inFlightCompletion,
+      );
+      expect(tenantOnly.error).not.toBeNull();
+      expect(tenantOnly.error?.code).toBe("42501");
+      expect(await publishCompletionState(inFlight.listingId)).toEqual(beforeTenantOnly);
+
+      const beforeServerOnly = await publishCompletionState(inFlight.listingId);
+      const serverKeyOnly = await serverOnly.rpc(
+        "complete_ebay_publish_dispatch",
+        inFlightCompletion,
+      );
+      expect(serverKeyOnly.error).not.toBeNull();
+      expect(serverKeyOnly.error?.code).toBe("42501");
+      expect(await publishCompletionState(inFlight.listingId)).toEqual(beforeServerOnly);
+
+      const beforeOtherDispatch = await publishCompletionState(inFlight.listingId);
+      const otherDispatchAuthority = await publishOwnerServer.rpc(
+        "complete_ebay_publish_dispatch",
+        {
+          ...inFlightCompletion,
+          p_attempt_token: otherInFlightDispatchToken,
+          p_claim_id: otherInFlightClaimId,
+        },
+      );
+      expect(otherDispatchAuthority.error).not.toBeNull();
+      expect(otherDispatchAuthority.error?.code).toBe("PT409");
+      expect(await publishCompletionState(inFlight.listingId)).toEqual(beforeOtherDispatch);
+
+      // Completion receives server and tenant authority only through its fixed
+      // RPC field set. A direct tenant mutation stays fenced during erasure.
+      const beforeOutOfSetWrite = await publishCompletionState(inFlight.listingId);
+      const outOfSetWrite = await publishOwnerServer
+        .from("listings")
+        .update({ title: "erasure fence must refuse this direct write" })
+        .eq("id", inFlight.listingId);
+      expect(outOfSetWrite.error).not.toBeNull();
+      expect(outOfSetWrite.error?.code).toBe("55000");
+      expect(await publishCompletionState(inFlight.listingId)).toEqual(beforeOutOfSetWrite);
+
+      const acknowledged = await publishOwnerServer.rpc(
+        "complete_ebay_publish_dispatch",
+        inFlightCompletion,
+      );
       expect(acknowledged.error).toBeNull();
       const acknowledgedListing = await database.query<{
         ebay_listing_id: string | null;
@@ -772,6 +883,26 @@ describe("durable account erasure against local Supabase", () => {
         ebay_status: "published",
       });
 
+      const beforeReplay = await publishCompletionState(inFlight.listingId);
+      const replayedCompletion = await publishOwnerServer.rpc(
+        "complete_ebay_publish_dispatch",
+        inFlightCompletion,
+      );
+      expect(replayedCompletion.error).not.toBeNull();
+      expect(replayedCompletion.error?.code).toBe("PT409");
+      expect(await publishCompletionState(inFlight.listingId)).toEqual(beforeReplay);
+
+      const otherAcknowledged = await publishOwnerServer.rpc("complete_ebay_publish_dispatch", {
+        ...inFlightCompletion,
+        p_attempt_token: otherInFlightDispatchToken,
+        p_claim_id: otherInFlightClaimId,
+        p_ebay_listing_id: "EXTERNAL-EBAY-OTHER-IN-FLIGHT-384",
+        p_ebay_offer_id: "EXTERNAL-EBAY-OTHER-OFFER-384",
+        p_listed_price: 43,
+        p_listing_id: otherInFlight.listingId,
+      });
+      expect(otherAcknowledged.error).toBeNull();
+
       // The provider round trip has landed, so the local rows go — but the live
       // eBay listings do not, and erasure records exactly that.
       const advanced = await advanceErasure(generationId);
@@ -782,7 +913,7 @@ describe("durable account erasure against local Supabase", () => {
       });
       const stillLocal = await database.query<{ count: number }>(
         "select count(*)::integer count from public.listings where id = any($1::uuid[])",
-        [[existing.listingId, inFlight.listingId]],
+        [[existing.listingId, inFlight.listingId, otherInFlight.listingId]],
       );
       expect(stillLocal.rows[0]!.count).toBe(0);
 
