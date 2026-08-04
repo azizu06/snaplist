@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
@@ -32,21 +33,11 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -72,13 +63,15 @@ async function uploadPhoto(user: ClerkTestUser): Promise<string> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
 
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   [userA, userB] = await Promise.all([provisionUser("a"), provisionUser("b")]);
+
+  });
 });
 
 afterAll(async () => {
@@ -100,7 +93,7 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
   });
 
   it("persists item + listing + prediction_log from a stubbed run, readable back by the owner", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     expect(photoPath.startsWith(`${userA.id}/`)).toBe(true);
@@ -169,7 +162,7 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
   });
 
   it("deletes the anchor item when the pipeline fails (nothing strands as 'Processing')", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
 
@@ -199,7 +192,7 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
   });
 
   it("RLS holds: user B cannot read user A's persisted item or listing", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     const { itemId, listingId } = await runPipelineAndPersist(
@@ -228,7 +221,7 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
   });
 
   it("RLS WITH CHECK blocks persisting a run under a spoofed user_id", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     // userA's client tries to persist rows owned by userB — must fail.
@@ -242,7 +235,7 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
   });
 
   it("persists the pipeline's identification and reads it back under RLS (issue #27)", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     // A pipeline that produces a MODEL-FLAGGED-AMBIGUOUS identification despite strong
@@ -302,7 +295,7 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
   });
 
   it("leaves identification null when the pipeline produces none (review falls back to re-derivation)", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     const { itemId } = await runPipelineAndPersist(
@@ -365,7 +358,7 @@ function pipelineWithConfidence(
 
 describe("confidence-gated publish eligibility + price override (issues #12, #127)", () => {
   it("an eligible run persists its listing QUEUED as ready for manual publish", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     const { listingId } = await runPipelineAndPersist(
@@ -383,7 +376,7 @@ describe("confidence-gated publish eligibility + price override (issues #12, #12
   });
 
   it("a NON-eligible run (low confidence, or autopilot off) persists its listing as a review DRAFT", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     // autopilotEligible false covers both causes: the gate already folded in the
@@ -403,7 +396,7 @@ describe("confidence-gated publish eligibility + price override (issues #12, #12
   });
 
   it("the seller's price override persists on the item and wins downstream via effectivePrice", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     const { itemId, result } = await runPipelineAndPersist(
@@ -456,7 +449,7 @@ describe("confidence-gated publish eligibility + price override (issues #12, #12
   });
 
   it("RLS: user B cannot set a price override on user A's item", async () => {
-    if (!reachable) return;
+
 
     const photoPath = await uploadPhoto(userA);
     const { itemId } = await runPipelineAndPersist(

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -19,18 +19,19 @@ import { createSupabaseMobileItemSubmissionStaging } from "./store";
 import {
   DATABASE_URL,
   PUBLISHABLE_KEY,
+  SECRET_KEY,
   SUPABASE_URL,
   authorizeRemoveAndCompleteStagingCleanup,
   createSubmissionAdminControl,
   expireAndClaimStagingCleanup,
   fixedWavBytes,
   jpeg,
-  localSubmissionStackIsReachable,
   proveVerifiedGuestLostResponseRecovery,
   request,
   singlePhotoMultipart,
 } from "./rls-test-fixture";
 import { shouldSkipGuestFirstRunForOfflineCi } from "./guest-first-run-test-mode";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 
 vi.mock("server-only", () => ({}));
 
@@ -58,6 +59,10 @@ let expiredCapabilityId = "";
 let revokedCapabilityId = "";
 let claimedCapabilityId = "";
 let tombstonedCapabilityId = "";
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 
 const verifiedAssertion = {
   appId: "TEAMID1234.dev.snaplist.ios",
@@ -148,12 +153,17 @@ function createGuestSubmission(
 }
 
 beforeAll(async () => {
-  if (!(await localSubmissionStackIsReachable())) {
-    throw new Error(
-      "The focused verified-guest RLS test requires its leased local Supabase stack.",
-    );
-  }
-
+  reachable = await stackReachable({
+    apiKey: PUBLISHABLE_KEY,
+    requiredValues: [
+      DATABASE_URL,
+      PUBLISHABLE_KEY?.startsWith("sb_publishable_"),
+      SECRET_KEY?.startsWith("sb_secret_"),
+      ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname),
+    ],
+    url: SUPABASE_URL,
+  });
+  await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource("pipeline_jobs");
   database = new Client({
     application_name: "issue-332-guest-first-run",
@@ -204,11 +214,11 @@ beforeAll(async () => {
       guestId,
     ],
   );
-  reachable = true;
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
 
   const residue = await database.query<{
     queue_message_id: string | null;
@@ -267,6 +277,7 @@ afterAll(async () => {
   );
   await database.end();
   await lease.release();
+  });
 });
 
 const describeVerifiedGuestFirstRun =

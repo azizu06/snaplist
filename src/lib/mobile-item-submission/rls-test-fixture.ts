@@ -368,22 +368,3 @@ export async function proveVerifiedGuestLostResponseRecovery(input: {
     );
   }
 }
-
-export async function localSubmissionStackIsReachable(): Promise<boolean> {
-  if (
-    !PUBLISHABLE_KEY?.startsWith("sb_publishable_") ||
-    !SECRET_KEY?.startsWith("sb_secret_") ||
-    !new URL(SUPABASE_URL).hostname.match(/^(127\.0\.0\.1|localhost|::1)$/)
-  ) {
-    return false;
-  }
-  try {
-    const health = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: PUBLISHABLE_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    return health.ok;
-  } catch {
-    return false;
-  }
-}

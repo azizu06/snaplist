@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
@@ -33,21 +34,11 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-/** Probe the local stack; if it's not up, we skip (never fake a pass). */
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -60,8 +51,8 @@ async function provisionUser(label: string): Promise<ClerkTestUser> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
 
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -71,6 +62,8 @@ beforeAll(async () => {
     provisionUser("a"),
     provisionUser("b"),
   ]);
+
+  });
 });
 
 afterAll(async () => {
@@ -92,7 +85,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("a minted token binds queries to the correct Clerk identity", async () => {
-    if (!reachable) return;
+
     // supabase.auth.* is disabled with the accessToken option (Clerk era), so
     // identity binding is proven through the data path: a row inserted as A
     // must come back stamped with A's sub — i.e. the JWT, not the payload's
@@ -108,7 +101,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("keeps billing entitlement mirrors read-own and Customer maps server-only", async () => {
-    if (!reachable) return;
+
 
     const { error: customerError } = await admin.from("billing_customers").insert([
       { user_id: userA.id, stripe_customer_id: `cus_${userA.id}` },
@@ -204,7 +197,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("atomically claims Stripe events and permits only the service-role lifecycle path", async () => {
-    if (!reachable) return;
+
     const eventId = `evt_claim_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const type = "customer.subscription.updated";
 
@@ -256,7 +249,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("atomically reserves one hosted Checkout for concurrent first-time starts", async () => {
-    if (!reachable) return;
+
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const userId = `billing_reservation_${suffix}`;
     const customerId = `cus_reservation_${suffix}`;
@@ -310,7 +303,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("a user can insert and read back their OWN item", async () => {
-    if (!reachable) return;
+
     const { data, error } = await userA.client
       .from("items")
       .insert({ user_id: userA.id, condition: "good", attributes: { brand: "A" } })
@@ -327,7 +320,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("user A CANNOT read user B's items / listings / messages / prediction_logs", async () => {
-    if (!reachable) return;
+
 
     // B creates one row in each domain table.
     const { data: bItem, error: bItemErr } = await userB.client
@@ -384,7 +377,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("user A CANNOT update or delete user B's item", async () => {
-    if (!reachable) return;
+
 
     const { data: bItem } = await userB.client
       .from("items")
@@ -418,7 +411,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("user A CANNOT insert a row owned by user B (WITH CHECK blocks spoofed user_id)", async () => {
-    if (!reachable) return;
+
 
     const { data, error } = await userA.client
       .from("items")
@@ -431,7 +424,7 @@ describe("RLS tenancy isolation", () => {
   });
 
   it("user A CANNOT thread reply_to onto user B's message (tenant-aware composite FK)", async () => {
-    if (!reachable) return;
+
 
     // B has an inbound question awaiting B's reply.
     const { data: bMessage, error: bMsgErr } = await userB.client

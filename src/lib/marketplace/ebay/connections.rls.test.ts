@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -60,20 +61,11 @@ const GRANT: EbayTokenGrant = {
   scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
 };
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY?.startsWith("sb_secret_")) return false;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -90,8 +82,8 @@ async function createTenantWriteClient(userId: string): Promise<SupabaseClient> 
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY?.startsWith("sb_secret_")] });
+  await whenStackReachable(reachable, async () => {
 
   deletionQueueLease = await acquireExclusiveTestResource(
     `local-db:message-photo-object-deletion-queue:${SUPABASE_URL}`,
@@ -107,7 +99,8 @@ beforeAll(async () => {
     createTenantWriteClient(userA.id),
     createTenantWriteClient(userB.id),
   ]);
-}, DELETION_QUEUE_HOOK_TIMEOUT_MS);
+
+  });}, DELETION_QUEUE_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   try {
@@ -130,7 +123,7 @@ describe("ebay_connections (DB-gated)", () => {
   });
 
   it("stores tokens as ciphertext only — the raw token never reaches Postgres", async () => {
-    if (!reachable) return;
+
 
     await saveEbayConnection(
       userAServer,
@@ -156,7 +149,7 @@ describe("ebay_connections (DB-gated)", () => {
   });
 
   it("RLS: a connection is invisible to another user and to anon", async () => {
-    if (!reachable) return;
+
 
     const statusForB = await getEbayConnectionStatus(userB.client);
     expect(statusForB.connected).toBe(false);
@@ -170,7 +163,7 @@ describe("ebay_connections (DB-gated)", () => {
   });
 
   it("reports status without exposing tokens, and disconnect erases the row", async () => {
-    if (!reachable) return;
+
 
     const status = await getEbayConnectionStatus(userA.client);
     expect(status).toEqual({ connected: true, ebayUsername: "seller_a" });
@@ -181,7 +174,7 @@ describe("ebay_connections (DB-gated)", () => {
   });
 
   it("eraseEbayUserData deletes by eBay identity (deletion-notice path)", async () => {
-    if (!reachable) return;
+
 
     await saveEbayConnection(
       userAServer,
@@ -222,7 +215,7 @@ describe("ebay_connections (DB-gated)", () => {
 
 describe("UserTokenProvider (DB-gated)", () => {
   it("returns the cached access token while it is still fresh — no network call", async () => {
-    if (!reachable) return;
+
 
     await saveEbayConnection(
       userBServer,
@@ -241,7 +234,7 @@ describe("UserTokenProvider (DB-gated)", () => {
   });
 
   it("refreshes an expired access token with the stored refresh token and caches it", async () => {
-    if (!reachable) return;
+
 
     // Expire the cached access token.
     await saveEbayConnection(
@@ -282,7 +275,7 @@ describe("UserTokenProvider (DB-gated)", () => {
   });
 
   it("explains the fix when no eBay account is connected", async () => {
-    if (!reachable) return;
+
 
     await deleteEbayConnection(userBServer);
     const provider = new UserTokenProvider(userB.client, {

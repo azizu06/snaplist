@@ -1,7 +1,8 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { randomBytes } from "node:crypto";
 import { Client } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import {
   acquireExclusiveTestResource,
   resolveLocalTestDatabaseUrl,
@@ -54,6 +55,10 @@ interface RecordedCall {
 }
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let lease: ExclusiveTestResourceLease | undefined;
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
@@ -62,25 +67,7 @@ let serverA: SupabaseClient;
 let serverB: SupabaseClient;
 let ebayIdentityA: { userId: string; username: string };
 let ebayIdentityB: { userId: string; username: string };
-const uploadedPhotos: string[] = [];
-
-async function stackReachable(): Promise<boolean> {
-  if (!PUBLISHABLE_KEY?.startsWith("sb_publishable_")) return false;
-  if (!SECRET_KEY?.startsWith("sb_secret_")) return false;
-  const url = new URL(SUPABASE_URL);
-  if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) return false;
-  try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: PUBLISHABLE_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function tenantServerClient(userId: string): Promise<SupabaseClient> {
+const uploadedPhotos: string[] = [];async function tenantServerClient(userId: string): Promise<SupabaseClient> {
   const token = await mintUserJwt(userId);
   return createClient(SUPABASE_URL, SECRET_KEY!, {
     accessToken: async () => token,
@@ -333,8 +320,8 @@ async function cleanPrivateIdentityRows(): Promise<void> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: PUBLISHABLE_KEY, requiredValues: [PUBLISHABLE_KEY?.startsWith("sb_publishable_"), SECRET_KEY?.startsWith("sb_secret_"), ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname)] });
+  await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource(
     `local-db:ebay-publish-connection-binding:${SUPABASE_URL}`,
   );
@@ -362,10 +349,11 @@ beforeAll(async () => {
     connectAndBind(serverA, "seller-a", ebayIdentityA.userId),
     connectAndBind(serverB, "seller-b", ebayIdentityB.userId),
   ]);
-}, TEST_TIMEOUT_MS);
+
+  });}, TEST_TIMEOUT_MS);
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   try {
     if (admin && uploadedPhotos.length > 0) {
       await admin.storage.from("photos").remove(uploadedPhotos);
@@ -377,11 +365,12 @@ afterAll(async () => {
   } finally {
     await lease?.release();
   }
-}, TEST_TIMEOUT_MS);
+
+  });}, TEST_TIMEOUT_MS);
 
 describe("connection-generation eBay publish boundary (DB-gated, offline)", () => {
   it("builds each tenant offer only from that seller's ready EBAY_US binding", async () => {
-    if (!reachable) return;
+
     const [listingA, listingB] = await Promise.all([
       persistedListing(userA),
       persistedListing(userB),
@@ -409,10 +398,10 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
     });
 
     const [publishedA, publishedB] = await Promise.all([
-      publishListingToEbay(userA.client, listingA, adapterA, {
+      publishListingToEbay(serverA, listingA, adapterA, {
         completionClient: serverA,
       }),
-      publishListingToEbay(userB.client, listingB, adapterB, {
+      publishListingToEbay(serverB, listingB, adapterB, {
         completionClient: serverB,
       }),
     ]);
@@ -442,7 +431,7 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
   }, TEST_TIMEOUT_MS);
 
   it("performs zero eBay writes for missing, stale, foreign, cross-marketplace, or unresolved bindings", async () => {
-    if (!reachable) return;
+
     const storeA = createSupabaseEbayPolicyLocationBindingStore(serverA);
     const storeB = createSupabaseEbayPolicyLocationBindingStore(serverB);
     const [contextA, contextB] = await Promise.all([
@@ -543,7 +532,7 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
   }, TEST_TIMEOUT_MS);
 
   it("fences reconnect, completion, and replay to one connection generation", async () => {
-    if (!reachable) return;
+
     const noTokenEgress = async () => {
       throw new Error("Cached seller token should prevent OAuth egress");
     };

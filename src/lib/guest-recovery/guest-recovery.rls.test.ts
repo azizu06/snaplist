@@ -1,5 +1,6 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { createHash } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 import {
@@ -67,6 +68,10 @@ interface Fixture {
 }
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let database: Client;
 let lease: ExclusiveTestResourceLease | undefined;
@@ -74,20 +79,6 @@ const users: ClerkTestUser[] = [];
 const recoveryIds: string[] = [];
 const claimLeaseIds = new Set<string>();
 const storagePaths = new Set<string>();
-
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
 
 function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(
@@ -345,8 +336,8 @@ async function register(fixture: Fixture, shaOverride?: string) {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource(
     `local-db:guest-claim-or-expire:${SUPABASE_URL}`,
   );
@@ -355,10 +346,12 @@ beforeAll(async () => {
   });
   database = new Client({ connectionString: resolveLocalTestDatabaseUrl() });
   await database.connect();
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   await admin.storage.from("photos").remove([...storagePaths]);
   if (recoveryIds.length > 0) {
     await database.query(
@@ -379,11 +372,13 @@ afterAll(async () => {
   await cleanupClerkTestUsers(admin, users.map((user) => user.id));
   await database.end();
   await lease?.release();
+
+  });
 });
 
 describe("guest recovery live DB/RLS and private Storage boundary", () => {
   it("replays one encrypted draft, atomically claims every record, and remaps the exact #168 reservation", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("claim", {
       targetHasIncludedPeriod: true,
       verifiedIdentity: false,
@@ -550,7 +545,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
   }, 20_000);
 
   it("claims the current guided-correction prediction/run without changing settled accounting", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("guided_correction");
     const correctedRunId = crypto.randomUUID();
     const correctedPredictionId = crypto.randomUUID();
@@ -636,7 +631,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
   }, 20_000);
 
   it("keeps guest state claimable when Storage verification fails", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("copy_failure", {
       photoContents: ["copy-failure-source"],
     });
@@ -679,7 +674,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
   });
 
   it("serializes double claim starts and replays an interrupted post-copy claim without another credit", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("interrupted", {
       photoContents: ["interrupted-source"],
     });
@@ -766,7 +761,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
   });
 
   it("expires at the exact server boundary, preserves accounting evidence, and queues cleanup idempotently", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("boundary", {
       completedAt: new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString(),
       photoContents: ["expired-source"],
@@ -811,7 +806,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
   });
 
   it("expires a four-photo copying claim into separate bounded source and destination cleanup jobs", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("four_photo_expiry", {
       photoContents: ["one", "two", "three", "four"],
     });
@@ -852,7 +847,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
   });
 
   it("quiesces copied paths before returning an expired completion to real maintenance", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("completion_expired", {
       photoContents: ["completion-expired-source"],
     });
@@ -973,7 +968,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
   });
 
   it("keeps the winning claim namespace alive when expiry and real maintenance run afterward", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("claim_wins_race", {
       photoContents: ["claim-wins-source"],
     });
@@ -1035,7 +1030,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
   }, 30_000);
 
   it("lets exactly one terminal predicate win when claim completion races expiry cleanup", async () => {
-    if (!reachable) return;
+
     const fixture = await createFixture("race", {
       photoContents: ["race-source"],
     });

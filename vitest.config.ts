@@ -16,6 +16,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    exclude: ["src/test/fixtures/supabase-stack-unreachable.test.ts"],
     globals: true,
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },

@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
@@ -23,20 +24,11 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -51,8 +43,8 @@ let queueLease: ExclusiveTestResourceLease | undefined;
 const claimedMessageIds = new Set<string>();
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
 
   queueLease = await acquireExclusiveTestResource(
     `local-pgmq:pipeline_jobs:${SUPABASE_URL}`,
@@ -120,6 +112,8 @@ beforeAll(async () => {
   expect(bRunError).toBeNull();
   runA = aRun!.id;
   runB = bRun!.id;
+
+  });
 });
 
 afterAll(async () => {
@@ -149,7 +143,7 @@ describe("pipeline queue tenant and worker boundary", () => {
   });
 
   it("shows each seller only their own run and denies direct state mutation", async () => {
-    if (!reachable) return;
+
 
     const { data: visible, error: readError } = await userA.client
       .from("pipeline_runs")
@@ -173,7 +167,7 @@ describe("pipeline queue tenant and worker boundary", () => {
   });
 
   it("rejects forged run/item/user and mismatched listing relationships", async () => {
-    if (!reachable) return;
+
 
     const { error: crossItemError } = await userA.client.from("pipeline_runs").insert({
       user_id: userA.id,
@@ -209,7 +203,7 @@ describe("pipeline queue tenant and worker boundary", () => {
   });
 
   it("retires the unfenced context RPC and still denies generic service-role reads", async () => {
-    if (!reachable) return;
+
 
     const { data: context, error: contextError } = await admin.rpc(
       "load_pipeline_run_worker_context",
@@ -232,7 +226,7 @@ describe("pipeline queue tenant and worker boundary", () => {
   });
 
   it("uses private PGMQ claim/ack authority with redelivery-safe read semantics", async () => {
-    if (!reachable) return;
+
     const queue = createSupabasePgmqPipelineQueue(
       admin as unknown as PipelineQueueRpcClient,
     );
@@ -257,7 +251,7 @@ describe("pipeline queue tenant and worker boundary", () => {
   });
 
   it("retires the unfenced transition RPC in favor of message-paired attempts", async () => {
-    if (!reachable) return;
+
 
     const { error: runningError } = await admin.rpc(
       "transition_pipeline_run",

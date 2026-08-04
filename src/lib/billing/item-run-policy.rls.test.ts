@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
@@ -15,20 +16,11 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -70,8 +62,8 @@ async function createGeneratedDraft(user: ClerkTestUser): Promise<void> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
 
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -91,6 +83,8 @@ beforeAll(async () => {
     current_period_end: "2099-01-01T00:00:00.000Z",
   });
   expect(error).toBeNull();
+
+  });
 });
 
 afterAll(async () => {
@@ -109,7 +103,7 @@ describe("new AI-item policy RLS boundary", () => {
   });
 
   it("does not let another tenant's generated draft or paid mirror consume or grant access", async () => {
-    if (!reachable) return;
+
 
     await expect(
       resolveNewAiItemRunPolicy(userA.id, { client: userA.client }),
@@ -130,7 +124,7 @@ describe("new AI-item policy RLS boundary", () => {
   });
 
   it("requires Pro after this tenant has its own completed generated draft", async () => {
-    if (!reachable) return;
+
     await createGeneratedDraft(userA);
 
     await expect(

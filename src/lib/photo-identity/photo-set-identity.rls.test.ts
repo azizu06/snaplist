@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 
@@ -27,26 +28,14 @@ const PHOTO_SET_FINGERPRINT =
   "2601809a314994324ece98d372ae5f7f546deaa21d430b76331d96dcfd5e75a9";
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let seller: ClerkTestUser;
 let concurrentSeller: ClerkTestUser;
-const queueMessageIds = new Set<string>();
-
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
-
-async function connectDatabase(applicationName: string): Promise<Client> {
+const queueMessageIds = new Set<string>();async function connectDatabase(applicationName: string): Promise<Client> {
   const client = new Client({
     application_name: applicationName,
     connectionString: DATABASE_URL,
@@ -114,8 +103,8 @@ async function waitForAdvisoryBlock(
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -130,19 +119,23 @@ beforeAll(async () => {
       grantIncludedOfferDeviceClaim(admin, user.id),
     ),
   );
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   for (const queueMessageId of queueMessageIds) {
     await admin.rpc("ack_pipeline_message", { p_message_id: queueMessageId });
   }
   await cleanupClerkTestUsers(admin, [seller.id, concurrentSeller.id]);
+
+  });
 });
 
 describe("versioned photo-set identity persistence", () => {
   it("binds one server-verified content identity to the item, run, and credit reservation", async () => {
-    if (!reachable) return;
+
     const idempotencyKey = `photo-identity-${crypto.randomUUID()}`;
     const entry = {
       idempotency_key: idempotencyKey,
@@ -222,7 +215,7 @@ describe("versioned photo-set identity persistence", () => {
   });
 
   it("rejects a verified replay after it blocks behind an uncommitted legacy winner", async () => {
-    if (!reachable) return;
+
     const idempotencyKey = `photo-identity-race-${crypto.randomUUID()}`;
     const batchId = crypto.randomUUID();
     const photoPath = `${concurrentSeller.id}/verified/race.jpg`;

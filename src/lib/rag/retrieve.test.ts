@@ -15,6 +15,7 @@ import {
 import { REFERENCE_CORPUS, corpusEmbeddingText } from "./corpus-data";
 import { EMBEDDING_DIM, type ReferenceItem } from "./types";
 import { seedReferenceCorpus } from "../../../supabase/seed/reference-corpus";
+import { stackReachable } from "@/test/supabase-stack";
 
 /**
  * Reference-corpus retrieval tests.
@@ -181,21 +182,11 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-describe("rag/retrieve against pgvector (integration; skips if stack down)", () => {
-  let reachable = false;
+describe.skipIf(!(await stackReachable({
+  url: SUPABASE_URL,
+  apiKey: ANON_KEY,
+  requiredValues: [ANON_KEY, SERVICE_ROLE_KEY],
+})))("rag/retrieve against pgvector", () => {
   let admin: SupabaseClient;
   const embedder = createSyntheticEmbedder();
   // Namespaced so we only touch + clean up OUR rows on a shared DB.
@@ -203,8 +194,6 @@ describe("rag/retrieve against pgvector (integration; skips if stack down)", () 
   const seededRefs: string[] = [];
 
   beforeAll(async () => {
-    reachable = await stackReachable();
-    if (!reachable) return;
     admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -220,22 +209,10 @@ describe("rag/retrieve against pgvector (integration; skips if stack down)", () 
   });
 
   afterAll(async () => {
-    if (!reachable || !admin) return;
     await admin.from("reference_corpus").delete().in("source_ref", seededRefs);
   });
 
-  it("requires a running local Supabase stack (skips otherwise, never fakes a pass)", () => {
-    if (!reachable) {
-      console.warn(
-        "[rag/retrieve.test] Local Supabase stack unreachable — skipping pgvector " +
-          "integration assertions. Run `pnpm supabase start` (+ apply migrations) and re-run.",
-      );
-    }
-    expect(true).toBe(true);
-  });
-
   it("match_reference_corpus returns OUR most-similar seeded reference first", async () => {
-    if (!reachable) return;
     const matches = await retrieveReferences(
       admin,
       { brand: "Sony", model: "WH-1000XM4", category: "electronics" },
@@ -260,7 +237,6 @@ describe("rag/retrieve against pgvector (integration; skips if stack down)", () 
   });
 
   it("the anon (authenticated-tier) role can READ the global corpus (RLS allows select)", async () => {
-    if (!reachable) return;
     const anon = createClient(SUPABASE_URL, ANON_KEY!, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -276,7 +252,6 @@ describe("rag/retrieve against pgvector (integration; skips if stack down)", () 
   });
 
   it("a non-service client CANNOT write to the global corpus (no write policy)", async () => {
-    if (!reachable) return;
     const anon = createClient(SUPABASE_URL, ANON_KEY!, {
       auth: { persistSession: false, autoRefreshToken: false },
     });

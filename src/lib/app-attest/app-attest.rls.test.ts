@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "pg";
 
 import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 
 const DATABASE_URL = resolveLocalTestDatabaseUrl(
   process.env.SUPABASE_TEST_DB_URL ??
@@ -20,6 +21,10 @@ let admin: Client;
 let first: Client;
 let second: Client;
 const challengeIds: string[] = [];
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 
 async function connect(applicationName: string): Promise<Client> {
   const client = new Client({
@@ -83,24 +88,26 @@ async function claim(
 }
 
 beforeAll(async () => {
-  try {
-    admin = await connect("app_attest_331_admin");
-    first = await connect("app_attest_331_first");
-    second = await connect("app_attest_331_second");
-    await Promise.all([asServiceRole(first), asServiceRole(second)]);
-    reachable = true;
-  } catch {
-    await Promise.allSettled([
-      admin?.end(),
-      first?.end(),
-      second?.end(),
-    ]);
-  }
+  reachable = await stackReachable({
+    requiredValues: [DATABASE_URL],
+    probe: async () => {
+      try {
+        admin = await connect("app_attest_331_admin");
+        first = await connect("app_attest_331_first");
+        second = await connect("app_attest_331_second");
+        await Promise.all([asServiceRole(first), asServiceRole(second)]);
+        return true;
+      } catch {
+        await Promise.allSettled([admin?.end(), first?.end(), second?.end()]);
+        return false;
+      }
+    },
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
-  await admin.query(
+  await whenStackReachable(reachable, async () => {
+    await admin.query(
     `delete from private.app_attest_challenges
      where challenge_id = any($1::uuid[])`,
     [challengeIds],
@@ -109,12 +116,12 @@ afterAll(async () => {
     "delete from private.app_attest_keys where key_id = any($1::text[])",
     [[KEY_ID, PENDING_KEY_ID, ...RETENTION_KEY_IDS]],
   );
-  await Promise.all([admin.end(), first.end(), second.end()]);
+    await Promise.all([admin.end(), first.end(), second.end()]);
+  });
 });
 
 describe("App Attest private replay boundary", () => {
   it("atomically consumes an attestation challenge once under concurrency", async () => {
-    if (!reachable) return;
     const challengeId = randomUUID();
     const challenge = Buffer.alloc(32, 0x31);
     await issueChallenge({
@@ -132,7 +139,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("binds environment, rejects expiry, and preserves an unclaimed challenge", async () => {
-    if (!reachable) return;
     const environmentChallengeId = randomUUID();
     await issueChallenge({
       challenge: Buffer.alloc(32, 0x32),
@@ -178,7 +184,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("issues an assertion challenge for an uncommitted key without creating key authority", async () => {
-    if (!reachable) return;
     const challengeId = randomUUID();
     await issueChallenge({
       challenge: Buffer.alloc(32, 0x39),
@@ -220,7 +225,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("commits one strictly increasing assertion counter under concurrency", async () => {
-    if (!reachable) return;
     const inserted = await first.query<{ committed: boolean }>(
       `select public.commit_app_attest_attestation(
          $1, $2, 'production', $3, $4::bytea, '1', 1
@@ -249,7 +253,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("does not expose the private RPCs to anonymous callers", async () => {
-    if (!reachable) return;
     await first.query("reset role");
     await first.query("set role anon");
     await expect(
@@ -263,7 +266,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("deletes consumed and expired challenges while preserving active state", async () => {
-    if (!reachable) return;
     const existingEligible = await admin.query<{ count: number }>(
       `select count(*)::integer as count
        from private.app_attest_challenges
@@ -332,7 +334,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("deletes asserted and never-asserted keys only after 90 inactive days", async () => {
-    if (!reachable) return;
     const [assertedStale, neverAssertedStale, active] = RETENTION_KEY_IDS;
     await admin.query(
       `insert into private.app_attest_keys (
@@ -380,7 +381,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("serializes concurrent cleanup and remains idempotent", async () => {
-    if (!reachable) return;
     const concurrentKey = RETENTION_KEY_IDS[3]!;
     await admin.query(
       `insert into private.app_attest_keys (
@@ -423,7 +423,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("immediately erases only explicitly supplied App Attest state", async () => {
-    if (!reachable) return;
     const erasureKey = RETENTION_KEY_IDS[4]!;
     const linkedChallenge = randomUUID();
     const explicitChallenge = randomUUID();
@@ -480,7 +479,6 @@ describe("App Attest private replay boundary", () => {
   });
 
   it("registers one exact hourly scheduler and reports its run-history health", async () => {
-    if (!reachable) return;
     const jobs = await admin.query<{
       active: boolean;
       command: string;

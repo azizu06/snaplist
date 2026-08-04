@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
@@ -28,21 +29,11 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: ANON_KEY },
-      signal: AbortSignal.timeout(2000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -54,13 +45,15 @@ async function provisionUser(label: string): Promise<ClerkTestUser> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
 
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   [userA, userB] = await Promise.all([provisionUser("a"), provisionUser("b")]);
+
+  });
 });
 
 afterAll(async () => {
@@ -81,12 +74,12 @@ describe("user_settings RLS + helpers", () => {
   });
 
   it("defaults to autopilot ON when the user has no settings row", async () => {
-    if (!reachable) return;
+
     await expect(getAutopilotEnabled(userA.client, userA.id)).resolves.toBe(true);
   });
 
   it("a user can set and read back their OWN autopilot switch (upsert create + update)", async () => {
-    if (!reachable) return;
+
 
     // First toggle creates the row…
     await setAutopilotEnabled(userA.client, userA.id, false);
@@ -98,7 +91,7 @@ describe("user_settings RLS + helpers", () => {
   });
 
   it("user A CANNOT read user B's settings row", async () => {
-    if (!reachable) return;
+
 
     await setAutopilotEnabled(userB.client, userB.id, false);
 
@@ -114,7 +107,7 @@ describe("user_settings RLS + helpers", () => {
   });
 
   it("user A CANNOT insert/upsert a settings row owned by user B (WITH CHECK blocks spoofed user_id)", async () => {
-    if (!reachable) return;
+
 
     await expect(
       setAutopilotEnabled(userA.client, userB.id, true),
@@ -129,7 +122,7 @@ describe("user_settings RLS + helpers", () => {
   });
 
   it("user A CANNOT update or delete user B's settings row", async () => {
-    if (!reachable) return;
+
 
     await setAutopilotEnabled(userB.client, userB.id, false);
 

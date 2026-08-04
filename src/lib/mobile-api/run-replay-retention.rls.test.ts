@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 
 const DATABASE_URL = resolveLocalTestDatabaseUrl(
   process.env.SUPABASE_TEST_DB_URL
@@ -43,6 +44,10 @@ let retryRunId = "";
 let foreignRunId = "";
 let quotaRunId = "";
 let concurrentQuotaRunId = "";
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 
 async function applyOperation(
   client: Client,
@@ -173,33 +178,27 @@ async function uninstallRejectedReceiptBarrier(): Promise<void> {
 }
 
 beforeAll(async () => {
-  admin = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
-  owner = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
-  ownerConcurrent = new Client({
-    connectionString: DATABASE_URL,
-    connectionTimeoutMillis: 2_000,
+  reachable = await stackReachable({
+    requiredValues: [DATABASE_URL],
+    probe: async () => {
+      admin = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
+      owner = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
+      ownerConcurrent = new Client({
+        connectionString: DATABASE_URL,
+        connectionTimeoutMillis: 2_000,
+      });
+      await Promise.all([admin.connect(), owner.connect(), ownerConcurrent.connect()]);
+      clientsConnected = true;
+      const migration = await admin.query<{ available: boolean }>(
+        `select to_regprocedure(
+           'public.apply_mobile_run_operation(uuid,text,uuid)'
+         ) is not null as available`,
+      );
+      return migration.rows[0]?.available ?? false;
+    },
   });
 
-  try {
-    await Promise.all([admin.connect(), owner.connect(), ownerConcurrent.connect()]);
-    clientsConnected = true;
-    const migration = await admin.query<{ available: boolean }>(
-      `select to_regprocedure(
-         'public.apply_mobile_run_operation(uuid,text,uuid)'
-       ) is not null as available`,
-    );
-    reachable = migration.rows[0]?.available ?? false;
-  } catch {
-    reachable = false;
-    await Promise.all([
-      admin.end().catch(() => undefined),
-      owner.end().catch(() => undefined),
-      ownerConcurrent.end().catch(() => undefined),
-    ]);
-    return;
-  }
-
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
 
   ownerUserId = `user_test_mobile_replay_owner_${Date.now()}`;
   foreignUserId = `user_test_mobile_replay_foreign_${Date.now()}`;
@@ -302,34 +301,36 @@ beforeAll(async () => {
      where id = any($1::uuid[])`,
     [[retryRunId, quotaRunId, concurrentQuotaRunId]],
   );
+  });
 });
 
 afterAll(async () => {
   if (!clientsConnected) return;
   try {
-    if (!reachable) return;
-    await admin.query(
-      `select pgmq.delete('pipeline_jobs', queue_message_id)
-       from public.pipeline_runs
-       where id = any($1::uuid[])
-         and queue_message_id is not null`,
-      [[retryRunId, quotaRunId, concurrentQuotaRunId]],
-    );
-    await admin.query(
-      `delete from private.mobile_run_operation_replays
-       where user_id = any($1::text[])`,
-      [[ownerUserId, foreignUserId]],
-    );
-    await admin.query(
-      "delete from public.items where id = any($1::uuid[])",
-      [[
-        cancelItemId,
-        retryItemId,
-        foreignItemId,
-        quotaItemId,
-        concurrentQuotaItemId,
-      ]],
-    );
+    await whenStackReachable(reachable, async () => {
+      await admin.query(
+        `select pgmq.delete('pipeline_jobs', queue_message_id)
+         from public.pipeline_runs
+         where id = any($1::uuid[])
+           and queue_message_id is not null`,
+        [[retryRunId, quotaRunId, concurrentQuotaRunId]],
+      );
+      await admin.query(
+        `delete from private.mobile_run_operation_replays
+         where user_id = any($1::text[])`,
+        [[ownerUserId, foreignUserId]],
+      );
+      await admin.query(
+        "delete from public.items where id = any($1::uuid[])",
+        [[
+          cancelItemId,
+          retryItemId,
+          foreignItemId,
+          quotaItemId,
+          concurrentQuotaItemId,
+        ]],
+      );
+    });
   } finally {
     await Promise.all([
       admin.end(),
@@ -340,17 +341,7 @@ afterAll(async () => {
 });
 
 describe("mobile run replay receipt retention", () => {
-  it("requires the migrated local database for the public RPC proof", () => {
-    if (!reachable) {
-      console.warn(
-        "[mobile-api/run-replay-retention.rls.test] Reset local Supabase before running this DB-gated proof.",
-      );
-    }
-    expect(true).toBe(true);
-  });
-
   it("does not retain repeated missing or foreign run receipts", async () => {
-    if (!reachable) return;
 
     const missingResults: MobileRunOperationResult[] = [];
     const missingKeys: string[] = [];
@@ -406,7 +397,6 @@ describe("mobile run replay receipt retention", () => {
   });
 
   it("linearizes concurrent missing replays without retaining either call", async () => {
-    if (!reachable) return;
 
     const missingRunId = randomUUID();
     const replayKey = randomUUID();
@@ -439,7 +429,6 @@ describe("mobile run replay receipt retention", () => {
   });
 
   it("keeps verified retry and cancel receipts durable and idempotent", async () => {
-    if (!reachable) return;
 
     const cancelKey = randomUUID();
     const retryKey = randomUUID();
@@ -492,7 +481,6 @@ describe("mobile run replay receipt retention", () => {
   });
 
   it("bounds fresh receipts and serializes two canonical rejections at the ceiling", async () => {
-    if (!reachable) return;
 
     const replayLimit = 32;
     const quotaKeys = Array.from({ length: replayLimit }, () => randomUUID());

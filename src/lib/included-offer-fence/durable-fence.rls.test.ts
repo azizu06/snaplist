@@ -1,3 +1,4 @@
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -31,21 +32,11 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
-
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
@@ -171,8 +162,8 @@ async function redeemThroughDevice(
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY] });
+  await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -180,6 +171,8 @@ beforeAll(async () => {
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "durable_fence_a"),
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "durable_fence_b"),
   ]);
+
+  });
 });
 
 /** Empties the shared single-writer queue so each test owns the head. */
@@ -197,23 +190,25 @@ async function drainQueue(): Promise<void> {
 }
 
 beforeEach(async () => {
-  if (!reachable) return;
+
   await drainQueue();
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   await drainQueue();
   await admin
     .from("included_offer_device_claims")
     .delete()
     .in("user_id", [userA.id, userB.id]);
   await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
+
+  });
 });
 
 describe("durable included-offer fence over Postgres", () => {
   it("grants one account and denies a second Clerk identity on the same device", async () => {
-    if (!reachable) return;
+
     const harnessed = harness(() => true);
 
     const first = await redeemThroughDevice(harnessed, userA, "key-a");
@@ -243,7 +238,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("never turns an ambiguous Apple outcome into unused eligibility", async () => {
-    if (!reachable) return;
+
     const harnessed = harness(() => true);
     harnessed.deviceCheck.failNextQuery("throttled");
 
@@ -264,7 +259,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("reconciles an ambiguous update that actually reached Apple as its own", async () => {
-    if (!reachable) return;
+
     const harnessed = harness(() => true);
     harnessed.appAttest.attest("key-reconcile");
     harnessed.deviceCheck.failNextUpdateAfterApplying("timeout");
@@ -303,7 +298,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("resumes the original claim for an exact same-key replay", async () => {
-    if (!reachable) return;
+
     const harnessed = harness(() => true);
     harnessed.appAttest.attest("key-replay");
     const idempotencyKey = `replay-${crypto.randomUUID()}`;
@@ -337,7 +332,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("keeps the ephemeral device token out of every durable surface", async () => {
-    if (!reachable) return;
+
     const harnessed = harness(() => true);
     await redeemThroughDevice(harnessed, userA, "key-secrecy");
 
@@ -363,7 +358,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("denies only the account promotion when the ledger already spent it", async () => {
-    if (!reachable) return;
+
     const harnessed = harness(() => false);
     harnessed.appAttest.attest("key-spent");
     const idempotencyKey = `spent-${crypto.randomUUID()}`;
@@ -394,7 +389,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("serializes Apple's query-and-set window through one global writer", async () => {
-    if (!reachable) return;
+
     const holder = crypto.randomUUID();
     const rival = crypto.randomUUID();
 
@@ -428,7 +423,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("refuses the clear-device write to a claim that does not hold the lease", async () => {
-    if (!reachable) return;
+
     const solo = crypto.randomUUID();
     const created = await admin.rpc("begin_included_offer_claim", {
       p_app_attest_key_id: `key-${solo}`,
@@ -483,7 +478,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("outranks an expired lease with an unresolved Apple write, until it goes stale", async () => {
-    if (!reachable) return;
+
     const writer = crypto.randomUUID();
     const rival = crypto.randomUUID();
     const created = await admin.rpc("begin_included_offer_claim", {
@@ -571,7 +566,7 @@ describe("durable included-offer fence over Postgres", () => {
   });
 
   it("carries claim identity only through the redemption queue", async () => {
-    if (!reachable) return;
+
     const claimId = crypto.randomUUID();
     const created = await admin.rpc("begin_included_offer_claim", {
       p_app_attest_key_id: `key-${claimId}`,
@@ -608,7 +603,7 @@ describe("durable included-offer fence over Postgres", () => {
   // with an unresolved `update` write, which holds the deployment-wide
   // rendezvous. Two suites doing that concurrently would fence each other out.
   it("holds the claim state machine and the spent-claim record immutable", async () => {
-    if (!reachable) return;
+
     const claimId = crypto.randomUUID();
     const reserved = await admin.rpc("begin_included_offer_claim", {
       p_app_attest_key_id: `key-${claimId}`,

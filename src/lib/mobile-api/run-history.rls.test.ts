@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { afterAll, beforeAll, describe, expect, it, beforeEach } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 import {
@@ -34,29 +35,17 @@ const TRANSFER_RECOVERY_ID = "37500000-0000-4000-8000-000000000021";
 const TRANSFER_LEASE_TOKEN = "37500000-0000-4000-8000-000000000022";
 
 let reachable = false;
+
+beforeEach((context) => {
+  skipIfStackUnreachable(context, reachable);
+});
 let admin: SupabaseClient;
 let ownerId = "";
 let foreignId = "";
 let ownerToken = "";
-let foreignToken = "";
-
-async function stackReachable(): Promise<boolean> {
-  if (!SECRET_API_KEY) return false;
-  try {
-    return (
-      await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: SECRET_API_KEY },
-        signal: AbortSignal.timeout(2_000),
-      })
-    ).ok;
-  } catch {
-    return false;
-  }
-}
-
-beforeAll(async () => {
-  reachable = await stackReachable();
-  if (!reachable) return;
+let foreignToken = "";beforeAll(async () => {
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: SECRET_API_KEY, requiredValues: [SECRET_API_KEY] });
+  await whenStackReachable(reachable, async () => {
 
   ownerId = `user_test_run_history_owner_${Date.now()}`;
   foreignId = `user_test_run_history_foreign_${Date.now()}`;
@@ -123,10 +112,12 @@ beforeAll(async () => {
   } finally {
     await database.end();
   }
+
+  });
 });
 
 afterAll(async () => {
-  if (!reachable) return;
+  await whenStackReachable(reachable, async () => {
   const database = new Client({ connectionString: DATABASE_URL });
   await database.connect();
   try {
@@ -138,6 +129,8 @@ afterAll(async () => {
     await database.end();
   }
   await cleanupClerkTestUsers(admin, [ownerId, foreignId]);
+
+  });
 });
 
 function runHistoryHandler() {
@@ -175,7 +168,7 @@ function expectExactInstant(actual: string, expected: string): void {
   expect(actualInstant).toBe(expectedInstant);
 }
 
-describe.runIf(await stackReachable())(
+describe.runIf(await stackReachable({ url: SUPABASE_URL, apiKey: SECRET_API_KEY, requiredValues: [SECRET_API_KEY] }))(
   "authenticated snapshot-stable durable-run collection",
   () => {
     it("continues owned history without repeats or skips after an unseen run updates", async () => {
