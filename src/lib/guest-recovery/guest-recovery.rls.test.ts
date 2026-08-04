@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Client } from "pg";
 import {
   cleanupClerkTestUsers,
+  mintUserJwt,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
@@ -27,6 +28,10 @@ import {
 import { createSupabaseGuestClaimStore } from "./store";
 import { createSupabaseGuestClaimStorage } from "./storage";
 import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
+import { encryptGuestRecoveryPhotoEnvelope } from "./photo-encryption";
+import { createListingReviewReader } from "@/lib/listing-review/read";
+import { MockEbayAdapter } from "@/lib/marketplace/ebay/mock";
+import { publishListingToEbay } from "@/lib/marketplace/ebay/publish";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -35,6 +40,11 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const RECOVERY_MASTER_KEY = new Uint8Array(32).fill(64);
+const CLAIM_COMPLETION_TOKEN = "c".repeat(64);
+const CLAIM_COMPLETION_TOKEN_HASH = createHash("sha256")
+  .update(CLAIM_COMPLETION_TOKEN)
+  .digest("hex");
 
 const encryptedArtifact = {
   version: 1 as const,
@@ -65,6 +75,8 @@ interface Fixture {
   photoIdentityFingerprint: string;
   objects: Array<Omit<GuestClaimObject, "destinationPath">>;
   storageManifest: GuestRecoveryStorageManifest;
+  plaintextPhotos: Uint8Array[];
+  encryptedPhotos: Uint8Array[];
 }
 
 let reachable = false;
@@ -77,6 +89,7 @@ let database: Client;
 let lease: ExclusiveTestResourceLease | undefined;
 const users: ClerkTestUser[] = [];
 const recoveryIds: string[] = [];
+const erasureGenerationIds: string[] = [];
 const claimLeaseIds = new Set<string>();
 const storagePaths = new Set<string>();
 
@@ -96,13 +109,23 @@ async function createFixture(
     verifiedIdentity?: boolean;
   } = {},
 ): Promise<Fixture> {
-  const [guest, target] = await Promise.all([
-    provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, `guest_recovery_${label}`),
+  const recoveryId = crypto.randomUUID();
+  const guestId = `guest_${createHash("sha256")
+    .update(`guest-recovery-${label}-${recoveryId}`)
+    .digest("hex")
+    .slice(0, 48)}`;
+  const [guestJwt, target] = await Promise.all([
+    mintUserJwt(guestId),
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, `guest_target_${label}`),
   ]);
+  const guest: ClerkTestUser = {
+    id: guestId,
+    client: createClient(SUPABASE_URL, ANON_KEY!, {
+      accessToken: async () => guestJwt,
+    }),
+  };
   users.push(guest, target);
 
-  const recoveryId = crypto.randomUUID();
   const claimIdempotencyKey = crypto.randomUUID();
   const recoveryTokenHash = createHash("sha256")
     .update(`recovery-token-${label}-${recoveryId}`)
@@ -118,20 +141,30 @@ async function createFixture(
     : null;
   const reviewRevision = crypto.randomUUID();
   const completedAt = options.completedAt ?? new Date().toISOString();
-  const contents = options.photoContents ?? ["encrypted-front", "encrypted-back"];
-  const objects: Array<Omit<GuestClaimObject, "destinationPath">> = contents.map((content, index) => {
-    const bytes = new TextEncoder().encode(content);
-    const sourcePath = `${guest.id}/guest-recovery/${itemId}/${index}.enc`;
+  const contents = options.photoContents ?? ["plaintext-front", "plaintext-back"];
+  const plaintextPhotos = contents.map((content) => new TextEncoder().encode(content));
+  const encryptedPhotos: Uint8Array[] = [];
+  const objects: Array<Omit<GuestClaimObject, "destinationPath">> = plaintextPhotos.map((bytes, index) => {
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const sourcePath = `${guest.id}/guest-recovery/${recoveryId}/${index}-${digest.slice(0, 24)}.enc`;
+    const encrypted = encryptGuestRecoveryPhotoEnvelope({
+      bytes,
+      masterKey: RECOVERY_MASTER_KEY,
+      mediaType: "image/jpeg",
+      nonce: new Uint8Array(12).fill(index + 4),
+      path: sourcePath,
+    });
+    encryptedPhotos.push(encrypted.envelope);
     storagePaths.add(sourcePath);
     return {
       sourcePath,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(encrypted.envelope).digest("hex"),
+      byteLength: encrypted.envelope.byteLength,
       encryption: {
         algorithm: "aes-256-gcm",
         keyId: encryptedArtifact.keyId,
-        nonce: Buffer.alloc(12, index + 4).toString("base64"),
-        tag: Buffer.alloc(16, index + 12).toString("base64"),
+        nonce: Buffer.from(encrypted.nonce).toString("base64"),
+        tag: Buffer.from(encrypted.tag).toString("base64"),
       },
     };
   });
@@ -160,7 +193,9 @@ async function createFixture(
          review_revision, review_content_revision,
          photo_identity_kind, photo_identity_fingerprint
        ) values ($1, $2, $3, '{"brand":"RecoveryFixture"}'::jsonb,
-         'good', '{"kind":"fixture"}'::jsonb, $4, $4,
+         'good',
+         '{"label":"Recovery fixture","confident":true,"evidence":1}'::jsonb,
+         $4, $4,
          $5, $6)`,
       [
         itemId,
@@ -191,12 +226,26 @@ async function createFixture(
          id, user_id, item_id, platform, title, description, copy, status,
          run_id, source_review_revision
        ) values ($1, $2, $3, 'ebay', 'Recovery fixture',
-         'A coherent editable draft.', '{}'::jsonb, 'draft', $4, $5)`,
+         'A coherent editable draft.',
+         '{"itemSpecifics":{"Brand":"RecoveryFixture"}}'::jsonb,
+         'draft', $4, $5)`,
       [draftId, guest.id, itemId, runId, reviewRevision],
     );
     await database.query(
       "update public.pipeline_runs set listing_id = $1 where id = $2",
       [draftId, runId],
+    );
+    await database.query(
+      `insert into public.pricing_evidence_snapshots (
+         run_id, pipeline_run_id, run_kind, user_id, item_id, prediction_id,
+         listing_id, schema_version, item, price_result, evidence, evidence_as_of
+       ) values (
+         $1, $1, 'pipeline', $2, $3, $4, $5, 1,
+         '{"title":"Recovery fixture","condition":"good"}'::jsonb,
+         '{"suggested":25,"range":{"min":20,"max":30},"confidence":0.8,"sources":[],"tier":"llm-only"}'::jsonb,
+         '[]'::jsonb, $6
+       )`,
+      [runId, guest.id, itemId, predictionId, draftId, completedAt],
     );
     await database.query(
       `insert into public.ai_item_allowance_periods (
@@ -259,10 +308,9 @@ async function createFixture(
   }
 
   for (const [index, object] of objects.entries()) {
-    const bytes = new TextEncoder().encode(contents[index]);
     const uploaded = await admin.storage.from("photos").upload(
       object.sourcePath,
-      arrayBuffer(bytes),
+      arrayBuffer(encryptedPhotos[index]!),
       { contentType: "image/jpeg", upsert: false },
     );
     if (uploaded.error) throw new Error(uploaded.error.message);
@@ -287,6 +335,8 @@ async function createFixture(
     photoIdentityFingerprint,
     objects,
     storageManifest,
+    plaintextPhotos,
+    encryptedPhotos,
   };
 }
 
@@ -294,7 +344,7 @@ function recoveryStore() {
   return createSupabaseGuestRecoveryStore(admin as never);
 }
 
-function claimStore() {
+function claimStore(onServiceRoleCompletionDenied?: () => void) {
   const store = createSupabaseGuestClaimStore(admin as never);
   return {
     ...store,
@@ -305,11 +355,65 @@ function claimStore() {
       }
       return outcome;
     },
+    async completeClaim(input: Parameters<typeof store.completeClaim>[0]) {
+      if (onServiceRoleCompletionDenied) {
+        const denied = await admin.rpc(
+          "complete_guest_draft_claim_with_plaintext",
+          {
+            p_claim_lease_token: input.claimLeaseToken,
+            p_completion_token: input.completionToken,
+            p_recovery_id: input.recoveryId,
+            p_recovery_token_hash: input.recoveryTokenHash,
+            p_target_user_id: input.targetUserId,
+            p_verified_objects: input.verifiedObjects,
+          },
+        );
+        expect(denied.data).toBeNull();
+        expect(denied.error).toMatchObject({ code: "42501" });
+      }
+      const targetToken = await mintUserJwt(input.targetUserId);
+      const targetClient = createClient(
+        SUPABASE_URL,
+        SERVICE_ROLE_KEY!,
+        {
+          accessToken: async () => targetToken,
+          auth: { persistSession: false, autoRefreshToken: false },
+        },
+      );
+      if (onServiceRoleCompletionDenied) {
+        const forged = await targetClient.rpc(
+          "complete_guest_draft_claim_with_plaintext",
+          {
+            p_claim_lease_token: input.claimLeaseToken,
+            p_completion_token: "f".repeat(64),
+            p_recovery_id: input.recoveryId,
+            p_recovery_token_hash: input.recoveryTokenHash,
+            p_target_user_id: input.targetUserId,
+            p_verified_objects: input.verifiedObjects,
+          },
+        );
+        expect(forged.data).toBeNull();
+        expect(forged.error).toMatchObject({ code: "42501" });
+        onServiceRoleCompletionDenied();
+      }
+      return createSupabaseGuestClaimStore(targetClient as never)
+        .completeClaim(input);
+    },
   };
 }
 
 function claimStorage() {
-  const storage = createSupabaseGuestClaimStorage(admin as never);
+  const storage = createSupabaseGuestClaimStorage(
+    admin as never,
+    {
+      keyFor(keyId) {
+        if (keyId !== encryptedArtifact.keyId) {
+          throw new Error("fixture key id mismatch");
+        }
+        return RECOVERY_MASTER_KEY;
+      },
+    },
+  );
   return {
     async copyAndVerify(object: GuestClaimObject) {
       storagePaths.add(object.destinationPath);
@@ -353,6 +457,12 @@ beforeAll(async () => {
 afterAll(async () => {
   await whenStackReachable(reachable, async () => {
   await admin.storage.from("photos").remove([...storagePaths]);
+  if (erasureGenerationIds.length > 0) {
+    await database.query(
+      "delete from private.account_erasure_generations where generation_id = any($1::uuid[])",
+      [erasureGenerationIds],
+    );
+  }
   if (recoveryIds.length > 0) {
     await database.query(
       "delete from private.pipeline_storage_cleanup_jobs where source_type = 'guest_recovery' and source_id = any($1::uuid[])",
@@ -377,11 +487,10 @@ afterAll(async () => {
 });
 
 describe("guest recovery live DB/RLS and private Storage boundary", () => {
-  it("replays one encrypted draft, atomically claims every record, and remaps the exact #168 reservation", async () => {
+  it("claims encrypted recovery into plaintext review and eBay publish inputs", async () => {
 
     const fixture = await createFixture("claim", {
       targetHasIncludedPeriod: true,
-      verifiedIdentity: false,
     });
     const before = await database.query(
       `select id, pipeline_run_id, item_id, logical_run_key, state,
@@ -392,6 +501,20 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
        from public.ai_item_credit_reservations where id = $1`,
       [fixture.reservationId],
     );
+    const encryptedBeforeClaim = await fixture.guest.client.storage
+      .from("photos")
+      .download(fixture.objects[0].sourcePath);
+    expect(encryptedBeforeClaim.error).toBeNull();
+    const encryptedBeforeClaimBytes = new Uint8Array(
+      await encryptedBeforeClaim.data!.arrayBuffer(),
+    );
+    expect(encryptedBeforeClaimBytes).toEqual(fixture.encryptedPhotos[0]);
+    expect(encryptedBeforeClaimBytes).not.toEqual(fixture.plaintextPhotos[0]);
+    await expect(database.query(
+      `select count(*)::integer as count from storage.objects
+       where bucket_id = 'photos' and name like $1`,
+      [`${fixture.target.id}/guest-claims/%`],
+    )).resolves.toMatchObject({ rows: [{ count: 0 }] });
 
     const first = await register(fixture);
     const replay = await register(fixture);
@@ -409,6 +532,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       new Date(fixture.completedAt).getTime(),
     );
 
+    let serviceRoleCompletionDenied = false;
     const outcome = await claimGuestRecovery(
       {
         handoff: {
@@ -419,11 +543,17 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
         idempotencyKey: fixture.claimIdempotencyKey,
         targetUserId: fixture.target.id,
       },
-      { store: claimStore(), storage: claimStorage() },
+      {
+        store: claimStore(() => {
+          serviceRoleCompletionDenied = true;
+        }),
+        storage: claimStorage(),
+      },
     );
+    expect(serviceRoleCompletionDenied).toBe(true);
     expect(outcome).toMatchObject({ outcome: "claimed", purgeLocalRecovery: true });
     if (outcome.outcome !== "claimed") throw new Error("expected claimed recovery");
-    expect(outcome.accountRecovery).toMatchObject({ encryptedArtifact });
+    expect(outcome).not.toHaveProperty("accountRecovery");
 
     const after = await database.query(
       `select id, pipeline_run_id, item_id, logical_run_key, state,
@@ -463,12 +593,110 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     });
     expect(guestItem.data).toEqual([]);
 
-    for (const path of claimedPhotos) {
+    for (const [index, path] of claimedPhotos.entries()) {
       const downloaded = await fixture.target.client.storage
         .from("photos")
         .download(path);
       expect(downloaded.error).toBeNull();
+      expect(new Uint8Array(await downloaded.data!.arrayBuffer())).toEqual(
+        fixture.plaintextPhotos[index],
+      );
     }
+    const envelopeState = await database.query(
+      `select encrypted_artifact, storage_manifest, claimed_storage_manifest
+       from private.guest_draft_recoveries where id = $1`,
+      [fixture.recoveryId],
+    );
+    expect(envelopeState.rows[0]).toMatchObject({
+      encrypted_artifact: null,
+      storage_manifest: null,
+    });
+    expect(envelopeState.rows[0].claimed_storage_manifest).toHaveLength(
+      fixture.objects.length,
+    );
+    expect(JSON.stringify(envelopeState.rows[0].claimed_storage_manifest))
+      .not.toMatch(/cipher|encryption|keyId|nonce|tag/i);
+    for (const receipt of envelopeState.rows[0].claimed_storage_manifest) {
+      expect(receipt).not.toHaveProperty("sourceSha256");
+      expect(receipt).not.toHaveProperty("sourceByteLength");
+    }
+
+    const reviewReader = createListingReviewReader({
+      async readReview(runId) {
+        const { data, error } = await fixture.target.client.rpc(
+          "get_mobile_listing_review",
+          { p_run_id: runId },
+        );
+        return { data, error: error ? { message: error.message } : null };
+      },
+      async readReviewRevisions(itemId) {
+        const { data, error } = await fixture.target.client
+          .from("items")
+          .select(
+            "reviewContentRevision:review_content_revision,reviewRevision:review_revision",
+          )
+          .eq("id", itemId)
+          .maybeSingle();
+        return { data, error: error ? { message: error.message } : null };
+      },
+      async signPhotoUrls(paths) {
+        const { data, error } = await fixture.target.client.storage
+          .from("photos")
+          .createSignedUrls(paths, 60);
+        if (error || !data) throw new Error(error?.message ?? "missing signed URLs");
+        return Promise.all(data.map(async (entry, ordinal) => {
+          if (!entry.signedUrl) throw new Error("missing signed URL");
+          const response = await fetch(entry.signedUrl);
+          expect(response.ok).toBe(true);
+          expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+            fixture.plaintextPhotos[ordinal],
+          );
+          return {
+            ordinal,
+            path: paths[ordinal]!,
+            signedUrl: entry.signedUrl.replace("http://", "https://"),
+          };
+        }));
+      },
+    });
+    const review = await reviewReader.forRun({
+      bearerToken: "fixture bearer is enclosed by the RLS client",
+      runId: fixture.runId,
+      userId: fixture.target.id,
+    });
+    expect(review).toMatchObject({
+      listing: {
+        title: "Recovery fixture",
+        description: "A coherent editable draft.",
+      },
+      photos: claimedPhotos.map((_, ordinal) => ({ ordinal })),
+    });
+
+    const adapter = Object.assign(new MockEbayAdapter(), {
+      getPublishFallbackBinding() {
+        return {
+          marketplaceId: "EBAY_US",
+          connectionGeneration: null,
+          fulfillmentPolicyId: "fixture-fulfillment",
+          paymentPolicyId: "fixture-payment",
+          returnPolicyId: "fixture-return",
+          merchantLocationKey: "fixture-location",
+        } as const;
+      },
+    });
+    await expect(publishListingToEbay(
+      fixture.target.client,
+      fixture.draftId,
+      adapter,
+      { env: () => ({ EBAY_MARKETPLACE_ID: "EBAY_US" }) },
+    )).resolves.toMatchObject({ ebayStatus: "published" });
+    expect(adapter.requests).toHaveLength(1);
+    const publishedPhoto = await fetch(adapter.requests[0]!.imageUrls[0]!);
+    expect(publishedPhoto.ok).toBe(true);
+    expect(new Uint8Array(await publishedPhoto.arrayBuffer())).toEqual(
+      fixture.plaintextPhotos[0],
+    );
+
     const attribution = await database.query(
       `select
          (select user_id from public.notifications where source_pipeline_run_id = $1) as notification_user,
@@ -496,15 +724,13 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
         { store: claimStore(), storage: claimStorage() },
       ),
     ).resolves.toEqual(outcome);
-    const { accountRecovery: _accountRecovery, ...guestOutcome } = outcome;
-    void _accountRecovery;
     await expect(
       recoveryStore().recover({
         recoveryId: fixture.recoveryId,
         guestUserId: fixture.guest.id,
         recoveryTokenHash: fixture.recoveryTokenHash,
       }),
-    ).resolves.toEqual(guestOutcome);
+    ).resolves.toEqual(outcome);
 
     const otherTarget = `${fixture.target.id}_other`;
     await expect(claimStore().beginClaim({
@@ -514,6 +740,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       guestUserId: fixture.guest.id,
       idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
+      completionTokenHash: CLAIM_COMPLETION_TOKEN_HASH,
     })).rejects.toThrow(/not found/i);
     await expect(claimStore().releaseClaim({
       recoveryId: fixture.recoveryId,
@@ -526,11 +753,14 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       recoveryTokenHash: fixture.recoveryTokenHash,
       targetUserId: otherTarget,
       claimLeaseToken: crypto.randomUUID(),
+      completionToken: CLAIM_COMPLETION_TOKEN,
       verifiedObjects: [{
         destinationPath: `${otherTarget}/guest-claims/${fixture.recoveryId}/${crypto.randomUUID()}/1`,
-        sha256: "f".repeat(64),
-        byteLength: 1,
-        encryption: fixture.storageManifest[0].encryption,
+        sourceSha256: "f".repeat(64),
+        sourceByteLength: 38,
+        plaintextSha256: "e".repeat(64),
+        plaintextByteLength: 1,
+        mediaType: "image/jpeg",
       }],
     })).rejects.toThrow(/not found/i);
 
@@ -542,7 +772,125 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       billing_source: "included",
       remaining_items: 0,
     });
-  }, 20_000);
+
+    const sourceCleanup = await database.query(
+      `select photo_paths from private.pipeline_storage_cleanup_jobs
+       where source_type = 'guest_recovery' and source_id = $1`,
+      [fixture.recoveryId],
+    );
+    expect(sourceCleanup.rows[0].photo_paths).toEqual(
+      fixture.objects.map((object) => object.sourcePath),
+    );
+    await database.query(
+      `update private.pipeline_storage_cleanup_jobs
+       set available_at = statement_timestamp()
+       where source_type = 'guest_recovery' and source_id = $1`,
+      [fixture.recoveryId],
+    );
+    await runPipelineMaintenance({
+      store: createSupabasePipelineOperationsStore(admin as never),
+      storage: {
+        async remove(paths) {
+          const removed = await admin.storage.from("photos").remove(paths);
+          if (removed.error) throw new Error(removed.error.message);
+        },
+        async confirmAbsent() {},
+      },
+    });
+    for (const source of fixture.objects) {
+      expect(
+        (await admin.storage.from("photos").download(source.sourcePath)).error,
+      ).not.toBeNull();
+    }
+    for (const path of claimedPhotos) {
+      expect(
+        (await fixture.target.client.storage.from("photos").download(path)).error,
+      ).toBeNull();
+    }
+
+    const erasureStarted = await admin.rpc("begin_account_erasure", {
+      p_idempotency_key: crypto.randomUUID(),
+      p_user_id: fixture.target.id,
+    });
+    expect(erasureStarted.error).toBeNull();
+    const erasure = erasureStarted.data as {
+      generation_id: string;
+      status: string;
+      storage_objects: Array<{ bucket_id: string; object_name: string }>;
+    };
+    erasureGenerationIds.push(erasure.generation_id);
+    expect(erasure.status).toBe("deletion_requested");
+    expect(
+      erasure.storage_objects.map((object) => object.object_name).sort(),
+    ).toEqual([...claimedPhotos].sort());
+
+    for (const object of erasure.storage_objects) {
+      const removed = await admin.storage
+        .from(object.bucket_id)
+        .remove([object.object_name]);
+      expect(removed.error).toBeNull();
+      const confirmed = await admin.rpc(
+        "confirm_account_erasure_storage_absence",
+        {
+          p_bucket_id: object.bucket_id,
+          p_generation_id: erasure.generation_id,
+          p_object_name: object.object_name,
+        },
+      );
+      expect(confirmed.error).toBeNull();
+      expect(confirmed.data).toBe(true);
+    }
+    await expect(database.query(
+      `select count(*)::integer as count
+       from private.account_erasure_storage_manifest
+       where generation_id = $1 and verified_absent_at is not null`,
+      [erasure.generation_id],
+    )).resolves.toMatchObject({
+      rows: [{ count: claimedPhotos.length }],
+    });
+
+    const advanced = await admin.rpc("advance_account_erasure", {
+      p_generation_id: erasure.generation_id,
+    });
+    expect(advanced.error).toBeNull();
+    expect(advanced.data).toMatchObject({
+      deferrals: [],
+      retained_records: ["ebay-live-listing"],
+      status: "deletion_in_progress",
+    });
+    await expect(database.query(
+      `select
+         (select count(*)::integer from private.guest_draft_recoveries
+          where id = $1) as recovery_count,
+         (select count(*)::integer from storage.objects
+          where bucket_id = 'photos' and name = any($2::text[])) as object_count,
+         (select count(*)::integer from public.items
+          where user_id = $3) as item_count`,
+      [fixture.recoveryId, claimedPhotos, fixture.target.id],
+    )).resolves.toMatchObject({
+      rows: [{ recovery_count: 0, object_count: 0, item_count: 0 }],
+    });
+
+    const finalized = await admin.rpc("finalize_account_erasure", {
+      p_attention_reasons: [],
+      p_clerk_identity_absent: true,
+      p_generation_id: erasure.generation_id,
+      p_posthog_person_and_events_deletion_confirmed: true,
+      p_revenuecat_customer_absent: true,
+    });
+    expect(finalized.error).toBeNull();
+    expect(finalized.data).toMatchObject({
+      retained_records: ["ebay-live-listing"],
+      status: "deletion_completed_with_retained_records",
+      storage_objects: [],
+    });
+    await expect(database.query(
+      `select count(*)::integer as count
+       from private.account_erasure_storage_manifest
+       where generation_id = $1`,
+      [erasure.generation_id],
+    )).resolves.toMatchObject({ rows: [{ count: 0 }] });
+  }, 30_000);
 
   it("claims the current guided-correction prediction/run without changing settled accounting", async () => {
 
@@ -686,6 +1034,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       guestUserId: fixture.guest.id,
       idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
+      completionTokenHash: CLAIM_COMPLETION_TOKEN_HASH,
     };
     const [left, right] = await Promise.all([
       claimStore().beginClaim(input),
@@ -818,6 +1167,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       guestUserId: fixture.guest.id,
       idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
+      completionTokenHash: CLAIM_COMPLETION_TOKEN_HASH,
     });
     if (plan.outcome !== "copy_required") throw new Error("expected copy plan");
     await database.query(
@@ -980,6 +1330,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       guestUserId: fixture.guest.id,
       idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
+      completionTokenHash: CLAIM_COMPLETION_TOKEN_HASH,
     });
     if (plan.outcome !== "copy_required") throw new Error("expected plan");
     const verified = await Promise.all(
@@ -992,6 +1343,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
         recoveryTokenHash: fixture.recoveryTokenHash,
         targetUserId: fixture.target.id,
         claimLeaseToken: plan.claimLeaseToken,
+        completionToken: CLAIM_COMPLETION_TOKEN,
         verifiedObjects: verified,
       }),
       admin.rpc("expire_guest_draft_recoveries", { p_batch_size: 25 }),
@@ -1042,6 +1394,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       guestUserId: fixture.guest.id,
       idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
+      completionTokenHash: CLAIM_COMPLETION_TOKEN_HASH,
     });
     if (plan.outcome !== "copy_required") throw new Error("expected plan");
     const verified = await Promise.all(
@@ -1049,8 +1402,8 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     );
     await database.query(
       `update private.guest_draft_recoveries
-       set usable_draft_at = statement_timestamp() - interval '24 hours',
-           expires_at = statement_timestamp()
+       set usable_draft_at = statement_timestamp() - interval '24 hours 1 second',
+           expires_at = statement_timestamp() - interval '1 second'
        where id = $1`,
       [fixture.recoveryId],
     );
@@ -1061,6 +1414,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
         recoveryTokenHash: fixture.recoveryTokenHash,
         targetUserId: fixture.target.id,
         claimLeaseToken: plan.claimLeaseToken,
+        completionToken: CLAIM_COMPLETION_TOKEN,
         verifiedObjects: verified,
       }),
       admin.rpc("expire_guest_draft_recoveries", { p_batch_size: 25 }),

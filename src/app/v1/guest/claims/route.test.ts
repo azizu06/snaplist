@@ -61,6 +61,7 @@ describe("guest claim App Router seam", () => {
     expect(claimGuestRecovery).toHaveBeenCalledOnce();
     expect(claimGuestRecovery).toHaveBeenCalledWith({
       handoff: VERIFIED_HANDOFF,
+      bearerToken: "signed-clerk-jwt",
       idempotencyKey: "77777777-7777-4777-8777-777777777777",
       targetUserId: ACCOUNT_USER_ID,
     });

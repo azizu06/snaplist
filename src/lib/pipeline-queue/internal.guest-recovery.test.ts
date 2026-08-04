@@ -233,8 +233,8 @@ describe("production guest recovery worker composition", () => {
         );
         await database.query(
           `select public.begin_mobile_item_submission_v3(
-             $1::uuid, $2, null, $3::uuid, $4::uuid, 0,
-             $5::jsonb, null, $6::uuid, $7
+             $1::uuid, $2::text, null::text, $3::uuid, $4::uuid, 0::numeric,
+             $5::jsonb, null::jsonb, $6::uuid, $7::text
            )`,
           [
             idempotencyKey,
@@ -253,11 +253,12 @@ describe("production guest recovery worker composition", () => {
           run_id: string;
         }>(
           `select * from public.commit_mobile_item_submission_v3(
-             $1::uuid, $2, null, $3::uuid, $4::uuid, 0, 100, 100,
+             $1::uuid, $2::text, null::text, $3::uuid, $4::uuid,
+             0::numeric, 100, 100,
              jsonb_build_object(
                'kind', 'content_sha256_set_v1', 'fingerprint', $5::text
              ),
-             $6::jsonb, null, $7::uuid, $8
+             $6::jsonb, null::jsonb, $7::uuid, $8::text
            )`,
           [
             idempotencyKey,

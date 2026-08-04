@@ -1,9 +1,11 @@
 import { Buffer } from "node:buffer";
+import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 
 export const MAX_GUEST_RECOVERY_PHOTOS = 5;
+export const MAX_GUEST_RECOVERY_PHOTO_BYTES = 50 * 1_024 * 1_024;
 export const MAX_GUEST_RECOVERY_PHOTO_ENVELOPE_BYTES =
-  50 * 1_024 * 1_024 + 37;
+  MAX_GUEST_RECOVERY_PHOTO_BYTES + 37;
 
 interface Base64Bounds {
   exactBytes?: number;
@@ -107,59 +109,30 @@ export const guestClaimObjectSchema = z
 
 export type GuestClaimObject = z.infer<typeof guestClaimObjectSchema>;
 
-export const guestClaimVerifiedObjectSchema = guestClaimObjectSchema
-  .omit({ sourcePath: true })
+export const guestClaimVerifiedObjectSchema = z
+  .object({
+    destinationPath: storagePathSchema,
+    sourceSha256: sha256Schema,
+    sourceByteLength: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_GUEST_RECOVERY_PHOTO_ENVELOPE_BYTES),
+    plaintextSha256: sha256Schema,
+    plaintextByteLength: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_GUEST_RECOVERY_PHOTO_BYTES),
+    mediaType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  })
   .strict();
 
 export type GuestClaimVerifiedObject = z.infer<
   typeof guestClaimVerifiedObjectSchema
 >;
 
-export const guestClaimAccountRecoverySchema = z
-  .object({
-    encryptedArtifact: encryptedGuestRecoveryArtifactSchema,
-    storageManifest: z
-      .array(guestClaimVerifiedObjectSchema)
-      .min(1)
-      .max(MAX_GUEST_RECOVERY_PHOTOS),
-  })
-  .strict()
-  .superRefine((recovery, context) => {
-    if (
-      new Set(recovery.storageManifest.map((object) => object.encryption.nonce)).size
-        !== recovery.storageManifest.length
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Guest recovery AES-GCM nonces must be unique.",
-        path: ["storageManifest"],
-      });
-    }
-    recovery.storageManifest.forEach((object, index) => {
-      if (object.encryption.keyId !== recovery.encryptedArtifact.keyId) {
-        context.addIssue({
-          code: "custom",
-          message: "Storage ciphertext must use the recovery key envelope.",
-          path: ["storageManifest", index, "encryption", "keyId"],
-        });
-      }
-      if (object.encryption.nonce === recovery.encryptedArtifact.nonce) {
-        context.addIssue({
-          code: "custom",
-          message: "Storage ciphertext cannot reuse the artifact AES-GCM nonce.",
-          path: ["storageManifest", index, "encryption", "nonce"],
-        });
-      }
-    });
-  });
-
-const guestClaimClaimedOutcomeSchema = z
-  .object({
-    outcome: z.literal("claimed"),
-    ...guestClaimTerminalFields,
-    accountRecovery: guestClaimAccountRecoverySchema,
-  })
-  .strict();
+const guestClaimClaimedOutcomeSchema = guestRecoveryClaimedOutcomeSchema;
 
 export const guestClaimTerminalOutcomeSchema = z.discriminatedUnion("outcome", [
   guestClaimClaimedOutcomeSchema,
@@ -220,9 +193,11 @@ export interface GuestClaimStore {
     guestUserId: string;
     idempotencyKey: string;
     leaseSeconds: number;
+    completionTokenHash: string;
   }): Promise<GuestClaimStart>;
   completeClaim(input: ClaimIdentity & {
     claimLeaseToken: string;
+    completionToken: string;
     verifiedObjects: GuestClaimVerifiedObject[];
   }): Promise<GuestClaimTerminalOutcome>;
   releaseClaim(input: ClaimIdentity & {
@@ -314,12 +289,20 @@ export async function claimGuestRecovery(
     recoveryTokenHash: handoff.recoveryTokenHash,
     targetUserId,
   };
+  // The raw completion capability exists only in this server request. The
+  // database binds its digest to the exact copy lease, so neither an observed
+  // lease path nor an authenticated seller session can forge finalization.
+  const completionToken = randomBytes(32).toString("hex");
+  const completionTokenHash = createHash("sha256")
+    .update(completionToken, "utf8")
+    .digest("hex");
   const start = guestClaimStartSchema.parse(
     await dependencies.store.beginClaim({
       ...identity,
       guestUserId: handoff.guestUserId,
       idempotencyKey,
       leaseSeconds: 300,
+      completionTokenHash,
     }),
   );
 
@@ -353,8 +336,8 @@ export async function claimGuestRecovery(
       );
       if (
         verified.destinationPath !== object.destinationPath ||
-        verified.sha256 !== object.sha256 ||
-        verified.byteLength !== object.byteLength
+        verified.sourceSha256 !== object.sha256 ||
+        verified.sourceByteLength !== object.byteLength
       ) {
         throw new Error("Storage verification receipt does not match the claim plan.");
       }
@@ -378,6 +361,7 @@ export async function claimGuestRecovery(
       await dependencies.store.completeClaim({
         ...identity,
         claimLeaseToken: start.claimLeaseToken,
+        completionToken,
         verifiedObjects,
       }),
     );

@@ -84,9 +84,8 @@ describe("mobile item submission OpenAPI", () => {
     expect(contract.components.schemas.MobileItemSubmissionPhoto).toMatchObject({
       properties: { ordinal: { minimum: 0, maximum: 4 } },
     });
-    expect(contract.components.schemas.GuestClaimAccountRecovery).toMatchObject({
-      properties: { storageManifest: { minItems: 1, maxItems: 5 } },
-    });
+    expect(contract.components.schemas.GuestClaimClaimedOutcome.properties)
+      .not.toHaveProperty("accountRecovery");
   });
 
   it("keeps the native contract inventory and receipt fixture aligned", () => {

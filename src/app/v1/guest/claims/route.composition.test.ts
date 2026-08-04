@@ -140,6 +140,7 @@ describe("guest claim App Router verifier composition", () => {
         recoveryId: RECOVERY_ID,
         recoveryTokenHash: createHash("sha256").update(RECOVERY_TOKEN).digest("hex"),
       },
+      bearerToken: "signed-clerk-jwt",
       idempotencyKey: "77777777-7777-4777-8777-777777777777",
       targetUserId: ACCOUNT_USER_ID,
     });

@@ -1,4 +1,9 @@
-import { createCipheriv, createHmac } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  timingSafeEqual,
+} from "node:crypto";
 import { z } from "zod";
 
 const PHOTO_MAGIC = Buffer.from("SGLRPHO1", "ascii");
@@ -12,6 +17,12 @@ const mediaTypeCodes = {
 } as const;
 
 type GuestRecoveryPhotoMediaType = keyof typeof mediaTypeCodes;
+const mediaTypesByCode = new Map<number, GuestRecoveryPhotoMediaType>(
+  Object.entries(mediaTypeCodes).map(([mediaType, code]) => [
+    code,
+    mediaType as GuestRecoveryPhotoMediaType,
+  ]),
+);
 
 const RECOVERY_PHOTO_PATH =
   /^guest_[0-9a-f]{48}\/guest-recovery\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/([0-4])-[0-9a-f]{24}\.enc$/;
@@ -103,4 +114,63 @@ export function encryptGuestRecoveryPhotoEnvelope(input: {
     nonce: Uint8Array.from(input.nonce),
     tag: Uint8Array.from(tag.subarray(0, PHOTO_TAG_BYTES)),
   };
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength
+    && timingSafeEqual(Buffer.from(left), Buffer.from(right));
+}
+
+/** Consumes one producer envelope before account-owned Storage is written. */
+export function decryptGuestRecoveryPhotoEnvelope(input: {
+  envelope: Uint8Array;
+  expectedNonce: Uint8Array;
+  expectedTag: Uint8Array;
+  masterKey: Uint8Array;
+  path: string;
+}): { bytes: Uint8Array; mediaType: GuestRecoveryPhotoMediaType } {
+  try {
+    requireMasterKey(input.masterKey);
+    const { ordinal, recoveryId } = pathIdentity(input.path);
+    const envelope = Buffer.from(input.envelope);
+    const headerLength = PHOTO_MAGIC.byteLength + 1 + PHOTO_NONCE_BYTES
+      + PHOTO_TAG_BYTES;
+    if (
+      envelope.byteLength <= headerLength
+      || !equalBytes(envelope.subarray(0, PHOTO_MAGIC.byteLength), PHOTO_MAGIC)
+    ) {
+      throw new Error();
+    }
+
+    const mediaType = mediaTypesByCode.get(envelope[PHOTO_MAGIC.byteLength]!);
+    const nonceOffset = PHOTO_MAGIC.byteLength + 1;
+    const tagOffset = nonceOffset + PHOTO_NONCE_BYTES;
+    const ciphertextOffset = tagOffset + PHOTO_TAG_BYTES;
+    const nonce = envelope.subarray(nonceOffset, tagOffset);
+    const tag = envelope.subarray(tagOffset, ciphertextOffset);
+    if (
+      !mediaType
+      || !equalBytes(nonce, input.expectedNonce)
+      || !equalBytes(tag, input.expectedTag)
+    ) {
+      throw new Error();
+    }
+
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      dataKey(input.masterKey, recoveryId),
+      nonce,
+    );
+    decipher.setAAD(photoAAD(recoveryId, ordinal));
+    decipher.setAuthTag(tag);
+    return {
+      bytes: Uint8Array.from(Buffer.concat([
+        decipher.update(envelope.subarray(ciphertextOffset)),
+        decipher.final(),
+      ])),
+      mediaType,
+    };
+  } catch {
+    throw new Error("Guest recovery photo envelope is invalid.");
+  }
 }

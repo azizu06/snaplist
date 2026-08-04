@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -602,6 +603,7 @@ describe("mobile Listing Review save RLS authority", () => {
     const userIds: string[] = [];
     const fixtures: ReviewFixture[] = [];
     const recoveryIds: string[] = [];
+    const claimedStoragePaths: string[] = [];
     await database.connect();
     try {
       for (const principalKind of ["ClerkBearer", "GuestBearer"] as const) {
@@ -1076,14 +1078,22 @@ describe("mobile Listing Review save RLS authority", () => {
           expect(registered.error).toBeNull();
           expect(registered.data).toMatchObject({ outcome: "recoverable" });
 
-          const claimStarted = await admin.rpc("begin_guest_draft_claim", {
+          const completionToken = randomBytes(32).toString("hex");
+          const completionTokenHash = createHash("sha256")
+            .update(completionToken)
+            .digest("hex");
+          const claimStarted = await admin.rpc(
+            "begin_guest_draft_claim_with_plaintext",
+            {
             p_recovery_id: recoveryId,
             p_guest_user_id: ownerId,
             p_recovery_token_hash: recoveryTokenHash,
             p_target_user_id: accountId,
             p_idempotency_key: crypto.randomUUID(),
             p_claim_lease_seconds: 300,
-          });
+              p_completion_token_hash: completionTokenHash,
+            },
+          );
           expect(claimStarted.error).toBeNull();
           const claimPlan = claimStarted.data as {
             claimLeaseToken: string;
@@ -1097,6 +1107,18 @@ describe("mobile Listing Review save RLS authority", () => {
             outcome: string;
           };
           expect(claimPlan.outcome).toBe("copy_required");
+          const claimedPlaintext = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+          const accountClient = rlsClient(accountToken);
+          for (const object of claimPlan.objects) {
+            const uploaded = await accountClient.storage
+              .from("photos")
+              .upload(object.destinationPath, claimedPlaintext, {
+                contentType: "image/jpeg",
+                upsert: false,
+              });
+            expect(uploaded.error).toBeNull();
+            claimedStoragePaths.push(object.destinationPath);
+          }
 
           const beforeClaim = await database.query<{
             review_revision: string;
@@ -1104,18 +1126,26 @@ describe("mobile Listing Review save RLS authority", () => {
             "select review_revision::text from public.items where id = $1::uuid",
             [fixture.itemId],
           );
-          const claimCompleted = await admin.rpc("complete_guest_draft_claim", {
-            p_recovery_id: recoveryId,
-            p_recovery_token_hash: recoveryTokenHash,
-            p_target_user_id: accountId,
-            p_claim_lease_token: claimPlan.claimLeaseToken,
-            p_verified_objects: claimPlan.objects.map((object) => ({
-              byteLength: object.byteLength,
-              destinationPath: object.destinationPath,
-              encryption: object.encryption,
-              sha256: object.sha256,
-            })),
-          });
+          const claimCompleted = await accountClient.rpc(
+            "complete_guest_draft_claim_with_plaintext",
+            {
+              p_recovery_id: recoveryId,
+              p_recovery_token_hash: recoveryTokenHash,
+              p_target_user_id: accountId,
+              p_claim_lease_token: claimPlan.claimLeaseToken,
+              p_completion_token: completionToken,
+              p_verified_objects: claimPlan.objects.map((object) => ({
+                destinationPath: object.destinationPath,
+                sourceByteLength: object.byteLength,
+                sourceSha256: object.sha256,
+                plaintextByteLength: claimedPlaintext.byteLength,
+                plaintextSha256: createHash("sha256")
+                  .update(claimedPlaintext)
+                  .digest("hex"),
+                mediaType: "image/jpeg",
+              })),
+            },
+          );
           expect(claimCompleted.error).toBeNull();
           expect(claimCompleted.data).toMatchObject({ outcome: "claimed" });
 
@@ -1170,6 +1200,9 @@ describe("mobile Listing Review save RLS authority", () => {
         }
       }
     } finally {
+      if (claimedStoragePaths.length > 0) {
+        await admin.storage.from("photos").remove(claimedStoragePaths);
+      }
       if (recoveryIds.length > 0) {
         await database.query(
           "delete from private.pipeline_storage_cleanup_jobs where source_id = any($1::uuid[])",
