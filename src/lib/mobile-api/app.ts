@@ -1558,12 +1558,16 @@ export function createMobileApiHandler(
               : error instanceof GuestClaimInProgressError
                 ? "guest_claim_in_progress"
                 : "guest_claim_idempotency_conflict";
+          const claimStage = error instanceof GuestClaimAllowanceSpentError
+              || error instanceof GuestClaimAllowanceInFlightError
+            ? error.claimStage
+            : undefined;
           return errorResponse(
             requestId,
             409,
             "conflict",
             error.message,
-            { reason },
+            { reason, ...(claimStage ? { claimStage } : {}) },
           );
         }
         dependencies.reportError?.("mobile-api.guest-claim", error);

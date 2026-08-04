@@ -3138,6 +3138,39 @@ describe("mobile API v1 provider-neutral handler", () => {
     ]);
   });
 
+  it.each([
+    [
+      new GuestClaimAllowanceSpentError("post_copy"),
+      "guest_claim_allowance_spent",
+    ],
+    [
+      new GuestClaimAllowanceInFlightError("post_copy"),
+      "guest_claim_allowance_in_flight",
+    ],
+  ] as const)(
+    "preserves the late post-copy stage for an actionable allowance denial",
+    async (error, reason) => {
+      const response = await handler({
+        claimGuestRecovery: vi.fn().mockRejectedValue(error),
+      })(
+        new Request("http://localhost/v1/guest/claims", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer signed-account-jwt",
+            "idempotency-key": "55555555-5555-4555-8555-555555555555",
+            "x-snaplist-guest-handoff": "opaque-174-handoff",
+          },
+        }),
+      );
+
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          details: { reason, claimStage: "post_copy" },
+        },
+      });
+    },
+  );
+
   it("requires authentication before either native billing seam", async () => {
     for (const [url, method] of [
       ["http://localhost/v1/billing/revenuecat/identity", "POST"],

@@ -17,6 +17,7 @@ enum EbayConnectionViewState: Equatable, Sendable {
 enum EbayConfirmationViewState: Equatable, Sendable {
     case ready
     case listingChanged
+    case refreshFailed
     case missingFields
     case connectionLost
     case accountChanged
@@ -250,6 +251,21 @@ final class EbayPublishFlowStore {
                 await replayAmbiguousPublish()
                 return
             }
+            if status.outcome == .failed {
+                let failedAttempt = try await attemptStore.attempt(
+                    listingID: listingID
+                )
+                try await loadPreflight(justConnected: false)
+                if case .confirmation(.ready) = screen {
+                    if failedAttempt?.expectedReviewRevision
+                        == preflight?.reviewRevision {
+                        screen = .result(.unavailable)
+                    } else {
+                        screen = .confirmation(.listingChanged)
+                    }
+                }
+                return
+            }
             if apply(status) { return }
             try await loadPreflight(justConnected: false)
         } catch {
@@ -373,6 +389,11 @@ final class EbayPublishFlowStore {
         }
     }
 
+    func retryPreflight() async {
+        guard screen == .confirmation(.refreshFailed) else { return }
+        await reloadAfterConflict()
+    }
+
     private func handleOAuth(_ result: EbayOAuthResult) async {
         if result != .inProgress {
             oauthIdempotencyKey = UUID()
@@ -435,7 +456,8 @@ final class EbayPublishFlowStore {
                 screen = .confirmation(.listingChanged)
             }
         } catch {
-            screen = .confirmation(.listingChanged)
+            preflight = nil
+            screen = .confirmation(.refreshFailed)
         }
     }
 

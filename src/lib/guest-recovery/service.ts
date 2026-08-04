@@ -244,9 +244,12 @@ export class GuestClaimIdempotencyConflictError extends Error {
  * the authoritative check at completion (issue #504).
  */
 export class GuestClaimAllowanceSpentError extends Error {
-  constructor() {
+  readonly claimStage: "preflight" | "post_copy";
+
+  constructor(claimStage: "preflight" | "post_copy" = "preflight") {
     super("The account's included item credit is already spent on another run.");
     this.name = "GuestClaimAllowanceSpentError";
+    this.claimStage = claimStage;
   }
 }
 
@@ -256,9 +259,12 @@ export class GuestClaimAllowanceSpentError extends Error {
  * never be presented as permanent.
  */
 export class GuestClaimAllowanceInFlightError extends Error {
-  constructor() {
+  readonly claimStage: "preflight" | "post_copy";
+
+  constructor(claimStage: "preflight" | "post_copy" = "preflight") {
     super("The account's included item credit is reserved by a run in flight.");
     this.name = "GuestClaimAllowanceInFlightError";
+    this.claimStage = claimStage;
   }
 }
 
@@ -389,9 +395,11 @@ export async function claimGuestRecovery(
     // claim that can never complete.
     if (
       error instanceof GuestClaimAllowanceSpentError
-      || error instanceof GuestClaimAllowanceInFlightError
     ) {
-      throw error;
+      throw new GuestClaimAllowanceSpentError("post_copy");
+    }
+    if (error instanceof GuestClaimAllowanceInFlightError) {
+      throw new GuestClaimAllowanceInFlightError("post_copy");
     }
     throw new GuestClaimStorageError();
   }

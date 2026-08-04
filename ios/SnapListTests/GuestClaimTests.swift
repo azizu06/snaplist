@@ -489,6 +489,113 @@ final class GuestClaimTests: XCTestCase {
         }
     }
 
+    func testPostCopyAllowanceConflictsPreserveTheLateDenialStage() async throws {
+        for (reason, expected) in [
+            (
+                "guest_claim_allowance_spent",
+                GuestClaimServiceError.allowanceSpentAfterCopy
+            ),
+            (
+                "guest_claim_allowance_in_flight",
+                GuestClaimServiceError.allowanceInFlightAfterCopy
+            ),
+        ] {
+            let authority = Self.authority
+            let retainedHandoffs = GuestClaimHandoffRecorder()
+            retainedHandoffs.save(
+                GuestClaimHandoff(
+                    token: "guesthandoff_v1.late-denial-377",
+                    expiresAt: Date(timeIntervalSince1970: 4_089_168_000),
+                    recoveryID: authority.recoveryID,
+                    photoIdentity: authority.photoIdentity
+                )
+            )
+            let session = makeSession { _ in
+                Self.response(
+                    status: 409,
+                    json: """
+                    {
+                      "error": {
+                        "code": "conflict",
+                        "message": "Conflict copy may change.",
+                        "requestId": "req-late-denial-377",
+                        "details": {
+                          "reason": "\(reason)",
+                          "claimStage": "post_copy"
+                        }
+                      }
+                    }
+                    """
+                )
+            }
+            let client = GuestClaimAPIClient(
+                baseURL: URL(string: "https://snaplist.dev")!,
+                proofProvider: GuestClaimProofProvider(),
+                tokenProvider: GuestClaimBearerProvider(),
+                handoffStore: retainedHandoffs,
+                session: session
+            )
+
+            do {
+                _ = try await client.claim(
+                    authority: authority,
+                    idempotencyKey: UUID()
+                )
+                XCTFail("Expected late structured conflict \(reason).")
+            } catch {
+                XCTAssertEqual(error as? GuestClaimServiceError, expected)
+            }
+        }
+    }
+
+    func testPostCopyAllowanceDenialsUseCleanupAwareClaimStates() async {
+        for (error, expected) in [
+            (
+                GuestClaimServiceError.allowanceSpentAfterCopy,
+                GuestClaimState.allowanceSpentAfterCopy
+            ),
+            (
+                GuestClaimServiceError.allowanceInFlightAfterCopy,
+                GuestClaimState.allowanceInFlightAfterCopy
+            ),
+        ] {
+            let store = GuestClaimStore(
+                authority: Self.authority,
+                authenticator: GuestClaimRecordingAuthenticator(),
+                service: GuestClaimFailingService(error: error),
+                attemptStore: MemoryGuestClaimAttemptStore()
+            )
+
+            await store.showEmailEntry()
+            await store.sendCode(to: "seller@example.com")
+            await store.verifyAndClaim(code: "123456")
+
+            XCTAssertEqual(store.state, expected)
+        }
+    }
+
+    func testRetryKeepsPostCopyInFlightDenialBoundToTheSameAccount() async {
+        let service = GuestClaimSequencedFailureService(errors: [
+            .allowanceInFlightAfterCopy,
+            .allowanceInFlight,
+        ])
+        let store = GuestClaimStore(
+            authority: Self.authority,
+            authenticator: GuestClaimRecordingAuthenticator(),
+            service: service,
+            attemptStore: MemoryGuestClaimAttemptStore()
+        )
+
+        await store.showEmailEntry()
+        await store.sendCode(to: "seller@example.com")
+        await store.verifyAndClaim(code: "123456")
+        XCTAssertEqual(store.state, .allowanceInFlightAfterCopy)
+
+        await store.retryClaim()
+
+        XCTAssertEqual(store.state, .allowanceInFlightAfterCopy)
+    }
+
     private func makeSession(
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> URLSession {
@@ -659,6 +766,40 @@ private actor GuestClaimRecordingService: GuestClaimServing {
     ) async throws -> GuestClaimOutcome {
         claims.append(Claim(authority: authority, idempotencyKey: idempotencyKey))
         return outcome
+    }
+}
+
+private actor GuestClaimFailingService: GuestClaimServing {
+    let error: GuestClaimServiceError
+
+    init(error: GuestClaimServiceError) {
+        self.error = error
+    }
+
+    func prepareHandoff(authority: GuestClaimAuthority) async throws {}
+
+    func claim(
+        authority: GuestClaimAuthority,
+        idempotencyKey: UUID
+    ) async throws -> GuestClaimOutcome {
+        throw error
+    }
+}
+
+private actor GuestClaimSequencedFailureService: GuestClaimServing {
+    private var errors: [GuestClaimServiceError]
+
+    init(errors: [GuestClaimServiceError]) {
+        self.errors = errors
+    }
+
+    func prepareHandoff(authority: GuestClaimAuthority) async throws {}
+
+    func claim(
+        authority: GuestClaimAuthority,
+        idempotencyKey: UUID
+    ) async throws -> GuestClaimOutcome {
+        throw errors.removeFirst()
     }
 }
 

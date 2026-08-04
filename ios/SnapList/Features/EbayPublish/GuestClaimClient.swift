@@ -324,14 +324,18 @@ struct GuestClaimAPIClient: GuestClaimServing {
     }
 
     private static func conflict(in data: Data) -> GuestClaimServiceError {
-        let reason = try? JSONDecoder().decode(
+        let details = try? JSONDecoder().decode(
             ErrorEnvelope.self,
             from: data
-        ).error.details?.reason
-        switch reason {
-        case "guest_claim_allowance_spent": return .allowanceSpent
-        case "guest_claim_allowance_in_flight": return .allowanceInFlight
-        case "guest_claim_in_progress": return .busy
+        ).error.details
+        switch (details?.reason, details?.claimStage) {
+        case ("guest_claim_allowance_spent", "post_copy"):
+            return .allowanceSpentAfterCopy
+        case ("guest_claim_allowance_in_flight", "post_copy"):
+            return .allowanceInFlightAfterCopy
+        case ("guest_claim_allowance_spent", _): return .allowanceSpent
+        case ("guest_claim_allowance_in_flight", _): return .allowanceInFlight
+        case ("guest_claim_in_progress", _): return .busy
         default: return .conflict
         }
     }
@@ -432,7 +436,10 @@ struct GuestClaimAPIClient: GuestClaimServing {
 
     private struct ErrorEnvelope: Decodable {
         struct Payload: Decodable {
-            struct Details: Decodable { let reason: String? }
+            struct Details: Decodable {
+                let reason: String?
+                let claimStage: String?
+            }
             let details: Details?
         }
         let error: Payload

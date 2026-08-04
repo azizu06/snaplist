@@ -316,6 +316,36 @@ final class EbayPublishDeliveryTests: XCTestCase {
         XCTAssertEqual(publishCount, 1)
     }
 
+    func testFailedStaleRevisionRefreshClearsStaleDetailsAndBlocksPost() async {
+        let stale = Self.preflight(
+            title: "Stale title",
+            description: "Stale description.",
+            revision: UUID(uuidString: "37700000-0000-4000-8000-000000000026")!
+        )
+        let service = StaleRevisionEbayPublishService(
+            preflights: [stale],
+            failAfterPreflights: 1
+        )
+        let store = EbayPublishFlowStore(
+            listingID: stale.listingID,
+            service: service,
+            oauth: EbayOAuthFixtureRunner(result: .connected),
+            attemptStore: MemoryEbayPublishAttemptStore()
+        )
+
+        await store.load()
+        await store.confirmPublish()
+
+        XCTAssertEqual(store.screen, .confirmation(.refreshFailed))
+        XCTAssertNil(store.preflight)
+
+        await store.confirmPublish()
+
+        let publishCount = await service.publishCount
+        XCTAssertEqual(publishCount, 1)
+        XCTAssertEqual(store.screen, .confirmation(.refreshFailed))
+    }
+
     func testDeclinedConnectionKeepsDraftAndStartsADistinctHostedSessionOnRetry() async {
         let preflight = Self.preflight(
             title: "Saved listing",
@@ -390,6 +420,106 @@ final class EbayPublishDeliveryTests: XCTestCase {
         XCTAssertEqual(store.screen, .result(.published))
         XCTAssertEqual(keys.count, 2)
         XCTAssertEqual(keys.first, keys.last)
+    }
+
+    func testDurableFailedPublishRelaunchReloadsPreflightAndRetriesSameAttempt()
+        async throws {
+        let preflight = Self.preflight(
+            title: "Relaunched seller draft",
+            revision: UUID(uuidString: "37700000-0000-4000-8000-000000000025")!
+        )
+        let root = FileManager.default.temporaryDirectory.appending(
+            path: "ebay-publish-failed-relaunch-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        let attemptURL = root.appending(path: "attempts.json")
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: root)
+        }
+        let service = FailureThenPublishedEbayService(preflight: preflight)
+        let firstFlow = EbayPublishFlowStore(
+            listingID: preflight.listingID,
+            service: service,
+            oauth: EbayOAuthFixtureRunner(result: .connected),
+            attemptStore: FileEbayPublishAttemptStore(fileURL: attemptURL)
+        )
+
+        await firstFlow.load()
+        await firstFlow.confirmPublish()
+        XCTAssertEqual(firstFlow.screen, .result(.unavailable))
+
+        let relaunchedFlow = EbayPublishFlowStore(
+            listingID: preflight.listingID,
+            service: service,
+            oauth: EbayOAuthFixtureRunner(result: .connected),
+            attemptStore: FileEbayPublishAttemptStore(fileURL: attemptURL)
+        )
+        await relaunchedFlow.load()
+
+        XCTAssertEqual(relaunchedFlow.screen, .result(.unavailable))
+        XCTAssertEqual(relaunchedFlow.preflight?.title, "Relaunched seller draft")
+
+        await relaunchedFlow.retryPublish()
+
+        let keys = await service.idempotencyKeys
+        XCTAssertEqual(relaunchedFlow.screen, .result(.published))
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertEqual(keys.first, keys.last)
+    }
+
+    func testDurableFailedPublishRelaunchRequiresConfirmationForNewRevision()
+        async throws {
+        let original = Self.preflight(
+            title: "Failed original draft",
+            revision: UUID(uuidString: "37700000-0000-4000-8000-000000000026")!
+        )
+        let current = Self.preflight(
+            title: "Current revised draft",
+            revision: UUID(uuidString: "37700000-0000-4000-8000-000000000027")!
+        )
+        let root = FileManager.default.temporaryDirectory.appending(
+            path: "ebay-publish-failed-revised-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        let attemptURL = root.appending(path: "attempts.json")
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: root)
+        }
+        let service = FailureThenPublishedEbayService(
+            preflights: [original, current]
+        )
+        let firstFlow = EbayPublishFlowStore(
+            listingID: original.listingID,
+            service: service,
+            oauth: EbayOAuthFixtureRunner(result: .connected),
+            attemptStore: FileEbayPublishAttemptStore(fileURL: attemptURL)
+        )
+
+        await firstFlow.load()
+        await firstFlow.confirmPublish()
+        XCTAssertEqual(firstFlow.screen, .result(.unavailable))
+
+        let relaunchedFlow = EbayPublishFlowStore(
+            listingID: original.listingID,
+            service: service,
+            oauth: EbayOAuthFixtureRunner(result: .connected),
+            attemptStore: FileEbayPublishAttemptStore(fileURL: attemptURL)
+        )
+        await relaunchedFlow.load()
+
+        XCTAssertEqual(relaunchedFlow.preflight?.title, "Current revised draft")
+        XCTAssertEqual(relaunchedFlow.screen, .confirmation(.listingChanged))
+
+        await relaunchedFlow.retryPublish()
+        let keysBeforeConfirmation = await service.idempotencyKeys
+        XCTAssertEqual(keysBeforeConfirmation.count, 1)
+
+        await relaunchedFlow.confirmPublish()
+
+        let keys = await service.idempotencyKeys
+        XCTAssertEqual(relaunchedFlow.screen, .result(.published))
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertNotEqual(keys.first, keys.last)
     }
 
     private func makeSession(
@@ -573,11 +703,17 @@ private struct EbayOAuthFixtureRunner: EbayOAuthRunning {
 
 private actor StaleRevisionEbayPublishService: EbayPublishFeatureServing {
     private var preflights: [EbayPublishPreflight]
+    private let failAfterPreflights: Int?
+    private var preflightCount = 0
     private(set) var publishCount = 0
     private(set) var oauthIdempotencyKeys: [UUID] = []
 
-    init(preflights: [EbayPublishPreflight]) {
+    init(
+        preflights: [EbayPublishPreflight],
+        failAfterPreflights: Int? = nil
+    ) {
         self.preflights = preflights
+        self.failAfterPreflights = failAfterPreflights
     }
 
     func createOAuthSession(idempotencyKey: UUID) async throws -> EbayOAuthSession {
@@ -598,6 +734,11 @@ private actor StaleRevisionEbayPublishService: EbayPublishFeatureServing {
     }
 
     func preflight(listingID: UUID) async throws -> EbayPublishPreflight {
+        if let failAfterPreflights,
+           preflightCount >= failAfterPreflights {
+            throw URLError(.cannotLoadFromNetwork)
+        }
+        preflightCount += 1
         if preflights.count > 1 { return preflights.removeFirst() }
         return preflights[0]
     }
@@ -643,11 +784,16 @@ private actor CanonicalEbayPublishService: EbayPublishServing {
 }
 
 private actor FailureThenPublishedEbayService: EbayPublishFeatureServing {
-    private let preflightValue: EbayPublishPreflight
+    private let preflightValues: [EbayPublishPreflight]
+    private var preflightCount = 0
     private(set) var idempotencyKeys: [UUID] = []
 
     init(preflight: EbayPublishPreflight) {
-        preflightValue = preflight
+        preflightValues = [preflight]
+    }
+
+    init(preflights: [EbayPublishPreflight]) {
+        preflightValues = preflights
     }
 
     var publishCount: Int { idempotencyKeys.count }
@@ -661,7 +807,7 @@ private actor FailureThenPublishedEbayService: EbayPublishFeatureServing {
     }
 
     func connection() async throws -> EbayConnectionStatus {
-        preflightValue.connection
+        preflightValues[0].connection
     }
 
     func disconnect() async throws -> EbayConnectionStatus {
@@ -669,13 +815,15 @@ private actor FailureThenPublishedEbayService: EbayPublishFeatureServing {
     }
 
     func preflight(listingID: UUID) async throws -> EbayPublishPreflight {
-        preflightValue
+        let index = min(preflightCount, preflightValues.count - 1)
+        preflightCount += 1
+        return preflightValues[index]
     }
 
     func status(listingID: UUID) async throws -> EbayPublishStatus {
         EbayPublishStatus(
             listingID: listingID,
-            outcome: .notPublished,
+            outcome: idempotencyKeys.count == 1 ? .failed : .notPublished,
             ebayListingID: nil,
             ebayOfferID: nil,
             alreadyPublished: false

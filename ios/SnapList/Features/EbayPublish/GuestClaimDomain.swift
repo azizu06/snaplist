@@ -38,6 +38,8 @@ enum GuestClaimOutcome: Equatable, Sendable {
 enum GuestClaimServiceError: Error, Equatable {
     case allowanceSpent
     case allowanceInFlight
+    case allowanceSpentAfterCopy
+    case allowanceInFlightAfterCopy
     case busy
     case conflict
     case proofUnavailable
@@ -87,6 +89,17 @@ struct NoopGuestClaimAuthorityStore: GuestClaimAuthorityStoring {
 struct GuestClaimAttempt: Codable, Equatable, Sendable {
     let recoveryID: UUID
     let idempotencyKey: UUID
+    let postCopyDenial: Bool?
+
+    init(
+        recoveryID: UUID,
+        idempotencyKey: UUID,
+        postCopyDenial: Bool? = nil
+    ) {
+        self.recoveryID = recoveryID
+        self.idempotencyKey = idempotencyKey
+        self.postCopyDenial = postCopyDenial
+    }
 }
 
 protocol GuestClaimAttemptStoring: Sendable {
@@ -158,6 +171,8 @@ enum GuestClaimState: Equatable, Sendable {
     case busy
     case allowanceSpent
     case allowanceInFlight
+    case allowanceSpentAfterCopy
+    case allowanceInFlightAfterCopy
     case claimed(ClaimedGuestListing)
     case expired(ClaimedGuestListing)
     case noDraft
@@ -263,7 +278,8 @@ final class GuestClaimStore {
     func retryClaim() async {
         guard !isWorking else { return }
         switch state {
-        case .leaseExpired, .copyFailed, .busy, .allowanceInFlight:
+        case .leaseExpired, .copyFailed, .busy,
+             .allowanceInFlight, .allowanceInFlightAfterCopy:
             break
         default:
             return
@@ -309,12 +325,52 @@ final class GuestClaimStore {
             try await applyTerminal(outcome)
         } catch let error as GuestClaimServiceError {
             switch error {
-            case .allowanceSpent: state = .allowanceSpent
-            case .allowanceInFlight: state = .allowanceInFlight
+            case .allowanceSpent:
+                do {
+                    state = try await hasPostCopyDenial()
+                        ? .allowanceSpentAfterCopy
+                        : .allowanceSpent
+                } catch {
+                    state = .copyFailed
+                }
+            case .allowanceInFlight:
+                do {
+                    state = try await hasPostCopyDenial()
+                        ? .allowanceInFlightAfterCopy
+                        : .allowanceInFlight
+                } catch {
+                    state = .copyFailed
+                }
+            case .allowanceSpentAfterCopy:
+                await recordPostCopyDenial(.allowanceSpentAfterCopy)
+            case .allowanceInFlightAfterCopy:
+                await recordPostCopyDenial(.allowanceInFlightAfterCopy)
             case .busy: state = .busy
             case .conflict: state = .leaseExpired
             case .proofUnavailable, .unavailable: state = .copyFailed
             }
+        } catch {
+            state = .copyFailed
+        }
+    }
+
+    private func hasPostCopyDenial() async throws -> Bool {
+        try await attemptStore.attempt(
+            recoveryID: authority.recoveryID
+        )?.postCopyDenial == true
+    }
+
+    private func recordPostCopyDenial(_ denial: GuestClaimState) async {
+        do {
+            let attempt = try await durableAttempt()
+            try await attemptStore.save(
+                GuestClaimAttempt(
+                    recoveryID: attempt.recoveryID,
+                    idempotencyKey: attempt.idempotencyKey,
+                    postCopyDenial: true
+                )
+            )
+            state = denial
         } catch {
             state = .copyFailed
         }

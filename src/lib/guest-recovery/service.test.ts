@@ -317,7 +317,10 @@ describe("guest claim-or-expire orchestrator", () => {
           },
           { store: claimStore, storage: storage() },
         ),
-      ).rejects.toBeInstanceOf(ErrorType);
+      ).rejects.toMatchObject({
+        name: ErrorType.name,
+        claimStage: "post_copy",
+      });
 
       // The copy already happened, so the obsolete namespace still has to be
       // swept and the lease handed back before the truth reaches the seller.

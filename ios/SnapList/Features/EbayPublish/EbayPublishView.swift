@@ -207,11 +207,7 @@ struct EbayPublishView: View {
                     .accessibilityIdentifier("ebay-publish.confirmation.banner")
                 }
 
-                Text(
-                    state == .missingFields
-                        ? "This listing is not ready to post."
-                        : "Post this to eBay?"
-                )
+                Text(confirmationHeading(state))
                 .snapListTypography(.displayTitle)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .accessibilityAddTraits(.isHeader)
@@ -228,7 +224,12 @@ struct EbayPublishView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
-                if state == .missingFields {
+                if state == .refreshFailed {
+                    SnapListPrimaryButton(
+                        title: "Try loading current details",
+                        forceReducedMotion: reduceMotion
+                    ) { Task { await store.retryPreflight() } }
+                } else if state == .missingFields {
                     SnapListPrimaryButton(
                         title: "Finish this listing",
                         forceReducedMotion: reduceMotion,
@@ -410,6 +411,10 @@ struct EbayPublishView: View {
             "This listing changed since you reviewed it",
             "Nothing was sent to eBay. The details below are the current version. Confirm again to post it."
         )
+        case .refreshFailed: (
+            "Current listing details could not be loaded",
+            "Nothing was sent to eBay. Posting stays blocked until SnapList can load and confirm the latest version."
+        )
         case .missingFields: (
             "This listing is not ready to post",
             "eBay needs a title before this listing can go up. Add what is missing on the listing, then come back here."
@@ -422,6 +427,16 @@ struct EbayPublishView: View {
             "A different eBay account is connected",
             "This listing was prepared for \(store.preparedUsername ?? "the previous account"). Confirm again to post it to \(accountName) instead."
         )
+        }
+    }
+
+    private func confirmationHeading(
+        _ state: EbayConfirmationViewState
+    ) -> String {
+        switch state {
+        case .refreshFailed: "Current listing details are unavailable."
+        case .missingFields: "This listing is not ready to post."
+        default: "Post this to eBay?"
         }
     }
 
@@ -590,6 +605,29 @@ struct GuestClaimView: View {
                 ],
                 primary: "Try again",
                 footnote: "Nothing has been uploaded. Your draft stays on this device until the 24 hours are up, and that clock keeps running while you wait."
+            )
+        case .allowanceSpentAfterCopy:
+            claimMessage(
+                headline: "This account already used its free AI listing",
+                statements: [
+                    "SnapList copied your photos before learning that this account’s free AI listing was already used.",
+                    "Those copied photos are being cleaned up. This claim stays tied to this account.",
+                ],
+                footnote: "Your draft is still on this device for the rest of the 24 hours. Nothing was posted to eBay."
+            )
+            SnapListSecondaryButton(
+                title: "Back to my draft",
+                action: backToDraft
+            )
+        case .allowanceInFlightAfterCopy:
+            retryState(
+                headline: "Another item is using this account’s free AI listing",
+                statements: [
+                    "SnapList copied your photos before learning that another item is still using this account’s free AI listing.",
+                    "Those copied photos are being cleaned up. This claim stays tied to this account.",
+                ],
+                primary: "Try again",
+                footnote: "Try again after the other item finishes. Nothing was posted to eBay."
             )
         case .claimed(let listing):
             claimMessage(
