@@ -590,23 +590,6 @@ export function createMobileApiHandler(
           "This method is not allowed.",
         );
       }
-      const idempotencyKey = request.method === "DELETE"
-        ? z
-            .string()
-            .uuid()
-            .safeParse(request.headers.get("idempotency-key")?.trim())
-        : null;
-      const disconnectIdempotencyKey = idempotencyKey?.success
-        ? idempotencyKey.data
-        : null;
-      if (request.method === "DELETE" && !disconnectIdempotencyKey) {
-        return errorResponse(
-          requestId,
-          400,
-          "invalid_request",
-          "A valid Idempotency-Key is required.",
-        );
-      }
       const authenticated = await authenticatedEbayAccount(
         request,
         requestId,
@@ -629,10 +612,7 @@ export function createMobileApiHandler(
         };
         const status = request.method === "GET"
           ? await dependencies.ebayPublish.connection(operation)
-          : await dependencies.ebayPublish.disconnect({
-              ...operation,
-              idempotencyKey: disconnectIdempotencyKey!,
-            });
+          : await dependencies.ebayPublish.disconnect(operation);
         return json(
           ebayConnectionStatusEnvelopeSchema.parse({
             data: status,

@@ -239,7 +239,6 @@
         "x-owner-issue": 628,
         "x-implementation-status": "implemented",
         "security": [{ "ClerkBearer": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "responses": { "200": { "description": "Connection removed and connection generation advanced; existing eBay listings stay live but reconnect does not restore SnapList control", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayConnectionStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },

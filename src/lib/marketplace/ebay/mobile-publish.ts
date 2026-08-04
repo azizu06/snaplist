@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EbayAdapter } from "./types";
 import { effectivePrice } from "@/lib/pipeline";
+import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
 import { toEbayAspects, toEbayCondition } from "./map";
 import { PublishValidationError } from "./errors";
 import {
@@ -34,7 +35,6 @@ export interface MobileEbayPublishGateway {
   disconnect(input: {
     userId: string;
     bearerToken: string;
-    idempotencyKey: string;
   }): Promise<EbayConnectionStatus>;
   preflight(input: {
     userId: string;
@@ -96,7 +96,7 @@ export function createMobileEbayPublishService(input: {
       const client = input.clientForBearer(operation.bearerToken);
       const listingResult = await client
         .from("listings")
-        .select("id,item_id,platform,title,copy")
+        .select("id,item_id,platform")
         .eq("id", operation.listingId)
         .maybeSingle();
       if (listingResult.error) {
@@ -106,58 +106,42 @@ export function createMobileEbayPublishService(input: {
         id: string;
         item_id: string;
         platform: string;
-        title: string | null;
-        copy: Record<string, unknown> | null;
       } | null;
       if (!listing || listing.platform !== "ebay") {
         throw new MobileEbayListingNotFoundError();
       }
-      const [itemResult, predictionResult] = await Promise.all([
-        client
-          .from("items")
-          .select("review_revision,condition,photos,price_override")
-          .eq("id", listing.item_id)
-          .maybeSingle(),
-        client
-          .from("prediction_logs")
-          .select("price")
-          .eq("item_id", listing.item_id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-      ]);
-      if (itemResult.error || predictionResult.error) {
-        throw new Error("Failed to load eBay preflight truth.");
+      const snapshot = await loadReviewSnapshot(client, listing.item_id);
+      if (
+        !snapshot
+        || snapshot.listing?.id !== listing.id
+        || snapshot.listing.platform !== "ebay"
+      ) {
+        throw new MobileEbayListingNotFoundError();
       }
-      const item = itemResult.data as {
-        review_revision: string;
-        condition: string | null;
-        photos: string[] | null;
-        price_override: number | string | null;
-      } | null;
-      if (!item) throw new MobileEbayListingNotFoundError();
-      const prediction = predictionResult.data as {
-        price: number | string | null;
-      } | null;
+      const { item, prediction } = snapshot;
       const price = effectivePrice(prediction?.price, item.price_override);
       if (price == null) {
         throw new PublishValidationError(
           "This listing has no usable price. Set a price before publishing.",
         );
       }
-      if (!listing.title?.trim()) {
+      if (!snapshot.listing.title?.trim()) {
         throw new PublishValidationError(
           "This listing needs a title before publishing.",
         );
       }
       return {
         listingId: listing.id,
-        title: listing.title,
+        title: snapshot.listing.title,
         effectivePrice: { amount: price, label: "What will be listed" },
-        photoCount: item.photos?.length ?? 0,
+        photoCount: Array.isArray(item.photos) ? item.photos.length : 0,
         marketplace: (input.env?.() ?? process.env).EBAY_MARKETPLACE_ID ?? "EBAY_US",
         ebayCondition: toEbayCondition(item.condition),
-        itemSpecifics: toEbayAspects(listing.copy ?? {}),
+        itemSpecifics: toEbayAspects(
+          snapshot.listing.copy && typeof snapshot.listing.copy === "object"
+            ? snapshot.listing.copy as Record<string, unknown>
+            : {},
+        ),
         reviewRevision: item.review_revision,
       };
     },
@@ -195,6 +179,7 @@ export function createMobileEbayPublishService(input: {
           completionClient,
           env: () => env,
           expectedReviewRevision: operation.expectedReviewRevision,
+          idempotencyKey: operation.idempotencyKey,
         },
       );
       return mobilePublishStatus(outcome);

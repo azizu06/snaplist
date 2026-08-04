@@ -19,17 +19,30 @@ const CLAIM_ID = "55555555-5555-4555-8555-555555555555";
 const CONNECTION_GENERATION = "66666666-6666-4666-8666-666666666666";
 const IDEMPOTENCY_KEY = "77777777-7777-4777-8777-777777777777";
 
-class AmbiguousAfterCompletionAdapter extends MockEbayAdapter {
+class AmbiguousThenRecoveringAdapter extends MockEbayAdapter {
+  mutationCount = 0;
+  private remoteResult: EbayPublishResult | null = null;
+
   override async publishListing(
     request: EbayPublishRequest,
     complete?: EbayPublishCompletion,
   ): Promise<EbayPublishResult> {
-    await super.publishListing(request, complete);
-    throw new EbayWriteAmbiguousError(
-      "Provider response ended after accepting the listing.",
-      0,
-      null,
-    );
+    this.requests.push(request);
+    if (!this.remoteResult) {
+      this.mutationCount += 1;
+      this.remoteResult = {
+        listingId: `MOCK-EBAY-LISTING-${request.sku}`,
+        offerId: `MOCK-EBAY-OFFER-${request.sku}`,
+        status: "published",
+      };
+      throw new EbayWriteAmbiguousError(
+        "Provider accepted the listing but returned no acknowledgement.",
+        0,
+        null,
+      );
+    }
+    await complete?.(this.remoteResult, null);
+    return this.remoteResult;
   }
 }
 
@@ -40,7 +53,9 @@ function publishFixtureClient() {
     platform: "ebay",
     title: "Nintendo Switch OLED",
     description: "Complete console in good condition.",
-    copy: { itemSpecifics: { Brand: "Nintendo", Model: "Switch OLED" } },
+    copy: {
+      itemSpecifics: { Brand: "Nintendo", Model: "Switch OLED" },
+    } as Record<string, unknown>,
     status: "draft",
     run_id: RUN_ID,
     ebay_listing_id: null as string | null,
@@ -49,6 +64,8 @@ function publishFixtureClient() {
     ebay_publish_claim_id: null as string | null,
     ebay_publish_connection_generation: null as string | null,
     ebay_publish_binding: null as Record<string, string> | null,
+    ebay_publish_idempotency_key: null as string | null,
+    ebay_publish_expected_review_revision: null as string | null,
   };
   const item = {
     id: ITEM_ID,
@@ -91,13 +108,17 @@ function publishFixtureClient() {
   const connectionState: { current: typeof connection | null } = {
     current: connection,
   };
+  let beforeReviewSnapshot: (() => void) | undefined;
+  let failPublishedPersistence = false;
 
   const client = {
     from(table: string) {
       if (table === "listings") {
         return {
           select: () => ({
-            eq: () => ({ maybeSingle: async () => ({ data: listing, error: null }) }),
+            eq: () => ({
+              maybeSingle: async () => ({ data: { ...listing }, error: null }),
+            }),
           }),
           update: (patch: Record<string, unknown>) => {
             const filters: Array<[string, unknown]> = [];
@@ -120,6 +141,13 @@ function publishFixtureClient() {
                     JSON.stringify(listing[column as keyof typeof listing])
                     === JSON.stringify(value),
                 );
+                if (
+                  matches
+                  && failPublishedPersistence
+                  && patch.ebay_status === "published"
+                ) {
+                  return { data: [], error: { message: "offline persistence failure" } };
+                }
                 if (matches) Object.assign(listing, patch);
                 return { data: matches ? [{ id: LISTING_ID }] : [], error: null };
               },
@@ -161,18 +189,59 @@ function publishFixtureClient() {
       throw new Error(`Unexpected table ${table}`);
     },
     async rpc(name: string, params: Record<string, unknown>) {
+      if (name === "get_review_snapshot") {
+        beforeReviewSnapshot?.();
+        return {
+          data: {
+            item: { ...item },
+            listing: { ...listing },
+            prediction: { price: 199.99 },
+            reviewBlocked: listing.ebay_status === "publishing",
+          },
+          error: null,
+        };
+      }
       if (name === "disconnect_ebay_connection") {
         const disconnected = connectionState.current !== null;
         connectionState.current = null;
         return { data: disconnected, error: null };
       }
-      if (name === "begin_ebay_publish") {
+      if (name === "begin_mobile_ebay_publish") {
+        if (
+          listing.ebay_status === "publishing"
+          && listing.ebay_publish_idempotency_key === params.p_idempotency_key
+        ) {
+          if (
+            listing.ebay_publish_expected_review_revision
+            !== params.p_expected_review_revision
+          ) {
+            return { data: null, error: { code: "P0002", message: "Review changed." } };
+          }
+          return {
+            data: {
+              claimId: listing.ebay_publish_claim_id,
+              listingId: LISTING_ID,
+              itemId: ITEM_ID,
+              title: listing.title,
+              description: listing.description,
+              copy: listing.copy,
+              condition: item.condition,
+              photos: item.photos,
+              price: 199.99,
+              priceOverride: item.price_override,
+            },
+            error: null,
+          };
+        }
         if (params.p_expected_review_revision !== item.review_revision) {
           return { data: null, error: { code: "P0002", message: "Review changed." } };
         }
         item.review_revision = CLAIM_ID;
         listing.ebay_status = "publishing";
         listing.ebay_publish_claim_id = CLAIM_ID;
+        listing.ebay_publish_idempotency_key = params.p_idempotency_key as string;
+        listing.ebay_publish_expected_review_revision =
+          params.p_expected_review_revision as string;
         return {
           data: {
             claimId: CLAIM_ID,
@@ -215,7 +284,18 @@ function publishFixtureClient() {
     },
   } as unknown as SupabaseClient;
 
-  return { client, connectionState, listing };
+  return {
+    client,
+    connectionState,
+    item,
+    listing,
+    beforeReviewSnapshot(hook: () => void) {
+      beforeReviewSnapshot = hook;
+    },
+    failPublishedPersistence() {
+      failPublishedPersistence = true;
+    },
+  };
 }
 
 const idleWorker = {
@@ -273,9 +353,9 @@ function confirmedPublishRequest(
 }
 
 describe("mobile eBay publish boundary", () => {
-  it("replays an ambiguously acknowledged confirmation with one adapter mutation and one provider identity", async () => {
+  it("replays an unacknowledged provider mutation with one mutation and one canonical identity", async () => {
     const { client } = publishFixtureClient();
-    const adapter = new AmbiguousAfterCompletionAdapter();
+    const adapter = new AmbiguousThenRecoveringAdapter();
     const handler = ebayHandler({
       adapter,
       client,
@@ -284,14 +364,17 @@ describe("mobile eBay publish boundary", () => {
     const publish = () => confirmedPublishRequest(handler);
 
     const first = await publish();
+    const unknown = await handler(
+      new Request(
+        `https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/publish`,
+        { headers: { authorization: "Bearer clerk-jwt" } },
+      ),
+    );
     const replay = await publish();
 
-    expect(first.status).toBe(200);
-    expect(await first.json()).toMatchObject({
-      data: {
-        outcome: "published",
-        ebayListingId: `MOCK-EBAY-LISTING-${LISTING_ID}`,
-      },
+    expect(first.status).toBe(503);
+    expect(await unknown.json()).toMatchObject({
+      data: { outcome: "outcome_not_yet_known" },
     });
     expect(replay.status).toBe(200);
     expect(await replay.json()).toMatchObject({
@@ -300,7 +383,8 @@ describe("mobile eBay publish boundary", () => {
         ebayListingId: `MOCK-EBAY-LISTING-${LISTING_ID}`,
       },
     });
-    expect(adapter.requests).toHaveLength(1);
+    expect(adapter.requests).toHaveLength(2);
+    expect(adapter.mutationCount).toBe(1);
   });
 
   it("fails closed with 409 when confirmation uses a stale review revision", async () => {
@@ -368,6 +452,35 @@ describe("mobile eBay publish boundary", () => {
     expect(adapter.requests).toHaveLength(0);
   });
 
+  it("never reports published until the canonical provider identity is durable", async () => {
+    const fixture = publishFixtureClient();
+    fixture.failPublishedPersistence();
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      client: fixture.client,
+      requestId: "request-628-persistence-failure",
+    });
+
+    const publish = await confirmedPublishRequest(handler);
+    const status = await handler(
+      new Request(
+        `https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/publish`,
+        { headers: { authorization: "Bearer clerk-jwt" } },
+      ),
+    );
+
+    expect(publish.status).toBe(503);
+    expect(await status.json()).toMatchObject({
+      data: {
+        outcome: "outcome_not_yet_known",
+        ebayListingId: null,
+      },
+    });
+    expect(fixture.listing.ebay_listing_id).toBeNull();
+    expect(adapter.requests).toHaveLength(1);
+  });
+
   it("preflights server-mapped listing truth without a marketplace mutation", async () => {
     const { client } = publishFixtureClient();
     const adapter = new MockEbayAdapter();
@@ -400,6 +513,40 @@ describe("mobile eBay publish boundary", () => {
       meta: { requestId: "request-628-preflight" },
     });
     expect(adapter.requests).toHaveLength(0);
+  });
+
+  it("returns one coherent preflight revision when review changes between reads", async () => {
+    const fixture = publishFixtureClient();
+    fixture.beforeReviewSnapshot(() => {
+      fixture.listing.title = "Updated Switch OLED";
+      fixture.listing.copy = { itemSpecifics: { Brand: "Nintendo", Edition: "White" } };
+      fixture.item.condition = "good";
+      fixture.item.price_override = "188.88";
+      fixture.item.review_revision = "99999999-9999-4999-8999-999999999999";
+    });
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: fixture.client,
+      requestId: "request-628-coherent-preflight",
+    });
+
+    const response = await handler(
+      new Request(
+        `https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/preflight`,
+        { headers: { authorization: "Bearer clerk-jwt" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        title: "Updated Switch OLED",
+        effectivePrice: { amount: 188.88 },
+        ebayCondition: "USED_GOOD",
+        itemSpecifics: { Brand: ["Nintendo"], Edition: ["White"] },
+        reviewRevision: "99999999-9999-4999-8999-999999999999",
+      },
+    });
   });
 
   it("reports an ambiguous durable publish as outcome not yet known", async () => {
