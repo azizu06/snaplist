@@ -1027,7 +1027,7 @@ html:has(.mkt) {
   height: 19px;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 640px) {
   .mkt .mkt-bento {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

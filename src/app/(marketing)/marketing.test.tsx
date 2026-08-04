@@ -226,9 +226,9 @@ describe("marketing destinations", () => {
     expect(cards.map((_, card) => $(card).find("h3").text()).get()).toContain("Trophy Wall");
   });
 
-  it("uses a three-column, equal-card Why-choose grid on desktop", () => {
+  it("uses a three-column, equal-card Why-choose grid on tablet and desktop", () => {
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
-    const desktopGrid = css.match(/@media \(min-width: 1024px\)\s*\{\s*\.mkt \.mkt-bento\s*\{[^}]*\}/)?.[0] ?? "";
+    const desktopGrid = css.match(/@media \(min-width: 640px\)\s*\{\s*\.mkt \.mkt-bento\s*\{[^}]*\}/)?.[0] ?? "";
     const cards = css.match(/\.mkt \.mkt-bento \.card\s*\{[^}]*\}/)?.[0] ?? "";
 
     expect(desktopGrid).toMatch(/grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
