@@ -9,14 +9,14 @@ final class FidelityScreenshotTests: XCTestCase {
     func testFoundationShellScreenshot() {
         let app = XCUIApplication()
         app.launchArguments = [
-            "--fixture=home",
+            "--fixture=scan",
             "--zero-network-fixtures",
             "--reduced-motion"
         ]
         app.launchAfterRetiringPriorInstance()
         XCUIDevice.shared.orientation = .portrait
 
-        XCTAssertTrue(app.buttons["dock.home"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
 
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = "FOUNDATION-HOME.png"

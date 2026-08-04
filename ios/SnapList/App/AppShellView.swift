@@ -16,6 +16,7 @@ struct AppShellView: View {
     @Environment(\.appDependencies) private var dependencies
     @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
+    @State private var keyboardProbeText = ""
     @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
@@ -180,7 +181,9 @@ struct AppShellView: View {
             }
             awaitsCommittedEmptyDismissal = false
             guard captureFlow.stagedPhotos.isEmpty else { return }
-            _ = dismissActivePhotoReviewForDepartedIntake()
+            Task {
+                _ = await dismissActivePhotoReviewForDepartedIntake()
+            }
         }
         .task(id: onboardingCaptureRouteID) {
             guard configuration.usesOnboarding,
@@ -219,7 +222,7 @@ struct AppShellView: View {
                     if awaitsPrincipalReviewDismissal
                         || activeReviewDeparted {
                         awaitsPrincipalReviewDismissal = false
-                        _ = dismissActivePhotoReviewForDepartedIntake()
+                        _ = await dismissActivePhotoReviewForDepartedIntake()
                     } else if snapshot.photos.isEmpty,
                               photoReviewHost.session != nil {
                         photoReviewHost.session?
@@ -227,7 +230,7 @@ struct AppShellView: View {
                         if photoReviewHost.isCommitting {
                             awaitsCommittedEmptyDismissal = true
                         } else {
-                            _ = dismissActivePhotoReviewForDepartedIntake()
+                            _ = await dismissActivePhotoReviewForDepartedIntake()
                         }
                     } else {
                         photoReviewHost.session?.publishCommittedSnapshot(snapshot)
@@ -244,33 +247,22 @@ struct AppShellView: View {
         TabView(selection: $router.selectedTab) {
             ForEach(PrimaryTab.allCases) { tab in
                 NavigationStack(path: router.pathBinding(for: tab)) {
-                    Group {
-                        if tab == .home {
+                    if router.selectedTab == tab {
+                        ZStack(alignment: .top) {
+                            primaryFeature(for: tab)
 #if DEBUG
                             if configuration.keyboardProbe {
-                                FoundationPlaceholderView(
-                                    tab: tab,
-                                    configuration: configuration,
-                                    openActivity: { router.navigate(to: .activity) },
-                                    openAccount: { router.navigate(to: .account) }
-                                )
-                            } else {
-                                homeFeature
+                                TextField("Fixture keyboard probe", text: $keyboardProbeText)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                                    .padding(SnapListMetrics.screenGutter)
+                                    .accessibilityIdentifier("fixture.keyboard-probe")
                             }
-#else
-                            homeFeature
 #endif
-                        } else {
-                            FoundationPlaceholderView(
-                                tab: tab,
-                                configuration: configuration,
-                                openActivity: { router.navigate(to: .activity) },
-                                openAccount: { router.navigate(to: .account) }
-                            )
                         }
-                    }
-                    .navigationDestination(for: AppRoute.self) { route in
-                        destination(for: route)
+                        .navigationDestination(for: AppRoute.self) { route in
+                            destination(for: route)
+                        }
                     }
                 }
                 .tag(tab)
@@ -310,26 +302,34 @@ struct AppShellView: View {
                 )
             }
         }
-        .fullScreenCover(item: $router.presentedFullScreen) { destination in
-            switch destination {
-            case .guidedCamera:
-                ScanCameraView(
-                    flow: captureFlow,
-                    returnFocus: $pendingScanReturnFocus
-                ) { destination, photos, opener in
-                    router.openCaptureBoundary(
-                        destination: destination,
-                        photos: photos,
-                        opener: opener
-                    )
-                }
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             isKeyboardVisible = true
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
+        }
+    }
+
+    @ViewBuilder
+    private func primaryFeature(for tab: PrimaryTab) -> some View {
+        switch tab {
+        case .scan:
+            ScanCameraView(
+                flow: captureFlow,
+                returnFocus: $pendingScanReturnFocus
+            ) { destination, photos, opener in
+                router.openCaptureBoundary(
+                    destination: destination,
+                    photos: photos,
+                    opener: opener
+                )
+            }
+            .task(id: router.selectedTab) {
+                guard router.selectedTab == .scan else { return }
+                await captureFlow.startCamera()
+            }
+        case .trophyWall:
+            homeFeature
         }
     }
 
@@ -413,6 +413,7 @@ struct AppShellView: View {
     private func presentPendingCaptureIfNeeded() {
         guard pendingCapturePresentation != nil else { return }
         self.pendingCapturePresentation = nil
+        router.selectedTab = .scan
         router.presentedFullScreen = .guidedCamera
         Task { await captureFlow.startCamera() }
     }
@@ -432,11 +433,15 @@ struct AppShellView: View {
     }
 
     @discardableResult
-    private func dismissActivePhotoReviewForDepartedIntake() -> Bool {
-        guard photoReviewHost.leaveForDepartedIntake(using: router) else {
+    private func dismissActivePhotoReviewForDepartedIntake() async -> Bool {
+        guard await AppShellDepartedPhotoReviewTransaction.perform(
+            captureFlow: captureFlow,
+            host: photoReviewHost,
+            router: router,
+            setReturnFocus: { pendingScanReturnFocus = $0 }
+        ) else {
             return false
         }
-        pendingScanReturnFocus = .addPhotoButton
         photoReviewIntake = nil
         return true
     }
@@ -544,6 +549,22 @@ enum AppShellPhotoReviewBackTransaction {
         }
 
         return outcome
+    }
+}
+
+@MainActor
+enum AppShellDepartedPhotoReviewTransaction {
+    static func perform(
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
+    ) async -> Bool {
+        guard host.session != nil else { return false }
+        setReturnFocus(.addPhotoButton)
+        guard host.leaveForDepartedIntake(using: router) else { return false }
+        await captureFlow.startCamera()
+        return true
     }
 }
 
@@ -758,7 +779,7 @@ enum AppCaptureHandoffCoordinator {
                     let didRollBackCapture = await captureFlow
                         .rollBackLibraryTransferAfterSourceConsumptionFailure()
                     if !didRollBackCapture {
-                        router.selectedTab = .home
+                        router.selectedTab = .scan
                         router.presentedSheet = .capture
                         return
                     }
@@ -767,7 +788,7 @@ enum AppCaptureHandoffCoordinator {
             guard onboardingModel.state.screen == .captureBoundary else { return }
         }
 
-        router.selectedTab = .home
+        router.selectedTab = .scan
         router.presentedSheet = .capture
     }
 }

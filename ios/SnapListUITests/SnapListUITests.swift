@@ -9,20 +9,18 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testPrimaryShellNavigationAndTypedDestinations() {
-        let app = launch()
+        let app = launch(extraArguments: ["--camera-status=unavailable"])
 
-        XCTAssertTrue(app.staticTexts["Home"].exists)
-        XCTAssertTrue(app.buttons["dock.home"].isSelected)
+        XCTAssertTrue(app.staticTexts["scan.recovery-title"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.scrollViews["home.active"].exists)
+        XCTAssertTrue(app.buttons["dock.scan"].isSelected)
 
-        app.buttons["dock.listings"].tap()
-        XCTAssertTrue(app.staticTexts["Listings"].waitForExistence(timeout: 2))
+        app.buttons["dock.trophy-wall"].tap()
+        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["scan.recovery-title"].exists)
 
-        app.buttons["dock.inbox"].tap()
-        XCTAssertTrue(app.staticTexts["Inbox"].waitForExistence(timeout: 2))
-
-        app.buttons["dock.insights"].tap()
-        XCTAssertTrue(app.staticTexts["Insights"].waitForExistence(timeout: 2))
-
+        XCTAssertFalse(app.buttons["dock.inbox"].exists)
+        XCTAssertFalse(app.buttons["dock.insights"].exists)
         XCTAssertFalse(app.buttons["Runs"].exists)
         XCTAssertFalse(app.buttons["You"].exists)
     }
@@ -30,7 +28,7 @@ final class SnapListUITests: XCTestCase {
     func testCapturePresentsAndDismissesAnItemDrivenSheet() {
         let app = launch()
 
-        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.staticTexts["Scan"].exists)
         app.buttons["dock.capture"].tap()
         XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 2))
 
@@ -54,12 +52,14 @@ final class SnapListUITests: XCTestCase {
 
         app.buttons["capture.close"].tap()
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 1))
-        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.staticTexts["Scan"].exists)
     }
 
     func testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable() {
         let app = launch()
 
+        app.buttons["dock.trophy-wall"].tap()
+        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
         app.buttons["dock.capture"].tap()
         XCTAssertTrue(app.buttons["capture.take-one-item"].waitForExistence(timeout: 2))
         app.buttons["capture.take-one-item"].tap()
@@ -67,6 +67,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
         addScreenshot(named: "CAPTURE-CAMERA-UNAVAILABLE.png")
         let library = app.buttons["scan.choose-library"]
+        XCTAssertEqual(app.buttons.matching(identifier: "scan.choose-library").count, 1)
         XCTAssertTrue(library.exists)
         XCTAssertEqual(library.label, "Choose from library")
         XCTAssertGreaterThanOrEqual(library.frame.width, 44)
@@ -93,12 +94,22 @@ final class SnapListUITests: XCTestCase {
 
         let photoCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            app.staticTexts.matching(identifier: "scan.photo-count").count,
+            1,
+            app.debugDescription
+        )
         XCTAssertEqual(photoCount.label, "1 of 5")
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
         addScreenshot(named: "CAPTURE-RESTORED-DRAFT.png")
 
         let reviewButton = app.buttons["scan.review"]
         let window = app.windows.firstMatch.frame
+        XCTAssertEqual(
+            app.buttons.matching(identifier: "scan.review").count,
+            1,
+            app.debugDescription
+        )
         XCTAssertTrue(reviewButton.exists)
         XCTAssertGreaterThanOrEqual(reviewButton.frame.minX, window.minX)
         XCTAssertLessThanOrEqual(reviewButton.frame.maxX, window.maxX)
@@ -119,9 +130,11 @@ final class SnapListUITests: XCTestCase {
 
         let scanCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(scanCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(app.staticTexts.matching(identifier: "scan.photo-count").count, 1)
         XCTAssertEqual(scanCount.label, "1 of 5")
 
         let review = app.buttons["scan.review"]
+        XCTAssertEqual(app.buttons.matching(identifier: "scan.review").count, 1)
         XCTAssertTrue(review.exists)
         XCTAssertEqual(review.label, "Review 1 photo")
         review.tap()
@@ -148,7 +161,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(thumbnail.isSelected)
 
         XCTAssertFalse(app.buttons["scan.review"].exists)
-        XCTAssertFalse(app.staticTexts["Home"].exists)
+        XCTAssertFalse(app.staticTexts["Scan"].exists)
     }
 
     func testLivePhotoReviewBackReturnsExactRestoredPhotoAndFocusesScanReview() {
@@ -196,6 +209,11 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(returnedCount.label, "1 of 5")
 
         XCTAssertEqual(returnedReview.label, "Review 1 photo")
+        XCTAssertEqual(
+            app.buttons.matching(identifier: "scan.review").count,
+            1,
+            app.debugDescription
+        )
         // Review-opener focus restoration is an accessibility-cursor contract, which
         // XCUITest cannot observe without an assistive technology running. It is proved
         // directly by ScanReturnFocusPolicy and by the router-seam return assertions.
@@ -1410,6 +1428,7 @@ final class SnapListUITests: XCTestCase {
 
     func testHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets() {
         let app = launch()
+        app.buttons["dock.trophy-wall"].tap()
         let activity = app.buttons["header.activity"]
         let account = app.buttons["header.account"]
         let capture = app.buttons["dock.capture"]
@@ -1435,13 +1454,14 @@ final class SnapListUITests: XCTestCase {
         probe.tap()
 
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["dock.home"].exists)
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
     }
 
     func testAccessibilityDynamicTypeKeepsFoundationControlsReachable() {
         let app = launch(extraArguments: ["--dynamic-type=accessibility3"])
+        app.buttons["dock.trophy-wall"].tap()
 
-        XCTAssertTrue(app.staticTexts["Home"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["header.activity"].exists)
         XCTAssertTrue(app.buttons["header.account"].exists)
         XCTAssertTrue(app.buttons["dock.capture"].exists)
@@ -1498,7 +1518,7 @@ final class SnapListUITests: XCTestCase {
 
         app.buttons["button.primary.continue-to-capture"].tap()
         XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.staticTexts["Scan"].exists)
         XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
         XCTAssertTrue(app.buttons["capture.choose-library"].exists)
         XCTAssertFalse(app.staticTexts["Capture entry boundary"].exists)
@@ -1709,7 +1729,7 @@ final class SnapListUITests: XCTestCase {
         orientation: UIDeviceOrientation = .portrait
     ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--fixture=home", "--zero-network-fixtures"] + extraArguments
+        app.launchArguments = ["--fixture=scan", "--zero-network-fixtures"] + extraArguments
         app.launchAfterRetiringPriorInstance()
         guard orientation == .landscapeLeft || orientation == .landscapeRight else {
             return app

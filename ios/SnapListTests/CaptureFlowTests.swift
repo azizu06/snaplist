@@ -8,6 +8,18 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
+    func testCaptureOffersNeitherAHaulNorABarcodeEntryPoint() {
+        XCTAssertEqual(
+            CaptureEntryPoint.allCases.map(\.title),
+            ["Take one item", "Choose from library"]
+        )
+
+        let retired = ["Photograph a haul", "Scan barcode or ISBN"]
+        for title in retired {
+            XCTAssertFalse(CaptureEntryPoint.allCases.map(\.title).contains(title))
+        }
+    }
+
     func testPhotoReviewV14AdaptiveMatrixMatchesApprovedNativeLayout() async throws {
         let proofs = [
             PhotoReviewV14LayoutProof(
@@ -805,7 +817,10 @@ final class CaptureFlowTests: XCTestCase {
         let third = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000003")
         let replacement = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000004")
         let store = PhotoReviewStore(photos: [originalCover, second, third])
-        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let router = AppRouter(
+            initialTab: .trophyWall,
+            initialFullScreen: .guidedCamera
+        )
 
         XCTAssertTrue(store.movePhoto(id: third.id, to: 0))
         XCTAssertTrue(store.replacePhoto(id: second.id, with: replacement))
@@ -820,6 +835,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(store.photos.map(\.id), [third.id, replacement.id])
         XCTAssertEqual(store.selectedPhotoID, third.id)
         XCTAssertEqual(router.photoReviewScanReturn, returned)
+        XCTAssertEqual(router.selectedTab, .scan)
     }
 
     func testAcceptedSubmissionEventConsumerAnnouncesAndAcknowledgesBeforeExactClearAndReturnsToReadyScan() async throws {
@@ -1053,8 +1069,8 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertNil(router.captureBoundaryRequest)
-        XCTAssertEqual(router.selectedTab, .home)
-        XCTAssertTrue(router.pathBinding(for: .home).wrappedValue.isEmpty)
+        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertTrue(router.pathBinding(for: .scan).wrappedValue.isEmpty)
         XCTAssertEqual(pendingScanFocus, .addPhotoButton)
         XCTAssertNil(submissionHost.pendingPresentationEvent)
         XCTAssertFalse(photoReviewHost.isCommitting)
@@ -1406,10 +1422,10 @@ final class CaptureFlowTests: XCTestCase {
         let fullScreenBeforeSubmission = router.presentedFullScreen
         let scanReturnBeforeSubmission = router.photoReviewScanReturn
         let selectedTabBeforeSubmission = router.selectedTab
-        let homePathBeforeSubmission =
-            router.pathBinding(for: .home).wrappedValue
-        let listingsPathBeforeSubmission =
-            router.pathBinding(for: .listings).wrappedValue
+        let scanPathBeforeSubmission =
+            router.pathBinding(for: .scan).wrappedValue
+        let trophyWallPathBeforeSubmission =
+            router.pathBinding(for: .trophyWall).wrappedValue
 
         let photoReviewHost = PhotoReviewLiveHost()
         XCTAssertTrue(photoReviewHost.consume(routeBeforeSubmission))
@@ -1601,12 +1617,12 @@ final class CaptureFlowTests: XCTestCase {
         )
         XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
         XCTAssertEqual(
-            router.pathBinding(for: .home).wrappedValue,
-            homePathBeforeSubmission
+            router.pathBinding(for: .scan).wrappedValue,
+            scanPathBeforeSubmission
         )
         XCTAssertEqual(
-            router.pathBinding(for: .listings).wrappedValue,
-            listingsPathBeforeSubmission
+            router.pathBinding(for: .trophyWall).wrappedValue,
+            trophyWallPathBeforeSubmission
         )
         XCTAssertEqual(
             router.captureBoundaryRequest?.destination,
@@ -3376,6 +3392,43 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.photoReviewScanReturn, expectedReturn)
         XCTAssertNil(router.captureBoundaryRequest)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+    }
+
+    func testDepartedPhotoReviewRestartsCameraForTheGuidedScanReturn() async {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000053")
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized
+        )
+        let captureFlow = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore()
+        )
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [photo],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+
+        var receivedFocuses: [PhotoReviewScanFocus] = []
+        let didReturn = await AppShellDepartedPhotoReviewTransaction.perform(
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { receivedFocuses.append($0) }
+        )
+
+        XCTAssertTrue(didReturn)
+        XCTAssertEqual(camera.startCount, 1)
+        XCTAssertEqual(captureFlow.phase, .camera)
+        XCTAssertNil(host.session)
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+        XCTAssertEqual(receivedFocuses, [.addPhotoButton])
     }
 
     func testPhotoReviewConditionalShellRemountPresentsPrepopulatedGuidedCamera() async {
@@ -7615,7 +7668,7 @@ final class CaptureFlowTests: XCTestCase {
         let capture = makeModel(store: store)
         let restoration = await capture.restore()
         XCTAssertEqual(restoration, .noDraft)
-        let router = AppRouter(initialTab: .listings)
+        let router = AppRouter(initialTab: .trophyWall)
 
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
@@ -7623,7 +7676,7 @@ final class CaptureFlowTests: XCTestCase {
             router: router
         )
 
-        XCTAssertEqual(router.selectedTab, .home)
+        XCTAssertEqual(router.selectedTab, .scan)
         XCTAssertEqual(router.presentedSheet, .capture)
         XCTAssertNil(router.presentedFullScreen)
         XCTAssertEqual(store.stageCount, 1)
@@ -9340,8 +9393,8 @@ private final class RetainedSubmissionPhotoReviewScenario {
     private let fullScreenBeforeSubmission: AppFullScreen?
     private let scanReturnBeforeSubmission: PhotoReviewScanReturn?
     private let selectedTabBeforeSubmission: PrimaryTab
-    private let homePathBeforeSubmission: [AppRoute]
-    private let listingsPathBeforeSubmission: [AppRoute]
+    private let scanPathBeforeSubmission: [AppRoute]
+    private let trophyWallPathBeforeSubmission: [AppRoute]
     private let sessionPhotosBeforeSubmission: [StagedCapturePhoto]
     private let selectedPhotoBeforeSubmission: StagedCapturePhoto.ID?
     private let actionsPhotoBeforeSubmission: StagedCapturePhoto.ID?
@@ -9424,10 +9477,10 @@ private final class RetainedSubmissionPhotoReviewScenario {
         fullScreenBeforeSubmission = router.presentedFullScreen
         scanReturnBeforeSubmission = router.photoReviewScanReturn
         selectedTabBeforeSubmission = router.selectedTab
-        homePathBeforeSubmission =
-            router.pathBinding(for: .home).wrappedValue
-        listingsPathBeforeSubmission =
-            router.pathBinding(for: .listings).wrappedValue
+        scanPathBeforeSubmission =
+            router.pathBinding(for: .scan).wrappedValue
+        trophyWallPathBeforeSubmission =
+            router.pathBinding(for: .trophyWall).wrappedValue
 
         let photoReviewHost = PhotoReviewLiveHost()
         self.photoReviewHost = photoReviewHost
@@ -9505,12 +9558,12 @@ private final class RetainedSubmissionPhotoReviewScenario {
         )
         XCTAssertEqual(router.selectedTab, selectedTabBeforeSubmission)
         XCTAssertEqual(
-            router.pathBinding(for: .home).wrappedValue,
-            homePathBeforeSubmission
+            router.pathBinding(for: .scan).wrappedValue,
+            scanPathBeforeSubmission
         )
         XCTAssertEqual(
-            router.pathBinding(for: .listings).wrappedValue,
-            listingsPathBeforeSubmission
+            router.pathBinding(for: .trophyWall).wrappedValue,
+            trophyWallPathBeforeSubmission
         )
         XCTAssertNil(pendingScanFocus)
         XCTAssertEqual(camera.startCount, 0)

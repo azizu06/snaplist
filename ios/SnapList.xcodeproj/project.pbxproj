@@ -17,7 +17,7 @@
 		A00000000000000000000008 /* LaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000008 /* LaunchConfiguration.swift */; };
 		A00000000000000000000009 /* FoundationPrimitives.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000009 /* FoundationPrimitives.swift */; };
 		A0000000000000000000000A /* SnapListTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000A /* SnapListTokens.swift */; };
-		A0000000000000000000000B /* FoundationPlaceholderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000B /* FoundationPlaceholderView.swift */; };
+		A0000000000000000000000B /* FoundationDestinationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000B /* FoundationDestinationView.swift */; };
 		A0000000000000000000000C /* AppNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000C /* AppNavigation.swift */; };
 		A0000000000000000000000D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000D /* Assets.xcassets */; };
 		A0000000000000000000000E /* OnboardingCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000F /* OnboardingCapabilities.swift */; };
@@ -135,7 +135,7 @@
 		F00000000000000000000008 /* LaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fixtures/LaunchConfiguration.swift; sourceTree = "<group>"; };
 		F00000000000000000000009 /* FoundationPrimitives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundationPrimitives.swift; sourceTree = "<group>"; };
 		F0000000000000000000000A /* SnapListTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapListTokens.swift; sourceTree = "<group>"; };
-		F0000000000000000000000B /* FoundationPlaceholderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundationPlaceholderView.swift; sourceTree = "<group>"; };
+		F0000000000000000000000B /* FoundationDestinationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundationDestinationView.swift; sourceTree = "<group>"; };
 		F0000000000000000000000C /* AppNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNavigation.swift; sourceTree = "<group>"; };
 		F0000000000000000000000D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Assets.xcassets; sourceTree = "<group>"; };
 		F0000000000000000000000E /* DesignContracts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DesignContracts; sourceTree = "<group>"; };
@@ -284,7 +284,7 @@
 			path = DesignSystem;
 			sourceTree = "<group>";
 		};
-		200000000000000000000007 /* Features */ = {isa = PBXGroup; children = (F0000000000000000000000B, 20000000000000000000000C /* Onboarding */, 208D00000000000000000001 /* Home */, 317D00000000000000000001 /* Runs */, 376D00000000000000000001 /* ListingReview */, 581D00000000000000000001 /* AssistedExport */, 457D00000000000000000001 /* Submission */, F0000000000000000000001C, F0000000000000000000001D, F0000000000000000000001E, F0000000000000000000001F, 469E00000000000000000001 /* VoiceNoteDomain.swift */, 469E00000000000000000002 /* AVFoundationVoiceNote.swift */, 469E00000000000000000003 /* VoiceNoteView.swift */, 540E00000000000000000002 /* NativeIntake.swift */); path = Features; sourceTree = "<group>"; };
+		200000000000000000000007 /* Features */ = {isa = PBXGroup; children = (F0000000000000000000000B /* FoundationDestinationView.swift */, 20000000000000000000000C /* Onboarding */, 208D00000000000000000001 /* Home */, 317D00000000000000000001 /* Runs */, 376D00000000000000000001 /* ListingReview */, 581D00000000000000000001 /* AssistedExport */, 457D00000000000000000001 /* Submission */, F0000000000000000000001C, F0000000000000000000001D, F0000000000000000000001E, F0000000000000000000001F, 469E00000000000000000001 /* VoiceNoteDomain.swift */, 469E00000000000000000002 /* AVFoundationVoiceNote.swift */, 469E00000000000000000003 /* VoiceNoteView.swift */, 540E00000000000000000002 /* NativeIntake.swift */); path = Features; sourceTree = "<group>"; };
 		20000000000000000000000C /* Onboarding */ = {isa = PBXGroup; children = (F0000000000000000000000F, F00000000000000000000010, F00000000000000000000018); path = Onboarding; sourceTree = "<group>"; };
 		208D00000000000000000001 /* Home */ = {isa = PBXGroup; children = (208F00000000000000000002, 208F00000000000000000003, 208F00000000000000000004, 208F00000000000000000005); path = Home; sourceTree = "<group>"; };
 		229D00000000000000000001 /* Analytics */ = {isa = PBXGroup; children = (229E00000000000000000001 /* AnalyticsContracts.swift */, 229E00000000000000000002 /* AnalyticsSanitizer.swift */, 229E00000000000000000003 /* AnalyticsClient.swift */, 229E00000000000000000004 /* AnalyticsPersistence.swift */, 229E00000000000000000005 /* AnalyticsRouting.swift */, 271E00000000000000000001 /* PostHogAnalyticsClient.swift */); path = Analytics; sourceTree = "<group>"; };

@@ -2,13 +2,54 @@ import XCTest
 @testable import SnapList
 
 final class AppNavigationTests: XCTestCase {
-    func testDockHasExactlyTheApprovedFiveDestinationsInOrder() {
+    func testDockCarriesOnlyTheTwoPrimaryDestinationsAndTheCaptureEntry() {
         XCTAssertEqual(
             DockDestination.allCases.map(\.title),
-            ["Home", "Listings", "Capture", "Inbox", "Insights"]
+            ["Scan", "Capture", "Trophy Wall"]
         )
         XCTAssertFalse(DockDestination.allCases.map(\.title).contains("Runs"))
         XCTAssertFalse(DockDestination.allCases.map(\.title).contains("You"))
+    }
+
+    func testPrimaryNavigationIsExactlyTheTwoApprovedDestinations() {
+        XCTAssertEqual(PrimaryTab.allCases.count, 2)
+        XCTAssertEqual(
+            DockDestination.allCases.compactMap(\.tab),
+            PrimaryTab.allCases
+        )
+    }
+
+    func testRetiredTabsCannotBeRestoredFromAPersistedName() {
+        // A tab that stops rendering but still parses from a persisted string stays
+        // routable. The enum is the fail-closed boundary, so the retired names must
+        // not resolve at all.
+        for retired in ["home", "listings", "inbox", "insights"] {
+            XCTAssertNil(PrimaryTab(rawValue: retired))
+            XCTAssertNil(DockDestination(rawValue: retired))
+        }
+
+        // Positive control: the boundary rejects the retired names, not every name.
+        XCTAssertEqual(DockDestination(rawValue: "capture"), .capture)
+        XCTAssertEqual(PrimaryTab(rawValue: "scan"), .scan)
+        XCTAssertEqual(PrimaryTab(rawValue: "trophy-wall"), .trophyWall)
+    }
+
+    func testLaunchFixturesNamingARetiredTabResolveToASurvivingDestination() {
+        for retired in ["home", "listings", "inbox", "insights"] {
+            let configuration = LaunchConfiguration.parse(
+                arguments: ["--fixture=\(retired)"]
+            )
+
+            XCTAssertNotEqual(configuration.fixture.rawValue, retired)
+            XCTAssertEqual(configuration.fixture, .scan)
+        }
+
+        // Positive control: a surviving fixture still parses to itself, so the
+        // fallback above is a rejection rather than the parser ignoring --fixture.
+        XCTAssertEqual(
+            LaunchConfiguration.parse(arguments: ["--fixture=trophy-wall"]).fixture,
+            .trophyWall
+        )
     }
 
     @MainActor
@@ -16,20 +57,20 @@ final class AppNavigationTests: XCTestCase {
         let router = AppRouter()
 
         router.navigate(to: .activity)
-        router.select(.listings)
+        router.select(.trophyWall)
         router.navigate(to: .account)
 
-        XCTAssertEqual(router.pathBinding(for: .home).wrappedValue, [.activity])
-        XCTAssertEqual(router.pathBinding(for: .listings).wrappedValue, [.account])
+        XCTAssertEqual(router.pathBinding(for: .scan).wrappedValue, [.activity])
+        XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.account])
     }
 
     @MainActor
     func testCaptureIsASheetAndDoesNotReplaceTheSelectedTab() {
-        let router = AppRouter(initialTab: .inbox)
+        let router = AppRouter(initialTab: .trophyWall)
 
         router.select(.capture)
 
-        XCTAssertEqual(router.selectedTab, .inbox)
+        XCTAssertEqual(router.selectedTab, .trophyWall)
         XCTAssertEqual(router.presentedSheet, .capture)
     }
 
@@ -157,6 +198,16 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertFalse(capture.usesOnboarding)
     }
 
+    func testRunDetailVisualStateLaunchesItsCanonicalRouteInTheTrophyWallStack() {
+        let configuration = LaunchConfiguration.parse(arguments: ["--visual-state=RUN-02"])
+
+        XCTAssertEqual(configuration.initialTab, .trophyWall)
+        XCTAssertEqual(
+            configuration.initialRoute,
+            .home(.run(LaunchConfiguration.runDetailFixtureID))
+        )
+    }
+
     @MainActor
     func testEveryFoundationFixtureProducesItsTypedInitialState() {
         for fixture in FoundationFixture.allCases {
@@ -176,18 +227,18 @@ final class AppNavigationTests: XCTestCase {
     }
 
     @MainActor
-    func testRunDeepLinkRoutesTheExactUUIDIntoTheHomeStack() {
+    func testRunDeepLinkRoutesTheExactUUIDIntoTheTrophyWallStack() {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000030")!
-        let router = AppRouter(initialTab: .inbox)
+        let router = AppRouter(initialTab: .scan)
 
         let didOpen = router.open(
             URL(string: "snaplist://runs/\(runID.uuidString.lowercased())")!
         )
 
         XCTAssertTrue(didOpen)
-        XCTAssertEqual(router.selectedTab, .home)
+        XCTAssertEqual(router.selectedTab, .trophyWall)
         XCTAssertEqual(
-            router.pathBinding(for: .home).wrappedValue,
+            router.pathBinding(for: .trophyWall).wrappedValue,
             [.home(.run(runID))]
         )
     }
@@ -195,7 +246,7 @@ final class AppNavigationTests: XCTestCase {
     @MainActor
     func testRunDeepLinksAcceptOnlyTheCustomSchemeAndRejectWebOrMalformedURLs() {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000031")!
-        let router = AppRouter(initialTab: .listings, initialRoute: .account)
+        let router = AppRouter(initialTab: .trophyWall, initialRoute: .account)
 
         XCTAssertEqual(
             RunDeepLink(
@@ -216,9 +267,9 @@ final class AppNavigationTests: XCTestCase {
         for rawURL in rejected {
             XCTAssertNil(RunDeepLink(url: URL(string: rawURL)!))
             XCTAssertFalse(router.open(URL(string: rawURL)!))
-            XCTAssertEqual(router.selectedTab, .listings)
-            XCTAssertEqual(router.pathBinding(for: .listings).wrappedValue, [.account])
-            XCTAssertTrue(router.pathBinding(for: .home).wrappedValue.isEmpty)
+            XCTAssertEqual(router.selectedTab, .trophyWall)
+            XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.account])
+            XCTAssertTrue(router.pathBinding(for: .scan).wrappedValue.isEmpty)
         }
     }
 }
