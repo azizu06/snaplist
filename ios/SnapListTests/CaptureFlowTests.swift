@@ -817,7 +817,10 @@ final class CaptureFlowTests: XCTestCase {
         let third = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000003")
         let replacement = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000004")
         let store = PhotoReviewStore(photos: [originalCover, second, third])
-        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let router = AppRouter(
+            initialTab: .trophyWall,
+            initialFullScreen: .guidedCamera
+        )
 
         XCTAssertTrue(store.movePhoto(id: third.id, to: 0))
         XCTAssertTrue(store.replacePhoto(id: second.id, with: replacement))
@@ -832,6 +835,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(store.photos.map(\.id), [third.id, replacement.id])
         XCTAssertEqual(store.selectedPhotoID, third.id)
         XCTAssertEqual(router.photoReviewScanReturn, returned)
+        XCTAssertEqual(router.selectedTab, .scan)
     }
 
     func testAcceptedSubmissionEventConsumerAnnouncesAndAcknowledgesBeforeExactClearAndReturnsToReadyScan() async throws {

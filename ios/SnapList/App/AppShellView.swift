@@ -413,6 +413,7 @@ struct AppShellView: View {
     private func presentPendingCaptureIfNeeded() {
         guard pendingCapturePresentation != nil else { return }
         self.pendingCapturePresentation = nil
+        router.selectedTab = .scan
         router.presentedFullScreen = .guidedCamera
         Task { await captureFlow.startCamera() }
     }

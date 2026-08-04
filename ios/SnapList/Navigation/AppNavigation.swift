@@ -219,6 +219,7 @@ final class AppRouter {
     }
 
     func returnFromPhotoReview(_ request: PhotoReviewScanReturn) {
+        selectedTab = .scan
         photoReviewScanReturn = request
         captureBoundaryRequest = nil
         presentedFullScreen = .guidedCamera

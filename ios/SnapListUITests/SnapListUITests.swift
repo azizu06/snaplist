@@ -58,6 +58,8 @@ final class SnapListUITests: XCTestCase {
     func testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable() {
         let app = launch()
 
+        app.buttons["dock.trophy-wall"].tap()
+        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
         app.buttons["dock.capture"].tap()
         XCTAssertTrue(app.buttons["capture.take-one-item"].waitForExistence(timeout: 2))
         app.buttons["capture.take-one-item"].tap()
@@ -207,6 +209,11 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(returnedCount.label, "1 of 5")
 
         XCTAssertEqual(returnedReview.label, "Review 1 photo")
+        XCTAssertEqual(
+            app.buttons.matching(identifier: "scan.review").count,
+            1,
+            app.debugDescription
+        )
         // Review-opener focus restoration is an accessibility-cursor contract, which
         // XCUITest cannot observe without an assistive technology running. It is proved
         // directly by ScanReturnFocusPolicy and by the router-seam return assertions.
