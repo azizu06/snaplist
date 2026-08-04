@@ -36,9 +36,6 @@ export function WaitlistFormView({
 
   return (
     <form className="mkt-waitlist" action={action} noValidate>
-      <p className="mkt-waitlist__promise">
-        We&apos;ll email you once when SnapList launches.
-      </p>
       <div className="mkt-waitlist__honeypot" aria-hidden="true">
         <label htmlFor="waitlist-company">Company</label>
         <input

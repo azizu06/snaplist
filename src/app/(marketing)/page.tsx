@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import { AppStoreButton } from "@/components/marketing/app-store-button";
 import { Faq } from "@/components/marketing/faq";
 import { FeatureExplorer } from "@/components/marketing/feature-explorer";
 import { HeroArt } from "@/components/marketing/hero-art";
 import { MarketingBento } from "@/components/marketing/marketing-bento";
 import { MarketplaceLoop } from "@/components/marketing/marketplace-loop";
-import { StorefrontHandoff } from "@/components/marketing/storefront-handoff";
 import { WaitlistForm } from "@/components/marketing/waitlist-form";
 import {
-  CTA,
   FAQ_TITLE,
   FEATURES_TITLE,
   HERO,
@@ -22,7 +19,7 @@ import {
  * SnapList landing page (issue #191, implementing Claude Design v6).
  *
  * The landing page is a scroll with in-page feature and FAQ anchors plus the
- * intentionally small pricing teaser. It has no signed-in destinations: the
+ * waitlist-first conversion path. It has no signed-in destinations: the
  * launch client is the iOS app, not a web product.
  *
  * All copy lives in `src/lib/marketing/site.ts` so the honesty test can derive
@@ -30,7 +27,7 @@ import {
  */
 export const metadata: Metadata = {
   title: "SnapList — turn photos into a listing you approve",
-  description: HERO.body,
+  description: HERO.title,
 };
 
 export default function LandingPage() {
@@ -41,9 +38,7 @@ export default function LandingPage() {
           <div className="mkt-hero__grid">
             <div className="mkt-hero__copy">
               <h1 className="mkt-h1">{HERO.title}</h1>
-              <p className="mkt-lede">{HERO.lede}</p>
-              <p className="mkt-sub">{HERO.body}</p>
-              <AppStoreButton />
+              <WaitlistForm />
             </div>
             <HeroArt />
           </div>
@@ -57,33 +52,20 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section id="why" className="mkt-section mkt-why">
-        <div className="mkt-shell mkt-shell--narrow">
-          <h2 className="mkt-h2">{WHY.title}</h2>
-          <p className="mkt-why__lede">{WHY.body}</p>
-          <MarketingBento />
-        </div>
-      </section>
-
       <section className="mkt-loop-section" aria-labelledby="mkt-loop-title">
         <div className="mkt-shell">
           <div className="mkt-loop-section__heading">
-            <h2 id="mkt-loop-title">From camera roll to cash.</h2>
-            <p>Keep your item photos, then shape an editable draft you control.</p>
+            <h2 id="mkt-loop-title">From camera roll to every storefront.</h2>
           </div>
         </div>
         <MarketplaceLoop />
       </section>
-
-      <StorefrontHandoff />
 
       <section id="trophy" className="mkt-section mkt-trophy">
         <div className="mkt-shell mkt-shell--narrow">
           <div className="mkt-trophy__grid">
             <div className="mkt-trophy__copy">
               <h2 className="mkt-trophy__h2">{TROPHY_WALL.title}</h2>
-              <p className="mkt-trophy__accent">{TROPHY_WALL.accent}</p>
-              <p className="mkt-trophy__body">{TROPHY_WALL.body}</p>
             </div>
             <div className="mkt-trophy__art">
               {/* Scout sits above the frame, never inside it: he is a companion
@@ -119,19 +101,18 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <section id="why" className="mkt-section mkt-why">
+        <div className="mkt-shell mkt-shell--narrow">
+          <h2 className="mkt-h2">{WHY.title}</h2>
+          <MarketingBento />
+        </div>
+      </section>
+
       <section id="faq" className="mkt-section mkt-faq">
         <div className="mkt-shell mkt-shell--prose">
           <h2 className="mkt-h2">{FAQ_TITLE}</h2>
           <div aria-hidden="true" className="mkt-faq__rule" />
           <Faq />
-        </div>
-      </section>
-
-      <section className="mkt-section mkt-cta">
-        <div className="mkt-shell mkt-shell--prose">
-          <h2 className="mkt-cta__h2">{CTA.title}</h2>
-          <p className="mkt-cta__body">{CTA.body}</p>
-          <WaitlistForm />
         </div>
       </section>
     </>

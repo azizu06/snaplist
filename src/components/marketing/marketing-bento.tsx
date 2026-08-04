@@ -8,17 +8,18 @@ const cards: BentoCardData[] = MARKETING_BENTO_CARDS.map((card) => ({
   tint: "blue",
 }));
 
-/** Existing React Bits grid, restyled by the scoped v6 marketing tokens. */
+/** Vendored React Bits grid, animated only when motion is allowed. */
 export function MarketingBento() {
   return (
     <MagicBento
       className="mkt-bento"
       cards={cards}
-      disableAnimations
-      enableBorderGlow={false}
-      enableSpotlight={false}
+      enableBorderGlow
+      enableSpotlight
       enableStars={false}
-      enableTilt={false}
+      enableTilt
+      clickEffect={false}
+      enableMagnetism={false}
       glowColor="54, 101, 243"
     />
   );
