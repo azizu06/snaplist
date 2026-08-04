@@ -59,6 +59,8 @@ export interface PublishOptions {
   completionClient?: SupabaseClient;
   /** Client-observed review token. Mobile publish must supply this and fail closed when stale. */
   expectedReviewRevision?: string;
+  /** Durable mobile confirmation key used to resume an ambiguous provider write. */
+  idempotencyKey?: string;
 }
 
 interface PublishClaimSnapshot {
@@ -185,7 +187,7 @@ export async function publishListingToEbay(
   const { data: listing, error: listingErr } = await supabase
     .from("listings")
     .select(
-      "id, item_id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_offer_id, ebay_status, ebay_publish_connection_generation",
+      "id, item_id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_offer_id, ebay_status, ebay_publish_connection_generation, ebay_publish_idempotency_key, ebay_publish_expected_review_revision",
     )
     .eq("id", listingId)
     .maybeSingle();
@@ -203,6 +205,18 @@ export async function publishListingToEbay(
 
   // 2. Idempotency: already live -> return the stored result, no eBay call.
   if (listing.ebay_listing_id && listing.ebay_status === "published") {
+    if (
+      options.idempotencyKey
+      && (
+        listing.ebay_publish_idempotency_key !== options.idempotencyKey
+        || listing.ebay_publish_expected_review_revision
+          !== options.expectedReviewRevision
+      )
+    ) {
+      throw new PublishReviewRevisionConflictError(
+        "The listing changed since it was opened. Refresh before publishing.",
+      );
+    }
     const currentConnectionGeneration = await readEbayReplayConnectionGeneration(
       supabase,
       marketplaceId,
@@ -246,9 +260,16 @@ export async function publishListingToEbay(
   }
   const expectedReviewRevision =
     options.expectedReviewRevision ?? (item.review_revision as string);
+  const matchingAmbiguousReplay =
+    listing.ebay_status === "publishing"
+    && options.idempotencyKey != null
+    && listing.ebay_publish_idempotency_key === options.idempotencyKey
+    && listing.ebay_publish_expected_review_revision
+      === options.expectedReviewRevision;
   if (
     options.expectedReviewRevision
     && item.review_revision !== options.expectedReviewRevision
+    && !matchingAmbiguousReplay
   ) {
     throw new PublishReviewRevisionConflictError(
       "The listing changed since it was opened. Refresh before publishing.",
@@ -272,14 +293,20 @@ export async function publishListingToEbay(
     );
   }
 
-  const { data: claimData, error: claimErr } = await supabase.rpc("begin_ebay_publish", {
+  const claimRpc = options.idempotencyKey
+    ? "begin_mobile_ebay_publish"
+    : "begin_ebay_publish";
+  const { data: claimData, error: claimErr } = await supabase.rpc(claimRpc, {
     p_listing_id: listingId,
     p_expected_run_id: (listing.run_id as string | null) ?? null,
     p_expected_review_revision: expectedReviewRevision,
+    ...(options.idempotencyKey
+      ? { p_idempotency_key: options.idempotencyKey }
+      : {}),
   });
   if (claimErr) {
     if (claimErr.code === "P0002") {
-      throw new PublishValidationError(
+      throw new PublishReviewRevisionConflictError(
         `Listing ${listingId} changed or is already being published. Refresh and try again.`,
       );
     }
@@ -368,6 +395,7 @@ export async function publishListingToEbay(
   //    ebay_status='failed' (then rethrown); persistence problems after a
   //    SUCCESSFUL publish must NOT be marked failed — the eBay listing is live.
   let providerAcknowledged = false;
+  let durableCompletionSucceeded = false;
   let acknowledgedResult: EbayPublishResult | null = null;
   let result: EbayPublishResult;
   try {
@@ -383,12 +411,13 @@ export async function publishListingToEbay(
         acknowledgement,
         context,
       );
+      durableCompletionSucceeded = true;
     });
   } catch (err) {
-    if (providerAcknowledged && acknowledgedResult) {
+    if (durableCompletionSucceeded && acknowledgedResult) {
       result = acknowledgedResult;
     } else {
-      if (!(err instanceof EbayWriteAmbiguousError)) {
+      if (!providerAcknowledged && !(err instanceof EbayWriteAmbiguousError)) {
         await markPublishFailed(supabase, listingId, claimId, offerBinding);
       }
       throw err;
@@ -657,6 +686,8 @@ async function markPublishFailed(
         ebay_publish_claimed_at: null,
         ebay_publish_connection_generation: null,
         ebay_publish_binding: null,
+        ebay_publish_idempotency_key: null,
+        ebay_publish_expected_review_revision: null,
       })
       .eq("id", listingId);
     query = claimId
