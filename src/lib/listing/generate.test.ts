@@ -3,6 +3,7 @@ import { listingCopySchema, type ExtractedAttributes } from "../pipeline/types";
 import type { FewShotExamples, ReferenceMatch } from "../rag";
 import { EBAY_TITLE_MAX_LENGTH, ebayListingSchema, type EbayListing } from "./schema";
 import {
+  fallbackEbayListing,
   corpusReadKey,
   enforceTitleLength,
   generateEbayListing,
@@ -10,6 +11,7 @@ import {
   type ListingGenerate,
   type RetrieveFewShot,
 } from "./generate";
+import { sellerCopyViolations } from "../seller-copy";
 
 /**
  * eBay listing generation CONTRACT tests (issue #9). Fully OFFLINE: BOTH the model
@@ -37,7 +39,7 @@ const CORE: ExtractedAttributes = {
 
 /** A clean, in-spec eBay listing a well-behaved model would emit for CORE. */
 const GOOD_LISTING: EbayListing = {
-  title: "Sony WH-1000XM4 Wireless Noise-Cancelling Headphones - Black, Good Condition",
+  title: "Sony WH-1000XM4 Wireless Noise-Cancelling Headphones, Good Condition",
   itemSpecifics: {
     Brand: "Sony",
     Model: "WH-1000XM4",
@@ -135,6 +137,73 @@ describe("listing/generate — valid output maps onto ListingCopy (ebay)", () =>
     expect(listing.itemSpecifics.Model).toBe("WH-1000XM4");
     expect(listing.description.length).toBeGreaterThan(0);
     expect(listing.tags.length).toBeGreaterThan(0);
+  });
+});
+
+describe("listing/generate — seller-visible copy contract (#243)", () => {
+  it("keeps a validated title in the factual fallback when stronger identity fields are absent", () => {
+    expect(fallbackEbayListing({ title: "Vintage desk lamp" }).title).toBe(
+      "Vintage desk lamp",
+    );
+  });
+
+  it("retries a violating generated draft, then publishes only a core-built fallback", async () => {
+    const violating: EbayListing = {
+      ...GOOD_LISTING,
+      title: "Sure! Sony WH-1000XM4 — not just headphones",
+      description:
+        "Ships fast with a charger. This premium listing is a must-have for a limited time.",
+    };
+    const { generate, calls } = scriptedGenerate([violating, violating]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(listing).toEqual(fallbackEbayListing(CORE));
+    expect(sellerCopyViolations(`${listing.title}\n${listing.description}`)).toEqual([]);
+    expect(listing.description).not.toMatch(/charger|ship|limited/i);
+  });
+
+  it("does not let a digit-free invented accessory bypass the title schema", async () => {
+    const inventedAccessory: EbayListing = {
+      ...GOOD_LISTING,
+      title: "Sony WH-1000XM4 Includes Charger",
+    };
+    const { generate, calls } = scriptedGenerate([inventedAccessory, inventedAccessory]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(listing).toEqual(fallbackEbayListing(CORE));
+    expect(listing.title).not.toMatch(/charger/i);
+  });
+
+  it("does not let a violating generated tag bypass the copy contract", async () => {
+    const violatingTag: EbayListing = {
+      ...GOOD_LISTING,
+      tags: ["Ships fast"],
+    };
+    const { generate, calls } = scriptedGenerate([violatingTag, violatingTag]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(listing).toEqual(fallbackEbayListing(CORE));
   });
 });
 

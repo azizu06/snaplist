@@ -17,8 +17,6 @@ import {
   type RawExportPacks,
 } from "./schema";
 import {
-  FACEBOOK_PICKUP_LINE,
-  MERCARI_SHIPPING_SUFFIX,
   buildCoreDescription,
   buildFacebookDescription,
   buildMercariDescription,
@@ -33,11 +31,11 @@ import {
   normalizeHashtag,
   packsHallucinateAttributes,
   reconcileHashtags,
-  repairMercariDescription,
   titlesViolateGrounding,
   type ExportPackGenerate,
   titleViolations,
 } from "./generate";
+import { sellerCopyViolations } from "../seller-copy";
 
 /**
  * Export-pack CONTRACT tests (issue #15). Fully OFFLINE: the model call is
@@ -140,12 +138,35 @@ describe("generateExportPacks — happy path", () => {
   });
 });
 
+describe("generateExportPacks — seller-visible copy contract (#243)", () => {
+  it("never adds seller shipping or pickup promises outside the validated core", async () => {
+    const { generate } = scriptedGenerate([GOOD_RAW]);
+    const packs = await generateExportPacks({ attributes: CORE, generate, price: 120 });
+
+    for (const copy of [
+      packs.facebook.pack.title,
+      packs.facebook.pack.description,
+      packs.facebook.copyBlock,
+      packs.mercari.pack.title,
+      packs.mercari.pack.description,
+      packs.mercari.copyBlock,
+      packs.depop.pack.description,
+      packs.depop.copyBlock,
+    ]) {
+      expect(sellerCopyViolations(copy)).toEqual([]);
+    }
+    expect(packs.facebook.copyBlock).not.toMatch(/pickup|message me/i);
+    expect(packs.mercari.copyBlock).not.toMatch(/ship/i);
+  });
+});
+
 describe("Facebook conventions (structural)", () => {
-  it("always closes the block with the local-pickup line", async () => {
+  it("uses only the supported condition line after the description", async () => {
     const { generate } = scriptedGenerate([GOOD_RAW]);
     const res = await generateExportPacks({ attributes: CORE, generate });
     const lines = res.facebook.copyBlock.split("\n");
-    expect(lines[lines.length - 1]).toBe(FACEBOOK_PICKUP_LINE);
+    expect(lines[lines.length - 1]).toBe("Condition: good");
+    expect(res.facebook.copyBlock).not.toMatch(/pickup|message me/i);
   });
 
   it("repairs an over-long FB title deterministically to ≤ 99 chars", async () => {
@@ -204,11 +225,10 @@ describe("Mercari conventions (structural)", () => {
     expect(res.mercari.pack.title.length).toBeGreaterThan(0);
   });
 
-  it("the published Mercari description always mentions shipping (deterministic suffix)", async () => {
+  it("does not claim a shipping policy the seller has not supplied", async () => {
     const { generate } = scriptedGenerate([GOOD_RAW]);
     const res = await generateExportPacks({ attributes: CORE, generate });
-    expect(res.mercari.pack.description).toMatch(/ship/i);
-    expect(res.mercari.pack.description).toContain(MERCARI_SHIPPING_SUFFIX);
+    expect(res.mercari.pack.description).not.toMatch(/ship/i);
   });
 
   it("publishes the deterministic core-built Mercari description, never model text", async () => {
@@ -228,7 +248,7 @@ describe("Mercari conventions (structural)", () => {
     expect(res.mercari.pack.description.length).toBeLessThanOrEqual(
       MERCARI_DESCRIPTION_MAX_LENGTH,
     );
-    expect(res.mercari.pack.description).toMatch(/ship/i);
+    expect(res.mercari.pack.description).not.toMatch(/ship/i);
   });
 
   it("bounds hashtags at 3 and normalizes their format", async () => {
@@ -307,14 +327,13 @@ describe("no hallucinated attributes beyond the validated core", () => {
     expect(res.mercari.pack.hashtags).toEqual(["#kitchen"]);
   });
 
-  it("every output fact line traces to inputs: condition from core, price from caller, pickup constant", async () => {
+  it("every output fact line traces to inputs: condition from core and price from caller", async () => {
     const { generate } = scriptedGenerate([GOOD_RAW]);
     const res = await generateExportPacks({ attributes: CORE, generate, price: 120 });
-    const metaLines = res.facebook.copyBlock.split("\n").slice(-3);
+    const metaLines = res.facebook.copyBlock.split("\n").filter(Boolean).slice(-2);
     expect(metaLines).toEqual([
       "Condition: good",
       "Asking $120",
-      FACEBOOK_PICKUP_LINE,
     ]);
   });
 });
@@ -455,8 +474,7 @@ describe("published descriptions are deterministic core-backed assembly", () => 
     expect(calls.length).toBe(1);
     expect(res.mercari.pack.description).toBe(buildMercariDescription(CORE));
     expect(res.mercari.pack.description).not.toContain("25");
-    // The deterministic build still honors the Mercari shipping convention.
-    expect(res.mercari.pack.description).toMatch(/ship/i);
+    expect(res.mercari.pack.description).not.toMatch(/ship/i);
     expect(mercariPackSchema.safeParse(res.mercari.pack).success).toBe(true);
   });
 
@@ -488,7 +506,7 @@ describe("published descriptions are deterministic core-backed assembly", () => 
       mercariPackSchema.safeParse({ title: "t", description: mercari, hashtags: [] })
         .success,
     ).toBe(true);
-    expect(mercari).toMatch(/ship/i);
+    expect(mercari).not.toMatch(/ship/i);
     expect(ungrounded(fb)).toEqual([]);
     expect(ungrounded(mercari)).toEqual([]);
     // A bare core still yields non-empty, schema-valid text.
@@ -730,14 +748,12 @@ describe("hashtag helpers (unit)", () => {
     ).toBe(true);
   });
 
-  it("repairMercariDescription always yields a ≤-cap, shipping-mentioning string", () => {
-    const long = "x".repeat(2000);
-    const repaired = repairMercariDescription(long);
-    expect(repaired.length).toBeLessThanOrEqual(MERCARI_DESCRIPTION_MAX_LENGTH);
-    expect(repaired).toMatch(/ship/i);
-    expect(repairMercariDescription("Already ships with tracking.")).toBe(
-      "Already ships with tracking.",
-    );
+  it("buildMercariDescription caps core-backed text without adding shipping copy", () => {
+    const description = buildMercariDescription({
+      specs: ["x".repeat(MERCARI_DESCRIPTION_MAX_LENGTH * 2)],
+    });
+    expect(description.length).toBeLessThanOrEqual(MERCARI_DESCRIPTION_MAX_LENGTH);
+    expect(description).not.toMatch(/ship/i);
   });
 });
 

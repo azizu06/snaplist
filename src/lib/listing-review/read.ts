@@ -11,6 +11,10 @@ import {
 } from "@/lib/pipeline/autopilot";
 import { signPhotoUrlMap } from "@/lib/vision/photos";
 import { ITEM_CONDITIONS } from "@/lib/items/condition";
+import {
+  NO_VERIFIED_SOLD_MATCHES_COPY,
+  STARTING_PRICE_COPY,
+} from "@/lib/seller-copy";
 
 const uuid = z.string().uuid();
 const isoDateTime = z.string().datetime({ offset: true });
@@ -179,8 +183,8 @@ export const listingReviewProjectionSchema = z
           .strict(),
       )
       .max(5),
-    startingPriceCopy: z.literal("Starting price estimate"),
-    soldEvidenceCopy: z.literal("No verified sold matches found.").nullable(),
+    startingPriceCopy: z.literal(STARTING_PRICE_COPY),
+    soldEvidenceCopy: z.literal(NO_VERIFIED_SOLD_MATCHES_COPY).nullable(),
   })
   .strict();
 
@@ -346,10 +350,10 @@ function projectReview(
     },
     evidenceAsOf: pricingSnapshot.evidenceAsOf,
     verifiedSoldMatches,
-    startingPriceCopy: "Starting price estimate",
+    startingPriceCopy: STARTING_PRICE_COPY,
     soldEvidenceCopy:
       verifiedSoldMatches.length === 0
-        ? "No verified sold matches found."
+        ? NO_VERIFIED_SOLD_MATCHES_COPY
         : null,
   });
 }
