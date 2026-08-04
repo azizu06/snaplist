@@ -133,6 +133,12 @@ jobs:
       - name: Run the pgTAP contracts
         run: |
           set -o pipefail
+          # Every pgTAP connection now requires branch migrations to be
+          # installed. Shared local stacks omit this disposable CI-only flag
+          # and may use a contract's rolled-back transactional DDL fallback.
+          docker exec supabase_db_snaplist psql -U postgres -d postgres \
+            -v ON_ERROR_STOP=1 \
+            -c "create schema pgtap_ci; create table pgtap_ci.require_installed_migrations (required boolean not null default true)"
           pnpm supabase test db --local 2>&1 | tee pgtap.log
           expected=$(ls supabase/tests/*.sql | wc -l | tr -d ' ')
           reported=$(grep -oE 'Files=[0-9]+' pgtap.log | tail -1 | cut -d= -f2)

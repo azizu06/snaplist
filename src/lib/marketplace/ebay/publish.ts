@@ -57,6 +57,10 @@ export interface PublishOptions {
    */
   signedUrlTtlSeconds?: number;
   completionClient?: SupabaseClient;
+  /** Client-observed review token. Mobile publish must supply this and fail closed when stale. */
+  expectedReviewRevision?: string;
+  /** Durable mobile confirmation key used to resume an ambiguous provider write. */
+  idempotencyKey?: string;
 }
 
 interface PublishClaimSnapshot {
@@ -98,7 +102,11 @@ const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
  */
 const PRICING_CURRENCY = "USD";
 
-class PublishedReplayConflictError extends PublishValidationError {}
+export class PublishedReplayConflictError extends PublishValidationError {}
+
+export class PublishReviewRevisionConflictError extends PublishValidationError {}
+
+class EbayPublishOutcomeUnknownError extends Error {}
 
 /**
  * `publishListingToEbay` + the seller's activity-feed notifications, shared by
@@ -120,7 +128,11 @@ export async function publishListingToEbayAndNotify(
   try {
     outcome = await publishListingToEbay(supabase, listingId, adapter, options);
   } catch (err) {
-    if (err instanceof PublishedReplayConflictError) {
+    if (
+      err instanceof PublishedReplayConflictError
+      || err instanceof EbayWriteAmbiguousError
+      || err instanceof EbayPublishOutcomeUnknownError
+    ) {
       throw err;
     }
     // An AUTH failure (expired/invalid token) has ONE fix — reconnect eBay in
@@ -181,7 +193,7 @@ export async function publishListingToEbay(
   const { data: listing, error: listingErr } = await supabase
     .from("listings")
     .select(
-      "id, item_id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_offer_id, ebay_status, ebay_publish_connection_generation",
+      "id, item_id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_offer_id, ebay_status, ebay_publish_connection_generation, ebay_publish_idempotency_key, ebay_publish_expected_review_revision",
     )
     .eq("id", listingId)
     .maybeSingle();
@@ -199,6 +211,18 @@ export async function publishListingToEbay(
 
   // 2. Idempotency: already live -> return the stored result, no eBay call.
   if (listing.ebay_listing_id && listing.ebay_status === "published") {
+    if (
+      options.idempotencyKey
+      && (
+        listing.ebay_publish_idempotency_key !== options.idempotencyKey
+        || listing.ebay_publish_expected_review_revision
+          !== options.expectedReviewRevision
+      )
+    ) {
+      throw new PublishReviewRevisionConflictError(
+        "The listing changed since it was opened. Refresh before publishing.",
+      );
+    }
     const currentConnectionGeneration = await readEbayReplayConnectionGeneration(
       supabase,
       marketplaceId,
@@ -240,6 +264,23 @@ export async function publishListingToEbay(
       `Failed to load item for listing ${listingId}: ${itemErr?.message ?? "not found"}`,
     );
   }
+  const expectedReviewRevision =
+    options.expectedReviewRevision ?? (item.review_revision as string);
+  const matchingAmbiguousReplay =
+    listing.ebay_status === "publishing"
+    && options.idempotencyKey != null
+    && listing.ebay_publish_idempotency_key === options.idempotencyKey
+    && listing.ebay_publish_expected_review_revision
+      === options.expectedReviewRevision;
+  if (
+    options.expectedReviewRevision
+    && item.review_revision !== options.expectedReviewRevision
+    && !matchingAmbiguousReplay
+  ) {
+    throw new PublishReviewRevisionConflictError(
+      "The listing changed since it was opened. Refresh before publishing.",
+    );
+  }
 
   // The persisted price is a currency-less numeric produced by the pricing
   // pipeline, whose comps are USD. Publishing it under another marketplace's
@@ -258,14 +299,20 @@ export async function publishListingToEbay(
     );
   }
 
-  const { data: claimData, error: claimErr } = await supabase.rpc("begin_ebay_publish", {
+  const claimRpc = options.idempotencyKey
+    ? "begin_mobile_ebay_publish"
+    : "begin_ebay_publish";
+  const { data: claimData, error: claimErr } = await supabase.rpc(claimRpc, {
     p_listing_id: listingId,
     p_expected_run_id: (listing.run_id as string | null) ?? null,
-    p_expected_review_revision: item.review_revision as string,
+    p_expected_review_revision: expectedReviewRevision,
+    ...(options.idempotencyKey
+      ? { p_idempotency_key: options.idempotencyKey }
+      : {}),
   });
   if (claimErr) {
     if (claimErr.code === "P0002") {
-      throw new PublishValidationError(
+      throw new PublishReviewRevisionConflictError(
         `Listing ${listingId} changed or is already being published. Refresh and try again.`,
       );
     }
@@ -354,10 +401,13 @@ export async function publishListingToEbay(
   //    ebay_status='failed' (then rethrown); persistence problems after a
   //    SUCCESSFUL publish must NOT be marked failed — the eBay listing is live.
   let providerAcknowledged = false;
+  let durableCompletionSucceeded = false;
+  let acknowledgedResult: EbayPublishResult | null = null;
   let result: EbayPublishResult;
   try {
     result = await adapter.publishListing(request, async (acknowledgement, context) => {
       providerAcknowledged = true;
+      acknowledgedResult = acknowledgement;
       await persistPublishedListing(
         options.completionClient ?? supabase,
         listingId,
@@ -367,15 +417,23 @@ export async function publishListingToEbay(
         acknowledgement,
         context,
       );
+      durableCompletionSucceeded = true;
     });
   } catch (err) {
-    if (
-      !providerAcknowledged
-      && !(err instanceof EbayWriteAmbiguousError)
-    ) {
-      await markPublishFailed(supabase, listingId, claimId, offerBinding);
+    if (durableCompletionSucceeded && acknowledgedResult) {
+      result = acknowledgedResult;
+    } else {
+      if (!providerAcknowledged && !(err instanceof EbayWriteAmbiguousError)) {
+        await markPublishFailed(supabase, listingId, claimId, offerBinding);
+      }
+      throw providerAcknowledged
+        ? new EbayPublishOutcomeUnknownError(
+            err instanceof Error
+              ? err.message
+              : "eBay may have accepted this listing, but SnapList could not save the result.",
+          )
+        : err;
     }
-    throw err;
   }
 
   return {
@@ -640,6 +698,8 @@ async function markPublishFailed(
         ebay_publish_claimed_at: null,
         ebay_publish_connection_generation: null,
         ebay_publish_binding: null,
+        ebay_publish_idempotency_key: null,
+        ebay_publish_expected_review_revision: null,
       })
       .eq("id", listingId);
     query = claimId
