@@ -5,6 +5,7 @@ import { createMobileEbayPublishService } from "@/lib/marketplace/ebay/mobile-pu
 import {
   EbayWriteAmbiguousError,
   MockEbayAdapter,
+  type EbayAdapter,
   type EbayPublishCompletion,
   type EbayPublishRequest,
   type EbayPublishResult,
@@ -87,6 +88,9 @@ function publishFixtureClient() {
     ebay_username: "sandbox-seller",
     policy_location_bindings: { EBAY_US: binding },
   };
+  const connectionState: { current: typeof connection | null } = {
+    current: connection,
+  };
 
   const client = {
     from(table: string) {
@@ -146,7 +150,9 @@ function publishFixtureClient() {
       }
       if (table === "ebay_connections") {
         return {
-          select: () => ({ maybeSingle: async () => ({ data: connection, error: null }) }),
+          select: () => ({
+            maybeSingle: async () => ({ data: connectionState.current, error: null }),
+          }),
         };
       }
       if (table === "notifications") {
@@ -155,6 +161,11 @@ function publishFixtureClient() {
       throw new Error(`Unexpected table ${table}`);
     },
     async rpc(name: string, params: Record<string, unknown>) {
+      if (name === "disconnect_ebay_connection") {
+        const disconnected = connectionState.current !== null;
+        connectionState.current = null;
+        return { data: disconnected, error: null };
+      }
       if (name === "begin_ebay_publish") {
         if (params.p_expected_review_revision !== item.review_revision) {
           return { data: null, error: { code: "P0002", message: "Review changed." } };
@@ -204,49 +215,73 @@ function publishFixtureClient() {
     },
   } as unknown as SupabaseClient;
 
-  return { client, listing };
+  return { client, connectionState, listing };
+}
+
+const idleWorker = {
+  consume: async () => ({
+    acknowledged: 0,
+    claimed: 0,
+    failed: 0,
+    retrying: 0,
+    skipped: 0,
+    succeeded: 0,
+  }),
+};
+
+function ebayHandler(input: {
+  adapter: EbayAdapter;
+  adapterFor?: () => Promise<EbayAdapter>;
+  client: SupabaseClient;
+  env?: Record<string, string | undefined>;
+  requestId: string;
+}) {
+  return createMobileApiHandler({
+    authenticate: async () => ({ kind: "clerk", userId: "user-1" }),
+    ebayPublish: createMobileEbayPublishService({
+      adapterFor: input.adapterFor ?? (async () => input.adapter),
+      clientForBearer: () => input.client,
+      completionClientForBearer: () => input.client,
+      env: () => ({
+        EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+        ...input.env,
+      }),
+    }),
+    worker: idleWorker,
+    requestId: () => input.requestId,
+  });
+}
+
+function confirmedPublishRequest(
+  handler: (request: Request) => Promise<Response>,
+  expectedReviewRevision = REVIEW_REVISION,
+) {
+  return handler(
+    new Request(`https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/publish`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer clerk-jwt",
+        "content-type": "application/json",
+        "idempotency-key": IDEMPOTENCY_KEY,
+      },
+      body: JSON.stringify({
+        confirmation: "publish_to_ebay",
+        expectedReviewRevision,
+      }),
+    }),
+  );
 }
 
 describe("mobile eBay publish boundary", () => {
   it("replays an ambiguously acknowledged confirmation with one adapter mutation and one provider identity", async () => {
     const { client } = publishFixtureClient();
     const adapter = new AmbiguousAfterCompletionAdapter();
-    const ebayPublish = createMobileEbayPublishService({
-      adapterFor: async () => adapter,
-      clientForBearer: () => client,
-      completionClientForBearer: () => client,
-      env: () => ({ EBAY_BASE_URL: "https://api.sandbox.ebay.com" }),
+    const handler = ebayHandler({
+      adapter,
+      client,
+      requestId: "request-628",
     });
-    const handler = createMobileApiHandler({
-      authenticate: async () => ({ kind: "clerk", userId: "user-1" }),
-      ebayPublish,
-      worker: {
-        consume: async () => ({
-          acknowledged: 0,
-          claimed: 0,
-          failed: 0,
-          retrying: 0,
-          skipped: 0,
-          succeeded: 0,
-        }),
-      },
-      requestId: () => "request-628",
-    });
-    const publish = () =>
-      handler(
-        new Request(`https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/publish`, {
-          method: "POST",
-          headers: {
-            authorization: "Bearer clerk-jwt",
-            "content-type": "application/json",
-            "idempotency-key": IDEMPOTENCY_KEY,
-          },
-          body: JSON.stringify({
-            confirmation: "publish_to_ebay",
-            expectedReviewRevision: REVIEW_REVISION,
-          }),
-        }),
-      );
+    const publish = () => confirmedPublishRequest(handler);
 
     const first = await publish();
     const replay = await publish();
@@ -263,6 +298,188 @@ describe("mobile eBay publish boundary", () => {
       data: {
         outcome: "published",
         ebayListingId: `MOCK-EBAY-LISTING-${LISTING_ID}`,
+      },
+    });
+    expect(adapter.requests).toHaveLength(1);
+  });
+
+  it("fails closed with 409 when confirmation uses a stale review revision", async () => {
+    const { client } = publishFixtureClient();
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      client,
+      requestId: "request-628-stale",
+    });
+
+    const response = await confirmedPublishRequest(
+      handler,
+      "88888888-8888-4888-8888-888888888888",
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "conflict",
+        message: "The listing changed since it was opened. Refresh before publishing.",
+      },
+    });
+    expect(adapter.requests).toHaveLength(0);
+  });
+
+  it("rejects a publish request without explicit confirmation", async () => {
+    const { client } = publishFixtureClient();
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      client,
+      requestId: "request-628-unconfirmed",
+    });
+
+    const response = await handler(
+      new Request(`https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/publish`, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer clerk-jwt",
+          "content-type": "application/json",
+          "idempotency-key": IDEMPOTENCY_KEY,
+        },
+        body: JSON.stringify({ expectedReviewRevision: REVIEW_REVISION }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(adapter.requests).toHaveLength(0);
+  });
+
+  it("refuses a non-Sandbox adapter before any marketplace mutation", async () => {
+    const { client } = publishFixtureClient();
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      client,
+      env: { EBAY_BASE_URL: "https://api.ebay.com" },
+      requestId: "request-628-production",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+
+    expect(response.status).toBe(503);
+    expect(adapter.requests).toHaveLength(0);
+  });
+
+  it("preflights server-mapped listing truth without a marketplace mutation", async () => {
+    const { client } = publishFixtureClient();
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      client,
+      env: { EBAY_MARKETPLACE_ID: "EBAY_US" },
+      requestId: "request-628-preflight",
+    });
+
+    const response = await handler(
+      new Request(
+        `https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/preflight`,
+        { headers: { authorization: "Bearer clerk-jwt" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        listingId: LISTING_ID,
+        title: "Nintendo Switch OLED",
+        effectivePrice: { amount: 177.77, label: "What will be listed" },
+        photoCount: 1,
+        marketplace: "EBAY_US",
+        ebayCondition: "LIKE_NEW",
+        itemSpecifics: { Brand: ["Nintendo"], Model: ["Switch OLED"] },
+        reviewRevision: REVIEW_REVISION,
+      },
+      meta: { requestId: "request-628-preflight" },
+    });
+    expect(adapter.requests).toHaveLength(0);
+  });
+
+  it("reports an ambiguous durable publish as outcome not yet known", async () => {
+    const { client, listing } = publishFixtureClient();
+    listing.ebay_status = "publishing";
+    listing.ebay_publish_claim_id = CLAIM_ID;
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      client,
+      requestId: "request-628-status",
+    });
+
+    const response = await handler(
+      new Request(
+        `https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/publish`,
+        { headers: { authorization: "Bearer clerk-jwt" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        listingId: LISTING_ID,
+        outcome: "outcome_not_yet_known",
+        ebayListingId: null,
+        ebayOfferId: null,
+        alreadyPublished: false,
+      },
+      meta: { requestId: "request-628-status" },
+    });
+    expect(adapter.requests).toHaveLength(0);
+  });
+
+  it("reads and disconnects the account, then rejects replay from the old generation", async () => {
+    const { client, connectionState } = publishFixtureClient();
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      adapterFor: async () => {
+        if (!connectionState.current) {
+          throw new Error("No eBay account is connected.");
+        }
+        return adapter;
+      },
+      client,
+      requestId: "request-628-connection",
+    });
+    const publishRequest = () => confirmedPublishRequest(handler);
+
+    expect((await publishRequest()).status).toBe(200);
+    const connected = await handler(
+      new Request("https://api.snaplist.test/v1/ebay/connection", {
+        headers: { authorization: "Bearer clerk-jwt" },
+      }),
+    );
+    expect(await connected.json()).toMatchObject({
+      data: { connected: true, ebayUsername: "sandbox-seller" },
+    });
+
+    const disconnected = await handler(
+      new Request("https://api.snaplist.test/v1/ebay/connection", {
+        method: "DELETE",
+        headers: {
+          authorization: "Bearer clerk-jwt",
+          "idempotency-key": IDEMPOTENCY_KEY,
+        },
+      }),
+    );
+    expect(disconnected.status).toBe(200);
+    expect(await disconnected.json()).toMatchObject({
+      data: { connected: false, ebayUsername: null },
+    });
+
+    const replay = await publishRequest();
+    expect(replay.status).toBe(409);
+    expect(await replay.json()).toMatchObject({
+      error: {
+        code: "conflict",
+        message: "Connect eBay before replaying this published listing.",
       },
     });
     expect(adapter.requests).toHaveLength(1);

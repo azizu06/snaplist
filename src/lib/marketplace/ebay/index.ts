@@ -37,7 +37,9 @@ export {
 } from "./publish";
 export {
   createMobileEbayPublishService,
+  MobileEbayListingNotFoundError,
   type MobileEbayPublishGateway,
+  type MobileEbayPublishPreflight,
   type MobileEbayPublishStatus,
 } from "./mobile-publish";
 export {

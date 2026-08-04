@@ -49,7 +49,14 @@ import {
   includedOfferRedeemRequestSchema,
 } from "@/lib/included-offer-fence/http";
 import type { IncludedOfferFence } from "@/lib/included-offer-fence/service";
-import type { MobileEbayPublishGateway } from "@/lib/marketplace/ebay/mobile-publish";
+import {
+  MobileEbayListingNotFoundError,
+  type MobileEbayPublishGateway,
+} from "@/lib/marketplace/ebay/mobile-publish";
+import {
+  PublishedReplayConflictError,
+  PublishReviewRevisionConflictError,
+} from "@/lib/marketplace/ebay/publish";
 import {
   MOBILE_API_VERSION,
   apiErrorEnvelopeSchema,
@@ -63,8 +70,10 @@ import {
   exportHandoffActionSchema,
   exportHandoffsEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
+  ebayConnectionStatusEnvelopeSchema,
   ebayOauthSessionEnvelopeSchema,
   ebayPublishConfirmationSchema,
+  ebayPublishPreflightEnvelopeSchema,
   ebayPublishStatusEnvelopeSchema,
   guidedCorrectionEnvelopeSchema,
   guestClaimEnvelopeSchema,
@@ -199,6 +208,43 @@ function errorResponse(
     }),
     status,
   );
+}
+
+async function authenticatedEbayAccount(
+  request: Request,
+  requestId: string,
+  dependencies: MobileApiDependencies,
+): Promise<{ principal: MobileApiPrincipal; token: string } | Response> {
+  const token = bearerToken(request);
+  if (!token) {
+    return errorResponse(
+      requestId,
+      401,
+      "unauthorized",
+      "Authentication is required.",
+    );
+  }
+  let principal: MobileApiPrincipal;
+  try {
+    principal = await dependencies.authenticate(token);
+  } catch (error) {
+    dependencies.reportError?.("mobile-api.authenticate", error);
+    return errorResponse(
+      requestId,
+      401,
+      "unauthorized",
+      "Authentication is required.",
+    );
+  }
+  if (principal.kind === "verifiedGuest") {
+    return errorResponse(
+      requestId,
+      403,
+      "forbidden",
+      "eBay delivery requires an account.",
+    );
+  }
+  return { principal, token };
 }
 
 /**
@@ -535,11 +581,80 @@ export function createMobileApiHandler(
       }
     }
 
+    if (pathname === `/${MOBILE_API_VERSION}/ebay/connection`) {
+      if (request.method !== "GET" && request.method !== "DELETE") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const idempotencyKey = request.method === "DELETE"
+        ? z
+            .string()
+            .uuid()
+            .safeParse(request.headers.get("idempotency-key")?.trim())
+        : null;
+      const disconnectIdempotencyKey = idempotencyKey?.success
+        ? idempotencyKey.data
+        : null;
+      if (request.method === "DELETE" && !disconnectIdempotencyKey) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid Idempotency-Key is required.",
+        );
+      }
+      const authenticated = await authenticatedEbayAccount(
+        request,
+        requestId,
+        dependencies,
+      );
+      if (authenticated instanceof Response) return authenticated;
+      const { principal, token } = authenticated;
+      if (!dependencies.ebayPublish) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay connection settings are temporarily unavailable.",
+        );
+      }
+      try {
+        const operation = {
+          userId: principal.userId,
+          bearerToken: token,
+        };
+        const status = request.method === "GET"
+          ? await dependencies.ebayPublish.connection(operation)
+          : await dependencies.ebayPublish.disconnect({
+              ...operation,
+              idempotencyKey: disconnectIdempotencyKey!,
+            });
+        return json(
+          ebayConnectionStatusEnvelopeSchema.parse({
+            data: status,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.ebay-connection", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay connection settings are temporarily unavailable.",
+        );
+      }
+    }
+
     const ebayPublishPath = pathname.match(
       new RegExp(`^/${MOBILE_API_VERSION}/listings/([^/]+)/ebay/publish$`),
     );
     if (ebayPublishPath) {
-      if (request.method !== "POST") {
+      if (request.method !== "GET" && request.method !== "POST") {
         return errorResponse(
           requestId,
           405,
@@ -548,14 +663,37 @@ export function createMobileApiHandler(
         );
       }
       const listingId = z.string().uuid().safeParse(ebayPublishPath[1]);
-      const idempotencyKey = z
-        .string()
-        .uuid()
-        .safeParse(request.headers.get("idempotency-key")?.trim());
-      const confirmation = ebayPublishConfirmationSchema.safeParse(
-        await request.json().catch(() => null),
-      );
-      if (!listingId.success || !idempotencyKey.success || !confirmation.success) {
+      if (!listingId.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid listing ID is required.",
+        );
+      }
+      const idempotencyKey = request.method === "POST"
+        ? z
+            .string()
+            .uuid()
+            .safeParse(request.headers.get("idempotency-key")?.trim())
+        : null;
+      const confirmation = request.method === "POST"
+        ? ebayPublishConfirmationSchema.safeParse(
+            await request.json().catch(() => null),
+          )
+        : null;
+      const publishIntent =
+        idempotencyKey?.success && confirmation?.success
+          ? {
+              expectedReviewRevision:
+                confirmation.data.expectedReviewRevision,
+              idempotencyKey: idempotencyKey.data,
+            }
+          : null;
+      if (
+        request.method === "POST"
+        && !publishIntent
+      ) {
         return errorResponse(
           requestId,
           400,
@@ -563,35 +701,13 @@ export function createMobileApiHandler(
           "A confirmed publish, current review revision, and Idempotency-Key are required.",
         );
       }
-      const token = bearerToken(request);
-      if (!token) {
-        return errorResponse(
-          requestId,
-          401,
-          "unauthorized",
-          "Authentication is required.",
-        );
-      }
-      let principal: MobileApiPrincipal;
-      try {
-        principal = await dependencies.authenticate(token);
-      } catch (error) {
-        dependencies.reportError?.("mobile-api.authenticate", error);
-        return errorResponse(
-          requestId,
-          401,
-          "unauthorized",
-          "Authentication is required.",
-        );
-      }
-      if (principal.kind === "verifiedGuest") {
-        return errorResponse(
-          requestId,
-          403,
-          "forbidden",
-          "Publishing to eBay requires an account.",
-        );
-      }
+      const authenticated = await authenticatedEbayAccount(
+        request,
+        requestId,
+        dependencies,
+      );
+      if (authenticated instanceof Response) return authenticated;
+      const { principal, token } = authenticated;
       if (!dependencies.ebayPublish) {
         return errorResponse(
           requestId,
@@ -601,13 +717,17 @@ export function createMobileApiHandler(
         );
       }
       try {
-        const outcome = await dependencies.ebayPublish.publish({
+        const operation = {
           userId: principal.userId,
           bearerToken: token,
           listingId: listingId.data,
-          expectedReviewRevision: confirmation.data.expectedReviewRevision,
-          idempotencyKey: idempotencyKey.data,
-        });
+        };
+        const outcome = request.method === "GET"
+          ? await dependencies.ebayPublish.status(operation)
+          : await dependencies.ebayPublish.publish({
+              ...operation,
+              ...publishIntent!,
+            });
         return json(
           ebayPublishStatusEnvelopeSchema.parse({
             data: outcome,
@@ -615,12 +735,98 @@ export function createMobileApiHandler(
           }),
         );
       } catch (error) {
+        if (error instanceof MobileEbayListingNotFoundError) {
+          return errorResponse(
+            requestId,
+            404,
+            "not_found",
+            "This listing is unavailable.",
+          );
+        }
+        if (
+          error instanceof PublishReviewRevisionConflictError
+          || error instanceof PublishedReplayConflictError
+        ) {
+          return errorResponse(
+            requestId,
+            409,
+            "conflict",
+            error.message,
+          );
+        }
         dependencies.reportError?.("mobile-api.ebay-publish", error);
         return errorResponse(
           requestId,
           503,
           "internal_error",
           "eBay publishing is temporarily unavailable.",
+        );
+      }
+    }
+
+    const ebayPreflightPath = pathname.match(
+      new RegExp(`^/${MOBILE_API_VERSION}/listings/([^/]+)/ebay/preflight$`),
+    );
+    if (ebayPreflightPath) {
+      if (request.method !== "GET") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const listingId = z.string().uuid().safeParse(ebayPreflightPath[1]);
+      if (!listingId.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid listing ID is required.",
+        );
+      }
+      const authenticated = await authenticatedEbayAccount(
+        request,
+        requestId,
+        dependencies,
+      );
+      if (authenticated instanceof Response) return authenticated;
+      const { principal, token } = authenticated;
+      if (!dependencies.ebayPublish) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay preflight is temporarily unavailable.",
+        );
+      }
+      try {
+        const preflight = await dependencies.ebayPublish.preflight({
+          userId: principal.userId,
+          bearerToken: token,
+          listingId: listingId.data,
+        });
+        return json(
+          ebayPublishPreflightEnvelopeSchema.parse({
+            data: preflight,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        if (error instanceof MobileEbayListingNotFoundError) {
+          return errorResponse(
+            requestId,
+            404,
+            "not_found",
+            "This listing is unavailable.",
+          );
+        }
+        dependencies.reportError?.("mobile-api.ebay-preflight", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay preflight is temporarily unavailable.",
         );
       }
     }

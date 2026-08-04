@@ -84,8 +84,13 @@ export const ebayPublishConfirmationSchema = z
 export const ebayPublishStatusSchema = z
   .object({
     listingId: z.string().uuid(),
-    outcome: z.literal("published"),
-    ebayListingId: z.string().min(1),
+    outcome: z.enum([
+      "not_published",
+      "outcome_not_yet_known",
+      "failed",
+      "published",
+    ]),
+    ebayListingId: z.string().min(1).nullable(),
     ebayOfferId: z.string().min(1).nullable(),
     alreadyPublished: z.boolean(),
   })
@@ -93,6 +98,47 @@ export const ebayPublishStatusSchema = z
 
 export const ebayPublishStatusEnvelopeSchema = z
   .object({ data: ebayPublishStatusSchema, meta: apiMetaSchema })
+  .strict();
+
+export const ebayPublishPreflightSchema = z
+  .object({
+    listingId: z.string().uuid(),
+    title: z.string().min(1).max(80),
+    effectivePrice: z
+      .object({
+        amount: z.number().positive().multipleOf(0.01),
+        label: z.literal("What will be listed"),
+      })
+      .strict(),
+    photoCount: z.number().int().min(0).max(5),
+    marketplace: z.string().min(1),
+    ebayCondition: z.enum([
+      "NEW",
+      "LIKE_NEW",
+      "USED_EXCELLENT",
+      "USED_VERY_GOOD",
+      "USED_GOOD",
+      "USED_ACCEPTABLE",
+      "FOR_PARTS_OR_NOT_WORKING",
+    ]),
+    itemSpecifics: z.record(z.string(), z.array(z.string().min(1))),
+    reviewRevision: z.string().uuid(),
+  })
+  .strict();
+
+export const ebayPublishPreflightEnvelopeSchema = z
+  .object({ data: ebayPublishPreflightSchema, meta: apiMetaSchema })
+  .strict();
+
+export const ebayConnectionStatusSchema = z
+  .object({
+    connected: z.boolean(),
+    ebayUsername: z.string().min(1).nullable(),
+  })
+  .strict();
+
+export const ebayConnectionStatusEnvelopeSchema = z
+  .object({ data: ebayConnectionStatusSchema, meta: apiMetaSchema })
   .strict();
 
 export const homeProjectionEnvelopeSchema = z

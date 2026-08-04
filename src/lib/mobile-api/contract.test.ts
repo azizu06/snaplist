@@ -45,6 +45,7 @@ const VALID_CONTRACT_OWNER_ISSUES = new Set([
   240,
   241,
   549,
+  628,
 ]);
 
 function operations() {
@@ -237,6 +238,54 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(callback.responses["303"].description).toBe(
       "Redirects to an app universal link carrying exactly one opaque result: connected, declined, cancelled, expired, wrong_tenant, invalid_state, in_progress, or failed. in_progress is a truthful nonterminal result and does not imply connection success or failure.",
     );
+  });
+
+  it("publishes only server-owned eBay preflight, exact-once, status, and disconnect truth", () => {
+    expect(nativeContractSource).toBe(serverContractSource);
+    const preflight = contract.paths["/v1/listings/{listingId}/ebay/preflight"]
+      .get as Record<string, unknown>;
+    const publish = contract.paths["/v1/listings/{listingId}/ebay/publish"];
+    const connection = contract.paths["/v1/ebay/connection"];
+    expect(preflight).toMatchObject({
+      "x-owner-issue": 628,
+      "x-implementation-status": "implemented",
+    });
+    expect(publish.get).toMatchObject({
+      "x-owner-issue": 628,
+      "x-implementation-status": "implemented",
+    });
+    expect(publish.post).toMatchObject({
+      "x-owner-issue": 628,
+      "x-implementation-status": "implemented",
+      responses: { "409": { $ref: "#/components/responses/Conflict" } },
+    });
+    expect(connection.get).toMatchObject({
+      "x-owner-issue": 628,
+      "x-implementation-status": "implemented",
+    });
+    expect(connection.delete).toMatchObject({
+      "x-owner-issue": 628,
+      "x-implementation-status": "implemented",
+    });
+
+    const preflightSchema = contract.components.schemas.EbayPublishPreflight;
+    expect(preflightSchema.required).toEqual([
+      "listingId",
+      "title",
+      "effectivePrice",
+      "photoCount",
+      "marketplace",
+      "ebayCondition",
+      "itemSpecifics",
+      "reviewRevision",
+    ]);
+    expect(preflightSchema.properties).not.toHaveProperty("categoryId");
+    expect(preflightSchema.properties).not.toHaveProperty("currency");
+    expect(
+      (contract.components.schemas.EbayPublishStatus.properties as {
+        outcome: { enum: string[] };
+      }).outcome.enum,
+    ).toContain("outcome_not_yet_known");
   });
 
   it("keeps both OpenAPI copies byte-identical and validates unavailable Home order truth", () => {
