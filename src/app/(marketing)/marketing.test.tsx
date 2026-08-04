@@ -376,32 +376,33 @@ describe("marketing destinations", () => {
     expect($(".mkt-bento .mkt-bento__label").length).toBe(0);
   });
 
-  it("uses intrinsic marketplace wordmarks and leaves bento copy fully visible", () => {
+  it("uses intrinsic, equally prominent marketplace wordmarks and leaves bento copy fully visible", () => {
     const marketplaceMark = readFileSync(resolve("public/marketplaces/facebook-marketplace.svg"), "utf8");
+    const mercariMark = readFileSync(resolve("public/marketplaces/mercari.svg"), "utf8");
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
     const $ = load(renderToStaticMarkup(<MarketplaceLoop />));
     const bentoRules = css.match(/\.mkt\s+\.mkt-bento\s+\.card(?:\s+(?:h3|p))?\s*\{[^}]*\}/g)?.join("\n") ?? "";
 
     expect(marketplaceMark).toMatch(/worldvectorlogo\.com\/logo\/marketplace-facebook/i);
     expect(marketplaceMark).toMatch(/fill="#[0-9a-f]{6}"/i);
-    expect(marketplaceMark).toMatch(/Marketplace/i);
-    expect(marketplaceMark).toMatch(/viewBox="-\.83 -\.04 65\.2 69\.73"/);
-    expect($(".mkt-loop-card__marketplace-name").length).toBe(0);
+    expect(marketplaceMark).toMatch(/viewBox="-\.83 -\.04 65\.2 57\.62"/);
+    expect(mercariMark).toMatch(/viewBox="72\.98 154\.35 415 91"/);
     const visibleSequence = $(".mkt-loop ul").first();
 
-    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo[alt='Facebook Marketplace']")).toHaveLength(1);
-    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo[alt=''][aria-hidden='true']")).toHaveLength(2);
-    const facebookMarks = visibleSequence.find(".mkt-loop-card__marketplace-logo[alt='Facebook Marketplace'], .mkt-loop-card__marketplace-logo[alt=''][aria-hidden='true']")
-      .filter((_, mark) => Boolean($(mark).attr("src")?.includes("facebook-marketplace.svg")));
+    const facebookLockups = visibleSequence.find(".mkt-loop-card__marketplace-lockup--facebook");
 
-    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook")).toHaveLength(0);
-    expect(facebookMarks).toHaveLength(3);
-    expect(facebookMarks.toArray().map((mark) => $(mark).attr("width")))
-      .toEqual(["2271", "2271", "2271"]);
-    expect(facebookMarks.toArray().map((mark) => $(mark).attr("height")))
-      .toEqual(["2500", "2500", "2500"]);
+    expect(facebookLockups).toHaveLength(3);
+    expect(facebookLockups.filter("[role='img'][aria-label='Facebook Marketplace']")).toHaveLength(1);
+    expect(facebookLockups.filter("[aria-hidden='true']")).toHaveLength(2);
+    expect(facebookLockups.find(".mkt-loop-card__marketplace-logo--facebook-glyph")).toHaveLength(3);
+    expect(facebookLockups.find(".mkt-loop-card__marketplace-wordmark").text()).toBe("MarketplaceMarketplaceMarketplace");
+    expect(facebookLockups.find(".mkt-loop-card__marketplace-logo--facebook-glyph").toArray().map((mark) => $(mark).attr("width")))
+      .toEqual(["65", "65", "65"]);
+    expect(facebookLockups.find(".mkt-loop-card__marketplace-logo--facebook-glyph").toArray().map((mark) => $(mark).attr("height")))
+      .toEqual(["58", "58", "58"]);
     expect(css).toMatch(/\.mkt-loop-card__marketplace-logo\s*\{[^}]*width:\s*auto !important;[^}]*height:\s*24px !important;[^}]*max-width:\s*100%;[^}]*align-self:\s*flex-start/);
-    expect(css).toMatch(/\.mkt-loop-card__marketplace-logo--mercari\s*\{[^}]*width:\s*72px !important;[^}]*height:\s*auto !important/);
+    expect(css).toMatch(/\.mkt-loop-card__marketplace-lockup--facebook\s*\{[^}]*display:\s*inline-flex;[^}]*height:\s*24px;[^}]*align-items:\s*center/);
+    expect(css).toMatch(/\.mkt-loop-card__marketplace-logo--facebook-glyph\s*\{[^}]*width:\s*auto !important;[^}]*height:\s*24px !important/);
     expect(bentoRules).not.toMatch(/line-clamp|text-overflow|white-space:\s*nowrap|overflow:\s*hidden/);
   });
 

@@ -11,7 +11,7 @@ const MARKETING_ROOTS = [
 const APPROVED_MARKETING_TOKENS = new Set([
   "#16181b", "#24262b", "#3a3d44", "#55585c", "#8a8d92", "#c9cdd6",
   "#ffffff", "#f7f7f7", "#ecedef", "#ecedf0", "#eef3ff", "#f6f8ff",
-  "#f7f9ff", "#3665f3", "#244cc0",
+  "#f7f9ff", "#3665f3", "#244cc0", "#3a589e",
 ]);
 
 const VENDORED_WORDMARK_COLORS = new Map([
