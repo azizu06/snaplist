@@ -345,7 +345,7 @@ describe("marketing destinations", () => {
     expect(css).toMatch(/\.mkt-h1\s*\{[^}]*font-family:\s*var\(--font-serif-accent\)/);
     expect(css).toMatch(/\.mkt-hero__accent\s*\{[^}]*var\(--action\)/);
     expect(css).toMatch(/\.mkt-hero__copy \.mkt-waitlist,[\s\S]*\.mkt-hero__copy \.mkt-waitlist__success\s*\{[^}]*margin-top:\s*clamp\(24px,\s*3vw,\s*36px\)/);
-    expect(css).toMatch(/\.mkt-waitlist__input-wrap::after\s*\{[^}]*inset:\s*0;[^}]*border-radius:\s*inherit;[^}]*border-width 220ms var\(--quint\),[\s\S]*opacity 180ms var\(--decel\)/);
+    expect(css).toMatch(/\.mkt-waitlist__input-wrap::after\s*\{[^}]*inset:\s*0;[^}]*border:\s*0 solid var\(--action\);[^}]*border-radius:\s*inherit;[^}]*border-width 220ms var\(--quint\),[\s\S]*opacity 180ms var\(--decel\)/);
     expect(css).toMatch(/\.mkt-waitlist__input-wrap:focus-within::after\s*\{[^}]*border-width:\s*3px;[^}]*opacity:\s*1/);
     expect(css).toMatch(/\.mkt-waitlist__input:focus-visible\s*\{[^}]*outline:\s*none;[^}]*box-shadow:\s*none/);
     expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.mkt-waitlist__input-wrap::after[^{]*\{[^}]*transition:\s*none !important/);

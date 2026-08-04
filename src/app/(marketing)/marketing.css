@@ -1664,7 +1664,7 @@ html:has(.mkt) {
   content: "";
   position: absolute;
   inset: 0;
-  border: 0 solid rgba(54, 101, 243, 0.34);
+  border: 0 solid var(--action);
   border-radius: inherit;
   opacity: 0;
   pointer-events: none;
