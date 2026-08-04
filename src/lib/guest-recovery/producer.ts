@@ -109,6 +109,9 @@ export function createGuestRecoveryRegistrationProducer(
       if (recoveryId === null || recoveryTokenHash === null) {
         throw new Error("Pipeline run guest recovery identity is incomplete.");
       }
+      if (context.item.photo_identity_kind !== "content_sha256_set_v1") {
+        throw new Error("Guest recovery requires verified photo identity.");
+      }
 
       const dataKey = hmac(
         config.masterKey,

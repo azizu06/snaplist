@@ -255,6 +255,7 @@ select extensions.ok(
 );
 
 set local enable_seqscan = off;
+set local enable_sort = off;
 select extensions.ok(
   (
     with recursive plan_nodes(node) as (
@@ -284,6 +285,7 @@ select extensions.ok(
   ),
   'source revision reads at most one indexed row from each retained history table'
 );
+reset enable_sort;
 reset enable_seqscan;
 
 select set_config(

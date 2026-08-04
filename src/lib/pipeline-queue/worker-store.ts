@@ -58,7 +58,10 @@ const workerContextSchema = z.object({
     id: z.string().uuid(),
     user_id: z.string().min(1),
     photos: z.array(z.string()),
-    photo_identity_kind: z.literal("content_sha256_set_v1"),
+    photo_identity_kind: z.enum([
+      "legacy_path_v0",
+      "content_sha256_set_v1",
+    ]),
     photo_identity_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
     attributes: z.record(z.string(), z.unknown()),
     condition: z.string().nullable(),

@@ -172,6 +172,30 @@ describe("guest recovery registration producer", () => {
     expect(storage.upload).not.toHaveBeenCalled();
   });
 
+  it("rejects legacy photo identity before preparing guest recovery uploads", async () => {
+    const context = guestContext();
+    Reflect.set(context.item, "photo_identity_kind", "legacy_path_v0");
+    const storage = {
+      download: vi.fn(),
+      upload: vi.fn(),
+    };
+    const producer = createGuestRecoveryRegistrationProducer({
+      keyId: "guest-recovery-key-v1",
+      masterKey: new Uint8Array(32).fill(7),
+      storage,
+    });
+    const stageUploadCleanup = vi.fn();
+
+    await expect(producer.prepare({
+      context,
+      result,
+      stageUploadCleanup,
+    })).rejects.toThrow("Guest recovery requires verified photo identity.");
+    expect(stageUploadCleanup).not.toHaveBeenCalled();
+    expect(storage.download).not.toHaveBeenCalled();
+    expect(storage.upload).not.toHaveBeenCalled();
+  });
+
   it("establishes durable cleanup authority before a partial upload can fail", async () => {
     const context = guestContext();
     const stageUploadCleanup = vi.fn(async () => undefined);

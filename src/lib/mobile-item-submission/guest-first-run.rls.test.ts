@@ -86,11 +86,14 @@ function stableGuestPrincipal(assertion: VerifiedAssertion): string {
 function guestMultipart(idempotencyKey: string): FormData {
   const body = singlePhotoMultipart();
   body.append("recoveryId", idempotencyKey);
-  body.append(
-    "recoveryTokenHash",
-    createHash("sha256").update(`guest-recovery:${idempotencyKey}`).digest("hex"),
-  );
+  body.append("recoveryTokenHash", guestRecoveryTokenHash(idempotencyKey));
   return body;
+}
+
+function guestRecoveryTokenHash(idempotencyKey: string): string {
+  return createHash("sha256")
+    .update(`guest-recovery:${idempotencyKey}`)
+    .digest("hex");
 }
 
 function observedFetch(
@@ -960,13 +963,17 @@ describeVerifiedGuestFirstRun(
     });
     expect(claimedJob.photoPaths).toEqual(denied.intent_paths);
 
-    const replayBegin = await tenant.rpc("begin_mobile_item_submission", {
+    const replayBegin = await tenant.rpc("begin_mobile_item_submission_v3", {
       p_batch_id: denied.batch_id,
       p_cleanup_id: denied.cleanup_id,
       p_cost_basis: denied.cost_basis,
       p_idempotency_key: denied.idempotency_key,
+      p_legacy_request_fingerprint: null,
       p_photo_receipts: denied.photo_receipts,
       p_request_fingerprint: denied.request_fingerprint,
+      p_recovery_id: denied.idempotency_key,
+      p_recovery_token_hash: guestRecoveryTokenHash(denied.idempotency_key),
+      p_voice_receipt: null,
     });
     expect(replayBegin.error).toBeNull();
     expect(replayBegin.data).toBe(false);
@@ -1021,13 +1028,14 @@ describeVerifiedGuestFirstRun(
       )
       .digest("hex");
     const deniedRetryCommit = await tenant.rpc(
-      "commit_mobile_item_submission",
+      "commit_mobile_item_submission_v3",
       {
         p_batch_id: denied.batch_id,
         p_cleanup_id: denied.cleanup_id,
         p_cost_basis: denied.cost_basis,
         p_daily_limit: 20,
         p_idempotency_key: denied.idempotency_key,
+        p_legacy_request_fingerprint: null,
         p_per_minute_limit: 20,
         p_photo_identity: {
           fingerprint: retryFingerprint,
@@ -1035,6 +1043,9 @@ describeVerifiedGuestFirstRun(
         },
         p_photo_receipts: denied.photo_receipts,
         p_request_fingerprint: denied.request_fingerprint,
+        p_recovery_id: denied.idempotency_key,
+        p_recovery_token_hash: guestRecoveryTokenHash(denied.idempotency_key),
+        p_voice_receipt: null,
       },
     );
     expect(deniedRetryCommit.error).toBeNull();

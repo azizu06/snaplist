@@ -95,7 +95,7 @@ describe("run-scoped pipeline worker store", () => {
           { length: 5 },
           (_, ordinal) => `user_a/photo-${ordinal}.jpg`,
         ),
-        photo_identity_kind: "content_sha256_set_v1",
+        photo_identity_kind: "legacy_path_v0",
         photo_identity_fingerprint: "a".repeat(64),
         attributes: {},
         condition: null,
