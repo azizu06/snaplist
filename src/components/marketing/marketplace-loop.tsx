@@ -52,8 +52,8 @@ function ListingCard({
           src={marketplace.asset}
           alt={isDecorativeMarketplaceLabel ? "" : marketplace.name}
           aria-hidden={isDecorativeMarketplaceLabel || undefined}
-          width={isFacebookMarketplace ? 65 : 104}
-          height={isFacebookMarketplace ? 70 : 22}
+          width={isFacebookMarketplace ? 65.2 : 104}
+          height={isFacebookMarketplace ? 69.73 : 22}
         />
       </div>
     </article>
