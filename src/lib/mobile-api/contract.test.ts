@@ -505,9 +505,12 @@ describe("SwiftUI mobile HTTP contract", () => {
       },
     });
     expect(contract.components.schemas.GuestClaimClaimedOutcome).toMatchObject({
-      required: expect.arrayContaining(["accountRecovery"]),
       properties: { outcome: { const: "claimed" } },
     });
+    expect(contract.components.schemas.GuestClaimClaimedOutcome.required)
+      .not.toContain("accountRecovery");
+    expect(contract.components.schemas.GuestClaimClaimedOutcome.properties)
+      .not.toHaveProperty("accountRecovery");
   });
 
   it("marks the three #241 run operations implemented with the canonical DTO", () => {

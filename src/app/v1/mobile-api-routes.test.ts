@@ -290,28 +290,6 @@ describe("mobile API contract to App Router routing", () => {
     const issuedBody = await issued.json();
 
     const claimGuestRecovery = vi.fn().mockResolvedValue({
-      accountRecovery: {
-        encryptedArtifact: {
-          algorithm: "aes-256-gcm",
-          ciphertext: Buffer.from("encrypted-draft").toString("base64"),
-          keyEnvelope: Buffer.alloc(32, 1).toString("base64"),
-          keyId: "guest-recovery-v1",
-          nonce: Buffer.alloc(12, 2).toString("base64"),
-          tag: Buffer.alloc(16, 3).toString("base64"),
-          version: 1,
-        },
-        storageManifest: [{
-          byteLength: 128,
-          destinationPath: "user_account/guest-claims/front.enc",
-          encryption: {
-            algorithm: "aes-256-gcm",
-            keyId: "guest-recovery-v1",
-            nonce: Buffer.alloc(12, 4).toString("base64"),
-            tag: Buffer.alloc(16, 5).toString("base64"),
-          },
-          sha256: "d".repeat(64),
-        }],
-      },
       draftId: "44444444-4444-4444-8444-444444444444",
       itemId: "55555555-5555-4555-8555-555555555555",
       outcome: "claimed",

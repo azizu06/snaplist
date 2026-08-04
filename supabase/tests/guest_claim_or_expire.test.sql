@@ -1,6 +1,6 @@
 begin;
 
-select plan(67);
+select plan(72);
 
 select ok(
   to_regclass('private.guest_draft_recoveries') is not null,
@@ -27,6 +27,34 @@ select ok(
     'execute'
   ),
   'authenticated callers cannot forge claim completion'
+);
+select ok(
+  not has_function_privilege(
+    'service_role',
+    'public.complete_guest_draft_claim(uuid,text,text,uuid,jsonb)',
+    'execute'
+  ),
+  'service role cannot bypass plaintext ownership finalization'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.begin_guest_draft_claim_with_plaintext(uuid,text,text,text,uuid,integer,text)',
+    'execute'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.begin_guest_draft_claim_with_plaintext(uuid,text,text,text,uuid,integer,text)',
+    'execute'
+  ) and has_function_privilege(
+    'authenticated',
+    'public.complete_guest_draft_claim_with_plaintext(uuid,text,text,uuid,text,jsonb)',
+    'execute'
+  ) and not has_function_privilege(
+    'service_role',
+    'public.complete_guest_draft_claim_with_plaintext(uuid,text,text,uuid,text,jsonb)',
+    'execute'
+  ),
+  'only the server may bind a completion capability and only its authenticated seller may present it'
 );
 select ok(
   has_function_privilege(
@@ -59,13 +87,15 @@ grant select on private.guest_draft_recoveries to service_role;
 grant select on private.pipeline_storage_cleanup_jobs to service_role;
 grant select on public.items, public.pipeline_runs, public.listings,
   public.prediction_logs, public.ai_item_credit_reservations,
-  public.ai_item_allowance_periods to service_role;
+  public.ai_item_allowance_periods, public.pricing_evidence_snapshots
+  to service_role;
 
 create temporary table guest_claim_results (
   label text primary key,
   payload jsonb not null
 ) on commit drop;
-grant select, insert, update on guest_claim_results to service_role;
+grant select, insert, update on guest_claim_results
+  to service_role, authenticated;
 
 insert into public.items (
   id, user_id, photos, attributes, condition, identification,
@@ -357,6 +387,23 @@ update public.listings
 set run_id = '90000000-0000-4000-8000-000000000001',
     source_review_revision = '90000000-0000-4000-8000-000000000001'
 where id = '30000000-0000-4000-8000-000000000001';
+insert into public.pricing_evidence_snapshots (
+  run_id, pipeline_run_id, run_kind, user_id, item_id, prediction_id,
+  listing_id, schema_version, item, price_result, evidence, evidence_as_of
+) values (
+  '90000000-0000-4000-8000-000000000001',
+  null,
+  'review-correction',
+  'guest_pgtap_claim',
+  '10000000-0000-4000-8000-000000000001',
+  '40000000-0000-4000-8000-000000000004',
+  '30000000-0000-4000-8000-000000000001',
+  1,
+  '{"title":"Corrected fixture","condition":"good"}'::jsonb,
+  '{"suggested":27,"range":{"min":22,"max":32},"confidence":0.9,"sources":[],"tier":"llm-only"}'::jsonb,
+  '[]'::jsonb,
+  statement_timestamp()
+);
 update public.ai_item_credit_reservations
 set guided_correction_revision = '80000000-0000-4000-8000-000000000001',
     guided_correction_started_at = statement_timestamp(),
@@ -730,12 +777,22 @@ where source_type = 'guest_claim_copy'
     select (payload->>'claimLeaseToken')::uuid
     from guest_claim_results where label = 'begun'
   );
-set local role service_role;
-select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+update private.guest_draft_recoveries
+set claim_completion_token_hash = encode(
+  sha256(convert_to(repeat('c', 64), 'UTF8')),
+  'hex'
+)
+where id = '70000000-0000-4000-8000-000000000001';
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"role":"authenticated","sub":"user_pgtap_claim"}',
+  true
+);
 
 insert into guest_claim_results values (
   'completed',
-  public.complete_guest_draft_claim(
+  public.complete_guest_draft_claim_with_plaintext(
     '70000000-0000-4000-8000-000000000001',
     repeat('a', 64),
     'user_pgtap_claim',
@@ -743,8 +800,16 @@ insert into guest_claim_results values (
       select (payload->>'claimLeaseToken')::uuid
       from guest_claim_results where label = 'begun-retry'
     ),
+    repeat('c', 64),
     (
-      select jsonb_agg(object.value - 'sourcePath' order by object.position)
+      select jsonb_agg(jsonb_build_object(
+        'destinationPath', object.value->>'destinationPath',
+        'sourceSha256', object.value->>'sha256',
+        'sourceByteLength', (object.value->>'byteLength')::bigint,
+        'plaintextSha256', repeat(lpad(to_hex(object.position::integer), 2, '0'), 32),
+        'plaintextByteLength', (object.value->>'byteLength')::bigint - 37,
+        'mediaType', 'image/jpeg'
+      ) order by object.position)
       from guest_claim_results result,
         jsonb_array_elements(result.payload->'objects')
           with ordinality object(value, position)
@@ -752,6 +817,7 @@ insert into guest_claim_results values (
     )
   )
 );
+reset role;
 set constraints all immediate;
 
 select is(
@@ -759,23 +825,52 @@ select is(
   'claimed',
   'verified Storage completes one authoritative claim'
 );
-select is(
-  (
-    select jsonb_array_length(payload #> '{accountRecovery,storageManifest}')
+select ok(
+  not (
+    select payload ? 'accountRecovery'
     from guest_claim_results where label = 'completed'
   ),
-  5,
-  'claimed recovery retains all five account-owned decrypt descriptors'
+  'claimed response exposes no ciphertext or key carrier'
 );
 select is(
   (
-    select (payload #>> '{accountRecovery,encryptedArtifact,keyId}') || ':'
-      || (payload #>> '{accountRecovery,storageManifest,0,encryption,keyId}')
-    from guest_claim_results where label = 'completed'
+    select (encrypted_artifact is null)::text || ':'
+      || (storage_manifest is null)::text || ':'
+      || jsonb_array_length(claimed_storage_manifest)::text
+    from private.guest_draft_recoveries
+    where id = '70000000-0000-4000-8000-000000000001'
   ),
-  'fixture:fixture',
-  'claimed retries retain one account-owned key envelope and object decrypt contract'
+  'true:true:5',
+  'claimed row purges its envelope after all plaintext receipts are durable'
 );
+select ok(
+  not exists (
+    select 1
+    from private.guest_draft_recoveries recovery,
+      jsonb_array_elements(recovery.claimed_storage_manifest) receipt
+    where recovery.id = '70000000-0000-4000-8000-000000000001'
+      and receipt ?| array[
+        'encryption', 'keyId', 'nonce', 'tag', 'ciphertext',
+        'sourceSha256', 'sourceByteLength'
+      ]
+  ),
+  'durable claimed receipts retain no decrypt material'
+);
+reset role;
+set constraints private.guest_draft_recoveries_claimed_envelope_purged immediate;
+select throws_ok(
+  $$
+    update private.guest_draft_recoveries
+    set encrypted_artifact =
+      '{"version":1,"algorithm":"aes-256-gcm","keyId":"stranded","keyEnvelope":"AQ==","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"BA=="}'::jsonb
+    where id = '70000000-0000-4000-8000-000000000001'
+  $$,
+  '23514',
+  'Claimed guest recovery cannot retain an encrypted envelope',
+  'claimed content cannot strand ciphertext or key metadata before erasure'
+);
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 insert into guest_claim_results values (
   'completed-replay',
   public.begin_guest_draft_claim(
@@ -857,6 +952,11 @@ select is(
   (select user_id from public.prediction_logs where id = '40000000-0000-4000-8000-000000000004'),
   'user_pgtap_claim',
   'the current guided-correction prediction transfers with its draft run'
+);
+select is(
+  (select user_id from public.pricing_evidence_snapshots where run_id = '90000000-0000-4000-8000-000000000001'),
+  'user_pgtap_claim',
+  'immutable review pricing evidence transfers before the claim becomes visible'
 );
 select is(
   (select user_id from public.ai_item_credit_reservations where id = '60000000-0000-4000-8000-000000000001'),
@@ -956,13 +1056,21 @@ select throws_ok(
   'Guest recovery not found',
   'terminal claim release never discloses claimed ids to another account'
 );
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"role":"authenticated","sub":"user_pgtap_other"}',
+  true
+);
 select throws_ok(
   $$
-    select public.complete_guest_draft_claim(
+    select public.complete_guest_draft_claim_with_plaintext(
       '70000000-0000-4000-8000-000000000001',
       repeat('a', 64),
       'user_pgtap_other',
       'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      repeat('c', 64),
       '[]'::jsonb
     )
   $$,
@@ -970,6 +1078,9 @@ select throws_ok(
   'Guest recovery not found',
   'terminal claim completion never discloses claimed ids to another account'
 );
+reset role;
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 select is(
   public.recover_guest_draft(
     '70000000-0000-4000-8000-000000000001',

@@ -150,6 +150,7 @@ export interface MobileApiDependencies {
   verifyGuestClaimHandoff?: (token: string) => Promise<VerifiedGuestHandoff>;
   /** Authoritative #175 claim service. The target always comes from authenticate(). */
   claimGuestRecovery?: (input: {
+    bearerToken: string;
     handoff: VerifiedGuestHandoff;
     idempotencyKey: string;
     targetUserId: string;
@@ -1519,6 +1520,7 @@ export function createMobileApiHandler(
 
       try {
         const outcome = await dependencies.claimGuestRecovery({
+          bearerToken: accountToken,
           handoff,
           idempotencyKey: idempotencyKey.data,
           targetUserId: principal.userId,

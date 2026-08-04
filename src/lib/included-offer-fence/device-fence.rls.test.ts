@@ -80,6 +80,21 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await whenStackReachable(reachable, async () => {
+  const queuedRuns = await Promise.all(
+    [userA, userB].map((user) =>
+      user.client
+        .from("pipeline_runs")
+        .select("queue_message_id")
+        .not("queue_message_id", "is", null)
+    ),
+  );
+  for (const result of queuedRuns) expect(result.error).toBeNull();
+  for (const run of queuedRuns.flatMap((result) => result.data ?? [])) {
+    const acknowledged = await admin.rpc("ack_pipeline_message", {
+      p_message_id: String(run.queue_message_id),
+    });
+    expect(acknowledged.error).toBeNull();
+  }
   await admin
     .from("included_offer_support_overrides")
     .delete()

@@ -2973,28 +2973,6 @@ describe("mobile API v1 provider-neutral handler", () => {
   });
 
   it("consumes #174's verified handoff and derives claim ownership only from the Clerk principal", async () => {
-    const accountRecovery = {
-      encryptedArtifact: {
-        version: 1 as const,
-        algorithm: "aes-256-gcm" as const,
-        keyId: "guest-recovery-v1",
-        keyEnvelope: Buffer.alloc(32, 1).toString("base64"),
-        nonce: Buffer.alloc(12, 2).toString("base64"),
-        tag: Buffer.alloc(16, 3).toString("base64"),
-        ciphertext: Buffer.from("encrypted-draft").toString("base64"),
-      },
-      storageManifest: [{
-        destinationPath: "user_account/items/front.enc",
-        sha256: "b".repeat(64),
-        byteLength: 128,
-        encryption: {
-          algorithm: "aes-256-gcm" as const,
-          keyId: "guest-recovery-v1",
-          nonce: Buffer.alloc(12, 4).toString("base64"),
-          tag: Buffer.alloc(16, 5).toString("base64"),
-        },
-      }],
-    };
     const verifyGuestClaimHandoff = vi.fn().mockResolvedValue({
       recoveryId: "11111111-1111-4111-8111-111111111111",
       guestUserId: "guest_fixture",
@@ -3006,7 +2984,6 @@ describe("mobile API v1 provider-neutral handler", () => {
       runId: "33333333-3333-4333-8333-333333333333",
       draftId: "44444444-4444-4444-8444-444444444444",
       purgeLocalRecovery: true,
-      accountRecovery,
     });
     const response = await handler({
       authenticate: vi.fn().mockResolvedValue({ userId: "user_account" }),
@@ -3036,6 +3013,7 @@ describe("mobile API v1 provider-neutral handler", () => {
         guestUserId: "guest_fixture",
         recoveryTokenHash: "a".repeat(64),
       },
+      bearerToken: "signed-account-jwt",
       idempotencyKey: "55555555-5555-4555-8555-555555555555",
       targetUserId: "user_account",
     });
@@ -3046,7 +3024,6 @@ describe("mobile API v1 provider-neutral handler", () => {
         runId: "33333333-3333-4333-8333-333333333333",
         draftId: "44444444-4444-4444-8444-444444444444",
         purgeLocalRecovery: true,
-        accountRecovery,
       },
       meta: { requestId: "req_test" },
     });

@@ -24,7 +24,7 @@ create temporary table guest_claim_504_results (
   label text primary key,
   payload jsonb not null
 ) on commit drop;
-grant select, insert on guest_claim_504_results to service_role;
+grant select, insert on guest_claim_504_results to service_role, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Guest side: one coherent usable draft that `complete` will accept as far as
@@ -418,6 +418,12 @@ select is(
 -- ---------------------------------------------------------------------------
 
 reset role;
+update private.guest_draft_recoveries
+set claim_completion_token_hash = encode(
+  sha256(convert_to(repeat('c', 64), 'UTF8')),
+  'hex'
+)
+where id = '77770000-0000-4000-8000-000000000504';
 insert into public.ai_item_credit_reservations (
   id, user_id, pipeline_run_id, item_id, allowance_period_id,
   logical_run_key, photo_set_fingerprint, state
@@ -431,12 +437,16 @@ insert into public.ai_item_credit_reservations (
   repeat('c', 64),
   'reserved'
 );
-set local role service_role;
-select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"role":"authenticated","sub":"user_pgtap_504_clean"}',
+  true
+);
 
 select throws_ok(
   $$
-    select public.complete_guest_draft_claim(
+    select public.complete_guest_draft_claim_with_plaintext(
       '77770000-0000-4000-8000-000000000504',
       repeat('5', 64),
       'user_pgtap_504_clean',
@@ -444,8 +454,16 @@ select throws_ok(
         select (payload->>'claimLeaseToken')::uuid
         from guest_claim_504_results where label = 'begun-clean'
       ),
+      repeat('c', 64),
       (
-        select jsonb_agg(entry.value - 'sourcePath' order by entry.ordinality)
+        select jsonb_agg(jsonb_build_object(
+          'destinationPath', entry.value->>'destinationPath',
+          'sourceSha256', entry.value->>'sha256',
+          'sourceByteLength', (entry.value->>'byteLength')::bigint,
+          'plaintextSha256', repeat(lpad(to_hex(entry.ordinality::integer), 2, '0'), 32),
+          'plaintextByteLength', (entry.value->>'byteLength')::bigint - 37,
+          'mediaType', 'image/jpeg'
+        ) order by entry.ordinality)
         from guest_claim_504_results result,
           lateral jsonb_array_elements(result.payload->'objects')
             with ordinality entry(value, ordinality)
@@ -479,12 +497,16 @@ insert into public.ai_item_credit_reservations (
   '33330000-0000-4000-8000-000000000513',
   '44440000-0000-4000-8000-000000000513'
 );
-set local role service_role;
-select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"role":"authenticated","sub":"user_pgtap_504_clean"}',
+  true
+);
 
 select throws_ok(
   $$
-    select public.complete_guest_draft_claim(
+    select public.complete_guest_draft_claim_with_plaintext(
       '77770000-0000-4000-8000-000000000504',
       repeat('5', 64),
       'user_pgtap_504_clean',
@@ -492,8 +514,16 @@ select throws_ok(
         select (payload->>'claimLeaseToken')::uuid
         from guest_claim_504_results where label = 'begun-clean'
       ),
+      repeat('c', 64),
       (
-        select jsonb_agg(entry.value - 'sourcePath' order by entry.ordinality)
+        select jsonb_agg(jsonb_build_object(
+          'destinationPath', entry.value->>'destinationPath',
+          'sourceSha256', entry.value->>'sha256',
+          'sourceByteLength', (entry.value->>'byteLength')::bigint,
+          'plaintextSha256', repeat(lpad(to_hex(entry.ordinality::integer), 2, '0'), 32),
+          'plaintextByteLength', (entry.value->>'byteLength')::bigint - 37,
+          'mediaType', 'image/jpeg'
+        ) order by entry.ordinality)
         from guest_claim_504_results result,
           lateral jsonb_array_elements(result.payload->'objects')
             with ordinality entry(value, ordinality)
@@ -505,6 +535,10 @@ select throws_ok(
   'Account included credit is already spent on another run',
   'an account that spends its included run mid-upload is still rejected at completion'
 );
+
+reset role;
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 select is(
   (

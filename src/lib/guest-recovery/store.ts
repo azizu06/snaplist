@@ -12,8 +12,8 @@ import {
 } from "./service";
 
 type GuestClaimRpcName =
-  | "begin_guest_draft_claim"
-  | "complete_guest_draft_claim"
+  | "begin_guest_draft_claim_with_plaintext"
+  | "complete_guest_draft_claim_with_plaintext"
   | "queue_guest_claim_copy_cleanup"
   | "release_guest_draft_claim"
   | "resolve_guest_recovery_outcome";
@@ -74,14 +74,15 @@ const releaseOutcomeSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("released") }).strict(),
 ]);
 
-/** Fixed service-role RPC capability; it provides no generic table access. */
+/** Fixed RPC capabilities; plaintext completion is tenant- and lease-capability-paired. */
 export function createSupabaseGuestClaimStore(
   client: GuestClaimRpcClient,
 ): GuestClaimStore {
   return {
     async beginClaim(input) {
-      const result = await client.rpc("begin_guest_draft_claim", {
+      const result = await client.rpc("begin_guest_draft_claim_with_plaintext", {
         p_claim_lease_seconds: z.number().int().min(30).max(3_600).parse(input.leaseSeconds),
+        p_completion_token_hash: z.string().regex(/^[0-9a-f]{64}$/).parse(input.completionTokenHash),
         p_guest_user_id: z.string().min(1).max(255).parse(input.guestUserId),
         p_idempotency_key: z.string().uuid().parse(input.idempotencyKey),
         p_recovery_id: z.string().uuid().parse(input.recoveryId),
@@ -92,8 +93,9 @@ export function createSupabaseGuestClaimStore(
     },
 
     async completeClaim(input) {
-      const result = await client.rpc("complete_guest_draft_claim", {
+      const result = await client.rpc("complete_guest_draft_claim_with_plaintext", {
         p_claim_lease_token: z.string().uuid().parse(input.claimLeaseToken),
+        p_completion_token: z.string().regex(/^[0-9a-f]{64}$/).parse(input.completionToken),
         p_recovery_id: z.string().uuid().parse(input.recoveryId),
         p_recovery_token_hash: z.string().regex(/^[0-9a-f]{64}$/).parse(input.recoveryTokenHash),
         p_target_user_id: z.string().min(1).max(255).parse(input.targetUserId),

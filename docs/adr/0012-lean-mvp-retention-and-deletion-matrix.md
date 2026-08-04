@@ -156,6 +156,37 @@ matrix says this limitation rather than claiming unreachable coverage.
 Current provider authority: [Persons API](https://posthog.com/docs/api/persons), including bulk
 deletion and deletion-status verification; retrieved 2026-08-02.
 
+### 8. Decrypt and rewrite guest recovery at claim
+
+Issue #640 chooses **decrypt-and-rewrite into account-owned private Storage under RLS**. The claim
+consumer downloads and authenticates each guest ciphertext envelope, decrypts it in memory, writes
+the original image bytes to the claiming Clerk `user_id` prefix, and reads that destination back
+before the ownership transaction can commit. The transaction then replaces item photo paths with
+those plaintext objects, transfers the coherent draft and immutable pricing evidence, clears the
+encrypted artifact and guest Storage manifest, retains only plaintext digests and media types, and
+queues the guest ciphertext paths for bounded deletion. Review and eBay publish therefore use the
+ordinary tenant-owned photo seam and never receive ciphertext or decrypt metadata.
+
+This costs one authenticated read, decrypt, write, and verification read per photo at claim. The
+tradeoff is deliberate: SnapList keeps no account-scoped ciphertext, per-account key envelope, or
+key-escrow lifecycle after ownership transfers. Account erasure can delete the ordinary item and
+its plaintext Storage objects without first recovering a key; a claim racing an active erasure is
+rejected by the existing tenant-mutation fence, and the guest source cleanup remains independently
+durable.
+
+Finalization also requires a fresh server-only completion capability whose SHA-256 digest is bound
+to that exact copy lease. The raw capability stays in request memory, is never returned to the
+seller, and its digest is cleared when the lease changes, the claim reaches a terminal state, or
+account erasure deletes the recovery row; an authenticated seller who observes a destination path
+and lease token therefore still cannot forge ownership completion.
+
+Key rotation is a bounded deployment keyring. `GUEST_RECOVERY_ENCRYPTION_KEY_ID` and
+`GUEST_RECOVERY_ENCRYPTION_KEY` select the one active producer key. Retired id-to-key mappings live
+only in `GUEST_RECOVERY_DECRYPTION_KEYS` so in-window recoveries remain decryptable after rotation.
+An operator removes a retired key only after the 24-hour guest ceiling has passed **and** no
+`claimable` or `copying` recovery row names that key id. Successful claim and expiry both remove the
+row-level encryption metadata, so rotation never creates permanent account key escrow.
+
 ## Consequences
 
 - Account-erasure and App Store review work share one machine-checked vocabulary instead of deriving
@@ -166,6 +197,9 @@ deletion and deletion-status verification; retrieved 2026-08-02.
 - Retention no longer blocks release, but nothing here makes deletion work. Executor issues still owe
   the named completion proof for every row.
 - Existing cleanup implementations are evidence, not proof that every matrix row is executable.
+- Claimed guest content follows the existing tenant photo/draft/account-erasure rows; the guest
+  envelope follows the existing successful-claim deletion trigger and does not become a second
+  retained account artifact.
 
 ## Excluded
 

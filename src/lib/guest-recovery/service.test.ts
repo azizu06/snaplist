@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   GuestClaimAllowanceInFlightError,
@@ -31,23 +32,12 @@ const objectEncryption = {
   nonce: Buffer.alloc(12, 4).toString("base64"),
   tag: Buffer.alloc(16, 5).toString("base64"),
 };
-const accountRecovery = {
-  encryptedArtifact,
-  storageManifest: [{
-    destinationPath: "user_account/items/front.enc",
-    sha256: "b".repeat(64),
-    byteLength: 128,
-    encryption: objectEncryption,
-  }],
-};
-
 const terminal = {
   outcome: "claimed" as const,
   itemId: "22222222-2222-4222-8222-222222222222",
   runId: "33333333-3333-4333-8333-333333333333",
   draftId: "44444444-4444-4444-8444-444444444444",
   purgeLocalRecovery: true as const,
-  accountRecovery,
 };
 
 const expired = {
@@ -104,9 +94,11 @@ function storage(
   return {
     copyAndVerify: vi.fn(async (object) => ({
       destinationPath: object.destinationPath,
-      sha256: object.sha256,
-      byteLength: object.byteLength,
-      encryption: object.encryption,
+      sourceSha256: object.sha256,
+      sourceByteLength: object.byteLength,
+      plaintextSha256: "d".repeat(64),
+      plaintextByteLength: object.byteLength,
+      mediaType: "image/jpeg" as const,
     })),
     remove: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -133,7 +125,7 @@ describe("guest claim-or-expire orchestrator", () => {
     }).success).toBe(false);
   });
 
-  it("preserves five ordered objects through guest claim and account recovery contracts", () => {
+  it("preserves five ordered encrypted objects only through the pre-claim copy plan", () => {
     const objects = Array.from({ length: 5 }, (_, ordinal) => ({
       sourcePath: `guest_fixture/items/photo-${ordinal}.enc`,
       destinationPath: `user_account/items/photo-${ordinal}.enc`,
@@ -150,23 +142,15 @@ describe("guest claim-or-expire orchestrator", () => {
     expect(parsedStart.outcome).toBe("copy_required");
     if (parsedStart.outcome !== "copy_required") throw new Error("Expected copy plan.");
     expect(parsedStart.objects).toEqual(objects);
-    expect(guestClaimTerminalOutcomeSchema.parse({
-      ...terminal,
-      accountRecovery: {
-        encryptedArtifact,
-        storageManifest: objects.map(({ sourcePath: _sourcePath, ...object }) => {
-          void _sourcePath;
-          return object;
-        }),
-      },
-    }).outcome).toBe("claimed");
+    expect(guestClaimTerminalOutcomeSchema.parse(terminal).outcome).toBe("claimed");
   });
 
-  it("requires a claimed retry to carry the account-owned recovery contract after local purge", () => {
-    const { accountRecovery: _missing, ...withoutRecovery } = terminal;
-    void _missing;
-    expect(guestClaimTerminalOutcomeSchema.safeParse(withoutRecovery).success).toBe(false);
+  it("returns only stable owned ids after local purge and rejects ciphertext carriers", () => {
     expect(guestClaimTerminalOutcomeSchema.safeParse(terminal).success).toBe(true);
+    expect(guestClaimTerminalOutcomeSchema.safeParse({
+      ...terminal,
+      accountRecovery: { encryptedArtifact },
+    }).success).toBe(false);
   });
 
   it("copies and verifies every private object before the atomic claim becomes authoritative", async () => {
@@ -185,17 +169,28 @@ describe("guest claim-or-expire orchestrator", () => {
     ).resolves.toEqual(terminal);
 
     expect(privateStorage.copyAndVerify).toHaveBeenCalledTimes(2);
+    const completionTokenHash = vi.mocked(claimStore.beginClaim).mock.calls[0]?.[0]
+      .completionTokenHash;
+    const completionToken = vi.mocked(claimStore.completeClaim).mock.calls[0]?.[0]
+      .completionToken;
+    expect(completionTokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(completionToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(createHash("sha256").update(completionToken!).digest("hex"))
+      .toBe(completionTokenHash);
     expect(claimStore.completeClaim).toHaveBeenCalledWith({
       recoveryId: handoff.recoveryId,
       recoveryTokenHash: handoff.recoveryTokenHash,
       targetUserId: "user_account",
       claimLeaseToken: plan.claimLeaseToken,
+      completionToken: expect.stringMatching(/^[0-9a-f]{64}$/),
       verifiedObjects: plan.objects.map(
-        ({ destinationPath, sha256, byteLength, encryption }) => ({
+        ({ destinationPath, sha256, byteLength }) => ({
           destinationPath,
-          sha256,
-          byteLength,
-          encryption,
+          sourceSha256: sha256,
+          sourceByteLength: byteLength,
+          plaintextSha256: "d".repeat(64),
+          plaintextByteLength: byteLength,
+          mediaType: "image/jpeg",
         }),
       ),
     });
@@ -266,9 +261,11 @@ describe("guest claim-or-expire orchestrator", () => {
         .fn()
         .mockResolvedValueOnce({
           destinationPath: plan.objects[0].destinationPath,
-          sha256: plan.objects[0].sha256,
-          byteLength: plan.objects[0].byteLength,
-          encryption: plan.objects[0].encryption,
+          sourceSha256: plan.objects[0].sha256,
+          sourceByteLength: plan.objects[0].byteLength,
+          plaintextSha256: "d".repeat(64),
+          plaintextByteLength: plan.objects[0].byteLength,
+          mediaType: "image/jpeg",
         })
         .mockRejectedValueOnce(new Error("checksum mismatch: internal detail")),
     });

@@ -12,34 +12,23 @@ const identity = {
   targetUserId: "user_account",
   idempotencyKey: "66666666-6666-4666-8666-666666666666",
 };
-const encryptedArtifact = {
-  version: 1 as const,
-  algorithm: "aes-256-gcm" as const,
-  keyId: "guest-recovery-v1",
-  keyEnvelope: Buffer.alloc(32, 1).toString("base64"),
-  nonce: Buffer.alloc(12, 2).toString("base64"),
-  tag: Buffer.alloc(16, 3).toString("base64"),
-  ciphertext: Buffer.from("encrypted-draft").toString("base64"),
-};
-const encryption = {
-  algorithm: "aes-256-gcm" as const,
-  keyId: encryptedArtifact.keyId,
-  nonce: Buffer.alloc(12, 4).toString("base64"),
-  tag: Buffer.alloc(16, 5).toString("base64"),
-};
+const completionToken = "c".repeat(64);
+const completionTokenHash = "d".repeat(64);
+function verifiedObject(destinationPath: string, ordinal = 0) {
+  return {
+    destinationPath,
+    sourceSha256: ordinal.toString(16).repeat(64),
+    sourceByteLength: 165 + ordinal,
+    plaintextSha256: (ordinal + 1).toString(16).repeat(64),
+    plaintextByteLength: 128 + ordinal,
+    mediaType: "image/jpeg" as const,
+  };
+}
 
 describe("guest claim fixed-RPC store", () => {
   it("completes a five-object claim through the fixed lease capability", async () => {
-    const verifiedObjects = Array.from({ length: 5 }, (_, ordinal) => ({
-      destinationPath: `user_account/items/photo-${ordinal}.enc`,
-      sha256: ordinal.toString(16).repeat(64),
-      byteLength: 128 + ordinal,
-      encryption: {
-        ...encryption,
-        nonce: Buffer.alloc(12, ordinal + 10).toString("base64"),
-        tag: Buffer.alloc(16, ordinal + 20).toString("base64"),
-      },
-    }));
+    const verifiedObjects = Array.from({ length: 5 }, (_, ordinal) =>
+      verifiedObject(`user_account/items/photo-${ordinal}.jpg`, ordinal));
     const rpc = vi.fn().mockResolvedValue({
       data: {
         outcome: "expired",
@@ -55,11 +44,12 @@ describe("guest claim fixed-RPC store", () => {
     await store.completeClaim({
       ...identity,
       claimLeaseToken: "55555555-5555-4555-8555-555555555555",
+      completionToken,
       verifiedObjects,
     });
 
     expect(rpc).toHaveBeenCalledWith(
-      "complete_guest_draft_claim",
+      "complete_guest_draft_claim_with_plaintext",
       expect.objectContaining({ p_verified_objects: verifiedObjects }),
     );
   });
@@ -82,10 +72,12 @@ describe("guest claim fixed-RPC store", () => {
         ...identity,
         guestUserId: "guest_fixture",
         leaseSeconds: 300,
+        completionTokenHash,
       }),
     ).resolves.toMatchObject({ outcome: "expired" });
-    expect(rpc).toHaveBeenCalledWith("begin_guest_draft_claim", {
+    expect(rpc).toHaveBeenCalledWith("begin_guest_draft_claim_with_plaintext", {
       p_claim_lease_seconds: 300,
+      p_completion_token_hash: completionTokenHash,
       p_guest_user_id: "guest_fixture",
       p_idempotency_key: identity.idempotencyKey,
       p_recovery_id: identity.recoveryId,
@@ -104,34 +96,22 @@ describe("guest claim fixed-RPC store", () => {
         runId: "33333333-3333-4333-8333-333333333333",
         draftId: "44444444-4444-4444-8444-444444444444",
         purgeLocalRecovery: true,
-        accountRecovery: {
-          encryptedArtifact,
-          storageManifest: [{
-            destinationPath: "user_account/items/front.enc",
-            sha256: "b".repeat(64),
-            byteLength: 128,
-            encryption,
-          }],
-        },
       },
       error: null,
     });
     const store = createSupabaseGuestClaimStore({ rpc });
-    const verifiedObjects = [{
-      destinationPath: "user_account/items/front.enc",
-      sha256: "b".repeat(64),
-      byteLength: 128,
-      encryption,
-    }];
+    const verifiedObjects = [verifiedObject("user_account/items/front.jpg", 11)];
 
     await store.completeClaim({
       ...identity,
       claimLeaseToken: "55555555-5555-4555-8555-555555555555",
+      completionToken,
       verifiedObjects,
     });
 
-    expect(rpc).toHaveBeenCalledWith("complete_guest_draft_claim", {
+    expect(rpc).toHaveBeenCalledWith("complete_guest_draft_claim_with_plaintext", {
       p_claim_lease_token: "55555555-5555-4555-8555-555555555555",
+      p_completion_token: completionToken,
       p_recovery_id: identity.recoveryId,
       p_recovery_token_hash: identity.recoveryTokenHash,
       p_target_user_id: identity.targetUserId,
@@ -151,6 +131,7 @@ describe("guest claim fixed-RPC store", () => {
       ...identity,
       guestUserId: "guest_fixture",
       leaseSeconds: 300,
+      completionTokenHash,
     })).rejects.toBeInstanceOf(GuestClaimIdempotencyConflictError);
   });
 
@@ -176,16 +157,13 @@ describe("guest claim fixed-RPC store", () => {
         ...identity,
         guestUserId: "guest_fixture",
         leaseSeconds: 300,
+        completionTokenHash,
       }),
       () => store.completeClaim({
         ...identity,
         claimLeaseToken: "55555555-5555-4555-8555-555555555555",
-        verifiedObjects: [{
-          destinationPath: "user_account/items/front.enc",
-          sha256: "b".repeat(64),
-          byteLength: 128,
-          encryption,
-        }],
+        completionToken,
+        verifiedObjects: [verifiedObject("user_account/items/front.jpg", 11)],
       }),
     ];
     for (const call of calls) {
@@ -208,6 +186,7 @@ describe("guest claim fixed-RPC store", () => {
       ...identity,
       guestUserId: "guest_fixture",
       leaseSeconds: 300,
+      completionTokenHash,
     })).rejects.toBeInstanceOf(GuestClaimAllowanceSpentError);
   });
 
@@ -225,6 +204,7 @@ describe("guest claim fixed-RPC store", () => {
       ...identity,
       guestUserId: "guest_fixture",
       leaseSeconds: 300,
+      completionTokenHash,
     });
     await expect(rejection).rejects.not.toBeInstanceOf(GuestClaimAllowanceSpentError);
     await expect(rejection).rejects.not.toBeInstanceOf(GuestClaimAllowanceInFlightError);
