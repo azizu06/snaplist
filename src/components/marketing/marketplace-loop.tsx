@@ -41,10 +41,13 @@ function ListingCard({ slug, marketplace }: { slug: string; marketplace: (typeof
         <Image
           className="mkt-loop-card__marketplace-logo"
           src={marketplace.asset}
-          alt={marketplace.name}
+          alt={marketplace.name === "Facebook Marketplace" ? "" : marketplace.name}
           width={104}
           height={22}
         />
+        {marketplace.name === "Facebook Marketplace" ? (
+          <span className="mkt-loop-card__marketplace-name">Facebook Marketplace</span>
+        ) : null}
       </div>
     </article>
   );

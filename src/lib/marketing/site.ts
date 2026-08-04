@@ -167,12 +167,14 @@ export const MARKETING_BENTO_CARDS = [
     title: "Add seller context with a voice note",
     description:
       "Add up to 15 seconds of context. Photos and verified evidence remain the source of truth.",
+    className: "lg:col-span-2",
   },
   {
     icon: "pencil" as const,
     title: "Edit before anything leaves SnapList",
     description:
       "Review the title, condition, details, photos, and price before you confirm an eBay publish.",
+    className: "lg:col-span-2",
   },
   {
     icon: "share" as const,
@@ -186,23 +188,16 @@ export const MARKETING_BENTO_CARDS = [
     title: "You confirm before eBay publishes",
     description:
       "SnapList publishes to eBay only after your explicit confirmation.",
+    className: "lg:col-span-2",
   },
   {
     icon: "trophy" as const,
-    title: "Keep one clear next step",
-    description:
-      "Trophy Wall keeps each item in one place from analyzing to ready to review and its next honest result.",
+    title: TROPHY_WALL.title,
+    description: TROPHY_WALL.body,
   },
 ] as const;
 
-/**
- * Trophy Wall rows shown in the illustrative phone.
- *
- * The states are the PRD's Trophy Wall vocabulary. `Sold` is deliberately absent:
- * nothing in this repository ever writes a sold listing status, and post-sale
- * workflows are retired by ADR-0008, so a sold badge would advertise a capability
- * the product does not have. See the #191 PR body.
- */
+/** Trophy Wall rows retained for the marketing phone illustration. */
 export const TROPHY_WALL_ROWS = [
   { id: "scarf", title: "Wool blend scarf", state: "Published" },
   { id: "lamp", title: "Ceramic table lamp", state: "Prepared" },

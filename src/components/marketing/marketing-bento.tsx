@@ -7,7 +7,7 @@ import { MARKETING_BENTO_CARDS } from "@/lib/marketing/site";
 const cards: BentoCardData[] = MARKETING_BENTO_CARDS.map((card) => ({
   ...card,
   icon: <BentoIcon name={card.icon} />,
-  tint: "green",
+  tint: "blue",
 }));
 
 type BentoIconName = (typeof MARKETING_BENTO_CARDS)[number]["icon"];

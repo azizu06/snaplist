@@ -25,9 +25,6 @@ import TermsPage from "./terms/page";
  * These assertions are derived from product capability instead:
  *   - The assisted marketplaces may never be the object of a publishing verb,
  *     whatever the surrounding wording is (PRD "Out of Scope", AGENTS.md).
- *   - Trophy Wall states must come from the vocabulary the product actually has.
- *     Nothing in this repository writes a sold listing status, and ADR-0008
- *     retires post-sale workflows.
  *   - Retired surfaces (inbox, buyer messaging, analytics, post-sale, autonomous
  *     marketplace actions) may not be named at all.
  *   - Social proof must be earned; there is none to cite yet.
@@ -42,19 +39,6 @@ const DELIVERY_VERB = /\b(publish|publishes|published|list|lists|listed|post|pos
 
 /** Wording that keeps an assisted destination honest about who finishes it. */
 const HANDOFF_MARKER = /\b(handoff|prepare|prepares|prepared|you finish|finish (?:it )?(?:yourself|in their own apps)|share)\b/i;
-
-/**
- * Trophy Wall states the PRD gives the product. `Sold` is deliberately absent.
- */
-const TROPHY_WALL_STATES = new Set([
-  "Accepted",
-  "Analyzing",
-  "Ready to review",
-  "Needs retry",
-  "Published",
-  "Prepared",
-  "Shared",
-]);
 
 /** Surfaces ADR-0008 retired. Naming one advertises a product that is not shipping. */
 const RETIRED_SURFACES: [RegExp, string][] = [
@@ -189,17 +173,11 @@ describe("marketing honesty", () => {
   it("says who finishes an assisted marketplace every time it names one", () => {
     const unqualified = marketingCopy()
       .filter((sentence) => ASSISTED_MARKETPLACES.some((name) => sentence.includes(name)))
+      // A storefront wordmark names a destination but does not claim delivery.
+      .filter((sentence) => !ASSISTED_MARKETPLACES.includes(sentence.trim()))
       .filter((sentence) => !HANDOFF_MARKER.test(sentence));
 
     expect(unqualified).toEqual([]);
-  });
-
-  it("shows only Trophy Wall states the product has", () => {
-    const shown = site.TROPHY_WALL_ROWS.map((row) => row.state);
-    expect(shown.length).toBeGreaterThan(0);
-    for (const state of shown) {
-      expect(TROPHY_WALL_STATES.has(state), `"${state}" is not a Trophy Wall state`).toBe(true);
-    }
   });
 
   it("does not name a retired surface", () => {
@@ -312,30 +290,35 @@ describe("marketing destinations", () => {
     expect($(".mkt-why__lede, .mkt-loop-section__heading p, .mkt-trophy__accent").length).toBe(0);
     expect($(".mkt-loop-section__heading h2").text()).toBe(site.LOOP_TITLE);
     expect($(".mkt-storefronts").length).toBe(0);
-    expect($(".mkt-trophy__copy h2").length).toBe(1);
-    expect($(".mkt-trophy__body").text()).toBe(site.TROPHY_WALL.body);
-    expect($(".mkt-trophy__chips [role='listitem']").map((_, chip) => $(chip).text()).get())
-      .toEqual(site.TROPHY_WALL.states);
+    expect($(".mkt-trophy").length).toBe(0);
+    expect($(".mkt-bento").text()).toContain(site.TROPHY_WALL.title);
+    expect($(".mkt-bento").text()).toContain(site.TROPHY_WALL.body);
   });
 
-  it("uses one green serif italic accent word in the rescaled hero", () => {
+  it("uses one blue serif italic accent word in the rescaled hero with a bounded focus ring", () => {
     const $ = load(renderToStaticMarkup(<LandingPage />));
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
 
     expect($(".mkt-hero h1 .mkt-hero__accent").length).toBe(1);
     expect($(".mkt-hero h1 .mkt-hero__accent").text()).toBe(site.HERO.accentWord);
-    expect(css).toMatch(/\.mkt-h1\s*\{[^}]*font-size:\s*clamp\(2\.5rem,\s*8vw,\s*6rem\)/);
+    expect(css).toMatch(/\.mkt-h1\s*\{[^}]*font-size:\s*clamp\(2\.25rem,\s*6\.5vw,\s*4\.75rem\)/);
     expect(css).toMatch(/\.mkt-h1\s*\{[^}]*font-family:\s*var\(--font-serif-accent\)/);
-    expect(css).toMatch(/\.mkt-hero__accent\s*\{[^}]*#008060/);
+    expect(css).toMatch(/\.mkt-hero__accent\s*\{[^}]*var\(--action\)/);
+    expect(css).toMatch(/\.mkt-hero__copy \.mkt-waitlist,[\s\S]*\.mkt-hero__copy \.mkt-waitlist__success\s*\{[^}]*margin-top:\s*clamp\(24px,\s*3vw,\s*36px\)/);
+    expect(css).toMatch(/\.mkt-waitlist__input-wrap::after\s*\{[^}]*inset:\s*0;[^}]*border-radius:\s*inherit;[^}]*border-width 220ms var\(--quint\),[\s\S]*opacity 180ms var\(--decel\)/);
+    expect(css).toMatch(/\.mkt-waitlist__input-wrap:focus-within::after\s*\{[^}]*border-width:\s*3px;[^}]*opacity:\s*1/);
+    expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.mkt-waitlist__input-wrap::after[^{]*\{[^}]*transition:\s*none !important/);
   });
 
-  it("puts fixed-size marketplace-logo cards directly after features", () => {
+  it("puts fixed-size marketplace-logo cards directly after the hero", () => {
     const $ = load(renderToStaticMarkup(<LandingPage />));
     const sections = $("section").toArray().map((section) => $(section).attr("class") ?? "");
+    const heroIndex = sections.findIndex((className) => className.includes("mkt-hero"));
     const featureIndex = sections.findIndex((className) => className.includes("mkt-features"));
     const loopIndex = sections.findIndex((className) => className.includes("mkt-loop-section"));
 
-    expect(loopIndex).toBe(featureIndex + 1);
+    expect(loopIndex).toBe(heroIndex + 1);
+    expect(featureIndex).toBe(loopIndex + 1);
     expect($(".mkt-loop-card").length).toBeGreaterThan(0);
     expect($(".mkt-loop-card .mkt-loop-card__marketplace-logo").length).toBe($(".mkt-loop-card").length);
     expect($(".mkt-loop-card").text()).not.toMatch(/Editable draft/);
@@ -359,27 +342,34 @@ describe("marketing destinations", () => {
     expect(css).toMatch(/\.mkt-loop-card__body p\s*\{[^}]*min-height:\s*2\.7em/);
   });
 
-  it("places animated React Bits bento between Trophy Wall and FAQ", () => {
+  it("places animated React Bits bento after What does SnapList include and before FAQ", () => {
     const $ = load(renderToStaticMarkup(<LandingPage />));
     const sections = $("section").toArray().map((section) => $(section).attr("id") ?? "");
 
-    expect(sections.indexOf("why")).toBeGreaterThan(sections.indexOf("trophy"));
+    expect(sections.indexOf("trophy")).toBe(-1);
+    expect(sections.indexOf("why")).toBeGreaterThan(sections.indexOf("features"));
     expect(sections.indexOf("why")).toBeLessThan(sections.indexOf("faq"));
     expect($(".mkt-bento .card").length).toBe(site.MARKETING_BENTO_CARDS.length);
     expect($(".mkt-bento .mkt-bento__icon").length).toBe(site.MARKETING_BENTO_CARDS.length);
     expect($(".mkt-bento .mkt-bento__label").length).toBe(0);
   });
 
-  it("uses the current Marketplace mark and keeps card claims compact", () => {
+  it("uses the current Facebook Marketplace mark and leaves bento copy fully visible", () => {
     const marketplaceMark = readFileSync(resolve("public/marketplaces/facebook-marketplace.svg"), "utf8");
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const $ = load(renderToStaticMarkup(<MarketplaceLoop />));
+    const bentoRules = css.match(/\.mkt\s+\.mkt-bento\s+\.card(?:\s+(?:h3|p))?\s*\{[^}]*\}/g)?.join("\n") ?? "";
 
     expect(marketplaceMark).not.toMatch(/3a589e|facebook wordmark/i);
     expect(marketplaceMark).toMatch(/Marketplace/i);
     expect(marketplaceMark).toMatch(/M1\.712 2\.439A2\.156 2\.156/);
     expect(marketplaceMark).toMatch(/facebook\.com\/marketplace/);
-    expect(css).toMatch(/\.mkt\s+\.mkt-bento\s+\.card p\s*\{[^}]*-webkit-line-clamp:\s*2/);
-    expect(css).toMatch(/\.mkt\s+\.mkt-bento\s+\.card h3\s*\{[^}]*white-space:\s*nowrap/);
+    expect($(".mkt-loop-card__marketplace-name").length).toBeGreaterThan(0);
+    expect($(".mkt-loop-card__marketplace-name").toArray().map((name) => $(name).text()))
+      .toEqual(expect.arrayContaining(["Facebook Marketplace"]));
+    expect($(".mkt-loop-card__marketplace-name").first()
+      .siblings(".mkt-loop-card__marketplace-logo").attr("alt")).toBe("");
+    expect(bentoRules).not.toMatch(/line-clamp|text-overflow|white-space:\s*nowrap|overflow:\s*hidden/);
   });
 
   it("covers every served app icon with the rounded-corner generator", async () => {
@@ -493,8 +483,9 @@ describe("marketing in-page navigation", () => {
   it("uses landing-page URLs for header sections", () => {
     const $ = load(renderToStaticMarkup(<SiteHeader />));
 
-    expect($(".mkt-navlink").map((_, link) => $(link).text()).get()).toEqual(["Features", "Why", "FAQ"]);
+    expect($(".mkt-navlink").map((_, link) => $(link).text()).get()).toEqual(["Features", "FAQ"]);
     expect($('a[href="/#features"]').length).toBeGreaterThan(0);
+    expect($('a[href="/#why"]').length).toBe(0);
     expect($('a[href="/#faq"]').length).toBeGreaterThan(0);
   });
 

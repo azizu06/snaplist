@@ -28,7 +28,6 @@
   --wash-3: #f7f9ff;
   --action: #3665f3;
   --action-deep: #244cc0;
-  --brand-green: #008060;
 
   /* React Bits primitives retain their utility-class structure. Mapping their
      semantic tokens here keeps every mounted marketing instance in v6 blue and
@@ -521,10 +520,10 @@ html:has(.mkt) {
 }
 
 .mkt-h1 {
-  margin: 0 0 14px;
+  margin: 0;
   max-width: 10ch;
   font-family: var(--font-serif-accent), ui-serif, Georgia, serif;
-  font-size: clamp(2.5rem, 8vw, 6rem);
+  font-size: clamp(2.25rem, 6.5vw, 4.75rem);
   font-style: italic;
   line-height: 0.98;
   letter-spacing: -0.045em;
@@ -532,7 +531,13 @@ html:has(.mkt) {
 }
 
 .mkt-hero__accent {
-  color: #008060;
+  color: var(--action);
+}
+
+.mkt-hero__copy .mkt-waitlist,
+.mkt-hero__copy .mkt-waitlist__success {
+  width: min(100%, 520px);
+  margin-top: clamp(24px, 3vw, 36px);
 }
 
 /* The two-phone hero arrangement only reads at width; below 880 the design
@@ -1002,24 +1007,18 @@ html:has(.mkt) {
   font-size: 18px;
   font-weight: 700;
   line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .mkt .mkt-bento .card p {
   color: var(--ink-2);
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .mkt .mkt-bento .mkt-bento__icon {
-  background: #e6f2ed;
-  color: var(--brand-green);
+  background: var(--wash);
+  color: var(--action);
 }
 
 .mkt .mkt-bento .mkt-bento__icon svg {
@@ -1111,6 +1110,14 @@ html:has(.mkt) {
   height: 22px;
   object-fit: contain;
   object-position: left center;
+}
+
+.mkt-loop-card__marketplace-name {
+  margin-top: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 @media (min-width: 640px) {
@@ -1475,191 +1482,6 @@ html:has(.mkt) {
   text-wrap: pretty;
 }
 
-/* -------------------------------------------------------------- trophy wall */
-
-.mkt-trophy {
-  background: linear-gradient(
-    180deg,
-    var(--canvas) 0%,
-    var(--wash) 26%,
-    var(--wash) 74%,
-    var(--canvas) 100%
-  );
-}
-
-.mkt-trophy__grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: clamp(36px, 5vw, 64px);
-  align-items: center;
-  justify-content: center;
-}
-
-.mkt-trophy__copy {
-  flex: 0 1 440px;
-  max-width: 440px;
-  min-width: min(100%, 300px);
-  text-align: left;
-}
-
-.mkt-trophy__art {
-  flex: 1 1 340px;
-  min-width: min(100%, 300px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.mkt-trophy__h2 {
-  margin: 0 0 10px;
-  font-size: clamp(30px, 4.2vw, 44px);
-  line-height: 1.08;
-  letter-spacing: -0.025em;
-  font-weight: 700;
-}
-
-.mkt-trophy__body {
-  max-width: 34ch;
-  margin: 0;
-  color: var(--ink-2);
-  font-size: 16px;
-  line-height: 1.55;
-}
-
-.mkt-trophy__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 20px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.mkt-trophy__chips li {
-  border: 1px solid rgba(0, 128, 96, 0.22);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.68);
-  color: var(--brand-green);
-  padding: 6px 10px;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.mkt-trophy__scout {
-  height: 80px;
-  width: auto;
-  display: block;
-  margin-bottom: -6px;
-  position: relative;
-  z-index: 2;
-}
-
-.mkt-trophy__caption {
-  margin: 12px 0 0;
-  font-size: 15px;
-  line-height: 1.5;
-  color: var(--ink-2);
-  text-align: center;
-  max-width: 34ch;
-}
-
-.mkt-trophy__device {
-  position: relative;
-  width: 312px;
-  max-width: 84vw;
-  aspect-ratio: 288 / 592;
-  background: var(--ink);
-  border-radius: 48px;
-  padding: 11px;
-  box-shadow: 0 24px 56px rgba(16, 24, 40, 0.2);
-}
-
-.mkt-trophy__device .mkt-phone__notch {
-  width: 92px;
-  height: 24px;
-}
-
-.mkt-trophy__device .mkt-phone__chip {
-  right: 24px;
-}
-
-.mkt-trophy__device .mkt-phone__screen {
-  border-radius: 36px;
-}
-
-.mkt-trophy__row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid var(--hairline-2);
-  border-radius: 10px;
-  padding: 10px;
-}
-
-.mkt-trophy__row-art {
-  width: 46px;
-  height: 46px;
-  border-radius: 8px;
-  background: var(--hairline-2);
-  flex: 0 0 auto;
-}
-
-.mkt-trophy__row-title {
-  flex: 1;
-  font-size: 14px;
-  color: var(--ink);
-  min-width: 0;
-}
-
-/* `Ready to review` is the longest real Trophy Wall state and does not fit on
-   one line beside a 46px thumbnail inside a 312px frame. The pill wraps rather
-   than truncating the item title, which would read as a rendering bug. */
-.mkt-trophy__state {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  line-height: 1.3;
-  text-transform: uppercase;
-  text-align: center;
-  color: var(--action);
-  border: 1px solid var(--action);
-  padding: 2px 7px;
-  border-radius: 999px;
-  max-width: 76px;
-  flex: 0 0 auto;
-}
-
-.mkt-trophy__device .mkt-scr__bar {
-  padding: 34px 18px 12px;
-}
-
-.mkt-trophy__device .mkt-scr__title {
-  font-size: 15px;
-}
-
-.mkt-trophy__device .mkt-scr__body {
-  padding: 14px 18px;
-  gap: 10px;
-}
-
-@media (max-width: 899px) {
-  .mkt-trophy__copy {
-    text-align: center;
-  }
-  .mkt-trophy__scout {
-    height: clamp(68px, 20vw, 76px);
-    margin-bottom: 14px;
-  }
-}
-
-@media (max-width: 640px) {
-  .mkt-trophy__scout {
-    height: 96px;
-    margin-bottom: -8px;
-  }
-}
-
 /* ---------------------------------------------------------------------- FAQ */
 
 .mkt-faq {
@@ -1798,6 +1620,31 @@ html:has(.mkt) {
   gap: 10px;
 }
 
+.mkt-waitlist__input-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 12px;
+}
+
+.mkt-waitlist__input-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 0 solid rgba(54, 101, 243, 0.34);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    border-width 220ms var(--quint),
+    opacity 180ms var(--decel);
+}
+
+.mkt-waitlist__input-wrap:focus-within::after {
+  border-width: 3px;
+  opacity: 1;
+}
+
 .mkt-waitlist__label,
 .mkt-waitlist__honeypot {
   position: absolute;
@@ -1812,7 +1659,7 @@ html:has(.mkt) {
 }
 
 .mkt-waitlist__input {
-  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
   min-height: 56px;
   padding: 14px 16px;
@@ -1822,6 +1669,10 @@ html:has(.mkt) {
   border-radius: 12px;
   font: inherit;
   font-size: 16px;
+}
+
+.mkt-waitlist__input:focus-visible {
+  outline: 0;
 }
 
 .mkt-waitlist__input::placeholder {
@@ -1877,7 +1728,7 @@ html:has(.mkt) {
 }
 
 .mkt-footer__inner {
-  padding-block: clamp(36px, 5vw, 56px) 28px;
+  padding-block: clamp(52px, 6vw, 72px) 36px;
 }
 
 .mkt-footer__top {
@@ -1889,7 +1740,7 @@ html:has(.mkt) {
 
 .mkt-footer__brand {
   display: grid;
-  gap: 8px;
+  gap: 12px;
 }
 
 .mkt-footer__lockup {
@@ -1897,37 +1748,37 @@ html:has(.mkt) {
 }
 
 .mkt-footer__lockup .mkt-lockup__mark {
-  height: 36px;
+  height: 42px;
 }
 
 .mkt-footer__lockup .mkt-lockup__word {
-  font-size: 21px;
+  font-size: 25px;
 }
 
 .mkt-footer__tagline {
   margin: 0;
   color: var(--ink-2);
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .mkt-footer__legal-links {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  font-size: 14px;
+  gap: 12px;
+  font-size: 16px;
 }
 
 .mkt-footer__divider {
   height: 1px;
-  margin-top: 28px;
+  margin-top: 36px;
   background: var(--hairline-2);
 }
 
 .mkt-footer__legal {
-  margin-top: 18px;
+  margin-top: 22px;
   text-align: center;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--ink-2);
 }
 
@@ -2023,6 +1874,7 @@ html:has(.mkt) {
   .mkt-burger__line,
   .mkt-menu,
   .mkt-menu__clip,
+  .mkt-waitlist__input-wrap::after,
   .mkt-tab,
   .mkt-card,
   .mkt .mkt-bento .card,
