@@ -22,9 +22,18 @@ const MARKETPLACES = [
  * It demonstrates the editable-draft flow without inventing prices, evidence
  * counts, marketplace publication, or a completed sale.
  */
-function ListingCard({ slug, marketplace }: { slug: string; marketplace: (typeof MARKETPLACES)[number] }) {
+function ListingCard({
+  slug,
+  marketplace,
+  isDecorativeMarketplaceLabel = false,
+}: {
+  slug: string;
+  marketplace: (typeof MARKETPLACES)[number];
+  isDecorativeMarketplaceLabel?: boolean;
+}) {
   const product = DEMO_PRODUCTS_BY_SLUG[slug];
   const title = MARKETING_CAROUSEL_TITLES[slug] ?? product.title;
+  const isFacebookMarketplace = marketplace.name === "Facebook Marketplace";
 
   return (
     <article className="mkt-loop-card">
@@ -39,15 +48,13 @@ function ListingCard({ slug, marketplace }: { slug: string; marketplace: (typeof
       <div className="mkt-loop-card__body">
         <p>{title}</p>
         <Image
-          className="mkt-loop-card__marketplace-logo"
+          className={`mkt-loop-card__marketplace-logo${isFacebookMarketplace ? " mkt-loop-card__marketplace-logo--facebook" : ""}`}
           src={marketplace.asset}
-          alt={marketplace.name === "Facebook Marketplace" ? "" : marketplace.name}
-          width={104}
-          height={22}
+          alt={isDecorativeMarketplaceLabel ? "" : marketplace.name}
+          aria-hidden={isDecorativeMarketplaceLabel || undefined}
+          width={isFacebookMarketplace ? 2271 : 104}
+          height={isFacebookMarketplace ? 2500 : 22}
         />
-        {marketplace.name === "Facebook Marketplace" ? (
-          <span className="mkt-loop-card__marketplace-name">Facebook Marketplace</span>
-        ) : null}
       </div>
     </article>
   );
@@ -68,11 +75,24 @@ function useReducedMotion() {
   return reducedMotion;
 }
 
-const LOOP_ITEMS: LogoItem[] = LISTINGS.map((product, index) => ({
-  node: <ListingCard slug={product.slug} marketplace={MARKETPLACES[index % MARKETPLACES.length]} />,
-  title: MARKETING_CAROUSEL_TITLES[product.slug] ?? product.title,
-  ariaLabel: `${MARKETING_CAROUSEL_TITLES[product.slug] ?? product.title}, ${MARKETPLACES[index % MARKETPLACES.length].name} handoff example`,
-}));
+const isDuplicateFacebookMarketplace = (marketplace: (typeof MARKETPLACES)[number], index: number) =>
+  marketplace.name === "Facebook Marketplace" && index > 1;
+
+const LOOP_ITEMS: LogoItem[] = LISTINGS.map((product, index) => {
+  const marketplace = MARKETPLACES[index % MARKETPLACES.length];
+
+  return {
+    node: (
+      <ListingCard
+        slug={product.slug}
+        marketplace={marketplace}
+        isDecorativeMarketplaceLabel={isDuplicateFacebookMarketplace(marketplace, index)}
+      />
+    ),
+    title: MARKETING_CAROUSEL_TITLES[product.slug] ?? product.title,
+    ariaLabel: `${MARKETING_CAROUSEL_TITLES[product.slug] ?? product.title}, ${marketplace.name} handoff example`,
+  };
+});
 
 export function MarketplaceLoop() {
   const [focusPaused, setFocusPaused] = useState(false);
@@ -86,6 +106,7 @@ export function MarketplaceLoop() {
             key={product.slug}
             slug={product.slug}
             marketplace={MARKETPLACES[index % MARKETPLACES.length]}
+            isDecorativeMarketplaceLabel={isDuplicateFacebookMarketplace(MARKETPLACES[index % MARKETPLACES.length], index)}
           />
         ))}
       </div>

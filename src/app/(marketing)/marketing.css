@@ -1074,7 +1074,7 @@ html:has(.mkt) {
 
 .mkt-loop-card__image {
   position: relative;
-  aspect-ratio: 1 / 0.9;
+  aspect-ratio: 1 / 0.82;
   background: var(--soft);
 }
 
@@ -1110,6 +1110,14 @@ html:has(.mkt) {
   height: 22px;
   object-fit: contain;
   object-position: left center;
+}
+
+/* The vendor's canonical Marketplace mark is portrait; keep its visual width
+ * comparable to the other wordmarks without distorting the supplied SVG. */
+.mkt-loop-card__marketplace-logo--facebook {
+  height: 52px;
+  width: auto;
+  align-self: flex-start;
 }
 
 .mkt-loop-card__marketplace-name {
@@ -1385,7 +1393,7 @@ html:has(.mkt) {
   border-radius: 999px;
 }
 
-/* Below 760 the explorer stacks: large phone, dots, then all four cards in one
+/* Below 760 the explorer stacks: large phone, dots, then all five cards in one
    column. Inactive cards stay visible and compact; they are never hidden. */
 @media (max-width: 759px) {
   .mkt-explorer {
