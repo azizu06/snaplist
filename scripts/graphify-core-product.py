@@ -27,9 +27,6 @@ from graphify.report import generate
 
 SAFE_LOCAL_AST_OVERRIDES = ("src/lib/marketplace/ebay/user-token-provider.ts",)
 SENSITIVE_CONTENT_EXCLUSIONS = (".env.example",)
-EXCLUDED_PACKAGE_DEPENDENCY_MARKERS = ("remotion",)
-
-
 def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
@@ -79,24 +76,6 @@ def normalize_extraction(result: dict, corpus: Path) -> dict:
             edges.append(edge)
             seen_edges.add(key)
     return {"nodes": nodes, "edges": edges, "hyperedges": []}
-
-
-def prune_excluded_package_dependencies(extraction: dict) -> None:
-    excluded_ids = {
-        node["id"]
-        for node in extraction["nodes"]
-        if node.get("source_file") == "package.json"
-        and any(
-            marker in str(node.get("label", "")).casefold()
-            for marker in EXCLUDED_PACKAGE_DEPENDENCY_MARKERS
-        )
-    }
-    extraction["nodes"] = [node for node in extraction["nodes"] if node["id"] not in excluded_ids]
-    extraction["edges"] = [
-        edge
-        for edge in extraction["edges"]
-        if edge.get("source") not in excluded_ids and edge.get("target") not in excluded_ids
-    ]
 
 
 def add_scope_nodes(extraction: dict, scope: list[str], corpus: Path) -> None:
@@ -262,7 +241,6 @@ def main() -> None:
             code_paths.append(override)
     ast = extract(code_paths, cache_root=corpus)
     extraction = normalize_extraction(ast, corpus)
-    prune_excluded_package_dependencies(extraction)
     add_scope_nodes(extraction, scope, corpus)
 
     represented = {node.get("source_file") for node in extraction["nodes"]}
@@ -282,13 +260,6 @@ def main() -> None:
     )
     if absent_labels:
         raise SystemExit(f"Graph omitted required core symbols: {absent_labels}")
-    if any(
-        marker in f"{node.get('label', '')} {node.get('id', '')}".casefold()
-        for marker in EXCLUDED_PACKAGE_DEPENDENCY_MARKERS
-        for node in extraction["nodes"]
-    ):
-        raise SystemExit("Graph contains an excluded presentation dependency")
-
     graph = build_from_json(extraction)
     communities = cluster(graph)
     cohesion = score_all(graph, communities)

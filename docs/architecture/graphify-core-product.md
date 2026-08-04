@@ -28,7 +28,7 @@ Included categories:
 Excluded categories:
 
 - public media and demo catalog presentation assets;
-- Remotion and marketing-only page/component code;
+- marketing-only page/component code;
 - unit/UI tests, fixtures, screenshots, videos, PDFs, and golden artifacts;
 - dependencies, build output, prior Graphify output, and other generated files.
 
