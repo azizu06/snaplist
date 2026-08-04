@@ -129,7 +129,8 @@ export const FEATURE_STEPS = [
     id: "trophy-wall",
     title: TROPHY_WALL.title,
     candidate: false,
-    body: TROPHY_WALL.body,
+    body:
+      "Follow each item from analysis to an editable draft. Keep confirmed eBay results and prepared handoffs together, so you can see what needs your next decision.",
   },
 ] as const;
 

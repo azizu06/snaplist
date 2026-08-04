@@ -1705,7 +1705,10 @@ html:has(.mkt) {
 }
 
 .mkt-waitlist__input:focus-visible {
-  outline: 0;
+  /* The wrapper owns this field's one focus accent. Suppress the global
+     marketing outline here so it cannot add square corners outside the input. */
+  outline: none;
+  box-shadow: none;
 }
 
 .mkt-waitlist__input::placeholder {

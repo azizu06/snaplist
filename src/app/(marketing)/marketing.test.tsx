@@ -330,7 +330,9 @@ describe("marketing destinations", () => {
     expect($(".mkt-trophy").length).toBe(0);
     expect($(".mkt-bento").text()).toContain(site.TROPHY_WALL.title);
     expect($(".mkt-tablist").text()).toContain(site.TROPHY_WALL.title);
-    expect($(".mkt-tablist").text()).toContain(site.TROPHY_WALL.body);
+    expect($(".mkt-tablist").text()).toContain(
+      site.FEATURE_STEPS.find((step) => step.id === "trophy-wall")?.body,
+    );
   });
 
   it("uses one blue serif italic accent word in the rescaled hero with a bounded focus ring", () => {
@@ -345,6 +347,7 @@ describe("marketing destinations", () => {
     expect(css).toMatch(/\.mkt-hero__copy \.mkt-waitlist,[\s\S]*\.mkt-hero__copy \.mkt-waitlist__success\s*\{[^}]*margin-top:\s*clamp\(24px,\s*3vw,\s*36px\)/);
     expect(css).toMatch(/\.mkt-waitlist__input-wrap::after\s*\{[^}]*inset:\s*0;[^}]*border-radius:\s*inherit;[^}]*border-width 220ms var\(--quint\),[\s\S]*opacity 180ms var\(--decel\)/);
     expect(css).toMatch(/\.mkt-waitlist__input-wrap:focus-within::after\s*\{[^}]*border-width:\s*3px;[^}]*opacity:\s*1/);
+    expect(css).toMatch(/\.mkt-waitlist__input:focus-visible\s*\{[^}]*outline:\s*none;[^}]*box-shadow:\s*none/);
     expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.mkt-waitlist__input-wrap::after[^{]*\{[^}]*transition:\s*none !important/);
   });
 
