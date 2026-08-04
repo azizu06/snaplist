@@ -56,6 +56,7 @@ let ownerId = "";
 let foreignId = "";
 let ownerToken = "";
 let foreignToken = "";
+let ownerGenerationId: string | null = null;
 let releaseSecondUpload: () => void = () => {};
 
 beforeEach((context) => {
@@ -372,8 +373,10 @@ afterAll(async () => {
     [[ownerId, foreignId]],
   );
   await database.query(
-    "delete from private.account_erasure_generations where user_id = any($1::text[])",
-    [[ownerId, foreignId]],
+    `delete from private.account_erasure_generations
+     where user_id = any($1::text[])
+        or generation_id = $2::uuid`,
+    [[ownerId, foreignId], ownerGenerationId],
   ).catch(() => undefined);
   await cleanupClerkTestUsers(admin, [ownerId, foreignId]);
   await database.end();
@@ -463,6 +466,7 @@ describe("durable account erasure against local Supabase", () => {
       return;
     }
     const started = erasurePayload(first.data);
+    ownerGenerationId = started.generation_id;
     expect(started.status).toBe("deletion_requested");
     expect(started.storage_objects).toHaveLength(1);
     expect(started.storage_objects[0]).toMatchObject({ bucket_id: "photos" });
