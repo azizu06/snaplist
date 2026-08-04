@@ -1,6 +1,6 @@
 /**
  * Demo product catalog — the ONLY source for example items shown anywhere in
- * the product (marketing pages, Remotion videos, empty states, previews).
+ * the product (marketing pages, empty states, previews).
  *
  * Every entry's title was written by looking at the actual photo: the label
  * always matches what is visibly in the image (brand text verified where
