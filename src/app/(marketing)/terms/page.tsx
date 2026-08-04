@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { SupportChannel } from "@/components/marketing/support-channel";
+import { TERMS } from "@/lib/marketing/site";
 
 export const metadata: Metadata = {
   title: "Terms of Use | SnapList",
@@ -18,18 +19,10 @@ export default function TermsPage() {
       </p>
 
       <h2>Your content and listings</h2>
-      <p>
-        You keep your rights in the photos and optional voice context you provide. You give
-        SnapList permission to process them only to identify your item, prepare an editable draft,
-        find price evidence, and deliver the features you choose to use.
-      </p>
+      <p>{TERMS.content}</p>
 
       <h2>Your decisions</h2>
-      <p>
-        You review the listing, price, and condition before you use them. SnapList publishes to
-        eBay only after your explicit confirmation. For Facebook Marketplace, Mercari, and Depop,
-        SnapList prepares a handoff that you finish yourself.
-      </p>
+      <p>{TERMS.decisions}</p>
 
       <h2>Waitlist</h2>
       <p>

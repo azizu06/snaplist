@@ -101,6 +101,7 @@ function marketingBlocks(): string[] {
     renderToStaticMarkup(<LandingPage />),
     renderToStaticMarkup(<PrivacyPage />),
     renderToStaticMarkup(<SupportPage />),
+    renderToStaticMarkup(<TermsPage />),
     renderToStaticMarkup(<SiteFooter />),
   ].join("\n");
 
@@ -171,6 +172,10 @@ describe("marketing honesty", () => {
     expect(sentences.length).toBeGreaterThan(40);
     expect(sentences.join(" ")).toMatch(/eBay/);
     expect(sentences.join(" ")).toMatch(/Mercari/);
+  });
+
+  it("scans the Terms capability claims", () => {
+    expect(marketingBlocks()).toContain(site.TERMS.decisions);
   });
 
   it("never puts an assisted marketplace on the receiving end of a publish", () => {

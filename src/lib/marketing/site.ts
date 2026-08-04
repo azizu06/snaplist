@@ -58,6 +58,17 @@ export const FOOTER = {
   ],
 } as const;
 
+export const TERMS = {
+  content:
+    "You keep your rights in the photos and optional voice context you provide. You give "
+    + "SnapList permission to process them only to identify your item, prepare an editable draft, "
+    + "find price evidence, and deliver the features you choose to use.",
+  decisions:
+    "You review the listing, price, and condition before you use them. SnapList publishes to "
+    + "eBay only after your explicit confirmation. For Facebook Marketplace, Mercari, and Depop, "
+    + "SnapList prepares a handoff that you finish yourself.",
+} as const;
+
 export const FEATURES_TITLE = "What does SnapList include?";
 export const LOOP_TITLE = "From camera roll to every storefront.";
 
