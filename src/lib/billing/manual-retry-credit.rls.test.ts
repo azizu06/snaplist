@@ -529,6 +529,9 @@ beforeAll(async () => {
       upgradeConflictSeller,
       upgradeOverlapSeller,
       retryProjectionSeller,
+      lockOrderRetrySeller,
+      lockOrderStageSeller,
+      lockRaceSeller,
     ].map((user) => grantIncludedOfferDeviceClaim(admin, user.id)),
   );
 

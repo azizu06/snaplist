@@ -5,7 +5,11 @@ import {
   acquireExclusiveTestResource,
   type ExclusiveTestResourceLease,
 } from "@/test/exclusive-resource-lock";
-import { cleanupClerkTestUsers, mintUserJwt } from "@/lib/supabase/test-users";
+import {
+  cleanupClerkTestUsers,
+  grantIncludedOfferDeviceClaim,
+  mintUserJwt,
+} from "@/lib/supabase/test-users";
 import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
 import { prepareMobileItemSubmission } from "./contract";
 import { createMobileItemSubmissionHandler } from "./http";
@@ -313,6 +317,18 @@ beforeAll(async () => {
     mintUserJwt(concurrentId),
     mintUserJwt(legacyReplayId),
   ]);
+  await Promise.all(
+    [
+      ownerId,
+      foreignId,
+      recoveryId,
+      abandonedId,
+      preparationFirstId,
+      replayFirstId,
+      concurrentId,
+      legacyReplayId,
+    ].map((userId) => grantIncludedOfferDeviceClaim(admin, userId)),
+  );
   });
 });
 
