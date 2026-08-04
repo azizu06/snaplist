@@ -1179,7 +1179,7 @@ html:has(.mkt) {
   --phone-h: calc(var(--phone-w) * 592 / 288);
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   gap: clamp(36px, 4vw, 64px);
 }
@@ -1225,6 +1225,10 @@ html:has(.mkt) {
   flex-direction: column;
   align-items: center;
   gap: 18px;
+  /* The pager occupies 44px below the frame, separated by an 18px gap. Shift
+     its flex item by half that 62px footprint so the illustrated phone, rather
+     than the phone-plus-pager group, centers against the card stack. */
+  transform: translateY(31px);
 }
 
 .mkt-explorer__panel {
@@ -1333,16 +1337,15 @@ html:has(.mkt) {
   min-width: 0;
   max-width: 540px;
   min-height: var(--phone-h);
-  align-self: center;
+  align-self: stretch;
   margin-inline: auto;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: repeat(5, minmax(0, 1fr));
   gap: clamp(16px, 1.6vw, 20px);
 }
 
 .mkt-tab {
   width: 100%;
-  flex: 1 1 0%;
   text-align: left;
   background: var(--canvas);
   border: 1px solid var(--hairline-2);
@@ -1366,7 +1369,7 @@ html:has(.mkt) {
 /* The page's one signature interaction. It is not repeated on the value cards,
    the FAQ rows, the Trophy Wall module, or the footer. */
 .mkt-tab[aria-selected="true"] {
-  transform: translateY(-8px) scale(1.01);
+  transform: translateY(-8px);
   background: var(--wash-3);
   border-color: var(--action);
   box-shadow:
@@ -1382,7 +1385,7 @@ html:has(.mkt) {
 }
 
 .mkt-tab[aria-selected="true"]:hover {
-  transform: translateY(-8px) scale(1.01);
+  transform: translateY(-8px);
   box-shadow:
     inset 0 2px 0 var(--action),
     0 10px 26px rgba(54, 101, 243, 0.18);
@@ -1426,24 +1429,23 @@ html:has(.mkt) {
   }
   .mkt-explorer__stage {
     width: 100%;
+    transform: none;
   }
   .mkt-h2--display {
     margin-bottom: 44px;
   }
   .mkt-tablist {
-    flex: 0 0 auto;
     width: 100%;
     max-width: var(--phone-w);
     min-height: auto;
     gap: 14px;
   }
   .mkt-tab {
-    flex: 0 0 auto;
     padding: 22px 24px;
   }
   .mkt-tab[aria-selected="true"],
   .mkt-tab[aria-selected="true"]:hover {
-    transform: translateY(-5px) scale(1.01);
+    transform: translateY(-5px);
   }
 }
 

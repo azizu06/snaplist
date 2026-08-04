@@ -214,6 +214,22 @@ describe("marketing honesty", () => {
 });
 
 describe("marketing destinations", () => {
+  it("keeps the five includes cards equal-height and centers the unstretched phone beside them", () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const explorer = css.match(/\.mkt-explorer\s*\{[^}]*\}/)?.[0] ?? "";
+    const stage = css.match(/\.mkt-explorer__stage\s*\{[^}]*\}/)?.[0] ?? "";
+    const tablist = css.match(/\.mkt-tablist\s*\{[^}]*\}/)?.[0] ?? "";
+    const selectedCard = css.match(/\.mkt-tab\[aria-selected="true"\]\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(explorer).toMatch(/align-items:\s*center/);
+    expect(stage).toMatch(/transform:\s*translateY\(31px\)/);
+    expect(tablist).toMatch(/display:\s*grid/);
+    expect(tablist).toMatch(/grid-template-rows:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
+    expect(selectedCard).toMatch(/transform:\s*translateY\(-8px\)/);
+    expect(selectedCard).not.toMatch(/scale\(/);
+    expect(css).not.toMatch(/\.mkt-tab\[aria-selected="true"\][^{]*\{[^}]*scale\(/);
+  });
+
   it("renders six equal Why-choose cards without span overrides", () => {
     const $ = load(renderToStaticMarkup(<MarketingBento />));
     const cards = $(".mkt-bento .card");
