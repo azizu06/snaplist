@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { AssistedExportHandoffGateway } from "@/lib/mobile-api";
 import {
-  loadExportHandoffs,
+  loadExportHandoffPack,
   markExportShared,
   recordExportHandoff,
   undoExportShared,
@@ -21,7 +21,7 @@ export function createSupabaseAssistedExportGateway(
 ): AssistedExportHandoffGateway {
   return {
     load: (input) =>
-      loadExportHandoffs(clientFor(input.bearerToken), {
+      loadExportHandoffPack(clientFor(input.bearerToken), {
         itemId: input.itemId,
         reviewContentRevision: input.reviewContentRevision,
       }),

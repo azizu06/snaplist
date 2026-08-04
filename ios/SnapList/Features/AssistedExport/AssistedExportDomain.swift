@@ -48,7 +48,57 @@ struct AssistedExportPack: Equatable, Sendable {
     let contentRevision: UUID
     /// The full `review_revision` the seller was looking at when it was built.
     let reviewRevision: UUID
-    let photoCount: Int
+    let title: String
+    let description: String
+    /// Server-resolved price: valid seller override, else recommendation.
+    let effectivePrice: Decimal
+    /// Ordered, authenticated photo references supplied by the mobile listing
+    /// review projection. The client resolves all of them before offering a
+    /// share sheet, so a failed fetch can never become an empty handoff.
+    let photoReferences: [URL]
+
+    var photoCount: Int { photoReferences.count }
+
+    func replacingEffectivePrice(_ price: Decimal) -> AssistedExportPack {
+        AssistedExportPack(
+            itemID: itemID,
+            contentRevision: contentRevision,
+            reviewRevision: reviewRevision,
+            title: title,
+            description: description,
+            effectivePrice: price,
+            photoReferences: photoReferences
+        )
+    }
+
+    func listingText(for destination: AssistedExportDestination) -> String {
+        let price = Self.priceText(effectivePrice)
+        switch destination {
+        case .facebookMarketplace, .mercari:
+            return "\(title)\n\n\(description)\n\nPrice: \(price)"
+        case .depop:
+            return "\(description)\n\nPrice: \(price)"
+        }
+    }
+
+    private static func priceText(_ price: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.currencySymbol = "$"
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: price as NSDecimalNumber) ?? "$\(price)"
+    }
+}
+
+/// The durable server read model. `handedOffAt` proves a device handoff was
+/// recorded; `sharedAt` exists only after the seller's explicit confirmation.
+struct AssistedExportReceipt: Equatable, Sendable {
+    let destination: AssistedExportDestination
+    let handedOffAt: Date?
+    let sharedAt: Date?
 }
 
 /// The four ways a seller can hand the pack over. Every one of them touches
@@ -134,6 +184,25 @@ struct AssistedExportDomain: Equatable, Sendable {
     func handoff(for destination: AssistedExportDestination) -> AssistedExportHandoffState {
         guard let date = sharedAt[destination] else { return .prepared }
         return .shared(at: date)
+    }
+
+    /// Restores the three server-backed receipts for this exact pack. Invalid
+    /// combinations fail closed to Prepared; the transport rejects malformed
+    /// arrays before they reach this seam.
+    mutating func synchronize(with receipts: [AssistedExportReceipt]) {
+        handedOff = Set(
+            receipts.compactMap { receipt in
+                receipt.handedOffAt == nil ? nil : receipt.destination
+            }
+        )
+        sharedAt = Dictionary(
+            uniqueKeysWithValues: receipts.compactMap { receipt in
+                guard receipt.handedOffAt != nil, let shared = receipt.sharedAt else {
+                    return nil
+                }
+                return (receipt.destination, shared)
+            }
+        )
     }
 
     /// The single primary action of an open workspace. Only one destination's
@@ -361,6 +430,13 @@ enum AssistedExportCopy {
         "You changed the listing after this pack was prepared. Update the "
             + "pack to match before sharing. Updating replaces the old pack."
     static let updatePack = "Update pack"
+    static let loadFailedTitle = "Couldn’t load this sharing pack"
+    static let loadFailedDetail = "Check your connection and try again."
+    static let retry = "Retry"
+    static let actionFailed = "Couldn’t complete that action. Try again."
+    static let entryTitle = "Share to other marketplaces"
+    static let entryDetail = "Prepared for Facebook Marketplace, Mercari, and Depop"
+    static let saveBeforeSharing = "Save your changes before sharing."
 
     static func savePhotos(count: Int) -> String {
         "Save \(photos(count))"
@@ -411,6 +487,13 @@ enum AssistedExportCopy {
         packOutOfDateTitle,
         packOutOfDateDetail,
         updatePack,
+        loadFailedTitle,
+        loadFailedDetail,
+        retry,
+        actionFailed,
+        entryTitle,
+        entryDetail,
+        saveBeforeSharing,
         savePhotos(count: 8),
         savePhotos(count: 1),
         packMeta(photoCount: 8, preparedAt: "2:41 PM"),

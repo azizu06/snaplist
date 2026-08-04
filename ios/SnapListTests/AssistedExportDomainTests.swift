@@ -10,6 +10,77 @@ import XCTest
 /// Marketplace, Mercari, or Depop, so nothing short of the explicit confirm
 /// sheet may write it.
 final class AssistedExportDomainTests: XCTestCase {
+    func testPackCarriesTheAuthoritativeEffectivePriceInEveryDestinationText() {
+        let pack = AssistedExportPack.fixture(
+            effectivePrice: 149.99,
+            photoReferences: Array(AssistedExportPack.fixturePhotoReferences.prefix(2))
+        )
+
+        XCTAssertEqual(pack.title, "Denim jacket, relaxed fit, size L")
+        XCTAssertEqual(pack.description, "A clean seller description.")
+        XCTAssertEqual(pack.photoCount, 2)
+        XCTAssertEqual(
+            pack.photoReferences.map(\.absoluteString),
+            [
+                "https://cdn.example/one.jpg",
+                "https://cdn.example/two.jpg",
+            ]
+        )
+        XCTAssertEqual(
+            pack.listingText(for: .facebookMarketplace),
+            "Denim jacket, relaxed fit, size L\n\nA clean seller description.\n\nPrice: $149.99"
+        )
+        XCTAssertEqual(
+            pack.listingText(for: .mercari),
+            "Denim jacket, relaxed fit, size L\n\nA clean seller description.\n\nPrice: $149.99"
+        )
+        XCTAssertEqual(
+            pack.listingText(for: .depop),
+            "A clean seller description.\n\nPrice: $149.99"
+        )
+    }
+
+    func testPackUsesRecommendationPriceWhenServerHasNoSellerOverride() {
+        let pack = AssistedExportPack.fixture(effectivePrice: 145)
+
+        XCTAssertTrue(
+            pack.listingText(for: .facebookMarketplace).hasSuffix("Price: $145.00")
+        )
+    }
+
+    func testDurableReceiptsRestoreHandoffAndSharedTruth() {
+        var domain = AssistedExportDomain(pack: .fixture())
+
+        domain.synchronize(
+            with: [
+                AssistedExportReceipt(
+                    destination: .facebookMarketplace,
+                    handedOffAt: Self.julyTwentyFifth,
+                    sharedAt: nil
+                ),
+                AssistedExportReceipt(
+                    destination: .mercari,
+                    handedOffAt: Self.julyTwentyFifth,
+                    sharedAt: Self.julyTwentySixth
+                ),
+                AssistedExportReceipt(
+                    destination: .depop,
+                    handedOffAt: nil,
+                    sharedAt: nil
+                ),
+            ]
+        )
+
+        XCTAssertTrue(domain.hasHandedOff(to: .facebookMarketplace))
+        XCTAssertEqual(domain.handoff(for: .facebookMarketplace), .prepared)
+        XCTAssertTrue(domain.hasHandedOff(to: .mercari))
+        XCTAssertEqual(
+            domain.handoff(for: .mercari),
+            .shared(at: Self.julyTwentySixth)
+        )
+        XCTAssertFalse(domain.hasHandedOff(to: .depop))
+    }
+
     // MARK: - XPORT-01, the prepared pack
 
     func testPreparedPackListsThreeDestinationsAndNoneIsShared() {
@@ -336,10 +407,9 @@ final class AssistedExportDomainTests: XCTestCase {
     // payload. Asserting any of that would be SnapList claiming something about
     // the seller's device it cannot verify.
 
-    func testAFailedOpenLeavesAnAdvisoryWithoutBlockingAnything() {
+    func testAFailedOpenLeavesAnAdvisoryWithoutRecordingAHandoff() {
         var domain = AssistedExportDomain(pack: .fixture())
         domain.toggle(.facebookMarketplace)
-        domain.recordHandoff(.openedDestination, for: .facebookMarketplace)
 
         domain.recordDestinationDidNotOpen(.facebookMarketplace)
 
@@ -348,14 +418,14 @@ final class AssistedExportDomainTests: XCTestCase {
             "Facebook Marketplace didn't open. It may not be installed. "
                 + "Copy the text or share another way."
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             domain.offersMarkAsShared(for: .facebookMarketplace),
-            "The advisory is quiet. It withholds nothing."
+            "An open attempt that went nowhere is not a handoff."
         )
         XCTAssertEqual(
             domain.state,
-            .handedOff(.facebookMarketplace),
-            "07B is not a live state. A row with an advisory is still XPORT-03."
+            .workspaceOpen(.facebookMarketplace),
+            "The advisory leaves the workspace open without inventing a receipt."
         )
     }
 
@@ -375,19 +445,14 @@ final class AssistedExportDomainTests: XCTestCase {
         )
     }
 
-    func testAFailedOpenStillEarnsTheRightToBeAsked() {
+    func testAFailedOpenDoesNotEarnTheRightToBeAsked() {
         var domain = AssistedExportDomain(pack: .fixture())
         domain.toggle(.facebookMarketplace)
-        domain.recordHandoff(.openedDestination, for: .facebookMarketplace)
         domain.recordDestinationDidNotOpen(.facebookMarketplace)
 
         domain.presentConfirmSheet(for: .facebookMarketplace)
-        XCTAssertEqual(
-            domain.confirmSheet,
-            .facebookMarketplace,
-            "SnapList cannot tell a failed open from the seller posting by "
-                + "hand, so it must not withhold the question."
-        )
+        XCTAssertNil(domain.confirmSheet)
+        XCTAssertFalse(domain.offersMarkAsShared(for: .facebookMarketplace))
     }
 
     // MARK: - Undo, the only unwrite
@@ -803,13 +868,29 @@ extension AssistedExportPack {
         itemID: UUID = fixtureItemID,
         contentRevision: UUID = fixtureContentRevision,
         reviewRevision: UUID = fixtureReviewRevision,
-        photoCount: Int = 8
+        title: String = "Denim jacket, relaxed fit, size L",
+        description: String = "A clean seller description.",
+        effectivePrice: Decimal = 145,
+        photoReferences: [URL] = fixturePhotoReferences
     ) -> AssistedExportPack {
         AssistedExportPack(
             itemID: itemID,
             contentRevision: contentRevision,
             reviewRevision: reviewRevision,
-            photoCount: photoCount
+            title: title,
+            description: description,
+            effectivePrice: effectivePrice,
+            photoReferences: photoReferences
         )
+    }
+
+    static let fixturePhotoReferences = (1...8).map { index in
+        let name: String
+        switch index {
+        case 1: name = "one"
+        case 2: name = "two"
+        default: name = "photo-\(index)"
+        }
+        return URL(string: "https://cdn.example/\(name).jpg")!
     }
 }

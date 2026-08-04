@@ -65,7 +65,8 @@ struct SnapListApp: App {
             apiOrigin: apiOrigin,
             tokenProvider: tokenProvider,
             nativeIntakeIdentitySource:
-                ClerkAuthenticationComposition.makeNativeIntakeIdentitySource()
+                ClerkAuthenticationComposition.makeNativeIntakeIdentitySource(),
+            session: urlSession
         )
         _router = State(
             initialValue: AppRouter(

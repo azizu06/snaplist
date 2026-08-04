@@ -16,6 +16,7 @@ const RUN_ID = "37600000-0000-4000-8000-000000000001";
 const ITEM_ID = "37600000-0000-4000-8000-000000000002";
 const LISTING_ID = "37600000-0000-4000-8000-000000000003";
 const REVIEW_REVISION = "37600000-0000-4000-8000-000000000004";
+const REVIEW_CONTENT_REVISION = "37600000-0000-4000-8000-000000000005";
 const USER_ID = "user_listing_review";
 
 const run: MobileRun = {
@@ -228,13 +229,23 @@ function fiveProviderEvidenceReview() {
   );
 }
 
-function dataClient(review = rawReview()): ListingReviewDataClient {
+function dataClient(
+  review = rawReview(),
+  revisions = {
+    reviewContentRevision: REVIEW_CONTENT_REVISION,
+    reviewRevision: REVIEW_REVISION,
+  },
+): ListingReviewDataClient {
   const persistedReview = JSON.stringify(review);
   return {
     readReview: vi.fn().mockImplementation(async () => ({
       data: JSON.parse(persistedReview) as unknown,
       error: null,
     })),
+    readReviewRevisions: vi.fn().mockResolvedValue({
+      data: revisions,
+      error: null,
+    }),
     signPhotoUrls: vi.fn().mockImplementation(async (paths: string[]) =>
       paths.map((path, ordinal) => ({
         ordinal,
@@ -271,6 +282,7 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
       name: "Clerk",
       principal: { kind: "clerk", userId: USER_ID } satisfies MobileApiPrincipal,
       expectedReadToken: "clerk-bearer",
+      expectedRevisionToken: "clerk-bearer",
       expectedPhotoToken: "clerk-bearer",
     },
     {
@@ -281,14 +293,17 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
         mintOperationToken: vi.fn()
           .mockResolvedValueOnce("guest-run-jwt")
           .mockResolvedValueOnce("guest-review-jwt")
+          .mockResolvedValueOnce("guest-revision-jwt")
           .mockResolvedValueOnce("guest-photo-jwt"),
       } satisfies MobileApiPrincipal,
       expectedReadToken: "guest-review-jwt",
+      expectedRevisionToken: "guest-revision-jwt",
       expectedPhotoToken: "guest-photo-jwt",
     },
   ])("returns the same run-bound zero-match review for $name", async ({
     principal,
     expectedReadToken,
+    expectedRevisionToken,
     expectedPhotoToken,
   }) => {
     const reviewClient = dataClient();
@@ -311,6 +326,7 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
             runId: RUN_ID,
             itemId: ITEM_ID,
             listingId: LISTING_ID,
+            reviewContentRevision: REVIEW_CONTENT_REVISION,
             reviewRevision: REVIEW_REVISION,
           },
           photos: [
@@ -350,6 +366,10 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
       RUN_ID,
       expectedReadToken,
     );
+    expect(reviewClient.readReviewRevisions).toHaveBeenCalledWith(
+      ITEM_ID,
+      expectedRevisionToken,
+    );
     expect(reviewClient.signPhotoUrls).toHaveBeenCalledWith(
       [`${USER_ID}/items/376-cover.jpg`],
       expectedPhotoToken,
@@ -369,6 +389,7 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
         mintOperationToken: vi.fn()
           .mockResolvedValueOnce("guest-run-jwt")
           .mockResolvedValueOnce("guest-review-jwt")
+          .mockResolvedValueOnce("guest-revision-jwt")
           .mockResolvedValueOnce("guest-photo-jwt"),
       } satisfies MobileApiPrincipal,
     },
@@ -535,6 +556,15 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
         itemId: "37600000-0000-4000-8000-000000000099",
       },
       reviewClient: dataClient(),
+      expectedStatus: 503,
+    },
+    {
+      name: "review revision changes while the projection is assembled",
+      runResult: run,
+      reviewClient: dataClient(rawReview(), {
+        reviewContentRevision: REVIEW_CONTENT_REVISION,
+        reviewRevision: "37600000-0000-4000-8000-000000000006",
+      }),
       expectedStatus: 503,
     },
   ])("fails closed for $name without exposing review data", async ({

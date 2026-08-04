@@ -9,12 +9,12 @@ import XCTest
 final class AssistedExportLaunchTests: XCTestCase {
     func testTheFixtureArgumentNamesAScenarioAndSuppressesNetworkFixtures() {
         let configuration = LaunchConfiguration.parse(arguments: [
-            "--assisted-export-fixture=revision-change-while-confirming"
+            "--assisted-export-fixture=pack-update-while-confirming"
         ])
 
         XCTAssertEqual(
             configuration.assistedExportFixture,
-            .revisionChangeWhileConfirming
+            .packUpdateWhileConfirming
         )
         XCTAssertTrue(
             configuration.usesZeroNetworkFixtures,

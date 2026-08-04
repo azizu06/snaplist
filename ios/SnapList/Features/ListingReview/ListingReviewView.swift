@@ -7,6 +7,7 @@ private enum ListingReviewDestination: Identifiable, Hashable {
     case specifics
     case sold(Int)
     case correction
+    case assistedExport
 
     var id: String {
         switch self {
@@ -16,6 +17,7 @@ private enum ListingReviewDestination: Identifiable, Hashable {
         case .specifics: "specifics"
         case .sold(let index): "sold-\(index)"
         case .correction: "correction"
+        case .assistedExport: "assisted-export"
         }
     }
 }
@@ -30,6 +32,7 @@ struct ListingReviewView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
+    @Environment(\.appDependencies) private var dependencies
     @State private var destination: ListingReviewDestination?
     @State private var returnFocus: ListingReviewFocus = .back
     @State private var hasAppeared = false
@@ -179,6 +182,8 @@ struct ListingReviewView: View {
                 identityAndPricing(snapshot: snapshot, draft: draft)
 
                 details(snapshot: snapshot, draft: draft)
+
+                assistedExportEntry
             }
             .padding(.horizontal, 18)
             .padding(.top, 12)
@@ -508,6 +513,57 @@ struct ListingReviewView: View {
         .accessibilityFocused($focusedElement, equals: focus)
     }
 
+    private var assistedExportEntry: some View {
+        Button {
+            guard !store.isDirty else {
+                ListingReviewAnnouncement.post(
+                    AssistedExportCopy.saveBeforeSharing,
+                    assertive: true
+                )
+                return
+            }
+            returnFocus = .assistedExport
+            destination = .assistedExport
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.headline)
+                    .foregroundStyle(SnapListColorToken.action.color)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(AssistedExportCopy.entryTitle)
+                        .font(.headline)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    Text(AssistedExportCopy.entryDetail)
+                        .font(.caption)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .accessibilityHidden(true)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(SnapListColorToken.canvas.color)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(SnapListColorToken.hairline.color)
+        }
+        .accessibilityHint(
+            store.isDirty
+                ? AssistedExportCopy.saveBeforeSharing
+                : "Opens the prepared sharing pack"
+        )
+        .accessibilityFocused($focusedElement, equals: .assistedExport)
+        .accessibilityIdentifier("listing-review.assisted-export")
+    }
+
     private var footer: some View {
         Group {
             if dynamicTypeSize.isAccessibilitySize {
@@ -553,7 +609,60 @@ struct ListingReviewView: View {
             }
         case .correction:
             ListingReviewCorrectionBoundaryView()
+        case .assistedExport:
+            if let pack = assistedExportPack,
+               let summary = assistedExportSummary {
+                AssistedExportHostView(
+                    pack: pack,
+                    summary: summary,
+                    service: dependencies.assistedExportService,
+                    refreshPack: refreshAssistedExportPack
+                )
+            }
         }
+    }
+
+    private var assistedExportPack: AssistedExportPack? {
+        guard let snapshot = store.snapshot,
+              let draft = store.draft,
+              !store.isDirty else { return nil }
+        return AssistedExportPack(
+            itemID: snapshot.binding.itemID,
+            contentRevision: snapshot.binding.reviewContentRevision,
+            reviewRevision: snapshot.binding.reviewRevision,
+            title: draft.title,
+            description: draft.description,
+            effectivePrice: snapshot.pricing.effectivePrice,
+            photoReferences: snapshot.photos.sorted { $0.ordinal < $1.ordinal }
+                .map(\.url)
+        )
+    }
+
+    private var assistedExportSummary: AssistedExportItemSummary? {
+        guard let snapshot = store.snapshot,
+              let draft = store.draft,
+              let price = store.effectivePrice else { return nil }
+        return AssistedExportItemSummary(
+            title: draft.title,
+            priceText: ListingReviewCurrency.string(price, locale: locale),
+            preparedAtText: Self.preparedAtText(snapshot.evidenceAsOf)
+        )
+    }
+
+    private func refreshAssistedExportPack() async -> AssistedExportPack? {
+        // Reuse the existing Listing Review projection. It carries both the
+        // current full review revision and the content-scoped export revision,
+        // so this adds no endpoint or mutation surface.
+        await store.requestReload()
+        guard store.phase == .ready else { return nil }
+        return assistedExportPack
+    }
+
+    private static func preparedAtText(_ value: String) -> String {
+        let input = ISO8601DateFormatter()
+        input.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = input.date(from: value) else { return "now" }
+        return date.formatted(date: .omitted, time: .shortened)
     }
 
     private var secondaryButton: some View {

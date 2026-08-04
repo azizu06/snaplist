@@ -5,7 +5,7 @@ import type { PricingEvidenceReader } from "@/lib/pricing-evidence";
 import {
   ASSISTED_EXPORT_PLATFORMS,
   type AssistedExportPlatform,
-  type ExportHandoffsView,
+  type ExportHandoffPackProjection,
 } from "@/lib/export/handoff";
 import type { ListingReviewReader } from "@/lib/listing-review";
 import {
@@ -96,7 +96,7 @@ export interface AssistedExportHandoffGateway {
     bearerToken: string;
     itemId: string;
     reviewContentRevision: string;
-  }): Promise<ExportHandoffsView>;
+  }): Promise<ExportHandoffPackProjection>;
   recordHandoff(input: AssistedExportGatewayMutation): Promise<string>;
   markShared(input: AssistedExportGatewayMutation): Promise<string>;
   undoShared(input: AssistedExportGatewayMutation): Promise<void>;
@@ -1158,8 +1158,12 @@ export function createMobileApiHandler(
           exportHandoffsEnvelopeSchema.parse({
             data: {
               handoffs: ASSISTED_EXPORT_PLATFORMS.map(
-                (platform) => view[platform],
+                (platform) => view.handoffs[platform],
               ),
+              pack: {
+                effectivePrice: view.effectivePrice,
+                reviewRevision: view.reviewRevision,
+              },
             },
             meta: { requestId },
           }),

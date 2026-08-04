@@ -667,6 +667,7 @@ final class ListingReviewStoreTests: XCTestCase {
                 "runId": "55000000-0000-4000-8000-000000000001",
                 "itemId": "55000000-0000-4000-8000-000000000002",
                 "listingId": "55000000-0000-4000-8000-000000000003",
+                "reviewContentRevision": revision,
                 "reviewRevision": revision,
             ],
             "photos": [[

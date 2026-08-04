@@ -14,19 +14,91 @@ struct AssistedExportItemSummary: Equatable, Sendable {
     let preparedAtText: String
 }
 
+@MainActor
+struct AssistedExportHostView: View {
+    @State private var store: AssistedExportStore
+    @State private var observedListingRevision: UUID
+    let summary: AssistedExportItemSummary
+    let pack: AssistedExportPack
+    let refreshPack: @MainActor () async -> AssistedExportPack?
+
+    init(
+        pack: AssistedExportPack,
+        summary: AssistedExportItemSummary,
+        service: any AssistedExportServing,
+        refreshPack: @escaping @MainActor () async -> AssistedExportPack?
+    ) {
+        self.pack = pack
+        self.summary = summary
+        self.refreshPack = refreshPack
+        _observedListingRevision = State(initialValue: pack.reviewRevision)
+        _store = State(
+            initialValue: AssistedExportStore(pack: pack, service: service)
+        )
+    }
+
+    var body: some View {
+        AssistedExportView(
+            store: store,
+            summary: summary,
+            listingRevision: observedListingRevision,
+            onUpdatePack: updatePack
+        )
+        .task {
+            // The projection is the existing source of truth for the current
+            // review revision. Refresh once on entry so XPORT-05 can detect an
+            // edit made outside this mounted export screen without adding a
+            // polling or export endpoint.
+            guard let current = await refreshPack() else { return }
+            observe(current)
+        }
+        .onChange(of: pack) { _, replacement in
+            // A parent refresh prepares a candidate pack. It only marks this
+            // screen stale; the seller's Update pack action remains the sole
+            // path that replaces what they were shown.
+            observe(replacement)
+        }
+    }
+
+    private func observe(_ replacement: AssistedExportPack) {
+        observedListingRevision = replacement.reviewRevision
+        guard replacement != store.domain.pack else {
+            store.listingRevisionChanged(to: replacement.reviewRevision)
+            return
+        }
+        store.listingRevisionChanged(to: replacement.reviewRevision)
+    }
+
+    private func updatePack() {
+        Task {
+            // Only the successful projection fetched for this tap is current
+            // enough to replace the seller's pack. An earlier observed pack is
+            // not a safe fallback after a failed refresh.
+            guard let replacement = await refreshPack() else {
+                store.reportActionFailure()
+                return
+            }
+            observe(replacement)
+            await store.updatePack(to: replacement)
+            if store.domain.pack == replacement {
+                observedListingRevision = replacement.reviewRevision
+            }
+        }
+    }
+}
+
+@MainActor
 struct AssistedExportView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var domain: AssistedExportDomain
+    @Bindable private var store: AssistedExportStore
+    @State private var sharePayload: AssistedExportSharePayload?
     private let summary: AssistedExportItemSummary
     /// The listing's current revision. It originates outside this screen — the
     /// seller can edit the listing from the review surface — so this screen
     /// observes it rather than owning it.
     private let listingRevision: UUID
-    /// The pack the host currently holds. Preparing a replacement is the
-    /// host's work, so this screen observes the result rather than building it.
-    private let pack: AssistedExportPack
-    private let now: @Sendable () -> Date
+    private let deviceActions: AssistedExportDeviceActions
     /// The seller asking for a pack that matches the current listing. No
     /// default: a screen that cannot honour it should not offer the action.
     private let onUpdatePack: () -> Void
@@ -35,59 +107,97 @@ struct AssistedExportView: View {
     private let onConfirmSheetPresented: (() -> Void)?
 
     init(
-        domain: AssistedExportDomain,
+        store: AssistedExportStore,
         summary: AssistedExportItemSummary,
         listingRevision: UUID,
-        pack: AssistedExportPack,
-        now: @escaping @Sendable () -> Date = Date.init,
+        deviceActions: AssistedExportDeviceActions? = nil,
         onUpdatePack: @escaping () -> Void,
         onConfirmSheetPresented: (() -> Void)? = nil
     ) {
-        _domain = State(initialValue: domain)
+        self.store = store
         self.summary = summary
         self.listingRevision = listingRevision
-        self.pack = pack
-        self.now = now
+        self.deviceActions = deviceActions ?? .live
         self.onUpdatePack = onUpdatePack
         self.onConfirmSheetPresented = onConfirmSheetPresented
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                itemIdentity
-                if domain.isPackOutOfDate {
-                    packOutOfDate
-                } else {
-                    packMeta
+        Group {
+            switch store.phase {
+            case .loading:
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityLabel("Loading sharing pack")
+            case .failed:
+                ContentUnavailableView {
+                    Label(
+                        AssistedExportCopy.loadFailedTitle,
+                        systemImage: "exclamationmark.circle"
+                    )
+                } description: {
+                    Text(AssistedExportCopy.loadFailedDetail)
+                } actions: {
+                    Button(AssistedExportCopy.retry) {
+                        Task { await store.load() }
+                    }
+                    .accessibilityIdentifier("assisted-export.retry")
                 }
-                destinationRows
-                Color.clear.frame(height: 40)
+            case .ready:
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        itemIdentity
+                        if domain.isPackOutOfDate {
+                            packOutOfDate
+                        } else {
+                            packMeta
+                        }
+                        destinationRows
+                        Color.clear.frame(height: 40)
+                    }
+                }
             }
         }
         .background(SnapListColorToken.canvas.color)
         .navigationTitle(AssistedExportCopy.screenTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("assisted-export.screen")
         .sheet(isPresented: confirmSheetBinding) {
             confirmSheet
         }
-        .onChange(of: listingRevision) { _, revision in
-            withMotion { domain.listingRevisionChanged(to: revision) }
+        .sheet(item: $sharePayload) { payload in
+            AssistedExportActivitySheet(items: payload.items) {
+                Task {
+                    await store.recordHandoff(
+                        .sharedAnotherWay,
+                        for: payload.destination,
+                        pack: payload.pack
+                    )
+                }
+            }
         }
-        .onChange(of: pack) { _, replacement in
-            withMotion { domain.updatePack(to: replacement) }
+        .task {
+            store.listingRevisionChanged(to: listingRevision)
+            await store.load()
+        }
+        .onChange(of: listingRevision) { _, revision in
+            withMotion { store.listingRevisionChanged(to: revision) }
         }
     }
+
+    private var domain: AssistedExportDomain { store.domain }
 
     // MARK: - Identity
 
     private var itemIdentity: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(SnapListColorToken.quietFill.color)
-                .frame(width: 64, height: 64)
-                .accessibilityHidden(true)
+            AsyncImage(url: domain.pack.photoReferences.first) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                SnapListColorToken.quietFill.color
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(summary.title)
                     .snapListTypography(.cardTitle)
@@ -172,13 +282,18 @@ struct AssistedExportView: View {
 
     private func destinationRow(_ destination: AssistedExportDestination) -> some View {
         Button {
-            withMotion { domain.toggle(destination) }
+            withMotion { store.toggle(destination) }
         } label: {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(SnapListColorToken.quietFill.color)
-                    .frame(width: 34, height: 34)
-                    .accessibilityHidden(true)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(SnapListColorToken.quietFill.color)
+                    Image(systemName: "macwindow")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                }
+                .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(destination.displayName)
                         .snapListTypography(.cardTitle)
@@ -260,8 +375,9 @@ struct AssistedExportView: View {
                 // Attempt first, then report. A pre-flight availability check
                 // would state something about the seller's device that this
                 // screen has no business asserting.
-                withMotion { domain.recordHandoff(.openedDestination, for: destination) }
+                Task { await openDestination(destination) }
             }
+            .disabled(store.isWriting)
 
             deviceActions(destination)
 
@@ -275,6 +391,13 @@ struct AssistedExportView: View {
 
             if domain.undoWindow == destination {
                 undoRow()
+            }
+
+            if let message = store.actionMessage {
+                Text(message)
+                    .snapListTypography(.status)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .accessibilityIdentifier("assisted-export.action-message")
             }
         }
         .padding(.horizontal, SnapListMetrics.screenGutter)
@@ -320,22 +443,42 @@ struct AssistedExportView: View {
     }
 
     private func copyAction(_ destination: AssistedExportDestination) -> some View {
-        quietAction(
-            title: AssistedExportCopy.copyListingText,
-            systemImage: "doc.on.doc",
+        let requestedPack = domain.pack
+        let completed = store.completedAction == AssistedExportCompletedAction(
+            action: .copiedListingText,
+            destination: destination
+        )
+        return quietAction(
+            title: completed
+                ? AssistedExportCopy.copyListingTextDone
+                : AssistedExportCopy.copyListingText,
+            systemImage: completed ? "checkmark" : "doc.on.doc",
             identifier: "assisted-export.copy.\(destination.rawValue)"
         ) {
-            withMotion { domain.recordHandoff(.copiedListingText, for: destination) }
+            deviceActions.copy(requestedPack.listingText(for: destination))
+            Task {
+                await store.recordHandoff(
+                    .copiedListingText,
+                    for: destination,
+                    pack: requestedPack
+                )
+            }
         }
     }
 
     private func saveAction(_ destination: AssistedExportDestination) -> some View {
-        quietAction(
-            title: AssistedExportCopy.savePhotos(count: domain.pack.photoCount),
-            systemImage: "square.and.arrow.down",
+        let completed = store.completedAction == AssistedExportCompletedAction(
+            action: .savedPhotos,
+            destination: destination
+        )
+        return quietAction(
+            title: completed
+                ? AssistedExportCopy.savedPhotosDone
+                : AssistedExportCopy.savePhotos(count: domain.pack.photoCount),
+            systemImage: completed ? "checkmark" : "square.and.arrow.down",
             identifier: "assisted-export.save.\(destination.rawValue)"
         ) {
-            withMotion { domain.recordHandoff(.savedPhotos, for: destination) }
+            Task { await savePhotos(for: destination) }
         }
     }
 
@@ -366,11 +509,12 @@ struct AssistedExportView: View {
                 .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
         }
         .accessibilityIdentifier(identifier)
+        .disabled(store.isWriting)
     }
 
     private func shareAnotherWay(_ destination: AssistedExportDestination) -> some View {
         Button {
-            withMotion { domain.recordHandoff(.sharedAnotherWay, for: destination) }
+            Task { await prepareShareSheet(for: destination) }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "square.and.arrow.up")
@@ -386,6 +530,7 @@ struct AssistedExportView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("assisted-export.share-another-way.\(destination.rawValue)")
+        .disabled(store.isWriting)
     }
 
     private func whatHappensNext(_ destination: AssistedExportDestination) -> some View {
@@ -408,7 +553,7 @@ struct AssistedExportView: View {
     private func markAsShared(_ destination: AssistedExportDestination) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withMotion { domain.presentConfirmSheet(for: destination) }
+                withMotion { store.presentConfirmSheet(for: destination) }
             } label: {
                 Text(AssistedExportCopy.markAsShared)
                     .snapListTypography(.rowTitle)
@@ -425,6 +570,7 @@ struct AssistedExportView: View {
                     .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
             }
             .accessibilityIdentifier("assisted-export.mark-as-shared.\(destination.rawValue)")
+            .disabled(store.isWriting)
 
             Text(AssistedExportCopy.markAsSharedSupport)
                 .snapListTypography(.metadata)
@@ -439,7 +585,7 @@ struct AssistedExportView: View {
                 .snapListTypography(.status)
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
             Button {
-                withMotion { domain.undoShared() }
+                Task { await store.undoShared() }
             } label: {
                 Text(AssistedExportCopy.undo)
                     .snapListTypography(.status)
@@ -453,6 +599,7 @@ struct AssistedExportView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("assisted-export.undo")
+            .disabled(store.isWriting)
             Spacer(minLength: 0)
         }
         .frame(minHeight: SnapListMetrics.minimumTouchTarget)
@@ -472,7 +619,7 @@ struct AssistedExportView: View {
         Binding(
             get: { domain.confirmSheet != nil },
             set: { presented in
-                if !presented { domain.dismissConfirmSheet() }
+                if !presented { store.dismissConfirmSheet() }
             }
         )
     }
@@ -493,19 +640,71 @@ struct AssistedExportView: View {
                 // Addressed as `button.primary.yes,-mark-as-shared`; see the
                 // note on the open action about the component's own identifier.
                 SnapListPrimaryButton(title: AssistedExportCopy.confirmShared) {
-                    withMotion { domain.confirmShared(at: now()) }
+                    Task { await store.confirmShared() }
                 }
+                .disabled(store.isWriting)
                 SnapListSecondaryButton(title: AssistedExportCopy.confirmNotYet) {
-                    withMotion { domain.dismissConfirmSheet() }
+                    withMotion { store.dismissConfirmSheet() }
                 }
+                .disabled(store.isWriting)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
             .padding(.bottom, 30)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .presentationDetents([.height(260)])
             .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(store.isWriting)
             .onAppear { onConfirmSheetPresented?() }
+        }
+    }
+
+    // MARK: - Device handoff
+
+    private func openDestination(
+        _ destination: AssistedExportDestination
+    ) async {
+        let requestedPack = domain.pack
+        let didOpen = await deviceActions.open(destination)
+        guard didOpen else {
+            withMotion { store.destinationDidNotOpen(destination) }
+            return
+        }
+        await store.recordHandoff(
+            .openedDestination,
+            for: destination,
+            pack: requestedPack
+        )
+    }
+
+    private func savePhotos(
+        for destination: AssistedExportDestination
+    ) async {
+        let requestedPack = domain.pack
+        await store.savePhotos(for: destination, pack: requestedPack) {
+            let images = try await deviceActions.loadPhotos(
+                requestedPack.photoReferences
+            )
+            try await deviceActions.savePhotos(images)
+        }
+    }
+
+    private func prepareShareSheet(
+        for destination: AssistedExportDestination
+    ) async {
+        let requestedPack = domain.pack
+        do {
+            let images = try await deviceActions.loadPhotos(
+                requestedPack.photoReferences
+            )
+            guard domain.pack == requestedPack,
+                  !domain.isPackOutOfDate else { return }
+            sharePayload = AssistedExportSharePayload(
+                destination: destination,
+                pack: requestedPack,
+                items: [requestedPack.listingText(for: destination)] + images
+            )
+        } catch {
+            store.reportActionFailure()
         }
     }
 

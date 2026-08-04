@@ -133,13 +133,16 @@ enum ListingReviewFixture: String, Equatable {
 
 /// Assisted-export scenarios a UI test can launch into (issue #581).
 ///
-/// `revisionChangeWhileConfirming` is the only one that exists for a behavior
+/// `packUpdateWhileConfirming` is the only one that exists for a behavior
 /// the pure domain cannot prove on its own: the confirm sheet coming down when
-/// the listing moves while it is presented.
+/// its mounted pack is replaced.
 enum AssistedExportFixture: String, Equatable {
     case prepared
-    case revisionChangeWhileConfirming = "revision-change-while-confirming"
+    case packUpdateWhileConfirming = "pack-update-while-confirming"
     case packOutOfDate = "pack-out-of-date"
+    case honestWording = "honest-wording"
+    case destinationOpenFailure = "destination-open-failure"
+    case saveDeduplication = "save-deduplication"
 }
 
 enum SubmissionFixture: String, Equatable {
