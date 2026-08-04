@@ -8,6 +8,8 @@ const {
   configurationFor,
   entitlementFor,
   logServerError,
+  createConfiguredGuestClaimHandoff,
+  verifyConfiguredGuestClaimHandoff,
 } = vi.hoisted(() => ({
   verifyToken: vi.fn(),
   createAdminClient: vi.fn(),
@@ -16,6 +18,8 @@ const {
   configurationFor: vi.fn(),
   entitlementFor: vi.fn(),
   logServerError: vi.fn(),
+  createConfiguredGuestClaimHandoff: vi.fn(),
+  verifyConfiguredGuestClaimHandoff: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ verifyToken }));
@@ -29,11 +33,15 @@ vi.mock("@/lib/billing", async (importOriginal) => ({
   createSupabaseNativeSubscriptionBridge,
   resolveRevenueCatServerConfig,
 }));
+vi.mock("@/lib/app-attest/configured-guest-handoff", () => ({
+  createConfiguredGuestClaimHandoff,
+}));
 
 import { GET as getHealth } from "./health/route";
 import { GET as getSession } from "./session/route";
 import { GET as getAiItemEntitlement } from "./entitlements/ai-items/route";
 import { POST as postRevenueCatIdentity } from "./billing/revenuecat/identity/route";
+import { verifyGuestClaimHandoff } from "./mobile-api-composition";
 
 const environmentKeys = ["CLERK_SECRET_KEY", "CLERK_AUTHORIZED_PARTIES"] as const;
 
@@ -57,6 +65,9 @@ beforeEach(() => {
   createSupabaseNativeSubscriptionBridge.mockReturnValue({
     configurationFor,
     entitlementFor,
+  });
+  createConfiguredGuestClaimHandoff.mockReturnValue({
+    verifyGuestClaimHandoff: verifyConfiguredGuestClaimHandoff,
   });
   configurationFor.mockResolvedValue({
     configured: false,
@@ -157,5 +168,17 @@ describe("production mobile API route composition", () => {
 
     expect(response.status).toBe(401);
     expect(entitlementFor).not.toHaveBeenCalled();
+  });
+
+  it("supplies the App Attest handoff verifier through the production dependency slot", async () => {
+    const verified = {
+      guestUserId: `guest_${"a".repeat(48)}`,
+      recoveryId: "11111111-1111-4111-8111-111111111111",
+      recoveryTokenHash: "b".repeat(64),
+    };
+    verifyConfiguredGuestClaimHandoff.mockResolvedValue(verified);
+
+    await expect(verifyGuestClaimHandoff("opaque-handoff")).resolves.toEqual(verified);
+    expect(verifyConfiguredGuestClaimHandoff).toHaveBeenCalledWith("opaque-handoff");
   });
 });

@@ -416,13 +416,6 @@ describe("SwiftUI mobile HTTP contract", () => {
     },
   );
 
-  it("keeps future implementation ownership explicit in the contract", () => {
-    const serialized = JSON.stringify(contract);
-    for (const issue of [174]) {
-      expect(serialized).toContain(`\"x-owner-issue\":${issue}`);
-    }
-  });
-
   it("keeps #175's claim result terminal and prevents clients from setting TTL or ownership", () => {
     const claim = contract.paths["/v1/guest/claims"].post as Record<string, unknown>;
     expect(claim).toMatchObject({

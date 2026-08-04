@@ -1,6 +1,13 @@
 import { existsSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createGuestAttestationHandler,
+  createGuestClaimHandoffService,
+  InMemoryGuestClaimHandoffStore,
+} from "@/lib/app-attest/guest-handoff";
+import { createMobileApiHandler } from "@/lib/mobile-api";
 
 /**
  * `src/lib/mobile-api/app.ts` is a self-contained web-standard router that
@@ -20,6 +27,86 @@ const contract = JSON.parse(
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
 const SWIFT_CLIENT_ROOT = resolve("ios/SnapList");
 
+const APP_ID = "TEAMID1234.dev.snaplist.ios";
+const APP_ATTEST_KEY_ID = Buffer.alloc(32, 0x61).toString("base64");
+const RECOVERY_ID = "11111111-1111-4111-8111-111111111111";
+const RECOVERY_TOKEN = "recovery_v1_abcdefghijklmnopqrstuvwxyz0123456789";
+const PHOTO_SET_FINGERPRINT = "b".repeat(64);
+const GUEST_USER_ID = `guest_${createHash("sha256")
+  .update(APP_ID)
+  .update("\0")
+  .update(APP_ATTEST_KEY_ID)
+  .digest("hex")
+  .slice(0, 48)}`;
+
+function handoffClientData(photoSetFingerprint = PHOTO_SET_FINGERPRINT): string {
+  return Buffer.from(
+    JSON.stringify({
+      version: 1,
+      purpose: "guest-claim-handoff",
+      recoveryId: RECOVERY_ID,
+      recoveryToken: RECOVERY_TOKEN,
+      photoIdentity: {
+        kind: "content_sha256_set_v1",
+        fingerprint: photoSetFingerprint,
+      },
+    }),
+  ).toString("base64");
+}
+
+function appAttestAssertion() {
+  return {
+    appId: APP_ID,
+    bundleVersion: "1",
+    counter: 1,
+    environment: "production" as const,
+    keyId: APP_ATTEST_KEY_ID,
+    kind: "assertion" as const,
+    requestHash: "c".repeat(43),
+    status: "verified" as const,
+    validationCategory: 2,
+  };
+}
+
+function guestHandoffContractHarness(
+  clock: () => Date = () => new Date("2026-08-02T16:00:00.000Z"),
+) {
+  const store = new InMemoryGuestClaimHandoffStore({
+    attestedKeys: [{
+      appId: APP_ID,
+      environment: "production",
+      keyId: APP_ATTEST_KEY_ID,
+    }],
+    recoveries: [{
+      guestUserId: GUEST_USER_ID,
+      photoSetFingerprint: PHOTO_SET_FINGERPRINT,
+      recoveryId: RECOVERY_ID,
+      recoveryTokenHash: createHash("sha256").update(RECOVERY_TOKEN).digest("hex"),
+    }],
+  });
+  const handoffs = createGuestClaimHandoffService({
+    appId: APP_ID,
+    clock,
+    environment: "production",
+    handoffId: () => "22222222-2222-4222-8222-222222222222",
+    randomBytes: () => Buffer.alloc(32, 0x62),
+    signingKey: Buffer.alloc(32, 0x63),
+    store,
+    ttlMs: 5 * 60 * 1_000,
+  });
+  const verifyAssertion = vi.fn().mockResolvedValue(appAttestAssertion());
+  const attestations = createGuestAttestationHandler({
+    appAttest: {
+      issueChallenge: vi.fn(),
+      verifyAttestation: vi.fn(),
+      verifyAssertion,
+    },
+    handoffs,
+    requestId: () => "req_attestation",
+  });
+  return { attestations, handoffs, store, verifyAssertion };
+}
+
 /**
  * `contract-only` operations publish a shape without claiming to serve it.
  * Everything else asserts a live endpoint, so it needs a route.
@@ -38,8 +125,8 @@ const SERVED_STATUSES = new Set(["implemented", "proof"]);
 const UNROUTED_BY_DESIGN = new Map<string, string>([
   [
     "/v1/guest/claims",
-    "The handler needs the #174 App Attest handoff verifier, which the contract "
-      + "still marks contract-only, so there is no verifier to compose a route from.",
+    "Issue #593 owns the Clerk/RLS guest-claim route composition; #610 supplies "
+      + "its production App Attest handoff verifier without taking that route surface.",
   ],
   [
     "/v1/webhooks/revenuecat",
@@ -146,6 +233,289 @@ function exportedMethods(routeFile: string): string[] {
 }
 
 describe("mobile API contract to App Router routing", () => {
+  it("publishes guest App Attest handoff issuance as a live POST route", () => {
+    expect(contract.paths["/v1/guest/attestations"]?.post).toMatchObject({
+      "x-owner-issue": 610,
+      "x-implementation-status": "implemented",
+    });
+    expect(existsSync(routeFileFor("/v1/guest/attestations"))).toBe(true);
+    expect(exportedMethods(routeFileFor("/v1/guest/attestations"))).toContain("POST");
+  });
+
+  it("documents the exact handoff assertion request, success, and fail-closed statuses", () => {
+    expect(contract.paths["/v1/guest/attestations"]?.post).toMatchObject({
+      operationId: "issueGuestClaimHandoff",
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/GuestClaimHandoffRequest" },
+          },
+        },
+        required: true,
+      },
+      responses: {
+        "201": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/GuestClaimHandoffEnvelope" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/InvalidRequest" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "503": { $ref: "#/components/responses/Unavailable" },
+      },
+    });
+  });
+
+  it("claims the same recovery under the Clerk principal after a verified App Attest assertion", async () => {
+    const { attestations, handoffs, verifyAssertion } = guestHandoffContractHarness();
+    const encodedClientData = handoffClientData();
+    const issued = await attestations(
+      new Request("https://snaplist.test/v1/guest/attestations", {
+        body: JSON.stringify({
+          assertionObject: Buffer.from("crafted-cbor").toString("base64"),
+          challengeId: "33333333-3333-4333-8333-333333333333",
+          clientData: encodedClientData,
+          keyId: APP_ATTEST_KEY_ID,
+          operation: "handoff",
+        }),
+        method: "POST",
+      }),
+    );
+    expect(issued.status).toBe(201);
+    expect(verifyAssertion).toHaveBeenCalledWith({
+      assertionObject: Buffer.from("crafted-cbor").toString("base64"),
+      challengeId: "33333333-3333-4333-8333-333333333333",
+      keyId: APP_ATTEST_KEY_ID,
+      requestBody: Buffer.from(encodedClientData, "base64"),
+    });
+    const issuedBody = await issued.json();
+
+    const claimGuestRecovery = vi.fn().mockResolvedValue({
+      accountRecovery: {
+        encryptedArtifact: {
+          algorithm: "aes-256-gcm",
+          ciphertext: Buffer.from("encrypted-draft").toString("base64"),
+          keyEnvelope: Buffer.alloc(32, 1).toString("base64"),
+          keyId: "guest-recovery-v1",
+          nonce: Buffer.alloc(12, 2).toString("base64"),
+          tag: Buffer.alloc(16, 3).toString("base64"),
+          version: 1,
+        },
+        storageManifest: [{
+          byteLength: 128,
+          destinationPath: "user_account/guest-claims/front.enc",
+          encryption: {
+            algorithm: "aes-256-gcm",
+            keyId: "guest-recovery-v1",
+            nonce: Buffer.alloc(12, 4).toString("base64"),
+            tag: Buffer.alloc(16, 5).toString("base64"),
+          },
+          sha256: "d".repeat(64),
+        }],
+      },
+      draftId: "44444444-4444-4444-8444-444444444444",
+      itemId: "55555555-5555-4555-8555-555555555555",
+      outcome: "claimed",
+      purgeLocalRecovery: true,
+      runId: "66666666-6666-4666-8666-666666666666",
+    });
+    const claim = createMobileApiHandler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_account" }),
+      claimGuestRecovery,
+      verifyGuestClaimHandoff: handoffs.verify,
+      worker: { consume: vi.fn() },
+      requestId: () => "req_claim",
+    });
+    const claimed = await claim(
+      new Request("https://snaplist.test/v1/guest/claims", {
+        headers: {
+          authorization: "Bearer clerk-jwt",
+          "idempotency-key": "77777777-7777-4777-8777-777777777777",
+          "x-snaplist-guest-handoff": issuedBody.data.handoffToken,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(claimed.status).toBe(200);
+    expect(claimGuestRecovery).toHaveBeenCalledWith(expect.objectContaining({
+      handoff: {
+        guestUserId: GUEST_USER_ID,
+        recoveryId: RECOVERY_ID,
+        recoveryTokenHash: createHash("sha256").update(RECOVERY_TOKEN).digest("hex"),
+      },
+      targetUserId: "user_account",
+    }));
+  });
+
+  it("rejects a replayed handoff token before a second tenant claim", async () => {
+    const { attestations, handoffs } = guestHandoffContractHarness();
+    const issued = await attestations(
+      new Request("https://snaplist.test/v1/guest/attestations", {
+        body: JSON.stringify({
+          assertionObject: Buffer.from("crafted-cbor").toString("base64"),
+          challengeId: "33333333-3333-4333-8333-333333333333",
+          clientData: handoffClientData(),
+          keyId: APP_ATTEST_KEY_ID,
+          operation: "handoff",
+        }),
+        method: "POST",
+      }),
+    );
+    const handoffToken = (await issued.json()).data.handoffToken as string;
+    const claimGuestRecovery = vi.fn().mockResolvedValue({
+      draftId: "44444444-4444-4444-8444-444444444444",
+      itemId: "55555555-5555-4555-8555-555555555555",
+      outcome: "expired",
+      purgeLocalRecovery: true,
+      runId: "66666666-6666-4666-8666-666666666666",
+    });
+    const claim = createMobileApiHandler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_account" }),
+      claimGuestRecovery,
+      verifyGuestClaimHandoff: handoffs.verify,
+      worker: { consume: vi.fn() },
+      requestId: () => "req_claim",
+    });
+    const request = (idempotencyKey: string) =>
+      new Request("https://snaplist.test/v1/guest/claims", {
+        headers: {
+          authorization: "Bearer clerk-jwt",
+          "idempotency-key": idempotencyKey,
+          "x-snaplist-guest-handoff": handoffToken,
+        },
+        method: "POST",
+      });
+
+    expect((await claim(request("77777777-7777-4777-8777-777777777777"))).status).toBe(200);
+    expect((await claim(request("88888888-8888-4888-8888-888888888888"))).status).toBe(401);
+    expect(claimGuestRecovery).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an expired handoff token before tenant claim", async () => {
+    let now = new Date("2026-08-02T16:00:00.000Z");
+    const { attestations, handoffs } = guestHandoffContractHarness(() => now);
+    const issued = await attestations(
+      new Request("https://snaplist.test/v1/guest/attestations", {
+        body: JSON.stringify({
+          assertionObject: Buffer.from("crafted-cbor").toString("base64"),
+          challengeId: "33333333-3333-4333-8333-333333333333",
+          clientData: handoffClientData(),
+          keyId: APP_ATTEST_KEY_ID,
+          operation: "handoff",
+        }),
+        method: "POST",
+      }),
+    );
+    const handoffToken = (await issued.json()).data.handoffToken as string;
+    now = new Date("2026-08-02T16:05:00.000Z");
+    const claimGuestRecovery = vi.fn();
+    const claim = createMobileApiHandler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_account" }),
+      claimGuestRecovery,
+      verifyGuestClaimHandoff: handoffs.verify,
+      worker: { consume: vi.fn() },
+      requestId: () => "req_claim",
+    });
+
+    const response = await claim(
+      new Request("https://snaplist.test/v1/guest/claims", {
+        headers: {
+          authorization: "Bearer clerk-jwt",
+          "idempotency-key": "77777777-7777-4777-8777-777777777777",
+          "x-snaplist-guest-handoff": handoffToken,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(claimGuestRecovery).not.toHaveBeenCalled();
+  });
+
+  it("rejects a handoff when the recovery no longer has the attested photo set", async () => {
+    const { attestations, handoffs, store } = guestHandoffContractHarness();
+    const issued = await attestations(
+      new Request("https://snaplist.test/v1/guest/attestations", {
+        body: JSON.stringify({
+          assertionObject: Buffer.from("crafted-cbor").toString("base64"),
+          challengeId: "33333333-3333-4333-8333-333333333333",
+          clientData: handoffClientData(),
+          keyId: APP_ATTEST_KEY_ID,
+          operation: "handoff",
+        }),
+        method: "POST",
+      }),
+    );
+    const handoffToken = (await issued.json()).data.handoffToken as string;
+    store.setRecoveryPhotoSetFingerprint(RECOVERY_ID, "e".repeat(64));
+    const claimGuestRecovery = vi.fn();
+    const claim = createMobileApiHandler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_account" }),
+      claimGuestRecovery,
+      verifyGuestClaimHandoff: handoffs.verify,
+      worker: { consume: vi.fn() },
+      requestId: () => "req_claim",
+    });
+
+    const response = await claim(
+      new Request("https://snaplist.test/v1/guest/claims", {
+        headers: {
+          authorization: "Bearer clerk-jwt",
+          "idempotency-key": "77777777-7777-4777-8777-777777777777",
+          "x-snaplist-guest-handoff": handoffToken,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(claimGuestRecovery).not.toHaveBeenCalled();
+  });
+
+  it("refuses the guest allowance when the assertion key was never attested", async () => {
+    const { handoffs } = guestHandoffContractHarness();
+    const attestations = createGuestAttestationHandler({
+      appAttest: {
+        issueChallenge: vi.fn(),
+        verifyAttestation: vi.fn(),
+        verifyAssertion: vi.fn().mockResolvedValue({
+          code: "key_not_attested",
+          kind: "assertion",
+          status: "invalid",
+        }),
+      },
+      handoffs,
+      requestId: () => "req_attestation",
+    });
+
+    const response = await attestations(
+      new Request("https://snaplist.test/v1/guest/attestations", {
+        body: JSON.stringify({
+          assertionObject: Buffer.from("crafted-cbor").toString("base64"),
+          challengeId: "33333333-3333-4333-8333-333333333333",
+          clientData: handoffClientData(),
+          keyId: APP_ATTEST_KEY_ID,
+          operation: "handoff",
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "forbidden",
+        message: "App Attest is required for the guest allowance.",
+        requestId: "req_attestation",
+      },
+    });
+  });
+
   it("serves every published contract or client-called v1 path", () => {
     const unreachable = missingRoutePaths(routeGuardPaths());
 
