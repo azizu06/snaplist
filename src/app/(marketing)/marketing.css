@@ -981,7 +981,8 @@ html:has(.mkt) {
 }
 
 .mkt .mkt-bento .card {
-  min-height: 196px;
+  min-height: 0;
+  aspect-ratio: 1 / 0.9;
   border-color: var(--hairline-2);
   border-radius: 16px;
   background: var(--canvas);
@@ -1024,6 +1025,12 @@ html:has(.mkt) {
 .mkt .mkt-bento .mkt-bento__icon svg {
   width: 19px;
   height: 19px;
+}
+
+@media (min-width: 640px) {
+  .mkt .mkt-bento {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .mkt-loop-section {
@@ -1106,18 +1113,19 @@ html:has(.mkt) {
 
 .mkt-loop-card__marketplace-logo {
   display: block;
-  width: 104px;
-  height: 22px;
+  width: auto !important;
+  height: 24px !important;
+  max-width: 100%;
+  align-self: flex-start;
   object-fit: contain;
   object-position: left center;
 }
 
-/* The vendor's canonical Marketplace mark is portrait; keep its visual width
- * comparable to the other wordmarks without distorting the supplied SVG. */
-.mkt-loop-card__marketplace-logo--facebook {
-  height: 52px;
-  width: auto;
-  align-self: flex-start;
+/* Logotyp's Mercari SVG includes generous transparent padding. Size only its
+ * width so its visible wordmark remains legible while the SVG keeps its ratio. */
+.mkt-loop-card__marketplace-logo--mercari {
+  width: 72px !important;
+  height: auto !important;
 }
 
 .mkt-loop-card__marketplace-name {

@@ -14,6 +14,13 @@ const APPROVED_MARKETING_TOKENS = new Set([
   "#f7f9ff", "#3665f3", "#244cc0",
 ]);
 
+const VENDORED_WORDMARK_COLORS = new Map([
+  // Logotyp's supplied Mercari wordmark uses this blue inside its standalone SVG.
+  [resolve("public/marketplaces/mercari.svg"), new Set(["#" + "5e6df2"])],
+  // Existing WorldVectorLogo Marketplace mark keeps its archive-supplied blue inside its standalone SVG.
+  [resolve("public/marketplaces/facebook-marketplace.svg"), new Set(["#" + "3a589e"])],
+]);
+
 function marketingSourceFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((entry) => {
     const file = resolve(directory, entry);
@@ -38,5 +45,15 @@ describe("marketing palette", () => {
       .filter(({ hex }) => !APPROVED_MARKETING_TOKENS.has(hex) || isGreenDominant(hex));
 
     expect(violations).toEqual([]);
+  });
+
+  it("confines vendored marketplace brand colors to their file-specific allowlists", () => {
+    for (const [file, allowedColors] of VENDORED_WORDMARK_COLORS) {
+      const colors = [...readFileSync(file, "utf8").matchAll(/#[0-9a-f]{6}\b/gi)]
+        .map((match) => match[0].toLowerCase());
+
+      expect(colors, relative(process.cwd(), file)).not.toEqual([]);
+      expect(colors.every((color) => allowedColors.has(color))).toBe(true);
+    }
   });
 });

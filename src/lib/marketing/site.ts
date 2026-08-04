@@ -159,42 +159,43 @@ export const VALUE_CARDS = [
   },
 ] as const;
 
-/** v6-restyled continuation of the live MagicBento grid. */
+/** Uniform Why-choose grid: one equal card per product truth. */
 export const MARKETING_BENTO_CARDS = [
   {
     icon: "chart" as const,
-    title: "Sold prices, not asking prices",
+    title: "Sold-price evidence",
     description:
-      "See sold-price evidence when it is available. Estimates stay clearly labeled when it is not.",
-    className: "sm:col-span-2 lg:col-span-2",
+      "See verified sold prices when available. When evidence is missing, SnapList labels the estimate.",
   },
   {
     icon: "mic" as const,
-    title: "Add seller context with a voice note",
+    title: "Voice notes add context",
     description:
       "Add up to 15 seconds of context. Photos and verified evidence remain the source of truth.",
-    className: "sm:col-span-2 lg:col-span-2",
   },
   {
     icon: "pencil" as const,
-    title: "Edit before anything leaves SnapList",
+    title: "Edit every detail",
     description:
-      "Review the title, condition, details, photos, and price before you confirm an eBay publish.",
-    className: "sm:col-span-2 lg:col-span-2",
+      "Review the title, condition, photos, details, and price before you confirm an eBay publish.",
   },
   {
     icon: "share" as const,
-    title: "Prepared for your share sheet",
+    title: "Prepared handoffs",
     description:
       "Facebook Marketplace, Mercari, and Depop get prepared text and photos. You finish each form yourself.",
-    className: "sm:col-span-2 lg:col-span-2",
   },
   {
     icon: "check" as const,
-    title: "You confirm before eBay publishes",
+    title: "eBay needs your confirmation",
     description:
-      "SnapList publishes to eBay only after your explicit confirmation.",
-    className: "sm:col-span-2 lg:col-span-4",
+      "SnapList publishes only to eBay. It never publishes there until you explicitly confirm.",
+  },
+  {
+    icon: "trophy" as const,
+    title: TROPHY_WALL.title,
+    description:
+      "Follow every draft from intake to review. See eBay publishes and prepared handoffs in one place.",
   },
 ] as const;
 

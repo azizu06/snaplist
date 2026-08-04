@@ -214,6 +214,27 @@ describe("marketing honesty", () => {
 });
 
 describe("marketing destinations", () => {
+  it("renders six equal Why-choose cards without span overrides", () => {
+    const $ = load(renderToStaticMarkup(<MarketingBento />));
+    const cards = $(".mkt-bento .card");
+
+    expect(cards).toHaveLength(6);
+    cards.each((_, card) => {
+      expect($(card).attr("class")).not.toMatch(/(?:^|\\s)(?:sm:|lg:)?col-span-/);
+    });
+
+    expect(cards.map((_, card) => $(card).find("h3").text()).get()).toContain("Trophy Wall");
+  });
+
+  it("uses a three-column, equal-card Why-choose grid on tablet and desktop", () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const desktopGrid = css.match(/@media \(min-width: 640px\)\s*\{\s*\.mkt \.mkt-bento\s*\{[^}]*\}/)?.[0] ?? "";
+    const cards = css.match(/\.mkt \.mkt-bento \.card\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(desktopGrid).toMatch(/grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
+    expect(cards).toMatch(/aspect-ratio:/);
+  });
+
   it("renders the launch waitlist form and its quiet states", () => {
     const landing = load(renderToStaticMarkup(<LandingPage />));
     const form = landing("form.mkt-waitlist");
@@ -291,8 +312,7 @@ describe("marketing destinations", () => {
     expect($(".mkt-loop-section__heading h2").text()).toBe(site.LOOP_TITLE);
     expect($(".mkt-storefronts").length).toBe(0);
     expect($(".mkt-trophy").length).toBe(0);
-    expect($(".mkt-bento").text()).not.toContain(site.TROPHY_WALL.title);
-    expect($(".mkt-bento").text()).not.toContain(site.TROPHY_WALL.body);
+    expect($(".mkt-bento").text()).toContain(site.TROPHY_WALL.title);
     expect($(".mkt-tablist").text()).toContain(site.TROPHY_WALL.title);
     expect($(".mkt-tablist").text()).toContain(site.TROPHY_WALL.body);
   });
@@ -356,7 +376,7 @@ describe("marketing destinations", () => {
     expect($(".mkt-bento .mkt-bento__label").length).toBe(0);
   });
 
-  it("uses the vendored Facebook Marketplace wordmark and leaves bento copy fully visible", () => {
+  it("uses intrinsic marketplace wordmarks and leaves bento copy fully visible", () => {
     const marketplaceMark = readFileSync(resolve("public/marketplaces/facebook-marketplace.svg"), "utf8");
     const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
     const $ = load(renderToStaticMarkup(<MarketplaceLoop />));
@@ -371,26 +391,25 @@ describe("marketing destinations", () => {
 
     expect(visibleSequence.find(".mkt-loop-card__marketplace-logo[alt='Facebook Marketplace']")).toHaveLength(1);
     expect(visibleSequence.find(".mkt-loop-card__marketplace-logo[alt=''][aria-hidden='true']")).toHaveLength(2);
-    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook")).toHaveLength(3);
-    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook").toArray().map((mark) => $(mark).attr("width")))
+    const facebookMarks = visibleSequence.find(".mkt-loop-card__marketplace-logo[alt='Facebook Marketplace'], .mkt-loop-card__marketplace-logo[alt=''][aria-hidden='true']")
+      .filter((_, mark) => Boolean($(mark).attr("src")?.includes("facebook-marketplace.svg")));
+
+    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook")).toHaveLength(0);
+    expect(facebookMarks).toHaveLength(3);
+    expect(facebookMarks.toArray().map((mark) => $(mark).attr("width")))
       .toEqual(["2271", "2271", "2271"]);
-    expect(visibleSequence.find(".mkt-loop-card__marketplace-logo--facebook").toArray().map((mark) => $(mark).attr("height")))
+    expect(facebookMarks.toArray().map((mark) => $(mark).attr("height")))
       .toEqual(["2500", "2500", "2500"]);
-    expect(css).toMatch(/\.mkt-loop-card__marketplace-logo--facebook\s*\{[^}]*height:\s*52px;[^}]*width:\s*auto;[^}]*align-self:\s*flex-start/);
+    expect(css).toMatch(/\.mkt-loop-card__marketplace-logo\s*\{[^}]*width:\s*auto !important;[^}]*height:\s*24px !important;[^}]*max-width:\s*100%;[^}]*align-self:\s*flex-start/);
+    expect(css).toMatch(/\.mkt-loop-card__marketplace-logo--mercari\s*\{[^}]*width:\s*72px !important;[^}]*height:\s*auto !important/);
     expect(bentoRules).not.toMatch(/line-clamp|text-overflow|white-space:\s*nowrap|overflow:\s*hidden/);
   });
 
   it("fills every bento row at tablet and desktop widths", () => {
     const cards = site.MARKETING_BENTO_CARDS;
 
-    expect(cards).toHaveLength(5);
-    expect(cards.map((card) => card.className)).toEqual([
-      "sm:col-span-2 lg:col-span-2",
-      "sm:col-span-2 lg:col-span-2",
-      "sm:col-span-2 lg:col-span-2",
-      "sm:col-span-2 lg:col-span-2",
-      "sm:col-span-2 lg:col-span-4",
-    ]);
+    expect(cards).toHaveLength(6);
+    expect(cards.every((card) => !("className" in card))).toBe(true);
   });
 
   it("covers every served app icon with the rounded-corner generator", async () => {
