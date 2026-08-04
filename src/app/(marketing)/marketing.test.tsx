@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { load } from "cheerio";
 import { renderToStaticMarkup } from "react-dom/server";
+import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SiteFooter } from "@/components/marketing/site-footer";
 import { SiteHeader } from "@/components/marketing/site-header";
@@ -12,6 +13,7 @@ import * as site from "@/lib/marketing/site";
 import LandingPage from "./page";
 import PrivacyPage from "./privacy/page";
 import SupportPage from "./support/page";
+import TermsPage from "./terms/page";
 
 /**
  * The marketing surface is the one place SnapList makes claims to people who
@@ -99,6 +101,7 @@ function marketingBlocks(): string[] {
     renderToStaticMarkup(<LandingPage />),
     renderToStaticMarkup(<PrivacyPage />),
     renderToStaticMarkup(<SupportPage />),
+    renderToStaticMarkup(<TermsPage />),
     renderToStaticMarkup(<SiteFooter />),
   ].join("\n");
 
@@ -169,6 +172,10 @@ describe("marketing honesty", () => {
     expect(sentences.length).toBeGreaterThan(40);
     expect(sentences.join(" ")).toMatch(/eBay/);
     expect(sentences.join(" ")).toMatch(/Mercari/);
+  });
+
+  it("scans the Terms capability claims", () => {
+    expect(marketingBlocks()).toContain(site.TERMS.decisions);
   });
 
   it("never puts an assisted marketplace on the receiving end of a publish", () => {
@@ -289,17 +296,37 @@ describe("marketing destinations", () => {
 
     expect(landing(".mkt-hero form.mkt-waitlist").length).toBe(1);
     expect(landing(".mkt-cta").length).toBe(0);
-    expect(footer("form.mkt-waitlist").length).toBe(1);
-    expect(footer(".mkt-footer__landscape .mkt-footer__scout").length).toBe(1);
+    expect(footer("form.mkt-waitlist").length).toBe(0);
+    expect(footer(".mkt-footer__landscape, .mkt-footer__scout").length).toBe(0);
+    expect(footer(".mkt-footer__lockup .mkt-lockup__mark").length).toBe(1);
+    expect(footer(".mkt-footer__tagline").text()).toBe(site.FOOTER.tagline);
+    expect(footer(".mkt-footer__legal-links a").map((_, link) => footer(link).text()).get()).toEqual([
+      ...site.FOOTER.legalLinks.map((link) => link.label),
+    ]);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("uses one heading per landing section without stacked ledes", () => {
     const $ = load(renderToStaticMarkup(<LandingPage />));
 
-    expect($(".mkt-why__lede, .mkt-loop-section__heading p, .mkt-trophy__accent, .mkt-trophy__body").length).toBe(0);
-    expect($(".mkt-loop-section__heading h2").text()).toBe("From camera roll to every storefront.");
+    expect($(".mkt-why__lede, .mkt-loop-section__heading p, .mkt-trophy__accent").length).toBe(0);
+    expect($(".mkt-loop-section__heading h2").text()).toBe(site.LOOP_TITLE);
     expect($(".mkt-storefronts").length).toBe(0);
+    expect($(".mkt-trophy__copy h2").length).toBe(1);
+    expect($(".mkt-trophy__body").text()).toBe(site.TROPHY_WALL.body);
+    expect($(".mkt-trophy__chips [role='listitem']").map((_, chip) => $(chip).text()).get())
+      .toEqual(site.TROPHY_WALL.states);
+  });
+
+  it("uses one green serif italic accent word in the rescaled hero", () => {
+    const $ = load(renderToStaticMarkup(<LandingPage />));
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+
+    expect($(".mkt-hero h1 .mkt-hero__accent").length).toBe(1);
+    expect($(".mkt-hero h1 .mkt-hero__accent").text()).toBe(site.HERO.accentWord);
+    expect(css).toMatch(/\.mkt-h1\s*\{[^}]*font-size:\s*clamp\(2\.5rem,\s*8vw,\s*6rem\)/);
+    expect(css).toMatch(/\.mkt-h1\s*\{[^}]*font-family:\s*var\(--font-serif-accent\)/);
+    expect(css).toMatch(/\.mkt-hero__accent\s*\{[^}]*#008060/);
   });
 
   it("puts fixed-size marketplace-logo cards directly after features", () => {
@@ -314,14 +341,22 @@ describe("marketing destinations", () => {
     expect($(".mkt-loop-card").text()).not.toMatch(/Editable draft/);
   });
 
-  it("gives the moving marketplace examples a keyboard-reachable pause control", () => {
+  it("pauses the moving marketplace examples on hover and focus without a visible control", () => {
     const $ = load(renderToStaticMarkup(<MarketplaceLoop />));
-    const control = $("button.mkt-loop__motion-control");
+    const source = readFileSync(resolve("src/components/marketing/marketplace-loop.tsx"), "utf8");
 
-    expect(control.length).toBe(1);
-    expect(control.attr("type")).toBe("button");
-    expect(control.attr("aria-pressed")).toBe("false");
-    expect(control.text()).toMatch(/Pause motion/);
+    expect($("button.mkt-loop__motion-control").length).toBe(0);
+    expect(source).toMatch(/pauseOnHover/);
+    expect(source).toMatch(/pauseOnFocus/);
+    expect(source).toMatch(/mkt-loop--static/);
+  });
+
+  it("keeps marketplace cards equal-height and clamps their titles to two whole lines", () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+
+    expect(css).toMatch(/\.mkt-loop-card\s*\{[^}]*height:\s*320px/);
+    expect(css).toMatch(/\.mkt-loop-card__body p\s*\{[^}]*-webkit-line-clamp:\s*2/);
+    expect(css).toMatch(/\.mkt-loop-card__body p\s*\{[^}]*min-height:\s*2\.7em/);
   });
 
   it("places animated React Bits bento between Trophy Wall and FAQ", () => {
@@ -331,6 +366,41 @@ describe("marketing destinations", () => {
     expect(sections.indexOf("why")).toBeGreaterThan(sections.indexOf("trophy"));
     expect(sections.indexOf("why")).toBeLessThan(sections.indexOf("faq"));
     expect($(".mkt-bento .card").length).toBe(site.MARKETING_BENTO_CARDS.length);
+    expect($(".mkt-bento .mkt-bento__icon").length).toBe(site.MARKETING_BENTO_CARDS.length);
+    expect($(".mkt-bento .mkt-bento__label").length).toBe(0);
+  });
+
+  it("uses the current Marketplace mark and keeps card claims compact", () => {
+    const marketplaceMark = readFileSync(resolve("public/marketplaces/facebook-marketplace.svg"), "utf8");
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+
+    expect(marketplaceMark).not.toMatch(/3a589e|facebook wordmark/i);
+    expect(marketplaceMark).toMatch(/Marketplace/i);
+    expect(marketplaceMark).toMatch(/M1\.712 2\.439A2\.156 2\.156/);
+    expect(marketplaceMark).toMatch(/facebook\.com\/marketplace/);
+    expect(css).toMatch(/\.mkt\s+\.mkt-bento\s+\.card p\s*\{[^}]*-webkit-line-clamp:\s*2/);
+    expect(css).toMatch(/\.mkt\s+\.mkt-bento\s+\.card h3\s*\{[^}]*white-space:\s*nowrap/);
+  });
+
+  it("covers every served app icon with the rounded-corner generator", async () => {
+    const generator = readFileSync(resolve("scripts/generate-rounded-icons.ts"), "utf8");
+    const icons = [
+      "src/app/icon.png",
+      "src/app/icon1.png",
+      "src/app/icon2.png",
+      "src/app/apple-icon.png",
+      "public/web-app-icon-512.png",
+    ];
+
+    expect(generator).toMatch(/RADIUS_RATIO = 0\.21/);
+    for (const icon of icons) {
+      expect(generator).toContain(icon);
+      const { data, info } = await sharp(resolve(icon)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const corner = data[3];
+      const center = data[(Math.floor(info.height / 2) * info.width + Math.floor(info.width / 2)) * 4 + 3];
+      expect(corner, `${icon} corner must be rounded`).toBeLessThan(16);
+      expect(center, `${icon} center must stay visible`).toBe(255);
+    }
   });
 
   it("keeps a motion affordance and static reduced-motion fallback for the bento", () => {
@@ -398,22 +468,24 @@ describe("App Review destinations", () => {
     );
 
     expect(publicMatcher).toMatch(/"\/privacy"/);
+    expect(publicMatcher).toMatch(/"\/terms"/);
     expect(publicMatcher).toMatch(/"\/support"/);
+    expect(publicMatcher).toMatch(/"\/manifest\.webmanifest"/);
   });
 
-  it("reaches both pages from the footer of every marketing page", () => {
+  it("reaches every legal destination from the footer", () => {
     const $ = load(renderToStaticMarkup(<SiteFooter />));
 
     expect($('a[href="/privacy"]').length).toBe(1);
+    expect($('a[href="/terms"]').length).toBe(1);
     expect($('a[href="/support"]').length).toBe(1);
   });
 
-  it("does not offer a legal document SnapList has not written", () => {
-    // v6 carries a Terms of Use row as the inert token LEGAL_TERMS_PENDING. No
-    // terms document exists, and a link to a page that does not resolve is worse
-    // than an absent row. See the #191 PR body.
-    const $ = load(renderToStaticMarkup(<SiteFooter />));
-    expect($("body").text()).not.toMatch(/terms of (?:use|service)/i);
+  it("renders a public Terms of Use page", () => {
+    const $ = load(renderToStaticMarkup(<TermsPage />));
+
+    expect($("h1").text()).toBe("Terms of Use");
+    expect($("body").text()).toMatch(/waitlist/i);
   });
 });
 
@@ -421,6 +493,7 @@ describe("marketing in-page navigation", () => {
   it("uses landing-page URLs for header sections", () => {
     const $ = load(renderToStaticMarkup(<SiteHeader />));
 
+    expect($(".mkt-navlink").map((_, link) => $(link).text()).get()).toEqual(["Features", "Why", "FAQ"]);
     expect($('a[href="/#features"]').length).toBeGreaterThan(0);
     expect($('a[href="/#faq"]').length).toBeGreaterThan(0);
   });

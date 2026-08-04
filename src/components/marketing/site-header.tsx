@@ -1,12 +1,12 @@
 "use client";
 
-import Image from "next/image";
+import { BrandLockup } from "@/components/marketing/brand-lockup";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppStoreButton } from "@/components/marketing/app-store-button";
 
 const NAV_LINKS = [
   { href: "/#features", label: "Features" },
-  { href: "/#why", label: "Why SnapList" },
+  { href: "/#why", label: "Why" },
   { href: "/#faq", label: "FAQ" },
 ] as const;
 
@@ -90,7 +90,7 @@ export function SiteHeader() {
       <div className="mkt-shell">
         <div className="mkt-header__bar">
           <a href="#top" className="mkt-lockup" style={{ justifySelf: "start" }}>
-            <Lockup />
+            <BrandLockup priority />
           </a>
           <nav aria-label="Primary" className="mkt-header__nav">
             <ul className="mkt-navlist">
@@ -147,22 +147,5 @@ export function SiteHeader() {
         </div>
       </div>
     </header>
-  );
-}
-
-function Lockup() {
-  return (
-    <>
-      <Image
-        className="mkt-lockup__mark"
-        src="/brand/scout-lockup.png"
-        alt=""
-        aria-hidden="true"
-        width={443}
-        height={388}
-        priority
-      />
-      <span className="mkt-lockup__word">SnapList</span>
-    </>
   );
 }

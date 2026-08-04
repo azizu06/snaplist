@@ -15,8 +15,15 @@
  * honest unavailable state when unset instead of a dead link.
  */
 
+const HERO_BEFORE_ACCENT = "Turn photos into a";
+const HERO_ACCENT_WORD = "listing";
+const HERO_AFTER_ACCENT = "you approve.";
+
 export const HERO = {
-  title: "Turn photos into a listing you approve.",
+  title: [HERO_BEFORE_ACCENT, HERO_ACCENT_WORD, HERO_AFTER_ACCENT].join(" "),
+  beforeAccent: HERO_BEFORE_ACCENT,
+  accentWord: HERO_ACCENT_WORD,
+  afterAccent: HERO_AFTER_ACCENT,
 } as const;
 
 export const WHY = {
@@ -35,15 +42,49 @@ export const WHY = {
  */
 export const TROPHY_WALL = {
   title: "Trophy Wall",
+  body: "See each item move from analysis to an editable draft, then a prepared handoff or an eBay result you confirmed.",
+  states: ["Analyzing", "Ready to review", "Published to eBay"],
 } as const;
 
 export const FAQ_TITLE = "Frequently asked questions";
 
 export const FOOTER = {
-  title: "Get first access to SnapList.",
+  brandName: "SnapList",
+  tagline: "Photos in. Listing you approve.",
+  legalLinks: [
+    { href: "/privacy", label: "Privacy" },
+    { href: "/terms", label: "Terms" },
+    { href: "/support", label: "Contact" },
+  ],
+} as const;
+
+export const TERMS = {
+  content:
+    "You keep your rights in the photos and optional voice context you provide. You give "
+    + "SnapList permission to process them only to identify your item, prepare an editable draft, "
+    + "find price evidence, and deliver the features you choose to use.",
+  decisions:
+    "You review the listing, price, and condition before you use them. SnapList publishes to "
+    + "eBay only after your explicit confirmation. For Facebook Marketplace, Mercari, and Depop, "
+    + "SnapList prepares a handoff that you finish yourself.",
 } as const;
 
 export const FEATURES_TITLE = "What does SnapList include?";
+export const LOOP_TITLE = "From camera roll to every storefront.";
+
+/** Short, complete item names so every carousel card fits without clipping. */
+export const MARKETING_CAROUSEL_TITLES: Record<string, string> = {
+  "reseller-ps5": "PlayStation 5 with DualSense",
+  "reseller-iphone-15": "iPhone 15, blue",
+  "reseller-sony-camera": "Sony camera with lenses",
+  "reseller-switch-2": "Nintendo Switch 2 console",
+  "reseller-dualsense": "DualSense wireless controller",
+  "reseller-charizard": "Holographic Charizard card",
+  "reseller-air-jordan-pair": "White Air Jordan sneakers",
+  "reseller-keychron": "Keychron mechanical keyboard",
+  "reseller-airpods-max": "AirPods Max, space gray",
+  "reseller-galaxy-watch": "Galaxy Watch Ultra and Watch 7",
+};
 
 /** Ordered feature-explorer steps. Index is the tab order. */
 export const FEATURE_STEPS = [
@@ -115,42 +156,42 @@ export const VALUE_CARDS = [
 /** v6-restyled continuation of the live MagicBento grid. */
 export const MARKETING_BENTO_CARDS = [
   {
-    label: "Pricing evidence",
+    icon: "chart" as const,
     title: "Sold prices, not asking prices",
     description:
-      "SnapList surfaces pricing from actual sold prices when evidence is available. When it is not, the estimate stays clearly labeled.",
+      "See sold-price evidence when it is available. Estimates stay clearly labeled when it is not.",
     className: "lg:col-span-2",
   },
   {
-    label: "Voice context",
+    icon: "mic" as const,
     title: "Add seller context with a voice note",
     description:
-      "A voice note of up to 15 seconds adds seller context to your item. It does not replace the photos or verified evidence.",
+      "Add up to 15 seconds of context. Photos and verified evidence remain the source of truth.",
   },
   {
-    label: "Review",
+    icon: "pencil" as const,
     title: "Edit before anything leaves SnapList",
     description:
-      "Review and edit the title, condition, item details, description, photos, and price before you confirm an eBay publish.",
+      "Review the title, condition, details, photos, and price before you confirm an eBay publish.",
   },
   {
-    label: "Export packs",
+    icon: "share" as const,
     title: "Prepared for your share sheet",
     description:
-      "Facebook Marketplace, Mercari, and Depop get prepared text and photos. You finish the destination form yourself.",
+      "Facebook Marketplace, Mercari, and Depop get prepared text and photos. You finish each form yourself.",
     className: "lg:col-span-2",
   },
   {
-    label: "Confirmation",
-    title: "eBay publishes only after you confirm",
+    icon: "check" as const,
+    title: "You confirm before eBay publishes",
     description:
       "SnapList publishes to eBay only after your explicit confirmation.",
   },
   {
-    label: "Your draft",
+    icon: "trophy" as const,
     title: "Keep one clear next step",
     description:
-      "Trophy Wall keeps each item in one chronological place, from analyzing to ready to review to a prepared or published result.",
+      "Trophy Wall keeps each item in one place from analyzing to ready to review and its next honest result.",
   },
 ] as const;
 

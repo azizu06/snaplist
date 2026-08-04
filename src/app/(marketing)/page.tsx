@@ -10,6 +10,7 @@ import {
   FAQ_TITLE,
   FEATURES_TITLE,
   HERO,
+  LOOP_TITLE,
   TROPHY_WALL,
   TROPHY_WALL_ROWS,
   WHY,
@@ -37,7 +38,11 @@ export default function LandingPage() {
         <div className="mkt-shell">
           <div className="mkt-hero__grid">
             <div className="mkt-hero__copy">
-              <h1 className="mkt-h1">{HERO.title}</h1>
+              <h1 className="mkt-h1">
+                {HERO.beforeAccent}{" "}
+                <span className="mkt-hero__accent">{HERO.accentWord}</span>{" "}
+                {HERO.afterAccent}
+              </h1>
               <WaitlistForm idPrefix="hero-waitlist" />
             </div>
             <HeroArt />
@@ -55,7 +60,7 @@ export default function LandingPage() {
       <section className="mkt-loop-section" aria-labelledby="mkt-loop-title">
         <div className="mkt-shell">
           <div className="mkt-loop-section__heading">
-            <h2 id="mkt-loop-title">From camera roll to every storefront.</h2>
+            <h2 id="mkt-loop-title">{LOOP_TITLE}</h2>
           </div>
         </div>
         <MarketplaceLoop />
@@ -66,6 +71,12 @@ export default function LandingPage() {
           <div className="mkt-trophy__grid">
             <div className="mkt-trophy__copy">
               <h2 className="mkt-trophy__h2">{TROPHY_WALL.title}</h2>
+              <p className="mkt-trophy__body">{TROPHY_WALL.body}</p>
+              <ul className="mkt-trophy__chips" aria-label="Trophy Wall states">
+                {TROPHY_WALL.states.map((state) => (
+                  <li key={state} role="listitem">{state}</li>
+                ))}
+              </ul>
             </div>
             <div className="mkt-trophy__art">
               {/* Scout sits above the frame, never inside it: he is a companion

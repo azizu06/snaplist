@@ -27,7 +27,9 @@ const isPublic = createRouteMatcher([
   // answer a redirect to /login (issue #191).
   "/pricing",
   "/privacy",
+  "/terms",
   "/support",
+  "/manifest.webmanifest",
   "/login(.*)",
   "/signup(.*)",
   "/api/health",

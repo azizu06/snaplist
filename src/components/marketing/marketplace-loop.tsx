@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import LogoLoop, { type LogoItem } from "@/components/bits/LogoLoop";
 import { DEMO_PRODUCTS_BY_SLUG, DEMO_SURFACE_ASSIGNMENTS } from "@/lib/demo-products";
+import { MARKETING_CAROUSEL_TITLES } from "@/lib/marketing/site";
 
 const LISTINGS = DEMO_SURFACE_ASSIGNMENTS["landing-carousel"].map(
   (slug) => DEMO_PRODUCTS_BY_SLUG[slug],
@@ -23,6 +24,7 @@ const MARKETPLACES = [
  */
 function ListingCard({ slug, marketplace }: { slug: string; marketplace: (typeof MARKETPLACES)[number] }) {
   const product = DEMO_PRODUCTS_BY_SLUG[slug];
+  const title = MARKETING_CAROUSEL_TITLES[slug] ?? product.title;
 
   return (
     <article className="mkt-loop-card">
@@ -35,7 +37,7 @@ function ListingCard({ slug, marketplace }: { slug: string; marketplace: (typeof
         />
       </div>
       <div className="mkt-loop-card__body">
-        <p>{product.title}</p>
+        <p>{title}</p>
         <Image
           className="mkt-loop-card__marketplace-logo"
           src={marketplace.asset}
@@ -65,12 +67,11 @@ function useReducedMotion() {
 
 const LOOP_ITEMS: LogoItem[] = LISTINGS.map((product, index) => ({
   node: <ListingCard slug={product.slug} marketplace={MARKETPLACES[index % MARKETPLACES.length]} />,
-  title: product.title,
-  ariaLabel: `${product.title}, ${MARKETPLACES[index % MARKETPLACES.length].name} handoff example`,
+  title: MARKETING_CAROUSEL_TITLES[product.slug] ?? product.title,
+  ariaLabel: `${MARKETING_CAROUSEL_TITLES[product.slug] ?? product.title}, ${MARKETPLACES[index % MARKETPLACES.length].name} handoff example`,
 }));
 
 export function MarketplaceLoop() {
-  const [paused, setPaused] = useState(false);
   const [focusPaused, setFocusPaused] = useState(false);
   const reducedMotion = useReducedMotion();
 
@@ -91,6 +92,9 @@ export function MarketplaceLoop() {
   return (
     <div
       className="mkt-loop__motion"
+      tabIndex={0}
+      role="group"
+      aria-label="Moving examples of photos becoming editable SnapList drafts. Pause while this region has keyboard focus."
       onFocusCapture={() => setFocusPaused(true)}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setFocusPaused(false);
@@ -105,19 +109,11 @@ export function MarketplaceLoop() {
         gap={20}
         pauseOnHover
         pauseOnFocus
-        paused={paused || focusPaused}
+        paused={focusPaused}
         fadeOut
         fadeOutColor="#ffffff"
         ariaLabel="Examples of photos becoming editable SnapList drafts"
       />
-      <button
-        className="mkt-loop__motion-control"
-        type="button"
-        aria-pressed={paused}
-        onClick={() => setPaused((current) => !current)}
-      >
-        {paused ? "Play motion" : "Pause motion"}
-      </button>
     </div>
   );
 }
