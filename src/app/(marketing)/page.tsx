@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import { Faq } from "@/components/marketing/faq";
 import { FeatureExplorer } from "@/components/marketing/feature-explorer";
 import { HeroArt } from "@/components/marketing/hero-art";
@@ -11,8 +10,6 @@ import {
   FEATURES_TITLE,
   HERO,
   LOOP_TITLE,
-  TROPHY_WALL,
-  TROPHY_WALL_ROWS,
   WHY,
 } from "@/lib/marketing/site";
 
@@ -50,13 +47,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section id="features" className="mkt-section mkt-features">
-        <div className="mkt-shell">
-          <h2 className="mkt-h2 mkt-h2--display">{FEATURES_TITLE}</h2>
-          <FeatureExplorer />
-        </div>
-      </section>
-
       <section className="mkt-loop-section" aria-labelledby="mkt-loop-title">
         <div className="mkt-shell">
           <div className="mkt-loop-section__heading">
@@ -66,49 +56,10 @@ export default function LandingPage() {
         <MarketplaceLoop />
       </section>
 
-      <section id="trophy" className="mkt-section mkt-trophy">
-        <div className="mkt-shell mkt-shell--narrow">
-          <div className="mkt-trophy__grid">
-            <div className="mkt-trophy__copy">
-              <h2 className="mkt-trophy__h2">{TROPHY_WALL.title}</h2>
-              <p className="mkt-trophy__body">{TROPHY_WALL.body}</p>
-              <ul className="mkt-trophy__chips" aria-label="Trophy Wall states">
-                {TROPHY_WALL.states.map((state) => (
-                  <li key={state} role="listitem">{state}</li>
-                ))}
-              </ul>
-            </div>
-            <div className="mkt-trophy__art">
-              {/* Scout sits above the frame, never inside it: he is a companion
-                  in the native app, not an element of the Trophy Wall screen. */}
-              <Image
-                className="mkt-trophy__scout"
-                src="/brand/scout-reviewing.png"
-                alt=""
-                aria-hidden="true"
-                width={239}
-                height={203}
-              />
-              <div className="mkt-trophy__device" aria-hidden="true">
-                <span className="mkt-phone__notch" />
-                <span className="mkt-phone__chip">Illustrative</span>
-                <div className="mkt-phone__screen">
-                  <div className="mkt-scr__bar">
-                    <span className="mkt-scr__title">Trophy Wall</span>
-                  </div>
-                  <div className="mkt-scr__body">
-                    {TROPHY_WALL_ROWS.map((row) => (
-                      <div key={row.id} className="mkt-trophy__row">
-                        <div className="mkt-trophy__row-art" />
-                        <span className="mkt-trophy__row-title">{row.title}</span>
-                        <span className="mkt-trophy__state">{row.state}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+      <section id="features" className="mkt-section mkt-features">
+        <div className="mkt-shell">
+          <h2 className="mkt-h2 mkt-h2--display">{FEATURES_TITLE}</h2>
+          <FeatureExplorer />
         </div>
       </section>
 

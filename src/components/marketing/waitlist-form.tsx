@@ -52,20 +52,22 @@ export function WaitlistFormView({
         <label className="mkt-waitlist__label" htmlFor={`${idPrefix}-email`}>
           Email address
         </label>
-        <input
-          className="mkt-waitlist__input"
-          id={`${idPrefix}-email`}
-          name="email"
-          type="email"
-          autoComplete="email"
-          inputMode="email"
-          placeholder="you@example.com"
-          required
-          aria-invalid={state.status === "invalid"}
-          aria-describedby={
-            state.status === "invalid" ? `${idPrefix}-error` : undefined
-          }
-        />
+        <span className="mkt-waitlist__input-wrap">
+          <input
+            className="mkt-waitlist__input"
+            id={`${idPrefix}-email`}
+            name="email"
+            type="email"
+            autoComplete="email"
+            inputMode="email"
+            placeholder="you@example.com"
+            required
+            aria-invalid={state.status === "invalid"}
+            aria-describedby={
+              state.status === "invalid" ? `${idPrefix}-error` : undefined
+            }
+          />
+        </span>
         <button className="mkt-waitlist__button" type="submit" disabled={pending}>
           {pending ? "Joining..." : "Join waitlist"}
         </button>
