@@ -41,6 +41,12 @@ struct AppShellView: View {
 #else
                 shell
 #endif
+            } else if let assistedExportFixture = configuration.assistedExportFixture {
+#if DEBUG
+                AssistedExportFixtureView(fixture: assistedExportFixture)
+#else
+                shell
+#endif
             } else if let visualState = configuration.visualState {
 #if DEBUG
                 if visualState.ownerIssue == 207 {

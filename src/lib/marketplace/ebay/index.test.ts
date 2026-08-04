@@ -20,8 +20,6 @@ vi.mock("./user-token-provider", () => ({
 import {
   createEbayAdapter,
   createEbayAdapterForUser,
-  createEbayMessagingAdapterForUser,
-  ebayMessagingSyncUserIds,
   hasEbayMessagingSandboxFallback,
 } from "./index";
 
@@ -36,7 +34,7 @@ const operatorEnv = {
   EBAY_MERCHANT_LOCATION_KEY: "operator-location",
 };
 
-describe("eBay messaging composition", () => {
+describe("eBay adapter composition", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -60,18 +58,10 @@ describe("eBay messaging composition", () => {
     const credentialClient = { rpc: vi.fn() } as unknown as SupabaseClient;
 
     await createEbayAdapterForUser(readClient, "user_a", { credentialClient });
-    await createEbayMessagingAdapterForUser(readClient, "user_a", {
-      credentialClient,
-    });
 
     expect(userTokenProvider.mock.calls[0]?.[0]).toBe(credentialClient);
     expect(userTokenProvider).toHaveBeenNthCalledWith(1, credentialClient, {
       userId: "user_a",
-    });
-    expect(userTokenProvider.mock.calls[1]?.[0]).toBe(credentialClient);
-    expect(userTokenProvider).toHaveBeenNthCalledWith(2, credentialClient, {
-      userId: "user_a",
-      scheduled: undefined,
     });
   });
 
@@ -159,21 +149,6 @@ describe("eBay messaging composition", () => {
     expect(hasEbayMessagingSandboxFallback(undefined, operatorEnv)).toBe(false);
   });
 
-  it("requests Commerce Media permission for Sandbox messaging photo uploads", async () => {
-    getEbayConnectionStatus.mockResolvedValue({ connected: false, ebayUsername: null });
-    for (const [key, value] of Object.entries(operatorEnv)) vi.stubEnv(key, value);
-    const adapter = await createEbayMessagingAdapterForUser(
-      {} as SupabaseClient,
-      "user_operator",
-      { credentialClient: {} as SupabaseClient },
-    );
-    const scopes = (adapter as unknown as {
-      tokenProvider: { envProvider: { scopes: string[] } };
-    }).tokenProvider.envProvider.scopes;
-
-    expect(scopes).toContain("https://api.ebay.com/oauth/api_scope/sell.inventory");
-  });
-
   it("never enables the app-level fallback outside the exact Sandbox API origin", () => {
     expect(
       hasEbayMessagingSandboxFallback("user_operator", {
@@ -187,21 +162,5 @@ describe("eBay messaging composition", () => {
         EBAY_BASE_URL: "https://api.sandbox.ebay.com.attacker.example",
       }),
     ).toBe(false);
-  });
-
-  it("adds the configured operator to background sync without duplicating a connection", () => {
-    expect(
-      ebayMessagingSyncUserIds(["user_a", "user_operator"], operatorEnv),
-    ).toEqual(["user_a", "user_operator"]);
-    expect(ebayMessagingSyncUserIds(["user_a"], operatorEnv)).toEqual([
-      "user_a",
-      "user_operator",
-    ]);
-    expect(
-      ebayMessagingSyncUserIds(["user_a"], {
-        ...operatorEnv,
-        EBAY_BASE_URL: "https://api.ebay.com",
-      }),
-    ).toEqual(["user_a"]);
   });
 });

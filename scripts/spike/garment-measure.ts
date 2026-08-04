@@ -11,7 +11,17 @@
  *   pnpm exec tsx scripts/spike/report.ts           # score + RESULTS.md
  *
  * Provider is PINNED to Google/Gemini (dev free tier) — this spike must not
- * spend OpenAI budget, so it doesn't trust ambient LLM_PROVIDER. Flags:
+ * spend OpenAI budget, so it doesn't trust ambient LLM_PROVIDER.
+ *
+ * This sends photos to Gemini's UNPAID tier, whose terms let Google use submitted
+ * content and let human reviewers read it. That is a recorded exemption from the
+ * seller-media fence (#501), and it holds only because these photos are other
+ * sellers' already-public eBay gallery images — never a SnapList seller's own
+ * photo out of the private `photos` bucket. Point this script at a photo a seller
+ * has not published and the exemption ends: see ADR-0002 Amendment 2 and
+ * `NON_SELLER_MEDIA_MODULES` in `src/lib/llm/seller-media-fence.test.ts`.
+ *
+ * Flags:
  *   --only <id>    run a single fixture (debugging)
  *   --limit <n>    run the first n fixtures
  *   --model <id>   override the model id (still Gemini)

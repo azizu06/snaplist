@@ -64,14 +64,16 @@ describe("no autonomous eBay price mutation (#591)", () => {
   });
 
   it("does not deploy a repricing cron route", () => {
-    const cronDir = join(process.cwd(), "src", "app", "api", "cron");
+    const apiDir = join(process.cwd(), "src", "app", "api");
 
-    // Positive control: prove we are looking at the real cron directory. If
-    // this path were wrong, the absence check below would pass for free.
-    expect(existsSync(join(cronDir, "inbox-sync", "route.ts"))).toBe(true);
+    // Positive control: prove we are looking at the real API directory. If this
+    // path were wrong, the absence checks below would pass for free. This used
+    // to anchor on the retired buyer-inbox cron route, which #599 deleted along
+    // with the rest of `src/app/api/cron`, so it anchors on a surviving route.
+    expect(existsSync(join(apiDir, "ebay", "account-deletion", "route.ts"))).toBe(true);
 
     // No route file at the path is exactly what makes `/api/cron/reprice`
     // return 404 in the App Router.
-    expect(existsSync(join(cronDir, "reprice"))).toBe(false);
+    expect(existsSync(join(apiDir, "cron", "reprice"))).toBe(false);
   });
 });

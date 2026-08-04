@@ -131,6 +131,17 @@ enum ListingReviewFixture: String, Equatable {
     case longText = "long-text"
 }
 
+/// Assisted-export scenarios a UI test can launch into (issue #581).
+///
+/// `revisionChangeWhileConfirming` is the only one that exists for a behavior
+/// the pure domain cannot prove on its own: the confirm sheet coming down when
+/// the listing moves while it is presented.
+enum AssistedExportFixture: String, Equatable {
+    case prepared
+    case revisionChangeWhileConfirming = "revision-change-while-confirming"
+    case packOutOfDate = "pack-out-of-date"
+}
+
 enum SubmissionFixture: String, Equatable {
     case delayed
     case acceptedPresentationGated = "accepted-presentation-gated"
@@ -204,6 +215,7 @@ struct LaunchConfiguration: Equatable {
     var runDetailFixture: RunDetailFixture?
     var listingReviewFixture: ListingReviewFixture?
     var resetListingReviewDraft: Bool
+    var assistedExportFixture: AssistedExportFixture?
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -221,7 +233,8 @@ struct LaunchConfiguration: Equatable {
         submissionAcknowledgmentNotification: nil,
         runDetailFixture: nil,
         listingReviewFixture: nil,
-        resetListingReviewDraft: false
+        resetListingReviewDraft: false,
+        assistedExportFixture: nil
     )
 
     static let preview = LaunchConfiguration(
@@ -240,7 +253,8 @@ struct LaunchConfiguration: Equatable {
         submissionAcknowledgmentNotification: nil,
         runDetailFixture: .loaded,
         listingReviewFixture: nil,
-        resetListingReviewDraft: false
+        resetListingReviewDraft: false,
+        assistedExportFixture: nil
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -324,6 +338,15 @@ struct LaunchConfiguration: Equatable {
                     ListingReviewFixture(rawValue: value)
             } else if argument == "--reset-listing-review-draft" {
                 configuration.resetListingReviewDraft = true
+            } else if argument.hasPrefix("--assisted-export-fixture=") {
+                let value = String(
+                    argument.dropFirst("--assisted-export-fixture=".count)
+                )
+                configuration.assistedExportFixture =
+                    AssistedExportFixture(rawValue: value)
+                if configuration.assistedExportFixture != nil {
+                    configuration.usesZeroNetworkFixtures = true
+                }
             }
         }
 
@@ -332,6 +355,9 @@ struct LaunchConfiguration: Equatable {
 
     var usesOnboarding: Bool {
         if photoReviewState != nil {
+            return false
+        }
+        if assistedExportFixture != nil {
             return false
         }
         if let visualState {

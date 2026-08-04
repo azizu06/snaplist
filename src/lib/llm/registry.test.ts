@@ -130,9 +130,6 @@ describe("resolveModelId", () => {
       resolveModelId("pricingAgent", { provider: "openai", env: { PRICING_MODEL: "p" } }),
     ).toBe("p");
     expect(
-      resolveModelId("reply", { provider: "openai", env: { REPLY_MODEL: "r" } }),
-    ).toBe("r");
-    expect(
       resolveModelId("export", { provider: "openai", env: { EXPORT_PACK_MODEL: "e" } }),
     ).toBe("e");
   });

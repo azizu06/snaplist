@@ -14,6 +14,9 @@ struct SnapListApp: App {
     private let dependencies: AppDependencies
 
     init() {
+        // First statement in the real app entry point so a crash while the
+        // dependency graph is still being built is still reported.
+        CrashReporting.start()
         let environment = ProcessInfo.processInfo.environment
         let nativeConfiguration: NativeAppConfiguration
         do {

@@ -62,14 +62,10 @@ Their source, author, license, and crop records are in
 Desktop tour clips:
 
 - `public/demo/steps/{snap,identify,price,write,publish}.mp4`
-- `public/demo/buyer-qa.mp4`
-- `public/demo/inbox-qa.mp4`
 
 Action-cropped mobile clips (6:5, 1080×900):
 
 - `public/demo/steps/{snap,identify,price,write,publish}-mobile.mp4`
-- `public/demo/buyer-qa-mobile.mp4`
-- `public/demo/inbox-qa-mobile.mp4`
 
 Every path also has a `-dark.mp4` sibling. Desktop outputs are 16:9 at
 1920×1080. `SeamlessThemeVideo` swaps the
@@ -92,7 +88,7 @@ pnpm vitest run src/lib/demo-capture-qa.test.ts \
 ```
 
 For a single capture while debugging, set
-`DEMO_CAPTURE_ONLY=mobile/dark/inbox-list`. A full capture run is still required
+`DEMO_CAPTURE_ONLY=mobile/dark/review-price`. A full capture run is still required
 before final rendering. When a composition-only change follows a verified full
-render, `DEMO_RENDER_ONLY=buyer-qa,buyer-qa-mobile pnpm demo:render-real-ui`
+render, `DEMO_RENDER_ONLY=step-price,step-price-mobile pnpm demo:render-real-ui`
 regenerates just those light/dark outputs.

@@ -1,5 +1,5 @@
 /**
- * Capture the real dev-preview routes for the marketing tour and inbox teaser.
+ * Capture the real dev-preview routes for the marketing tour.
  *
  * The preview routes render the shipped components with deterministic fixtures,
  * so these pixels stay coupled to the actual product instead of a hand-drawn
@@ -36,9 +36,6 @@ const SHOTS = [
   { name: "review-write", route: "/dev/preview/review?focus=write", focusSelector: "#review-title" },
   { name: "publish-draft", route: "/dev/preview/publish?focus=publish", focusSelector: "#publish-action" },
   { name: "publish-live", route: "/dev/preview/publish-live?focus=publish", focusSelector: "#publish-action" },
-  { name: "inbox-list", route: "/dev/preview/inbox-live?capture=list" },
-  { name: "inbox-draft", route: "/dev/preview/inbox-live" },
-  { name: "inbox-sent", route: "/dev/preview/inbox-live?capture=sent" },
 ];
 
 const VIEWPORTS = {
@@ -154,27 +151,6 @@ async function waitForCaptureReady(cdp, timeoutMs = 15_000) {
   throw new Error("Preview did not report demoCaptureReady");
 }
 
-const MOBILE_LAYOUT_METRICS = `(() => {
-  const viewportWidth = window.innerWidth;
-  const rectFor = (element) => {
-    if (!element) return null;
-    const rect = element.getBoundingClientRect();
-    return { left: rect.left, right: rect.right, width: rect.width };
-  };
-  const rows = Array.from(
-    document.querySelectorAll('nav[aria-label="Buyer conversations"] li button'),
-  ).map(rectFor);
-  const control = rectFor(
-    document.querySelector('button[aria-label="Simulate a buyer question"]'),
-  );
-  return {
-    viewportWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-    rows,
-    control,
-  };
-})()`;
-
 function captureLayoutMetricsExpression(focusSelector) {
   return `(() => {
     const rectFor = (element) => {
@@ -229,30 +205,6 @@ export function assertCaptureLayout(metrics, label, requiresTarget = false, expe
   }
 }
 
-export function assertMobileInboxLayout(metrics, label) {
-  const tolerance = 0.5;
-  if (metrics.scrollWidth > metrics.viewportWidth + tolerance) {
-    throw new Error(
-      `${label}: document overflow (${metrics.scrollWidth} > ${metrics.viewportWidth})`,
-    );
-  }
-  if (metrics.rows.length === 0) {
-    throw new Error(`${label}: no conversation rows found for mobile overflow QA`);
-  }
-  for (const [index, rect] of metrics.rows.entries()) {
-    if (!rect || rect.left < -tolerance || rect.right > metrics.viewportWidth + tolerance) {
-      throw new Error(`${label}: row ${index + 1} escapes viewport: ${JSON.stringify(rect)}`);
-    }
-  }
-  if (
-    !metrics.control ||
-    metrics.control.left < -tolerance ||
-    metrics.control.right > metrics.viewportWidth + tolerance
-  ) {
-    throw new Error(`${label}: simulator control escapes viewport: ${JSON.stringify(metrics.control)}`);
-  }
-}
-
 async function captureWithCdp({
   browserExecutable,
   url,
@@ -260,7 +212,6 @@ async function captureWithCdp({
   output,
   theme,
   focusSelector,
-  assertMobileInbox,
 }) {
   const profile = await mkdtemp(path.join(os.tmpdir(), "snaplist-capture-"));
   const child = spawn(
@@ -334,14 +285,6 @@ async function captureWithCdp({
     });
     assertCaptureLayout(layoutResult.result.value, output, Boolean(focusSelector), theme);
 
-    if (assertMobileInbox) {
-      const result = await cdp.send("Runtime.evaluate", {
-        expression: MOBILE_LAYOUT_METRICS,
-        returnByValue: true,
-      });
-      assertMobileInboxLayout(result.result.value, output);
-    }
-
     const screenshot = await cdp.send("Page.captureScreenshot", {
       format: "png",
       fromSurface: true,
@@ -402,7 +345,6 @@ async function capture({ name, route, focusSelector, formFactor, theme }, browse
     output,
     theme,
     focusSelector,
-    assertMobileInbox: formFactor === "mobile" && name === "inbox-list",
   });
   process.stdout.write(`  capture ✓ ${formFactor}/${theme}/${name}.png\n`);
 }

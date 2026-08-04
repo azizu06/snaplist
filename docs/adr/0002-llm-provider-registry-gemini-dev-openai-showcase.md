@@ -55,7 +55,7 @@ Two forces made this worth fixing now:
    stays swappable" into a checked claim: if a provider's structured output drifts from a role's
    shape, the test fails before it reaches the showcase.
 
-## Amendment (2026-07-25, issue #501) — the free tier's data terms
+## Amendment 1 (2026-07-25, issue #501) — the free tier's data terms
 
 The original decision recorded Gemini's free tier as a **cost** benefit only. It is also a **data**
 decision, and the two must be stated together.
@@ -147,14 +147,151 @@ because it is easy to overstate:
 So the startup check is a genuine hard stop only where the runtime awaits it. Do not rely on it as
 the sole fence, and do not describe it as one.
 
+## Amendment 2 (2026-08-01, issue #501) — the seller-media fence
+
+Amendment 1 built a floor under the provider being reached by **omission**. It does not stop the
+provider being reached by **choice**, which is the likelier mistake. Gemini was selected for its free
+tier in the first place, and `AGENTS.md` said so; "save money, set `LLM_PROVIDER=gemini` in
+production" is a reasonable-sounding decision that routed every seller photo into the unpaid bargain
+with nothing objecting. Setting the variable was treated as sufficient, when *which value* it is set
+to is the part that matters for seller data.
+
+### Billing status of the Gemini project
+
+**Free tier, no billing configured.** Recorded by the owner on 2026-07-25 (Amendment 1) and
+unchanged as of 2026-08-01. Billing lives in the Google console and is not observable from this
+repository, so this line is the single named slot for it: **if the owner enables billing on the
+project, update this paragraph and this paragraph only** — no code changes, because the code asks
+for the fact by name rather than inferring it. Note that enabling billing does not retroactively
+cover content already submitted under the unpaid terms.
+
+### Where real seller media can actually reach a Gemini key
+
+Established by tracing the one path that carries media, not by inspecting configuration alone:
+
+| Environment | Can real seller media reach a Gemini key? |
+| --- | --- |
+| Offline test suite (vitest) | **No.** `vision/extract.ts:202` takes `input.generate` by injection, so tests supply a fake and the registry is never reached. Recorded provider responses replay through `replayFixture`. Fixtures only. |
+| Local development, product pipeline (`next dev`, worker) | **Yes**, and permitted. `LLM_PROVIDER` may be unset and means Gemini. Photos here are the developer's own — the condition below. |
+| Local development, `scripts/spike/garment-measure.ts` | **Yes**, and the photos are **not** the developer's own. See the exemption below; the "developer's own photos" premise does not cover this script. |
+| Any deploy (`next start`, Docker, Vercel, Render) | **Yes**, and this is what the fence closes. `LLM_PROVIDER=gemini` was accepted with no further question. |
+
+The media path itself: the durable pipeline worker composes vision stages
+(`pipeline-queue/composition.ts:42`) → `vision/extract.ts:202` falls back to `createOpenAIVisionGenerate()`
+→ `vision/extract.ts:331` resolves the model → `vision/extract.ts:336` attaches `{ type: "image" }`
+parts whose bytes were downloaded from the private `photos` bucket (`vision/photos.ts:183`). `vision`
+is the only role that sends media; every other role receives text derived from the item.
+
+**Audio never reaches this registry at all.** `llm/seller-context.ts` carries its own
+`sellerContext` transcription role, which is not one of `LLM_ROLES`, and
+`resolveSellerContextTranscriber` returns `unsupported` with no model injected — no transcription
+provider is wired. Transcription provider selection is decided separately (OpenAI
+`/v1/audio/transcriptions`) and is out of scope here.
+
+### The one media call site that is not a seller's photo, and why it stays exempt
+
+`scripts/spike/garment-measure.ts:85` resolves the `vision` role with `provider: "google"` pinned
+explicitly, and attaches `{ type: "image" }` parts at `:108`. Run as documented — `pnpm exec tsx
+scripts/spike/garment-measure.ts` — `NODE_ENV` is unset and no platform marker is present, so
+`isLocalDevelopment` reads true and the fence stands down. `scripts/spike/predictions.json` holds 16
+committed Gemini responses, so this is a path already exercised, not a prospective one. Amendment 1
+listed "a sourced (rather than self-shot) gold set" as a future trigger that would void the local
+allowance; it had in fact already landed.
+
+**The exemption stands, but by decision rather than by accident.** The bytes are other sellers' eBay
+gallery photos, fetched from those sellers' own listing URLs (`fetch-images.ts`, whose header says
+so) and already published publicly by them. What Google's unpaid terms then get is already-public
+third-party product imagery, not the in-home photo — faces, addresses, documents, surroundings — that
+this fence exists to protect. The script is run by hand from a developer's checkout, sits on no
+product path, and still resolves through the registry, so the fence bites it anywhere that is not a
+developer's own machine.
+
+Two consequences. First, the local-development row above is now split: the "photos are the
+developer's own" premise governs the product pipeline, and this script is named as the case it does
+not cover. Second, the exemption is recorded in code as well as here —
+`NON_SELLER_MEDIA_MODULES` in `llm/seller-media-fence.test.ts` carries the same reason, and its
+assertions stop the list becoming a way to silence the guard: an exempt module may not live under
+`src/`, and must resolve its model through the registry rather than constructing a provider inline.
+
+If the spike ever takes a photo a seller has not already published — a privately supplied gold set, a
+buyer's photo, a friend's testing image — this exemption ends and the script needs
+`GEMINI_BILLING_ENABLED=true` or another provider like anything else.
+
+### Amended posture
+
+- `SELLER_MEDIA_ROLES` names the roles that carry the seller's own media. It contains `vision`.
+- Outside local development, resolving a seller-media role to Google **throws** unless
+  `GEMINI_BILLING_ENABLED=true`. It is checked against the **effective** provider, so a call site
+  that forces `provider: "google"` (the cross-family judge, a spike script) is fenced on the same
+  terms as a deploy that selected it.
+- The same condition fails `parseEnv` at config startup and rejects from `instrumentation.register()`.
+  A deploy configured this way could not process a single item, so it should say so at boot rather
+  than on the first seller's photo. As in Amendment 1, how hard the startup check stops depends on
+  the host; `resolveLanguageModel` throwing is the guarantee that holds everywhere.
+- `GEMINI_BILLING_ENABLED` accepts exactly `true` or `false` (any casing, trimmed) or nothing. Any
+  other value is a config error rather than a silent `false`, whatever the active provider is — an
+  attestation that looks set and acts unset is worse than one that is absent, and a stray `yes` on an
+  OpenAI deploy must not become a surprise the day someone flips `LLM_PROVIDER`.
+- Local development is still allowed, **by name**, on the condition recorded below. An attestation is
+  not required there because requiring one would teach developers to set it untruthfully to make
+  their box work, and that lie would then travel to a deploy. The variable is only ever needed where
+  it means something, which is what keeps it meaningful.
+- Nothing here weakens Amendment 1. An unset `LLM_PROVIDER` still fails outside local development.
+
+### What this does not claim
+
+The fence keys on the role, not on the bytes. It is therefore only as true as `SELLER_MEDIA_ROLES`
+is, and a role that quietly gained a media payload would slip past it invisibly. That is why
+`llm/seller-media-fence.test.ts` scans the source: every module building a media message part must be
+either a known seller-media module resolving a covered role or a recorded exemption, so a new media
+call site fails the suite until someone decides deliberately what the fence should do about it.
+
+**The guard's reach is every first-party `.ts`/`.tsx` file in the repository** — not just `src/`. It
+originally scanned `src/` only, which is precisely why the spike call site above went unnoticed by a
+guard written to catch that class of drift. It skips `node_modules`, dot-directories, `fixtures`, and
+test files, and it matches on source with comment lines dropped, so prose about media parts is not a
+hit. It reads text, so it cannot see a media part assembled dynamically (a computed `type`, a part
+built by a helper in another file); a call site determined to hide from it can. It is a guard against
+drift, not against intent.
+
+It also does not verify the attestation. `GEMINI_BILLING_ENABLED=true` is an operator's claim about
+an external fact, and a false claim buys exactly the exposure this fence exists to prevent. The error
+text says so.
+
+### Condition this rests on (restated, now load-bearing twice)
+
+The local Gemini allowance is sound only while the photos crossing a developer's machine are that
+developer's own. It stops holding the moment a photo they did not take enters the local pipeline.
+
+**One of the triggers Amendment 1 listed as foreseeable has already fired.** A sourced (rather than
+self-shot) gold set exists: the spike above sends other sellers' eBay photos. It is exempt on the
+reasoning recorded there — those photos are already public, and the script is off every product path
+— not because the condition still holds universally. Amendment 1's wording, which described this as
+future, is left as written; it is a dated record of what was believed on 2026-07-25, and this
+amendment is where the correction lives.
+
+The triggers that have **not** fired, and that would end the local allowance outright rather than
+earning a narrow exemption: a seeded corpus carrying real listing photos on a product path, a
+privately supplied (unpublished) gold set, or a TestFlight/friend-testing build pointed at a dev
+configuration. Amendment 1 said to revisit the local default if any of those land; the media fence
+now rests on the same condition, so revisiting it means revisiting both.
+
+The "Known limit" above compounds here: a host that sets neither `NODE_ENV` nor a recognized platform
+marker reads as local, and would therefore bypass the media fence as well as the provider fence.
+Extending `DEPLOYMENT_MARKERS` when adopting such a host is now two guards' concern, not one.
+
+### Migration required before this ships
+
+Any deploy currently running `LLM_PROVIDER=gemini` must either move to `LLM_PROVIDER=openai` or
+enable billing on the Google project and set `GEMINI_BILLING_ENABLED=true`. As with Amendment 1 this
+is a configuration step; the code will not guess it.
+
 ### Still outstanding
 
-`AGENTS.md:41` still describes Gemini as the dev default "for the free tier" without its data terms,
-and now also misdescribes behavior, since there is no longer a production OpenAI default to fall
-through to. That one-line amendment is excluded from this change by the issue owner, not by a merge
-conflict: PR #500's `AGENTS.md` hunks are at lines 112, 134, and 220 and do not touch line 41. Issue
-#501 stays open to carry that line, and it should ride the next change that touches `AGENTS.md`
-rather than becoming an issue of its own.
+Nothing from Amendment 1. `AGENTS.md:41` — which described Gemini as the dev default "for the free
+tier" without its data terms, and misdescribed behavior once the production default was removed — was
+amended by this change and now states the required-in-every-deploy rule and the seller-media fence
+alongside the cost benefit.
 
 ## Alternatives considered
 

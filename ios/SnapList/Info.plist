@@ -47,6 +47,12 @@
 	<string>$(SNAPLIST_API_ORIGIN)</string>
 	<key>SnapListClerkPublishableKey</key>
 	<string>$(SNAPLIST_CLERK_PUBLISHABLE_KEY)</string>
+	<key>SnapListPostHogHost</key>
+	<string>$(SNAPLIST_POSTHOG_HOST)</string>
+	<key>SnapListPostHogKey</key>
+	<string>$(SNAPLIST_POSTHOG_KEY)</string>
+	<key>SnapListSentryDSN</key>
+	<string>$(SNAPLIST_SENTRY_DSN)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -12,6 +12,7 @@ type AccountErasureRpcName =
   | "begin_account_erasure"
   | "confirm_account_erasure_storage_absence"
   | "advance_account_erasure"
+  | "record_account_erasure_posthog_person_uuid"
   | "finalize_account_erasure";
 
 interface AccountErasureRpcResult {
@@ -42,6 +43,7 @@ const rpcStateSchema = z.object({
   identity: z.object({
     clerk_user_id: z.string().min(1),
     revenuecat_app_user_ids: z.array(z.string().min(1)),
+    posthog_person_uuid: z.string().uuid().nullable().default(null),
   }).strict().nullable(),
   storage_objects: z.array(z.object({
     bucket_id: z.enum(["photos", "message-photos"]),
@@ -56,6 +58,7 @@ const rpcStateSchema = z.object({
   identity: state.identity === null ? null : {
     clerkUserId: state.identity.clerk_user_id,
     revenueCatAppUserIds: state.identity.revenuecat_app_user_ids,
+    postHogPersonUUID: state.identity.posthog_person_uuid,
   },
   storageObjects: state.storage_objects.map((object) => ({
     bucketId: object.bucket_id,
@@ -105,6 +108,14 @@ export function createSupabaseAccountErasureStore(
       return rpcStateSchema.parse(rpcData("advancement", result));
     },
 
+    async recordPostHogPersonUUID(input) {
+      const result = await client.rpc("record_account_erasure_posthog_person_uuid", {
+        p_generation_id: z.string().uuid().parse(input.generationId),
+        p_person_uuid: z.string().uuid().parse(input.personUUID),
+      });
+      rpcData("PostHog person target recording", result);
+    },
+
     async finalize(input) {
       const result = await client.rpc("finalize_account_erasure", {
         p_attention_reasons: z
@@ -112,6 +123,9 @@ export function createSupabaseAccountErasureStore(
           .parse(input.attentionReasons),
         p_clerk_identity_absent: z.boolean().parse(input.clerkIdentityAbsent),
         p_generation_id: z.string().uuid().parse(input.generationId),
+        p_posthog_person_and_events_deletion_confirmed: z
+          .boolean()
+          .parse(input.postHogPersonAndEventsDeletionConfirmed),
         p_revenuecat_customer_absent: z
           .boolean()
           .parse(input.revenueCatCustomerAbsent),

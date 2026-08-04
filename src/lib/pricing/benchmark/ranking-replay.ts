@@ -89,6 +89,13 @@ function matcherPrice(
   signal: (typeof SOLD_COMPS_BENCHMARK_CORPUS)[number]["signal"],
   benchmarkNow: number | undefined,
 ): { suggested: number; range: { min: number; max: number } } | null {
+  /**
+   * This replay deliberately stays below `finalizeVerifiedSoldResult`: it is an
+   * offline ranking baseline for historical capture comparison, not a retrieval
+   * adapter and never produces seller-facing adapter output. Its fixed
+   * filter/minimum/synthesis sequence preserves the pre-#363 replay metric;
+   * routing it through adapter finalization would change that baseline.
+   */
   const candidates = query.comps
     .filter(hasUsablePricingAmount)
     .map((comp) => ({

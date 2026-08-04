@@ -31,6 +31,9 @@ const environmentKeys = [
   "SUPABASE_SERVICE_ROLE_KEY",
   "REVENUECAT_SECRET_API_KEY",
   "REVENUECAT_PROJECT_ID",
+  "POSTHOG_API_HOST",
+  "POSTHOG_PROJECT_ID",
+  "POSTHOG_PERSONAL_API_KEY",
 ] as const;
 const idempotencyKey = "38430000-0000-4000-8000-000000000001";
 const generationId = "38430000-0000-4000-8000-000000000002";
@@ -52,6 +55,9 @@ beforeEach(() => {
   process.env.SUPABASE_SECRET_KEY = "sb_secret_release";
   process.env.REVENUECAT_SECRET_API_KEY = "sk_revenuecat_release";
   process.env.REVENUECAT_PROJECT_ID = "proj_release";
+  process.env.POSTHOG_API_HOST = "https://us.posthog.com";
+  process.env.POSTHOG_PROJECT_ID = "617";
+  process.env.POSTHOG_PERSONAL_API_KEY = "phx_test_release";
   has.mockReturnValue(true);
   authenticateRequest.mockResolvedValue({
     isAuthenticated: true,
@@ -103,6 +109,9 @@ describe("production account erasure route", () => {
       clerkSecretKey: "sk_test_release",
       revenueCatProjectId: "proj_release",
       revenueCatSecretKey: "sk_revenuecat_release",
+      postHogHost: "https://us.posthog.com",
+      postHogProjectId: "617",
+      postHogPersonalAPIKey: "phx_test_release",
       secretKey: "sb_secret_release",
       supabaseURL: "https://project.supabase.co",
     });

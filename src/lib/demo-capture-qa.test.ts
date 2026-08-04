@@ -14,10 +14,9 @@ vi.mock("node:fs", async () => {
 });
 
 let assertCaptureLayout: typeof import("../../remotion/scripts/capture-real-ui.mjs").assertCaptureLayout;
-let assertMobileInboxLayout: typeof import("../../remotion/scripts/capture-real-ui.mjs").assertMobileInboxLayout;
 
 beforeAll(async () => {
-  ({ assertCaptureLayout, assertMobileInboxLayout } = await import(
+  ({ assertCaptureLayout } = await import(
     "../../remotion/scripts/capture-real-ui.mjs"
   ));
 });
@@ -25,37 +24,7 @@ beforeAll(async () => {
 describe("browserless assertion imports", () => {
   it("does not resolve Chrome while importing the pure QA exports", () => {
     expect(assertCaptureLayout).toBeTypeOf("function");
-    expect(assertMobileInboxLayout).toBeTypeOf("function");
     expect(fsMock.accessSync).not.toHaveBeenCalled();
-  });
-});
-
-const validMetrics = {
-  viewportWidth: 390,
-  scrollWidth: 390,
-  rows: [{ left: 0, right: 390, width: 390 }],
-  control: { left: 286, right: 374, width: 88 },
-};
-
-describe("assertMobileInboxLayout", () => {
-  it("accepts a viewport-contained inbox", () => {
-    expect(() => assertMobileInboxLayout(validMetrics, "mobile inbox")).not.toThrow();
-  });
-
-  it.each([
-    ["document overflow", { ...validMetrics, scrollWidth: 433 }],
-    [
-      "conversation row overflow",
-      { ...validMetrics, rows: [{ left: 0, right: 433, width: 433 }] },
-    ],
-    [
-      "header control overflow",
-      { ...validMetrics, control: { left: 400, right: 440, width: 40 } },
-    ],
-  ])("rejects %s", (_label, metrics) => {
-    expect(() => assertMobileInboxLayout(metrics, "mobile inbox")).toThrow(
-      /overflow|escapes viewport/,
-    );
   });
 });
 

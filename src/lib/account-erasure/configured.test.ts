@@ -6,6 +6,9 @@ const baseInput = {
   secretKey: "sb_secret_current",
   clerkSecretKey: "sk_test_account_erasure",
   revenueCatSecretKey: "sk_revenuecat_account_erasure",
+  postHogHost: "https://us.posthog.com",
+  postHogProjectId: "617",
+  postHogPersonalAPIKey: "phx_test_account_erasure",
 };
 
 describe("configured account erasure", () => {
@@ -22,5 +25,12 @@ describe("configured account erasure", () => {
       ...baseInput,
       secretKey,
     })).toThrow(/current Supabase secret key/);
+  });
+
+  it("requires private PostHog deletion authority", () => {
+    expect(() => createConfiguredAccountErasureOperations({
+      ...baseInput,
+      postHogPersonalAPIKey: "",
+    })).toThrow(/PostHog.*personal API key/i);
   });
 });
