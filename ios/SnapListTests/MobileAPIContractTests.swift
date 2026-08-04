@@ -241,7 +241,7 @@ final class MobileAPIContractTests: XCTestCase {
 
         XCTAssertEqual(
             contractOnlyOperationIDs,
-            Set(ContractOnlyOperation.allCases.map(\.rawValue))
+            Set(ContractOnlyOperation.allCases.map(\.operationID))
         )
     }
 

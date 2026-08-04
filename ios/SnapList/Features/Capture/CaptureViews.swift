@@ -117,19 +117,12 @@ struct CaptureLauncherSheet: View {
     private var freshCaptureOptions: some View {
         VStack(alignment: .leading, spacing: 14) {
             Button(action: takeOneItem) {
-                CaptureOptionRow(
-                    title: "Take one item",
-                    subtitle: "Snap one thing and get help listing it.",
-                    systemImage: "camera",
-                    isPrimary: true,
-                    badge: "Recommended",
-                    showsChevron: true
-                )
+                CaptureOptionRow(entryPoint: .takeOneItem, isPrimary: true)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Take one item, recommended")
             .accessibilityHint("Opens the guided camera")
-            .accessibilityIdentifier("capture.take-one-item")
+            .accessibilityIdentifier(CaptureEntryPoint.takeOneItem.identifier)
 
             Text("Other ways to add")
                 .font(.caption2.weight(.semibold))
@@ -138,40 +131,15 @@ struct CaptureLauncherSheet: View {
                 .foregroundStyle(SnapListColorToken.textTertiary.color)
 
             VStack(spacing: 0) {
-                CaptureOptionRow(
-                    title: "Photograph a haul",
-                    subtitle: "Stage several items, one after another.",
-                    systemImage: "shippingbox",
-                    showsChevron: false
-                )
-                .accessibilityHint("Not available in this capture slice")
-
-                Divider().padding(.leading, 58)
-
                 PhotosPicker(selection: $libraryItem, matching: .images) {
-                    CaptureOptionRow(
-                        title: "Choose from library",
-                        subtitle: "Use photos you already have.",
-                        systemImage: "photo",
-                        showsChevron: true
-                    )
+                    CaptureOptionRow(entryPoint: .chooseFromLibrary)
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity, minHeight: 60)
                 .contentShape(.rect)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Choose from library")
-                .accessibilityIdentifier("capture.choose-library")
-
-                Divider().padding(.leading, 58)
-
-                CaptureOptionRow(
-                    title: "Scan barcode or ISBN",
-                    subtitle: "First for books, games, and sealed goods.",
-                    systemImage: "barcode.viewfinder",
-                    showsChevron: false
-                )
-                .accessibilityHint("Owned by a later approved slice")
+                .accessibilityLabel(CaptureEntryPoint.chooseFromLibrary.title)
+                .accessibilityIdentifier(CaptureEntryPoint.chooseFromLibrary.identifier)
             }
 
             Label(
@@ -188,13 +156,52 @@ struct CaptureLauncherSheet: View {
     }
 }
 
+/// Every way the capture surface lets a seller start an item. The lean MVP offers
+/// exactly one primary path and one alternate; anything else is a destination the
+/// product decided not to ship, so the set is asserted rather than left implicit.
+enum CaptureEntryPoint: String, CaseIterable, Identifiable {
+    case takeOneItem
+    case chooseFromLibrary
+
+    var id: String { rawValue }
+
+    var identifier: String {
+        switch self {
+        case .takeOneItem: "capture.take-one-item"
+        case .chooseFromLibrary: "capture.choose-library"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .takeOneItem: "Take one item"
+        case .chooseFromLibrary: "Choose from library"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .takeOneItem: "Snap one thing and get help listing it."
+        case .chooseFromLibrary: "Use photos you already have."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .takeOneItem: "camera"
+        case .chooseFromLibrary: "photo"
+        }
+    }
+}
+
 private struct CaptureOptionRow: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
+    let entryPoint: CaptureEntryPoint
     var isPrimary = false
-    var badge: String?
-    var showsChevron = true
+
+    private var title: String { entryPoint.title }
+    private var subtitle: String { entryPoint.subtitle }
+    private var systemImage: String { entryPoint.systemImage }
+    private var badge: String? { isPrimary ? "Recommended" : nil }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -234,11 +241,9 @@ private struct CaptureOptionRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(SnapListColorToken.textTertiary.color)
         }
         .padding(.horizontal, isPrimary ? 10 : 8)
         .frame(minHeight: isPrimary ? 64 : 60)
@@ -1193,14 +1198,8 @@ private struct CaptureLauncherFixture: View {
                 Color.clear.frame(width: 44, height: 44)
             }
             .padding(.horizontal, 20)
-            CaptureOptionRow(
-                title: "Take one item",
-                subtitle: "Snap one thing and get help listing it.",
-                systemImage: "camera",
-                isPrimary: true,
-                badge: "Recommended"
-            )
-            .padding(.horizontal, 20)
+            CaptureOptionRow(entryPoint: .takeOneItem, isPrimary: true)
+                .padding(.horizontal, 20)
             Text("Other ways to add")
                 .font(.caption2.weight(.semibold))
                 .textCase(.uppercase)
@@ -1208,17 +1207,9 @@ private struct CaptureLauncherFixture: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.top, 14)
-            ForEach([
-                ("Photograph a haul", "Stage several items, one after another.", "shippingbox"),
-                ("Choose from library", "Use photos you already have.", "photo"),
-                ("Scan barcode or ISBN", "First for books, games, and sealed goods.", "barcode.viewfinder")
-            ], id: \.0) { title, subtitle, icon in
-                CaptureOptionRow(
-                    title: title,
-                    subtitle: subtitle,
-                    systemImage: icon
-                )
-                .padding(.horizontal, 20)
+            ForEach(CaptureEntryPoint.allCases.filter { $0 != .takeOneItem }) { entryPoint in
+                CaptureOptionRow(entryPoint: entryPoint)
+                    .padding(.horizontal, 20)
             }
             Label(
                 "Capture and organize photos before choosing what to list.",

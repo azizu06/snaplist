@@ -1,54 +1,5 @@
 import SwiftUI
 
-struct FoundationPlaceholderView: View {
-    let tab: PrimaryTab
-    let configuration: LaunchConfiguration
-    let openActivity: () -> Void
-    let openAccount: () -> Void
-
-    @State private var keyboardProbeText = ""
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                AppHeader(openActivity: openActivity, openAccount: openAccount)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(tab.title)
-                        .snapListTypography(.displayTitle)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .accessibilityIdentifier("screen.title")
-
-                    Text("The native foundation is ready for this approved screen family.")
-                        .snapListTypography(.body)
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    SnapListChip(
-                        "Foundation only",
-                        systemImage: "checkmark.seal",
-                        variant: .info
-                    )
-                }
-
-                if configuration.keyboardProbe {
-                    TextField("Fixture keyboard probe", text: $keyboardProbeText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                        .accessibilityIdentifier("fixture.keyboard-probe")
-                }
-
-                Spacer(minLength: 260)
-            }
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.top, 8)
-        }
-        .background(SnapListColorToken.canvas.color)
-        .navigationBarBackButtonHidden()
-        .accessibilityIdentifier("screen.\(tab.rawValue)")
-    }
-}
-
 struct FoundationDestinationView: View {
     let destination: FutureBoundary
 

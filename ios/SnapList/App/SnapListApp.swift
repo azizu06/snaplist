@@ -70,7 +70,7 @@ struct SnapListApp: App {
         )
         _router = State(
             initialValue: AppRouter(
-                initialTab: configuration.fixture.initialTab,
+                initialTab: configuration.initialTab,
                 initialRoute: configuration.initialRoute,
                 initialSheet: configuration.fixture.initialSheet
             )

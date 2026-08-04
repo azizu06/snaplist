@@ -1,11 +1,13 @@
 import { verifyToken } from "@clerk/nextjs/server";
 import { logServerError } from "@/lib/api/errors";
+import { createConfiguredGuestClaimHandoff } from "@/lib/app-attest/configured-guest-handoff";
 import {
   createSupabaseNativeSubscriptionBridge,
   resolveRevenueCatServerConfig,
   type NativeSubscriptionBridge,
 } from "@/lib/billing";
 import type { MobileApiPrincipal } from "@/lib/mobile-api";
+import type { VerifiedGuestHandoff } from "@/lib/guest-recovery";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 
@@ -38,6 +40,13 @@ export async function clerkPrincipal(token: string): Promise<MobileApiPrincipal>
   const userId = verified.sub?.trim();
   if (!userId) throw new Error("The verified Clerk token has no subject.");
   return { kind: "clerk" as const, userId };
+}
+
+/** Concrete #610 dependency for the #593 guest-claim route composition. */
+export async function verifyGuestClaimHandoff(
+  token: string,
+): Promise<VerifiedGuestHandoff> {
+  return createConfiguredGuestClaimHandoff().verifyGuestClaimHandoff(token);
 }
 
 /**

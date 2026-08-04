@@ -69,8 +69,7 @@ final class HomeUITests: XCTestCase {
     }
 
     func testRunDetailShowsLoadedItemAndStageTruth() {
-        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=loaded"])
-        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+        let app = launch("RUN-02", extraArguments: ["--run-detail-fixture=loaded"])
 
         XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Processing"].exists)
@@ -251,7 +250,7 @@ final class HomeUITests: XCTestCase {
 
         XCTAssertTrue(search.waitForExistence(timeout: 3))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["dock.home"].exists)
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
 
         search.typeText("camera")
         XCTAssertTrue(app.staticTexts["1 result for “camera”"].waitForExistence(timeout: 2))
@@ -271,7 +270,7 @@ final class HomeUITests: XCTestCase {
     func testStandardHomeCanReachFocusedSearchWithoutAVisualStateFixture() {
         let app = XCUIApplication()
         app.launchArguments = [
-            "--fixture=home",
+            "--fixture=trophy-wall",
             "--zero-network-fixtures",
             "--reset-onboarding-progress"
         ]
@@ -283,7 +282,7 @@ final class HomeUITests: XCTestCase {
 
         XCTAssertTrue(app.textFields["home.search.field"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["dock.home"].exists)
+        XCTAssertFalse(app.buttons["dock.scan"].exists)
     }
 
     func testHomeRemainsReachableAtAccessibilityTypeWithReducedMotion() {
