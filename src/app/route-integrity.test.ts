@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import nextConfig from "../../next.config";
 import { safeNext } from "./(auth)/login/safe-next";
 
 /**
@@ -154,6 +155,16 @@ function navigationTargets(): NavigationTarget[] {
 const UNROUTED_BY_DESIGN = new Map<string, string>([]);
 
 describe("route integrity", () => {
+  it("permanently redirects the retired pricing URL to the landing page", async () => {
+    const redirects = await nextConfig.redirects?.();
+
+    expect(redirects).toContainEqual({
+      source: "/pricing",
+      destination: "/",
+      permanent: true,
+    });
+  });
+
   it("emits the routes the marketing and auth surfaces link to", () => {
     // Guards the guard: an empty or wrong route set would make every assertion
     // below vacuous, or fail everything for the wrong reason.

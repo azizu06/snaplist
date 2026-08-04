@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
     // do NOT hand-convert /public images to WebP, it bypasses this resizer.
     formats: ["image/avif", "image/webp"],
   },
+  async redirects() {
+    return [
+      { source: "/pricing", destination: "/", permanent: true },
+    ];
+  },
   experimental: {
     serverActions: {
       // Phone photos routinely exceed Next's 1 MB Server Action body default, which
