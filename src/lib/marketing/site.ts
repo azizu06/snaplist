@@ -98,7 +98,7 @@ export const FEATURE_STEPS = [
     id: "photo-review",
     title: "Photo Review",
     body:
-      "Reorder, crop, rotate, or remove photos before SnapList drafts the listing, then choose the final order for the item.",
+      "Reorder, replace, or remove photos before SnapList drafts the listing, then choose the final order for the item.",
   },
   {
     id: "listing-review",

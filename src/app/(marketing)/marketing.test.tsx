@@ -607,6 +607,7 @@ describe("feature explorer semantics", () => {
     expect($(".mkt-hero__minimal-phone .mkt-hero__neutral-screen").length).toBe(1);
     expect($(".mkt-hero__sbar, .mkt-hero__lbar, .mkt-hero__lbody").length).toBe(0);
     expect($("body").text()).not.toMatch(/\b(?:candidate|illustrative)\b/i);
+    expect($("body").text()).not.toMatch(/\b(?:crop|rotate)\b/i);
   });
 
   it("keeps five truthful two-line descriptions, including one optional bounded voice note", () => {
@@ -615,6 +616,7 @@ describe("feature explorer semantics", () => {
     expect(bodies).toHaveLength(5);
     expect(bodies.every((body) => body.length >= 90 && body.length <= 120)).toBe(true);
     expect(bodies.filter((body) => /optional voice note.*15 seconds/i.test(body))).toHaveLength(1);
+    expect(site.FEATURE_STEPS.find((step) => step.id === "photo-review")?.body).toMatch(/replace|remove/i);
     expect(bodies.join(" ")).toMatch(/handoff you finish/i);
   });
 });

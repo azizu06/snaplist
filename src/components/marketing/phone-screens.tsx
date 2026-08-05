@@ -46,8 +46,8 @@ export function PhotoReviewScreen() {
           ))}
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <div className="mkt-scr__tool">Crop</div>
-          <div className="mkt-scr__tool">Rotate</div>
+          <div className="mkt-scr__tool">Replace</div>
+          <div className="mkt-scr__tool">Delete</div>
         </div>
       </div>
     </div>
