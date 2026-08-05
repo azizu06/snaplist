@@ -472,6 +472,7 @@ supabase/migrations/20260804010000_account_erasure_ebay_provider_completion.sql
 supabase/migrations/20260804020000_mobile_ebay_publish_idempotency.sql
 supabase/migrations/20260804030000_guest_recovery_submission_identity.sql
 supabase/migrations/20260804040000_claimed_guest_recovery_plaintext.sql
+supabase/migrations/20260805170000_hosted_server_api_guard.sql
 tsconfig.json
 vercel.json
 vitest.config.ts
