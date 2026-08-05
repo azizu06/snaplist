@@ -221,6 +221,9 @@ describe("mobile eBay OAuth operator activation", () => {
     ["non-root path", "https://api.ebay.com/identity"],
     ["query", "https://api.sandbox.ebay.com?mobile=true"],
     ["hash", "https://api.ebay.com#mobile"],
+    ["credential syntax", "https://@api.ebay.com"],
+    ["control whitespace", "https://api.e\tbay.com"],
+    ["trailing whitespace", "https://api.ebay.com "],
   ])(
     "refuses %s for session creation and callback completion even with production enabled",
     async (_label, baseUrl) => {

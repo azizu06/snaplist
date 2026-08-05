@@ -536,6 +536,9 @@ describe("mobile eBay publish boundary", () => {
     ["non-root path", "https://api.ebay.com/inventory"],
     ["query", "https://api.sandbox.ebay.com?mobile=true"],
     ["hash", "https://api.ebay.com#mobile"],
+    ["credential syntax", "https://@api.ebay.com"],
+    ["control whitespace", "https://api.e\tbay.com"],
+    ["trailing whitespace", "https://api.ebay.com "],
   ])(
     "refuses a mobile publish adapter with %s even when production is enabled",
     async (_label, baseUrl) => {

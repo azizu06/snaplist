@@ -7,7 +7,10 @@ export class EbayProductionMobileDisabledError extends Error {}
 
 export function assertMobileEbayOperatorActivation(env: Env): string {
   const configured = env.EBAY_BASE_URL ?? SANDBOX_API_ORIGIN;
-  if (!/^https:\/\/[^/?#]+\/?$/i.test(configured)) {
+  if (
+    !/^https:\/\/(?:api\.sandbox\.ebay\.com|api\.ebay\.com)(?::443)?\/?$/i
+      .test(configured)
+  ) {
     throw invalidMobileEbayBaseUrl();
   }
 
