@@ -186,15 +186,24 @@ function reconcileSpecifics(attrs: ExtractedAttributes): Record<string, string> 
 // and item-specific text. A hit uses the existing retry/factual-fallback behavior.
 const SELLER_VOICE_BANNED_PATTERNS = [
   /[\u2013\u2014]/u,
+  /\b(?:stunning|elevate|boasts|must-have|exquisite|seamless|vibrant|top-notch|sleek|gorgeous|breathtaking)\b/i,
   /\bdon['’]t miss\b/i,
-  /\bmust-?have\b/i,
+  /\bwon['’]t last\b/i,
+  /\bgrab yours\b/i,
   /\blook no further\b/i,
   /\bact fast\b/i,
+  /\bwhether\s+you['’]re\s+[^.!?]*\bor\b\s+[^.!?]+/i,
 ];
 
+const SELLER_VOICE_MULTIPLE_EXCLAMATION_MARKS = /(?:[^!]*!){2}/;
+
 function listingViolatesSellerVoice(raw: RawEbayListing): boolean {
-  return [raw.description, ...Object.values(raw.itemSpecifics)].some((value) =>
-    SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(value)),
+  return (
+    SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(raw.description)) ||
+    SELLER_VOICE_MULTIPLE_EXCLAMATION_MARKS.test(raw.description) ||
+    Object.values(raw.itemSpecifics).some((value) =>
+      SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(value)),
+    )
   );
 }
 

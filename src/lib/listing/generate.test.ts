@@ -212,9 +212,23 @@ describe("listing/generate — seller-voice hard-list repair (#669)", () => {
     ["em dash", "Sony WH-1000XM4 — good used condition."],
     ["en dash", "Sony WH-1000XM4 – good used condition."],
     ["don't miss", "Don't miss this Sony WH-1000XM4."],
+    ["won't last", "This Sony WH-1000XM4 won't last."],
+    ["grab yours", "Grab yours before it is gone."],
     ["must-have", "This is a must-have Sony WH-1000XM4."],
     ["look no further", "Look no further for Sony WH-1000XM4 headphones."],
     ["act fast", "Act fast for this Sony WH-1000XM4."],
+    ["stunning", "Stunning Sony WH-1000XM4 headphones."],
+    ["elevate", "Elevate your listening setup with these headphones."],
+    ["boasts", "This headset boasts noise cancelling."],
+    ["exquisite", "Exquisite condition for its age."],
+    ["seamless", "Seamless wireless listening."],
+    ["vibrant", "Vibrant black finish."],
+    ["top-notch", "Top-notch noise cancelling."],
+    ["sleek", "Sleek over-ear design."],
+    ["gorgeous", "Gorgeous black headphones."],
+    ["breathtaking", "Breathtaking sound quality."],
+    ["whether you're X or Y", "Whether you're a collector or a casual listener, these work."],
+    ["more than one exclamation mark", "Tested and working! Includes case!"],
   ])("retries then replaces a raw description with %s", async (_label, description) => {
     const violating: EbayListing = {
       ...fallbackEbayListing(CORE),
@@ -230,6 +244,46 @@ describe("listing/generate — seller-voice hard-list repair (#669)", () => {
     });
 
     expect(calls).toHaveLength(2);
+    expect(listing).toEqual(fallbackEbayListing(CORE));
+  });
+
+  it("retries and falls back when an item-specific value contains a banned pattern", async () => {
+    const violating: EbayListing = {
+      ...fallbackEbayListing(CORE),
+      description: "Sony WH-1000XM4 headphones in good used condition.",
+      itemSpecifics: {
+        ...fallbackEbayListing(CORE).itemSpecifics,
+        Condition: "stunning",
+      },
+    };
+    const { generate, calls } = scriptedGenerate([violating, violating]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(listing).toEqual(fallbackEbayListing(CORE));
+  });
+
+  it("does not flag a banned adjective inside a longer word", async () => {
+    const clean: EbayListing = {
+      ...fallbackEbayListing(CORE),
+      description: "These headphones are stunningly well kept and tested.",
+    };
+    const { generate, calls } = scriptedGenerate([clean]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    expect(calls).toHaveLength(1);
     expect(listing).toEqual(fallbackEbayListing(CORE));
   });
 
