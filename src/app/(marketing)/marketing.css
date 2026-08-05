@@ -540,43 +540,10 @@ html:has(.mkt) {
   margin-top: clamp(24px, 3vw, 36px);
 }
 
-/* The two-phone hero arrangement only reads at width; below 880 the design
-   shows the single Listing Review phone. */
-.mkt-hero__pair {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-
-.mkt-hero__pair-back {
-  margin-top: 44px;
-  transform: rotate(-3deg);
-}
-
-.mkt-hero__pair-front {
-  margin-left: -64px;
-  z-index: 3;
-}
-
-.mkt-hero__single {
-  width: 264px;
-  max-width: 82vw;
-}
-
 @media (max-width: 879px) {
   .mkt-hero__copy {
     align-items: center;
     text-align: center;
-  }
-  .mkt-hero__pair {
-    display: none;
-  }
-}
-
-@media (min-width: 880px) {
-  .mkt-hero__single {
-    display: none;
   }
 }
 
@@ -602,22 +569,6 @@ html:has(.mkt) {
   z-index: 5;
 }
 
-.mkt-phone__chip {
-  position: absolute;
-  top: 22px;
-  right: 22px;
-  z-index: 6;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-  background: var(--canvas);
-  border: 1px solid var(--hairline-2);
-  padding: 2px 7px;
-  border-radius: 999px;
-}
-
 .mkt-phone__screen {
   position: relative;
   width: 100%;
@@ -631,120 +582,18 @@ html:has(.mkt) {
 
 /* --------------------------------------------------------------- hero art */
 
-/* The hero phones are sized by aspect-ratio rather than a fixed height, so the
-   single-phone variant can shrink with the viewport (max-width: 82vw) without
-   the frame going out of proportion. */
-.mkt-hero__lp {
+/* The hero stays a clean device treatment, not a preview of unshipped UI. */
+.mkt-hero__minimal-phone {
+  width: min(268px, 82vw);
   aspect-ratio: 268 / 552;
+  transform: rotate(-3deg);
 }
 
-.mkt-hero__pair-front .mkt-hero__lp {
-  width: 268px;
+.mkt-hero__neutral-screen {
+  background: linear-gradient(145deg, var(--wash) 0%, var(--canvas) 48%, var(--wash-2) 100%);
 }
 
-.mkt-hero__single .mkt-hero__lp {
-  width: 100%;
-}
-
-.mkt-hero__sp {
-  width: 232px;
-  aspect-ratio: 232 / 480;
-  border-radius: 38px;
-  padding: 9px;
-  box-shadow: 0 18px 44px rgba(16, 24, 40, 0.18);
-}
-
-.mkt-hero__sp .mkt-phone__notch {
-  width: 74px;
-  height: 20px;
-  top: 8px;
-}
-
-.mkt-hero__sp .mkt-phone__screen {
-  background: var(--ink);
-  border-radius: 30px;
-}
-
-.mkt-hero__sbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 30px 14px 10px;
-  color: var(--canvas);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.mkt-hero__scount {
-  font-size: 12px;
-  color: #c9cdd6;
-}
-
-.mkt-hero__sview {
-  flex: 1 1 auto;
-  margin: 0 14px;
-  border-radius: 12px;
-  background: #24262b;
-  position: relative;
-}
-
-.mkt-hero__sview::after {
-  content: "";
-  position: absolute;
-  inset: 14px;
-  border: 1.5px solid rgba(255, 255, 255, 0.28);
-  border-radius: 8px;
-}
-
-.mkt-hero__sstrip {
-  display: flex;
-  gap: 6px;
-  padding: 10px 14px 8px;
-}
-
-.mkt-hero__sthumb {
-  width: 34px;
-  height: 34px;
-  border-radius: 6px;
-  background: #3a3d44;
-}
-
-.mkt-hero__sshutter-row {
-  display: flex;
-  justify-content: center;
-  padding: 4px 0 18px;
-}
-
-.mkt-hero__sshutter {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: var(--canvas);
-  box-shadow:
-    0 0 0 3px var(--ink),
-    0 0 0 5px var(--canvas);
-}
-
-.mkt-hero__lbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 32px 16px 12px;
-  border-bottom: 1px solid var(--hairline-2);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.mkt-hero__lbody {
-  flex: 1 1 auto;
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  overflow: hidden;
-}
-
-/* Screen internals. 9px labels inside the illustrative frames are decorative
+/* Screen internals. 9px labels inside the feature frames are decorative
    chrome, not page copy; they are below AA on purpose and carry no information
    the page does not also state at full size. */
 .mkt-scr {
@@ -814,15 +663,6 @@ html:has(.mkt) {
   color: var(--ink);
   margin-top: 2px;
   line-height: 1.35;
-}
-
-.mkt-scr__row {
-  display: flex;
-  gap: 9px;
-}
-
-.mkt-scr__row > * {
-  flex: 1;
 }
 
 .mkt-scr__cta {
@@ -1406,17 +1246,7 @@ html:has(.mkt) {
   line-height: 1.5;
   color: var(--ink-2);
   text-wrap: pretty;
-}
-
-.mkt-chip {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-  background: var(--hairline-2);
-  padding: 2px 7px;
-  border-radius: 999px;
+  min-height: 3em;
 }
 
 /* Below 760 the explorer stacks: large phone, dots, then all five cards in one

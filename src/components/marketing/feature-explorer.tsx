@@ -21,7 +21,7 @@ const STEP: Record<string, number> = {
 };
 
 /**
- * The signature section: five selector cards drive one illustrative phone.
+ * The signature section: five selector cards drive one feature phone.
  *
  * Semantics are a WAI-ARIA tablist with a single tabpanel. Two consequences are
  * deliberate:
@@ -71,12 +71,6 @@ export function FeatureExplorer() {
             <div className="mkt-explorer__scale">
               <div className="mkt-explorer__device">
                 <span aria-hidden="true" className="mkt-phone__notch" />
-                {/* Every frame says it is a drawing. The chip narrows to
-                    `Candidate` on the one screen the native design package has
-                    not frozen. */}
-                <span className="mkt-phone__chip">
-                  {FEATURE_STEPS[active].candidate ? "Candidate" : "Illustrative"}
-                </span>
                 <div className="mkt-phone__screen">
                   {SCREENS.map((Screen, index) => (
                     <div
@@ -126,10 +120,7 @@ export function FeatureExplorer() {
             onClick={() => setActive(index)}
             onKeyDown={(event) => onTabKey(event, index)}
           >
-            <span className="mkt-tab__title">
-              {step.title}
-              {step.candidate ? <span className="mkt-chip">Candidate</span> : null}
-            </span>
+            <span className="mkt-tab__title">{step.title}</span>
             <span className="mkt-tab__body">{step.body}</span>
           </button>
         ))}

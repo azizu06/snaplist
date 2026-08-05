@@ -91,38 +91,32 @@ export const FEATURE_STEPS = [
   {
     id: "scan",
     title: "Scan",
-    /** Marks a screen the design package has not frozen for the native client. */
-    candidate: false,
     body:
-      "Take 1 to 5 photos, add another angle when needed, then choose when the set is ready.",
+      "Add 1 to 5 photos, then record one optional voice note up to 15 seconds before you start a draft.",
   },
   {
     id: "photo-review",
     title: "Photo Review",
-    candidate: true,
     body:
-      "Reorder, crop, rotate, or remove photos before SnapList drafts the listing.",
+      "Reorder, replace, or remove photos before SnapList drafts the listing, then choose the final order for the item.",
   },
   {
     id: "listing-review",
     title: "Listing Review",
-    candidate: false,
     body:
-      "Review and edit the title, condition, details, photos, and price before you publish.",
+      "Review and edit the title, condition, details, photos, and price so every field matches the item before you confirm it.",
   },
   {
     id: "publish",
     title: "Publish",
-    candidate: false,
     body:
-      "For Facebook Marketplace, Mercari, and Depop, SnapList prepares a handoff you finish.",
+      "Confirm before eBay publishing. Facebook Marketplace, Mercari, and Depop get a prepared handoff you finish.",
   },
   {
     id: "trophy-wall",
     title: TROPHY_WALL.title,
-    candidate: false,
     body:
-      "Follow each item from analysis to review, then see confirmed eBay results or prepared handoffs you finish.",
+      "Follow each item from analysis to review, then return to confirmed eBay results or prepared handoffs that you finish.",
   },
 ] as const;
 
