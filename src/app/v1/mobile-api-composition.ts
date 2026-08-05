@@ -1,6 +1,7 @@
 import { verifyToken } from "@clerk/nextjs/server";
 import { logServerError } from "@/lib/api/errors";
 import { createConfiguredGuestClaimHandoff } from "@/lib/app-attest/configured-guest-handoff";
+import { getClerkAuthorizedParties } from "@/lib/env";
 import {
   createSupabaseNativeSubscriptionBridge,
   resolveRevenueCatServerConfig,
@@ -30,10 +31,8 @@ export function unavailableWorker(routeName: string): PipelineWorker {
 /** Verifies the native bearer against Clerk and returns the RLS identity. */
 export async function clerkPrincipal(token: string): Promise<MobileApiPrincipal> {
   const secretKey = process.env.CLERK_SECRET_KEY?.trim();
-  const authorizedParties = process.env.CLERK_AUTHORIZED_PARTIES?.split(",")
-    .map((party) => party.trim())
-    .filter(Boolean);
-  if (!secretKey || !authorizedParties?.length) {
+  const authorizedParties = getClerkAuthorizedParties();
+  if (!secretKey || !authorizedParties.length) {
     throw new Error("The native Clerk verification boundary is not configured.");
   }
   const verified = await verifyToken(token, { secretKey, authorizedParties });

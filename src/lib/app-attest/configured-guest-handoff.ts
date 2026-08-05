@@ -44,8 +44,10 @@ export function resolveGuestClaimHandoffConfiguration(
   const appleRootCertificatePem = required(env, "APP_ATTEST_ROOT_CA_PEM")
     .replaceAll("\\n", "\n");
   const encodedSigningKey = required(env, "APP_ATTEST_HANDOFF_SIGNING_KEY");
-  if (!/^[A-Z0-9]{10}$/.test(teamId)) {
-    throw new Error("Guest claim handoff APP_ATTEST_TEAM_ID is invalid.");
+  if (teamId === "TEAMID1234" || !/^[A-Z0-9]{10}$/.test(teamId)) {
+    throw new Error(
+      "Guest claim handoff APP_ATTEST_TEAM_ID is invalid or uses the TEAMID1234 placeholder.",
+    );
   }
   if (
     bundleId.length > 255 ||

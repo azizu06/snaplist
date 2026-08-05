@@ -5,6 +5,7 @@ import {
   resolveApiKey,
   resolveProvider,
   sellerMediaConfigError,
+  isLocalDevelopment,
 } from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
 
@@ -89,6 +90,9 @@ const envSchema = z.object({
   // The iOS SDK key is public but stays server-provided instead of source-coded.
   REVENUECAT_WEBHOOK_SIGNING_SECRET: z.string().min(1).optional(),
   REVENUECAT_WEBHOOK_AUTHORIZATION: z.string().min(1).optional(),
+  // Server-only RevenueCat credentials used by account erasure.
+  REVENUECAT_SECRET_API_KEY: z.string().min(1).optional(),
+  REVENUECAT_PROJECT_ID: z.string().min(1).optional(),
   REVENUECAT_APP_ID: z.string().min(1).optional(),
   REVENUECAT_ENTITLEMENT_ID: z.string().min(1).optional(),
   REVENUECAT_MONTHLY_PRODUCT_ID: z.string().min(1).optional(),
@@ -137,14 +141,32 @@ const envSchema = z.object({
   // Supabase
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
+  // Current server key required by the account-erasure handler.
+  SUPABASE_SECRET_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   // Isolated imported ES256 signer for <=60s verified-guest operation JWTs.
   // Production and preview use distinct key ids/private keys.
   SUPABASE_GUEST_JWT_KEY_ID: z.string().min(1).optional(),
   SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM: z.string().min(1).optional(),
 
+  // Apple credentials remain optional for local/offline work, but a deployed
+  // guest allowance must identify the registered Team ID and exact bundle ID.
+  APPLE_TEAM_ID: z.string().min(1).optional(),
+  APP_ATTEST_APP_ID: z.string().min(1).optional(),
+  // The guest-claim handoff is a separate App Attest consumer. It reads these
+  // exact values, so deployed validation must bind to them rather than only the
+  // included-offer pair above.
+  APP_ATTEST_TEAM_ID: z.string().min(1).optional(),
+  APP_ATTEST_BUNDLE_ID: z.string().min(1).optional(),
+
+  // Native endpoints use Clerk's authorized-party list for `azp` validation.
+  CLERK_AUTHORIZED_PARTIES: z.string().min(1).optional(),
+
   // eBay (adapter; sandbox by default — flip to production via this URL + keys)
   EBAY_BASE_URL: z.string().min(1).default("https://api.sandbox.ebay.com"),
+  // Native OAuth and publishing stay behind an explicit operator gate. When the
+  // gate is on, deployed environments must use the exact production API origin.
+  EBAY_PRODUCTION_MOBILE_ENABLED: z.enum(["true", "false"]).optional(),
   // eBay API credentials. ALL OPTIONAL: adapters read them lazily at call time,
   // so the app and offline tests do not need them. Connected sellers use their
   // encrypted per-user grant. Env tokens are a restricted fallback for one
@@ -227,6 +249,224 @@ function llmProviderIssues(raw: Record<string, unknown>): string[] {
   return [];
 }
 
+function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string") env[key] = value;
+  }
+  if (isLocalDevelopment(env)) return [];
+
+  const issues: string[] = [];
+  const appAttestTeamId = env.APPLE_TEAM_ID?.trim();
+  if (!appAttestTeamId) {
+    issues.push(
+      "  - APPLE_TEAM_ID: APPLE_TEAM_ID is required outside local development.",
+    );
+  } else if (
+    appAttestTeamId === "TEAMID1234"
+    || !/^[A-Z0-9]{10}$/.test(appAttestTeamId)
+  ) {
+    issues.push(
+      "  - APPLE_TEAM_ID: APPLE_TEAM_ID must be the real 10-character Apple Team ID, not the placeholder TEAMID1234.",
+    );
+  }
+
+  const appAttestAppId = env.APP_ATTEST_APP_ID?.trim();
+  const appIdPrefix = `${appAttestTeamId}.`;
+  const appAttestBundleId = appAttestAppId?.startsWith(appIdPrefix)
+    ? appAttestAppId.slice(appIdPrefix.length)
+    : undefined;
+  if (
+    !appAttestBundleId
+    || appAttestBundleId.length > 255
+    || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(appAttestBundleId)
+  ) {
+    issues.push(
+      "  - APP_ATTEST_APP_ID: APP_ATTEST_APP_ID is required and must combine APPLE_TEAM_ID with the exact native bundle ID.",
+    );
+  }
+
+  const guestHandoffTeamId = env.APP_ATTEST_TEAM_ID?.trim();
+  if (!guestHandoffTeamId) {
+    issues.push(
+      "  - APP_ATTEST_TEAM_ID: APP_ATTEST_TEAM_ID is required outside local development.",
+    );
+  } else if (
+    guestHandoffTeamId === "TEAMID1234"
+    || !/^[A-Z0-9]{10}$/.test(guestHandoffTeamId)
+  ) {
+    issues.push(
+      "  - APP_ATTEST_TEAM_ID: APP_ATTEST_TEAM_ID must be the real 10-character Apple Team ID, not the placeholder TEAMID1234.",
+    );
+  }
+
+  const guestHandoffBundleId = env.APP_ATTEST_BUNDLE_ID?.trim();
+  if (
+    !guestHandoffBundleId
+    || guestHandoffBundleId.length > 255
+    || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(guestHandoffBundleId)
+  ) {
+    issues.push(
+      "  - APP_ATTEST_BUNDLE_ID: APP_ATTEST_BUNDLE_ID is required and must be the exact native bundle ID.",
+    );
+  }
+
+  const erasureRequired = [
+    "SUPABASE_SECRET_KEY",
+    "REVENUECAT_SECRET_API_KEY",
+    "REVENUECAT_PROJECT_ID",
+  ] as const;
+  const erasureIssues = erasureRequired
+    .filter((name) => !env[name]?.trim())
+    .map(
+      (name) =>
+        `  - ${name}: ${name} is required outside local development so account erasure can complete.`,
+    );
+  issues.push(...erasureIssues);
+
+  const authorizedParties = clerkAuthorizedParties(env);
+  if (!authorizedParties.length) {
+    issues.push(
+      "  - CLERK_AUTHORIZED_PARTIES: CLERK_AUTHORIZED_PARTIES is required outside local development.",
+    );
+  } else if (authorizedParties.some((party) => !isPublicHttpsOrigin(party))) {
+    issues.push(
+      "  - CLERK_AUTHORIZED_PARTIES: every deployed authorized party must be a public HTTPS origin.",
+    );
+  }
+
+  const baseUrl = env.EBAY_BASE_URL?.trim();
+  if (!baseUrl) {
+    issues.push(
+      "  - EBAY_BASE_URL: EBAY_BASE_URL is required outside local development; the Sandbox default is local/test-only.",
+    );
+  } else if (
+    env.EBAY_PRODUCTION_MOBILE_ENABLED?.trim() === "true"
+    && baseUrl !== "https://api.ebay.com"
+  ) {
+    issues.push(
+      "  - EBAY_BASE_URL: EBAY_PRODUCTION_MOBILE_ENABLED=true requires exactly https://api.ebay.com.",
+    );
+  }
+  return issues;
+}
+
+function clerkAuthorizedParties(env: Record<string, string | undefined>): string[] {
+  return (env.CLERK_AUTHORIZED_PARTIES ?? "")
+    .split(",")
+    .map((party) => party.trim())
+    .filter(Boolean);
+}
+
+function isPublicHttpsOrigin(party: string): boolean {
+  try {
+    const url = new URL(party);
+    if (
+      url.protocol !== "https:"
+      || url.username
+      || url.password
+      || url.pathname !== "/"
+      || url.search
+      || url.hash
+    ) {
+      return false;
+    }
+
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
+
+    const ipv4 = hostname.split(".").map(Number);
+    if (ipv4.length === 4 && ipv4.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
+      return isPublicIpv4(ipv4);
+    }
+
+    if (!hostname.includes(":")) return true;
+
+    const ipv6 = parseIpv6Hextets(hostname);
+    if (!ipv6) return false;
+
+    if (isIpv4EmbeddedIpv6(ipv6)) {
+      return isPublicIpv4([
+        ipv6[6] >> 8,
+        ipv6[6] & 0xff,
+        ipv6[7] >> 8,
+        ipv6[7] & 0xff,
+      ]);
+    }
+
+    return !(
+      (ipv6[0] & 0xfe00) === 0xfc00
+      || (ipv6[0] & 0xffc0) === 0xfe80
+      || (ipv6[0] & 0xffc0) === 0xfec0
+      || (ipv6[0] & 0xff00) === 0xff00
+      || (ipv6[0] === 0x2001 && ipv6[1] === 0x0db8)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isPublicIpv4([first, second]: number[]): boolean {
+  return !(
+    first === 0
+    || first === 10
+    || first === 127
+    || (first === 169 && second === 254)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168)
+  );
+}
+
+function parseIpv6Hextets(hostname: string): number[] | undefined {
+  const parts = hostname.toLowerCase().split("::");
+  if (parts.length > 2) return undefined;
+
+  const left = parts[0] ? parts[0].split(":") : [];
+  const right = parts[1] ? parts[1].split(":") : [];
+  const hextets = [...left, ...right];
+  if (
+    (parts.length === 1 && hextets.length !== 8)
+    || (parts.length === 2 && hextets.length >= 8)
+    || hextets.some((hextet) => !/^[0-9a-f]{1,4}$/.test(hextet))
+  ) {
+    return undefined;
+  }
+
+  const values = hextets.map((hextet) => Number.parseInt(hextet, 16));
+  return parts.length === 1
+    ? values
+    : [...values.slice(0, left.length), ...Array(8 - values.length).fill(0), ...values.slice(left.length)];
+}
+
+function isIpv4EmbeddedIpv6(ipv6: number[]): boolean {
+  return (
+    ipv6.slice(0, 6).every((hextet) => hextet === 0)
+    || (ipv6.slice(0, 5).every((hextet) => hextet === 0) && ipv6[5] === 0xffff)
+    || (
+      ipv6.slice(0, 4).every((hextet) => hextet === 0)
+      && ipv6[4] === 0xffff
+      && ipv6[5] === 0
+    )
+  );
+}
+
+/**
+ * Reads the same Clerk audience list used by native auth. In deployed processes
+ * it rejects malformed, local, and non-HTTPS values before `verifyToken` sees
+ * them; startup validation alone is not an authorization boundary.
+ */
+export function getClerkAuthorizedParties(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const parties = clerkAuthorizedParties(env);
+  if (!isLocalDevelopment(env) && parties.some((party) => !isPublicHttpsOrigin(party))) {
+    throw new Error(
+      "CLERK_AUTHORIZED_PARTIES must contain only public HTTPS origins outside local development.",
+    );
+  }
+  return parties;
+}
+
 export type Env = z.infer<typeof envSchema>;
 
 /**
@@ -239,6 +479,7 @@ export function parseEnv(raw: Record<string, unknown>): Env {
     ? []
     : parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`);
   issues.push(...llmProviderIssues(raw));
+  issues.push(...deploymentConfigIssues(raw));
 
   if (!parsed.success) throw new Error(`Invalid environment variables:\n${issues.join("\n")}`);
   if (issues.length > 0) throw new Error(`Invalid environment variables:\n${issues.join("\n")}`);

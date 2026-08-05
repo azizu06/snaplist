@@ -14,15 +14,36 @@ the ordered checklist for the flip. Sandbox setup itself is documented in
 | `EBAY_VERIFICATION_TOKEN` | unused | random 32–80 char token you mint |
 | `EBAY_DELETION_ENDPOINT_URL` | unused | `https://<host>/api/ebay/account-deletion` |
 | `EBAY_TOKEN_ENCRYPTION_KEY` | any | keep stable — rotating it orphans stored seller tokens |
-| `SUPABASE_SERVICE_ROLE_KEY` | current `sb_secret_...` | current `sb_secret_...`; required by tenant-bound completion and cron RPCs |
+| `SUPABASE_SECRET_KEY` | optional local key | current `sb_secret_...`; required by account erasure |
+| `SUPABASE_SERVICE_ROLE_KEY` | legacy caller compatibility | current `sb_secret_...`; does not replace `SUPABASE_SECRET_KEY` for account erasure |
+| `REVENUECAT_SECRET_API_KEY` / `REVENUECAT_PROJECT_ID` | unset for local/offline | required server-only RevenueCat erasure credentials |
+| `APPLE_TEAM_ID` / `APP_ATTEST_APP_ID` | local/test values | real 10-character Apple Team ID plus exact registered bundle ID; placeholder `TEAMID1234` is rejected |
+| `APP_ATTEST_TEAM_ID` / `APP_ATTEST_BUNDLE_ID` | local/test values | real 10-character Apple Team ID plus exact registered bundle ID for guest-claim handoff; placeholder `TEAMID1234` is rejected |
+| `CLERK_AUTHORIZED_PARTIES` | localhost origins allowed | every deployed value is a public HTTPS origin, e.g. `https://snaplist.vercel.app` |
+| `EBAY_PRODUCTION_MOBILE_ENABLED` | `false` or unset | set `true` only with `EBAY_BASE_URL=https://api.ebay.com` exactly |
 | policy ids (`EBAY_*_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`) | optional exact-operator fallback only | **unset**; each connected seller's verified binding |
 | `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` | sandbox convenience | **unset** — production publishes use per-user OAuth |
 | `EBAY_MESSAGING_SANDBOX_OPERATOR_*` | optional one-tenant fallback | **unset** — never allowed in production |
 | `CRON_SECRET` | optional for local/manual checks | required before enabling scheduled inbox sync |
 
 The consent-screen host flips automatically with `EBAY_BASE_URL`
-(`auth.sandbox.ebay.com` ↔ `auth.ebay.com`); nothing else derives state from
-`NODE_ENV`.
+(`auth.sandbox.ebay.com` ↔ `auth.ebay.com`). Deployment validation separately
+distinguishes local/test processes from deployed environments.
+
+## Deployed configuration validation
+
+Before deployed traffic, SnapList rejects an omitted `EBAY_BASE_URL`; the
+Sandbox default is available only to local/test processes. If
+`EBAY_PRODUCTION_MOBILE_ENABLED=true`, the URL must be exactly
+`https://api.ebay.com`.
+
+Every deployed environment also needs `SUPABASE_SECRET_KEY`,
+`REVENUECAT_SECRET_API_KEY`, `REVENUECAT_PROJECT_ID`, `APPLE_TEAM_ID`,
+`APP_ATTEST_APP_ID`, `APP_ATTEST_TEAM_ID`, `APP_ATTEST_BUNDLE_ID`, and
+`CLERK_AUTHORIZED_PARTIES`. Use real Apple Team IDs and registered App Attest
+bundle IDs for both consumers, current `sb_secret_...` Supabase key, and only
+public HTTPS Clerk authorized parties. The `SUPABASE_SERVICE_ROLE_KEY` legacy name
+does not satisfy account erasure.
 
 ## Ordered checklist
 
@@ -67,7 +88,15 @@ EBAY_CLIENT_ID=<production App ID>
 EBAY_CLIENT_SECRET=<production Cert ID>
 EBAY_RU_NAME=<production RuName>
 EBAY_TOKEN_ENCRYPTION_KEY=<openssl rand -base64 32; then never rotate casually>
-SUPABASE_SERVICE_ROLE_KEY=<current sb_secret_... value>
+SUPABASE_SECRET_KEY=<current sb_secret_... value>
+REVENUECAT_SECRET_API_KEY=<RevenueCat secret API key>
+REVENUECAT_PROJECT_ID=<RevenueCat project id>
+APPLE_TEAM_ID=<real-10-character-Apple-Team-ID>
+APP_ATTEST_APP_ID=<APPLE_TEAM_ID>.<registered.native.bundle.id>
+APP_ATTEST_TEAM_ID=<real-10-character-Apple-Team-ID>
+APP_ATTEST_BUNDLE_ID=<registered.native.bundle.id>
+CLERK_AUTHORIZED_PARTIES=https://snaplist.vercel.app
+EBAY_PRODUCTION_MOBILE_ENABLED=true
 EBAY_MARKETPLACE_ID=EBAY_US
 CRON_SECRET=<openssl rand -hex 32; required before scheduled inbox sync>
 ```
