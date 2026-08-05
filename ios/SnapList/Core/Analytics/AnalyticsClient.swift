@@ -36,7 +36,7 @@ protocol AnalyticsDedupeStoring: AnyObject {
 final class InMemoryAnalyticsConsentStore: AnalyticsConsentStoring {
     private(set) var consent: AnalyticsConsent
 
-    init(consent: AnalyticsConsent = .notDetermined) {
+    init(consent: AnalyticsConsent = .granted) {
         self.consent = consent
     }
 
@@ -62,11 +62,21 @@ final class InMemoryAnalyticsDedupeStore: AnalyticsDedupeStoring {
 }
 
 struct NoOpAnalyticsClient: AnalyticsClient {
+    private let consentStore: any AnalyticsConsentStoring
+
+    init(
+        consentStore: any AnalyticsConsentStoring = UserDefaultsAnalyticsConsentStore()
+    ) {
+        self.consentStore = consentStore
+    }
+
     func capture(_ event: AnalyticsEvent) {}
     func screen(_ screen: AnalyticsScreen) {}
     func identify(clerkUserID: String) {}
     func reset() {}
-    func setConsent(_ consent: AnalyticsConsent) {}
+    func setConsent(_ consent: AnalyticsConsent) {
+        consentStore.setConsent(consent)
+    }
     func flush() {}
 }
 

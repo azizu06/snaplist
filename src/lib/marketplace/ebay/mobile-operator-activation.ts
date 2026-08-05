@@ -24,7 +24,14 @@ export function assertMobileEbayOperatorActivation(env: Env): string {
     throw invalidMobileEbayBaseUrl();
   }
 
-  if (parsed.origin === SANDBOX_API_ORIGIN) return SANDBOX_API_ORIGIN;
+  if (parsed.origin === SANDBOX_API_ORIGIN) {
+    if (env.EBAY_PRODUCTION_MOBILE_ENABLED === "true") {
+      throw new Error(
+        "EBAY_PRODUCTION_MOBILE_ENABLED=true requires EBAY_BASE_URL to be exactly https://api.ebay.com.",
+      );
+    }
+    return SANDBOX_API_ORIGIN;
+  }
 
   if (parsed.origin === PRODUCTION_API_ORIGIN) {
     if (env.EBAY_PRODUCTION_MOBILE_ENABLED !== "true") {

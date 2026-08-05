@@ -9,7 +9,9 @@ struct SettingsView: View {
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
     private let deletionOutstanding: Bool
+    private let analyticsClient: any AnalyticsClient
     @State private var hasLocalData: Bool
+    @State private var analyticsConsentState: SettingsAnalyticsConsentState
     @State private var subscriptionStore: SubscriptionStore
     @State private var subscriptionLoadPhase =
         SettingsSubscriptionPresentation.LoadPhase.loading
@@ -19,6 +21,7 @@ struct SettingsView: View {
         configuration: LaunchConfiguration,
         mobileAPIClient: any MobileAPIClient,
         subscriptionClient: any SubscriptionClient,
+        analyticsClient: any AnalyticsClient,
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false
@@ -27,7 +30,13 @@ struct SettingsView: View {
         self.mobileAPIClient = mobileAPIClient
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
+        self.analyticsClient = analyticsClient
         _hasLocalData = State(initialValue: hasLocalData)
+        _analyticsConsentState = State(
+            initialValue: SettingsAnalyticsConsentState(
+                consent: UserDefaultsAnalyticsConsentStore().consent
+            )
+        )
         _subscriptionStore = State(
             initialValue: SubscriptionStore(client: subscriptionClient)
         )
@@ -47,6 +56,10 @@ struct SettingsView: View {
                 valueRow("Connected marketplaces", profile.isGuest ? "Not connected" : "eBay", chevron: true)
                 valueRow("Photos", "Selected photos", chevron: true)
                 valueRow("Notifications", "On", chevron: true)
+            }
+            Section("Privacy") {
+                Toggle("Share usage analytics", isOn: analyticsConsentBinding)
+                    .accessibilityIdentifier("settings.share-usage-analytics")
             }
             if SettingsSubscriptionVisibility(
                 identity: profile.identity,
@@ -125,6 +138,16 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
         .background(Color(hex: "#F5F6F7"))
+        .alert(
+            "Couldn’t update analytics sharing",
+            isPresented: analyticsConsentErrorBinding
+        ) {
+            Button("OK", role: .cancel) {
+                analyticsConsentState.dismissError()
+            }
+        } message: {
+            Text("Your preference did not change. Try again.")
+        }
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
         .task {
             guard !profile.isGuest else { return }
@@ -234,6 +257,23 @@ struct SettingsView: View {
         )
     }
 
+    private var analyticsConsentBinding: Binding<Bool> {
+        Binding(
+            get: { analyticsConsentState.isEnabled },
+            set: { analyticsConsentState.request($0, using: analyticsClient) }
+        )
+    }
+
+    private var analyticsConsentErrorBinding: Binding<Bool> {
+        Binding(
+            get: { analyticsConsentState.showsError },
+            set: { isPresented in
+                guard !isPresented else { return }
+                analyticsConsentState.dismissError()
+            }
+        )
+    }
+
     private func valueRow(_ label: String, _ value: String, chevron: Bool = false) -> some View {
         HStack {
             Text(label)
@@ -246,6 +286,32 @@ struct SettingsView: View {
 
     private func navigationRow(_ label: String) -> some View {
         HStack { Text(label); Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
+    }
+}
+
+struct SettingsAnalyticsConsentState {
+    private(set) var isEnabled: Bool
+    private(set) var showsError = false
+
+    init(consent: AnalyticsConsent) {
+        isEnabled = consent == .granted
+    }
+
+    mutating func request(
+        _ isEnabled: Bool,
+        using analyticsClient: any AnalyticsClient
+    ) {
+        do {
+            try analyticsClient.setConsent(isEnabled ? .granted : .denied)
+            self.isEnabled = isEnabled
+            showsError = false
+        } catch {
+            showsError = true
+        }
+    }
+
+    mutating func dismissError() {
+        showsError = false
     }
 }
 

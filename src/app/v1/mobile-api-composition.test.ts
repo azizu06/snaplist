@@ -41,9 +41,9 @@ import { GET as getHealth } from "./health/route";
 import { GET as getSession } from "./session/route";
 import { GET as getAiItemEntitlement } from "./entitlements/ai-items/route";
 import { POST as postRevenueCatIdentity } from "./billing/revenuecat/identity/route";
-import { verifyGuestClaimHandoff } from "./mobile-api-composition";
+import { clerkPrincipal, verifyGuestClaimHandoff } from "./mobile-api-composition";
 
-const environmentKeys = ["CLERK_SECRET_KEY", "CLERK_AUTHORIZED_PARTIES"] as const;
+const environmentKeys = ["CLERK_SECRET_KEY", "CLERK_AUTHORIZED_PARTIES", "NODE_ENV"] as const;
 
 function nativeRequest(path: string, init?: RequestInit): Request {
   return new Request(`https://snaplist.example${path}`, init);
@@ -87,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const key of environmentKeys) delete process.env[key];
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 
@@ -168,6 +169,16 @@ describe("production mobile API route composition", () => {
 
     expect(response.status).toBe(401);
     expect(entitlementFor).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-HTTPS authorized party in a deployed native auth path", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    process.env.CLERK_AUTHORIZED_PARTIES = "http://snaplist.example";
+
+    await expect(clerkPrincipal("signed-release-jwt")).rejects.toThrow(
+      /public HTTPS origin/i,
+    );
+    expect(verifyToken).not.toHaveBeenCalled();
   });
 
   it("supplies the App Attest handoff verifier through the production dependency slot", async () => {

@@ -83,6 +83,7 @@
 		581A00000000000000000004 /* AssistedExportClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581E00000000000000000004 /* AssistedExportClient.swift */; };
 		581A00000000000000000005 /* AssistedExportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581E00000000000000000005 /* AssistedExportStore.swift */; };
 		581A00000000000000000006 /* AssistedExportDeviceActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581E00000000000000000006 /* AssistedExportDeviceActions.swift */; };
+		667A00000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 667F00000000000000000001 /* PrivacyInfo.xcprivacy */; };
 		581B00000000000000000002 /* AssistedExportLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581F00000000000000000003 /* AssistedExportLaunchTests.swift */; };
 		581B00000000000000000001 /* AssistedExportDomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581F00000000000000000001 /* AssistedExportDomainTests.swift */; };
 		581B00000000000000000004 /* AssistedExportClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581F00000000000000000004 /* AssistedExportClientTests.swift */; };
@@ -195,6 +196,7 @@
 		208F00000000000000000005 /* HomeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViews.swift; sourceTree = "<group>"; };
 		208F00000000000000000008 /* ClerkAuthentication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClerkAuthentication.swift; sourceTree = "<group>"; };
 		208F00000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		667F00000000000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		229F00000000000000000001 /* AnalyticsContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsContractTests.swift; sourceTree = "<group>"; };
 		317F00000000000000000001 /* RunAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunAPIClientTests.swift; sourceTree = "<group>"; };
 		317F00000000000000000002 /* RunStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunStoreTests.swift; sourceTree = "<group>"; };
@@ -291,6 +293,7 @@
 			isa = PBXGroup;
 			children = (
 				208F00000000000000000009 /* Info.plist */,
+				667F00000000000000000001 /* PrivacyInfo.xcprivacy */,
 				200000000000000000000003 /* App */,
 				331D00000000000000000001 /* AppAttest */,
 				200000000000000000000004 /* Core */,
@@ -412,7 +415,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		500000000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A0000000000000000000000D /* Assets.xcassets in Resources */); runOnlyForDeploymentPostprocessing = 0; };
+		500000000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A0000000000000000000000D /* Assets.xcassets in Resources */, 667A00000000000000000001 /* PrivacyInfo.xcprivacy in Resources */); runOnlyForDeploymentPostprocessing = 0; };
 		500000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B00000000000000000000005 /* DesignContracts in Resources */); runOnlyForDeploymentPostprocessing = 0; };
 		500000000000000000000003 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */

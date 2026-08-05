@@ -30,6 +30,7 @@ describe("App Attest verification service", () => {
     const store = new InMemoryAppAttestStore();
     const verifier = fixedVerifier();
     const service = createAppAttestService({
+      appId: "TEAMID1234.dev.snaplist.ios",
       challengeBytes: () => FIXED_CHALLENGE,
       challengeId: () => "challenge-331",
       challengeTtlMs: 5 * 60 * 1000,
@@ -77,6 +78,7 @@ describe("App Attest verification service", () => {
     const store = new InMemoryAppAttestStore();
     const verifier = fixedVerifier();
     const service = createAppAttestService({
+      appId: "TEAMID1234.dev.snaplist.ios",
       challengeBytes: () => FIXED_CHALLENGE,
       challengeId: () => "pending-key-challenge-331",
       challengeTtlMs: 5 * 60 * 1000,

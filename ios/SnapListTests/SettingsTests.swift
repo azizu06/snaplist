@@ -2,6 +2,52 @@ import XCTest
 @testable import SnapList
 
 final class SettingsTests: XCTestCase {
+    func testShareUsageAnalyticsPreferenceDefaultsOnAndPersistsAcrossRelaunch() throws {
+        let suiteName = "SettingsTests-analytics-consent-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = UserDefaultsAnalyticsConsentStore(defaults: defaults)
+        XCTAssertEqual(first.consent, .granted)
+
+        first.setConsent(.denied)
+        XCTAssertEqual(
+            UserDefaultsAnalyticsConsentStore(defaults: defaults).consent,
+            .denied
+        )
+
+        first.setConsent(.granted)
+        XCTAssertEqual(
+            UserDefaultsAnalyticsConsentStore(defaults: defaults).consent,
+            .granted
+        )
+    }
+
+    func testNoOpAnalyticsClientPersistsTheSettingsToggle() throws {
+        let suiteName = "SettingsTests-noop-analytics-consent-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = UserDefaultsAnalyticsConsentStore(defaults: defaults)
+        let client = NoOpAnalyticsClient(consentStore: store)
+
+        try client.setConsent(.denied)
+        XCTAssertEqual(store.consent, .denied)
+
+        try client.setConsent(.granted)
+        XCTAssertEqual(store.consent, .granted)
+    }
+
+    func testAnalyticsToggleRetainsActualConsentAndReportsFailure() {
+        let client = FailingSettingsAnalyticsClient()
+        var state = SettingsAnalyticsConsentState(consent: .denied)
+
+        state.request(true, using: client)
+
+        XCTAssertFalse(state.isEnabled)
+        XCTAssertTrue(state.showsError)
+        XCTAssertEqual(client.requestedConsents, [.granted])
+    }
+
     @MainActor
     func testSettingsEntryUsesTheTrophyWallProfileRoute() {
         let router = AppRouter(initialTab: .trophyWall)
@@ -490,4 +536,20 @@ final class SettingsTests: XCTestCase {
             state.lead(email: "seller@example.com").contains("SnapList sent")
         )
     }
+}
+
+private final class FailingSettingsAnalyticsClient: AnalyticsClient {
+    enum Failure: Error { case expected }
+
+    private(set) var requestedConsents: [AnalyticsConsent] = []
+
+    func capture(_ event: AnalyticsEvent) {}
+    func screen(_ screen: AnalyticsScreen) {}
+    func identify(clerkUserID: String) {}
+    func reset() {}
+    func setConsent(_ consent: AnalyticsConsent) throws {
+        requestedConsents.append(consent)
+        throw Failure.expected
+    }
+    func flush() {}
 }

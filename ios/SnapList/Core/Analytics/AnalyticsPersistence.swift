@@ -113,7 +113,7 @@ final class UserDefaultsAnalyticsConsentStore: AnalyticsConsentStoring {
     var consent: AnalyticsConsent {
         guard let rawValue = defaults.string(forKey: key),
               let consent = AnalyticsConsent(rawValue: rawValue) else {
-            return .notDetermined
+            return .granted
         }
         return consent
     }

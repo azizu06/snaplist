@@ -306,6 +306,68 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
+    func testPhotoReviewControlsReachTheirExactTypedBoundaryDestinations() {
+        let acknowledgmentNotification =
+            "dev.snaplist.ios.test.submission-ack.\(UUID().uuidString)"
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--submission-fixture=accepted-presentation-gated",
+            "--submission-acknowledgment-notification=\(acknowledgmentNotification)"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let voice = app.buttons["photo-review.voice"]
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(voice.waitForExistence(timeout: 3))
+        XCTAssertTrue(startListing.exists)
+        XCTAssertEqual(startListing.label, "Start listing")
+
+        voice.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["voice-note.title"].waitForExistence(timeout: 2),
+            "Voice control must reach the Voice boundary."
+        )
+        let unexpectedSubmission = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                startListing.label != "Start listing"
+            },
+            object: startListing
+        )
+        unexpectedSubmission.isInverted = true
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [unexpectedSubmission], timeout: 3),
+            .completed,
+            "Voice control must not reach the submission boundary."
+        )
+
+        app.buttons["voice-note.close"].tap()
+        XCTAssertTrue(startListing.waitForExistence(timeout: 2))
+
+        startListing.tap()
+
+        let saved = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                startListing.exists && startListing.label == "Item saved"
+            },
+            object: startListing
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [saved], timeout: 3),
+            .completed,
+            "Start listing control must reach the submission boundary."
+        )
+    }
+
     func testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave() {
         let app = XCUIApplication()
         app.launchArguments = [
