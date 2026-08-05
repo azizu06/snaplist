@@ -1440,7 +1440,7 @@ final class SnapListUITests: XCTestCase {
         }
 
         XCTAssertEqual(activity.label, "Open activity")
-        XCTAssertEqual(account.label, "Open account and settings")
+        XCTAssertEqual(account.label, "Open Settings")
         XCTAssertEqual(capture.label, "Capture a new item")
 
         activity.tap()

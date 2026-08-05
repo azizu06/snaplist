@@ -119,7 +119,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(persisted)
     }
 
-    func testLocalRemovalDoesNotReportEmptyWhenAnyOwnedStoreFails() async {
+    func testLocalRemovalStopsBeforeCachesWhenVersionFencedIntakeRejects() async {
         var cachedRemovalCalled = false
 
         let removed = await SettingsLocalRemovalTransaction.perform(
@@ -131,7 +131,7 @@ final class SettingsTests: XCTestCase {
         )
 
         XCTAssertFalse(removed)
-        XCTAssertTrue(cachedRemovalCalled)
+        XCTAssertFalse(cachedRemovalCalled)
     }
 
     func testGuestSettingsStopsBeforeEntitlementsAndAccountManagement() {
@@ -177,6 +177,20 @@ final class SettingsTests: XCTestCase {
         flow.resolveReauthentication(.succeeded)
         flow.returnFromDeletionConfirmation()
         XCTAssertEqual(flow.stateID, "DEL-02")
+    }
+
+    func testProductionDeletionBoundaryStopsAtConfirmationUntilServerTailLands() {
+        let confirmationOnly = SettingsDeletionBoundary.confirmationOnly
+        var committed = false
+        let wired = SettingsDeletionBoundary(commit: { committed = true })
+
+        XCTAssertFalse(confirmationOnly.allowsCommit)
+        XCTAssertFalse(confirmationOnly.commitIfAvailable())
+        XCTAssertFalse(committed)
+
+        XCTAssertTrue(wired.allowsCommit)
+        XCTAssertTrue(wired.commitIfAvailable())
+        XCTAssertTrue(committed)
     }
 
     func testSubscriptionPresentationKeepsEveryFrozenReadingDistinct() {
@@ -340,6 +354,18 @@ final class SettingsTests: XCTestCase {
             SettingsEntitlementRefreshPlan.afterRestore(.failed("offline")),
             .stop
         )
+        XCTAssertEqual(
+            SettingsEntitlementRefreshPlan
+                .afterInitialLoad(.available([]))
+                .deletionDisclosureLoadPhase,
+            .loading
+        )
+        XCTAssertEqual(
+            SettingsEntitlementRefreshPlan
+                .afterInitialLoad(.unconfigured)
+                .deletionDisclosureLoadPhase,
+            .loaded
+        )
     }
 
     func testSubscriptionGroupIsAbsentForGuestAndDeletionOutstanding() {
@@ -405,6 +431,28 @@ final class SettingsTests: XCTestCase {
             SettingsReauthenticationGate.isSameAccount(
                 originalUserID: "user_385",
                 verifiedUserID: nil
+            )
+        )
+    }
+
+    func testEmailReauthenticationUsesOnlyTheDisplayedPrimaryAddressFactor() {
+        XCTAssertEqual(
+            SettingsReauthenticationGate.emailAddressID(
+                displayedPrimaryAddressID: "email_primary",
+                supportedEmailAddressIDs: ["email_other", "email_primary"]
+            ),
+            "email_primary"
+        )
+        XCTAssertNil(
+            SettingsReauthenticationGate.emailAddressID(
+                displayedPrimaryAddressID: "email_primary",
+                supportedEmailAddressIDs: ["email_other"]
+            )
+        )
+        XCTAssertNil(
+            SettingsReauthenticationGate.emailAddressID(
+                displayedPrimaryAddressID: nil,
+                supportedEmailAddressIDs: ["email_other"]
             )
         )
     }

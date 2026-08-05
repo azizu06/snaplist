@@ -115,6 +115,25 @@ struct SettingsFlow: Equatable {
     }
 }
 
+struct SettingsDeletionBoundary {
+    static let confirmationOnly = Self(commit: nil)
+
+    private let commit: (() -> Void)?
+
+    init(commit: (() -> Void)?) {
+        self.commit = commit
+    }
+
+    var allowsCommit: Bool { commit != nil }
+
+    @discardableResult
+    func commitIfAvailable() -> Bool {
+        guard let commit else { return false }
+        commit()
+        return true
+    }
+}
+
 struct SettingsLocalCachedDataStore {
     private let applicationSupportDirectory: URL
     private let fileManager: FileManager
@@ -159,9 +178,8 @@ enum SettingsLocalRemovalTransaction {
         removeIntake: () async -> Bool,
         removeCachedItems: () async -> Bool
     ) async -> Bool {
-        let removedIntake = await removeIntake()
-        let removedCachedItems = await removeCachedItems()
-        return removedIntake && removedCachedItems
+        guard await removeIntake() else { return false }
+        return await removeCachedItems()
     }
 }
 
@@ -183,6 +201,17 @@ enum SettingsReauthenticationGate {
     ) -> Bool {
         verifiedUserID == originalUserID
     }
+
+    static func emailAddressID(
+        displayedPrimaryAddressID: String?,
+        supportedEmailAddressIDs: [String]
+    ) -> String? {
+        guard let displayedPrimaryAddressID,
+              supportedEmailAddressIDs.contains(displayedPrimaryAddressID) else {
+            return nil
+        }
+        return displayedPrimaryAddressID
+    }
 }
 
 enum SettingsEntitlementRefreshPlan: Equatable {
@@ -200,6 +229,14 @@ enum SettingsEntitlementRefreshPlan: Equatable {
             .requestServerTruth
         default:
             .stop
+        }
+    }
+
+    var deletionDisclosureLoadPhase:
+        SettingsSubscriptionPresentation.LoadPhase {
+        switch self {
+        case .stop: .loaded
+        case .requestServerTruth: .loading
         }
     }
 }

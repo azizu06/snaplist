@@ -8,7 +8,7 @@ struct SettingsView: View {
     private let profile: SettingsProfile
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
-    private let deletionBoundary: () -> Void
+    private let deletionBoundary: SettingsDeletionBoundary
     private let deletionOutstanding: Bool
     @State private var hasLocalData: Bool
     @State private var subscriptionStore: SubscriptionStore
@@ -23,7 +23,7 @@ struct SettingsView: View {
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false,
-        deletionBoundary: @escaping () -> Void = {}
+        deletionBoundary: SettingsDeletionBoundary = .confirmationOnly
     ) {
         profile = .current(configuration: configuration)
         self.mobileAPIClient = mobileAPIClient
@@ -205,10 +205,11 @@ struct SettingsView: View {
             let configuration = try await mobileAPIClient
                 .getRevenueCatConfiguration().data.subscriptionConfiguration
             await subscriptionStore.load(configuration: configuration)
-            subscriptionLoadPhase = .loaded
-            guard SettingsEntitlementRefreshPlan.afterInitialLoad(
+            let refreshPlan = SettingsEntitlementRefreshPlan.afterInitialLoad(
                 subscriptionStore.state
-            ) == .requestServerTruth else { return }
+            )
+            subscriptionLoadPhase = refreshPlan.deletionDisclosureLoadPhase
+            guard refreshPlan == .requestServerTruth else { return }
             try await refreshServerEntitlement()
         } catch {
             subscriptionLoadPhase = .failed
@@ -218,9 +219,11 @@ struct SettingsView: View {
     private func restoreSubscription() async {
         subscriptionLoadPhase = .loaded
         await subscriptionStore.restore()
-        guard SettingsEntitlementRefreshPlan.afterRestore(
+        let refreshPlan = SettingsEntitlementRefreshPlan.afterRestore(
             subscriptionStore.state
-        ) == .requestServerTruth else { return }
+        )
+        subscriptionLoadPhase = refreshPlan.deletionDisclosureLoadPhase
+        guard refreshPlan == .requestServerTruth else { return }
         do { try await refreshServerEntitlement() }
         catch { subscriptionLoadPhase = .failed }
     }
@@ -298,7 +301,7 @@ private struct SettingsDeletionConsequencesView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
-    let deletionBoundary: () -> Void
+    let deletionBoundary: SettingsDeletionBoundary
     @State private var managesSubscription = false
 
     var body: some View {
@@ -351,7 +354,7 @@ private struct SettingsReauthenticationView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
-    let deletionBoundary: () -> Void
+    let deletionBoundary: SettingsDeletionBoundary
     let keepAccount: () -> Void
     @State private var code = ""
     @State private var failed = false
@@ -446,7 +449,11 @@ private struct SettingsReauthenticationView: View {
 
     private func prepareEmailCodeIfNeeded() async {
         guard profile.method == .emailCode else { return }
-        do { try await SettingsReauthentication.prepareEmailCode() }
+        do {
+            try await SettingsReauthentication.prepareEmailCode(
+                displayedPrimaryAddressID: profile.emailAddressID
+            )
+        }
         catch { showFailure() }
     }
 
@@ -460,7 +467,7 @@ private struct SettingsReauthenticationView: View {
 
 private struct SettingsDeletionConfirmationView: View {
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
-    let deletionBoundary: () -> Void
+    let deletionBoundary: SettingsDeletionBoundary
     let keepAccount: () -> Void
 
     var body: some View {
@@ -472,22 +479,48 @@ private struct SettingsDeletionConfirmationView: View {
                 "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
                 subscriptionTruth.shortCopy
             ], usesBullets: false)
-            Text("It’s you, confirmed a moment ago. Nothing is sent until you tap Delete account.")
-                .foregroundStyle(.secondary)
+            if deletionBoundary.allowsCommit {
+                Text("It’s you, confirmed a moment ago. Nothing is sent until you tap Delete account.")
+                    .foregroundStyle(.secondary)
+            }
         }
         .navigationTitle("Delete account")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            SettingsActionTray(
-                primary: "Delete account",
-                secondary: "Keep my account",
-                destructive: true,
-                note: "Keep my account is the safe way out and it works right up to the tap.",
-                primaryAction: deletionBoundary,
-                secondaryAction: keepAccount
-            )
+            if deletionBoundary.allowsCommit {
+                SettingsActionTray(
+                    primary: "Delete account",
+                    secondary: "Keep my account",
+                    destructive: true,
+                    note: "Keep my account is the safe way out and it works right up to the tap.",
+                    primaryAction: {
+                        deletionBoundary.commitIfAvailable()
+                    },
+                    secondaryAction: keepAccount
+                )
+            } else {
+                SettingsConfirmationOnlyTray(keepAccount: keepAccount)
+            }
         }
         .accessibilityIdentifier("settings.state.del-03")
+    }
+}
+
+private struct SettingsConfirmationOnlyTray: View {
+    let keepAccount: () -> Void
+
+    var body: some View {
+        Button("Keep my account", action: keepAccount)
+            .font(.headline)
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(
+                SnapListColorToken.action.color,
+                in: RoundedRectangle(cornerRadius: 18)
+            )
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.bar)
     }
 }
 
@@ -675,6 +708,7 @@ private struct SettingsProfile {
     let isGuest: Bool
     let name: String
     let email: String
+    let emailAddressID: String?
     let initials: String
     let method: SettingsAuthenticationMethod
     var methodLabel: String { method == .apple ? "Apple" : "Email code" }
@@ -686,11 +720,25 @@ private struct SettingsProfile {
     static func current(configuration: LaunchConfiguration) -> Self {
 #if DEBUG
         if configuration.usesZeroNetworkFixtures && configuration.fixture == .account {
-            return Self(isGuest: false, name: "Jordan Hale", email: "jordan.hale@icloud.com", initials: "JH", method: .apple)
+            return Self(
+                isGuest: false,
+                name: "Jordan Hale",
+                email: "jordan.hale@icloud.com",
+                emailAddressID: "fixture-primary-email",
+                initials: "JH",
+                method: .apple
+            )
         }
 #endif
         guard let user = Clerk.shared.user else {
-            return Self(isGuest: true, name: "Guest", email: "Not signed in", initials: "G", method: .emailCode)
+            return Self(
+                isGuest: true,
+                name: "Guest",
+                email: "Not signed in",
+                emailAddressID: nil,
+                initials: "G",
+                method: .emailCode
+            )
         }
         let name = [user.firstName, user.lastName].compactMap { $0 }.joined(separator: " ")
         let apple = user.verifiedExternalAccounts.contains { $0.provider == "oauth_apple" }
@@ -698,6 +746,7 @@ private struct SettingsProfile {
             isGuest: false,
             name: name.isEmpty ? "SnapList seller" : name,
             email: user.primaryEmailAddress?.emailAddress ?? "Signed in",
+            emailAddressID: user.primaryEmailAddress?.id,
             initials: [user.firstName?.first, user.lastName?.first].compactMap { $0 }.map(String.init).joined().uppercased().nonEmpty ?? "S",
             method: apple ? .apple : .emailCode
         )
@@ -706,11 +755,18 @@ private struct SettingsProfile {
 
 @MainActor
 private enum SettingsReauthentication {
-    static func prepareEmailCode() async throws {
+    static func prepareEmailCode(
+        displayedPrimaryAddressID: String?
+    ) async throws {
         guard let session = Clerk.shared.session else { throw SettingsReauthenticationError.unavailable }
         let verification = try await session.startVerification(level: .firstFactor)
-        guard let emailID = verification.supportedFirstFactors?
-            .first(where: { $0.strategy == .emailCode })?.emailAddressId else {
+        let supportedEmailAddressIDs = verification.supportedFirstFactors?
+            .filter { $0.strategy == .emailCode }
+            .compactMap(\.emailAddressId) ?? []
+        guard let emailID = SettingsReauthenticationGate.emailAddressID(
+            displayedPrimaryAddressID: displayedPrimaryAddressID,
+            supportedEmailAddressIDs: supportedEmailAddressIDs
+        ) else {
             throw SettingsReauthenticationError.unavailable
         }
         try await session.sendEmailCode(emailAddressId: emailID)
