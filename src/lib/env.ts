@@ -1,13 +1,79 @@
 import { z } from "zod";
 import {
   SELLER_MEDIA_ROLES,
+  isLocalDevelopment,
   llmProviderConfigError,
   resolveApiKey,
   resolveProvider,
   sellerMediaConfigError,
-  isLocalDevelopment,
 } from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
+
+const LOCAL_SERVER_RPC_SECRET =
+  "snaplist-local-server-rpc-secret-do-not-use-in-hosted";
+
+// `openssl rand -base64 48` produces 48 random bytes encoded as 64 unpadded
+// Base64 characters. Syntax cannot prove randomness or provenance, so that
+// command remains the canonical source; these checks only reject obviously
+// predictable patterns. Keep this deployed-only: checked-in local/test fixtures
+// intentionally remain usable without pretending to be production secrets.
+const DEPLOYED_SERVER_RPC_SECRET_PATTERN = /^[A-Za-z0-9+/]{64}$/;
+const MINIMUM_SERVER_RPC_SECRET_DISTINCT_CHARACTERS = 16;
+const REPEATED_SERVER_RPC_SECRET_BLOCK_LENGTH = 8;
+const ORDERED_SERVER_RPC_SECRET_RUN_LENGTH = 10;
+const ORDERED_SERVER_RPC_SECRET_ALPHABETS = [
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+  "0123456789abcdefghijklmnopqrstuvwxyz",
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+] as const;
+
+function hasRepeatedServerRpcSecretBlock(value: string): boolean {
+  const blocks = new Set<string>();
+  for (
+    let start = 0;
+    start <= value.length - REPEATED_SERVER_RPC_SECRET_BLOCK_LENGTH;
+    start += 1
+  ) {
+    const block = value.slice(
+      start,
+      start + REPEATED_SERVER_RPC_SECRET_BLOCK_LENGTH,
+    );
+    if (blocks.has(block)) return true;
+    blocks.add(block);
+  }
+  return false;
+}
+
+function hasLongOrderedServerRpcSecretRun(value: string): boolean {
+  return ORDERED_SERVER_RPC_SECRET_ALPHABETS.some((alphabet) => {
+    const descending = [...alphabet].reverse().join("");
+    return [alphabet, descending].some((ordered) => {
+      for (
+        let start = 0;
+        start <= ordered.length - ORDERED_SERVER_RPC_SECRET_RUN_LENGTH;
+        start += 1
+      ) {
+        if (
+          value.includes(
+            ordered.slice(start, start + ORDERED_SERVER_RPC_SECRET_RUN_LENGTH),
+          )
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+  });
+}
+
+function isGeneratedServerRpcSecret(value: string): boolean {
+  return (
+    DEPLOYED_SERVER_RPC_SECRET_PATTERN.test(value)
+    && new Set(value).size >= MINIMUM_SERVER_RPC_SECRET_DISTINCT_CHARACTERS
+    && !hasRepeatedServerRpcSecretBlock(value)
+    && !hasLongOrderedServerRpcSecretRun(value)
+  );
+}
 
 const optionalProxyTemplateSchema = z.preprocess(
   (value) =>
@@ -145,6 +211,7 @@ const envSchema = z.object({
   // Current server key required by the account-erasure handler.
   SUPABASE_SECRET_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  SERVER_RPC_SECRET: z.string().trim().min(32).optional(),
   // Isolated imported ES256 signer for <=60s verified-guest operation JWTs.
   // Production and preview use distinct key ids/private keys.
   SUPABASE_GUEST_JWT_KEY_ID: z.string().min(1).optional(),
@@ -258,6 +325,20 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
   if (isLocalDevelopment(env)) return [];
 
   const issues: string[] = [];
+  const serverRpcSecret = env.SERVER_RPC_SECRET?.trim();
+  if (!serverRpcSecret) {
+    issues.push(
+      "  - SERVER_RPC_SECRET: Required in every deployed environment for tenant-bound server RPC authorization.",
+    );
+  } else if (serverRpcSecret === LOCAL_SERVER_RPC_SECRET) {
+    issues.push(
+      "  - SERVER_RPC_SECRET: The public local/CI secret is forbidden in deployed environments; generate a distinct high-entropy value.",
+    );
+  } else if (!isGeneratedServerRpcSecret(serverRpcSecret)) {
+    issues.push(
+      "  - SERVER_RPC_SECRET: Must be a non-placeholder 64-character Base64 value generated with `openssl rand -base64 48`.",
+    );
+  }
   const appAttestTeamId = env.APPLE_TEAM_ID?.trim();
   if (!appAttestTeamId) {
     issues.push(

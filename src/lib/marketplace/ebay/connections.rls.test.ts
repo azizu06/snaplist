@@ -21,6 +21,7 @@ import {
 } from "./connections";
 import { UserTokenProvider } from "./user-token-provider";
 import type { EbayTokenGrant } from "./oauth";
+import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
 
 /**
  * ebay_connections integration suite (issue #17): tokens encrypted at rest,
@@ -37,6 +38,7 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SERVER_RPC_SECRET = process.env.SERVER_RPC_SECRET;
 const DELETION_QUEUE_HOOK_TIMEOUT_MS = 70_000;
 
 /** Test-only encryption key — passed explicitly, never via process.env. */
@@ -77,12 +79,13 @@ async function createTenantWriteClient(userId: string): Promise<SupabaseClient> 
   const jwt = await mintUserJwt(userId);
   return createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     accessToken: async () => jwt,
+    global: { headers: serverRpcHeaders(SERVER_RPC_SECRET!) },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY?.startsWith("sb_secret_")] });
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SERVICE_ROLE_KEY?.startsWith("sb_secret_"), SERVER_RPC_SECRET] });
   await whenStackReachable(reachable, async () => {
 
   deletionQueueLease = await acquireExclusiveTestResource(

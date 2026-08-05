@@ -19,10 +19,12 @@ import { publishListingToEbay } from "@/lib/marketplace/ebay/publish";
 import { runPipelineAndPersist } from "@/lib/pipeline/persist";
 import { StubPipeline } from "@/lib/pipeline/stub";
 import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
+import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
 const PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
 const SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
+const SERVER_RPC_SECRET = process.env.SERVER_RPC_SECRET;
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
 
 const ERASURE_STATUSES = [
@@ -325,6 +327,7 @@ beforeAll(async () => {
     requiredValues: [
       PUBLISHABLE_KEY?.startsWith("sb_publishable_"),
       SECRET_KEY?.startsWith("sb_secret_"),
+      SERVER_RPC_SECRET,
       new URL(SUPABASE_URL).hostname.match(/^(127\.0\.0\.1|localhost|::1)$/),
     ],
   });
@@ -636,6 +639,7 @@ describe("durable account erasure against local Supabase", () => {
     });
     const publishOwnerServer = createClient(SUPABASE_URL, SECRET_KEY!, {
       accessToken: async () => publishOwnerToken,
+      global: { headers: serverRpcHeaders(SERVER_RPC_SECRET!) },
       auth: { persistSession: false, autoRefreshToken: false },
     });
     const publishOwnerTenantOnly = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {

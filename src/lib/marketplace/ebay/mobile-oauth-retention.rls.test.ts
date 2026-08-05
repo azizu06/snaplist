@@ -16,6 +16,7 @@ const SUPABASE_URL =
   ?? "http://127.0.0.1:54321";
 const SECRET_KEY =
   process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SERVER_RPC_SECRET = process.env.SERVER_RPC_SECRET;
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
 const TEST_TIMEOUT_MS = 30_000;
 
@@ -29,7 +30,7 @@ let admin: SupabaseClient;
 let tenantAId = "";
 let tenantBId = "";
 const seededIds: string[] = [];beforeAll(async () => {
-  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: "", requiredValues: [SECRET_KEY?.startsWith("sb_secret_")] });
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: "", requiredValues: [SECRET_KEY?.startsWith("sb_secret_"), SERVER_RPC_SECRET] });
   await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource(
     `local-db:mobile-ebay-oauth-retention:${SUPABASE_URL}`,
@@ -171,6 +172,7 @@ describe("mobile eBay OAuth retention (DB-gated)", () => {
       const active = await createSupabaseMobileEbayOauthSessionStore({
         supabaseURL: SUPABASE_URL,
         secretKey: SECRET_KEY!,
+        serverRpcSecret: SERVER_RPC_SECRET!,
       }).getSession(ids.active);
       expect(active).toMatchObject({
         sessionId: ids.active,

@@ -3,42 +3,60 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select extensions.plan(7);
 
+delete from private.server_rpc_auth_config;
+
 set local role authenticated;
 select set_config(
   'request.jwt.claims',
   '{"sub":"mobile-oauth-server-api-guard","role":"authenticated"}',
   true
 );
-
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
-select extensions.lives_ok(
+select extensions.throws_ok(
   $$select public.create_mobile_ebay_oauth_session(
     '67600000-0000-4000-8000-000000000001',
     '67600000-0000-4000-8000-000000000011'
   )$$,
-  'mobile OAuth accepts the raw local secret-key shape'
+  '42501',
+  'Server API authorization is required',
+  'mobile OAuth rejects the correct header while the secret hash is unprovisioned'
 );
 
-select set_config(
-  'request.headers',
-  '{"apikey":"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.test-signature"}',
-  true
+reset role;
+insert into private.server_rpc_auth_config (singleton, secret_sha256)
+values (
+  true,
+  encode(
+    extensions.digest(
+      convert_to(
+        'snaplist-local-server-rpc-secret-do-not-use-in-hosted',
+        'UTF8'
+      ),
+      'sha256'
+    ),
+    'hex'
+  )
 );
-select extensions.lives_ok(
+
+set local role authenticated;
+select set_config('request.headers', '{}', true);
+select extensions.throws_ok(
   $$select public.create_mobile_ebay_oauth_session(
     '67600000-0000-4000-8000-000000000002',
     '67600000-0000-4000-8000-000000000012'
   )$$,
-  'mobile OAuth accepts the hosted service-role JWT shape'
+  '42501',
+  'Server API authorization is required',
+  'mobile OAuth rejects a missing server authorization header'
 );
 
 select set_config(
   'request.headers',
-  '{"apikey":"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.test-signature"}',
+  '{"x-snaplist-server-auth":"wrong-server-rpc-secret"}',
   true
 );
 select extensions.throws_ok(
@@ -48,14 +66,10 @@ select extensions.throws_ok(
   )$$,
   '42501',
   'Server API authorization is required',
-  'mobile OAuth rejects the hosted anon-role JWT shape'
+  'mobile OAuth rejects a wrong server authorization header'
 );
 
-select set_config(
-  'request.headers',
-  '{"apikey":"sb_publishable_local_test"}',
-  true
-);
+select set_config('request.headers', 'not-json', true);
 select extensions.throws_ok(
   $$select public.create_mobile_ebay_oauth_session(
     '67600000-0000-4000-8000-000000000004',
@@ -63,48 +77,50 @@ select extensions.throws_ok(
   )$$,
   '42501',
   'Server API authorization is required',
-  'mobile OAuth rejects the raw publishable-key shape'
+  'mobile OAuth rejects malformed request headers without leaking a parse error'
 );
 
-select set_config('request.headers', '{"apikey":""}', true);
-select extensions.throws_ok(
-  $$select public.create_mobile_ebay_oauth_session(
-    '67600000-0000-4000-8000-000000000005',
-    '67600000-0000-4000-8000-000000000015'
-  )$$,
-  '42501',
-  'Server API authorization is required',
-  'mobile OAuth rejects an empty API key'
-);
-
+select set_config('request.jwt.claims', 'not-json', true);
 select set_config(
   'request.headers',
-  '{"apikey":"e30.eA.c2ln"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
-select extensions.throws_ok(
+reset role;
+select extensions.ok(
+  not private.is_server_api_request(),
+  'the server authorization helper rejects malformed request claims'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"mobile-oauth-server-api-guard","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
+  true
+);
+select extensions.lives_ok(
   $$select public.create_mobile_ebay_oauth_session(
     '67600000-0000-4000-8000-000000000006',
     '67600000-0000-4000-8000-000000000016'
   )$$,
-  '42501',
-  'Server API authorization is required',
-  'mobile OAuth rejects a malformed JWT without leaking a decode error'
+  'mobile OAuth accepts the forwarded secret without an apikey header'
 );
 
+reset role;
 select set_config(
-  'request.headers',
-  '{"apikey":"e30.e30.c2ln"}',
+  'request.jwt.claims',
+  '{"role":"service_role"}',
   true
 );
-select extensions.throws_ok(
-  $$select public.create_mobile_ebay_oauth_session(
-    '67600000-0000-4000-8000-000000000007',
-    '67600000-0000-4000-8000-000000000017'
-  )$$,
-  '42501',
-  'Server API authorization is required',
-  'mobile OAuth rejects a JWT whose payload has no server role'
+select set_config('request.headers', '{}', true);
+select extensions.ok(
+  private.is_server_api_request(),
+  'mobile OAuth accepts gateway-validated service-role claims without a custom header'
 );
 
 select * from extensions.finish();

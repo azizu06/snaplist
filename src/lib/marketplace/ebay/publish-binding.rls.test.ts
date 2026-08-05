@@ -22,6 +22,7 @@ import type { EbayPolicyLocationBinding } from "./policy-location-contract";
 import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
 import { publishListingToEbay } from "./publish";
 import { UserTokenProvider } from "./user-token-provider";
+import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL
@@ -33,6 +34,7 @@ const PUBLISHABLE_KEY =
   ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SECRET_KEY =
   process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SERVER_RPC_SECRET = process.env.SERVER_RPC_SECRET;
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
 const TEST_TIMEOUT_MS = 30_000;
 const EBAY_BASE_URL = "https://mock-ebay.invalid";
@@ -71,6 +73,7 @@ const uploadedPhotos: string[] = [];async function tenantServerClient(userId: st
   const token = await mintUserJwt(userId);
   return createClient(SUPABASE_URL, SECRET_KEY!, {
     accessToken: async () => token,
+    global: { headers: serverRpcHeaders(SERVER_RPC_SECRET!) },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -320,7 +323,7 @@ async function cleanPrivateIdentityRows(): Promise<void> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: PUBLISHABLE_KEY, requiredValues: [PUBLISHABLE_KEY?.startsWith("sb_publishable_"), SECRET_KEY?.startsWith("sb_secret_"), ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname)] });
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: PUBLISHABLE_KEY, requiredValues: [PUBLISHABLE_KEY?.startsWith("sb_publishable_"), SECRET_KEY?.startsWith("sb_secret_"), SERVER_RPC_SECRET, ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname)] });
   await whenStackReachable(reachable, async () => {
   lease = await acquireExclusiveTestResource(
     `local-db:ebay-publish-connection-binding:${SUPABASE_URL}`,

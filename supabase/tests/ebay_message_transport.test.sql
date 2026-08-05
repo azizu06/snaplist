@@ -170,7 +170,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -1198,7 +1198,7 @@ select extensions.throws_ok(
 
 select set_config(
   'request.headers',
-  '{"apikey":"sb_publishable_local_test"}',
+  '{"x-snaplist-server-auth":"wrong-server-rpc-secret"}',
   true
 );
 
@@ -1216,7 +1216,7 @@ select extensions.throws_ok(
 
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -1474,7 +1474,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -1961,7 +1961,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -2076,7 +2076,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -2252,7 +2252,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -2345,7 +2345,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -2523,7 +2523,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -2673,7 +2673,7 @@ select set_config(
   true
 );
 
-select set_config('request.headers', '{"apikey":"anon-local-test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"wrong-server-rpc-secret"}', true);
 
 select extensions.throws_ok(
   $$select public.begin_ebay_transactional_dispatch(
@@ -2687,7 +2687,7 @@ select extensions.throws_ok(
 
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -2802,7 +2802,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"anon-local-test"}',
+  '{"x-snaplist-server-auth":"wrong-server-rpc-secret"}',
   true
 );
 
@@ -2832,7 +2832,7 @@ select extensions.throws_ok(
 
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -2904,7 +2904,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -2999,7 +2999,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -3083,7 +3083,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -3180,7 +3180,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -3261,7 +3261,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -3531,7 +3531,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -3580,7 +3580,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 
@@ -3651,7 +3651,7 @@ select set_config(
 );
 select set_config(
   'request.headers',
-  '{"apikey":"sb_secret_local_test"}',
+  '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}',
   true
 );
 

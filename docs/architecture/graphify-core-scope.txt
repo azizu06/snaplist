@@ -354,6 +354,7 @@ src/lib/seller-copy/index.ts
 src/lib/sentry.ts
 src/lib/settings/user-settings.ts
 src/lib/supabase/admin.ts
+src/lib/supabase/server-rpc-auth.ts
 src/lib/supabase/server.ts
 src/lib/supabase/tenant-server.ts
 src/lib/supabase/test-users.ts
@@ -474,6 +475,7 @@ supabase/migrations/20260804030000_guest_recovery_submission_identity.sql
 supabase/migrations/20260804040000_claimed_guest_recovery_plaintext.sql
 supabase/migrations/20260805160000_revenuecat_environment_gate.sql
 supabase/migrations/20260805170000_hosted_server_api_guard.sql
+supabase/migrations/20260805200000_server_rpc_forwarded_secret.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

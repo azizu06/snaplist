@@ -69,7 +69,7 @@ select set_config(
   '{"sub":"erasure-completion-a","role":"authenticated"}',
   true
 );
-select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}', true);
 select public.bind_ebay_sandbox_fallback('erasure-completion-a-seller');
 
 create temporary table completion_dispatches on commit drop as
@@ -189,7 +189,7 @@ select set_config(
   '{"sub":"erasure-completion-a","role":"authenticated"}',
   true
 );
-select set_config('request.headers', '{"apikey":"sb_publishable_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"wrong-server-rpc-secret"}', true);
 
 select extensions.throws_ok(
   $$
@@ -219,7 +219,7 @@ select extensions.results_eq(
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
-select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}', true);
 
 select extensions.throws_ok(
   $$
@@ -289,7 +289,7 @@ select set_config(
   '{"sub":"erasure-completion-a","role":"authenticated"}',
   true
 );
-select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}', true);
 select extensions.throws_ok(
   $$
     select public.complete_ebay_publish_dispatch(
@@ -325,7 +325,7 @@ select set_config(
   '{"sub":"erasure-completion-a","role":"authenticated"}',
   true
 );
-select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}', true);
 select extensions.lives_ok(
   $$
     select public.complete_ebay_publish_dispatch(
@@ -359,7 +359,7 @@ select set_config(
   '{"sub":"erasure-completion-a","role":"authenticated"}',
   true
 );
-select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}', true);
 select extensions.throws_ok(
   $$
     select public.complete_ebay_publish_dispatch(
@@ -404,7 +404,7 @@ select set_config(
   '{"sub":"erasure-completion-a","role":"authenticated"}',
   true
 );
-select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}', true);
 
 select extensions.throws_ok(
   $$

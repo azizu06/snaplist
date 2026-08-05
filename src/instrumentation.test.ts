@@ -38,6 +38,7 @@ describe("register", () => {
       OPENAI_API_KEY: "sk-test",
       REVENUECAT_PROJECT_ID: "project-test",
       REVENUECAT_SECRET_API_KEY: "revenuecat-secret",
+      SERVER_RPC_SECRET: "dOD9IRVTwgq/GTVsIoNQ29nsUWHdqgRjpgdYQN7Yy0QUqS7yFBsMq6fknzT+jiTI",
       SUPABASE_SECRET_KEY: "supabase-secret",
     })) {
       vi.stubEnv(name, value);

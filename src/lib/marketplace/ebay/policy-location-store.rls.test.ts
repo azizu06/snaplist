@@ -16,6 +16,7 @@ import {
   type EbayPolicyLocationDiscoveryAdapter,
 } from "./policy-location-discovery";
 import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
+import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL
@@ -27,6 +28,7 @@ const PUBLISHABLE_KEY =
   ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SECRET_KEY =
   process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SERVER_RPC_SECRET = process.env.SERVER_RPC_SECRET;
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
 const TEST_TIMEOUT_MS = 30_000;
 const DIAGNOSTIC_REQUEST_TIMEOUT_MS = 2_000;
@@ -95,6 +97,9 @@ async function tenantClient(
   const token = await mintUserJwt(userId);
   return createClient(SUPABASE_URL, key, {
     accessToken: async () => token,
+    ...(key === SECRET_KEY
+      ? { global: { headers: serverRpcHeaders(SERVER_RPC_SECRET!) } }
+      : {}),
     auth: { persistSession: false, autoRefreshToken: false },
     ...(requestTimeoutMs
       ? { db: { timeout: requestTimeoutMs } }
@@ -180,7 +185,7 @@ async function cleanExactFixtures(): Promise<void> {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: PUBLISHABLE_KEY, requiredValues: [PUBLISHABLE_KEY?.startsWith("sb_publishable_"), SECRET_KEY?.startsWith("sb_secret_"), ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname)] });
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: PUBLISHABLE_KEY, requiredValues: [PUBLISHABLE_KEY?.startsWith("sb_publishable_"), SECRET_KEY?.startsWith("sb_secret_"), SERVER_RPC_SECRET, ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname)] });
   await whenStackReachable(reachable, async () => {
 
   lease = await acquireExclusiveTestResource(

@@ -107,6 +107,7 @@ jobs:
             echo "SUPABASE_ANON_KEY=$PUBLISHABLE_KEY"
             echo "SUPABASE_SECRET_KEY=$SECRET_KEY"
             echo "SUPABASE_SERVICE_ROLE_KEY=$SECRET_KEY"
+            echo "SERVER_RPC_SECRET=snaplist-local-server-rpc-secret-do-not-use-in-hosted"
           } >> "$GITHUB_ENV"
 
       # A skipped RLS suite is useful on a laptop but not merge evidence.

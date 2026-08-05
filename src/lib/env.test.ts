@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { parseEnv } from "./env";
 
+const DEPLOYED_SERVER_RPC_SECRET =
+  "dd0Gf7bUC6iOCfyI1cXgM7pPDSpyDGd9zM6rhFgDFk6r2sW7d2VKB/EkB2WRUM/p";
+
 const valid = {
   OPENAI_API_KEY: "sk-test",
   NEXT_PUBLIC_SUPABASE_URL: "http://localhost:54321",
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-test",
+  SERVER_RPC_SECRET: "server-rpc-secret-with-at-least-32-characters",
 };
 
 describe("parseEnv", () => {
@@ -19,6 +23,7 @@ describe("parseEnv", () => {
   it("requires the production eBay API origin when mobile production is enabled", () => {
     const deployed = {
       ...valid,
+      SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
       EBAY_PRODUCTION_MOBILE_ENABLED: "true",
@@ -47,6 +52,7 @@ describe("parseEnv", () => {
   it("requires non-placeholder App Attest identities for every deployed consumer", () => {
     const deployed = {
       ...valid,
+      SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
       EBAY_BASE_URL: "https://api.sandbox.ebay.com",
@@ -94,6 +100,7 @@ describe("parseEnv", () => {
   it("requires the account-erasure Supabase and RevenueCat configuration in deployments", () => {
     const deployed = {
       ...valid,
+      SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
       EBAY_BASE_URL: "https://api.sandbox.ebay.com",
@@ -126,6 +133,7 @@ describe("parseEnv", () => {
   it("rejects missing, non-public, or malformed Clerk authorized parties in deployments", () => {
     const deployed = {
       ...valid,
+      SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
       EBAY_BASE_URL: "https://api.sandbox.ebay.com",
@@ -169,6 +177,7 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({
         ...valid,
+        SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
         NODE_ENV: "production",
         LLM_PROVIDER: "openai",
         EBAY_BASE_URL: "https://api.sandbox.ebay.com",
@@ -188,6 +197,7 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({
         ...valid,
+        SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
         NODE_ENV: "production",
         LLM_PROVIDER: "openai",
         EBAY_BASE_URL: "https://api.sandbox.ebay.com",
@@ -272,6 +282,81 @@ describe("parseEnv", () => {
     const env = parseEnv(valid);
     expect(env.TAVILY_API_KEY).toBeUndefined();
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
+  });
+
+  it("requires an openssl-generated server RPC secret in deployed environments", () => {
+    const deployed = {
+      ...valid,
+      SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
+      NODE_ENV: "production",
+      LLM_PROVIDER: "openai",
+      EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      APPLE_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+      REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
+      REVENUECAT_PROJECT_ID: "proj_test",
+      CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
+    };
+    const { SERVER_RPC_SECRET, ...withoutServerRpcSecret } = deployed;
+    void SERVER_RPC_SECRET;
+
+    expect(() =>
+      parseEnv(withoutServerRpcSecret),
+    ).toThrowError(/SERVER_RPC_SECRET/);
+
+    expect(parseEnv(deployed).SERVER_RPC_SECRET).toBe(DEPLOYED_SERVER_RPC_SECRET);
+
+    for (const predictableSecret of [
+      "server-rpc-secret-with-at-least-32-characters",
+      "a".repeat(64),
+      "correcthorsebatterystaple".repeat(3).slice(0, 64),
+      "fKq9Y3n8ouWON6TS".repeat(4),
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    ]) {
+      expect(() =>
+        parseEnv({ ...deployed, SERVER_RPC_SECRET: predictableSecret }),
+      ).toThrowError(/SERVER_RPC_SECRET/);
+    }
+
+    for (const generatedSecret of [
+      "fKqdY3n8ouiON63S3PdDwc9OfiLiPP1UF1uPAaC5MfiL4X0nQ2i8GjA2zLE4Ynh4",
+      "fsUFJNTcQ3cmQN8BYaPasb8JS0e44qdDOitQP40ydXRCiFO8ecO6JNuY5Ou0KxL5",
+      "l+fIGcA3DQizPFLjJ3mc0gDQkCNikkK34ffoYIuYf3xxk9z1x/hIxMfrkTVTN9E8",
+    ]) {
+      expect(parseEnv({ ...deployed, SERVER_RPC_SECRET: generatedSecret }).SERVER_RPC_SECRET).toBe(
+        generatedSecret,
+      );
+    }
+  });
+
+  it("keeps local and test server RPC fixtures permissive", () => {
+    expect(parseEnv(valid).SERVER_RPC_SECRET).toBe(
+      "server-rpc-secret-with-at-least-32-characters",
+    );
+    expect(parseEnv({ ...valid, NODE_ENV: "test" }).SERVER_RPC_SECRET).toBe(
+      "server-rpc-secret-with-at-least-32-characters",
+    );
+  });
+
+  it("rejects a configured server RPC secret that is too short", () => {
+    expect(() =>
+      parseEnv({ ...valid, SERVER_RPC_SECRET: "too-short" }),
+    ).toThrowError(/SERVER_RPC_SECRET/);
+  });
+
+  it("rejects the public local server RPC secret in deployed environments", () => {
+    expect(() =>
+      parseEnv({
+        ...valid,
+        NODE_ENV: "production",
+        LLM_PROVIDER: "openai",
+        SERVER_RPC_SECRET:
+          "snaplist-local-server-rpc-secret-do-not-use-in-hosted",
+      }),
+    ).toThrowError(/public local\/CI secret is forbidden/);
   });
 
   it("accepts the server-only listing-example experiment controls", () => {

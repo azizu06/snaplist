@@ -16,6 +16,7 @@ import { toEbayCondition } from "./map";
 import { saveEbayConnection } from "./connections";
 import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
 import type { EbayPolicyLocationBinding } from "./policy-location-contract";
+import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
 
 /**
  * eBay publish seam test (issue #14): persisted listing -> adapter ->
@@ -39,6 +40,7 @@ const ANON_KEY =
   ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SECRET_KEY =
   process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SERVER_RPC_SECRET = process.env.SERVER_RPC_SECRET;
 const CONNECTION_ENV = {
   EBAY_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
 };
@@ -64,6 +66,7 @@ async function tenantServerClient(userId: string): Promise<SupabaseClient> {
   const token = await mintUserJwt(userId);
   return createClient(SUPABASE_URL, SECRET_KEY!, {
     accessToken: async () => token,
+    global: { headers: serverRpcHeaders(SERVER_RPC_SECRET!) },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -143,7 +146,7 @@ async function persistedRun(user: ClerkTestUser) {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SECRET_KEY] });
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SECRET_KEY, SERVER_RPC_SECRET] });
   await whenStackReachable(reachable, async () => {
   admin = createClient(SUPABASE_URL, SECRET_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },

@@ -1,10 +1,11 @@
 type SupabaseTestEnvironment = Record<string, string | undefined>;
 
 /**
- * Tenant-bound server tests use the same two-part authorization as production:
- * a seller JWT in Authorization and a current secret API key in apikey.
- * The legacy service-role JWT bypasses RLS but cannot prove the server-key half
- * of that contract.
+ * Tenant-bound server tests use the same shape as production: a seller JWT in
+ * Authorization, a current secret API key at the gateway, and SERVER_RPC_SECRET
+ * in x-snaplist-server-auth. The legacy service-role JWT bypasses RLS, so it
+ * cannot stand in for the tenant-bound client even though service_role claims
+ * remain a separate guard authority for secret-key-only calls.
  */
 export function resolveTenantServerTestApiKey(
   env: SupabaseTestEnvironment = process.env,
