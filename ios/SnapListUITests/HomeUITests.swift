@@ -77,32 +77,21 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Finding recent sold comps"].exists)
     }
 
-    func testTerminalRunStatusDominatesStaleActiveStageCopy() {
-        let expectations = [
-            (fixture: "failed", heading: "Run failed", status: "Failed"),
-            (fixture: "canceled", heading: "Run canceled", status: "Canceled")
-        ]
+    func testFailedRunStatusDominatesStaleActiveStageCopy() {
+        assertTerminalRunStatus(
+            fixture: "failed",
+            heading: "Run failed",
+            status: "Failed"
+        )
+    }
 
-        for expectation in expectations {
-            let app = launch(
-                "HOME-01",
-                extraArguments: ["--run-detail-fixture=\(expectation.fixture)"]
-            )
-            app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
-
-            XCTAssertTrue(app.staticTexts[expectation.heading].waitForExistence(timeout: 3))
-            XCTAssertTrue(app.staticTexts[expectation.status].exists)
-            XCTAssertFalse(app.staticTexts["Working on your item"].exists)
-            XCTAssertFalse(app.staticTexts["Researching pricing evidence"].exists)
-            if expectation.fixture == "canceled" {
-                XCTAssertTrue(app.staticTexts["Processing stopped"].exists)
-                XCTAssertFalse(app.staticTexts["You canceled this run"].exists)
-            }
-            XCTAssertTrue(
-                UIProcessTerminationBoundary().terminate(app),
-                "Run-detail fixture app did not reach a safe terminated state."
-            )
-        }
+    func testCanceledRunStatusDominatesStaleActiveStageCopy() {
+        assertTerminalRunStatus(
+            fixture: "canceled",
+            heading: "Run canceled",
+            status: "Canceled",
+            expectsStoppedCopy: true
+        )
     }
 
     func testFailedRunDetailKeepsMaximumSellerSafeFailureReachableAtAccessibilityType() {
@@ -152,8 +141,14 @@ final class HomeUITests: XCTestCase {
             "The final line of the complete seller-safe detail must be reachable."
         )
 
-        app.buttons["Back"].tap()
-        XCTAssertTrue(opener.waitForExistence(timeout: 2))
+        let back = app.buttons["Back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 3))
+        back.tap()
+        XCTAssertTrue(
+            waitForDisappearance(of: app.otherElements["run.detail"]),
+            "System Back must finish dismissing Run Detail before Home is asserted."
+        )
+        XCTAssertTrue(opener.waitForExistence(timeout: 3))
         XCTAssertTrue(opener.isHittable)
     }
 
@@ -411,6 +406,39 @@ final class HomeUITests: XCTestCase {
         ] + extraArguments
         app.launchAfterRetiringPriorInstance()
         return app
+    }
+
+    private func waitForDisappearance(
+        of element: XCUIElement,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        let gone = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: element
+        )
+        return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
+    }
+
+    private func assertTerminalRunStatus(
+        fixture: String,
+        heading: String,
+        status: String,
+        expectsStoppedCopy: Bool = false
+    ) {
+        let app = launch(
+            "HOME-01",
+            extraArguments: ["--run-detail-fixture=\(fixture)"]
+        )
+        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+
+        XCTAssertTrue(app.staticTexts[heading].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts[status].exists)
+        XCTAssertFalse(app.staticTexts["Working on your item"].exists)
+        XCTAssertFalse(app.staticTexts["Researching pricing evidence"].exists)
+        if expectsStoppedCopy {
+            XCTAssertTrue(app.staticTexts["Processing stopped"].exists)
+            XCTAssertFalse(app.staticTexts["You canceled this run"].exists)
+        }
     }
 
     private func scrollUntilFullyVisible(

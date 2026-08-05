@@ -124,13 +124,15 @@ final class AssistedExportUITests: XCTestCase {
         saveCoordinate.tap()
         saveCoordinate.tap()
 
-        let saved = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label == %@", "Saved to Photos"),
-            object: save
-        )
-        XCTAssertEqual(
-            XCTWaiter().wait(for: [saved], timeout: 5),
-            .completed
+        XCTAssertTrue(
+            waitForLabel(
+                "1",
+                on: marker(
+                    "assisted-export.fixture.handoff-write-count",
+                    in: app
+                )
+            ),
+            "Saving is complete only after exactly one durable handoff receipt."
         )
         XCTAssertEqual(
             marker("assisted-export.fixture.photo-write-count", in: app).label,
@@ -280,5 +282,17 @@ final class AssistedExportUITests: XCTestCase {
             object: element
         )
         return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
+    }
+
+    private func waitForLabel(
+        _ label: String,
+        on element: XCUIElement,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        let matches = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", label),
+            object: element
+        )
+        return XCTWaiter().wait(for: [matches], timeout: timeout) == .completed
     }
 }

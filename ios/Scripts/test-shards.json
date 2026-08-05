@@ -31,7 +31,8 @@
       "SnapListUITests/HomeUITests/testRun02VisualStateUsesTheCanonicalDetailRouteShell",
       "SnapListUITests/HomeUITests/testRunDetailRefreshIsAccessibleAndReplacesServerTruth",
       "SnapListUITests/HomeUITests/testRunDetailShowsLoadedItemAndStageTruth",
-      "SnapListUITests/HomeUITests/testTerminalRunStatusDominatesStaleActiveStageCopy",
+      "SnapListUITests/HomeUITests/testFailedRunStatusDominatesStaleActiveStageCopy",
+      "SnapListUITests/HomeUITests/testCanceledRunStatusDominatesStaleActiveStageCopy",
       "SnapListUITests/ListingReviewUITests/testCanonicalRunOpensListingReviewAndCleanDoneRestoresExactOpener",
       "SnapListUITests/ListingReviewUITests/testEditorsStageConditionSpecificAndPriceWithoutLosingInvoker",
       "SnapListUITests/ListingReviewUITests/testFailedAndOfflineSavesKeepTheLastUsableDirtyDraft",
@@ -112,7 +113,7 @@
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessUsesNativeWaitToObserveSuspensionBeforeTermination",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testPositiveForegroundExitWitnessAllowsStaleForegroundTargetTermination",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest"
     ]
   }
