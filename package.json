@@ -36,6 +36,7 @@
     "@supabase/supabase-js": "^2.108.1",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
+    "@vercel/analytics": "^2.0.1",
     "ai": "^6.0.199",
     "apify-client": "^2.23.4",
     "cbor-x": "^1.6.4",
