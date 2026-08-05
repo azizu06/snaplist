@@ -1117,6 +1117,115 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(store.processingRows, firstProjection)
     }
 
+    func testStoreProjectsConfirmedEbayPublicationIntoTheSettledTrophyWall() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let historyPage = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded
+        )
+
+        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
+        store.applyEbayPublishStatus(
+            EbayPublishStatus(
+                listingID: fixture.listingID,
+                outcome: .published,
+                ebayListingID: "123456789012",
+                ebayOfferID: "offer-375",
+                alreadyPublished: true
+            )
+        )
+
+        XCTAssertEqual(store.processingRows.map(\.id), [.local(fixture.unrelatedLogicalID)])
+        XCTAssertEqual(
+            store.settledTiles,
+            [
+                TrophyWallSettledTile(
+                    id: .run(fixture.runID),
+                    itemName: fixture.matchedItemName,
+                    stateLabel: "Published to eBay",
+                    historyOrderAt: fixture.runDetailUpdate
+                ),
+            ]
+        )
+    }
+
+    func testStoreRehydratesListingCorrelationFromAnEqualHistoryPage() throws {
+        let fixture = TrophyWallTestFixture()
+        let savedCard = TrophyWallCard.accepted(
+            principalScope: fixture.principal,
+            runID: fixture.runID,
+            state: .readyToReviewLocked,
+            itemName: fixture.matchedItemName,
+            lastMeaningfulUpdateAt: fixture.runDetailUpdate
+        )
+        let store = fixture.makeStore(cards: [savedCard])
+        let historyPage = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded
+        )
+
+        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
+        store.applyEbayPublishStatus(
+            EbayPublishStatus(
+                listingID: fixture.listingID,
+                outcome: .published,
+                ebayListingID: "123456789012",
+                ebayOfferID: "offer-375",
+                alreadyPublished: true
+            )
+        )
+
+        XCTAssertEqual(
+            store.settledTiles.map(\.id),
+            [.run(fixture.runID)]
+        )
+    }
+
+    func testStoreKeepsConfirmedPublicationAcrossTheFirstHistoryRefresh() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let runDetail = try fixture.decodedRunDetail(
+            runID: fixture.runID,
+            itemID: fixture.itemID,
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded
+        )
+        let historyPage = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded
+        )
+
+        store.ingest(
+            acceptedHandoff: fixture.acceptedHandoff,
+            runDetail: runDetail,
+            principalScope: fixture.principal
+        )
+        store.applyEbayPublishStatus(
+            EbayPublishStatus(
+                listingID: fixture.listingID,
+                outcome: .published,
+                ebayListingID: "123456789012",
+                ebayOfferID: "offer-375",
+                alreadyPublished: true
+            )
+        )
+        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
+
+        XCTAssertEqual(
+            store.settledTiles.map(\.id),
+            [.run(fixture.runID)]
+        )
+    }
+
     func testProcessingViewDisclosesClampedRowsWithoutRouting() {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: fixture.processingInitialCards)
