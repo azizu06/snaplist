@@ -428,7 +428,7 @@ def main() -> None:
         reextract_paths = related_sources(state["extraction"], changed_paths)
         changed_code_paths = [
             corpus / relative
-            for relative in reextract_paths
+            for relative in sorted(reextract_paths)
             if (corpus / relative).exists()
             and (corpus / relative) in {Path(path) for path in detection.get("files", {}).get("code", [])}
         ]
