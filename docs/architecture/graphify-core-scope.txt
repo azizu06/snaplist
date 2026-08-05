@@ -97,6 +97,8 @@ ios/SnapList/Features/Runs/RunAPIClient.swift
 ios/SnapList/Features/Runs/RunDetailView.swift
 ios/SnapList/Features/Runs/RunModels.swift
 ios/SnapList/Features/Runs/RunStore.swift
+ios/SnapList/Features/Settings/SettingsDomain.swift
+ios/SnapList/Features/Settings/SettingsView.swift
 ios/SnapList/Features/Submission/ItemRunSubmission.swift
 ios/SnapList/Features/Submission/ItemRunSubmissionAttemptStore.swift
 ios/SnapList/Features/Submission/ItemRunSubmissionClient.swift

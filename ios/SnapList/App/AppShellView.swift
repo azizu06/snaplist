@@ -476,7 +476,7 @@ struct AppShellView: View {
             store: homeStore,
             visualState: configuration.visualState,
             openActivity: { router.navigate(to: .activity) },
-            openAccount: { router.navigate(to: .account) },
+            openAccount: { router.navigate(to: .settings) },
             openCapture: { router.select(.capture) },
             openRoute: { router.navigate(to: .home($0)) }
         )
@@ -485,8 +485,28 @@ struct AppShellView: View {
     @ViewBuilder
     private func destination(for route: AppRoute) -> some View {
         switch route {
-        case .account:
-            FoundationDestinationView(destination: .account)
+        case .settings:
+            SettingsView(
+                configuration: configuration,
+                mobileAPIClient: dependencies.mobileAPIClient,
+                subscriptionClient: dependencies.subscriptionClient,
+                hasLocalData: (captureFlow.intakeSnapshot.map {
+                    !$0.photos.isEmpty || $0.voice != nil
+                } ?? false) || settingsCachedData.hasData,
+                removeLocalData: {
+                    await SettingsLocalRemovalTransaction.perform(
+                        removeIntake: {
+                            guard let snapshot = captureFlow.intakeSnapshot else {
+                                return true
+                            }
+                            return await dependencies.nativeIntake.perform(
+                                .discard(expected: snapshot.version)
+                            ) == .committed
+                        },
+                        removeCachedItems: { settingsCachedData.removeAll() }
+                    )
+                }
+            )
         case .activity:
             FoundationDestinationView(destination: .activity)
         case .home(let route):
@@ -514,6 +534,10 @@ struct AppShellView: View {
         case .future(let boundary):
             FoundationDestinationView(destination: boundary)
         }
+    }
+
+    private var settingsCachedData: SettingsLocalCachedDataStore {
+        SettingsLocalCachedDataStore()
     }
 
     private var reduceMotion: Bool {

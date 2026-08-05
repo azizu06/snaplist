@@ -91,14 +91,14 @@ enum FoundationFixture: String, CaseIterable {
 
     var initialTab: PrimaryTab {
         switch self {
-        case .onboarding, .scan, .account, .activity, .capture: .scan
-        case .trophyProcessing, .trophyWall: .trophyWall
+        case .onboarding, .scan, .activity, .capture: .scan
+        case .trophyProcessing, .trophyWall, .account: .trophyWall
         }
     }
 
     var initialRoute: AppRoute? {
         switch self {
-        case .account: .account
+        case .account: .settings
         case .activity: .activity
         case .onboarding, .scan, .trophyProcessing, .trophyWall, .capture:
             nil
