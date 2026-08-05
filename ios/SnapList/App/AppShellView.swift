@@ -490,6 +490,7 @@ struct AppShellView: View {
                 configuration: configuration,
                 mobileAPIClient: dependencies.mobileAPIClient,
                 subscriptionClient: dependencies.subscriptionClient,
+                analyticsClient: dependencies.analyticsClient,
                 hasLocalData: (captureFlow.intakeSnapshot.map {
                     !$0.photos.isEmpty || $0.voice != nil
                 } ?? false) || settingsCachedData.hasData,

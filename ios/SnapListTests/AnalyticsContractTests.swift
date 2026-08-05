@@ -306,13 +306,13 @@ final class AnalyticsContractTests: XCTestCase {
         XCTAssertEqual(configuration.mode, .disabled)
     }
 
-    func testConsentDefaultsAbsentAndPersistsOnlyTheProviderNeutralState() throws {
+    func testConsentDefaultsEnabledAndPersistsOnlyTheProviderNeutralState() throws {
         let suiteName = "AnalyticsContractTests-consent-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let first = UserDefaultsAnalyticsConsentStore(defaults: defaults)
-        XCTAssertEqual(first.consent, .notDetermined)
+        XCTAssertEqual(first.consent, .granted)
         first.setConsent(.denied)
 
         XCTAssertEqual(UserDefaultsAnalyticsConsentStore(defaults: defaults).consent, .denied)
@@ -703,8 +703,43 @@ final class AnalyticsContractTests: XCTestCase {
         )
     }
 
-    func testDebugRuntimeDropsAbsentAndDeniedConsentWithoutRecording() {
+    func testFreshDefaultRecordsEveryFunnelEventAndToggleResumesRecording() {
         let consent = InMemoryAnalyticsConsentStore()
+        let sink = RecordingAnalyticsDebugSink()
+        let client = DebugAnalyticsClient(
+            metadata: metadata,
+            consentStore: consent,
+            dedupeStore: InMemoryAnalyticsDedupeStore(),
+            identityStore: InMemoryAnalyticsIdentityStore(),
+            sink: sink
+        )
+
+        for event in FunnelAnalyticsEvent.allCases {
+            client.capture(.funnel(eventID: UUID(), event: event))
+        }
+        client.finishPendingWorkForTesting()
+
+        XCTAssertEqual(
+            sink.records.compactMap { record in
+                guard case let .payload(payload) = record else { return nil }
+                return payload.name
+            },
+            FunnelAnalyticsEvent.allCases.map(\.name)
+        )
+
+        client.setConsent(.denied)
+        client.capture(.funnel(eventID: UUID(), event: .scanStarted))
+        client.finishPendingWorkForTesting()
+        XCTAssertEqual(sink.records.count, FunnelAnalyticsEvent.allCases.count)
+
+        client.setConsent(.granted)
+        client.capture(.funnel(eventID: UUID(), event: .scanStarted))
+        client.finishPendingWorkForTesting()
+        XCTAssertEqual(sink.records.count, FunnelAnalyticsEvent.allCases.count + 1)
+    }
+
+    func testDebugRuntimeDropsDeniedConsentWithoutRecording() {
+        let consent = InMemoryAnalyticsConsentStore(consent: .denied)
         let identity = InMemoryAnalyticsIdentityStore()
         let sink = RecordingAnalyticsDebugSink()
         let client = DebugAnalyticsClient(

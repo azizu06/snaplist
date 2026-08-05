@@ -9,7 +9,9 @@ struct SettingsView: View {
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
     private let deletionOutstanding: Bool
+    private let analyticsClient: any AnalyticsClient
     @State private var hasLocalData: Bool
+    @State private var sharesUsageAnalytics: Bool
     @State private var subscriptionStore: SubscriptionStore
     @State private var subscriptionLoadPhase =
         SettingsSubscriptionPresentation.LoadPhase.loading
@@ -19,6 +21,7 @@ struct SettingsView: View {
         configuration: LaunchConfiguration,
         mobileAPIClient: any MobileAPIClient,
         subscriptionClient: any SubscriptionClient,
+        analyticsClient: any AnalyticsClient,
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false
@@ -27,7 +30,11 @@ struct SettingsView: View {
         self.mobileAPIClient = mobileAPIClient
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
+        self.analyticsClient = analyticsClient
         _hasLocalData = State(initialValue: hasLocalData)
+        _sharesUsageAnalytics = State(
+            initialValue: UserDefaultsAnalyticsConsentStore().consent == .granted
+        )
         _subscriptionStore = State(
             initialValue: SubscriptionStore(client: subscriptionClient)
         )
@@ -47,6 +54,15 @@ struct SettingsView: View {
                 valueRow("Connected marketplaces", profile.isGuest ? "Not connected" : "eBay", chevron: true)
                 valueRow("Photos", "Selected photos", chevron: true)
                 valueRow("Notifications", "On", chevron: true)
+            }
+            Section("Privacy") {
+                Toggle("Share usage analytics", isOn: $sharesUsageAnalytics)
+                    .onChange(of: sharesUsageAnalytics) { _, sharesUsageAnalytics in
+                        try? analyticsClient.setConsent(
+                            sharesUsageAnalytics ? .granted : .denied
+                        )
+                    }
+                    .accessibilityIdentifier("settings.share-usage-analytics")
             }
             if SettingsSubscriptionVisibility(
                 identity: profile.identity,

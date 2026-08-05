@@ -2,6 +2,41 @@ import XCTest
 @testable import SnapList
 
 final class SettingsTests: XCTestCase {
+    func testShareUsageAnalyticsPreferenceDefaultsOnAndPersistsAcrossRelaunch() throws {
+        let suiteName = "SettingsTests-analytics-consent-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = UserDefaultsAnalyticsConsentStore(defaults: defaults)
+        XCTAssertEqual(first.consent, .granted)
+
+        first.setConsent(.denied)
+        XCTAssertEqual(
+            UserDefaultsAnalyticsConsentStore(defaults: defaults).consent,
+            .denied
+        )
+
+        first.setConsent(.granted)
+        XCTAssertEqual(
+            UserDefaultsAnalyticsConsentStore(defaults: defaults).consent,
+            .granted
+        )
+    }
+
+    func testNoOpAnalyticsClientPersistsTheSettingsToggle() throws {
+        let suiteName = "SettingsTests-noop-analytics-consent-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = UserDefaultsAnalyticsConsentStore(defaults: defaults)
+        let client = NoOpAnalyticsClient(consentStore: store)
+
+        try client.setConsent(.denied)
+        XCTAssertEqual(store.consent, .denied)
+
+        try client.setConsent(.granted)
+        XCTAssertEqual(store.consent, .granted)
+    }
+
     @MainActor
     func testSettingsEntryUsesTheTrophyWallProfileRoute() {
         let router = AppRouter(initialTab: .trophyWall)
