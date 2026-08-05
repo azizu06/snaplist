@@ -151,9 +151,38 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
     abort "PR shard selector must come from the closed matrix" unless
       shard_step&.fetch("env")&.fetch("SNAPLIST_IOS_SHARD") == "${{ matrix.shard }}"
 
+    validate_job = jobs.fetch("validate")
+    release_contract_step = validate_job.fetch("steps").find do |step|
+      step["name"] == "Validate Release archive configuration"
+    end
+    abort "Release archive configuration contract changed" unless
+      release_contract_step&.fetch("run") == "zsh ios/Scripts/release-config-contract.test.sh"
+
+    release_job = jobs.fetch("release")
+    abort "Release configuration must run for pull requests" unless
+      release_job.fetch("if") == "github.event_name == '\''pull_request'\''"
+    abort "Release configuration must wait for validation" unless
+      release_job.fetch("needs") == "validate"
+    abort "Release configuration must use the declared Apple runner" unless
+      release_job.fetch("runs-on") == "macos-26"
+    release_checkout_step = release_job.fetch("steps").find do |step|
+      step["uses"] == "actions/checkout@v4"
+    end
+    abort "Release configuration must check out the exact candidate head" unless
+      release_checkout_step&.fetch("with")&.fetch("ref") ==
+        "${{ github.event.pull_request.head.sha }}"
+    release_step = release_job.fetch("steps").find do |step|
+      step["name"] == "Build verified Release configuration"
+    end
+    abort "Release build command changed" unless
+      release_step&.fetch("run") == "ios/Scripts/build-release.sh"
+    abort "Release build must inject only a synthetic live Clerk key" unless
+      release_step&.fetch("env")&.fetch("SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY") ==
+        "pk_live_ci_release_validation"
+
     aggregate_job = jobs.fetch("test")
     abort "aggregate required check must wait for validation and every shard" unless
-      aggregate_job.fetch("needs") == ["validate", "shard"]
+      aggregate_job.fetch("needs") == ["validate", "shard", "release"]
     abort "aggregate required check must run after failures" unless
       aggregate_job.fetch("if") == "always() && github.event_name == '\''pull_request'\''"
     aggregate_step = aggregate_job.fetch("steps").find do |step|
@@ -164,6 +193,8 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       aggregate_step.fetch("env").fetch("VALIDATE_RESULT") == "${{ needs.validate.result }}"
     abort "aggregate check must observe the complete matrix result" unless
       aggregate_step.fetch("env").fetch("SHARD_RESULT") == "${{ needs.shard.result }}"
+    abort "aggregate check must observe the Release configuration result" unless
+      aggregate_step.fetch("env").fetch("RELEASE_RESULT") == "${{ needs.release.result }}"
 
     serial_job = jobs.fetch("serial")
     abort "serial confidence must remain on main pushes" unless
@@ -175,6 +206,11 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
     end
     abort "serial confidence command changed" unless
       serial_step&.fetch("run") == "ios/Scripts/test.sh"
+    serial_release_step = serial_job.fetch("steps").find do |step|
+      step["name"] == "Build verified Release configuration"
+    end
+    abort "main must build the verified Release configuration" unless
+      serial_release_step&.fetch("run") == "ios/Scripts/build-release.sh"
 
     focused_job = jobs.fetch("focused")
     abort "focused dispatch guard changed" unless

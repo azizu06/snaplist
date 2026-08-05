@@ -92,6 +92,33 @@ final class SubscriptionClientTests: XCTestCase {
         XCTAssertEqual(verified.source, .storeKit)
     }
 
+    func testRevenueCatAppleKeyValidationRejectsTestStoreForRelease() {
+        XCTAssertTrue(
+            RevenueCatSDKKey.isAccepted(
+                "appl_release_fixture",
+                for: .release
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatSDKKey.isAccepted(
+                "test_development_fixture",
+                for: .release
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatSDKKey.isAccepted(
+                "not-an-apple-key",
+                for: .release
+            )
+        )
+        XCTAssertTrue(
+            RevenueCatSDKKey.isAccepted(
+                "test_development_fixture",
+                for: .debug
+            )
+        )
+    }
+
     private func configured() -> NativeSubscriptionConfiguration {
         .init(
             configured: true,

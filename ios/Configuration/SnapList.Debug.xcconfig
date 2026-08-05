@@ -1,0 +1,5 @@
+#include "SnapList.xcconfig"
+
+// Development Clerk instance for Debug builds only.
+SNAPLIST_CLERK_PUBLISHABLE_KEY = pk_test_d2l0dHktd2FscnVzLTI3LmNsZXJrLmFjY291bnRzLmRldiQ
+SNAPLIST_CLERK_FRONTEND_DOMAIN = witty-walrus-27.clerk.accounts.dev

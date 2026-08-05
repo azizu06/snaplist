@@ -290,6 +290,7 @@ struct LaunchConfiguration: Equatable {
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
+#if DEBUG
         var configuration = standard
 
         for argument in arguments {
@@ -392,6 +393,9 @@ struct LaunchConfiguration: Equatable {
         }
 
         return configuration
+#else
+        .standard
+#endif
     }
 
     var usesOnboarding: Bool {

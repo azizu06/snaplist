@@ -7,7 +7,7 @@
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>webcredentials:snaplist.dev</string>
-		<string>webcredentials:witty-walrus-27.clerk.accounts.dev</string>
+		<string>webcredentials:$(SNAPLIST_CLERK_FRONTEND_DOMAIN)</string>
 	</array>
 </dict>
 </plist>

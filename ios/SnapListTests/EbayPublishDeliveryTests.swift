@@ -136,7 +136,9 @@ final class EbayPublishDeliveryTests: XCTestCase {
                     "outcome": "published",
                     "ebayListingId": "110377000011",
                     "ebayOfferId": "offer-377",
-                    "alreadyPublished": false
+                    "alreadyPublished": false,
+                    "listingUrl": "https://www.ebay.com/itm/110377000011",
+                    "ebayEnvironment": "sandbox"
                   },
                   "meta": { "requestId": "req-377" }
                 }
@@ -161,9 +163,48 @@ final class EbayPublishDeliveryTests: XCTestCase {
                 EbayPublishedListing(
                     ebayListingID: "110377000011",
                     listingURL: URL(
-                        string: "https://www.sandbox.ebay.com/itm/110377000011"
+                        string: "https://www.ebay.com/itm/110377000011"
                     )!
                 )
+            )
+        )
+    }
+
+    func testPublishedListingURLPrefersProviderTruthThenMapsBothOfficialHosts() {
+        let providerURL = URL(string: "https://www.ebay.com/itm/provider-truth")!
+
+        XCTAssertEqual(
+            EbayListingURL.resolve(
+                providerURL: providerURL,
+                listingID: "110377000011",
+                environment: .sandbox
+            ),
+            providerURL
+        )
+        XCTAssertEqual(
+            EbayListingURL.resolve(
+                providerURL: nil,
+                listingID: "110377000011",
+                environment: .sandbox
+            ),
+            URL(string: "https://www.sandbox.ebay.com/itm/110377000011")
+        )
+        XCTAssertEqual(
+            EbayListingURL.resolve(
+                providerURL: nil,
+                listingID: "110377000011",
+                environment: .production
+            ),
+            URL(string: "https://www.ebay.com/itm/110377000011")
+        )
+    }
+
+    func testPublishedListingURLNeverGuessesWithoutProviderURLOrEnvironment() {
+        XCTAssertNil(
+            EbayListingURL.resolve(
+                providerURL: nil,
+                listingID: "110377000011",
+                environment: nil
             )
         )
     }
