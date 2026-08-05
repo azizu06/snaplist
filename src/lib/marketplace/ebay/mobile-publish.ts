@@ -14,6 +14,7 @@ import {
   publishListingToEbayAndNotify,
   type PublishOutcome,
 } from "./publish";
+import { assertMobileEbayOperatorActivation } from "./mobile-operator-activation";
 
 export interface MobileEbayPublishStatus {
   listingId: string;
@@ -168,7 +169,7 @@ export function createMobileEbayPublishService(input: {
     },
     async publish(operation) {
       const env = input.env?.() ?? process.env;
-      assertSandboxOnly(env.EBAY_BASE_URL);
+      assertMobileEbayOperatorActivation(env);
       const client = input.clientForBearer(operation.bearerToken);
       const currentStatus = await readMobilePublishStatus(
         client,
@@ -250,24 +251,4 @@ function mobilePublishStatus(outcome: PublishOutcome): MobileEbayPublishStatus {
     ebayOfferId: outcome.ebayOfferId,
     alreadyPublished: outcome.alreadyPublished,
   };
-}
-
-function assertSandboxOnly(baseUrl: string | undefined): void {
-  const configured = baseUrl ?? "https://api.sandbox.ebay.com";
-  let parsed: URL;
-  try {
-    parsed = new URL(configured);
-  } catch {
-    throw new Error("The mobile eBay adapter is not configured for Sandbox.");
-  }
-  if (
-    parsed.origin !== "https://api.sandbox.ebay.com"
-    || (parsed.pathname !== "" && parsed.pathname !== "/")
-    || parsed.username
-    || parsed.password
-    || parsed.search
-    || parsed.hash
-  ) {
-    throw new Error("The mobile eBay adapter is restricted to Sandbox.");
-  }
 }

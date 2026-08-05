@@ -11,7 +11,8 @@ import {
   encryptSecret,
   parseEncryptionKey,
 } from "@/lib/crypto/secretbox";
-import { buildAuthorizeUrl, ebayApiBaseUrl } from "./oauth";
+import { buildAuthorizeUrl } from "./oauth";
+import { assertMobileEbayOperatorActivation } from "./mobile-operator-activation";
 import {
   exchangeAuthorizationCode,
   fetchEbayIdentity,
@@ -147,18 +148,6 @@ function mobileReturnUrl(env: Env, result: string): string {
   const url = validatedMobileReturnUrl(env);
   url.searchParams.set("result", result);
   return url.toString();
-}
-
-function assertSandboxOnly(env: Env): void {
-  const url = new URL(ebayApiBaseUrl(env));
-  if (
-    url.origin !== "https://api.sandbox.ebay.com" ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  ) {
-    throw new Error("Mobile eBay OAuth is restricted to Sandbox.");
-  }
 }
 
 function mobileProviderEnv(env: Env): Env {
@@ -297,7 +286,7 @@ export function createMobileEbayOauthOperations(input: {
       const configuredEnv = readEnv();
       validatedMobileReturnUrl(configuredEnv);
       const env = mobileProviderEnv(configuredEnv);
-      assertSandboxOnly(env);
+      assertMobileEbayOperatorActivation(env);
       const stored = await input.store.createOrReplaySession({
         proposedSessionId: nextUUID(),
         userId,
@@ -316,7 +305,7 @@ export function createMobileEbayOauthOperations(input: {
       let env: Env;
       try {
         env = mobileProviderEnv(configuredEnv);
-        assertSandboxOnly(env);
+        assertMobileEbayOperatorActivation(env);
       } catch {
         return { redirectUrl: mobileReturnUrl(configuredEnv, "failed") };
       }

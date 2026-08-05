@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMobileApiHandler } from "./app";
 import { createMobileEbayPublishService } from "@/lib/marketplace/ebay/mobile-publish";
 import {
@@ -333,6 +333,7 @@ function ebayHandler(input: {
   adapterFor?: () => Promise<EbayAdapter>;
   client: SupabaseClient;
   env?: Record<string, string | undefined>;
+  reportError?: (context: string, error: unknown) => void;
   requestId: string;
 }) {
   return createMobileApiHandler({
@@ -346,6 +347,7 @@ function ebayHandler(input: {
         ...input.env,
       }),
     }),
+    reportError: input.reportError,
     worker: idleWorker,
     requestId: () => input.requestId,
   });
@@ -371,7 +373,35 @@ function confirmedPublishRequest(
   );
 }
 
+async function publishActivationAttempt(
+  env: Record<string, string | undefined> = {},
+) {
+  const { client } = publishFixtureClient();
+  const adapter = new MockEbayAdapter();
+  const reportError = vi.fn();
+  const handler = ebayHandler({
+    adapter,
+    client,
+    env,
+    reportError,
+    requestId: "request-674-operator-activation",
+  });
+
+  return {
+    adapter,
+    reportError,
+    response: await confirmedPublishRequest(handler),
+  };
+}
+
 describe("mobile eBay publish boundary", () => {
+  it("allows the Sandbox adapter with the production flag unset", async () => {
+    const { adapter, response } = await publishActivationAttempt();
+
+    expect(response.status).toBe(200);
+    expect(adapter.requests).toHaveLength(1);
+  });
+
   it("replays an unacknowledged provider mutation with one mutation and one canonical identity", async () => {
     const { client, notifications } = publishFixtureClient();
     const adapter = new AmbiguousThenRecoveringAdapter();
@@ -459,21 +489,59 @@ describe("mobile eBay publish boundary", () => {
     expect(adapter.requests).toHaveLength(0);
   });
 
-  it("refuses a non-Sandbox adapter before any marketplace mutation", async () => {
-    const { client } = publishFixtureClient();
-    const adapter = new MockEbayAdapter();
-    const handler = ebayHandler({
-      adapter,
-      client,
-      env: { EBAY_BASE_URL: "https://api.ebay.com" },
-      requestId: "request-628-production",
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+    ["wrong case", "TRUE"],
+    ["another value", "1"],
+  ])(
+    "refuses the production adapter when the flag is %s",
+    async (_label, flag) => {
+      const { adapter, reportError, response } = await publishActivationAttempt(
+        {
+          EBAY_BASE_URL: "https://api.ebay.com",
+          EBAY_PRODUCTION_MOBILE_ENABLED: flag,
+        },
+      );
+
+      expect(response.status).toBe(503);
+      expect(adapter.requests).toHaveLength(0);
+      expect(reportError).toHaveBeenCalledWith(
+        "mobile-api.ebay-publish",
+        expect.objectContaining({
+          message: expect.stringContaining("EBAY_PRODUCTION_MOBILE_ENABLED"),
+        }),
+      );
+    },
+  );
+
+  it("allows the production adapter with the exact true flag", async () => {
+    const { adapter, response } = await publishActivationAttempt({
+      EBAY_BASE_URL: "https://api.ebay.com",
+      EBAY_PRODUCTION_MOBILE_ENABLED: "true",
     });
 
-    const response = await confirmedPublishRequest(handler);
-
-    expect(response.status).toBe(503);
-    expect(adapter.requests).toHaveLength(0);
+    expect(response.status).toBe(200);
+    expect(adapter.requests).toHaveLength(1);
   });
+
+  it.each([
+    ["other origin", "https://api.sandbox.ebay.com.attacker.example"],
+    ["non-root path", "https://api.ebay.com/inventory"],
+    ["query", "https://api.sandbox.ebay.com?mobile=true"],
+    ["hash", "https://api.ebay.com#mobile"],
+  ])(
+    "refuses a mobile publish adapter with %s even when production is enabled",
+    async (_label, baseUrl) => {
+      const { adapter, response } = await publishActivationAttempt({
+        EBAY_BASE_URL: baseUrl,
+        EBAY_PRODUCTION_MOBILE_ENABLED: "true",
+      });
+
+      expect(response.status).toBe(503);
+      expect(adapter.requests).toHaveLength(0);
+    },
+  );
 
   it("never reports published until the canonical provider identity is durable", async () => {
     const fixture = publishFixtureClient();
