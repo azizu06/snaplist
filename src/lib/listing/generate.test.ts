@@ -207,6 +207,48 @@ describe("listing/generate — seller-visible copy contract (#243)", () => {
   });
 });
 
+describe("listing/generate — seller-voice hard-list repair (#669)", () => {
+  it.each([
+    ["em dash", "Sony WH-1000XM4 — good used condition."],
+    ["en dash", "Sony WH-1000XM4 – good used condition."],
+    ["don't miss", "Don't miss this Sony WH-1000XM4."],
+    ["must-have", "This is a must-have Sony WH-1000XM4."],
+    ["look no further", "Look no further for Sony WH-1000XM4 headphones."],
+    ["act fast", "Act fast for this Sony WH-1000XM4."],
+  ])("retries then replaces a raw description with %s", async (_label, description) => {
+    const violating: EbayListing = {
+      ...fallbackEbayListing(CORE),
+      description,
+    };
+    const { generate, calls } = scriptedGenerate([violating, violating]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    expect(calls).toHaveLength(2);
+    expect(listing).toEqual(fallbackEbayListing(CORE));
+  });
+
+  it("passes a clean raw listing through byte-identically", async () => {
+    const clean = fallbackEbayListing(CORE);
+    const { generate, calls } = scriptedGenerate([clean]);
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(listing).toEqual(clean);
+  });
+});
+
 describe("listing/generate — eBay title-length constraint (≤ 80) is guaranteed", () => {
   it("truncates an over-length model title so the RETURNED title fits the cap", async () => {
     const overLong: EbayListing = {

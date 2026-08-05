@@ -181,6 +181,23 @@ function reconcileSpecifics(attrs: ExtractedAttributes): Record<string, string> 
   return coreSpecifics(attrs);
 }
 
+// Seller-voice hard list. This stays next to the listing repair path rather than the
+// shared seller-copy contract because it applies only to generated eBay description
+// and item-specific text. A hit uses the existing retry/factual-fallback behavior.
+const SELLER_VOICE_BANNED_PATTERNS = [
+  /[\u2013\u2014]/u,
+  /\bdon['’]t miss\b/i,
+  /\bmust-?have\b/i,
+  /\blook no further\b/i,
+  /\bact fast\b/i,
+];
+
+function listingViolatesSellerVoice(raw: RawEbayListing): boolean {
+  return [raw.description, ...Object.values(raw.itemSpecifics)].some((value) =>
+    SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(value)),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Title-length guarantee: deterministic truncation on a word boundary, with an
 // ellipsis when the cut lands mid-content. Applied unconditionally so the RETURNED
@@ -308,9 +325,11 @@ export async function generateEbayListing(
       attributes.title,
       ...(attributes.specs ?? []),
     ];
+    const modelSellerVoiceViolates = listingViolatesSellerVoice(raw);
     const modelCopyViolates =
       sellerTitleViolations(raw.title, titleCore).length > 0 ||
-      sellerCopyViolations(raw.description).length > 0;
+      sellerCopyViolations(raw.description).length > 0 ||
+      modelSellerVoiceViolates;
     const modelTagsViolate = raw.tags.some(
       (tag) => sellerTitleViolations(tag, titleCore).length > 0,
     );
@@ -495,7 +514,14 @@ const LISTING_SYSTEM_PROMPT =
   "a brand, model, or spec that is not given. Ground your tone and structure in the " +
   "provided example listings. The title must be a keyword-dense eBay title of 80 " +
   "characters or fewer. Provide eBay item specifics as name→value pairs drawn from the " +
-  "given attributes, a clear description, and relevant search tags.";
+  "given attributes, a clear description, and relevant search tags. Description and item " +
+  "specifics must use plain seller voice: no em dashes or en dashes; no promotional " +
+  "adjectives (stunning, elevate, boasts, must-have, exquisite, seamless, vibrant, " +
+  "top-notch, sleek, gorgeous, breathtaking); no urgency or hype (don't miss, act fast, " +
+  "won't last, grab yours, look no further); no Whether you're X or Y construction, " +
+  "three-part parallel hype list, or perfect for chain. Use at most one exclamation mark " +
+  "in the whole description; zero is preferred. Write short factual sentences covering " +
+  "what it is, condition specifics, what is included, and flaws stated plainly.";
 
 /**
  * Build the real generate: a lazy wrapper around the AI SDK's `generateObject` with
