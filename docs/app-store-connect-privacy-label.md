@@ -14,8 +14,8 @@ free-text, price, IDFA, or advertising identifier is sent. SnapList does not lin
 third-party data for advertising or advertising measurement, and does not share it with data
 brokers, so tracking is **No**.
 
-App manifest declares app-owned Clerk alias and `UserDefaults` use. PostHog iOS 3.66.1 already
-ships its own manifest for product interaction and other usage data, so app manifest does not
-duplicate those SDK entries. SnapList disables PostHog automatic lifecycle, screen,
+App manifest declares app-owned Clerk alias, Product Interaction, and `UserDefaults` use. PostHog
+iOS 3.66.1 also ships its own manifest for other usage data. SnapList disables PostHog automatic
+lifecycle, screen,
 element-interaction, replay, error, feature-flag, survey, and network-telemetry capture; App Store
 label above therefore covers only explicit native funnel contract.

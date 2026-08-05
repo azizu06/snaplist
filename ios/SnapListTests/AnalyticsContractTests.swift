@@ -25,6 +25,7 @@ final class AnalyticsContractTests: XCTestCase {
                 "event_id": eventID.uuidString.lowercased(),
                 "entry_point": "onboarding",
                 "environment": "testflight",
+                "build_type": "release",
                 "app_version": "0.1.0",
                 "app_build": "270",
             ]
@@ -70,7 +71,7 @@ final class AnalyticsContractTests: XCTestCase {
                 ["event_id", "account_state"]
             ),
         ]
-        let metadataKeys: Set<String> = ["environment", "app_version", "app_build"]
+        let metadataKeys: Set<String> = ["environment", "build_type", "app_version", "app_build"]
 
         for (event, name, eventKeys) in cases {
             let payload = try XCTUnwrap(
@@ -98,6 +99,7 @@ final class AnalyticsContractTests: XCTestCase {
                     FunnelAnalyticsConstants.PropertyName.eventID:
                         eventID.uuidString.lowercased(),
                     "environment": "testflight",
+                    "build_type": "release",
                     "app_version": "0.1.0",
                     "app_build": "270",
                 ]
@@ -189,6 +191,7 @@ final class AnalyticsContractTests: XCTestCase {
             [
                 "screen": "draft_review",
                 "environment": "testflight",
+                "build_type": "release",
                 "app_version": "0.1.0",
                 "app_build": "270",
             ]
@@ -375,6 +378,13 @@ final class AnalyticsContractTests: XCTestCase {
         )
         XCTAssertTrue(configured.analyticsClient is PostHogAnalyticsClient)
 
+        let debug = AppDependencies.make(
+            configuration: .standard,
+            analyticsLaunchInputs: analyticsLaunchInputs(isDebugBuild: true),
+            analyticsTransportFactory: RecordingPostHogTransportFactory()
+        )
+        XCTAssertTrue(debug.analyticsClient is PostHogAnalyticsClient)
+
         for absent in [nil, "", "   "] as [String?] {
             let dependencies = AppDependencies.make(
                 configuration: .standard,
@@ -409,8 +419,12 @@ final class AnalyticsContractTests: XCTestCase {
         XCTAssertTrue(fixture.analyticsClient is NoOpAnalyticsClient)
     }
 
-    func testAnalyticsLaunchPolicyRefusesLocalTestAndUnusableConfiguration() throws {
-        XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(isDebugBuild: true)))
+    func testAnalyticsLaunchPolicyEnablesDebugAndRefusesXCTestAndUnusableConfiguration() throws {
+        let debug = try XCTUnwrap(
+            AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(isDebugBuild: true))
+        )
+        XCTAssertEqual(debug.metadata.environment, .local)
+        XCTAssertEqual(debug.metadata.buildType, .debug)
         XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(hasLoadedXCTest: true)))
         XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(key: nil)))
         XCTAssertNil(AnalyticsLaunchPolicy.decide(analyticsLaunchInputs(key: "")))
@@ -521,6 +535,7 @@ final class AnalyticsContractTests: XCTestCase {
                     "event_id": eventID.uuidString.lowercased(),
                     "entry_point": "capture",
                     "environment": "testflight",
+                    "build_type": "release",
                     "app_version": "1.0.0",
                     "app_build": "613",
                 ]
@@ -533,6 +548,7 @@ final class AnalyticsContractTests: XCTestCase {
                 properties: [
                     "screen": "capture",
                     "environment": "testflight",
+                    "build_type": "release",
                     "app_version": "1.0.0",
                     "app_build": "613",
                 ]
@@ -613,6 +629,7 @@ final class AnalyticsContractTests: XCTestCase {
             .union(AnalyticsScreen.allCases.map(\.rawValue))
         let metadataValues: Set<String> = [
             metadata.environment.rawValue,
+            metadata.buildType.rawValue,
             metadata.appVersion,
             metadata.build,
         ]
@@ -666,7 +683,7 @@ final class AnalyticsContractTests: XCTestCase {
                 switch name {
                 case "event_id":
                     XCTAssertEqual(value, eventID.uuidString.lowercased())
-                case "environment", "app_version", "app_build":
+                case "environment", "build_type", "app_version", "app_build":
                     XCTAssertTrue(
                         metadataValues.contains(value),
                         "\(payload.name).\(name) emitted \(value), which is not build metadata"

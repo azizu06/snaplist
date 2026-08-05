@@ -37,6 +37,17 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(store.consent, .granted)
     }
 
+    func testAnalyticsToggleRetainsActualConsentAndReportsFailure() {
+        let client = FailingSettingsAnalyticsClient()
+        var state = SettingsAnalyticsConsentState(consent: .denied)
+
+        state.request(true, using: client)
+
+        XCTAssertFalse(state.isEnabled)
+        XCTAssertTrue(state.showsError)
+        XCTAssertEqual(client.requestedConsents, [.granted])
+    }
+
     @MainActor
     func testSettingsEntryUsesTheTrophyWallProfileRoute() {
         let router = AppRouter(initialTab: .trophyWall)
@@ -525,4 +536,20 @@ final class SettingsTests: XCTestCase {
             state.lead(email: "seller@example.com").contains("SnapList sent")
         )
     }
+}
+
+private final class FailingSettingsAnalyticsClient: AnalyticsClient {
+    enum Failure: Error { case expected }
+
+    private(set) var requestedConsents: [AnalyticsConsent] = []
+
+    func capture(_ event: AnalyticsEvent) {}
+    func screen(_ screen: AnalyticsScreen) {}
+    func identify(clerkUserID: String) {}
+    func reset() {}
+    func setConsent(_ consent: AnalyticsConsent) throws {
+        requestedConsents.append(consent)
+        throw Failure.expected
+    }
+    func flush() {}
 }

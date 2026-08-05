@@ -11,7 +11,7 @@ struct SettingsView: View {
     private let deletionOutstanding: Bool
     private let analyticsClient: any AnalyticsClient
     @State private var hasLocalData: Bool
-    @State private var sharesUsageAnalytics: Bool
+    @State private var analyticsConsentState: SettingsAnalyticsConsentState
     @State private var subscriptionStore: SubscriptionStore
     @State private var subscriptionLoadPhase =
         SettingsSubscriptionPresentation.LoadPhase.loading
@@ -32,8 +32,10 @@ struct SettingsView: View {
         self.deletionOutstanding = deletionOutstanding
         self.analyticsClient = analyticsClient
         _hasLocalData = State(initialValue: hasLocalData)
-        _sharesUsageAnalytics = State(
-            initialValue: UserDefaultsAnalyticsConsentStore().consent == .granted
+        _analyticsConsentState = State(
+            initialValue: SettingsAnalyticsConsentState(
+                consent: UserDefaultsAnalyticsConsentStore().consent
+            )
         )
         _subscriptionStore = State(
             initialValue: SubscriptionStore(client: subscriptionClient)
@@ -56,12 +58,7 @@ struct SettingsView: View {
                 valueRow("Notifications", "On", chevron: true)
             }
             Section("Privacy") {
-                Toggle("Share usage analytics", isOn: $sharesUsageAnalytics)
-                    .onChange(of: sharesUsageAnalytics) { _, sharesUsageAnalytics in
-                        try? analyticsClient.setConsent(
-                            sharesUsageAnalytics ? .granted : .denied
-                        )
-                    }
+                Toggle("Share usage analytics", isOn: analyticsConsentBinding)
                     .accessibilityIdentifier("settings.share-usage-analytics")
             }
             if SettingsSubscriptionVisibility(
@@ -141,6 +138,16 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
         .background(Color(hex: "#F5F6F7"))
+        .alert(
+            "Couldn’t update analytics sharing",
+            isPresented: analyticsConsentErrorBinding
+        ) {
+            Button("OK", role: .cancel) {
+                analyticsConsentState.dismissError()
+            }
+        } message: {
+            Text("Your preference did not change. Try again.")
+        }
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
         .task {
             guard !profile.isGuest else { return }
@@ -250,6 +257,23 @@ struct SettingsView: View {
         )
     }
 
+    private var analyticsConsentBinding: Binding<Bool> {
+        Binding(
+            get: { analyticsConsentState.isEnabled },
+            set: { analyticsConsentState.request($0, using: analyticsClient) }
+        )
+    }
+
+    private var analyticsConsentErrorBinding: Binding<Bool> {
+        Binding(
+            get: { analyticsConsentState.showsError },
+            set: { isPresented in
+                guard !isPresented else { return }
+                analyticsConsentState.dismissError()
+            }
+        )
+    }
+
     private func valueRow(_ label: String, _ value: String, chevron: Bool = false) -> some View {
         HStack {
             Text(label)
@@ -262,6 +286,32 @@ struct SettingsView: View {
 
     private func navigationRow(_ label: String) -> some View {
         HStack { Text(label); Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
+    }
+}
+
+struct SettingsAnalyticsConsentState {
+    private(set) var isEnabled: Bool
+    private(set) var showsError = false
+
+    init(consent: AnalyticsConsent) {
+        isEnabled = consent == .granted
+    }
+
+    mutating func request(
+        _ isEnabled: Bool,
+        using analyticsClient: any AnalyticsClient
+    ) {
+        do {
+            try analyticsClient.setConsent(isEnabled ? .granted : .denied)
+            self.isEnabled = isEnabled
+            showsError = false
+        } catch {
+            showsError = true
+        }
+    }
+
+    mutating func dismissError() {
+        showsError = false
     }
 }
 

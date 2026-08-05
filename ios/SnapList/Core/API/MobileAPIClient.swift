@@ -448,16 +448,12 @@ struct AnalyticsLaunchInputs {
     }
 }
 
-/// Decides whether the production composition builds the real PostHog client
-/// and under which environment tag, or none at all.
+/// Decides whether app composition builds the real PostHog client and under
+/// which environment tag, or none at all.
 ///
-/// Returning `nil` is what keeps local builds and test runs out of the funnel.
-/// A unit test is caught directly — the host app loads XCTest — but the app
-/// under a UI test is not: XCUITest drives it out of process through
-/// `testmanagerd` and injects nothing into it, so the build configuration is
-/// the only honest signal and the scheme's TestAction builds Debug. #483
-/// established both gates for the Sentry DSN; analytics reuses them rather than
-/// inventing a second answer to the same question.
+/// A unit-test host is caught directly because it loads XCTest. A real app,
+/// including Debug and UI-test builds, keeps analytics enabled by default and
+/// emits `build_type=debug` so development traffic stays distinct in dashboards.
 enum AnalyticsLaunchPolicy {
     /// Which build channel produced this binary. Kept separate from `decide`
     /// because the two answer different questions: this one names the channel,
@@ -475,7 +471,7 @@ enum AnalyticsLaunchPolicy {
     static func decide(
         _ inputs: AnalyticsLaunchInputs
     ) -> AnalyticsPostHogConfiguration? {
-        guard !inputs.isDebugBuild, !inputs.hasLoadedXCTest else {
+        guard !inputs.hasLoadedXCTest else {
             return nil
         }
         guard let projectToken = usableBundleValue(inputs.projectKeyBundleValue),
@@ -664,10 +660,10 @@ struct AppDependencies {
         )
     }
 
-    /// Builds the analytics client the production composition uses. The
-    /// dependencies are `@autoclosure` so a build that must not transmit never
-    /// constructs the durable stores — `UserDefaultsAnalyticsIdentityStore`
-    /// mints and persists an anonymous id in its initializer.
+    /// Builds the analytics client app composition uses. The dependencies are
+    /// `@autoclosure` so an invalid configuration or unit-test host does not
+    /// construct durable stores — `UserDefaultsAnalyticsIdentityStore` mints
+    /// and persists an anonymous id in its initializer.
     static func makeAnalyticsClient(
         launchInputs: AnalyticsLaunchInputs = .current,
         transportFactory: any PostHogTransportBuilding = PostHogSDKTransportFactory(),
