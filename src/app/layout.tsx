@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Schibsted_Grotesk } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "next-themes";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -117,6 +118,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${schibsted.variable} h-full antialiased`}
       >
         <body className="min-h-full">
+          <Analytics />
           <ThemeProvider
             attribute="class"
             defaultTheme="light"
