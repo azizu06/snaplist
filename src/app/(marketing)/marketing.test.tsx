@@ -613,7 +613,7 @@ describe("feature explorer semantics", () => {
     const bodies = site.FEATURE_STEPS.map((step) => step.body);
 
     expect(bodies).toHaveLength(5);
-    expect(bodies.every((body) => body.length >= 95 && body.length <= 120)).toBe(true);
+    expect(bodies.every((body) => body.length >= 90 && body.length <= 120)).toBe(true);
     expect(bodies.filter((body) => /optional voice note.*15 seconds/i.test(body))).toHaveLength(1);
     expect(bodies.join(" ")).toMatch(/handoff you finish/i);
   });

@@ -92,7 +92,7 @@ export const FEATURE_STEPS = [
     id: "scan",
     title: "Scan",
     body:
-      "Take 1 to 5 photos, then add one optional voice note up to 15 seconds before you start a draft.",
+      "Add 1 to 5 photos, then record one optional voice note up to 15 seconds before you start a draft.",
   },
   {
     id: "photo-review",
