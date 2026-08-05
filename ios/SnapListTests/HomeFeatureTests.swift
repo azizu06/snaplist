@@ -1117,7 +1117,7 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(store.processingRows, firstProjection)
     }
 
-    func testStoreProjectsConfirmedEbayPublicationIntoTheSettledTrophyWall() throws {
+    func testStoreProjectsConfirmedLegacyEbayPublicationIntoTheSettledTrophyWall() throws {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore()
         let historyPage = try fixture.historyPage(
@@ -1126,17 +1126,19 @@ final class TrophyWallDomainTests: XCTestCase {
             stage: .completed,
             terminalOutcome: .succeeded
         )
-
-        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
-        store.applyEbayPublishStatus(
-            EbayPublishStatus(
-                listingID: fixture.listingID,
-                outcome: .published,
-                ebayListingID: "123456789012",
-                ebayOfferID: "offer-375",
-                alreadyPublished: true
+        let legacyStatus = try JSONDecoder().decode(
+            EbayPublishStatus.self,
+            from: Data(
+                """
+                {"listingId":"\(fixture.listingID.uuidString.lowercased())","outcome":"published","ebayListingId":"123456789012","ebayOfferId":"offer-375","alreadyPublished":true}
+                """.utf8
             )
         )
+
+        XCTAssertNil(legacyStatus.publishedListing)
+
+        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
+        store.applyEbayPublishStatus(legacyStatus)
 
         XCTAssertEqual(store.processingRows.map(\.id), [.local(fixture.unrelatedLogicalID)])
         XCTAssertEqual(

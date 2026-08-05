@@ -125,8 +125,12 @@ struct EbayPublishStatus: Codable, Equatable, Sendable {
         case environment = "ebayEnvironment"
     }
 
+    var isConfirmedPublication: Bool {
+        outcome == .published && ebayListingID != nil
+    }
+
     var publishedListing: EbayPublishedListing? {
-        guard outcome == .published,
+        guard isConfirmedPublication,
               let ebayListingID,
               let resolvedURL = EbayListingURL.resolve(
                 providerURL: listingURL,
