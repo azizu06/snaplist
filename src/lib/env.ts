@@ -9,6 +9,9 @@ import {
 } from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
 
+const LOCAL_SERVER_RPC_SECRET =
+  "snaplist-local-server-rpc-secret-do-not-use-in-hosted";
+
 const optionalProxyTemplateSchema = z.preprocess(
   (value) =>
     typeof value === "string" && value.trim() === "" ? undefined : value,
@@ -258,9 +261,14 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
   if (isLocalDevelopment(env)) return [];
 
   const issues: string[] = [];
-  if (!env.SERVER_RPC_SECRET?.trim()) {
+  const serverRpcSecret = env.SERVER_RPC_SECRET?.trim();
+  if (!serverRpcSecret) {
     issues.push(
       "  - SERVER_RPC_SECRET: Required in every deployed environment for tenant-bound server RPC authorization.",
+    );
+  } else if (serverRpcSecret === LOCAL_SERVER_RPC_SECRET) {
+    issues.push(
+      "  - SERVER_RPC_SECRET: The public local/CI secret is forbidden in deployed environments; generate a distinct high-entropy value.",
     );
   }
   const appAttestTeamId = env.APPLE_TEAM_ID?.trim();

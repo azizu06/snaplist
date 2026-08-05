@@ -308,6 +308,18 @@ describe("parseEnv", () => {
     ).toThrowError(/SERVER_RPC_SECRET/);
   });
 
+  it("rejects the public local server RPC secret in deployed environments", () => {
+    expect(() =>
+      parseEnv({
+        ...valid,
+        NODE_ENV: "production",
+        LLM_PROVIDER: "openai",
+        SERVER_RPC_SECRET:
+          "snaplist-local-server-rpc-secret-do-not-use-in-hosted",
+      }),
+    ).toThrowError(/public local\/CI secret is forbidden/);
+  });
+
   it("accepts the server-only listing-example experiment controls", () => {
     const env = parseEnv({
       ...valid,

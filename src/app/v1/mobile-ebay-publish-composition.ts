@@ -4,13 +4,12 @@ import {
   createEbayAdapterForUser,
   createMobileEbayPublishService,
 } from "@/lib/marketplace/ebay";
-import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
+import { createServerRpcClient } from "@/lib/supabase/server-rpc-auth";
 import { clerkPrincipal, unavailableWorker } from "./mobile-api-composition";
 
 function configuredClient(
   bearerToken: string,
   apiKey: string,
-  serverRpcSecret?: string,
 ): SupabaseClient {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   if (!supabaseURL) {
@@ -18,10 +17,24 @@ function configuredClient(
   }
   return createClient(supabaseURL, apiKey, {
     accessToken: async () => bearerToken,
-    ...(serverRpcSecret
-      ? { global: { headers: serverRpcHeaders(serverRpcSecret) } }
-      : {}),
     auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+function configuredServerRpcClient(
+  bearerToken: string,
+  apiKey: string,
+  serverRpcSecret: string,
+): SupabaseClient {
+  const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  if (!supabaseURL) {
+    throw new Error("The mobile eBay Supabase boundary is not configured.");
+  }
+  return createServerRpcClient({
+    supabaseURL,
+    apiKey,
+    serverRpcSecret,
+    bearerToken,
   });
 }
 
@@ -41,7 +54,7 @@ function configuredEbayPublish() {
     clientForBearer: (bearerToken) =>
       configuredClient(bearerToken, publishableKey),
     completionClientForBearer: (bearerToken) =>
-      configuredClient(bearerToken, secretKey, serverRpcSecret),
+      configuredServerRpcClient(bearerToken, secretKey, serverRpcSecret),
     adapterFor: (client, completionClient, userId, env) =>
       createEbayAdapterForUser(client, userId, {
         credentialClient: completionClient,
