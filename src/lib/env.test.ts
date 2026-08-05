@@ -313,7 +313,7 @@ describe("parseEnv", () => {
       "server-rpc-secret-with-at-least-32-characters",
       "a".repeat(64),
       "correcthorsebatterystaple".repeat(3).slice(0, 64),
-      "0123456789abcdef".repeat(4),
+      "fKq9Y3n8ouWON6TS".repeat(4),
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
     ]) {
       expect(() =>
