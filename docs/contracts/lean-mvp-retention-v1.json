@@ -22,10 +22,11 @@
       "dispositions": [{
         "treatment": "delete",
         "owner": "seller-local-client",
-        "deletionTriggers": ["seller-deletes-or-replaces-voice", "seller-discards-intake", "matching-durable-acceptance-allows-local-cleanup", "local-recovery-window-expires"],
+        "deletionTriggers": ["seller-deletes-or-replaces-voice", "seller-discards-intake", "matching-durable-acceptance-allows-local-cleanup", "local-recovery-window-expires", "deferred-unmatched-voice-entry-becomes-unreadable"],
         "maximumRetention": "24 hours from local intake capture",
         "executor": "native-intake-cleanup-capability",
-        "completionProof": "protected voice file and its local intake reference are absent"
+        "completionProof": "protected voice file and its local intake reference are absent",
+        "ownerDecision": "A deferred unmatched-voice entry whose metadata or media cannot be read is terminal local input, including a per-entry transient read failure. The native cleanup capability deletes that owned entry directory on sight because no caller can safely restore, match, or return the voice and its own expiry cannot be recovered. A failed deletion retries only the deletion; it never re-arms an unreadable-entry read. Until the entry directory is absent, destructive guards treat it as possible protected voice bytes and do not destroy the residual principal root."
       }]
     },
     {

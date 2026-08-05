@@ -224,6 +224,7 @@ actor NativeIntake {
     private var reviewActivationID: UUID?
     private var anonymousIdentityUnavailable = false
     private var deletionRetryAfter: [URL: Date] = [:]
+    private var terminalDeferredVoiceDeletionRoots = Set<URL>()
 
     init(
         applicationSupportDirectory: URL, identitySource: IdentitySource,
@@ -1221,7 +1222,8 @@ actor NativeIntake {
     }
 
     private func deferredUnmatchedVoices(
-        in principalRoot: URL
+        in principalRoot: URL,
+        excluding terminalDeletionRoots: Set<URL> = []
     ) -> ReadResult<DeferredUnmatchedVoiceListing> {
         let container = deferredUnmatchedVoicesRoot(in: principalRoot)
         guard let anchor = storageAnchor(containing: container) else {
@@ -1244,6 +1246,11 @@ actor NativeIntake {
         var listing = DeferredUnmatchedVoiceListing()
         listing.records.reserveCapacity(entryRoots.count)
         for entryRoot in entryRoots {
+            guard !terminalDeletionRoots.contains(
+                entryRoot.standardizedFileURL
+            ) else {
+                continue
+            }
             switch readDeferredUnmatchedVoice(at: entryRoot) {
             case .value(let record):
                 listing.records.append(record)
@@ -1258,7 +1265,12 @@ actor NativeIntake {
                 // only the sweep can decide what becomes of them.
                 listing.unreadableRoots.append(entryRoot)
             case .transient:
-                return .transient
+                // A per-entry I/O failure cannot collapse the whole store.
+                // Its metadata may never become readable (for example after
+                // bit rot), so retention gives the entry the same terminal
+                // cleanup disposition as other unreadable entries instead of
+                // re-arming a container-wide retry forever.
+                listing.unreadableRoots.append(entryRoot)
             }
         }
         return .value(listing)
@@ -1275,17 +1287,24 @@ actor NativeIntake {
         in principalRoot: URL,
         whenUncertain: Bool
     ) -> Bool {
-        switch deferredUnmatchedVoices(in: principalRoot) {
+        let terminalRoots = terminalDeferredVoiceDeletionRoots.filter {
+            Self.isContained($0, under: principalRoot)
+        }
+        switch deferredUnmatchedVoices(
+            in: principalRoot,
+            excluding: terminalDeferredVoiceDeletionRoots
+        ) {
         case .value(let listing):
             // An unreadable entry counts as present. Its bytes are real even
             // though its metadata is not, so a root holding one has not been
             // ruled clear of voices and must not be destroyed as if it had.
             return !listing.records.isEmpty
                 || !listing.unreadableRoots.isEmpty
+                || !terminalRoots.isEmpty
         case .absent:
-            return false
+            return !terminalRoots.isEmpty
         case .transient, .malformed:
-            return whenUncertain
+            return whenUncertain || !terminalRoots.isEmpty
         }
     }
 
@@ -1384,6 +1403,11 @@ actor NativeIntake {
             in: ephemeralRoots,
             to: &deadlines
         )
+        deadlines.append(
+            contentsOf: terminalDeferredVoiceDeletionRoots.map {
+                deletionRetryAfter[$0] ?? now()
+            }
+        )
         return deadlines.min()
     }
 
@@ -1394,7 +1418,10 @@ actor NativeIntake {
         switch roots {
         case .value(let roots):
             for root in roots {
-                switch deferredUnmatchedVoices(in: root) {
+                switch deferredUnmatchedVoices(
+                    in: root,
+                    excluding: terminalDeferredVoiceDeletionRoots
+                ) {
                 case .value(let listing):
                     deadlines.append(
                         contentsOf: listing.records.map {
@@ -1465,30 +1492,21 @@ actor NativeIntake {
     private func cleanupExpiredDeferredUnmatchedVoices(
         at currentTime: Date
     ) {
+        cleanupTerminalDeferredUnmatchedVoiceDeletions(at: currentTime)
         for roots in [ownedDurableRoots(), ownedEphemeralRoots()] {
             guard case .value(let roots) = roots else { continue }
             for root in roots {
                 guard case .value(let listing) =
-                    deferredUnmatchedVoices(in: root) else {
+                    deferredUnmatchedVoices(
+                        in: root,
+                        excluding: terminalDeferredVoiceDeletionRoots
+                    ) else {
                     continue
                 }
                 let expired = listing.records
                     .filter { $0.value.expiresAt <= currentTime }
                     .map(\.root)
-                // An unreadable entry is deleted on sight rather than kept.
-                // Nothing can recover it: a record only ever reaches a caller
-                // through a successful read, so no path can surface, match, or
-                // return one to the seller. What it can still do is hold raw
-                // voice bytes with no deadline to read, and ADR-0012 caps
-                // those at 24 hours. Deletion is bounded to a deferred entry
-                // directory inside a root this app owns, checked against that
-                // root's own storage anchor. That reaches every principal's
-                // residual store rather than only the current one, which is
-                // what a 24-hour cap has to do to hold. Only schema version 1
-                // is ever written, so if a
-                // second version is added its writer must land before this
-                // sweep learns to tolerate it.
-                for entryRoot in expired + listing.unreadableRoots {
+                for entryRoot in expired {
                     let removed = removeDeferredUnmatchedVoiceEntry(
                         at: entryRoot
                     )
@@ -1498,7 +1516,44 @@ actor NativeIntake {
                             Self.retentionRetryInterval
                         )
                 }
+                for entryRoot in listing.unreadableRoots {
+                    terminalDeferredVoiceDeletionRoots.insert(entryRoot)
+                    removeTerminalDeferredUnmatchedVoiceEntry(
+                        at: entryRoot,
+                        currentTime: currentTime
+                    )
+                }
             }
+        }
+    }
+
+    private func cleanupTerminalDeferredUnmatchedVoiceDeletions(
+        at currentTime: Date
+    ) {
+        for entryRoot in Array(terminalDeferredVoiceDeletionRoots) {
+            guard (deletionRetryAfter[entryRoot] ?? currentTime) <= currentTime
+            else {
+                continue
+            }
+            removeTerminalDeferredUnmatchedVoiceEntry(
+                at: entryRoot,
+                currentTime: currentTime
+            )
+        }
+    }
+
+    private func removeTerminalDeferredUnmatchedVoiceEntry(
+        at entryRoot: URL,
+        currentTime: Date
+    ) {
+        let removed = removeDeferredUnmatchedVoiceEntry(at: entryRoot)
+        if removed {
+            terminalDeferredVoiceDeletionRoots.remove(entryRoot)
+            deletionRetryAfter[entryRoot] = nil
+        } else {
+            deletionRetryAfter[entryRoot] = currentTime.addingTimeInterval(
+                Self.retentionRetryInterval
+            )
         }
     }
 
