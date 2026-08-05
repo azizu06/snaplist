@@ -79,6 +79,7 @@ enum SubscriptionAdvisoryOutcome: Equatable, Sendable {
     case cancelled
     case pending
     case awaitingServerVerification
+    case nothingToRestore
 }
 
 enum VerifiedSubscriptionSource: String, Codable, Equatable, Sendable {

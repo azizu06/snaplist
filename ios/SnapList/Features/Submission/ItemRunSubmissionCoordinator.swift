@@ -36,8 +36,13 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
             self = .photoReview(.sub03)
         case .conflict:
             self = .photoReview(.sub04)
-        case .creditDenied(reason: _):
+        case .creditDenied(reason: "snaplist-pro-required"):
             self = .handoff(.pay01)
+        case .creditDenied:
+            // Only the canonical first-paid-run denial proves this seller owes
+            // the Pro gate. Expired, ambiguous, exhausted, or untyped server
+            // truth must not become an offer to buy again.
+            self = .photoReview(.sub06)
         case .rateLimited(reason: _):
             self = .photoReview(.sub06)
         case .rejected:
@@ -301,6 +306,12 @@ final class ItemRunSubmissionHost {
         guard !isSubmitting, !isInert else {
             return
         }
+        // A destination handoff owns this exact attempt until AppShell consumes it.
+        // Photo Review remains visible while Pro eligibility loads, so another tap
+        // must not replace the handoff with a new event identity mid-presentation.
+        if case .destinationHandoff? = pendingPresentationEvent {
+            return
+        }
 #if DEBUG
         if let delayedFixture {
             isSubmitting = true
@@ -558,6 +569,25 @@ final class ItemRunSubmissionHost {
         return handoff
     }
 
+    @discardableResult
+    func replaceProGateHandoffWithPhotoReviewFallback(
+        eventID: UUID
+    ) -> Bool {
+        guard case .destinationHandoff(
+            eventID: let pendingEventID,
+            handoff: .pay01
+        )? = pendingPresentationEvent,
+              pendingEventID == eventID else {
+            return false
+        }
+        publish(retention: .submissionUnavailable)
+        return true
+    }
+
+    func publishProGatePhotoReviewFallback() {
+        publish(retention: .submissionUnavailable)
+    }
+
     func completeClearedIntakePresentation() {
         guard clearedIntake,
               case .itemSaved(_, _)? = pendingPresentationEvent else {
@@ -615,7 +645,10 @@ struct PhotoReviewSubmissionPresentation: Equatable {
     }
 
     @MainActor
-    init(host: ItemRunSubmissionHost) {
+    init(
+        host: ItemRunSubmissionHost,
+        proGateIntakeAdvisory: ProGateStore.IntakeAdvisory? = nil
+    ) {
         if case .itemSaved(let eventID, _)? = host.pendingPresentationEvent {
             self = PhotoReviewSubmissionPresentation(
                 primaryActionLabel: "Item saved",
@@ -636,6 +669,19 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 visibleMessage: nil,
                 rendersSubmittedMedia: true
             )
+        } else if case .destinationHandoff(
+            eventID: _,
+            handoff: .pay01
+        )? = host.pendingPresentationEvent {
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Start listing",
+                primaryActionEvent: .startListing,
+                mutationControlsLocked: true,
+                announcementEvent: nil,
+                accessibilityAnnouncement: nil,
+                visibleMessage: nil,
+                rendersSubmittedMedia: true
+            )
         } else if case .submissionRejected(
             eventID: let eventID,
             retention: let retention
@@ -652,8 +698,27 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 visibleMessage: family.message,
                 rendersSubmittedMedia: true
             )
+        } else if let proGateIntakeAdvisory {
+            self = PhotoReviewSubmissionPresentation(
+                proGateIntakeAdvisory: proGateIntakeAdvisory
+            )
         } else {
             self = .idle
+        }
+    }
+
+    init(proGateIntakeAdvisory: ProGateStore.IntakeAdvisory) {
+        switch proGateIntakeAdvisory {
+        case .needsPro(let eventID):
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Start listing",
+                primaryActionEvent: .startListing,
+                mutationControlsLocked: false,
+                announcementEvent: .submissionRejected(eventID: eventID),
+                accessibilityAnnouncement: ProGateCopy.intakeNeedsPro,
+                visibleMessage: ProGateCopy.intakeNeedsPro,
+                rendersSubmittedMedia: true
+            )
         }
     }
 }

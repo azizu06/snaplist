@@ -2162,6 +2162,7 @@ private extension PhotoReviewPickerRequest {
 @MainActor
 struct PhotoReviewFixtureView: View {
     @State private var store: PhotoReviewStore
+    private let submissionPresentation: PhotoReviewSubmissionPresentation
     private let forceReducedMotion: Bool
     private let onLayoutObservation: ((PhotoReviewLayoutObservation) -> Void)?
     private let projectsFixtureOrder: Bool
@@ -2169,6 +2170,7 @@ struct PhotoReviewFixtureView: View {
     init(
         state: PhotoReviewVisualStateID,
         forceReducedMotion: Bool = false,
+        submissionPresentation: PhotoReviewSubmissionPresentation = .idle,
         onLayoutObservation:
             ((PhotoReviewLayoutObservation) -> Void)? = nil
     ) {
@@ -2184,6 +2186,7 @@ struct PhotoReviewFixtureView: View {
         }
         _store = State(initialValue: store)
         self.forceReducedMotion = forceReducedMotion
+        self.submissionPresentation = submissionPresentation
         self.onLayoutObservation = onLayoutObservation
         projectsFixtureOrder = ProcessInfo.processInfo.arguments.contains(
             "--photo-review-fixture-order-probe"
@@ -2195,6 +2198,7 @@ struct PhotoReviewFixtureView: View {
         PhotoReviewView(
             store: store,
             forceReducedMotion: forceReducedMotion,
+            submissionPresentation: submissionPresentation,
             backToCamera: {},
             delete: { nil },
             openBoundary: { _ in },
@@ -2819,6 +2823,7 @@ struct PhotoReviewView: View {
     /// Fixture-only override. Live Photo Review always follows the system setting.
     var forceReducedMotion = false
     var submissionPresentation: PhotoReviewSubmissionPresentation = .idle
+    var focusStartListingRequest: UUID?
     var postSubmissionAnnouncement: (String) -> Void = {
         UIAccessibility.post(notification: .announcement, argument: $0)
     }
@@ -2862,6 +2867,7 @@ struct PhotoReviewView: View {
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
     @AccessibilityFocusState private var focusedVoiceNoteOpener: Bool
+    @AccessibilityFocusState private var focusedStartListing: Bool
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .headline)
@@ -2947,6 +2953,10 @@ struct PhotoReviewView: View {
                 postAnnouncement: postSubmissionAnnouncement,
                 acknowledgePresentation: acknowledgeSubmissionPresentation
             )
+        }
+        .onChange(of: focusStartListingRequest) { _, request in
+            guard request != nil else { return }
+            focusedStartListing = true
         }
         .onChange(of: dragPresentation.pendingFocusPhotoID) { _, photoID in
             guard photoID != nil,
@@ -3749,6 +3759,7 @@ struct PhotoReviewView: View {
             )
         )
         .accessibilityIdentifier("photo-review.start-listing")
+        .accessibilityFocused($focusedStartListing)
     }
 
     private var pickerIsPresented: Binding<Bool> {

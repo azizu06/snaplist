@@ -11,6 +11,7 @@ final class SubscriptionStore {
         case purchasing(productID: String)
         case pending(productID: String)
         case restoring
+        case restoreNotFound
         case awaitingServerVerification(action: VerificationAction)
         case verified(ServerVerifiedSubscription)
         case failed(String)
@@ -57,6 +58,8 @@ final class SubscriptionStore {
                 state = .pending(productID: productID)
             case .awaitingServerVerification:
                 state = .awaitingServerVerification(action: .purchase)
+            case .nothingToRestore:
+                state = .available(products)
             }
         } catch is CancellationError {
             state = .available(products)
@@ -68,8 +71,15 @@ final class SubscriptionStore {
     func restore() async {
         state = .restoring
         do {
-            _ = try await client.restore()
-            state = .awaitingServerVerification(action: .restore)
+            let result = try await client.restore()
+            switch result {
+            case .nothingToRestore:
+                state = .restoreNotFound
+            case .cancelled:
+                state = .available(products)
+            case .pending, .awaitingServerVerification:
+                state = .awaitingServerVerification(action: .restore)
+            }
         } catch is CancellationError {
             state = .available(products)
         } catch {

@@ -30,6 +30,9 @@ struct SubscriptionStatusView: View {
                     .accessibilityIdentifier("subscription.pending")
             case .restoring:
                 ProgressView("Restoring purchases")
+            case .restoreNotFound:
+                Text("No subscription found")
+                    .accessibilityIdentifier("subscription.restore-not-found")
             case .awaitingServerVerification:
                 Text("Awaiting server verification")
                     .accessibilityIdentifier("subscription.awaiting-server")
