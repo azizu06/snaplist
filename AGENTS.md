@@ -127,6 +127,8 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   run. When nothing is in flight, batch related small fixes into one issue
   rather than filing them one by one. Route work only when its size,
   independence, or blast radius makes the active PR unsafe or unreviewable.
+### Graphify impact
+
 - **Core-architecture Graphify impact.** Every PR that changes a path in
   `docs/architecture/graphify-core-scope.txt` must classify Graphify impact and
   report the updated node/edge receipt with its source SHA, or `no graph impact`
