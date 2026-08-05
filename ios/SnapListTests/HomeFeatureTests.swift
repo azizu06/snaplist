@@ -1146,9 +1146,43 @@ final class TrophyWallDomainTests: XCTestCase {
                     id: .run(fixture.runID),
                     itemName: fixture.matchedItemName,
                     stateLabel: "Published to eBay",
-                    completedAt: fixture.runDetailUpdate
+                    historyOrderAt: fixture.runDetailUpdate
                 ),
             ]
+        )
+    }
+
+    func testStoreRehydratesListingCorrelationFromAnEqualHistoryPage() throws {
+        let fixture = TrophyWallTestFixture()
+        let savedCard = TrophyWallCard.accepted(
+            principalScope: fixture.principal,
+            runID: fixture.runID,
+            state: .readyToReviewLocked,
+            itemName: fixture.matchedItemName,
+            lastMeaningfulUpdateAt: fixture.runDetailUpdate
+        )
+        let store = fixture.makeStore(cards: [savedCard])
+        let historyPage = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded
+        )
+
+        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
+        store.applyEbayPublishStatus(
+            EbayPublishStatus(
+                listingID: fixture.listingID,
+                outcome: .published,
+                ebayListingID: "123456789012",
+                ebayOfferID: "offer-375",
+                alreadyPublished: true
+            )
+        )
+
+        XCTAssertEqual(
+            store.settledTiles.map(\.id),
+            [.run(fixture.runID)]
         )
     }
 

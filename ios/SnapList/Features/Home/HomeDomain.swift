@@ -368,7 +368,7 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
     let id: TrophyWallCardIdentity
     let itemName: String
     let stateLabel: String
-    let completedAt: Date
+    let historyOrderAt: Date
 }
 
 struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
@@ -468,7 +468,7 @@ final class TrophyWallStore {
                 id: card.identity,
                 itemName: itemName,
                 stateLabel: "Published to eBay",
-                completedAt: card.orderKey.lastMeaningfulUpdateAt
+                historyOrderAt: card.orderKey.lastMeaningfulUpdateAt
             )
         }
     }
@@ -621,6 +621,9 @@ final class TrophyWallStore {
                       runDetail.lastMeaningfulUpdateAt
                   ) else {
                 continue
+            }
+            if let listingID = runDetail.listingID {
+                runIDsByListingID[listingID] = runDetail.id
             }
             if let currentState = canonicalHistoryStates[runDetail.id],
                entry.orderKey <= currentState.orderKey {
