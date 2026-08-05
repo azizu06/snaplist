@@ -44,6 +44,14 @@ Server raw voice is private temporary transcription input. Its deletion trigger 
 terminal transcription outcome and its hard maximum is 24 hours after durable acceptance. A failed
 delete is not completion; durable cleanup success plus object absence is required.
 
+An unreadable local deferred unmatched-voice entry is terminal input. Its manifest is the only
+source for the entry's individual expiry, so a malformed or per-entry transient read cannot safely
+schedule a replacement deadline. The native intake cleanup capability deletes that owned entry
+directory on sight and proves completion by its absence. If removal fails, only that deletion is
+retried; repeated metadata reads are not a retention wake. Until removal proves the entry absent,
+destructive root cleanup treats it as possible protected voice bytes and fails closed rather than
+destroying the residual principal root.
+
 The bounded transcript, `seller_voice` provenance, and optional canonical language tag are a different
 datum. They may remain with the item, but are deleted when the seller deletes voice context, when an
 unclaimed guest result expires, with item deletion, or with account erasure. Raw audio never inherits

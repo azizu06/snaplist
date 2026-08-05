@@ -886,10 +886,22 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertTrue(files.fileExists(atPath: firstEntryRoot.path))
     }
     func testUnreadableDeferredUnmatchedVoiceEntryStillExpiresItsSiblings() async throws {
+        try await assertUnreadableDeferredUnmatchedVoiceEntryExpiresItsSiblings(
+            corruptManifest: false
+        )
+        try await assertUnreadableDeferredUnmatchedVoiceEntryExpiresItsSiblings(
+            corruptManifest: true
+        )
+    }
+    private func assertUnreadableDeferredUnmatchedVoiceEntryExpiresItsSiblings(
+        corruptManifest: Bool
+    ) async throws {
         let start = Date(timeIntervalSince1970: 2_100_000_000)
         let clock = NativeIntakeTestClock(now: start)
         let harness = NativeIntakeHarness(
-            identity: .clerk("user_native_intake_deferred_unreadable_sibling")
+            identity: .clerk(
+                "user_native_intake_deferred_unreadable_sibling_\(corruptManifest)"
+            )
         )
         addTeardownBlock { harness.cleanUp() }
         let guardedFiles = NativeIntakeTestFileManager()
@@ -939,21 +951,24 @@ final class NativeIntakeTests: XCTestCase {
         let freedEntryRoot = entryRoots[1]
         let blockedEntryRoot = entryRoots[2]
 
-        // A directory-tree removal is not atomic, so an interrupted deletion
-        // sweep can leave the entry directory standing with its metadata
-        // already gone. That entry can never be read back, but its siblings
-        // are still ordinary deferred voices with real deadlines.
-        try files.removeItem(
-            at: unreadableEntryRoot.appendingPathComponent("entry.json")
-        )
+        let manifestURL = unreadableEntryRoot.appendingPathComponent("entry.json")
+        let originalManifest = try Data(contentsOf: manifestURL)
+        if corruptManifest {
+            try Data("{".utf8).write(to: manifestURL)
+        } else {
+            try files.removeItem(at: manifestURL)
+        }
         XCTAssertTrue(files.fileExists(atPath: unreadableEntryRoot.path))
         XCTAssertTrue(files.fileExists(atPath: freedEntryRoot.path))
 
         // One sibling's removal is blocked so that a working and a stalled
         // sweep both settle on the same retry deadline, which keeps this
         // assertion deterministic instead of hanging one of them.
+        let retryEntryRoot = corruptManifest
+            ? unreadableEntryRoot
+            : blockedEntryRoot
         guardedFiles.failNextFileOperation = .rootDeletions([
-            blockedEntryRoot.standardizedFileURL.path
+            retryEntryRoot.standardizedFileURL.path
         ])
         let expiryRegistration = clock.latestRegistration
         clock.advance(by: NativeIntake.recoveryWindow)
@@ -965,23 +980,36 @@ final class NativeIntakeTests: XCTestCase {
             deadline: retryDeadline
         )
 
-        guard guardedFiles.rootDeletionFailureCount(at: blockedEntryRoot) == 1
+        guard guardedFiles.rootDeletionFailureCount(at: retryEntryRoot) == 1
         else {
             return XCTFail(
                 "An unreadable entry froze the expiry of its readable siblings."
             )
         }
         XCTAssertFalse(files.fileExists(atPath: freedEntryRoot.path))
-        XCTAssertFalse(files.fileExists(atPath: unreadableEntryRoot.path))
 
         let removalBaseline = guardedFiles.successfulRootRemovalCount
         guardedFiles.failNextFileOperation = nil
+        if corruptManifest {
+            var recoveredManifest = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: originalManifest)
+                    as? [String: Any]
+            )
+            recoveredManifest["expiresAt"] = clock.now()
+                .addingTimeInterval(NativeIntake.recoveryWindow)
+                .timeIntervalSinceReferenceDate
+            try JSONSerialization.data(
+                withJSONObject: recoveredManifest
+            ).write(to: manifestURL)
+        }
         clock.advance(by: NativeIntake.retentionRetryInterval)
         await guardedFiles.waitForRootRemovals(
             removalBaseline + 1,
             successful: true
         )
 
+        XCTAssertFalse(files.fileExists(atPath: retryEntryRoot.path))
+        XCTAssertFalse(files.fileExists(atPath: unreadableEntryRoot.path))
         XCTAssertFalse(files.fileExists(atPath: blockedEntryRoot.path))
     }
     func testRootHoldingOnlyAnUnreadableDeferredVoiceStillSweepsIt() async throws {
