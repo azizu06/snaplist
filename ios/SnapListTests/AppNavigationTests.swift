@@ -58,10 +58,10 @@ final class AppNavigationTests: XCTestCase {
 
         router.navigate(to: .activity)
         router.select(.trophyWall)
-        router.navigate(to: .account)
+        router.navigate(to: .settings)
 
         XCTAssertEqual(router.pathBinding(for: .scan).wrappedValue, [.activity])
-        XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.account])
+        XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.settings])
     }
 
     @MainActor
@@ -246,7 +246,7 @@ final class AppNavigationTests: XCTestCase {
     @MainActor
     func testRunDeepLinksAcceptOnlyTheCustomSchemeAndRejectWebOrMalformedURLs() {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000031")!
-        let router = AppRouter(initialTab: .trophyWall, initialRoute: .account)
+        let router = AppRouter(initialTab: .trophyWall, initialRoute: .settings)
 
         XCTAssertEqual(
             RunDeepLink(
@@ -268,7 +268,7 @@ final class AppNavigationTests: XCTestCase {
             XCTAssertNil(RunDeepLink(url: URL(string: rawURL)!))
             XCTAssertFalse(router.open(URL(string: rawURL)!))
             XCTAssertEqual(router.selectedTab, .trophyWall)
-            XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.account])
+            XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.settings])
             XCTAssertTrue(router.pathBinding(for: .scan).wrappedValue.isEmpty)
         }
     }

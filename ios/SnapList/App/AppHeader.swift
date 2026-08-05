@@ -65,7 +65,7 @@ struct AppHeader: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            .accessibilityLabel("Open account and settings")
+            .accessibilityLabel("Open Settings")
             .accessibilityIdentifier("header.account")
         }
         .frame(minHeight: SnapListMetrics.minimumTouchTarget)
