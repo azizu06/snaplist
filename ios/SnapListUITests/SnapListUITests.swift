@@ -968,6 +968,60 @@ final class SnapListUITests: XCTestCase {
         addScreenshot(named: "REV-04-402x874.png")
     }
 
+    func testPhotoReviewREV05ShowsOnlyTheFirstRejectedSaveExit() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-05"])
+
+        XCTAssertTrue(
+            app.scrollViews["photo-review.save-failure"].waitForExistence(timeout: 3)
+        )
+        XCTAssertEqual(
+            app.staticTexts["photo-review.save-failure.heading"].label,
+            "These photos cannot be saved."
+        )
+        XCTAssertEqual(
+            app.staticTexts["photo-review.save-failure.body"].label,
+            "SnapList could not save the photos on this screen. This is a problem on this device, not something you did. No credit was used."
+        )
+        XCTAssertEqual(
+            app.otherElements["photo-review.save-failure.photos"].label,
+            "3 photos on this screen"
+        )
+        XCTAssertLessThan(
+            app.staticTexts["photo-review.save-failure.heading"].frame.maxY,
+            app.otherElements["photo-review.save-failure.photos"].frame.minY
+        )
+        XCTAssertLessThanOrEqual(
+            app.staticTexts["photo-review.save-failure.body"].frame.maxY,
+            app.otherElements["photo-review.save-failure.photos"].frame.minY + 1
+        )
+        XCTAssertTrue(app.buttons["photo-review.save-failure.retry"].exists)
+        XCTAssertTrue(app.buttons["photo-review.save-failure.discard"].exists)
+        XCTAssertFalse(app.buttons["photo-review.back"].exists)
+        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        XCTAssertFalse(app.staticTexts["photo-review.count"].exists)
+    }
+
+    func testPhotoReviewREV06WithdrawsRetryAndKeepsOnlyDiscard() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-06"])
+
+        XCTAssertTrue(
+            app.scrollViews["photo-review.save-failure"].waitForExistence(timeout: 3)
+        )
+        XCTAssertEqual(
+            app.staticTexts["photo-review.save-failure.heading"].label,
+            "Saving failed again. These photos cannot be kept."
+        )
+        XCTAssertEqual(
+            app.staticTexts["photo-review.save-failure.body"].label,
+            "Nothing more will recover them. Discard them to continue."
+        )
+        XCTAssertFalse(app.buttons["photo-review.save-failure.retry"].exists)
+        XCTAssertTrue(app.buttons["photo-review.save-failure.discard"].exists)
+        XCTAssertFalse(app.buttons["photo-review.back"].exists)
+        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+        XCTAssertFalse(app.staticTexts["photo-review.count"].exists)
+    }
+
     func testPhotoReviewHardwareKeyboardControlLeftMovesSelectedSecondPhotoToCoverWithReducedMotion() {
         let app = launch(extraArguments: [
             "--photo-review-state=REV-04",

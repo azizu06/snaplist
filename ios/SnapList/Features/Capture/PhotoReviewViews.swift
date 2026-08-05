@@ -2164,6 +2164,7 @@ struct PhotoReviewFixtureView: View {
     @State private var store: PhotoReviewStore
     private let submissionPresentation: PhotoReviewSubmissionPresentation
     private let forceReducedMotion: Bool
+    private let saveFailure: PhotoReviewSaveFailure?
     private let onLayoutObservation: ((PhotoReviewLayoutObservation) -> Void)?
     private let projectsFixtureOrder: Bool
 
@@ -2186,6 +2187,7 @@ struct PhotoReviewFixtureView: View {
         }
         _store = State(initialValue: store)
         self.forceReducedMotion = forceReducedMotion
+        saveFailure = state.saveFailure
         self.submissionPresentation = submissionPresentation
         self.onLayoutObservation = onLayoutObservation
         projectsFixtureOrder = ProcessInfo.processInfo.arguments.contains(
@@ -2201,6 +2203,9 @@ struct PhotoReviewFixtureView: View {
             submissionPresentation: submissionPresentation,
             backToCamera: {},
             delete: { nil },
+            saveFailure: saveFailure,
+            retrySave: {},
+            discardPhotos: {},
             openBoundary: { _ in },
             onLayoutObservation: onLayoutObservation
         )
@@ -2387,6 +2392,7 @@ struct PhotoReviewLiveFinalDeleteResult: Equatable {
 
 @MainActor
 final class PhotoReviewLiveSession {
+    let id = UUID()
     let store: PhotoReviewStore
     let voiceNoteStore: VoiceNoteStore
     let intakeActivationID: UUID?
@@ -2758,6 +2764,16 @@ final class PhotoReviewLiveHost {
         return true
     }
 
+    func leaveForDepartedIntake(
+        from liveSession: PhotoReviewLiveSession,
+        using router: AppRouter
+    ) -> Bool {
+        guard session === liveSession else {
+            return false
+        }
+        return leaveForDepartedIntake(using: router)
+    }
+
     func consumeFinalDeleteAnnouncement() -> String? {
         defer { pendingFinalDeleteAnnouncement = nil }
         return pendingFinalDeleteAnnouncement
@@ -2780,6 +2796,166 @@ enum PhotoReviewBackOutcome: Equatable {
     case persistenceRejected
     case sessionChanged
     case completed(PhotoReviewScanReturn)
+}
+
+enum PhotoReviewSaveFailureState: Hashable {
+    case firstRejection
+    case rejectedAgain
+}
+
+struct PhotoReviewSaveFailureAnnouncementConsumer {
+    private var announcedReadings: Set<PhotoReviewSaveFailureAnnouncementKey> = []
+
+    mutating func consume(_ failure: PhotoReviewSaveFailure?) -> String? {
+        guard let failure else {
+            announcedReadings.removeAll()
+            return nil
+        }
+        let reading = PhotoReviewSaveFailureAnnouncementKey(
+            sessionID: failure.sessionID,
+            state: failure.state
+        )
+        guard announcedReadings.insert(reading).inserted else { return nil }
+        return failure.liveRegionAnnouncement
+    }
+}
+
+private struct PhotoReviewSaveFailureAnnouncementKey: Hashable {
+    let sessionID: UUID
+    let state: PhotoReviewSaveFailureState
+}
+
+struct PhotoReviewSaveFailureEvidenceLayout {
+    let photoCount: Int
+    let isAccessibilitySize: Bool
+
+    private let recognitionFloor: CGFloat = 104
+    private let tileAspectRatio: CGFloat = 4 / 5
+    private let gap: CGFloat = 10
+    private let verticalPadding: CGFloat = 36
+
+    func columnCount(for contentWidth: CGFloat) -> Int {
+        guard photoCount > 0 else { return 1 }
+        if !isAccessibilitySize {
+            return standardColumnCount
+        }
+
+        var columns = photoCount
+        while columns > 1,
+              (contentWidth - CGFloat(columns - 1) * gap) / CGFloat(columns)
+                < recognitionFloor {
+            columns -= 1
+        }
+        return columns
+    }
+
+    var minimumColumnCount: Int {
+        guard photoCount > 0 else { return 1 }
+        return isAccessibilitySize ? min(photoCount, 3) : standardColumnCount
+    }
+
+    func minimumHeight(for columns: Int) -> CGFloat {
+        let rows = rowCount(for: columns)
+        return CGFloat(rows) * (recognitionFloor / tileAspectRatio)
+            + CGFloat(rows - 1) * gap
+            + verticalPadding
+    }
+
+    func tileWidth(in availableSize: CGSize, columns: Int) -> CGFloat {
+        let rows = rowCount(for: columns)
+        let widthCap = max(
+            0,
+            (availableSize.width - CGFloat(columns - 1) * gap) / CGFloat(columns)
+        )
+        let heightDerived = max(
+            0,
+            (availableSize.height - verticalPadding - CGFloat(rows - 1) * gap)
+                / CGFloat(rows) * tileAspectRatio
+        )
+        return min(widthCap, max(recognitionFloor, heightDerived))
+    }
+
+    private func rowCount(for columns: Int) -> Int {
+        max(1, Int(ceil(Double(max(photoCount, 1)) / Double(columns))))
+    }
+
+    private var standardColumnCount: Int {
+        switch photoCount {
+        case 1...2: photoCount
+        case 3...4: 2
+        default: 3
+        }
+    }
+}
+
+enum PhotoReviewSaveFailureDiscardButtonStyle: Equatable {
+    case outlined
+    case filled
+}
+
+enum PhotoReviewSaveFailureAction: Equatable {
+    case backToCamera
+    case delete(StagedCapturePhoto.ID)
+}
+
+struct PhotoReviewSaveFailure: Equatable {
+    private(set) var state: PhotoReviewSaveFailureState = .firstRejection
+    let sessionID: UUID
+    let action: PhotoReviewSaveFailureAction
+
+    init(
+        sessionID: UUID = UUID(),
+        action: PhotoReviewSaveFailureAction
+    ) {
+        self.sessionID = sessionID
+        self.action = action
+    }
+
+    var heading: String {
+        switch state {
+        case .firstRejection:
+            "These photos cannot be saved."
+        case .rejectedAgain:
+            "Saving failed again. These photos cannot be kept."
+        }
+    }
+
+    var body: String {
+        switch state {
+        case .firstRejection:
+            "SnapList could not save the photos on this screen. This is a problem on this device, not something you did. No credit was used."
+        case .rejectedAgain:
+            "Nothing more will recover them. Discard them to continue."
+        }
+    }
+
+    var primaryActionTitle: String? {
+        state == .firstRejection ? "Try saving again" : nil
+    }
+
+    let secondaryActionTitle = "Discard these photos"
+
+    var discardButtonStyle: PhotoReviewSaveFailureDiscardButtonStyle {
+        switch state {
+        case .firstRejection:
+            .outlined
+        case .rejectedAgain:
+            .filled
+        }
+    }
+
+    var liveRegionAnnouncement: String {
+        switch state {
+        case .firstRejection:
+            "These photos cannot be saved. No credit was used. Actions: Try saving again, Discard these photos."
+        case .rejectedAgain:
+            "Saving failed again. These photos cannot be kept. Actions: Discard these photos."
+        }
+    }
+
+    mutating func recordAnotherRejection() {
+        state = .rejectedAgain
+    }
 }
 
 @MainActor
@@ -2830,6 +3006,9 @@ struct PhotoReviewView: View {
     var acknowledgeSubmissionPresentation: (UUID) -> Void = { _ in }
     var backToCamera: (() -> Void)? = nil
     let delete: () async -> PhotoReviewDeleteApplication?
+    var saveFailure: PhotoReviewSaveFailure?
+    var retrySave: (() -> Void)? = nil
+    var discardPhotos: (() -> Void)? = nil
     var commitReorder:
         ((StagedCapturePhoto.ID, Int) async -> PhotoReviewReorderResult?)? = nil
     var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
@@ -2862,18 +3041,23 @@ struct PhotoReviewView: View {
     @State private var isVoiceNotePresented = false
     @State private var submissionEffectConsumer =
         PhotoReviewSubmissionEffectConsumer()
+    @State private var saveFailureAnnouncementConsumer =
+        PhotoReviewSaveFailureAnnouncementConsumer()
     // Outside dismissal focus stays independent from picker cancellation focus.
     @FocusState private var hardwareFocusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
     @AccessibilityFocusState private var focusedVoiceNoteOpener: Bool
     @AccessibilityFocusState private var focusedStartListing: Bool
+    @AccessibilityFocusState private var focusedSaveFailureHeading: Bool
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .headline)
     private var reviewTitleSize: CGFloat = 17
     @ScaledMetric(relativeTo: .caption)
     private var reviewCountSize: CGFloat = 13
+    @ScaledMetric(relativeTo: .body)
+    private var saveFailureActionTitleSize: CGFloat = 16
 
     private enum PickerFocusTarget: Hashable {
         case addButton
@@ -2912,7 +3096,9 @@ struct PhotoReviewView: View {
 
     var body: some View {
         Group {
-            if submissionPresentation.rendersSubmittedMedia {
+            if let saveFailure {
+                saveFailureContent(saveFailure)
+            } else if submissionPresentation.rendersSubmittedMedia {
                 reviewContent
                     .photosPicker(
                         isPresented: pickerIsPresented,
@@ -2953,6 +3139,13 @@ struct PhotoReviewView: View {
                 postAnnouncement: postSubmissionAnnouncement,
                 acknowledgePresentation: acknowledgeSubmissionPresentation
             )
+        }
+        .onChange(of: saveFailure, initial: true) { _, failure in
+            guard let announcement = saveFailureAnnouncementConsumer.consume(failure) else {
+                return
+            }
+            focusedSaveFailureHeading = true
+            postSubmissionAnnouncement(announcement)
         }
         .onChange(of: focusStartListingRequest) { _, request in
             guard request != nil else { return }
@@ -3098,6 +3291,199 @@ struct PhotoReviewView: View {
             onLayoutObservation?(
                 PhotoReviewLayoutObservation(frames: frames)
             )
+        }
+    }
+
+    private func saveFailureContent(
+        _ failure: PhotoReviewSaveFailure
+    ) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    saveFailureHeading(failure)
+                    saveFailureBody(failure)
+                    saveFailureEvidence
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("photo-review.save-failure")
+
+            saveFailureActionBlock(failure)
+        }
+        .background(SnapListColorToken.quietFill.color)
+    }
+
+    private func saveFailureHeading(
+        _ failure: PhotoReviewSaveFailure
+    ) -> some View {
+        Text(failure.heading)
+            .font(.title2.weight(.bold))
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.top, 20)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(SnapListColorToken.canvas.color)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityFocused($focusedSaveFailureHeading)
+            .accessibilityIdentifier("photo-review.save-failure.heading")
+    }
+
+    private func saveFailureBody(
+        _ failure: PhotoReviewSaveFailure
+    ) -> some View {
+        Text(failure.body)
+            .snapListTypography(.body)
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.bottom, 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(SnapListColorToken.canvas.color)
+            .accessibilityIdentifier("photo-review.save-failure.body")
+    }
+
+    @ViewBuilder
+    private var saveFailureEvidence: some View {
+        let layout = PhotoReviewSaveFailureEvidenceLayout(
+            photoCount: store.photos.count,
+            isAccessibilitySize: dynamicTypeSize.isAccessibilitySize
+        )
+        GeometryReader { proxy in
+            let contentWidth = max(0, proxy.size.width - 36)
+            let columns = layout.columnCount(for: contentWidth)
+            let tileWidth = layout.tileWidth(
+                in: CGSize(width: contentWidth, height: proxy.size.height),
+                columns: columns
+            )
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.fixed(tileWidth), spacing: 10),
+                    count: columns
+                ),
+                spacing: 10
+            ) {
+                ForEach(Array(store.photos.enumerated()), id: \.element.id) {
+                    index,
+                    photo in
+                    LocalCaptureImage(
+                        url: photo.thumbnailURL,
+                        maximumPixelSize: 360
+                    )
+                    .scaledToFill()
+                    .frame(width: tileWidth, height: tileWidth / (4 / 5))
+                    .clipped()
+                    .clipShape(.rect(cornerRadius: 12))
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier(
+                        "photo-review.save-failure.photo.\(index + 1)"
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(18)
+        }
+        .frame(
+            minHeight: layout.minimumHeight(
+                for: layout.minimumColumnCount
+            )
+        )
+        .background(SnapListColorToken.quietFill.color)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(SnapListColorToken.hairline.color)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(store.photos.count) \(store.photos.count == 1 ? "photo" : "photos") on this screen"
+        )
+        .accessibilityIdentifier("photo-review.save-failure.photos")
+    }
+
+    @ViewBuilder
+    private func saveFailureActionBlock(
+        _ failure: PhotoReviewSaveFailure
+    ) -> some View {
+        VStack(spacing: 12) {
+            if let primaryActionTitle = failure.primaryActionTitle,
+               let retrySave {
+                Button(action: retrySave) {
+                    saveFailureActionLabel(
+                        primaryActionTitle,
+                        foreground: SnapListColorToken.canvas.color
+                    )
+                }
+                .buttonStyle(.plain)
+                .background(SnapListColorToken.action.color)
+                .clipShape(.rect(cornerRadius: 15))
+                    .accessibilityIdentifier("photo-review.save-failure.retry")
+            }
+
+            if let discardPhotos {
+                Button(
+                    failure.secondaryActionTitle,
+                    role: .destructive,
+                    action: discardPhotos
+                )
+                .font(.system(size: saveFailureActionTitleSize, weight: .bold))
+                .foregroundStyle(discardButtonForeground(for: failure))
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .buttonStyle(.plain)
+                .background(discardButtonBackground(for: failure))
+                .clipShape(.rect(cornerRadius: 15))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 15)
+                        .stroke(
+                            SnapListColorToken.inkPrimary.color,
+                            lineWidth: 1.5
+                        )
+                }
+                .accessibilityIdentifier("photo-review.save-failure.discard")
+            }
+        }
+        .padding(.horizontal, SnapListMetrics.screenGutter)
+        .padding(.vertical, 12)
+        .background(SnapListColorToken.canvas.color)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(SnapListColorToken.hairline.color)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func saveFailureActionLabel(
+        _ title: String,
+        foreground: Color
+    ) -> some View {
+        Text(title)
+            .font(.system(size: saveFailureActionTitleSize, weight: .bold))
+            .foregroundStyle(foreground)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .contentShape(.rect)
+    }
+
+    private func discardButtonBackground(
+        for failure: PhotoReviewSaveFailure
+    ) -> Color {
+        switch failure.discardButtonStyle {
+        case .outlined:
+            SnapListColorToken.canvas.color
+        case .filled:
+            SnapListColorToken.inkPrimary.color
+        }
+    }
+
+    private func discardButtonForeground(
+        for failure: PhotoReviewSaveFailure
+    ) -> Color {
+        switch failure.discardButtonStyle {
+        case .outlined:
+            SnapListColorToken.inkPrimary.color
+        case .filled:
+            SnapListColorToken.canvas.color
         }
     }
 

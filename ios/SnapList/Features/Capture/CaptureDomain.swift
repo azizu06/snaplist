@@ -1289,6 +1289,38 @@ final class CaptureFlowModel {
         }
     }
 
+    /// Discards only the exact Photo Review intake the seller can still see.
+    /// A failed discard leaves that intake available for another attempt instead of
+    /// clearing the in-memory projection ahead of its durable receipt.
+    func discardPhotoReviewPhotos(
+        _ photos: [StagedCapturePhoto],
+        expectedActivationID: UUID?
+    ) async -> Bool {
+        if let intake {
+            guard let expectedActivationID,
+                  let snapshot = intakeSnapshot,
+                  snapshot.version.activationID == expectedActivationID,
+                  snapshot.photos == photos else {
+                return false
+            }
+            let outcome = await performAndAwaitSnapshot(
+                .discard(expected: snapshot.version),
+                using: intake,
+                expectedActivationID: expectedActivationID
+            )
+            return outcome == .committed && intakeSnapshot?.photos.isEmpty == true
+        }
+        guard let store else { return false }
+        do {
+            guard try await store.discardExactly(photos) else { return false }
+            stagedPhotos = []
+            phase = .idle
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Drops the in-memory intake after the durable draft was already discarded
     /// elsewhere, leaving Scan the way an empty draft leaves it.
     ///
