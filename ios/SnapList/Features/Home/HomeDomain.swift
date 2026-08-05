@@ -561,9 +561,9 @@ final class TrophyWallStore {
                 $0.identity == .local(linkedLogicalIdentity)
             }?.itemName
         }
-        let existingCanonicalItemName = cards.first {
+        let existingCanonicalCard = cards.first {
             $0.identity == .run(acceptedRun.runID)
-        }?.itemName
+        }
 
         if let linkedLogicalIdentity = acceptedRun.linkedLogicalIdentity {
             cards.removeAll {
@@ -574,8 +574,10 @@ final class TrophyWallStore {
         let canonicalCard = TrophyWallCard.accepted(
             principalScope: principalScope,
             runID: acceptedRun.runID,
-            state: acceptedRun.state,
-            itemName: linkedItemName ?? existingCanonicalItemName ?? acceptedRun.itemName,
+            state: existingCanonicalCard?.state == .publishedToEbay
+                ? .publishedToEbay
+                : acceptedRun.state,
+            itemName: linkedItemName ?? existingCanonicalCard?.itemName ?? acceptedRun.itemName,
             lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt,
             orderKey: acceptedRun.historyOrderKey
         )
