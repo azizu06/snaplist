@@ -1,6 +1,6 @@
 begin;
 
-select plan(55);
+select plan(70);
 
 -- Issue #524 fences the included first AI run by physical device, so every
 -- non-guest tenant here needs the reserved claim a real redemption would have
@@ -14,7 +14,8 @@ select
   'pgtap-key-' || tenant,
   'reserved'
 from unnest(array[
-  'rc-user-ledger'
+  'rc-user-ledger',
+  'rc-user-legacy'
 ]) as tenant;
 
 select ok(
@@ -119,6 +120,13 @@ select is(
   'the signed environment is persisted with the RevenueCat event'
 );
 select is(
+  (select event.outcome from private.revenuecat_webhook_events event
+   where event.environment = 'PRODUCTION'
+     and event.event_id = 'rc-event-initial'),
+  'applied',
+  'a production event still applies to the StoreKit allowance ledger'
+);
+select is(
   (select event.event_id from private.storekit_ai_item_period_events event
    where event.user_id = 'rc-user-a' and event.applied),
   'production:' || md5('rc-event-initial'),
@@ -170,26 +178,72 @@ select throws_ok(
   'Invalid RevenueCat environment',
   'the persisted boundary rejects a missing environment'
 );
+select * from public.bind_revenuecat_customer(
+  'rc-user-sandbox-event', 'rc-user-sandbox-event'
+);
+select * from public.resolve_revenuecat_customer(
+  'rc-user-sandbox-event', 'rc-user-sandbox-event', 'rc-original-sandbox-event'
+);
 select ok(
   not public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'SANDBOX', 'rc-original-a:p1', 'rc-original-a',
-    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
-    'active', null, 24, 'rc-event-initial', 'INITIAL_PURCHASE',
-    date_trunc('month', now()) + interval '1 minute'
+    'rc-user-sandbox-event', 'rc-user-sandbox-event', 'SANDBOX',
+    'rc-original-sandbox-event:p2', 'rc-original-sandbox-event',
+    date_trunc('month', now()) + interval '1 month',
+    date_trunc('month', now()) + interval '2 months',
+    'active', null, 24, 'rc-sandbox-new-period', 'RENEWAL',
+    date_trunc('month', now()) + interval '1 month 2 minutes'
   ),
-  'the same sandbox event identity cannot resettle the production period'
-);
-select is(
-  (select count(*)::integer from private.revenuecat_webhook_events event
-   where event.event_id = 'rc-event-initial'),
-  2,
-  'webhook idempotency keeps sandbox and production identities distinct'
+  'a sandbox event for a new period is audited without applying credit'
 );
 select is(
   (select count(*)::integer from public.ai_item_allowance_periods period
-   where period.user_id = 'rc-user-a' and period.source = 'storekit'),
-  1,
-  'cross-environment replay does not stack another allowance period'
+   where period.user_id = 'rc-user-sandbox-event'
+     and period.source = 'storekit'
+     and period.period_key = 'rc-original-sandbox-event:p2'),
+  0,
+  'a sandbox renewal cannot create a production-usable period'
+);
+select is(
+  (select event.outcome from private.revenuecat_webhook_events event
+   where event.environment = 'SANDBOX'
+     and event.event_id = 'rc-sandbox-new-period'),
+  'sandbox_ignored',
+  'the rejected sandbox renewal remains auditable'
+);
+select is(
+  (select count(*)::integer from private.storekit_ai_item_period_events event
+   where event.event_id = 'sandbox:' || md5('rc-sandbox-new-period')),
+  0,
+  'a sandbox renewal never reaches StoreKit allowance persistence'
+);
+
+select * from public.bind_revenuecat_customer('rc-user-sandbox-rpc', 'rc-user-sandbox-rpc');
+select * from public.resolve_revenuecat_customer(
+  'rc-user-sandbox-rpc', 'rc-user-sandbox-rpc', 'rc-original-sandbox-rpc'
+);
+select ok(
+  not public.record_verified_revenuecat_ai_item_period(
+    'rc-user-sandbox-rpc', 'rc-user-sandbox-rpc', 'SANDBOX',
+    'rc-original-sandbox-rpc:p1', 'rc-original-sandbox-rpc',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+    'active', null, 24, 'rc-direct-sandbox', 'INITIAL_PURCHASE',
+    date_trunc('month', now()) + interval '3 minutes'
+  ),
+  'a direct service-role sandbox RPC call cannot mint credit'
+);
+select is(
+  (select count(*)::integer from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-sandbox-rpc'
+     and period.source = 'storekit'),
+  0,
+  'the direct sandbox RPC leaves the shared allowance ledger unchanged'
+);
+select is(
+  (select event.outcome from private.revenuecat_webhook_events event
+   where event.environment = 'SANDBOX'
+     and event.event_id = 'rc-direct-sandbox'),
+  'sandbox_ignored',
+  'the direct sandbox RPC denial remains auditable'
 );
 select ok(
   public.record_verified_revenuecat_ai_item_period(
@@ -468,6 +522,115 @@ select is(
    from public.get_verified_ai_item_entitlement('rc-user-ledger') entitlement),
   1,
   'the verified status reads the same monthly ledger without stacking credits'
+);
+
+-- Upgrade-state proof: this reproduces the state left by the old
+-- environment-blind RevenueCat RPC, then runs the migration quarantine seam.
+select * from public.bind_revenuecat_customer('rc-user-legacy', 'rc-user-legacy');
+select * from public.resolve_revenuecat_customer(
+  'rc-user-legacy', 'rc-user-legacy', 'rc-original-legacy'
+);
+select public.record_verified_storekit_ai_item_period(
+  'rc-user-legacy', 'rc-original-legacy:p1', 'rc-original-legacy',
+  date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+  'grace', date_trunc('month', now()) + interval '1 month 7 days', 2,
+  'rc-legacy-sandbox-event', date_trunc('month', now()) + interval '1 minute'
+);
+insert into private.revenuecat_webhook_events (
+  environment, event_id, user_id, revenuecat_app_user_id,
+  original_transaction_id, event_type, event_created_at,
+  payload_fingerprint, outcome
+) values (
+  'LEGACY_UNKNOWN', 'rc-legacy-sandbox-event', 'rc-user-legacy',
+  'rc-user-legacy', 'rc-original-legacy', 'INITIAL_PURCHASE',
+  date_trunc('month', now()) + interval '1 minute', md5('legacy-sandbox-payload'),
+  'applied'
+);
+create temp table rc_legacy_runs as
+select staged.run_id
+from public.stage_pipeline_batch(
+  'rc-user-legacy',
+  '17300000-0000-4000-8000-000000000003'::uuid,
+  jsonb_build_array(jsonb_build_object(
+    'idempotency_key', 'rc-legacy-included',
+    'source', 'single',
+    'autopilot_enabled', false,
+    'photo_paths', jsonb_build_array('rc-user-legacy/included.jpg'),
+    'cost_basis', null
+  )),
+  100,
+  100
+) staged;
+select is(
+  (select entitlement.remaining_items
+   from public.get_verified_ai_item_entitlement('rc-user-legacy') entitlement),
+  2,
+  'a pre-migration sandbox-minted grace period would grant paid credit'
+);
+select is(
+  private.quarantine_legacy_revenuecat_allowances(),
+  1,
+  'the upgrade quarantines the allowance backed by a legacy RevenueCat event'
+);
+select is(
+  (select period.state from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-legacy'
+     and period.period_key = 'rc-original-legacy:p1'),
+  'ambiguous',
+  'the legacy-backed allowance becomes ambiguous'
+);
+select is(
+  (select period.grace_expires_date from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-legacy'
+     and period.period_key = 'rc-original-legacy:p1'),
+  null,
+  'the legacy-backed allowance loses its unverified grace timestamp'
+);
+select is(
+  (select entitlement.remaining_items
+   from public.get_verified_ai_item_entitlement('rc-user-legacy') entitlement),
+  0,
+  'the quarantined legacy allowance cannot grant another credit'
+);
+select ok(
+  not public.record_verified_revenuecat_ai_item_period(
+    'rc-user-legacy', 'rc-user-legacy', 'SANDBOX',
+    'rc-original-legacy:p1', 'rc-original-legacy',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+    'active', null, 2, 'rc-legacy-sandbox-refresh', 'RENEWAL',
+    date_trunc('month', now()) + interval '2 minutes'
+  ),
+  'a fresh sandbox event cannot reauthorize a quarantined allowance'
+);
+select is(
+  (select period.state from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-legacy'
+     and period.period_key = 'rc-original-legacy:p1'),
+  'ambiguous',
+  'sandbox refresh leaves the quarantined allowance ambiguous'
+);
+select ok(
+  public.record_verified_revenuecat_ai_item_period(
+    'rc-user-legacy', 'rc-user-legacy', 'PRODUCTION',
+    'rc-original-legacy:p1', 'rc-original-legacy',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+    'active', null, 2, 'rc-legacy-production-refresh', 'RENEWAL',
+    date_trunc('month', now()) + interval '3 minutes'
+  ),
+  'a fresh production event re-establishes allowance authority'
+);
+select is(
+  (select period.state from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-legacy'
+     and period.period_key = 'rc-original-legacy:p1'),
+  'active',
+  'the production event reactivates the same verified period'
+);
+select is(
+  (select entitlement.remaining_items
+   from public.get_verified_ai_item_entitlement('rc-user-legacy') entitlement),
+  2,
+  'production verification restores the quarantined allowance remainder'
 );
 
 set local role authenticated;

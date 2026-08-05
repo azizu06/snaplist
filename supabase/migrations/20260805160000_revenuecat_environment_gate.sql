@@ -1,6 +1,13 @@
 -- Issue #679: bind RevenueCat delivery environment to verification and replay
 -- identity. Historical rows predate the boundary and remain honestly marked
 -- instead of being guessed as sandbox or production.
+--
+-- Design choice: SANDBOX deliveries remain testable through the signed,
+-- environment-bound audit path, but this RPC never forwards them into the
+-- shared StoreKit allowance ledger. That ledger has no deployment-environment
+-- selector, so persisting an active sandbox period there would make it
+-- production-selectable. Only a fresh PRODUCTION event may create or reactivate
+-- RevenueCat-backed allowance state.
 
 alter table private.revenuecat_webhook_events
   add column environment text;
@@ -13,11 +20,51 @@ alter table private.revenuecat_webhook_events
   alter column environment set not null,
   add constraint revenuecat_webhook_events_environment_check
     check (environment in ('PRODUCTION', 'SANDBOX', 'LEGACY_UNKNOWN')),
+  drop constraint revenuecat_webhook_events_outcome_check,
+  add constraint revenuecat_webhook_events_outcome_check check (outcome in (
+    'applied', 'duplicate', 'reconciliation_required',
+    'unmapped_reconciliation', 'sandbox_ignored'
+  )),
   drop constraint revenuecat_webhook_events_pkey,
   add primary key (environment, event_id);
 
 comment on column private.revenuecat_webhook_events.environment is
   'Signed RevenueCat event environment. LEGACY_UNKNOWN is reserved for rows persisted before issue #679.';
+
+create or replace function private.quarantine_legacy_revenuecat_allowances()
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_quarantined integer;
+begin
+  update public.ai_item_allowance_periods period
+  set state = 'ambiguous',
+      grace_expires_date = null,
+      updated_at = statement_timestamp()
+  where period.source = 'storekit'
+    and period.state in ('active', 'grace')
+    and exists (
+      select 1
+      from private.revenuecat_webhook_events event
+      where event.environment = 'LEGACY_UNKNOWN'
+        and event.user_id = period.user_id
+        and event.original_transaction_id = period.original_transaction_id
+        and event.event_id = period.last_event_id
+    );
+  get diagnostics v_quarantined = row_count;
+  return v_quarantined;
+end;
+$$;
+
+comment on function private.quarantine_legacy_revenuecat_allowances() is
+  'Issue #679 upgrade seam: active/grace StoreKit periods whose last authority is an environment-unknown RevenueCat event become ambiguous until a fresh PRODUCTION event verifies them.';
+revoke all on function private.quarantine_legacy_revenuecat_allowances()
+  from public, anon, authenticated, service_role;
+
+select private.quarantine_legacy_revenuecat_allowances();
 
 drop function public.record_verified_revenuecat_ai_item_period(
   text, text, text, text, timestamptz, timestamptz, text, timestamptz,
@@ -97,6 +144,19 @@ begin
     if v_existing.payload_fingerprint <> v_fingerprint then
       raise exception using errcode = '23514', message = 'RevenueCat event identity conflicts';
     end if;
+    return false;
+  end if;
+
+  if p_environment = 'SANDBOX' then
+    insert into private.revenuecat_webhook_events (
+      environment, event_id, user_id, revenuecat_app_user_id,
+      original_transaction_id, event_type, event_created_at,
+      payload_fingerprint, outcome
+    ) values (
+      p_environment, p_event_id, p_user_id, p_revenuecat_app_user_id,
+      p_original_transaction_id, p_event_type, p_event_created_at,
+      v_fingerprint, 'sandbox_ignored'
+    );
     return false;
   end if;
 
