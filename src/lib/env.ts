@@ -5,6 +5,7 @@ import {
   resolveApiKey,
   resolveProvider,
   sellerMediaConfigError,
+  isLocalDevelopment,
 } from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
 
@@ -89,6 +90,9 @@ const envSchema = z.object({
   // The iOS SDK key is public but stays server-provided instead of source-coded.
   REVENUECAT_WEBHOOK_SIGNING_SECRET: z.string().min(1).optional(),
   REVENUECAT_WEBHOOK_AUTHORIZATION: z.string().min(1).optional(),
+  // Server-only RevenueCat credentials used by account erasure.
+  REVENUECAT_SECRET_API_KEY: z.string().min(1).optional(),
+  REVENUECAT_PROJECT_ID: z.string().min(1).optional(),
   REVENUECAT_APP_ID: z.string().min(1).optional(),
   REVENUECAT_ENTITLEMENT_ID: z.string().min(1).optional(),
   REVENUECAT_MONTHLY_PRODUCT_ID: z.string().min(1).optional(),
@@ -137,14 +141,27 @@ const envSchema = z.object({
   // Supabase
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
+  // Current server key required by the account-erasure handler.
+  SUPABASE_SECRET_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   // Isolated imported ES256 signer for <=60s verified-guest operation JWTs.
   // Production and preview use distinct key ids/private keys.
   SUPABASE_GUEST_JWT_KEY_ID: z.string().min(1).optional(),
   SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM: z.string().min(1).optional(),
 
+  // Apple credentials remain optional for local/offline work, but a deployed
+  // guest allowance must identify the registered Team ID and exact bundle ID.
+  APPLE_TEAM_ID: z.string().min(1).optional(),
+  APP_ATTEST_APP_ID: z.string().min(1).optional(),
+
+  // Native endpoints use Clerk's authorized-party list for `azp` validation.
+  CLERK_AUTHORIZED_PARTIES: z.string().min(1).optional(),
+
   // eBay (adapter; sandbox by default — flip to production via this URL + keys)
   EBAY_BASE_URL: z.string().min(1).default("https://api.sandbox.ebay.com"),
+  // Native OAuth and publishing stay behind an explicit operator gate. When the
+  // gate is on, deployed environments must use the exact production API origin.
+  EBAY_PRODUCTION_MOBILE_ENABLED: z.enum(["true", "false"]).optional(),
   // eBay API credentials. ALL OPTIONAL: adapters read them lazily at call time,
   // so the app and offline tests do not need them. Connected sellers use their
   // encrypted per-user grant. Env tokens are a restricted fallback for one
@@ -227,6 +244,95 @@ function llmProviderIssues(raw: Record<string, unknown>): string[] {
   return [];
 }
 
+function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string") env[key] = value;
+  }
+  if (isLocalDevelopment(env)) return [];
+
+  const issues: string[] = [];
+  const appAttestTeamId = env.APPLE_TEAM_ID?.trim();
+  if (!appAttestTeamId) {
+    issues.push(
+      "  - APPLE_TEAM_ID: APPLE_TEAM_ID is required outside local development.",
+    );
+  } else if (
+    appAttestTeamId === "TEAMID1234"
+    || !/^[A-Z0-9]{10}$/.test(appAttestTeamId)
+  ) {
+    issues.push(
+      "  - APPLE_TEAM_ID: APPLE_TEAM_ID must be the real 10-character Apple Team ID, not the placeholder TEAMID1234.",
+    );
+  }
+
+  const appAttestAppId = env.APP_ATTEST_APP_ID?.trim();
+  const appIdPrefix = `${appAttestTeamId}.`;
+  const appAttestBundleId = appAttestAppId?.startsWith(appIdPrefix)
+    ? appAttestAppId.slice(appIdPrefix.length)
+    : undefined;
+  if (
+    !appAttestBundleId
+    || appAttestBundleId.length > 255
+    || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(appAttestBundleId)
+  ) {
+    issues.push(
+      "  - APP_ATTEST_APP_ID: APP_ATTEST_APP_ID is required and must combine APPLE_TEAM_ID with the exact native bundle ID.",
+    );
+  }
+
+  const erasureRequired = [
+    "SUPABASE_SECRET_KEY",
+    "REVENUECAT_SECRET_API_KEY",
+    "REVENUECAT_PROJECT_ID",
+  ] as const;
+  const erasureIssues = erasureRequired
+    .filter((name) => !env[name]?.trim())
+    .map(
+      (name) =>
+        `  - ${name}: ${name} is required outside local development so account erasure can complete.`,
+    );
+  issues.push(...erasureIssues);
+
+  const authorizedParties = (env.CLERK_AUTHORIZED_PARTIES ?? "")
+    .split(",")
+    .map((party) => party.trim())
+    .filter(Boolean);
+  if (!authorizedParties.length) {
+    issues.push(
+      "  - CLERK_AUTHORIZED_PARTIES: CLERK_AUTHORIZED_PARTIES is required outside local development.",
+    );
+  } else if (authorizedParties.every(isLoopbackAuthorizedParty)) {
+    issues.push(
+      "  - CLERK_AUTHORIZED_PARTIES: deployed environments require at least one non-localhost authorized party.",
+    );
+  }
+
+  const baseUrl = env.EBAY_BASE_URL?.trim();
+  if (!baseUrl) {
+    issues.push(
+      "  - EBAY_BASE_URL: EBAY_BASE_URL is required outside local development; the Sandbox default is local/test-only.",
+    );
+  } else if (
+    env.EBAY_PRODUCTION_MOBILE_ENABLED?.trim() === "true"
+    && baseUrl !== "https://api.ebay.com"
+  ) {
+    issues.push(
+      "  - EBAY_BASE_URL: EBAY_PRODUCTION_MOBILE_ENABLED=true requires exactly https://api.ebay.com.",
+    );
+  }
+  return issues;
+}
+
+function isLoopbackAuthorizedParty(party: string): boolean {
+  try {
+    const hostname = new URL(party).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
 export type Env = z.infer<typeof envSchema>;
 
 /**
@@ -239,6 +345,7 @@ export function parseEnv(raw: Record<string, unknown>): Env {
     ? []
     : parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`);
   issues.push(...llmProviderIssues(raw));
+  issues.push(...deploymentConfigIssues(raw));
 
   if (!parsed.success) throw new Error(`Invalid environment variables:\n${issues.join("\n")}`);
   if (issues.length > 0) throw new Error(`Invalid environment variables:\n${issues.join("\n")}`);

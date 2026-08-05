@@ -112,7 +112,7 @@ export function createConfiguredIncludedOfferFence(
 
   // #331 owns this verification entirely; the fence only consumes its verdict.
   const attest = createAppAttestService({
-    appId: env.APP_ATTEST_APP_ID?.trim(),
+    appId: required(env, "APP_ATTEST_APP_ID"),
     challengeTtlMs: 300_000,
     environment,
     store: createSupabaseAppAttestStore(client),

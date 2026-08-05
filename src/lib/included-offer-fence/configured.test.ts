@@ -49,6 +49,7 @@ describe("configured included-offer fence", () => {
       "APPLE_DEVICECHECK_KEY_ID",
       "APPLE_DEVICECHECK_PRIVATE_KEY_PEM",
       "APPLE_TEAM_ID",
+      "APP_ATTEST_APP_ID",
       "APP_ATTEST_ENVIRONMENT",
       "SUPABASE_SERVICE_ROLE_KEY",
       "NEXT_PUBLIC_SUPABASE_URL",

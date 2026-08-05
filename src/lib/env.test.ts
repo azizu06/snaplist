@@ -16,6 +16,119 @@ describe("parseEnv", () => {
     expect(env.NODE_ENV).toBe("development");
   });
 
+  it("requires the production eBay API origin when mobile production is enabled", () => {
+    const deployed = {
+      ...valid,
+      NODE_ENV: "production",
+      LLM_PROVIDER: "openai",
+      EBAY_PRODUCTION_MOBILE_ENABLED: "true",
+      APPLE_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+      REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
+      REVENUECAT_PROJECT_ID: "proj_test",
+      CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
+    };
+
+    expect(() => parseEnv(deployed)).toThrowError(/EBAY_BASE_URL/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      }),
+    ).toThrowError(/EBAY_BASE_URL/);
+    expect(() =>
+      parseEnv({ ...deployed, EBAY_BASE_URL: "https://api.ebay.com" }),
+    ).not.toThrow();
+  });
+
+  it("requires a non-placeholder App Attest Team ID and bundle ID in deployments", () => {
+    const deployed = {
+      ...valid,
+      NODE_ENV: "production",
+      LLM_PROVIDER: "openai",
+      EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+      REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
+      REVENUECAT_PROJECT_ID: "proj_test",
+      CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
+    };
+
+    expect(() => parseEnv(deployed)).toThrowError(/APPLE_TEAM_ID/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        APPLE_TEAM_ID: "TEAMID1234",
+        APP_ATTEST_APP_ID: "TEAMID1234.dev.snaplist.ios",
+      }),
+    ).toThrowError(/APPLE_TEAM_ID/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        APPLE_TEAM_ID: "A1B2C3D4E5",
+        APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      }),
+    ).not.toThrow();
+  });
+
+  it("requires the account-erasure Supabase and RevenueCat configuration in deployments", () => {
+    const deployed = {
+      ...valid,
+      NODE_ENV: "production",
+      LLM_PROVIDER: "openai",
+      EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      APPLE_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+      REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
+      REVENUECAT_PROJECT_ID: "proj_test",
+      CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
+    };
+
+    for (const missing of [
+      "SUPABASE_SECRET_KEY",
+      "REVENUECAT_SECRET_API_KEY",
+      "REVENUECAT_PROJECT_ID",
+    ] as const) {
+      const withoutRequiredValue: Record<string, string> = { ...deployed };
+      delete withoutRequiredValue[missing];
+      expect(() => parseEnv(withoutRequiredValue)).toThrowError(new RegExp(missing));
+    }
+
+    const env = parseEnv(deployed);
+    expect(env.SUPABASE_SECRET_KEY).toBe("sb_secret_test");
+    expect(env.REVENUECAT_SECRET_API_KEY).toBe("sk_revenuecat_test");
+    expect(env.REVENUECAT_PROJECT_ID).toBe("proj_test");
+  });
+
+  it("rejects missing or localhost-only Clerk authorized parties in deployments", () => {
+    const deployed = {
+      ...valid,
+      NODE_ENV: "production",
+      LLM_PROVIDER: "openai",
+      EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      APPLE_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+      REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
+      REVENUECAT_PROJECT_ID: "proj_test",
+    };
+
+    expect(() => parseEnv(deployed)).toThrowError(/CLERK_AUTHORIZED_PARTIES/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        CLERK_AUTHORIZED_PARTIES: "http://localhost:3000,http://127.0.0.1:3001",
+      }),
+    ).toThrowError(/CLERK_AUTHORIZED_PARTIES/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
+      }),
+    ).not.toThrow();
+  });
+
   it("throws when NO LLM provider key is present (names OPENAI_API_KEY)", () => {
     // OPENAI_API_KEY is no longer required on its own (dev runs on Gemini), but at
     // least one provider key must be set — the guard message names OPENAI_API_KEY.

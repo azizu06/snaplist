@@ -209,7 +209,7 @@ export type AppAttestVerificationResult =
     };
 
 export function createAppAttestService(options: {
-  appId?: string;
+  appId: string;
   challengeBytes?: () => Uint8Array;
   challengeId?: () => string;
   challengeTtlMs: number;
@@ -218,7 +218,7 @@ export function createAppAttestService(options: {
   store: AppAttestStore;
   verifier: AppAttestCryptographicVerifier;
 }) {
-  const appId = options.appId ?? "TEAMID1234.dev.snaplist.ios";
+  const appId = options.appId;
   const clock = options.clock ?? (() => new Date());
   const makeChallenge = options.challengeBytes ?? (() => randomBytes(32));
   const makeChallengeId = options.challengeId ?? randomUUID;
