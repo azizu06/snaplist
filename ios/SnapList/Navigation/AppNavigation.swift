@@ -73,7 +73,7 @@ enum HomeRoute: Hashable {
 }
 
 enum AppRoute: Hashable {
-    case account
+    case settings
     case activity
     case home(HomeRoute)
     case future(FutureBoundary)
