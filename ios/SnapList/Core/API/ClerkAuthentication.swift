@@ -167,6 +167,11 @@ private struct LiveClerkSessionTokenProvider: ClerkSessionTokenProviding {
 }
 
 enum ClerkAuthenticationComposition {
+    @MainActor
+    static func currentUserID() -> String? {
+        Clerk.shared.user?.id
+    }
+
     /// Configures ClerkKit once from the validated public build value and binds
     /// every authenticated native caller to the real current Clerk session.
     @MainActor

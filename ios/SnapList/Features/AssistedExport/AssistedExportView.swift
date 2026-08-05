@@ -26,6 +26,7 @@ struct AssistedExportHostView: View {
         pack: AssistedExportPack,
         summary: AssistedExportItemSummary,
         service: any AssistedExportServing,
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink(),
         refreshPack: @escaping @MainActor () async -> AssistedExportPack?
     ) {
         self.pack = pack
@@ -33,7 +34,11 @@ struct AssistedExportHostView: View {
         self.refreshPack = refreshPack
         _observedListingRevision = State(initialValue: pack.reviewRevision)
         _store = State(
-            initialValue: AssistedExportStore(pack: pack, service: service)
+            initialValue: AssistedExportStore(
+                pack: pack,
+                service: service,
+                funnelAnalytics: funnelAnalytics
+            )
         )
     }
 

@@ -113,9 +113,11 @@ final class AssistedExportClientTests: XCTestCase {
 
     func testConfirmSheetCannotDismissWhileSharedReceiptIsInFlight() async {
         let service = AssistedExportSuspendedSharedService()
+        let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
         let store = AssistedExportStore(
             pack: .fixture(),
-            service: service
+            service: service,
+            funnelAnalytics: funnelAnalytics
         )
         await store.load()
         store.toggle(.mercari)
@@ -143,6 +145,7 @@ final class AssistedExportClientTests: XCTestCase {
             .shared(at: AssistedExportSuspendedSharedService.sharedAt)
         )
         XCTAssertNil(store.domain.confirmSheet)
+        XCTAssertEqual(funnelAnalytics.events, [.exportPackShared])
     }
 
     func testConcurrentSaveRequestsWritePhotosAndReceiptOnce() async {

@@ -215,6 +215,7 @@ final class ItemRunSubmissionHost {
     private(set) var pendingPresentationEvent: ItemRunSubmissionPresentationEvent?
 
     private let coordinator: ItemRunSubmissionCoordinator?
+    private let funnelAnalytics: any FunnelAnalyticsEventSinking
     private var presentationAcknowledgmentGate:
         ItemRunSubmissionPresentationAcknowledgmentGate?
     private var pendingAmbiguousRetry:
@@ -235,9 +236,14 @@ final class ItemRunSubmissionHost {
         ItemRunSubmissionAcknowledgmentNotificationGate?
 #endif
 
-    init(coordinator: ItemRunSubmissionCoordinator?, isInert: Bool = false) {
+    init(
+        coordinator: ItemRunSubmissionCoordinator?,
+        isInert: Bool = false,
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
+    ) {
         self.coordinator = coordinator
         self.isInert = isInert
+        self.funnelAnalytics = funnelAnalytics
 #if DEBUG
         delayedFixture = nil
         acknowledgmentNotificationGate = nil
@@ -248,6 +254,7 @@ final class ItemRunSubmissionHost {
     init(delayedFixture: DelayedItemRunSubmissionFixture) {
         coordinator = nil
         isInert = false
+        funnelAnalytics = NoOpFunnelAnalyticsEventSink()
         self.delayedFixture = delayedFixture
         acknowledgmentNotificationGate = nil
     }
@@ -259,6 +266,7 @@ final class ItemRunSubmissionHost {
     ) {
         self.coordinator = coordinator
         isInert = false
+        funnelAnalytics = NoOpFunnelAnalyticsEventSink()
         delayedFixture = nil
         acknowledgmentNotificationGate =
             ItemRunSubmissionAcknowledgmentNotificationGate(
@@ -406,6 +414,10 @@ final class ItemRunSubmissionHost {
             pendingAmbiguousRetry = nil
             retention = nil
             acceptedRun = submission.acceptedRun
+            funnelAnalytics.record(
+                .intakeSubmitted,
+                eventID: submission.acceptedRun.runID
+            )
             clearedIntake = false
 
             let eventID = UUID()
@@ -790,7 +802,8 @@ enum ItemRunSubmissionHostFactory {
         apiOrigin: URL?,
         tokenProvider: any BearerTokenProviding,
         session: URLSession,
-        draftStore: any CaptureDraftStoring
+        draftStore: any CaptureDraftStoring,
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
     ) -> ItemRunSubmissionHost {
 #if DEBUG
         if let fixtureHost = ItemRunSubmissionDebugFixtureFactory.make(
@@ -801,7 +814,11 @@ enum ItemRunSubmissionHostFactory {
         }
 #endif
         guard !configuration.usesZeroNetworkFixtures else {
-            return ItemRunSubmissionHost(coordinator: nil, isInert: true)
+            return ItemRunSubmissionHost(
+                coordinator: nil,
+                isInert: true,
+                funnelAnalytics: funnelAnalytics
+            )
         }
         let submitter: (any ItemRunSubmitting)? = apiOrigin.map {
             ItemRunSubmissionClient(baseURL: $0, session: session)
@@ -812,7 +829,8 @@ enum ItemRunSubmissionHostFactory {
                 attemptStore: LocalItemRunSubmissionAttemptStore(),
                 draftStore: draftStore,
                 tokenProvider: tokenProvider
-            )
+            ),
+            funnelAnalytics: funnelAnalytics
         )
     }
 }

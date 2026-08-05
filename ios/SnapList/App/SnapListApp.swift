@@ -97,7 +97,8 @@ struct SnapListApp: App {
             initialValue: CaptureFlowModel(
                 camera: dependencies.captureCamera,
                 evaluator: dependencies.framingEvaluator,
-                intake: dependencies.nativeIntake
+                intake: dependencies.nativeIntake,
+                funnelAnalytics: dependencies.funnelAnalytics
             )
         )
         _homeStore = State(
@@ -115,7 +116,8 @@ struct SnapListApp: App {
                 configuration: configuration,
                 apiOrigin: apiOrigin,
                 tokenProvider: tokenProvider,
-                session: urlSession
+                session: urlSession,
+                funnelAnalytics: dependencies.funnelAnalytics
             )
         )
         _listingReviewStore = State(
@@ -132,7 +134,8 @@ struct SnapListApp: App {
                 apiOrigin: apiOrigin,
                 tokenProvider: tokenProvider,
                 session: urlSession,
-                draftStore: dependencies.captureDraftStore
+                draftStore: dependencies.captureDraftStore,
+                funnelAnalytics: dependencies.funnelAnalytics
             )
         )
     }

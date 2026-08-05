@@ -38,11 +38,13 @@ final class EbayPublishDeliveryTests: XCTestCase {
 
         XCTAssertEqual(firstFlow.screen, .result(.outcomeNotYetKnown))
 
+        let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
         let relaunchedFlow = EbayPublishFlowStore(
             listingID: listingID,
             service: service,
             oauth: EbayOAuthFixtureRunner(result: .connected),
-            attemptStore: FileEbayPublishAttemptStore(fileURL: attemptURL)
+            attemptStore: FileEbayPublishAttemptStore(fileURL: attemptURL),
+            funnelAnalytics: funnelAnalytics
         )
         await relaunchedFlow.load()
 
@@ -58,6 +60,8 @@ final class EbayPublishDeliveryTests: XCTestCase {
             providerTruth.canonicalListing.ebayListingID
         )
         XCTAssertEqual(relaunchedFlow.screen, .result(.published))
+        await relaunchedFlow.load()
+        XCTAssertEqual(funnelAnalytics.events, [.ebayPublishConfirmed])
     }
 
     func testIOS170UsesTheOwnedCustomSchemeCallbackBridge() throws {

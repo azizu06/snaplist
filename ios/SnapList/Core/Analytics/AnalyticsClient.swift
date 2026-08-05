@@ -268,7 +268,8 @@ extension AnalyticsEvent {
              let .correctionCompleted(eventID),
              let .paywallViewed(eventID, _),
              let .checkoutFlowStarted(eventID, _, _),
-             let .publishIntent(eventID, _):
+             let .publishIntent(eventID, _),
+             let .funnel(eventID, _):
             eventID
         }
     }

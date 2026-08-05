@@ -126,16 +126,20 @@ final class RunStoreTests: XCTestCase {
             credential: credential
         )
         let authorities = RunStoreGuestClaimAuthorities()
+        let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
         let store = RunDetailStore(
-            service: RecordingRunService(results: [.success(run)]),
+            service: RecordingRunService(results: [.success(run), .success(run)]),
             tokenProvider: RunStoreBearerTokenProvider { "guestcap_token" },
             guestRecoveryCredentials: credentials,
-            guestClaimAuthorities: authorities
+            guestClaimAuthorities: authorities,
+            funnelAnalytics: funnelAnalytics
         )
 
         await store.load(runID: run.id)
+        await store.refresh()
 
         XCTAssertEqual(store.state, .loaded(run))
+        XCTAssertEqual(funnelAnalytics.events, [.listingReadyToReview])
         let saved = await authorities.savedAuthority(
             listingID: review.binding.listingID
         )

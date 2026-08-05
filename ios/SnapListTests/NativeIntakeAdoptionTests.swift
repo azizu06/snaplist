@@ -18,10 +18,12 @@ final class NativeIntakeAdoptionTests: XCTestCase {
                 nativeIntakeIdentitySource: productionAnonymousIdentitySource(),
                 nativeIntakeApplicationSupportDirectory: root
             )
+            let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
             let firstCapture = CaptureFlowModel(
                 camera: firstDependencies.captureCamera,
                 evaluator: firstDependencies.framingEvaluator,
-                intake: firstDependencies.nativeIntake
+                intake: firstDependencies.nativeIntake,
+                funnelAnalytics: funnelAnalytics
             )
             let initialRestoration = await firstCapture.restore()
             XCTAssertEqual(initialRestoration, .noDraft)
@@ -29,6 +31,7 @@ final class NativeIntakeAdoptionTests: XCTestCase {
                 NativeIntakeAdoptionPhoto(data: try makeJPEG(seed: 10))
             ])
             XCTAssertEqual(addedPhotoCount, 1)
+            XCTAssertEqual(funnelAnalytics.events, [.scanStarted])
             let activationID = try XCTUnwrap(
                 firstCapture.intakeSnapshot?.version.activationID
             )

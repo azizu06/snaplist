@@ -22,14 +22,17 @@ final class AssistedExportStore {
     private(set) var completedAction: AssistedExportCompletedAction?
 
     private let service: any AssistedExportServing
+    private let funnelAnalytics: any FunnelAnalyticsEventSinking
     private var photosSavedForContentRevision: UUID?
 
     init(
         pack: AssistedExportPack,
-        service: any AssistedExportServing
+        service: any AssistedExportServing,
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
     ) {
         domain = AssistedExportDomain(pack: pack)
         self.service = service
+        self.funnelAnalytics = funnelAnalytics
     }
 
     func load() async {
@@ -202,7 +205,9 @@ final class AssistedExportStore {
             })?.sharedAt else {
                 throw AssistedExportClientError.invalidResponse
             }
-            _ = domain.confirmShared(at: sharedAt)
+            if case .recorded = domain.confirmShared(at: sharedAt) {
+                funnelAnalytics.record(.exportPackShared, eventID: UUID())
+            }
         } catch AssistedExportClientError.conflict {
             domain.dismissConfirmSheet()
             actionMessage = AssistedExportCopy.actionFailed

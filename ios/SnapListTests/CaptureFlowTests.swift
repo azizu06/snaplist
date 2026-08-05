@@ -7347,6 +7347,22 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(model.canTakePhoto)
     }
 
+    func testStartingScanRecordsOnceBeforeAnyPhotoIsCaptured() async {
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
+        let model = CaptureFlowModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore(),
+            funnelAnalytics: funnelAnalytics
+        )
+
+        await model.startCamera()
+        await model.startCamera()
+
+        XCTAssertEqual(funnelAnalytics.events, [.scanStarted])
+    }
+
     func testManualCaptureAppendsFivePhotosInOrderAndMakesTheSixthAttemptInert() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let store = TestCaptureStore()

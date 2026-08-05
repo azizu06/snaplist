@@ -33,7 +33,8 @@ struct EbayPublishJourneyHost: View {
                 service: dependencies.ebayPublishService,
                 oauth: AppleEbayOAuthRunner(
                     callbackURL: dependencies.ebayOAuthCallbackURL
-                )
+                ),
+                funnelAnalytics: dependencies.funnelAnalytics
             )
         )
     }
@@ -73,7 +74,9 @@ struct EbayPublishJourneyHost: View {
                 authenticator: dependencies.guestAccountAuthenticator,
                 service: dependencies.guestClaimService,
                 authorityStore: dependencies.guestClaimAuthorityStore,
-                credentialStore: KeychainGuestRecoveryCredentialStore()
+                credentialStore: KeychainGuestRecoveryCredentialStore(),
+                funnelAnalytics: dependencies.funnelAnalytics,
+                authenticatedUserID: ClerkAuthenticationComposition.currentUserID
             )
             claimStore = store
             await store.resumeClaim()

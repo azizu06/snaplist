@@ -41,13 +41,16 @@ final class GuestClaimTests: XCTestCase {
         let authorityStore = GuestClaimAuthorityRecorder()
         let credentialStore = GuestRecoveryCredentialRecorder()
         let service = GuestClaimRecordingService(outcome: .claimed(Self.handoff))
+        let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
         let store = GuestClaimStore(
             authority: Self.authority,
             authenticator: GuestClaimRecordingAuthenticator(),
             service: service,
             attemptStore: MemoryGuestClaimAttemptStore(),
             authorityStore: authorityStore,
-            credentialStore: credentialStore
+            credentialStore: credentialStore,
+            funnelAnalytics: funnelAnalytics,
+            authenticatedUserID: { "user_633" }
         )
 
         await store.showEmailEntry()
@@ -70,6 +73,8 @@ final class GuestClaimTests: XCTestCase {
         XCTAssertEqual(claims.first?.authority.photoIdentity, Self.authority.photoIdentity)
         XCTAssertEqual(purgeCount, 1)
         XCTAssertEqual(credentialPurgeCount, 1)
+        XCTAssertEqual(funnelAnalytics.identifiedUserIDs, ["user_633"])
+        XCTAssertEqual(funnelAnalytics.events, [.accountClaimed])
     }
 
     func testTerminalClaimWaitsForDurableCredentialCleanupAndRetriesIt() async {
