@@ -100,6 +100,7 @@
       "SnapListUITests/SnapListUITests/testLivePhotoReviewTopBarHoldsTheTouchFloorAcrossDynamicType",
       "SnapListUITests/SnapListUITests/testLivePhotoReviewVoiceAndStartListingStayTypedBoundariesOverIntake",
       "SnapListUITests/SnapListUITests/testLiveScanReviewOpensApprovedPhotoReviewShellWithExactRestoredPhoto",
+      "SnapListUITests/SnapListUITests/testPhotoReviewControlsReachTheirExactTypedBoundaryDestinations",
       "SnapListUITests/SnapListUITests/testPhotoReviewAtFivePhotosShowsAddDimmedDisabledAndInert",
       "SnapListUITests/SnapListUITests/testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionCoverAndProgressiveActions",
       "SnapListUITests/SnapListUITests/testRateLimitedSubmissionRendersExactRetainedMessageInLivePhotoReview",
