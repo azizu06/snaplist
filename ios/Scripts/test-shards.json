@@ -53,6 +53,8 @@
       "SnapListUITests/SnapListUITests/testPhotoReviewREV01RendersOneSelectedCoverPhotoWithProgressiveActions",
       "SnapListUITests/SnapListUITests/testPhotoReviewREV02UsesCanonicalAdaptiveHeroAt402x874",
       "SnapListUITests/SnapListUITests/testPhotoReviewREV04RendersSecondPhotoSelectedWithActionsInFlow",
+      "SnapListUITests/SnapListUITests/testPhotoReviewREV05ShowsOnlyTheFirstRejectedSaveExit",
+      "SnapListUITests/SnapListUITests/testPhotoReviewREV06WithdrawsRetryAndKeepsOnlyDiscard",
       "SnapListUITests/SnapListUITests/testProGateAccessibilityTypeScalesAndKeepsActionsInTheSheetScroll",
       "SnapListUITests/SnapListUITests/testProGateOfferKeepsTheApprovedLabelAndDecisionControlsReachable",
       "SnapListUITests/SnapListUITests/testProGatePurchasePendingHasNoDismissOrRestoreAction",
