@@ -46,6 +46,19 @@ modified tracked working-tree content into a graph labeled as the unchanged
 commit. `--prepare-only` emits the exact temporary corpus for inspection without
 generating output.
 
+For a follow-up commit that changes already-scoped architecture, use the
+incremental path:
+
+```bash
+scripts/graphify-core-product.sh --incremental
+```
+
+It replaces records sourced from changed scoped files and preserves all other
+source records from ignored local state. It falls back to a full deterministic
+rebuild only when the prior graph/cache is absent or incompatible because the
+committed scope or pinned Graphify/parser versions changed. `--check` validates
+the pinned, zero-semantic-token command without producing a graph.
+
 Graphify's SQL parser is required so migrations contribute tables, functions,
 RLS, and RPC relationships. Install the pinned optional parser when necessary:
 
@@ -63,17 +76,28 @@ JSON, caches, and semantic extraction intermediates are large and reproducible.
 This document, the exact scope manifest, and the preparation script are the
 versioned contract.
 
+Pull requests run the scope-drift and incremental-command check. After a relevant
+change reaches `main`, GitHub Actions restores the preceding ignored artifact when
+compatible, regenerates at the exact source SHA, and uploads HTML, JSON, report,
+manifest, cache/state, and `core-product-receipt.json`. The receipt records source
+SHA, scoped and changed file counts, node and edge counts, run mode/fallback reason,
+and zero semantic tokens. The workflow never contacts a model/provider, commits,
+deploys, or mutates a database.
+
+Use the receipt before making a PR Graphify-impact report; it is the exact-SHA
+source of node and edge counts, not a claim inferred from the workflow status.
+
 ## Current snapshot
 
 - Graphify: `graphifyy v0.8.33`
-- Tracked and represented scope: 321 files
-- Graph: 4,390 nodes and 8,702 edges. The generated report records the exact
-  deterministic-clustering community count for each run.
-- Generation command: `scripts/graphify-core-product.sh`
+- The generated receipt records the exact source SHA, scope, node, edge, and
+  deterministic-clustering counts for each run.
+- Generation commands: `scripts/graphify-core-product.sh` and
+  `scripts/graphify-core-product.sh --incremental`
 
 The snapshot uses deterministic Graphify AST extraction plus document-heading
 nodes. It consumes no semantic-model tokens. The graph and report use
 repository-relative source paths so the ignored artifact remains navigable
-after the temporary corpus is removed. Re-run the same script after a core scope
-or code change; do not run `graphify update .`, which would bypass the committed
+after the temporary corpus is removed. Re-run the incremental command after a core
+code change; do not run `graphify update .`, which would bypass the committed
 scope and index excluded presentation surfaces.
