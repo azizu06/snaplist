@@ -112,7 +112,7 @@
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessUsesNativeWaitToObserveSuspensionBeforeTermination",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testPositiveForegroundExitWitnessAllowsStaleForegroundTargetTermination",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest"
     ]
   }

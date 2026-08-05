@@ -152,8 +152,14 @@ final class HomeUITests: XCTestCase {
             "The final line of the complete seller-safe detail must be reachable."
         )
 
-        app.buttons["Back"].tap()
-        XCTAssertTrue(opener.waitForExistence(timeout: 2))
+        let back = app.buttons["Back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 3))
+        back.tap()
+        XCTAssertTrue(
+            waitForDisappearance(of: app.otherElements["run.detail"]),
+            "System Back must finish dismissing Run Detail before Home is asserted."
+        )
+        XCTAssertTrue(opener.waitForExistence(timeout: 3))
         XCTAssertTrue(opener.isHittable)
     }
 
@@ -411,6 +417,17 @@ final class HomeUITests: XCTestCase {
         ] + extraArguments
         app.launchAfterRetiringPriorInstance()
         return app
+    }
+
+    private func waitForDisappearance(
+        of element: XCUIElement,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        let gone = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: element
+        )
+        return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
     }
 
     private func scrollUntilFullyVisible(

@@ -57,8 +57,35 @@ extension UIProcessLifecycle {
 
 extension XCUIApplication: UIProcessLifecycle {
     func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
-        XCUIApplication(bundleIdentifier: "com.apple.springboard")
-            .wait(for: .runningForeground, timeout: timeout)
+        let deadline = monotonicUptime + timeout
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        guard springboard.wait(for: .runningForeground, timeout: timeout) else {
+            return false
+        }
+
+        let safeStates: [XCUIApplication.State] = [
+            .runningBackground,
+            .runningBackgroundSuspended,
+            .notRunning
+        ]
+        let probeDuration = min(0.1, timeout / 6)
+        var safeStateIndex = 0
+
+        while true {
+            if state.isSafeToTerminate {
+                return true
+            }
+
+            let remaining = deadline - monotonicUptime
+            guard remaining > 0 else {
+                return state.isSafeToTerminate
+            }
+            let safeState = safeStates[safeStateIndex]
+            if wait(for: safeState, timeout: min(remaining, probeDuration)) {
+                return true
+            }
+            safeStateIndex = (safeStateIndex + 1) % safeStates.count
+        }
     }
 }
 
@@ -75,25 +102,18 @@ struct UIProcessTerminationBoundary {
         _ process: any UIProcessLifecycle,
         timeout: TimeInterval = 3
     ) -> Bool {
-        var foregroundExitWitnessed = false
         if process.state == .runningForeground {
             pressHome()
-            foregroundExitWitnessed = process.waitUntilSafeToTerminate(timeout: timeout)
-        }
-
-        switch process.state {
-        case .runningBackground, .runningBackgroundSuspended:
-            break
-        case .runningForeground:
-            guard foregroundExitWitnessed else {
+            guard process.waitUntilSafeToTerminate(timeout: timeout) else {
                 return false
             }
-        case .notRunning:
+        }
+
+        guard process.state.isSafeToTerminate else {
+            return false
+        }
+        guard process.state != .notRunning else {
             return true
-        case .unknown:
-            return false
-        @unknown default:
-            return false
         }
 
         process.terminate()
@@ -226,25 +246,23 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         XCTAssertEqual(process.state, .notRunning)
     }
 
-    func testPositiveForegroundExitWitnessAllowsStaleForegroundTargetTermination() {
+    func testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget() {
         let process = PositiveForegroundExitWitnessUIProcess()
         let boundary = UIProcessTerminationBoundary {
             process.pressHome()
         }
 
-        XCTAssertTrue(boundary.terminate(process, timeout: 4))
+        XCTAssertFalse(boundary.terminate(process, timeout: 4))
         XCTAssertEqual(
             process.events,
             [
                 "press-home",
-                "wait-foreground-exit-witness",
-                "terminate",
-                "wait-not-running"
+                "wait-foreground-exit-witness"
             ]
         )
-        XCTAssertEqual(process.waitTimeouts, [4, 4])
-        XCTAssertEqual(process.terminateCount, 1)
-        XCTAssertEqual(process.state, .notRunning)
+        XCTAssertEqual(process.waitTimeouts, [4])
+        XCTAssertEqual(process.terminateCount, 0)
+        XCTAssertEqual(process.state, .runningForeground)
     }
 
     func testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow() {
