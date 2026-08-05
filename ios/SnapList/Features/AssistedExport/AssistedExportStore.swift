@@ -197,15 +197,22 @@ final class AssistedExportStore {
                 destination: destination,
                 pack: requestedPack
             )
-            guard synchronize(response, for: requestedPack),
-                  domain.confirmSheet == destination,
+            guard response.reviewRevision == requestedPack.reviewRevision else {
+                _ = synchronize(response, for: requestedPack)
+                return
+            }
+            guard domain.confirmSheet == destination,
                   !domain.isPackOutOfDate else { return }
             guard let sharedAt = response.receipts.first(where: {
                 $0.destination == destination
             })?.sharedAt else {
                 throw AssistedExportClientError.invalidResponse
             }
-            if case .recorded = domain.confirmShared(at: sharedAt) {
+            let confirmOutcome = domain.confirmShared(at: sharedAt)
+            guard synchronize(response, for: requestedPack), !domain.isPackOutOfDate else {
+                return
+            }
+            if case .recorded = confirmOutcome {
                 funnelAnalytics.record(.exportPackShared, eventID: UUID())
             }
         } catch AssistedExportClientError.conflict {
