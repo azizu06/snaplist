@@ -129,8 +129,8 @@ Facebook Marketplace, Mercari, and Depop receive honest export packs.
   independence, or blast radius makes the active PR unsafe or unreviewable.
 - **Core-architecture Graphify impact.** Every PR that changes a path in
   `docs/architecture/graphify-core-scope.txt` must classify Graphify impact and
-  report the updated node/edge receipt, or `no graph impact` with a concrete
-  reason. Never commit generated Graphify output.
+  report the updated node/edge receipt with its source SHA, or `no graph impact`
+  with a concrete reason. Never commit generated Graphify output.
 - **One visible implementation task per issue.** The orchestration hub stays
   available for product decisions, design intake, dependency release, and
   status relays. A substantive implementation owner runs in a separate
