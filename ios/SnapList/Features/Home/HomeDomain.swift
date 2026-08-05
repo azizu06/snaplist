@@ -205,6 +205,7 @@ enum TrophyWallCardState: Hashable, Sendable {
     case workingPersisting
     case readyToReviewLocked
     case needsRetryLocked(detail: String)
+    case publishedToEbay
 }
 
 struct TrophyWallOrderKey: Hashable, Comparable, Sendable {
@@ -323,7 +324,8 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
              .workingPricing,
              .workingPersisting,
              .readyToReviewLocked,
-             .needsRetryLocked:
+             .needsRetryLocked,
+             .publishedToEbay:
             if case .run(let runID) = card.identity {
                 destination = .run(runID)
                 accessibilityIdentifier =
@@ -355,11 +357,18 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             case .needsRetryLocked(let detail):
                 stateLabel = "Needs retry · \(detail)"
                 accessibilityLabel = "\(itemName), needs retry. \(detail)"
-            case .pendingUpload:
+            case .pendingUpload, .publishedToEbay:
                 return nil
             }
         }
     }
+}
+
+struct TrophyWallSettledTile: Identifiable, Hashable {
+    let id: TrophyWallCardIdentity
+    let itemName: String
+    let stateLabel: String
+    let completedAt: Date
 }
 
 struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
@@ -370,6 +379,7 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
     let lastMeaningfulUpdateAt: Date
     let historyOrderKey: TrophyWallOrderKey?
     let itemName: String?
+    let listingID: UUID?
 
     init(
         principalScope: TrophyWallPrincipalScope,
@@ -378,7 +388,8 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         state: TrophyWallCardState = .accepted,
         lastMeaningfulUpdateAt: Date,
         historyOrderKey: TrophyWallOrderKey? = nil,
-        itemName: String? = nil
+        itemName: String? = nil,
+        listingID: UUID? = nil
     ) {
         self.principalScope = principalScope
         self.runID = runID
@@ -387,6 +398,7 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         self.lastMeaningfulUpdateAt = lastMeaningfulUpdateAt
         self.historyOrderKey = historyOrderKey
         self.itemName = itemName
+        self.listingID = listingID
     }
 }
 
@@ -439,10 +451,26 @@ final class TrophyWallStore {
     private(set) var cards: [TrophyWallCard]
     private(set) var collectionOutcome: TrophyWallCollectionOutcome = .unknown
     private var canonicalHistoryStates: [UUID: CanonicalHistoryState]
+    private var runIDsByListingID: [UUID: UUID]
     private var isRefreshingCollection = false
 
     var processingRows: [TrophyWallProcessingRow] {
         cards.compactMap(TrophyWallProcessingRow.init(card:))
+    }
+
+    var settledTiles: [TrophyWallSettledTile] {
+        cards.compactMap { card in
+            guard case .publishedToEbay = card.state,
+                  let itemName = card.itemName else {
+                return nil
+            }
+            return TrophyWallSettledTile(
+                id: card.identity,
+                itemName: itemName,
+                stateLabel: "Published to eBay",
+                completedAt: card.orderKey.lastMeaningfulUpdateAt
+            )
+        }
     }
 
     init(
@@ -463,6 +491,7 @@ final class TrophyWallStore {
             }
             states[runID] = .visible(card.orderKey)
         }
+        runIDsByListingID = [:]
     }
 
     /// Re-requests the tenant's collection page from the existing boundary. A
@@ -553,6 +582,28 @@ final class TrophyWallStore {
         cards.removeAll { $0.identity == canonicalCard.identity }
         cards.append(canonicalCard)
         cards.sort { $0.orderKey > $1.orderKey }
+        if let listingID = acceptedRun.listingID {
+            runIDsByListingID[listingID] = acceptedRun.runID
+        }
+    }
+
+    func applyEbayPublishStatus(_ status: EbayPublishStatus) {
+        guard status.publishedListing != nil,
+              let runID = runIDsByListingID[status.listingID],
+              let index = cards.firstIndex(where: { $0.identity == .run(runID) })
+        else {
+            return
+        }
+
+        let card = cards[index]
+        cards[index] = TrophyWallCard.accepted(
+            principalScope: card.principalScope,
+            runID: runID,
+            state: .publishedToEbay,
+            itemName: card.itemName,
+            lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
+            orderKey: card.orderKey
+        )
     }
 
     func ingest(
@@ -591,7 +642,8 @@ final class TrophyWallStore {
                     state: state,
                     lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                     historyOrderKey: entry.orderKey,
-                    itemName: runDetail.item?.title
+                    itemName: runDetail.item?.title,
+                    listingID: runDetail.listingID
                 )
             )
         }
@@ -622,7 +674,8 @@ final class TrophyWallStore {
                 ),
                 state: state,
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
-                itemName: runDetail.item?.title
+                itemName: runDetail.item?.title,
+                listingID: runDetail.listingID
             )
         )
     }
