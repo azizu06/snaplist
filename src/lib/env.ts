@@ -12,6 +12,19 @@ import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
 const LOCAL_SERVER_RPC_SECRET =
   "snaplist-local-server-rpc-secret-do-not-use-in-hosted";
 
+// `openssl rand -base64 48` produces 48 random bytes encoded as 64 unpadded
+// Base64 characters. Keep this deployed-only: checked-in local/test fixtures
+// intentionally remain usable without pretending to be production secrets.
+const DEPLOYED_SERVER_RPC_SECRET_PATTERN = /^[A-Za-z0-9+/]{64}$/;
+const MINIMUM_SERVER_RPC_SECRET_DISTINCT_CHARACTERS = 16;
+
+function isGeneratedServerRpcSecret(value: string): boolean {
+  return (
+    DEPLOYED_SERVER_RPC_SECRET_PATTERN.test(value)
+    && new Set(value).size >= MINIMUM_SERVER_RPC_SECRET_DISTINCT_CHARACTERS
+  );
+}
+
 const optionalProxyTemplateSchema = z.preprocess(
   (value) =>
     typeof value === "string" && value.trim() === "" ? undefined : value,
@@ -269,6 +282,10 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
   } else if (serverRpcSecret === LOCAL_SERVER_RPC_SECRET) {
     issues.push(
       "  - SERVER_RPC_SECRET: The public local/CI secret is forbidden in deployed environments; generate a distinct high-entropy value.",
+    );
+  } else if (!isGeneratedServerRpcSecret(serverRpcSecret)) {
+    issues.push(
+      "  - SERVER_RPC_SECRET: Must be a non-placeholder 64-character Base64 value generated with `openssl rand -base64 48`.",
     );
   }
   const appAttestTeamId = env.APPLE_TEAM_ID?.trim();

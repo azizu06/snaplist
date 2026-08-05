@@ -1,5 +1,6 @@
 -- Hosted operator provisioning (run only after setting the deployed
--- SERVER_RPC_SECRET to the same high-entropy value; never commit that value):
+-- SERVER_RPC_SECRET to `openssl rand -base64 48` output: exactly 64 unpadded
+-- Base64 characters. Never commit that value):
 --
 -- insert into private.server_rpc_auth_config (singleton, secret_sha256)
 -- values (
