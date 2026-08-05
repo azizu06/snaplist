@@ -10,9 +10,9 @@ import io
 import importlib.metadata
 import json
 import re
+import hashlib
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from graphify.analyze import god_nodes, suggest_questions, surprising_connections
@@ -27,6 +27,126 @@ from graphify.report import generate
 
 SAFE_LOCAL_AST_OVERRIDES = ("src/lib/marketplace/ebay/user-token-provider.ts",)
 SENSITIVE_CONTENT_EXCLUSIONS = (".env.example",)
+STATE_VERSION = 1
+GRAPHIFY_VERSION = "0.8.33"
+SQL_PARSER_VERSION = "0.3.11"
+STATE_FILE = "core-product-state.json"
+RECEIPT_FILE = "core-product-receipt.json"
+REQUIRED_LABEL_FRAGMENTS = {
+    "reserve_ai_item_credit_for_pipeline_run",
+    "pipeline_runs",
+    "UserTokenProvider",
+}
+
+
+def scope_digest(scope: list[str]) -> str:
+    return hashlib.sha256("\n".join(scope).encode("utf-8")).hexdigest()
+
+
+def tool_versions() -> dict[str, str | None]:
+    try:
+        sql_parser_version = importlib.metadata.version("tree-sitter-sql")
+    except importlib.metadata.PackageNotFoundError:
+        sql_parser_version = None
+    return {"graphifyy": importlib.metadata.version("graphifyy"), "tree-sitter-sql": sql_parser_version}
+
+
+def require_pinned_tools() -> dict[str, str | None]:
+    versions = tool_versions()
+    if versions["graphifyy"] != GRAPHIFY_VERSION:
+        raise SystemExit(f"Graphify v{GRAPHIFY_VERSION} is required for this snapshot")
+    if versions["tree-sitter-sql"] != SQL_PARSER_VERSION:
+        raise SystemExit(
+            "Install the Graphify SQL extra: uv pip install --python "
+            "~/.local/share/uv/tools/graphifyy/bin/python tree-sitter-sql==0.3.11"
+        )
+    return versions
+
+
+def load_compatible_state(
+    output: Path, repo: Path, scope: list[str], versions: dict[str, str | None]
+) -> tuple[dict | None, str | None]:
+    state_path = output / STATE_FILE
+    graph_path = output / "graph.json"
+    if not state_path.exists() or not graph_path.exists():
+        return None, "no prior graph/cache"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, "no compatible prior graph/cache"
+    if state.get("state_version") != STATE_VERSION:
+        return None, "no compatible prior graph/cache"
+    if state.get("scope_digest") != scope_digest(scope):
+        return None, "committed scope changed"
+    if state.get("tool_versions") != versions:
+        return None, "Graphify/parser version changed"
+    if not isinstance(state.get("extraction"), dict) or not isinstance(state.get("source_commit"), str):
+        return None, "no compatible prior graph/cache"
+    if subprocess.run(
+        ["git", "-C", str(repo), "cat-file", "-e", f"{state['source_commit']}^{{commit}}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode != 0:
+        return None, "no compatible prior graph/cache"
+    return state, None
+
+
+def changed_scope_paths(repo: Path, previous_commit: str, source_commit: str, scope: set[str]) -> set[str]:
+    output = subprocess.check_output(
+        ["git", "-C", str(repo), "diff", "--name-only", previous_commit, source_commit, "--"],
+        text=True,
+    )
+    return {path for path in output.splitlines() if path in scope}
+
+
+def remove_sources(extraction: dict, sources: set[str]) -> dict:
+    nodes = [node for node in extraction.get("nodes", []) if node.get("source_file") not in sources]
+    edges = [
+        edge
+        for edge in extraction.get("edges", [])
+        if edge.get("source_file") not in sources
+    ]
+    return {"nodes": nodes, "edges": edges, "hyperedges": []}
+
+
+def merge_incremental_extraction(previous: dict, changed: dict, changed_sources: set[str]) -> dict:
+    """Replace changed sources while retaining valid unchanged inbound edges."""
+    removed_node_ids = {
+        node.get("id")
+        for node in previous.get("nodes", [])
+        if node.get("source_file") in changed_sources
+    }
+    preserved = remove_sources(previous, changed_sources)
+    replacement_ids = {node.get("id") for node in changed.get("nodes", [])}
+    preserved["edges"] = [
+        edge
+        for edge in preserved["edges"]
+        if (edge.get("source") not in removed_node_ids or edge.get("source") in replacement_ids)
+        and (edge.get("target") not in removed_node_ids or edge.get("target") in replacement_ids)
+    ]
+    merged = {
+        "nodes": [*preserved["nodes"], *changed.get("nodes", [])],
+        "edges": [*preserved["edges"], *changed.get("edges", [])],
+        "hyperedges": [],
+    }
+    return normalize_extraction(merged, Path("."))
+
+
+def impacted_records(extraction: dict, changed_sources: set[str]) -> dict:
+    """Keep changed-source records plus cross-file edges whose endpoint changed."""
+    nodes = [node for node in extraction.get("nodes", []) if node.get("source_file") in changed_sources]
+    node_ids = {node.get("id") for node in nodes}
+    edges = [
+        edge
+        for edge in extraction.get("edges", [])
+        if edge.get("source_file") in changed_sources
+        or edge.get("source") in node_ids
+        or edge.get("target") in node_ids
+    ]
+    return {"nodes": nodes, "edges": edges, "hyperedges": []}
+
+
 def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
@@ -78,7 +198,12 @@ def normalize_extraction(result: dict, corpus: Path) -> dict:
     return {"nodes": nodes, "edges": edges, "hyperedges": []}
 
 
-def add_scope_nodes(extraction: dict, scope: list[str], corpus: Path) -> None:
+def add_scope_nodes(
+    extraction: dict,
+    scope: list[str],
+    corpus: Path,
+    source_paths: set[str] | None = None,
+) -> None:
     node_ids = {node["id"] for node in extraction["nodes"]}
     project_id = "snaplist_core_product"
     if project_id not in node_ids:
@@ -104,6 +229,8 @@ def add_scope_nodes(extraction: dict, scope: list[str], corpus: Path) -> None:
         for edge in extraction["edges"]
     }
     for relative in scope:
+        if source_paths is not None and relative not in source_paths:
+            continue
         file_id = f"file_{slug(relative)}"
         if file_id not in node_ids:
             label = Path(relative).name
@@ -211,51 +338,121 @@ def community_labels(communities: dict[int, list[str]], nodes: dict[str, dict]) 
     return labels
 
 
+def write_state(
+    output: Path,
+    extraction: dict,
+    source_commit: str,
+    scope: list[str],
+    versions: dict[str, str | None],
+) -> None:
+    (output / STATE_FILE).write_text(
+        json.dumps(
+            {
+                "state_version": STATE_VERSION,
+                "source_commit": source_commit,
+                "scope_digest": scope_digest(scope),
+                "tool_versions": versions,
+                "extraction": extraction,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_receipt(
+    output: Path,
+    source_commit: str,
+    scope: list[str],
+    changed_files: int,
+    graph: object,
+    run_mode: str,
+    fallback_reason: str | None,
+) -> None:
+    receipt = {
+        "source_sha": source_commit,
+        "scoped_file_count": len(scope),
+        "changed_file_count": changed_files,
+        "node_count": graph.number_of_nodes(),
+        "edge_count": graph.number_of_edges(),
+        "run_mode": run_mode,
+        "semantic_tokens": 0,
+        "method": "deterministic AST and document-heading extraction",
+    }
+    if fallback_reason:
+        receipt["full_fallback_reason"] = fallback_reason
+    (output / RECEIPT_FILE).write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--corpus", type=Path, required=True)
+    parser.add_argument("--corpus", type=Path)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--scope", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--incremental", action="store_true")
+    parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    corpus = args.corpus.resolve()
     repo = args.repo.resolve()
+    scope = args.scope.read_text(encoding="utf-8").splitlines()
+    versions = require_pinned_tools()
+    if args.check:
+        print(
+            json.dumps(
+                {
+                    "command": "incremental" if args.incremental else "full",
+                    "scope_files": len(scope),
+                    "tool_versions": versions,
+                    "semantic_tokens": 0,
+                },
+                sort_keys=True,
+            )
+        )
+        return
+    if args.corpus is None:
+        raise SystemExit("--corpus is required unless --check is used")
+    corpus = args.corpus.resolve()
     output = repo / "graphify-out"
     output.mkdir(parents=True, exist_ok=True)
-    scope = args.scope.read_text(encoding="utf-8").splitlines()
-
-    if importlib.metadata.version("graphifyy") != "0.8.33":
-        raise SystemExit("Graphify v0.8.33 is required for this snapshot")
-    try:
-        sql_parser_version = importlib.metadata.version("tree-sitter-sql")
-    except importlib.metadata.PackageNotFoundError:
-        sql_parser_version = None
-    if sql_parser_version != "0.3.11":
-        raise SystemExit("Install the Graphify SQL extra: uv pip install --python ~/.local/share/uv/tools/graphifyy/bin/python tree-sitter-sql==0.3.11")
 
     detection = detect(corpus)
-    code_paths = [Path(path) for path in detection.get("files", {}).get("code", [])]
-    for relative in SAFE_LOCAL_AST_OVERRIDES:
-        override = corpus / relative
-        if override.exists() and override not in code_paths:
-            code_paths.append(override)
-    ast = extract(code_paths, cache_root=corpus)
-    extraction = normalize_extraction(ast, corpus)
-    add_scope_nodes(extraction, scope, corpus)
+    state, fallback_reason = (
+        load_compatible_state(output, repo, scope, versions) if args.incremental else (None, None)
+    )
+    changed_paths: set[str]
+    if state is None:
+        run_mode = "full" if not args.incremental else "full-fallback"
+        changed_paths = set(scope)
+        code_paths = sorted((Path(path) for path in detection.get("files", {}).get("code", [])), key=str)
+        for relative in SAFE_LOCAL_AST_OVERRIDES:
+            override = corpus / relative
+            if override.exists() and override not in code_paths:
+                code_paths.append(override)
+        ast = extract(code_paths, cache_root=corpus)
+        extraction = normalize_extraction(ast, corpus)
+        add_scope_nodes(extraction, scope, corpus)
+    else:
+        run_mode = "incremental"
+        changed_paths = changed_scope_paths(repo, state["source_commit"], args.source_commit, set(scope))
+        code_paths = sorted((Path(path) for path in detection.get("files", {}).get("code", [])), key=str)
+        for relative in SAFE_LOCAL_AST_OVERRIDES:
+            override = corpus / relative
+            if override.exists() and override not in code_paths:
+                code_paths.append(override)
+        ast = extract(code_paths, cache_root=corpus)
+        changed_extraction = impacted_records(normalize_extraction(ast, corpus), changed_paths)
+        add_scope_nodes(changed_extraction, scope, corpus, changed_paths)
+        extraction = merge_incremental_extraction(state["extraction"], changed_extraction, changed_paths)
 
     represented = {node.get("source_file") for node in extraction["nodes"]}
     missing = sorted(set(scope) - represented)
     if missing:
         raise SystemExit(f"Graph omitted scoped files: {missing}")
-    required_label_fragments = {
-        "reserve_ai_item_credit_for_pipeline_run",
-        "pipeline_runs",
-        "UserTokenProvider",
-    }
     labels_present = {str(node.get("label", "")) for node in extraction["nodes"]}
     absent_labels = sorted(
         fragment
-        for fragment in required_label_fragments
+        for fragment in REQUIRED_LABEL_FRAGMENTS
         if not any(fragment in label for label in labels_present)
     )
     if absent_labels:
@@ -298,7 +495,15 @@ def main() -> None:
         json.dumps({str(key): value for key, value in labels.items()}, indent=2), encoding="utf-8"
     )
     to_json(graph, communities, str(output / "graph.json"), force=True, built_at_commit=args.source_commit)
-    to_html(graph, communities, str(output / "graph.html"), community_labels=labels)
+    # Keep the required HTML artifact useful for a growing core graph without
+    # silently dropping it once Graphify's full-node visualization limit is hit.
+    to_html(
+        graph,
+        communities,
+        str(output / "graph.html"),
+        community_labels=labels,
+        node_limit=5_000,
+    )
 
     graphify_cli = Path(sys.executable).with_name("graphify")
     benchmark_result = run_benchmark(
@@ -335,7 +540,6 @@ def main() -> None:
             {
                 "runs": [
                     {
-                        "date": datetime.now(timezone.utc).isoformat(),
                         "input_tokens": 0,
                         "output_tokens": 0,
                         "method": "deterministic AST and document-heading extraction",
@@ -349,14 +553,27 @@ def main() -> None:
         ),
         encoding="utf-8",
     )
+    write_state(output, extraction, args.source_commit, scope, versions)
+    write_receipt(
+        output,
+        args.source_commit,
+        scope,
+        len(changed_paths),
+        graph,
+        run_mode,
+        fallback_reason,
+    )
     print(
         json.dumps(
             {
                 "source_commit": args.source_commit,
                 "scope_files": len(scope),
+                "changed_files": len(changed_paths),
                 "nodes": graph.number_of_nodes(),
                 "edges": graph.number_of_edges(),
                 "communities": len(communities),
+                "run_mode": run_mode,
+                "full_fallback_reason": fallback_reason,
             }
         )
     )

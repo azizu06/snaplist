@@ -20,6 +20,7 @@ struct AppShellView: View {
     @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
+    @State private var photoReviewSaveFailure: PhotoReviewSaveFailure?
     @State private var photoReviewIntake: PhotoReviewIntake?
     @State private var awaitsPrincipalReviewDismissal = false
     @State private var awaitsCommittedEmptyDismissal = false
@@ -89,13 +90,16 @@ struct AppShellView: View {
                         returnFromPhotoReview(session)
                     },
                     delete: {
-                        await AppShellPhotoReviewDeleteTransaction.perform(
-                            session: session,
-                            captureFlow: captureFlow,
-                            host: photoReviewHost,
-                            router: router,
-                            setReturnFocus: { pendingScanReturnFocus = $0 }
-                        )
+                        await deleteFromPhotoReview(session)
+                    },
+                    saveFailure: photoReviewSaveFailure?.sessionID == session.id
+                        ? photoReviewSaveFailure
+                        : nil,
+                    retrySave: {
+                        retryPhotoReviewSaveFailure(session)
+                    },
+                    discardPhotos: {
+                        discardPhotoReviewSaveFailure(session)
                     },
                     commitReorder: { photoID, destinationIndex in
                         await session.commitReorder(
@@ -178,6 +182,7 @@ struct AppShellView: View {
             ) else { return }
             // A new session gets a new intake, so a recovery the seller already resolved
             // cannot reappear on the next item they review.
+            photoReviewSaveFailure = nil
             let activationID = photoReviewHost.session?.intakeActivationID
             if let activationID {
                 photoReviewIntake = PhotoReviewIntake(
@@ -568,14 +573,94 @@ struct AppShellView: View {
         _ session: PhotoReviewLiveSession
     ) {
         Task {
-            _ = await AppShellPhotoReviewBackTransaction.perform(
+            let outcome = await AppShellPhotoReviewBackTransaction.perform(
+                session: session,
+                captureFlow: captureFlow,
+                host: photoReviewHost,
+                router: router,
+                setReturnFocus: { pendingScanReturnFocus = $0 },
+                onPersistenceRejected: {
+                    recordPhotoReviewSaveFailure(
+                        for: .backToCamera,
+                        session: session
+                    )
+                }
+            )
+            if case .completed = outcome {
+                photoReviewSaveFailure = nil
+            }
+        }
+    }
+
+    private func deleteFromPhotoReview(
+        _ session: PhotoReviewLiveSession,
+        expectedPhotoID: StagedCapturePhoto.ID? = nil
+    ) async -> PhotoReviewDeleteApplication? {
+        let application = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: photoReviewHost,
+            router: router,
+            setReturnFocus: { pendingScanReturnFocus = $0 },
+            expectedPhotoID: expectedPhotoID,
+            onPersistenceRejected: { photoID in
+                recordPhotoReviewSaveFailure(
+                    for: .delete(photoID),
+                    session: session
+                )
+            }
+        )
+        if application != nil {
+            photoReviewSaveFailure = nil
+        }
+        return application
+    }
+
+    private func retryPhotoReviewSaveFailure(
+        _ session: PhotoReviewLiveSession
+    ) {
+        guard let failure = photoReviewSaveFailure,
+              failure.sessionID == session.id else { return }
+        switch failure.action {
+        case .backToCamera:
+            returnFromPhotoReview(session)
+        case .delete(let photoID):
+            Task { _ = await deleteFromPhotoReview(session, expectedPhotoID: photoID) }
+        }
+    }
+
+    private func discardPhotoReviewSaveFailure(
+        _ session: PhotoReviewLiveSession
+    ) {
+        Task {
+            guard await AppShellPhotoReviewFailureDiscardTransaction.perform(
                 session: session,
                 captureFlow: captureFlow,
                 host: photoReviewHost,
                 router: router,
                 setReturnFocus: { pendingScanReturnFocus = $0 }
-            )
+            ) else {
+                return
+            }
+            photoReviewSaveFailure = nil
         }
+    }
+
+    private func recordPhotoReviewSaveFailure(
+        for action: PhotoReviewSaveFailureAction,
+        session: PhotoReviewLiveSession
+    ) {
+        guard var existing = photoReviewSaveFailure,
+              existing.sessionID == session.id,
+              existing.action == action else {
+            photoReviewSaveFailure = PhotoReviewSaveFailure(
+                sessionID: session.id,
+                action: action
+            )
+            return
+        }
+        existing.recordAnotherRejection()
+        photoReviewSaveFailure = existing
     }
 
     @discardableResult
@@ -589,6 +674,7 @@ struct AppShellView: View {
             return false
         }
         photoReviewIntake = nil
+        photoReviewSaveFailure = nil
         return true
     }
 }
@@ -673,7 +759,8 @@ enum AppShellPhotoReviewBackTransaction {
         captureFlow: CaptureFlowModel,
         host: PhotoReviewLiveHost,
         router: AppRouter,
-        setReturnFocus: (PhotoReviewScanFocus) -> Void
+        setReturnFocus: (PhotoReviewScanFocus) -> Void,
+        onPersistenceRejected: () -> Void = {}
     ) async -> PhotoReviewBackOutcome {
         guard host.beginCommit() else {
             return .sessionChanged
@@ -687,7 +774,9 @@ enum AppShellPhotoReviewBackTransaction {
         )
 
         switch outcome {
-        case .persistenceRejected, .sessionChanged:
+        case .persistenceRejected:
+            onPersistenceRejected()
+        case .sessionChanged:
             break
         case .completed(let request):
             setReturnFocus(request.focus)
@@ -851,9 +940,13 @@ enum AppShellPhotoReviewDeleteTransaction {
         captureFlow: CaptureFlowModel,
         host: PhotoReviewLiveHost,
         router: AppRouter,
-        setReturnFocus: (PhotoReviewScanFocus) -> Void
+        setReturnFocus: (PhotoReviewScanFocus) -> Void,
+        expectedPhotoID: StagedCapturePhoto.ID? = nil,
+        onPersistenceRejected: (StagedCapturePhoto.ID) -> Void = { _ in }
     ) async -> PhotoReviewDeleteApplication? {
-        guard let photoID = session.store.actionsPhotoID, host.beginCommit() else {
+        guard let photoID = session.store.actionsPhotoID,
+              expectedPhotoID == nil || expectedPhotoID == photoID,
+              host.beginCommit() else {
             return nil
         }
         defer { host.endCommit() }
@@ -862,14 +955,21 @@ enum AppShellPhotoReviewDeleteTransaction {
         guard let removedIndex = priorIDs.firstIndex(of: photoID) else {
             return nil
         }
-        guard let activationID = session.intakeActivationID,
-              let snapshot = await captureFlow.removePhotoReviewPhoto(
-                  id: photoID,
-                  expectedActivationID: activationID
-              ),
-              host.session === session,
-              [priorIDs, snapshot.photos.map(\.id)]
-                .contains(session.store.photos.map(\.id)) else {
+        guard let activationID = session.intakeActivationID else {
+            onPersistenceRejected(photoID)
+            return nil
+        }
+        let snapshot = await captureFlow.removePhotoReviewPhoto(
+            id: photoID,
+            expectedActivationID: activationID
+        )
+        guard host.session === session else { return nil }
+        guard let snapshot else {
+            onPersistenceRejected(photoID)
+            return nil
+        }
+        guard [priorIDs, snapshot.photos.map(\.id)]
+            .contains(session.store.photos.map(\.id)) else {
             return nil
         }
 
@@ -914,6 +1014,45 @@ enum AppShellPhotoReviewDeleteTransaction {
             focus: .addButton,
             announcement: finalResult.announcement
         )
+    }
+}
+
+@MainActor
+enum AppShellPhotoReviewFailureDiscardTransaction {
+    static func perform(
+        session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
+    ) async -> Bool {
+        guard host.session === session, host.beginCommit() else {
+            return false
+        }
+        defer { host.endCommit() }
+
+        guard await captureFlow.discardPhotoReviewPhotos(
+            session.store.photos,
+            expectedActivationID: session.intakeActivationID
+        ) else {
+            return false
+        }
+        guard host.session === session else {
+            return false
+        }
+        _ = await captureFlow.markPhotoReviewLeft(
+            activationID: session.intakeActivationID
+        )
+        guard host.session === session else {
+            return false
+        }
+        await captureFlow.startCamera()
+        guard host.session === session,
+              host.leaveForDepartedIntake(from: session, using: router) else {
+            return false
+        }
+        setReturnFocus(.addPhotoButton)
+        return true
     }
 }
 

@@ -181,12 +181,14 @@ enum PhotoReviewVisualStateID: String, Equatable {
     case resting = "REV-02"
     case fivePhotos = "REV-03"
     case actionsOpen = "REV-04"
+    case saveRejected = "REV-05"
+    case saveRejectedAgain = "REV-06"
 
     var photoCount: Int {
         switch self {
         case .onePhoto:
             1
-        case .resting, .actionsOpen:
+        case .resting, .actionsOpen, .saveRejected, .saveRejectedAgain:
             3
         case .fivePhotos:
             PhotoReviewCapacityPolicy.photoLimit
@@ -197,13 +199,26 @@ enum PhotoReviewVisualStateID: String, Equatable {
         switch self {
         case .resting, .actionsOpen:
             1
-        case .onePhoto, .fivePhotos:
+        case .onePhoto, .fivePhotos, .saveRejected, .saveRejectedAgain:
             0
         }
     }
 
     var presentsActions: Bool {
         self == .actionsOpen
+    }
+
+    var saveFailure: PhotoReviewSaveFailure? {
+        switch self {
+        case .saveRejected:
+            return PhotoReviewSaveFailure(action: .backToCamera)
+        case .saveRejectedAgain:
+            var failure = PhotoReviewSaveFailure(action: .backToCamera)
+            failure.recordAnotherRejection()
+            return failure
+        case .onePhoto, .resting, .fivePhotos, .actionsOpen:
+            return nil
+        }
     }
 }
 

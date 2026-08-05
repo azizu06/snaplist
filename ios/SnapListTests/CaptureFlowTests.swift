@@ -867,7 +867,6 @@ final class CaptureFlowTests: XCTestCase {
         )
         let restoration = await captureFlow.restore()
         XCTAssertEqual(restoration, .stagedPhoto)
-
         let router = AppRouter(initialFullScreen: .guidedCamera)
         router.openCaptureBoundary(
             destination: .photoReview,
@@ -1411,7 +1410,6 @@ final class CaptureFlowTests: XCTestCase {
         )
         let restoration = await captureFlow.restore()
         XCTAssertEqual(restoration, .stagedPhoto)
-
         let router = AppRouter(initialFullScreen: .guidedCamera)
         router.openCaptureBoundary(
             destination: .photoReview,
@@ -3592,6 +3590,284 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.photoReviewScanReturn, expectedReturn)
         XCTAssertNil(router.captureBoundaryRequest)
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+    }
+
+    func testPhotoReviewSaveFailureUsesApprovedCopyAndWithdrawsRetryAfterSecondRejection() {
+        var failure = PhotoReviewSaveFailure(action: .backToCamera)
+
+        XCTAssertEqual(failure.state, .firstRejection)
+        XCTAssertEqual(
+            failure.heading,
+            "These photos cannot be saved."
+        )
+        XCTAssertEqual(
+            failure.body,
+            "SnapList could not save the photos on this screen. This is a problem on this device, not something you did. No credit was used."
+        )
+        XCTAssertEqual(failure.primaryActionTitle, "Try saving again")
+        XCTAssertEqual(failure.secondaryActionTitle, "Discard these photos")
+        XCTAssertEqual(failure.discardButtonStyle, .outlined)
+        XCTAssertEqual(
+            failure.liveRegionAnnouncement,
+            "These photos cannot be saved. No credit was used. Actions: Try saving again, Discard these photos."
+        )
+
+        failure.recordAnotherRejection()
+
+        XCTAssertEqual(failure.state, .rejectedAgain)
+        XCTAssertEqual(
+            failure.heading,
+            "Saving failed again. These photos cannot be kept."
+        )
+        XCTAssertEqual(
+            failure.body,
+            "Nothing more will recover them. Discard them to continue."
+        )
+        XCTAssertNil(failure.primaryActionTitle)
+        XCTAssertEqual(failure.secondaryActionTitle, "Discard these photos")
+        XCTAssertEqual(failure.discardButtonStyle, .filled)
+        XCTAssertEqual(
+            failure.liveRegionAnnouncement,
+            "Saving failed again. These photos cannot be kept. Actions: Discard these photos."
+        )
+    }
+
+    func testPhotoReviewV15FailureFixturesExposeBothFrozenStates() {
+        let first = try! XCTUnwrap(PhotoReviewVisualStateID.saveRejected.saveFailure)
+        let second = try! XCTUnwrap(
+            PhotoReviewVisualStateID.saveRejectedAgain.saveFailure
+        )
+
+        XCTAssertEqual(PhotoReviewVisualStateID.saveRejected.rawValue, "REV-05")
+        XCTAssertEqual(
+            PhotoReviewVisualStateID.saveRejectedAgain.rawValue,
+            "REV-06"
+        )
+        XCTAssertEqual(first.state, .firstRejection)
+        XCTAssertEqual(second.state, .rejectedAgain)
+    }
+
+    func testPhotoReviewSaveFailureAnnouncesEachFrozenReadingOnce() {
+        var consumer = PhotoReviewSaveFailureAnnouncementConsumer()
+        var failure = PhotoReviewSaveFailure(action: .backToCamera)
+
+        XCTAssertEqual(
+            consumer.consume(failure),
+            "These photos cannot be saved. No credit was used. Actions: Try saving again, Discard these photos."
+        )
+        XCTAssertNil(consumer.consume(failure))
+
+        failure.recordAnotherRejection()
+
+        XCTAssertEqual(
+            consumer.consume(failure),
+            "Saving failed again. These photos cannot be kept. Actions: Discard these photos."
+        )
+        XCTAssertNil(consumer.consume(failure))
+
+        XCTAssertNil(consumer.consume(nil))
+        let laterDeleteFailure = PhotoReviewSaveFailure(
+            action: .delete(UUID())
+        )
+        XCTAssertEqual(
+            consumer.consume(laterDeleteFailure),
+            "These photos cannot be saved. No credit was used. Actions: Try saving again, Discard these photos."
+        )
+    }
+
+    func testPhotoReviewSaveFailureEvidenceUsesCenteredFloorAndAdaptiveColumns() {
+        let onePhoto = PhotoReviewSaveFailureEvidenceLayout(
+            photoCount: 1,
+            isAccessibilitySize: false
+        )
+        let oneColumn = onePhoto.columnCount(for: 339)
+        XCTAssertEqual(oneColumn, 1)
+        XCTAssertEqual(onePhoto.minimumHeight(for: oneColumn), 166)
+        XCTAssertEqual(
+            onePhoto.tileWidth(
+                in: CGSize(width: 339, height: onePhoto.minimumHeight(for: oneColumn)),
+                columns: oneColumn
+            ),
+            104
+        )
+
+        let accessibilityThreePhotos = PhotoReviewSaveFailureEvidenceLayout(
+            photoCount: 3,
+            isAccessibilitySize: true
+        )
+        XCTAssertEqual(accessibilityThreePhotos.columnCount(for: 339), 3)
+
+        let accessibilityFivePhotos = PhotoReviewSaveFailureEvidenceLayout(
+            photoCount: 5,
+            isAccessibilitySize: true
+        )
+        XCTAssertEqual(accessibilityFivePhotos.columnCount(for: 339), 3)
+        XCTAssertEqual(accessibilityFivePhotos.minimumColumnCount, 3)
+        XCTAssertEqual(
+            accessibilityFivePhotos.minimumHeight(
+                for: accessibilityFivePhotos.minimumColumnCount
+            ),
+            306
+        )
+    }
+
+    func testRejectedPhotoReviewDeleteKeepsPhotosAndSignalsTheFailure() async {
+        let photo = makeStagedPhoto(
+            id: "48700000-0000-4000-8000-000000000006"
+        )
+        let draftStore = TestCaptureStore(
+            staged: photo,
+            replacePhotosError: CaptureDraftStoreError.invalidManifest
+        )
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: draftStore
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try! XCTUnwrap(host.session)
+        XCTAssertTrue(session.store.selectPhotoForActions(id: photo.id))
+        let expectedPhotoID = try! XCTUnwrap(session.store.actionsPhotoID)
+        var rejectedPhotoIDs: [StagedCapturePhoto.ID] = []
+
+        let deletion = await AppShellPhotoReviewDeleteTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in },
+            expectedPhotoID: expectedPhotoID,
+            onPersistenceRejected: { rejectedPhotoIDs.append($0) }
+        )
+
+        XCTAssertNil(deletion)
+        XCTAssertEqual(rejectedPhotoIDs, [expectedPhotoID])
+        XCTAssertEqual(session.store.photos, [photo])
+        XCTAssertTrue(host.session === session)
+        XCTAssertEqual(captureFlow.stagedPhotos, [photo])
+    }
+
+    func testRejectedPhotoReviewBackKeepsPhotosAndOffersTheDurableDiscardExit() async {
+        let photo = makeStagedPhoto(
+            id: "48700000-0000-4000-8000-000000000001"
+        )
+        let draftStore = TestCaptureStore(
+            staged: photo,
+            replacePhotosError: CaptureDraftStoreError.invalidManifest
+        )
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: draftStore
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: captureFlow.stagedPhotos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let session = try! XCTUnwrap(host.session)
+
+        var rejectedBackCount = 0
+        let backOutcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in },
+            onPersistenceRejected: { rejectedBackCount += 1 }
+        )
+
+        XCTAssertEqual(backOutcome, .persistenceRejected)
+        XCTAssertEqual(rejectedBackCount, 1)
+        XCTAssertEqual(session.store.photos, [photo])
+        XCTAssertTrue(host.session === session)
+
+        let discarded = await AppShellPhotoReviewFailureDiscardTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertTrue(discarded)
+        XCTAssertEqual(draftStore.discardCount, 1)
+        XCTAssertNil(host.session)
+        XCTAssertTrue(captureFlow.stagedPhotos.isEmpty)
+        XCTAssertEqual(
+            router.photoReviewScanReturn,
+            PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+        )
+    }
+
+    func testPhotoReviewFailureDiscardLeavesAReplacementSessionUntouched() async {
+        let stalePhoto = makeStagedPhoto(
+            id: "48700000-0000-4000-8000-000000000003"
+        )
+        let replacementPhoto = makeStagedPhoto(
+            id: "48700000-0000-4000-8000-000000000004"
+        )
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: TestCaptureStore(staged: stalePhoto)
+        )
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [stalePhoto],
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let staleSession = try! XCTUnwrap(host.session)
+
+        XCTAssertTrue(host.leaveForDepartedIntake(from: staleSession, using: router))
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [replacementPhoto],
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        let replacementSession = try! XCTUnwrap(host.session)
+
+        let discarded = await AppShellPhotoReviewFailureDiscardTransaction.perform(
+            session: staleSession,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { _ in }
+        )
+
+        XCTAssertFalse(discarded)
+        XCTAssertFalse(host.isCommitting)
+        XCTAssertTrue(host.session === replacementSession)
+        XCTAssertEqual(replacementSession.store.photos, [replacementPhoto])
     }
 
     func testDepartedPhotoReviewRestartsCameraForTheGuidedScanReturn() async {
@@ -10961,15 +11237,18 @@ private final class TestCaptureStore: CaptureDraftStoring {
     var loadPhotosCount = 0
     private var stageError: Error?
     private let loadPhotosError: Error?
+    private let replacePhotosError: Error?
 
     init(
         staged: StagedCapturePhoto? = nil,
         stageError: Error? = nil,
-        loadPhotosError: Error? = nil
+        loadPhotosError: Error? = nil,
+        replacePhotosError: Error? = nil
     ) {
         stagedPhotos = staged.map { [$0] } ?? []
         self.stageError = stageError
         self.loadPhotosError = loadPhotosError
+        self.replacePhotosError = replacePhotosError
     }
 
     func load() async throws -> StagedCapturePhoto? { staged }
@@ -11056,6 +11335,7 @@ private final class TestCaptureStore: CaptureDraftStoring {
     }
 
     func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        if let replacePhotosError { throw replacePhotosError }
         stagedPhotos = photos
     }
 }
