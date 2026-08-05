@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +22,15 @@ SPEC.loader.exec_module(GRAPHIFY)
 
 
 class IncrementalGraphifyContractTest(unittest.TestCase):
+    def run_generator(self, *args: str) -> None:
+        previous_argv = sys.argv
+        try:
+            sys.argv = [str(MODULE_PATH), *args]
+            with contextlib.redirect_stdout(io.StringIO()):
+                GRAPHIFY.main()
+        finally:
+            sys.argv = previous_argv
+
     def test_incremental_merge_replaces_changed_source_and_preserves_unchanged_records(self) -> None:
         previous = {
             "nodes": [
@@ -93,8 +105,8 @@ class IncrementalGraphifyContractTest(unittest.TestCase):
         self.assertEqual(merged["nodes"], [{"id": "kept", "source_file": "src/lib/kept.ts"}])
         self.assertEqual(merged["edges"], [])
 
-    def test_related_unchanged_source_is_reextracted_for_cross_file_edge(self) -> None:
-        extraction = {
+    def test_incremental_merge_preserves_unchanged_inbound_edge_to_replaced_node(self) -> None:
+        previous = {
             "nodes": [
                 {"id": "changed", "source_file": "src/lib/changed.ts"},
                 {"id": "stable", "source_file": "src/lib/stable.ts"},
@@ -103,10 +115,11 @@ class IncrementalGraphifyContractTest(unittest.TestCase):
                 {"source": "stable", "target": "changed", "relation": "uses", "source_file": "src/lib/stable.ts"},
             ],
         }
+        changed = {"nodes": [{"id": "changed", "source_file": "src/lib/changed.ts"}], "edges": []}
 
         self.assertEqual(
-            GRAPHIFY.related_sources(extraction, {"src/lib/changed.ts"}),
-            {"src/lib/changed.ts", "src/lib/stable.ts"},
+            GRAPHIFY.merge_incremental_extraction(previous, changed, {"src/lib/changed.ts"})["edges"],
+            previous["edges"],
         )
 
     def test_changed_scope_paths_uses_committed_source_delta(self) -> None:
@@ -133,6 +146,57 @@ class IncrementalGraphifyContractTest(unittest.TestCase):
                 GRAPHIFY.changed_scope_paths(repo, before, after, {"src/lib/core.ts"}),
                 {"src/lib/core.ts"},
             )
+
+    def test_real_incremental_generation_updates_heading_and_preserves_unchanged_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            repo.mkdir()
+            scope = repo / "scope.txt"
+            prd = repo / "PRD.md"
+            agents = repo / "AGENTS.md"
+            prd.write_text("# Product\n", encoding="utf-8")
+            agents.write_text("# Agent rules\n", encoding="utf-8")
+            scope.write_text("AGENTS.md\nPRD.md\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "baseline"],
+                check=True,
+            )
+            baseline = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            corpus = Path(directory) / "corpus"
+            corpus.mkdir()
+            (corpus / "PRD.md").write_text(prd.read_text(encoding="utf-8"), encoding="utf-8")
+            (corpus / "AGENTS.md").write_text(agents.read_text(encoding="utf-8"), encoding="utf-8")
+
+            required_labels = GRAPHIFY.REQUIRED_LABEL_FRAGMENTS
+            GRAPHIFY.REQUIRED_LABEL_FRAGMENTS = set()
+            try:
+                self.run_generator("--repo", str(repo), "--scope", str(scope), "--source-commit", baseline, "--corpus", str(corpus))
+                baseline_receipt = json.loads((repo / "graphify-out" / GRAPHIFY.RECEIPT_FILE).read_text(encoding="utf-8"))
+                unchanged_nodes = [
+                    node for node in json.loads((repo / "graphify-out" / GRAPHIFY.STATE_FILE).read_text(encoding="utf-8"))["extraction"]["nodes"]
+                    if node.get("source_file") == "AGENTS.md"
+                ]
+
+                prd.write_text("# Product\n## Incremental receipt\n", encoding="utf-8")
+                subprocess.run(
+                    ["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-am", "heading"],
+                    check=True,
+                )
+                source_commit = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+                (corpus / "PRD.md").write_text(prd.read_text(encoding="utf-8"), encoding="utf-8")
+                self.run_generator("--incremental", "--repo", str(repo), "--scope", str(scope), "--source-commit", source_commit, "--corpus", str(corpus))
+            finally:
+                GRAPHIFY.REQUIRED_LABEL_FRAGMENTS = required_labels
+
+            receipt = json.loads((repo / "graphify-out" / GRAPHIFY.RECEIPT_FILE).read_text(encoding="utf-8"))
+            state = json.loads((repo / "graphify-out" / GRAPHIFY.STATE_FILE).read_text(encoding="utf-8"))
+            self.assertEqual(receipt["source_sha"], source_commit)
+            self.assertEqual(receipt["run_mode"], "incremental")
+            self.assertEqual(receipt["changed_file_count"], 1)
+            self.assertGreater(receipt["node_count"], baseline_receipt["node_count"])
+            self.assertEqual([node for node in state["extraction"]["nodes"] if node.get("source_file") == "AGENTS.md"], unchanged_nodes)
 
 
 if __name__ == "__main__":

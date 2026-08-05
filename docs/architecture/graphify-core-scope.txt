@@ -229,7 +229,6 @@ src/lib/llm/contracts.ts
 src/lib/llm/index.ts
 src/lib/llm/registry.ts
 src/lib/llm/seller-context.ts
-src/lib/marketing/site.ts
 src/lib/marketplace/ebay/auth.ts
 src/lib/marketplace/ebay/connections.ts
 src/lib/marketplace/ebay/deletion.ts

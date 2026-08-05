@@ -9,6 +9,7 @@ corpus_root=""
 archive_path=""
 incremental=false
 check_only=false
+prepare_only=false
 
 cleanup() {
   rm -f "$generated_scope"
@@ -25,13 +26,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --incremental) incremental=true ;;
     --check) check_only=true ;;
-    --prepare-only)
-      if [[ "$check_only" == true || "$incremental" == true ]]; then
-        echo "--prepare-only cannot be combined with --incremental or --check" >&2
-        exit 2
-      fi
-      prepare_only=true
-      ;;
+    --prepare-only) prepare_only=true ;;
     *)
       echo "Usage: scripts/graphify-core-product.sh [--incremental] [--check] [--prepare-only]" >&2
       exit 2
@@ -40,9 +35,14 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if [[ "$prepare_only" == true && ( "$incremental" == true || "$check_only" == true ) ]]; then
+  echo "--prepare-only cannot be combined with --incremental or --check" >&2
+  exit 2
+fi
+
 git ls-files \
   | grep -E '^(\.env\.example|AGENTS\.md|CONTEXT\.md|PRD\.md|Dockerfile(\.mobile-runtime-proof)?|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|next\.config\.(ts|js)|vitest\.config\.(ts|js)|eslint\.config\.(js|mjs)|vercel\.json|docs/(adr/|agents/|contracts/|design/native-v1-)|ios/(DesignContracts/V1/(README-FIRST\.md|mobile-api-v1\.openapi\.json|snaplist-swiftui-mapping-notes\.md)|SnapList/.*\.swift$|SnapList\.xcodeproj/project\.pbxproj$)|src/(instrumentation\.ts$|lib/|app/\(app\)/.*actions\.ts$|app/api/|app/v1/|app/webhooks/|runtime/|proxy\.ts$)|supabase/(migrations/|functions/|config\.toml$)|evals/(README|run|schema|metrics))' \
-  | grep -Ev '(^|/)(__snapshots__|node_modules|\.next|DerivedData|fixtures?|testdata|goldens?)(/|$)|Fixtures?\.swift$|fixtures?\.(ts|tsx)$|demo-products\.ts$|\.(test|spec)\.(ts|tsx|swift)$|/Tests?/|UITests|\.xcresult|\.(png|jpe?g|gif|mp4|mov|webm|pdf)$' \
+  | grep -Ev '(^|/)(__snapshots__|node_modules|\.next|DerivedData|fixtures?|testdata|goldens?|src/lib/marketing)(/|$)|Fixtures?\.swift$|fixtures?\.(ts|tsx)$|demo-products\.ts$|\.(test|spec)\.(ts|tsx|swift)$|/Tests?/|UITests|\.xcresult|\.(png|jpe?g|gif|mp4|mov|webm|pdf)$' \
   > "$generated_scope"
 
 if ! cmp -s "$scope_file" "$generated_scope"; then

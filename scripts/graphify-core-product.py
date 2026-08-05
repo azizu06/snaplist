@@ -32,6 +32,11 @@ GRAPHIFY_VERSION = "0.8.33"
 SQL_PARSER_VERSION = "0.3.11"
 STATE_FILE = "core-product-state.json"
 RECEIPT_FILE = "core-product-receipt.json"
+REQUIRED_LABEL_FRAGMENTS = {
+    "reserve_ai_item_credit_for_pipeline_run",
+    "pipeline_runs",
+    "UserTokenProvider",
+}
 
 
 def scope_digest(scope: list[str]) -> str:
@@ -96,47 +101,38 @@ def changed_scope_paths(repo: Path, previous_commit: str, source_commit: str, sc
 
 
 def remove_sources(extraction: dict, sources: set[str]) -> dict:
-    removed_node_ids = {
-        node.get("id")
-        for node in extraction.get("nodes", [])
-        if node.get("source_file") in sources
-    }
     nodes = [node for node in extraction.get("nodes", []) if node.get("source_file") not in sources]
     edges = [
         edge
         for edge in extraction.get("edges", [])
         if edge.get("source_file") not in sources
-        and edge.get("source") not in removed_node_ids
-        and edge.get("target") not in removed_node_ids
     ]
     return {"nodes": nodes, "edges": edges, "hyperedges": []}
 
 
-def related_sources(extraction: dict, changed_sources: set[str]) -> set[str]:
-    """Re-extract unchanged sources whose AST edges point at changed nodes."""
-    changed_node_ids = {
+def merge_incremental_extraction(previous: dict, changed: dict, changed_sources: set[str]) -> dict:
+    """Replace changed sources while retaining valid unchanged inbound edges."""
+    removed_node_ids = {
         node.get("id")
-        for node in extraction.get("nodes", [])
+        for node in previous.get("nodes", [])
         if node.get("source_file") in changed_sources
     }
-    related = set(changed_sources)
-    for edge in extraction.get("edges", []):
-        if edge.get("source") in changed_node_ids or edge.get("target") in changed_node_ids:
-            source = edge.get("source_file")
-            if isinstance(source, str):
-                related.add(source)
-    return related
-
-
-def merge_incremental_extraction(previous: dict, changed: dict, changed_sources: set[str]) -> dict:
-    """Replace only graph records produced by changed scoped sources."""
     preserved = remove_sources(previous, changed_sources)
+    replacement_ids = {node.get("id") for node in changed.get("nodes", [])}
+    preserved["edges"] = [
+        edge
+        for edge in preserved["edges"]
+        if (edge.get("source") not in removed_node_ids or edge.get("source") in replacement_ids)
+        and (edge.get("target") not in removed_node_ids or edge.get("target") in replacement_ids)
+    ]
     merged = {
         "nodes": [*preserved["nodes"], *changed.get("nodes", [])],
         "edges": [*preserved["edges"], *changed.get("edges", [])],
         "hyperedges": [],
     }
     return normalize_extraction(merged, Path("."))
+
+
 def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
@@ -425,35 +421,29 @@ def main() -> None:
     else:
         run_mode = "incremental"
         changed_paths = changed_scope_paths(repo, state["source_commit"], args.source_commit, set(scope))
-        reextract_paths = related_sources(state["extraction"], changed_paths)
         changed_code_paths = [
             corpus / relative
-            for relative in sorted(reextract_paths)
+            for relative in sorted(changed_paths)
             if (corpus / relative).exists()
             and (corpus / relative) in {Path(path) for path in detection.get("files", {}).get("code", [])}
         ]
         for relative in SAFE_LOCAL_AST_OVERRIDES:
             override = corpus / relative
-            if relative in reextract_paths and override.exists() and override not in changed_code_paths:
+            if relative in changed_paths and override.exists() and override not in changed_code_paths:
                 changed_code_paths.append(override)
         ast = extract(changed_code_paths, cache_root=corpus)
         changed_extraction = normalize_extraction(ast, corpus)
-        add_scope_nodes(changed_extraction, scope, corpus, reextract_paths)
-        extraction = merge_incremental_extraction(state["extraction"], changed_extraction, reextract_paths)
+        add_scope_nodes(changed_extraction, scope, corpus, changed_paths)
+        extraction = merge_incremental_extraction(state["extraction"], changed_extraction, changed_paths)
 
     represented = {node.get("source_file") for node in extraction["nodes"]}
     missing = sorted(set(scope) - represented)
     if missing:
         raise SystemExit(f"Graph omitted scoped files: {missing}")
-    required_label_fragments = {
-        "reserve_ai_item_credit_for_pipeline_run",
-        "pipeline_runs",
-        "UserTokenProvider",
-    }
     labels_present = {str(node.get("label", "")) for node in extraction["nodes"]}
     absent_labels = sorted(
         fragment
-        for fragment in required_label_fragments
+        for fragment in REQUIRED_LABEL_FRAGMENTS
         if not any(fragment in label for label in labels_present)
     )
     if absent_labels:
