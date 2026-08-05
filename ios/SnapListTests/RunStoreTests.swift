@@ -132,6 +132,11 @@ final class RunStoreTests: XCTestCase {
             tokenProvider: RunStoreBearerTokenProvider { "guestcap_token" },
             guestRecoveryCredentials: credentials,
             guestClaimAuthorities: authorities,
+            now: {
+                ISO8601DateFormatter.snapListDate(
+                    from: "2026-08-04T13:00:00.000Z"
+                )!
+            },
             funnelAnalytics: funnelAnalytics
         )
 
