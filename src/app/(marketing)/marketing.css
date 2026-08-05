@@ -665,15 +665,6 @@ html:has(.mkt) {
   line-height: 1.35;
 }
 
-.mkt-scr__row {
-  display: flex;
-  gap: 9px;
-}
-
-.mkt-scr__row > * {
-  flex: 1;
-}
-
 .mkt-scr__cta {
   margin: 10px 16px 18px;
   height: 42px;
