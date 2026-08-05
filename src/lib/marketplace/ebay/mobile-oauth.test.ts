@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createMobileApiHandler } from "@/lib/mobile-api/app";
 import {
   createMobileEbayOauthOperations,
   type MobileEbayOauthSessionStore,
@@ -28,6 +29,19 @@ function activationFixture(
   const finishSession = vi.fn(async (input: {
     outcome: "declined" | "cancelled" | "expired" | "failed";
   }) => ({ kind: "finished" as const, outcome: input.outcome }));
+  const beginSession = vi.fn().mockResolvedValue({
+    kind: "claimed" as const,
+    leaseToken: "67400000-0000-4000-8000-000000000003",
+  });
+  const completeSession = vi.fn().mockResolvedValue({
+    kind: "connected" as const,
+  });
+  const exchangeCode = vi.fn().mockResolvedValue({
+    accessToken: "access-token",
+    refreshToken: "refresh-token",
+    accessTokenExpiresAt: Date.parse("2026-08-05T20:00:00.000Z"),
+    scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+  });
   const store: MobileEbayOauthSessionStore = {
     createOrReplaySession,
     async getSession(sessionId) {
@@ -36,12 +50,8 @@ function activationFixture(
         : null;
     },
     finishSession,
-    async beginSession() {
-      return { kind: "wrong_tenant" as const };
-    },
-    async completeSession() {
-      return { kind: "wrong_tenant" as const };
-    },
+    beginSession,
+    completeSession,
     async failSession() {
       return { kind: "finished" as const, outcome: "failed" as const };
     },
@@ -49,6 +59,11 @@ function activationFixture(
   const operations = createMobileEbayOauthOperations({
     store,
     env: () => env,
+    exchangeCode,
+    fetchIdentity: vi.fn().mockResolvedValue({
+      userId: "ebay-user-674",
+      username: "seller_674",
+    }),
     randomUUID: () => SESSION_ID,
   });
   const createSession = () => operations.createSession({
@@ -56,19 +71,23 @@ function activationFixture(
     bearerToken: "tenant-a-jwt",
     idempotencyKey: "67400000-0000-4000-8000-000000000002",
   });
-  const completeCallback = (state: string) => operations.completeCallback({
-    state,
-    code: null,
-    error: null,
-    errorDescription: null,
-  });
+  const completeCallback = (state: string, code: string | null = null) =>
+    operations.completeCallback({
+      state,
+      code,
+      error: null,
+      errorDescription: null,
+    });
 
   return {
     completeCallback,
+    completeSession,
     createOrReplaySession,
     createSession,
     env,
+    exchangeCode,
     finishSession,
+    operations,
   };
 }
 
@@ -79,22 +98,28 @@ function stateFrom(authorizationUrl: string): string {
 }
 
 describe("mobile eBay OAuth operator activation", () => {
-  it("allows Sandbox session creation and callback completion with the flag unset", async () => {
-    const fixture = activationFixture();
+  it.each([
+    "https://api.sandbox.ebay.com",
+    "https://API.SANDBOX.EBAY.COM:443/",
+  ])(
+    "allows exact Sandbox origin %s with the flag unset",
+    async (baseUrl) => {
+      const fixture = activationFixture({ EBAY_BASE_URL: baseUrl });
 
-    const session = await fixture.createSession();
-    const callback = await fixture.completeCallback(
-      stateFrom(session.authorizationUrl),
-    );
+      const session = await fixture.createSession();
+      const callback = await fixture.completeCallback(
+        stateFrom(session.authorizationUrl),
+      );
 
-    expect(new URL(session.authorizationUrl).origin).toBe(
-      "https://auth.sandbox.ebay.com",
-    );
-    expect(callback.redirectUrl).toBe(
-      "https://snaplist.example/mobile/ebay/oauth?result=cancelled",
-    );
-    expect(fixture.finishSession).toHaveBeenCalledOnce();
-  });
+      expect(new URL(session.authorizationUrl).origin).toBe(
+        "https://auth.sandbox.ebay.com",
+      );
+      expect(callback.redirectUrl).toBe(
+        "https://snaplist.example/mobile/ebay/oauth?result=cancelled",
+      );
+      expect(fixture.finishSession).toHaveBeenCalledOnce();
+    },
+  );
 
   it.each([
     ["unset", undefined],
@@ -114,32 +139,81 @@ describe("mobile eBay OAuth operator activation", () => {
       );
       await expect(
         fixture.completeCallback(stateFrom(sandboxSession.authorizationUrl)),
-      ).resolves.toEqual({
-        redirectUrl: "https://snaplist.example/mobile/ebay/oauth?result=failed",
-      });
+      ).rejects.toThrow(/EBAY_PRODUCTION_MOBILE_ENABLED/);
       expect(fixture.createOrReplaySession).toHaveBeenCalledOnce();
       expect(fixture.finishSession).not.toHaveBeenCalled();
     },
   );
 
-  it("allows production session creation and callback completion only with the exact true flag", async () => {
+  it.each([
+    "https://api.ebay.com",
+    "https://API.EBAY.COM:443/",
+  ])(
+    "allows exact production origin %s only with the exact true flag",
+    async (baseUrl) => {
+      const fixture = activationFixture({
+        EBAY_BASE_URL: baseUrl,
+        EBAY_PRODUCTION_MOBILE_ENABLED: "true",
+      });
+
+      const session = await fixture.createSession();
+      const callback = await fixture.completeCallback(
+        stateFrom(session.authorizationUrl),
+        "provider-code",
+      );
+
+      expect(new URL(session.authorizationUrl).origin).toBe(
+        "https://auth.ebay.com",
+      );
+      expect(callback.redirectUrl).toBe(
+        "https://snaplist.example/mobile/ebay/oauth?result=connected",
+      );
+      expect(fixture.exchangeCode).toHaveBeenCalledWith(
+        "provider-code",
+        expect.objectContaining({ EBAY_BASE_URL: "https://api.ebay.com" }),
+      );
+      expect(fixture.completeSession).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("returns a production authorization URL through the authenticated mobile HTTP seam", async () => {
     const fixture = activationFixture({
       EBAY_BASE_URL: "https://api.ebay.com",
       EBAY_PRODUCTION_MOBILE_ENABLED: "true",
     });
+    const authenticate = vi.fn().mockResolvedValue({ userId: "tenant_a" });
+    const api = createMobileApiHandler({
+      authenticate,
+      ebayOauth: fixture.operations,
+      requestId: () => "request-674-production-oauth",
+      worker: {
+        consume: async () => ({
+          acknowledged: 0,
+          claimed: 0,
+          failed: 0,
+          retrying: 0,
+          skipped: 0,
+          succeeded: 0,
+        }),
+      },
+    });
 
-    const session = await fixture.createSession();
-    const callback = await fixture.completeCallback(
-      stateFrom(session.authorizationUrl),
+    const response = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "67400000-0000-4000-8000-000000000004",
+        },
+      }),
     );
+    const body = await response.json();
 
-    expect(new URL(session.authorizationUrl).origin).toBe(
+    expect(response.status).toBe(201);
+    expect(authenticate).toHaveBeenCalledWith("tenant-a-jwt");
+    expect(new URL(body.data.authorizationUrl).origin).toBe(
       "https://auth.ebay.com",
     );
-    expect(callback.redirectUrl).toBe(
-      "https://snaplist.example/mobile/ebay/oauth?result=cancelled",
-    );
-    expect(fixture.finishSession).toHaveBeenCalledOnce();
   });
 
   it.each([

@@ -515,15 +515,21 @@ describe("mobile eBay publish boundary", () => {
     },
   );
 
-  it("allows the production adapter with the exact true flag", async () => {
-    const { adapter, response } = await publishActivationAttempt({
-      EBAY_BASE_URL: "https://api.ebay.com",
-      EBAY_PRODUCTION_MOBILE_ENABLED: "true",
-    });
+  it.each([
+    "https://api.ebay.com",
+    "https://API.EBAY.COM:443/",
+  ])(
+    "allows the exact production origin %s with the exact true flag",
+    async (baseUrl) => {
+      const { adapter, response } = await publishActivationAttempt({
+        EBAY_BASE_URL: baseUrl,
+        EBAY_PRODUCTION_MOBILE_ENABLED: "true",
+      });
 
-    expect(response.status).toBe(200);
-    expect(adapter.requests).toHaveLength(1);
-  });
+      expect(response.status).toBe(200);
+      expect(adapter.requests).toHaveLength(1);
+    },
+  );
 
   it.each([
     ["other origin", "https://api.sandbox.ebay.com.attacker.example"],

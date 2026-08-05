@@ -168,8 +168,11 @@ export function createMobileEbayPublishService(input: {
       );
     },
     async publish(operation) {
-      const env = input.env?.() ?? process.env;
-      assertMobileEbayOperatorActivation(env);
+      const configuredEnv = input.env?.() ?? process.env;
+      const env = {
+        ...configuredEnv,
+        EBAY_BASE_URL: assertMobileEbayOperatorActivation(configuredEnv),
+      };
       const client = input.clientForBearer(operation.bearerToken);
       const currentStatus = await readMobilePublishStatus(
         client,

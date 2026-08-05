@@ -12,7 +12,10 @@ import {
   parseEncryptionKey,
 } from "@/lib/crypto/secretbox";
 import { buildAuthorizeUrl } from "./oauth";
-import { assertMobileEbayOperatorActivation } from "./mobile-operator-activation";
+import {
+  assertMobileEbayOperatorActivation,
+  EbayProductionMobileDisabledError,
+} from "./mobile-operator-activation";
 import {
   exchangeAuthorizationCode,
   fetchEbayIdentity,
@@ -285,8 +288,10 @@ export function createMobileEbayOauthOperations(input: {
     async createSession({ userId, bearerToken, idempotencyKey }) {
       const configuredEnv = readEnv();
       validatedMobileReturnUrl(configuredEnv);
-      const env = mobileProviderEnv(configuredEnv);
-      assertMobileEbayOperatorActivation(env);
+      const env = {
+        ...mobileProviderEnv(configuredEnv),
+        EBAY_BASE_URL: assertMobileEbayOperatorActivation(configuredEnv),
+      };
       const stored = await input.store.createOrReplaySession({
         proposedSessionId: nextUUID(),
         userId,
@@ -304,9 +309,12 @@ export function createMobileEbayOauthOperations(input: {
       validatedMobileReturnUrl(configuredEnv);
       let env: Env;
       try {
-        env = mobileProviderEnv(configuredEnv);
-        assertMobileEbayOperatorActivation(env);
-      } catch {
+        env = {
+          ...mobileProviderEnv(configuredEnv),
+          EBAY_BASE_URL: assertMobileEbayOperatorActivation(configuredEnv),
+        };
+      } catch (error) {
+        if (error instanceof EbayProductionMobileDisabledError) throw error;
         return { redirectUrl: mobileReturnUrl(configuredEnv, "failed") };
       }
       const decoded = decodeState(state);

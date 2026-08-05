@@ -3,26 +3,41 @@ type Env = Record<string, string | undefined>;
 const SANDBOX_API_ORIGIN = "https://api.sandbox.ebay.com";
 const PRODUCTION_API_ORIGIN = "https://api.ebay.com";
 
-function isBareOrigin(configured: string, origin: string): boolean {
-  return configured === origin || configured === `${origin}/`;
-}
+export class EbayProductionMobileDisabledError extends Error {}
 
-export function assertMobileEbayOperatorActivation(env: Env): void {
+export function assertMobileEbayOperatorActivation(env: Env): string {
   const configured = env.EBAY_BASE_URL ?? SANDBOX_API_ORIGIN;
+  if (!/^https:\/\/[^/?#]+\/?$/i.test(configured)) {
+    throw invalidMobileEbayBaseUrl();
+  }
 
-  if (isBareOrigin(configured, SANDBOX_API_ORIGIN)) return;
+  let parsed: URL;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw invalidMobileEbayBaseUrl();
+  }
+  if (parsed.username || parsed.password || parsed.pathname !== "/") {
+    throw invalidMobileEbayBaseUrl();
+  }
 
-  if (isBareOrigin(configured, PRODUCTION_API_ORIGIN)) {
+  if (parsed.origin === SANDBOX_API_ORIGIN) return SANDBOX_API_ORIGIN;
+
+  if (parsed.origin === PRODUCTION_API_ORIGIN) {
     if (env.EBAY_PRODUCTION_MOBILE_ENABLED !== "true") {
-      throw new Error(
+      throw new EbayProductionMobileDisabledError(
         "Production mobile eBay OAuth and publish are disabled. Set "
           + 'EBAY_PRODUCTION_MOBILE_ENABLED="true" to activate them.',
       );
     }
-    return;
+    return PRODUCTION_API_ORIGIN;
   }
 
-  throw new Error(
+  throw invalidMobileEbayBaseUrl();
+}
+
+function invalidMobileEbayBaseUrl(): Error {
+  return new Error(
     "Mobile eBay OAuth and publish require EBAY_BASE_URL to be the bare "
       + "Sandbox or Production API origin.",
   );
