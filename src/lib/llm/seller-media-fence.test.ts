@@ -156,7 +156,7 @@ describe("parseEnv", () => {
     NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon",
     SUPABASE_SECRET_KEY: "sb_secret",
     SUPABASE_SERVICE_ROLE_KEY: "service",
-    SERVER_RPC_SECRET: "server-rpc-secret-with-at-least-32-characters",
+    SERVER_RPC_SECRET: "dOD9IRVTwgq/GTVsIoNQ29nsUWHdqgRjpgdYQN7Yy0QUqS7yFBsMq6fknzT+jiTI",
     REVENUECAT_SECRET_API_KEY: "sk_revenuecat",
     REVENUECAT_PROJECT_ID: "proj",
     APPLE_TEAM_ID: "A1B2C3D4E5",

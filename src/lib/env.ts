@@ -13,15 +13,65 @@ const LOCAL_SERVER_RPC_SECRET =
   "snaplist-local-server-rpc-secret-do-not-use-in-hosted";
 
 // `openssl rand -base64 48` produces 48 random bytes encoded as 64 unpadded
-// Base64 characters. Keep this deployed-only: checked-in local/test fixtures
+// Base64 characters. Syntax cannot prove randomness or provenance, so that
+// command remains the canonical source; these checks only reject obviously
+// predictable patterns. Keep this deployed-only: checked-in local/test fixtures
 // intentionally remain usable without pretending to be production secrets.
 const DEPLOYED_SERVER_RPC_SECRET_PATTERN = /^[A-Za-z0-9+/]{64}$/;
 const MINIMUM_SERVER_RPC_SECRET_DISTINCT_CHARACTERS = 16;
+const REPEATED_SERVER_RPC_SECRET_BLOCK_LENGTH = 8;
+const ORDERED_SERVER_RPC_SECRET_RUN_LENGTH = 10;
+const ORDERED_SERVER_RPC_SECRET_ALPHABETS = [
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+  "0123456789abcdefghijklmnopqrstuvwxyz",
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+] as const;
+
+function hasRepeatedServerRpcSecretBlock(value: string): boolean {
+  const blocks = new Set<string>();
+  for (
+    let start = 0;
+    start <= value.length - REPEATED_SERVER_RPC_SECRET_BLOCK_LENGTH;
+    start += 1
+  ) {
+    const block = value.slice(
+      start,
+      start + REPEATED_SERVER_RPC_SECRET_BLOCK_LENGTH,
+    );
+    if (blocks.has(block)) return true;
+    blocks.add(block);
+  }
+  return false;
+}
+
+function hasLongOrderedServerRpcSecretRun(value: string): boolean {
+  return ORDERED_SERVER_RPC_SECRET_ALPHABETS.some((alphabet) => {
+    const descending = [...alphabet].reverse().join("");
+    return [alphabet, descending].some((ordered) => {
+      for (
+        let start = 0;
+        start <= ordered.length - ORDERED_SERVER_RPC_SECRET_RUN_LENGTH;
+        start += 1
+      ) {
+        if (
+          value.includes(
+            ordered.slice(start, start + ORDERED_SERVER_RPC_SECRET_RUN_LENGTH),
+          )
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+  });
+}
 
 function isGeneratedServerRpcSecret(value: string): boolean {
   return (
     DEPLOYED_SERVER_RPC_SECRET_PATTERN.test(value)
     && new Set(value).size >= MINIMUM_SERVER_RPC_SECRET_DISTINCT_CHARACTERS
+    && !hasRepeatedServerRpcSecretBlock(value)
+    && !hasLongOrderedServerRpcSecretRun(value)
   );
 }
 

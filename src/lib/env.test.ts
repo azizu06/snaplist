@@ -313,10 +313,22 @@ describe("parseEnv", () => {
       "server-rpc-secret-with-at-least-32-characters",
       "a".repeat(64),
       "correcthorsebatterystaple".repeat(3).slice(0, 64),
+      "0123456789abcdef".repeat(4),
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
     ]) {
       expect(() =>
         parseEnv({ ...deployed, SERVER_RPC_SECRET: predictableSecret }),
       ).toThrowError(/SERVER_RPC_SECRET/);
+    }
+
+    for (const generatedSecret of [
+      "fKqdY3n8ouiON63S3PdDwc9OfiLiPP1UF1uPAaC5MfiL4X0nQ2i8GjA2zLE4Ynh4",
+      "fsUFJNTcQ3cmQN8BYaPasb8JS0e44qdDOitQP40ydXRCiFO8ecO6JNuY5Ou0KxL5",
+      "l+fIGcA3DQizPFLjJ3mc0gDQkCNikkK34ffoYIuYf3xxk9z1x/hIxMfrkTVTN9E8",
+    ]) {
+      expect(parseEnv({ ...deployed, SERVER_RPC_SECRET: generatedSecret }).SERVER_RPC_SECRET).toBe(
+        generatedSecret,
+      );
     }
   });
 
