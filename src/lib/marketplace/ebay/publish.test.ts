@@ -184,6 +184,17 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     const { listingId, result } = await persistedRun(userA);
     const adapter = new MockEbayAdapter();
+    adapter.publishListing = async (request, complete) => {
+      adapter.requests.push(request);
+      const publishResult = {
+        listingId: `MOCK-EBAY-LISTING-${request.sku}`,
+        offerId: `MOCK-EBAY-OFFER-${request.sku}`,
+        listingUrl: `https://www.ebay.com/itm/MOCK-EBAY-LISTING-${request.sku}`,
+        status: "published" as const,
+      };
+      await complete?.(publishResult, null);
+      return publishResult;
+    };
 
     const outcome = await publishListingToEbay(serverA, listingId, adapter);
 
@@ -191,6 +202,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
       listingId,
       ebayListingId: `MOCK-EBAY-LISTING-${listingId}`,
       ebayOfferId: `MOCK-EBAY-OFFER-${listingId}`,
+      listingUrl: `https://www.ebay.com/itm/MOCK-EBAY-LISTING-${listingId}`,
       ebayStatus: "published",
       alreadyPublished: false,
     });
