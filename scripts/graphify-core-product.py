@@ -133,6 +133,20 @@ def merge_incremental_extraction(previous: dict, changed: dict, changed_sources:
     return normalize_extraction(merged, Path("."))
 
 
+def impacted_records(extraction: dict, changed_sources: set[str]) -> dict:
+    """Keep changed-source records plus cross-file edges whose endpoint changed."""
+    nodes = [node for node in extraction.get("nodes", []) if node.get("source_file") in changed_sources]
+    node_ids = {node.get("id") for node in nodes}
+    edges = [
+        edge
+        for edge in extraction.get("edges", [])
+        if edge.get("source_file") in changed_sources
+        or edge.get("source") in node_ids
+        or edge.get("target") in node_ids
+    ]
+    return {"nodes": nodes, "edges": edges, "hyperedges": []}
+
+
 def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
@@ -410,7 +424,7 @@ def main() -> None:
     if state is None:
         run_mode = "full" if not args.incremental else "full-fallback"
         changed_paths = set(scope)
-        code_paths = [Path(path) for path in detection.get("files", {}).get("code", [])]
+        code_paths = sorted((Path(path) for path in detection.get("files", {}).get("code", [])), key=str)
         for relative in SAFE_LOCAL_AST_OVERRIDES:
             override = corpus / relative
             if override.exists() and override not in code_paths:
@@ -421,18 +435,13 @@ def main() -> None:
     else:
         run_mode = "incremental"
         changed_paths = changed_scope_paths(repo, state["source_commit"], args.source_commit, set(scope))
-        changed_code_paths = [
-            corpus / relative
-            for relative in sorted(changed_paths)
-            if (corpus / relative).exists()
-            and (corpus / relative) in {Path(path) for path in detection.get("files", {}).get("code", [])}
-        ]
+        code_paths = sorted((Path(path) for path in detection.get("files", {}).get("code", [])), key=str)
         for relative in SAFE_LOCAL_AST_OVERRIDES:
             override = corpus / relative
-            if relative in changed_paths and override.exists() and override not in changed_code_paths:
-                changed_code_paths.append(override)
-        ast = extract(changed_code_paths, cache_root=corpus)
-        changed_extraction = normalize_extraction(ast, corpus)
+            if override.exists() and override not in code_paths:
+                code_paths.append(override)
+        ast = extract(code_paths, cache_root=corpus)
+        changed_extraction = impacted_records(normalize_extraction(ast, corpus), changed_paths)
         add_scope_nodes(changed_extraction, scope, corpus, changed_paths)
         extraction = merge_incremental_extraction(state["extraction"], changed_extraction, changed_paths)
 

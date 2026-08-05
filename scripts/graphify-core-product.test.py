@@ -122,6 +122,23 @@ class IncrementalGraphifyContractTest(unittest.TestCase):
             previous["edges"],
         )
 
+    def test_impacted_records_include_new_cross_file_edge_into_changed_symbol(self) -> None:
+        extraction = {
+            "nodes": [
+                {"id": "changed", "source_file": "src/lib/changed.ts"},
+                {"id": "stable", "source_file": "src/lib/stable.ts"},
+            ],
+            "edges": [
+                {"source": "stable", "target": "changed", "relation": "calls", "source_file": "src/lib/stable.ts"},
+                {"source": "changed", "target": "stable", "relation": "calls", "source_file": "src/lib/changed.ts"},
+            ],
+        }
+
+        impacted = GRAPHIFY.impacted_records(extraction, {"src/lib/changed.ts"})
+
+        self.assertEqual(impacted["nodes"], [extraction["nodes"][0]])
+        self.assertEqual(impacted["edges"], extraction["edges"])
+
     def test_changed_scope_paths_uses_committed_source_delta(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
