@@ -5,6 +5,7 @@ import {
   parseAndVerifyRevenueCatWebhook,
   resolveRevenueCatServerConfig,
   type RevenueCatEntitlementStore,
+  type RevenueCatWebhookConfig,
 } from "./revenuecat";
 import {
   createSupabaseNativeSubscriptionBridge,
@@ -304,18 +305,35 @@ describe("RevenueCat verified lifecycle bridge", () => {
   async function handle(
     overrides: Record<string, unknown>,
     storeOverrides: Partial<RevenueCatEntitlementStore> = {},
+    selectedConfig: RevenueCatWebhookConfig = config,
   ) {
     const rawBody = payload(overrides);
     const event = parseAndVerifyRevenueCatWebhook({
       rawBody,
       signature: signature(rawBody),
       authorization: "Bearer offline",
-      config,
+      config: selectedConfig,
       now,
     });
     const fake = store(storeOverrides);
-    return { result: await handleRevenueCatWebhook(event, fake, config), fake };
+    return {
+      result: await handleRevenueCatWebhook(event, fake, selectedConfig),
+      fake,
+    };
   }
+
+  it("accepts sandbox delivery only under explicit sandbox configuration", async () => {
+    const { result, fake } = await handle(
+      { environment: "SANDBOX" },
+      {},
+      { ...config, allowedEnvironment: "SANDBOX" },
+    );
+
+    expect(result).toEqual({ processed: true });
+    expect(fake.recordPeriod).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "SANDBOX" }),
+    );
+  });
 
   it.each([
     ["INITIAL_PURCHASE", {}, "active", null],
