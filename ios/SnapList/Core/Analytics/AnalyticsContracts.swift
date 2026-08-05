@@ -6,6 +6,11 @@ enum AnalyticsEnvironment: String, Sendable {
     case production
 }
 
+enum AnalyticsBuildType: String, Sendable {
+    case debug
+    case release
+}
+
 struct AnalyticsMetadata: Equatable, Sendable {
     let environment: AnalyticsEnvironment
     let appVersion: String
@@ -19,6 +24,10 @@ struct AnalyticsMetadata: Equatable, Sendable {
             of: #"^[0-9]{1,12}$"#,
             options: .regularExpression
         ) != nil
+    }
+
+    var buildType: AnalyticsBuildType {
+        environment == .local ? .debug : .release
     }
 
     static func resolve(

@@ -3,6 +3,7 @@ import Foundation
 struct AnalyticsSanitizer: Sendable {
     private static let metadataPropertyNames: Set<String> = [
         "environment",
+        "build_type",
         "app_version",
         "app_build",
     ]
@@ -15,6 +16,7 @@ struct AnalyticsSanitizer: Sendable {
         values["screen viewed"] = [
             "screen",
             "environment",
+            "build_type",
             "app_version",
             "app_build",
         ]
@@ -31,6 +33,7 @@ struct AnalyticsSanitizer: Sendable {
             properties: [
                 "screen": screen.rawValue,
                 "environment": metadata.environment.rawValue,
+                "build_type": metadata.buildType.rawValue,
                 "app_version": metadata.appVersion,
                 "app_build": metadata.build,
             ]
@@ -138,6 +141,7 @@ struct AnalyticsSanitizer: Sendable {
         }
         sanitized["event_id"] = eventID.lowercased()
         sanitized["environment"] = metadata.environment.rawValue
+        sanitized["build_type"] = metadata.buildType.rawValue
         sanitized["app_version"] = metadata.appVersion
         sanitized["app_build"] = metadata.build
         return AnalyticsPayload(name: eventName, properties: sanitized)
