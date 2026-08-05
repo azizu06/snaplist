@@ -85,6 +85,7 @@ export function createSupabaseRevenueCatEntitlementStore(
         "record_verified_revenuecat_ai_item_period",
         {
           p_allowance: period.allowance,
+          p_environment: period.environment,
           p_event_created_at: period.eventCreatedAt,
           p_event_id: period.eventId,
           p_event_type: period.eventType,
@@ -105,6 +106,7 @@ export function createSupabaseRevenueCatEntitlementStore(
     async requireReconciliation(input) {
       const { error } = await admin.rpc("require_revenuecat_reconciliation", {
         p_event_created_at: input.eventCreatedAt,
+        p_environment: input.environment,
         p_event_id: input.eventId,
         p_event_type: input.eventType,
         p_original_app_user_id: input.identity.originalAppUserId,

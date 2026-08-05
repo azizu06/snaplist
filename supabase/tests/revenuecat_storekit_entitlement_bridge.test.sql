@@ -1,6 +1,6 @@
 begin;
 
-select plan(45);
+select plan(53);
 
 -- Issue #524 fences the included first AI run by physical device, so every
 -- non-guest tenant here needs the reserved claim a real redemption would have
@@ -52,7 +52,7 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)',
+    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)',
     'execute'
   ),
   'service role may translate a verified provider event into the ledger'
@@ -60,7 +60,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)',
+    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)',
     'execute'
   ),
   'sellers cannot call the verified provider event seam'
@@ -94,11 +94,23 @@ select is(
 );
 select ok(
   public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'rc-original-a:p1', 'rc-original-a',
+    'rc-user-a', 'rc-user-a', 'PRODUCTION', 'rc-original-a:p1', 'rc-original-a',
     date_trunc('month', now()), date_trunc('month', now()) + interval '1 month', 'active', null,
     24, 'rc-event-initial', 'INITIAL_PURCHASE', date_trunc('month', now()) + interval '1 minute'
   ),
   'an initial purchase creates one verified #168 period'
+);
+select is(
+  (select event.environment from private.revenuecat_webhook_events event
+   where event.event_id = 'rc-event-initial'),
+  'PRODUCTION',
+  'the signed environment is persisted with the RevenueCat event'
+);
+select is(
+  (select event.event_id from private.storekit_ai_item_period_events event
+   where event.user_id = 'rc-user-a' and event.applied),
+  'production:' || md5('rc-event-initial'),
+  'downstream StoreKit idempotency includes the RevenueCat environment'
 );
 select is(
   (select period.state from public.ai_item_allowance_periods period
@@ -108,15 +120,68 @@ select is(
 );
 select ok(
   not public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'rc-original-a:p1', 'rc-original-a',
+    'rc-user-a', 'rc-user-a', 'PRODUCTION', 'rc-original-a:p1', 'rc-original-a',
     date_trunc('month', now()), date_trunc('month', now()) + interval '1 month', 'active', null,
     24, 'rc-event-initial', 'INITIAL_PURCHASE', date_trunc('month', now()) + interval '1 minute'
   ),
   'an exact duplicate provider delivery is idempotent'
 );
+select throws_ok(
+  $$
+    select public.record_verified_revenuecat_ai_item_period(
+      'rc-user-a', 'rc-user-a', 'TEST', 'rc-original-a:p1', 'rc-original-a',
+      date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+      'active', null, 24, 'rc-event-invalid-environment', 'INITIAL_PURCHASE',
+      date_trunc('month', now()) + interval '2 minutes'
+    )
+  $$,
+  '22023',
+  'Invalid RevenueCat environment',
+  'the persisted boundary rejects an unknown environment'
+);
+select is(
+  (select count(*)::integer from private.revenuecat_webhook_events event
+   where event.event_id = 'rc-event-invalid-environment'),
+  0,
+  'an invalid environment creates no webhook idempotency row'
+);
+select throws_ok(
+  $$
+    select public.record_verified_revenuecat_ai_item_period(
+      'rc-user-a', 'rc-user-a', null, 'rc-original-a:p1', 'rc-original-a',
+      date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+      'active', null, 24, 'rc-event-missing-environment', 'INITIAL_PURCHASE',
+      date_trunc('month', now()) + interval '2 minutes'
+    )
+  $$,
+  '22023',
+  'Invalid RevenueCat environment',
+  'the persisted boundary rejects a missing environment'
+);
+select ok(
+  not public.record_verified_revenuecat_ai_item_period(
+    'rc-user-a', 'rc-user-a', 'SANDBOX', 'rc-original-a:p1', 'rc-original-a',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+    'active', null, 24, 'rc-event-initial', 'INITIAL_PURCHASE',
+    date_trunc('month', now()) + interval '1 minute'
+  ),
+  'the same sandbox event identity cannot resettle the production period'
+);
+select is(
+  (select count(*)::integer from private.revenuecat_webhook_events event
+   where event.event_id = 'rc-event-initial'),
+  2,
+  'webhook idempotency keeps sandbox and production identities distinct'
+);
+select is(
+  (select count(*)::integer from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-a' and period.source = 'storekit'),
+  1,
+  'cross-environment replay does not stack another allowance period'
+);
 select ok(
   public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'rc-original-a:p1', 'rc-original-a',
+    'rc-user-a', 'rc-user-a', 'PRODUCTION', 'rc-original-a:p1', 'rc-original-a',
     date_trunc('month', now()), date_trunc('month', now()) + interval '1 month', 'grace', date_trunc('month', now()) + interval '1 month 7 days',
     24, 'rc-event-grace', 'BILLING_ISSUE', date_trunc('month', now()) + interval '1 month 1 minute'
   ),
@@ -130,7 +195,7 @@ select is(
 );
 select ok(
   not public.record_verified_revenuecat_ai_item_period(
-    'rc-user-a', 'rc-user-a', 'rc-original-a:p1', 'rc-original-a',
+    'rc-user-a', 'rc-user-a', 'PRODUCTION', 'rc-original-a:p1', 'rc-original-a',
     date_trunc('month', now()), date_trunc('month', now()) + interval '1 month', 'expired', null,
     24, 'rc-event-late', 'EXPIRATION', date_trunc('month', now()) + interval '1 month' - interval '1 minute'
   ),
@@ -174,7 +239,7 @@ select throws_ok(
 select throws_ok(
   $$
     select public.require_revenuecat_reconciliation(
-      'rc-user-b', 'rc-user-b', 'rc-original-a', 'rc-cross-tenant-reconcile',
+      'rc-user-b', 'rc-user-b', 'rc-original-a', 'PRODUCTION', 'rc-cross-tenant-reconcile',
       'PRODUCT_CHANGE', date_trunc('month', now()) + interval '1 month 1 day'
     )
   $$,
@@ -185,7 +250,7 @@ select throws_ok(
 select throws_ok(
   $$
     select public.require_revenuecat_reconciliation(
-      'rc-user-b', 'rc-user-a', 'rc-original-b', 'rc-original-user-mismatch',
+      'rc-user-b', 'rc-user-a', 'rc-original-b', 'PRODUCTION', 'rc-original-user-mismatch',
       'PRODUCT_CHANGE', date_trunc('month', now()) + interval '1 month 1 day'
     )
   $$,
@@ -199,14 +264,14 @@ select * from public.resolve_revenuecat_customer(
   'rc-user-late', 'rc-user-late', 'rc-original-late'
 );
 select public.record_verified_revenuecat_ai_item_period(
-  'rc-user-late', 'rc-user-late', 'rc-original-late:p1',
+  'rc-user-late', 'rc-user-late', 'PRODUCTION', 'rc-original-late:p1',
   'rc-original-late', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
   'active', null, 2, 'rc-late-active', 'INITIAL_PURCHASE',
   date_trunc('month', now()) + interval '2 minutes'
 );
 select ok(
   public.require_revenuecat_reconciliation(
-    'rc-user-late', 'rc-user-late', 'rc-original-late', 'rc-late-reconcile',
+    'rc-user-late', 'rc-user-late', 'rc-original-late', 'PRODUCTION', 'rc-late-reconcile',
     'PRODUCT_CHANGE', date_trunc('month', now()) + interval '1 minute'
   ),
   'a late ambiguous event is recorded for explicit reconciliation'
@@ -226,7 +291,7 @@ select is(
 select throws_ok(
   $$
     select public.record_verified_revenuecat_ai_item_period(
-      'rc-user-late', 'rc-user-late', 'rc-original-late:p2',
+      'rc-user-late', 'rc-user-late', 'PRODUCTION', 'rc-original-late:p2',
       'rc-original-late', date_trunc('month', now()) + interval '1 month', date_trunc('month', now()) + interval '2 months',
       'active', null, 2, 'rc-late-renewal', 'RENEWAL', date_trunc('month', now()) + interval '1 month 1 minute'
     )
@@ -257,7 +322,7 @@ select * from public.resolve_revenuecat_customer(
 select throws_ok(
   $$
     select public.record_verified_revenuecat_ai_item_period(
-      'rc-user-stripe', 'rc-user-stripe', 'rc-original-stripe:p1',
+      'rc-user-stripe', 'rc-user-stripe', 'PRODUCTION', 'rc-original-stripe:p1',
       'rc-original-stripe', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
       'active', null, 24, 'rc-stripe-before-reconcile', 'INITIAL_PURCHASE',
       date_trunc('month', now()) + interval '1 minute'
@@ -286,7 +351,7 @@ select ok(
 );
 select ok(
   public.record_verified_revenuecat_ai_item_period(
-    'rc-user-stripe', 'rc-user-stripe', 'rc-original-stripe:p1',
+    'rc-user-stripe', 'rc-user-stripe', 'PRODUCTION', 'rc-original-stripe:p1',
     'rc-original-stripe', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
     'active', null, 24, 'rc-stripe-after-reconcile', 'INITIAL_PURCHASE',
     date_trunc('month', now()) + interval '1 minute'
@@ -318,14 +383,14 @@ select * from public.resolve_revenuecat_customer(
 -- now. Every span in this file is anchored to date_trunc('month', now()) for
 -- that reason -- now() is frozen at BEGIN, so all of them agree on one instant.
 select public.record_verified_revenuecat_ai_item_period(
-  'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger:p1',
+  'rc-user-ledger', 'rc-user-ledger', 'PRODUCTION', 'rc-original-ledger:p1',
   'rc-original-ledger', date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
   'active', null, 2, 'rc-ledger-active', 'INITIAL_PURCHASE',
   date_trunc('month', now()) + interval '1 minute'
 );
 select ok(
   public.require_revenuecat_reconciliation(
-    'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger',
+    'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger', 'PRODUCTION',
     'rc-ledger-ambiguous', 'PRODUCT_CHANGE', date_trunc('month', now()) + interval '30 seconds'
   ),
   'ambiguous delivery preserves the verified ledger while blocking period advance'

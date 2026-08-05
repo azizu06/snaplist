@@ -2950,6 +2950,7 @@ describe("mobile API v1 provider-neutral handler", () => {
         entitlementId: "pro",
         monthlyProductId: "snaplist-pro-fixture",
         monthlyAllowance: 24,
+        allowedEnvironment: "PRODUCTION",
       },
     );
     const response = await handler({

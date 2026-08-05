@@ -30,7 +30,7 @@ function payload(overrides: Record<string, unknown> = {}) {
       period_type: "NORMAL",
       purchased_at_ms: Date.parse("2026-07-01T00:00:00.000Z"),
       expiration_at_ms: Date.parse("2026-08-01T00:00:00.000Z"),
-      environment: "SANDBOX",
+      environment: "PRODUCTION",
       transaction_id: "transaction-1",
       original_transaction_id: "original-1",
       store: "APP_STORE",
@@ -73,9 +73,31 @@ describe("RevenueCat webhook authentication", () => {
         REVENUECAT_APP_ID: "app",
         REVENUECAT_ENTITLEMENT_ID: "pro",
         REVENUECAT_MONTHLY_PRODUCT_ID: "snaplist-pro-fixture",
+        REVENUECAT_ALLOWED_ENVIRONMENT: "PRODUCTION",
         SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: "0",
       }),
     ).toThrow("allowance");
+    expect(() =>
+      resolveRevenueCatServerConfig({
+        REVENUECAT_WEBHOOK_SIGNING_SECRET: "secret",
+        REVENUECAT_WEBHOOK_AUTHORIZATION: "Bearer auth",
+        REVENUECAT_APP_ID: "app",
+        REVENUECAT_ENTITLEMENT_ID: "pro",
+        REVENUECAT_MONTHLY_PRODUCT_ID: "snaplist-pro-fixture",
+        SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: "24",
+      }),
+    ).toThrow("incomplete");
+    expect(() =>
+      resolveRevenueCatServerConfig({
+        REVENUECAT_WEBHOOK_SIGNING_SECRET: "secret",
+        REVENUECAT_WEBHOOK_AUTHORIZATION: "Bearer auth",
+        REVENUECAT_APP_ID: "app",
+        REVENUECAT_ENTITLEMENT_ID: "pro",
+        REVENUECAT_MONTHLY_PRODUCT_ID: "snaplist-pro-fixture",
+        REVENUECAT_ALLOWED_ENVIRONMENT: "TEST",
+        SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: "24",
+      }),
+    ).toThrow("allowed environment");
   });
 
   it("keeps native public configuration server-provided instead of source-coded", () => {
@@ -86,6 +108,7 @@ describe("RevenueCat webhook authentication", () => {
         REVENUECAT_APP_ID: "app",
         REVENUECAT_ENTITLEMENT_ID: "pro",
         REVENUECAT_MONTHLY_PRODUCT_ID: "snaplist-pro-fixture",
+        REVENUECAT_ALLOWED_ENVIRONMENT: "PRODUCTION",
         REVENUECAT_IOS_PUBLIC_SDK_KEY: "appl_public_fixture",
         REVENUECAT_OFFERING_ID: "current",
         SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: "24",
@@ -97,6 +120,7 @@ describe("RevenueCat webhook authentication", () => {
       entitlementId: "pro",
       monthlyProductId: "snaplist-pro-fixture",
       monthlyAllowance: 24,
+      allowedEnvironment: "PRODUCTION",
       iosPublicSdkKey: "appl_public_fixture",
       offeringId: "current",
     });
@@ -115,6 +139,7 @@ describe("RevenueCat webhook authentication", () => {
         entitlementId: "pro",
         monthlyProductId: "snaplist-pro-fixture",
         monthlyAllowance: 24,
+        allowedEnvironment: "PRODUCTION",
       },
       now,
     });
@@ -140,6 +165,7 @@ describe("RevenueCat webhook authentication", () => {
           entitlementId: "pro",
           monthlyProductId: "snaplist-pro-fixture",
           monthlyAllowance: 24,
+          allowedEnvironment: "PRODUCTION",
         },
         now,
       }),
@@ -161,6 +187,7 @@ describe("RevenueCat webhook authentication", () => {
           entitlementId: "pro",
           monthlyProductId: "snaplist-pro-fixture",
           monthlyAllowance: 24,
+          allowedEnvironment: "PRODUCTION",
         },
         now,
       }),
@@ -169,6 +196,33 @@ describe("RevenueCat webhook authentication", () => {
 });
 
 describe("RevenueCat persistence composition", () => {
+  it("passes the verified environment into period persistence", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const entitlementStore = createSupabaseRevenueCatEntitlementStore({ rpc } as never);
+
+    await entitlementStore.recordPeriod({
+      userId: "user_123",
+      source: "storekit",
+      periodKey: "original-1:2026-07-01T00:00:00.000Z",
+      originalTransactionId: "original-1",
+      periodStart: "2026-07-01T00:00:00.000Z",
+      expiresDate: "2026-08-01T00:00:00.000Z",
+      state: "active",
+      graceExpiresDate: null,
+      allowance: 24,
+      eventId: "event-initial",
+      eventCreatedAt: now.toISOString(),
+      eventType: "INITIAL_PURCHASE",
+      transactionId: "transaction-1",
+      environment: "PRODUCTION",
+    });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "record_verified_revenuecat_ai_item_period",
+      expect.objectContaining({ p_environment: "PRODUCTION" }),
+    );
+  });
+
   it("passes the signed original App User ID into reconciliation", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
     const entitlementStore = createSupabaseRevenueCatEntitlementStore({ rpc } as never);
@@ -183,10 +237,12 @@ describe("RevenueCat persistence composition", () => {
       eventId: "event-product-change",
       eventType: "PRODUCT_CHANGE",
       eventCreatedAt: now.toISOString(),
+      environment: "PRODUCTION",
     });
 
     expect(rpc).toHaveBeenCalledWith("require_revenuecat_reconciliation", {
       p_event_created_at: now.toISOString(),
+      p_environment: "PRODUCTION",
       p_event_id: "event-product-change",
       p_event_type: "PRODUCT_CHANGE",
       p_original_app_user_id: "user_123",
@@ -218,6 +274,7 @@ describe("RevenueCat persistence composition", () => {
       entitlementId: "pro",
       monthlyProductId: "snaplist-pro-fixture",
       monthlyAllowance: 24,
+      allowedEnvironment: "PRODUCTION",
     });
 
     await expect(bridge.entitlementFor("user_123")).resolves.toEqual({
@@ -241,6 +298,7 @@ describe("RevenueCat verified lifecycle bridge", () => {
     entitlementId: "pro",
     monthlyProductId: "snaplist-pro-fixture",
     monthlyAllowance: 24,
+    allowedEnvironment: "PRODUCTION" as const,
   };
 
   async function handle(
