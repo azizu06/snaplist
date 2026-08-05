@@ -179,20 +179,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(flow.stateID, "DEL-02")
     }
 
-    func testProductionDeletionBoundaryStopsAtConfirmationUntilServerTailLands() {
-        let confirmationOnly = SettingsDeletionBoundary.confirmationOnly
-        var committed = false
-        let wired = SettingsDeletionBoundary(commit: { committed = true })
-
-        XCTAssertFalse(confirmationOnly.allowsCommit)
-        XCTAssertFalse(confirmationOnly.commitIfAvailable())
-        XCTAssertFalse(committed)
-
-        XCTAssertTrue(wired.allowsCommit)
-        XCTAssertTrue(wired.commitIfAvailable())
-        XCTAssertTrue(committed)
-    }
-
     func testSubscriptionPresentationKeepsEveryFrozenReadingDistinct() {
         let periodEnd = Date(timeIntervalSince1970: 1_786_406_400)
         let graceEnd = Date(timeIntervalSince1970: 1_784_937_600)
@@ -368,6 +354,39 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testEntitlementServerRefreshKeepsDisclosureUnknownUntilApplyCompletes() async {
+        var events: [String] = []
+
+        await SettingsEntitlementServerRefresh.perform(
+            fetch: {
+                events.append("fetch")
+                return "server truth"
+            },
+            apply: { events.append("apply:\($0)") },
+            setLoadPhase: { events.append("phase:\($0)") }
+        )
+
+        XCTAssertEqual(
+            events,
+            ["phase:loading", "fetch", "apply:server truth", "phase:loaded"]
+        )
+    }
+
+    @MainActor
+    func testEntitlementServerRefreshKeepsDisclosureUnknownOnFailure() async {
+        enum RefreshError: Error { case unavailable }
+        var phases: [SettingsSubscriptionPresentation.LoadPhase] = []
+
+        await SettingsEntitlementServerRefresh.perform(
+            fetch: { throw RefreshError.unavailable },
+            apply: { (_: String) in XCTFail("Failed refresh must not apply") },
+            setLoadPhase: { phases.append($0) }
+        )
+
+        XCTAssertEqual(phases, [.loading, .failed])
+    }
+
     func testSubscriptionGroupIsAbsentForGuestAndDeletionOutstanding() {
         XCTAssertFalse(
             SettingsSubscriptionVisibility(
@@ -435,25 +454,40 @@ final class SettingsTests: XCTestCase {
         )
     }
 
-    func testEmailReauthenticationUsesOnlyTheDisplayedPrimaryAddressFactor() {
+    func testEmailReauthenticationSendsOnlyToTheDisplayedPrimaryAddress() async {
+        var sentAddressID: String?
+
+        let state = await SettingsEmailCodeChallenge.send(
+            displayedPrimaryAddressID: "email_primary",
+            supportedEmailAddressIDs: ["email_other", "email_primary"],
+            sender: { sentAddressID = $0 }
+        )
+
+        XCTAssertEqual(state, .sent)
+        XCTAssertEqual(sentAddressID, "email_primary")
         XCTAssertEqual(
-            SettingsReauthenticationGate.emailAddressID(
-                displayedPrimaryAddressID: "email_primary",
-                supportedEmailAddressIDs: ["email_other", "email_primary"]
-            ),
-            "email_primary"
+            state.lead(email: "seller@example.com"),
+            "Deleting an account is permanent, so SnapList sent a 6-digit code to seller@example.com. Enter it to confirm it is you."
         )
-        XCTAssertNil(
-            SettingsReauthenticationGate.emailAddressID(
-                displayedPrimaryAddressID: "email_primary",
-                supportedEmailAddressIDs: ["email_other"]
-            )
+    }
+
+    func testEmailReauthenticationDoesNotClaimDeliveryWithoutMatchingFactor() async {
+        var senderCalled = false
+
+        let state = await SettingsEmailCodeChallenge.send(
+            displayedPrimaryAddressID: "email_primary",
+            supportedEmailAddressIDs: ["email_other"],
+            sender: { _ in senderCalled = true }
         )
-        XCTAssertNil(
-            SettingsReauthenticationGate.emailAddressID(
-                displayedPrimaryAddressID: nil,
-                supportedEmailAddressIDs: ["email_other"]
-            )
+
+        XCTAssertEqual(state, .failed)
+        XCTAssertFalse(senderCalled)
+        XCTAssertEqual(
+            state.failureCopy(email: "seller@example.com"),
+            "SnapList could not send a code to seller@example.com. Nothing has been deleted. You can try again."
+        )
+        XCTAssertFalse(
+            state.lead(email: "seller@example.com").contains("SnapList sent")
         )
     }
 }

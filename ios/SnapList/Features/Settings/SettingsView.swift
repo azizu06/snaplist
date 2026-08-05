@@ -8,7 +8,6 @@ struct SettingsView: View {
     private let profile: SettingsProfile
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
-    private let deletionBoundary: SettingsDeletionBoundary
     private let deletionOutstanding: Bool
     @State private var hasLocalData: Bool
     @State private var subscriptionStore: SubscriptionStore
@@ -22,14 +21,12 @@ struct SettingsView: View {
         subscriptionClient: any SubscriptionClient,
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
-        deletionOutstanding: Bool = false,
-        deletionBoundary: SettingsDeletionBoundary = .confirmationOnly
+        deletionOutstanding: Bool = false
     ) {
         profile = .current(configuration: configuration)
         self.mobileAPIClient = mobileAPIClient
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
-        self.deletionBoundary = deletionBoundary
         _hasLocalData = State(initialValue: hasLocalData)
         _subscriptionStore = State(
             initialValue: SubscriptionStore(client: subscriptionClient)
@@ -96,8 +93,7 @@ struct SettingsView: View {
                             subscriptionTruth: SettingsDeletionSubscriptionTruth(
                                 state: subscriptionStore.state,
                                 loadPhase: subscriptionLoadPhase
-                            ),
-                            deletionBoundary: deletionBoundary
+                            )
                         )
                     } label: {
                         Text("Delete account")
@@ -210,7 +206,7 @@ struct SettingsView: View {
             )
             subscriptionLoadPhase = refreshPlan.deletionDisclosureLoadPhase
             guard refreshPlan == .requestServerTruth else { return }
-            try await refreshServerEntitlement()
+            await refreshServerEntitlement()
         } catch {
             subscriptionLoadPhase = .failed
         }
@@ -224,15 +220,18 @@ struct SettingsView: View {
         )
         subscriptionLoadPhase = refreshPlan.deletionDisclosureLoadPhase
         guard refreshPlan == .requestServerTruth else { return }
-        do { try await refreshServerEntitlement() }
-        catch { subscriptionLoadPhase = .failed }
+        await refreshServerEntitlement()
     }
 
-    private func refreshServerEntitlement() async throws {
-        let verified = try await mobileAPIClient
-            .getAiItemEntitlement().data.serverVerifiedSubscription
-        subscriptionStore.applyServerVerification(verified)
-        subscriptionLoadPhase = .loaded
+    private func refreshServerEntitlement() async {
+        await SettingsEntitlementServerRefresh.perform(
+            fetch: {
+                try await mobileAPIClient
+                    .getAiItemEntitlement().data.serverVerifiedSubscription
+            },
+            apply: subscriptionStore.applyServerVerification,
+            setLoadPhase: { subscriptionLoadPhase = $0 }
+        )
     }
 
     private func valueRow(_ label: String, _ value: String, chevron: Bool = false) -> some View {
@@ -301,7 +300,6 @@ private struct SettingsDeletionConsequencesView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
-    let deletionBoundary: SettingsDeletionBoundary
     @State private var managesSubscription = false
 
     var body: some View {
@@ -341,7 +339,6 @@ private struct SettingsDeletionConsequencesView: View {
                 destination: SettingsReauthenticationView(
                     profile: profile,
                     subscriptionTruth: subscriptionTruth,
-                    deletionBoundary: deletionBoundary,
                     keepAccount: { dismiss() }
                 )
             )
@@ -354,12 +351,12 @@ private struct SettingsReauthenticationView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
-    let deletionBoundary: SettingsDeletionBoundary
     let keepAccount: () -> Void
     @State private var code = ""
     @State private var failed = false
     @State private var confirmed = false
     @State private var working = false
+    @State private var emailCodeDelivery = SettingsEmailCodeDeliveryState.sending
     @AccessibilityFocusState private var errorFocused: Bool
     @FocusState private var codeFocused: Bool
 
@@ -368,9 +365,15 @@ private struct SettingsReauthenticationView: View {
             title: "Confirm it’s you",
             lead: profile.method == .apple
                 ? "Deleting an account is permanent, so SnapList asks the system to confirm you before it sends anything."
-                : "Deleting an account is permanent, so SnapList sent a 6-digit code to \(profile.email). Enter it to confirm it is you."
+                : emailCodeDelivery.lead(email: profile.email)
         ) {
-            if failed {
+            if let failureCopy = emailCodeDelivery.failureCopy(
+                email: profile.email
+            ) {
+                Text(failureCopy)
+                    .padding().background(Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 14))
+                    .accessibilityFocused($errorFocused)
+            } else if failed {
                 Text("That did not confirm it was you. Nothing has been deleted. You can try again.")
                     .padding().background(Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 14))
                     .accessibilityFocused($errorFocused)
@@ -379,7 +382,7 @@ private struct SettingsReauthenticationView: View {
                 SettingsFactSection(title: "Signed in with Apple", bullets: [
                     "Apple asks you to confirm. SnapList never sees a password, and this step alone deletes nothing."
                 ], usesBullets: false)
-            } else {
+            } else if emailCodeDelivery == .sent {
                 SettingsEmailCodeField(
                     code: $code,
                     isFocused: $codeFocused
@@ -395,18 +398,17 @@ private struct SettingsReauthenticationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             SettingsActionTray(
-                primary: profile.method == .apple ? "Verify with Apple" : "Verify",
+                primary: primaryActionTitle,
                 secondary: "Cancel",
                 destructive: false,
-                disabled: working || (profile.method == .emailCode && code.count != 6),
-                primaryAction: verify,
+                disabled: primaryActionDisabled,
+                primaryAction: performPrimaryAction,
                 secondaryAction: cancelReauthentication
             )
         }
         .navigationDestination(isPresented: $confirmed) {
             SettingsDeletionConfirmationView(
                 subscriptionTruth: subscriptionTruth,
-                deletionBoundary: deletionBoundary,
                 keepAccount: keepAccount
             )
         }
@@ -415,6 +417,7 @@ private struct SettingsReauthenticationView: View {
             guard wasConfirmed && !isConfirmed else { return }
             code = ""
             failed = false
+            emailCodeDelivery = .sending
             Task { await prepareEmailCodeIfNeeded() }
         }
         .accessibilityIdentifier(failed ? "settings.state.del-02f" : "settings.state.del-02")
@@ -441,6 +444,29 @@ private struct SettingsReauthenticationView: View {
         }
     }
 
+    private var primaryActionTitle: String {
+        if profile.method == .apple { return "Verify with Apple" }
+        return emailCodeDelivery == .failed ? "Try again" : "Verify"
+    }
+
+    private var primaryActionDisabled: Bool {
+        guard !working else { return true }
+        guard profile.method == .emailCode else { return false }
+        switch emailCodeDelivery {
+        case .sending: true
+        case .sent: code.count != 6
+        case .failed: false
+        }
+    }
+
+    private func performPrimaryAction() {
+        if profile.method == .emailCode, emailCodeDelivery == .failed {
+            Task { await prepareEmailCodeIfNeeded() }
+        } else {
+            verify()
+        }
+    }
+
     private func showFailure() {
         code = ""
         failed = true
@@ -449,12 +475,15 @@ private struct SettingsReauthenticationView: View {
 
     private func prepareEmailCodeIfNeeded() async {
         guard profile.method == .emailCode else { return }
-        do {
-            try await SettingsReauthentication.prepareEmailCode(
-                displayedPrimaryAddressID: profile.emailAddressID
-            )
+        emailCodeDelivery = .sending
+        failed = false
+        emailCodeDelivery = await SettingsReauthentication.prepareEmailCode(
+            displayedPrimaryAddressID: profile.emailAddressID
+        )
+        if emailCodeDelivery == .failed {
+            code = ""
+            errorFocused = true
         }
-        catch { showFailure() }
     }
 
     private func cancelReauthentication() {
@@ -467,7 +496,6 @@ private struct SettingsReauthenticationView: View {
 
 private struct SettingsDeletionConfirmationView: View {
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
-    let deletionBoundary: SettingsDeletionBoundary
     let keepAccount: () -> Void
 
     var body: some View {
@@ -479,28 +507,11 @@ private struct SettingsDeletionConfirmationView: View {
                 "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
                 subscriptionTruth.shortCopy
             ], usesBullets: false)
-            if deletionBoundary.allowsCommit {
-                Text("It’s you, confirmed a moment ago. Nothing is sent until you tap Delete account.")
-                    .foregroundStyle(.secondary)
-            }
         }
         .navigationTitle("Delete account")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            if deletionBoundary.allowsCommit {
-                SettingsActionTray(
-                    primary: "Delete account",
-                    secondary: "Keep my account",
-                    destructive: true,
-                    note: "Keep my account is the safe way out and it works right up to the tap.",
-                    primaryAction: {
-                        deletionBoundary.commitIfAvailable()
-                    },
-                    secondaryAction: keepAccount
-                )
-            } else {
-                SettingsConfirmationOnlyTray(keepAccount: keepAccount)
-            }
+            SettingsConfirmationOnlyTray(keepAccount: keepAccount)
         }
         .accessibilityIdentifier("settings.state.del-03")
     }
@@ -757,19 +768,27 @@ private struct SettingsProfile {
 private enum SettingsReauthentication {
     static func prepareEmailCode(
         displayedPrimaryAddressID: String?
-    ) async throws {
-        guard let session = Clerk.shared.session else { throw SettingsReauthenticationError.unavailable }
-        let verification = try await session.startVerification(level: .firstFactor)
-        let supportedEmailAddressIDs = verification.supportedFirstFactors?
-            .filter { $0.strategy == .emailCode }
-            .compactMap(\.emailAddressId) ?? []
-        guard let emailID = SettingsReauthenticationGate.emailAddressID(
-            displayedPrimaryAddressID: displayedPrimaryAddressID,
-            supportedEmailAddressIDs: supportedEmailAddressIDs
-        ) else {
-            throw SettingsReauthenticationError.unavailable
+    ) async -> SettingsEmailCodeDeliveryState {
+        guard let session = Clerk.shared.session else { return .failed }
+        do {
+            let verification = try await session.startVerification(
+                level: .firstFactor
+            )
+            let supportedEmailAddressIDs = verification.supportedFirstFactors?
+                .filter { $0.strategy == .emailCode }
+                .compactMap(\.emailAddressId) ?? []
+            return await SettingsEmailCodeChallenge.send(
+                displayedPrimaryAddressID: displayedPrimaryAddressID,
+                supportedEmailAddressIDs: supportedEmailAddressIDs,
+                sender: { emailAddressID in
+                    try await session.sendEmailCode(
+                        emailAddressId: emailAddressID
+                    )
+                }
+            )
+        } catch {
+            return .failed
         }
-        try await session.sendEmailCode(emailAddressId: emailID)
     }
 
     static func verify(method: SettingsAuthenticationMethod, code: String) async throws -> Bool {

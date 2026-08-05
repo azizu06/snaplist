@@ -115,25 +115,6 @@ struct SettingsFlow: Equatable {
     }
 }
 
-struct SettingsDeletionBoundary {
-    static let confirmationOnly = Self(commit: nil)
-
-    private let commit: (() -> Void)?
-
-    init(commit: (() -> Void)?) {
-        self.commit = commit
-    }
-
-    var allowsCommit: Bool { commit != nil }
-
-    @discardableResult
-    func commitIfAvailable() -> Bool {
-        guard let commit else { return false }
-        commit()
-        return true
-    }
-}
-
 struct SettingsLocalCachedDataStore {
     private let applicationSupportDirectory: URL
     private let fileManager: FileManager
@@ -214,6 +195,47 @@ enum SettingsReauthenticationGate {
     }
 }
 
+enum SettingsEmailCodeDeliveryState: Equatable {
+    case sending
+    case sent
+    case failed
+
+    func lead(email: String) -> String {
+        switch self {
+        case .sending:
+            "Deleting an account is permanent, so SnapList is sending a 6-digit code to \(email) to confirm it is you."
+        case .sent:
+            "Deleting an account is permanent, so SnapList sent a 6-digit code to \(email). Enter it to confirm it is you."
+        case .failed:
+            "Deleting an account is permanent, so SnapList needs a 6-digit code sent to \(email) to confirm it is you."
+        }
+    }
+
+    func failureCopy(email: String) -> String? {
+        guard self == .failed else { return nil }
+        return "SnapList could not send a code to \(email). Nothing has been deleted. You can try again."
+    }
+}
+
+enum SettingsEmailCodeChallenge {
+    static func send(
+        displayedPrimaryAddressID: String?,
+        supportedEmailAddressIDs: [String],
+        sender: (String) async throws -> Void
+    ) async -> SettingsEmailCodeDeliveryState {
+        guard let emailAddressID = SettingsReauthenticationGate.emailAddressID(
+            displayedPrimaryAddressID: displayedPrimaryAddressID,
+            supportedEmailAddressIDs: supportedEmailAddressIDs
+        ) else { return .failed }
+        do {
+            try await sender(emailAddressID)
+            return .sent
+        } catch {
+            return .failed
+        }
+    }
+}
+
 enum SettingsEntitlementRefreshPlan: Equatable {
     case stop
     case requestServerTruth
@@ -237,6 +259,24 @@ enum SettingsEntitlementRefreshPlan: Equatable {
         switch self {
         case .stop: .loaded
         case .requestServerTruth: .loading
+        }
+    }
+}
+
+enum SettingsEntitlementServerRefresh {
+    @MainActor
+    static func perform<Value>(
+        fetch: () async throws -> Value,
+        apply: (Value) -> Void,
+        setLoadPhase: (SettingsSubscriptionPresentation.LoadPhase) -> Void
+    ) async {
+        setLoadPhase(.loading)
+        do {
+            let value = try await fetch()
+            apply(value)
+            setLoadPhase(.loaded)
+        } catch {
+            setLoadPhase(.failed)
         }
     }
 }
