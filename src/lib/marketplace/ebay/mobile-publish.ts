@@ -82,6 +82,7 @@ export function createMobileEbayPublishService(input: {
     client: SupabaseClient,
     completionClient: SupabaseClient,
     userId: string,
+    env: Record<string, string | undefined>,
   ) => Promise<EbayAdapter>;
   env?: () => Record<string, string | undefined>;
 }): MobileEbayPublishGateway {
@@ -193,7 +194,12 @@ export function createMobileEbayPublishService(input: {
         client,
         operation.userId,
         operation.listingId,
-        await input.adapterFor(client, completionClient, operation.userId),
+        await input.adapterFor(
+          client,
+          completionClient,
+          operation.userId,
+          env,
+        ),
         {
           completionClient,
           env: () => env,

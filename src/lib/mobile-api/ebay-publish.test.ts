@@ -378,19 +378,26 @@ async function publishActivationAttempt(
 ) {
   const { client } = publishFixtureClient();
   const adapter = new MockEbayAdapter();
+  let adapterEnv: Record<string, string | undefined> | undefined;
   const reportError = vi.fn();
   const handler = ebayHandler({
     adapter,
+    adapterFor: async (...args: unknown[]) => {
+      adapterEnv = args[3] as Record<string, string | undefined> | undefined;
+      return adapter;
+    },
     client,
     env,
     reportError,
     requestId: "request-674-operator-activation",
   });
+  const response = await confirmedPublishRequest(handler);
 
   return {
     adapter,
+    adapterEnv,
     reportError,
-    response: await confirmedPublishRequest(handler),
+    response,
   };
 }
 
@@ -521,13 +528,14 @@ describe("mobile eBay publish boundary", () => {
   ])(
     "allows the exact production origin %s with the exact true flag",
     async (baseUrl) => {
-      const { adapter, response } = await publishActivationAttempt({
+      const { adapter, adapterEnv, response } = await publishActivationAttempt({
         EBAY_BASE_URL: baseUrl,
         EBAY_PRODUCTION_MOBILE_ENABLED: "true",
       });
 
       expect(response.status).toBe(200);
       expect(adapter.requests).toHaveLength(1);
+      expect(adapterEnv?.EBAY_BASE_URL).toBe("https://api.ebay.com");
     },
   );
 

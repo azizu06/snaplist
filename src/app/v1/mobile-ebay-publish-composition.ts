@@ -32,9 +32,10 @@ function configuredEbayPublish() {
       configuredClient(bearerToken, publishableKey),
     completionClientForBearer: (bearerToken) =>
       configuredClient(bearerToken, secretKey),
-    adapterFor: (client, completionClient, userId) =>
+    adapterFor: (client, completionClient, userId, env) =>
       createEbayAdapterForUser(client, userId, {
         credentialClient: completionClient,
+        env: () => env,
       }),
   });
 }
