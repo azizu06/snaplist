@@ -1772,6 +1772,7 @@ final class SnapListUITests: XCTestCase {
         ]
 
         for state in states {
+            var settings: XCUIApplication?
             let status: String? = state == "native-camera-permission" ? nil : "denied"
             let app = launchOnboarding(
                 state: state,
@@ -1791,6 +1792,7 @@ final class SnapListUITests: XCTestCase {
 
             if state == "settings-handoff" {
                 let settingsApp = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+                settings = settingsApp
                 XCTAssertTrue(
                     settingsApp.wait(for: .runningForeground, timeout: 3),
                     "Settings handoff did not foreground the system Settings app"
@@ -1822,6 +1824,14 @@ final class SnapListUITests: XCTestCase {
                 deny.tap()
             } else if state == "settings-handoff" {
                 XCUIDevice.shared.press(.home)
+                if let settings {
+                    XCTAssertTrue(
+                        settings.wait(for: .runningBackground, timeout: 3),
+                        "Settings did not leave foreground after settings-handoff"
+                    )
+                } else {
+                    XCTFail("Settings lifecycle proxy was not retained")
+                }
             }
             XCTAssertTrue(
                 processTermination.terminate(app),

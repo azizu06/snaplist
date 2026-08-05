@@ -346,6 +346,12 @@ final class HomeUITests: XCTestCase {
             .completed
         )
 
+        // XCTest can retain a stale generic accessibility node after SwiftUI
+        // removes a ForEach row. Hittability observes what the seller can
+        // still reach; HomeFeatureTests separately proves visible-row membership.
+        for identifier in rowIdentifiers.suffix(2) {
+            XCTAssertFalse(app.descendants(matching: .any)[identifier].isHittable)
+        }
         XCTAssertTrue(rows[0].exists)
         XCTAssertTrue(rows[1].exists)
         XCTAssertTrue(rows[2].exists)
