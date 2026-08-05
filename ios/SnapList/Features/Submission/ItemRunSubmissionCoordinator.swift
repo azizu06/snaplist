@@ -669,6 +669,19 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 visibleMessage: nil,
                 rendersSubmittedMedia: true
             )
+        } else if case .destinationHandoff(
+            eventID: _,
+            handoff: .pay01
+        )? = host.pendingPresentationEvent {
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Start listing",
+                primaryActionEvent: .startListing,
+                mutationControlsLocked: true,
+                announcementEvent: nil,
+                accessibilityAnnouncement: nil,
+                visibleMessage: nil,
+                rendersSubmittedMedia: true
+            )
         } else if case .submissionRejected(
             eventID: let eventID,
             retention: let retention

@@ -264,7 +264,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(Set(observedEventIDs).count, cases.count)
     }
 
-    func testUnavailableProGateReplacesOnlyItsMatchingHandoffWithPhotoReviewFallback() async throws {
+    func testPendingProGateHandoffLocksMutationsUntilUnavailableFallbackReturnsToPhotoReview() async throws {
         let intake = SubmissionIntakeFixture(photoCount: 2, seed: "pro-fallback")
         let attemptStore = InMemoryItemRunSubmissionAttemptStore()
         let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
@@ -289,6 +289,10 @@ final class ItemRunSubmissionTests: XCTestCase {
         )? = host.pendingPresentationEvent else {
             return XCTFail("Expected the readable Pro denial handoff.")
         }
+        XCTAssertTrue(
+            PhotoReviewSubmissionPresentation(host: host)
+                .mutationControlsLocked
+        )
         XCTAssertFalse(
             host.replaceProGateHandoffWithPhotoReviewFallback(
                 eventID: UUID()
@@ -305,6 +309,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         }
         let presentation = PhotoReviewSubmissionPresentation(host: host)
         XCTAssertEqual(presentation.primaryActionLabel, "Try again")
+        XCTAssertFalse(presentation.mutationControlsLocked)
         XCTAssertTrue(presentation.rendersSubmittedMedia)
         let retainedPhotos = try await draftStore.loadPhotos()
         let retainedAttempt = try await attemptStore.loadAttempt()
