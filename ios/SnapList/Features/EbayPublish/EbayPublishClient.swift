@@ -55,6 +55,32 @@ struct EbayPublishPreflight: Codable, Equatable, Sendable {
     }
 }
 
+enum EbayListingEnvironment: String, Codable, Sendable {
+    case sandbox
+    case production
+}
+
+enum EbayListingURL {
+    static func resolve(
+        providerURL: URL?,
+        listingID: String,
+        environment: EbayListingEnvironment?
+    ) -> URL? {
+        if let providerURL { return providerURL }
+
+        let host: String
+        switch environment {
+        case .sandbox:
+            host = "www.sandbox.ebay.com"
+        case .production:
+            host = "www.ebay.com"
+        case nil:
+            return nil
+        }
+        return URL(string: "https://\(host)/itm/\(listingID)")
+    }
+}
+
 struct EbayPublishStatus: Codable, Equatable, Sendable {
     enum Outcome: String, Codable, Sendable {
         case notPublished = "not_published"
@@ -68,6 +94,26 @@ struct EbayPublishStatus: Codable, Equatable, Sendable {
     let ebayListingID: String?
     let ebayOfferID: String?
     let alreadyPublished: Bool
+    let listingURL: URL?
+    let environment: EbayListingEnvironment?
+
+    init(
+        listingID: UUID,
+        outcome: Outcome,
+        ebayListingID: String?,
+        ebayOfferID: String?,
+        alreadyPublished: Bool,
+        listingURL: URL? = nil,
+        environment: EbayListingEnvironment? = nil
+    ) {
+        self.listingID = listingID
+        self.outcome = outcome
+        self.ebayListingID = ebayListingID
+        self.ebayOfferID = ebayOfferID
+        self.alreadyPublished = alreadyPublished
+        self.listingURL = listingURL
+        self.environment = environment
+    }
 
     private enum CodingKeys: String, CodingKey {
         case listingID = "listingId"
@@ -75,19 +121,27 @@ struct EbayPublishStatus: Codable, Equatable, Sendable {
         case ebayListingID = "ebayListingId"
         case ebayOfferID = "ebayOfferId"
         case alreadyPublished
+        case listingURL = "listingUrl"
+        case environment = "ebayEnvironment"
+    }
+
+    var isConfirmedPublication: Bool {
+        outcome == .published && ebayListingID != nil
     }
 
     var publishedListing: EbayPublishedListing? {
-        guard outcome == .published,
+        guard isConfirmedPublication,
               let ebayListingID,
-              let listingURL = URL(
-                string: "https://www.sandbox.ebay.com/itm/\(ebayListingID)"
+              let resolvedURL = EbayListingURL.resolve(
+                providerURL: listingURL,
+                listingID: ebayListingID,
+                environment: environment
               ) else {
             return nil
         }
         return EbayPublishedListing(
             ebayListingID: ebayListingID,
-            listingURL: listingURL
+            listingURL: resolvedURL
         )
     }
 }

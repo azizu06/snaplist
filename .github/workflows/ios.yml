@@ -54,6 +54,9 @@ jobs:
       - name: Validate app icon asset catalog
         run: zsh ios/Scripts/app-icon-contract.test.sh
 
+      - name: Validate Release archive configuration
+        run: zsh ios/Scripts/release-config-contract.test.sh
+
   shard:
     name: shard (${{ matrix.shard }})
     if: github.event_name == 'pull_request'
@@ -77,8 +80,28 @@ jobs:
           SNAPLIST_IOS_SHARD: ${{ matrix.shard }}
         run: ios/Scripts/test.sh
 
+  release:
+    name: Release configuration
+    if: github.event_name == 'pull_request'
+    needs: validate
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Show Apple toolchain
+        run: xcodebuild -version
+
+      - name: Build verified Release configuration
+        env:
+          SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY: pk_live_ci_release_validation
+          SNAPLIST_RELEASE_CLERK_FRONTEND_DOMAIN: release-clerk.example.invalid
+        run: ios/Scripts/build-release.sh
+
   test:
-    needs: [validate, shard]
+    needs: [validate, shard, release]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -87,9 +110,10 @@ jobs:
         env:
           VALIDATE_RESULT: ${{ needs.validate.result }}
           SHARD_RESULT: ${{ needs.shard.result }}
+          RELEASE_RESULT: ${{ needs.release.result }}
         run: |
-          if [[ "$VALIDATE_RESULT" != "success" || "$SHARD_RESULT" != "success" ]]; then
-            echo "iOS validation or one or more declared test shards failed." >&2
+          if [[ "$VALIDATE_RESULT" != "success" || "$SHARD_RESULT" != "success" || "$RELEASE_RESULT" != "success" ]]; then
+            echo "iOS validation, Release build, or one or more declared test shards failed." >&2
             exit 1
           fi
 
@@ -116,6 +140,12 @@ jobs:
 
       - name: Build app and run complete serial test suite
         run: ios/Scripts/test.sh
+
+      - name: Build verified Release configuration
+        env:
+          SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY: pk_live_ci_release_validation
+          SNAPLIST_RELEASE_CLERK_FRONTEND_DOMAIN: release-clerk.example.invalid
+        run: ios/Scripts/build-release.sh
 
   focused:
     if: github.event_name == 'workflow_dispatch'

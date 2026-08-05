@@ -237,7 +237,7 @@ export class HttpEbayAdapter implements EbayAdapter {
     }
 
     // --- 3. Publish the offer -> live listing id. -----------------------------
-    const published = await this.call<{ listingId?: string }>(
+    const published = await this.call<{ listingId?: string; listingUrl?: string }>(
       token,
       "POST",
       `${baseUrl}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`,
@@ -256,6 +256,9 @@ export class HttpEbayAdapter implements EbayAdapter {
       const result = {
         listingId: published.listingId,
         offerId,
+        ...(typeof published.listingUrl === "string"
+          ? { listingUrl: published.listingUrl }
+          : {}),
         status: "published" as const,
       };
       await complete?.(result, dispatchContext(lease));

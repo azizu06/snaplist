@@ -93,6 +93,8 @@ export const ebayPublishStatusSchema = z
     ebayListingId: z.string().min(1).nullable(),
     ebayOfferId: z.string().min(1).nullable(),
     alreadyPublished: z.boolean(),
+    listingUrl: z.string().url().nullable(),
+    ebayEnvironment: z.enum(["sandbox", "production"]).nullable(),
   })
   .strict();
 

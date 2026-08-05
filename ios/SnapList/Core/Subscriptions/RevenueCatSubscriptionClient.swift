@@ -1,6 +1,30 @@
 import Foundation
 import RevenueCat
 
+enum RevenueCatSDKKey {
+    enum Build: Sendable {
+        case debug
+        case release
+
+        static let current: Self = {
+#if DEBUG
+            .debug
+#else
+            .release
+#endif
+        }()
+    }
+
+    static func isAccepted(_ key: String, for build: Build) -> Bool {
+        switch build {
+        case .debug:
+            key.hasPrefix("test_") || key.hasPrefix("appl_")
+        case .release:
+            key.hasPrefix("appl_")
+        }
+    }
+}
+
 final class RevenueCatSubscriptionClient: SubscriptionClient, @unchecked Sendable {
     private var configuration: NativeSubscriptionConfiguration?
     private var packagesByProductID: [String: Package] = [:]
@@ -9,6 +33,10 @@ final class RevenueCatSubscriptionClient: SubscriptionClient, @unchecked Sendabl
         guard configuration.configured,
               let publicSDKKey = configuration.publicSDKKey,
               !publicSDKKey.isEmpty,
+              RevenueCatSDKKey.isAccepted(
+                publicSDKKey,
+                for: .current
+              ),
               configuration.entitlementID?.isEmpty == false,
               configuration.monthlyProductID?.isEmpty == false else {
             throw SubscriptionClientError.unconfigured

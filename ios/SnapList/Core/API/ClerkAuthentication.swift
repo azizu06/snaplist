@@ -39,8 +39,11 @@ struct NativeAppConfiguration: Equatable {
         guard let publishableKey, !publishableKey.isEmpty else {
             throw NativeAppConfigurationError.missingClerkPublishableKey
         }
-        guard publishableKey.hasPrefix("pk_test_")
-                || publishableKey.hasPrefix("pk_live_") else {
+        guard publishableKey.hasPrefix("pk_live_")
+                || (
+                    allowsLocalDevelopment
+                    && publishableKey.hasPrefix("pk_test_")
+                ) else {
             throw NativeAppConfigurationError.invalidClerkPublishableKey
         }
 

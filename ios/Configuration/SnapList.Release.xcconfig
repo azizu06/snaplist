@@ -1,0 +1,6 @@
+#include "SnapList.xcconfig"
+
+// Archive and App Store builds must receive both values from protected build
+// settings. They intentionally have no committed fallback.
+SNAPLIST_CLERK_PUBLISHABLE_KEY = $(SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY)
+SNAPLIST_CLERK_FRONTEND_DOMAIN = $(SNAPLIST_RELEASE_CLERK_FRONTEND_DOMAIN)

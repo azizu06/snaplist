@@ -590,7 +590,7 @@ final class TrophyWallStore {
     }
 
     func applyEbayPublishStatus(_ status: EbayPublishStatus) {
-        guard status.publishedListing != nil,
+        guard status.isConfirmedPublication,
               let runID = runIDsByListingID[status.listingID],
               let index = cards.firstIndex(where: { $0.identity == .run(runID) })
         else {

@@ -42,6 +42,7 @@ export interface PublishOutcome {
   listingId: string;
   ebayListingId: string;
   ebayOfferId: string | null;
+  listingUrl: string | null;
   ebayStatus: "published";
   /** True when the stored result was returned (idempotent short-circuit, no eBay call); false when this call actually published. */
   alreadyPublished: boolean;
@@ -240,6 +241,7 @@ export async function publishListingToEbay(
       listingId,
       ebayListingId: listing.ebay_listing_id as string,
       ebayOfferId: (listing.ebay_offer_id as string | null) ?? null,
+      listingUrl: null,
       ebayStatus: "published",
       alreadyPublished: true,
     };
@@ -440,6 +442,7 @@ export async function publishListingToEbay(
     listingId,
     ebayListingId: result.listingId,
     ebayOfferId: result.offerId,
+    listingUrl: result.listingUrl ?? null,
     ebayStatus: "published",
     alreadyPublished: false,
   };
