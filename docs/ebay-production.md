@@ -18,7 +18,8 @@ the ordered checklist for the flip. Sandbox setup itself is documented in
 | `SUPABASE_SERVICE_ROLE_KEY` | legacy caller compatibility | current `sb_secret_...`; does not replace `SUPABASE_SECRET_KEY` for account erasure |
 | `REVENUECAT_SECRET_API_KEY` / `REVENUECAT_PROJECT_ID` | unset for local/offline | required server-only RevenueCat erasure credentials |
 | `APPLE_TEAM_ID` / `APP_ATTEST_APP_ID` | local/test values | real 10-character Apple Team ID plus exact registered bundle ID; placeholder `TEAMID1234` is rejected |
-| `CLERK_AUTHORIZED_PARTIES` | localhost origins allowed | at least one deployed HTTPS origin, e.g. `https://snaplist.vercel.app`; localhost-only is rejected |
+| `APP_ATTEST_TEAM_ID` / `APP_ATTEST_BUNDLE_ID` | local/test values | real 10-character Apple Team ID plus exact registered bundle ID for guest-claim handoff; placeholder `TEAMID1234` is rejected |
+| `CLERK_AUTHORIZED_PARTIES` | localhost origins allowed | every deployed value is a public HTTPS origin, e.g. `https://snaplist.vercel.app` |
 | `EBAY_PRODUCTION_MOBILE_ENABLED` | `false` or unset | set `true` only with `EBAY_BASE_URL=https://api.ebay.com` exactly |
 | policy ids (`EBAY_*_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`) | optional exact-operator fallback only | **unset**; each connected seller's verified binding |
 | `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` | sandbox convenience | **unset** — production publishes use per-user OAuth |
@@ -38,9 +39,10 @@ Sandbox default is available only to local/test processes. If
 
 Every deployed environment also needs `SUPABASE_SECRET_KEY`,
 `REVENUECAT_SECRET_API_KEY`, `REVENUECAT_PROJECT_ID`, `APPLE_TEAM_ID`,
-`APP_ATTEST_APP_ID`, and `CLERK_AUTHORIZED_PARTIES`. Use a real Apple Team ID
-and App Attest bundle ID, current `sb_secret_...` Supabase key, and at least one
-public HTTPS Clerk authorized party. The `SUPABASE_SERVICE_ROLE_KEY` legacy name
+`APP_ATTEST_APP_ID`, `APP_ATTEST_TEAM_ID`, `APP_ATTEST_BUNDLE_ID`, and
+`CLERK_AUTHORIZED_PARTIES`. Use real Apple Team IDs and registered App Attest
+bundle IDs for both consumers, current `sb_secret_...` Supabase key, and only
+public HTTPS Clerk authorized parties. The `SUPABASE_SERVICE_ROLE_KEY` legacy name
 does not satisfy account erasure.
 
 ## Ordered checklist
@@ -91,6 +93,8 @@ REVENUECAT_SECRET_API_KEY=<RevenueCat secret API key>
 REVENUECAT_PROJECT_ID=<RevenueCat project id>
 APPLE_TEAM_ID=<real-10-character-Apple-Team-ID>
 APP_ATTEST_APP_ID=<APPLE_TEAM_ID>.<registered.native.bundle.id>
+APP_ATTEST_TEAM_ID=<real-10-character-Apple-Team-ID>
+APP_ATTEST_BUNDLE_ID=<registered.native.bundle.id>
 CLERK_AUTHORIZED_PARTIES=https://snaplist.vercel.app
 EBAY_PRODUCTION_MOBILE_ENABLED=true
 EBAY_MARKETPLACE_ID=EBAY_US

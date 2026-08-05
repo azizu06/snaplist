@@ -24,6 +24,8 @@ describe("parseEnv", () => {
       EBAY_PRODUCTION_MOBILE_ENABLED: "true",
       APPLE_TEAM_ID: "A1B2C3D4E5",
       APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
@@ -42,12 +44,14 @@ describe("parseEnv", () => {
     ).not.toThrow();
   });
 
-  it("requires a non-placeholder App Attest Team ID and bundle ID in deployments", () => {
+  it("requires non-placeholder App Attest identities for every deployed consumer", () => {
     const deployed = {
       ...valid,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
       EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
@@ -67,6 +71,22 @@ describe("parseEnv", () => {
         ...deployed,
         APPLE_TEAM_ID: "A1B2C3D4E5",
         APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+        APP_ATTEST_TEAM_ID: "TEAMID1234",
+      }),
+    ).toThrowError(/APP_ATTEST_TEAM_ID/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        APPLE_TEAM_ID: "A1B2C3D4E5",
+        APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+        APP_ATTEST_BUNDLE_ID: undefined,
+      }),
+    ).toThrowError(/APP_ATTEST_BUNDLE_ID/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        APPLE_TEAM_ID: "A1B2C3D4E5",
+        APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
       }),
     ).not.toThrow();
   });
@@ -79,6 +99,8 @@ describe("parseEnv", () => {
       EBAY_BASE_URL: "https://api.sandbox.ebay.com",
       APPLE_TEAM_ID: "A1B2C3D4E5",
       APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
@@ -101,7 +123,7 @@ describe("parseEnv", () => {
     expect(env.REVENUECAT_PROJECT_ID).toBe("proj_test");
   });
 
-  it("rejects missing or localhost-only Clerk authorized parties in deployments", () => {
+  it("rejects missing, non-public, or malformed Clerk authorized parties in deployments", () => {
     const deployed = {
       ...valid,
       NODE_ENV: "production",
@@ -109,6 +131,8 @@ describe("parseEnv", () => {
       EBAY_BASE_URL: "https://api.sandbox.ebay.com",
       APPLE_TEAM_ID: "A1B2C3D4E5",
       APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
@@ -121,6 +145,12 @@ describe("parseEnv", () => {
         CLERK_AUTHORIZED_PARTIES: "http://localhost:3000,http://127.0.0.1:3001",
       }),
     ).toThrowError(/CLERK_AUTHORIZED_PARTIES/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example,not a URL",
+      }),
+    ).toThrowError(/public HTTPS origin/);
     expect(() =>
       parseEnv({
         ...deployed,

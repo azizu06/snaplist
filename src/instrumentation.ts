@@ -15,38 +15,17 @@ export async function register(): Promise<void> {
   const { initSentry, captureError } = await import("./lib/sentry");
   await initSentry();
 
-  // Reject startup if the LLM provider was not chosen (#501). The registry
-  // refuses to resolve an unset LLM_PROVIDER outside local development; raising
-  // it here surfaces the refusal when the server starts rather than on the first
-  // seller request.
-  //
-  // How hard this stops depends on the host, so do not treat it as THE fence.
-  // Under `next start` it fails `prepare()` and every route then 500s for the
-  // life of the process. On Vercel, registration is not awaited, so this only
-  // surfaces as an unhandled rejection and requests keep serving. Either way the
-  // guarantee that holds everywhere is `resolveProvider` throwing when a model is
-  // resolved — see ADR-0002. Sentry is initialized FIRST so the config failure
-  // reaches alerting instead of only the platform's raw logs.
-  const { SELLER_MEDIA_ROLES, llmProviderConfigError, resolveProvider, sellerMediaConfigError } =
-    await import("./lib/llm/registry");
-  const providerError = llmProviderConfigError();
-  if (providerError) {
-    const error = new Error(providerError);
+  // Parse the whole process environment during server registration. Request paths
+  // may never be the first consumers of a deployed configuration: a deployment
+  // with a Sandbox default, placeholder App Attest identity, or unsafe Clerk
+  // audience must fail before it can serve traffic. Sentry starts first so the
+  // failure remains observable.
+  try {
+    const { parseEnv } = await import("./lib/env");
+    parseEnv(process.env);
+  } catch (error) {
     captureError(error, { phase: "instrumentation.register" });
     throw error;
-  }
-
-  // A chosen provider still may not be a permissible one for SELLER MEDIA (#501).
-  // Safe to resolve now: the check above already rejected every env from which
-  // `resolveProvider` would throw.
-  const provider = resolveProvider();
-  for (const role of SELLER_MEDIA_ROLES) {
-    const mediaError = sellerMediaConfigError(role, provider);
-    if (mediaError) {
-      const error = new Error(mediaError);
-      captureError(error, { phase: "instrumentation.register" });
-      throw error;
-    }
   }
 }
 

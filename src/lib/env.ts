@@ -153,6 +153,11 @@ const envSchema = z.object({
   // guest allowance must identify the registered Team ID and exact bundle ID.
   APPLE_TEAM_ID: z.string().min(1).optional(),
   APP_ATTEST_APP_ID: z.string().min(1).optional(),
+  // The guest-claim handoff is a separate App Attest consumer. It reads these
+  // exact values, so deployed validation must bind to them rather than only the
+  // included-offer pair above.
+  APP_ATTEST_TEAM_ID: z.string().min(1).optional(),
+  APP_ATTEST_BUNDLE_ID: z.string().min(1).optional(),
 
   // Native endpoints use Clerk's authorized-party list for `azp` validation.
   CLERK_AUTHORIZED_PARTIES: z.string().min(1).optional(),
@@ -281,6 +286,31 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
     );
   }
 
+  const guestHandoffTeamId = env.APP_ATTEST_TEAM_ID?.trim();
+  if (!guestHandoffTeamId) {
+    issues.push(
+      "  - APP_ATTEST_TEAM_ID: APP_ATTEST_TEAM_ID is required outside local development.",
+    );
+  } else if (
+    guestHandoffTeamId === "TEAMID1234"
+    || !/^[A-Z0-9]{10}$/.test(guestHandoffTeamId)
+  ) {
+    issues.push(
+      "  - APP_ATTEST_TEAM_ID: APP_ATTEST_TEAM_ID must be the real 10-character Apple Team ID, not the placeholder TEAMID1234.",
+    );
+  }
+
+  const guestHandoffBundleId = env.APP_ATTEST_BUNDLE_ID?.trim();
+  if (
+    !guestHandoffBundleId
+    || guestHandoffBundleId.length > 255
+    || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(guestHandoffBundleId)
+  ) {
+    issues.push(
+      "  - APP_ATTEST_BUNDLE_ID: APP_ATTEST_BUNDLE_ID is required and must be the exact native bundle ID.",
+    );
+  }
+
   const erasureRequired = [
     "SUPABASE_SECRET_KEY",
     "REVENUECAT_SECRET_API_KEY",
@@ -294,17 +324,14 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
     );
   issues.push(...erasureIssues);
 
-  const authorizedParties = (env.CLERK_AUTHORIZED_PARTIES ?? "")
-    .split(",")
-    .map((party) => party.trim())
-    .filter(Boolean);
+  const authorizedParties = clerkAuthorizedParties(env);
   if (!authorizedParties.length) {
     issues.push(
       "  - CLERK_AUTHORIZED_PARTIES: CLERK_AUTHORIZED_PARTIES is required outside local development.",
     );
-  } else if (authorizedParties.every(isLoopbackAuthorizedParty)) {
+  } else if (authorizedParties.some((party) => !isPublicHttpsOrigin(party))) {
     issues.push(
-      "  - CLERK_AUTHORIZED_PARTIES: deployed environments require at least one non-localhost authorized party.",
+      "  - CLERK_AUTHORIZED_PARTIES: every deployed authorized party must be a public HTTPS origin.",
     );
   }
 
@@ -324,13 +351,68 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
   return issues;
 }
 
-function isLoopbackAuthorizedParty(party: string): boolean {
+function clerkAuthorizedParties(env: Record<string, string | undefined>): string[] {
+  return (env.CLERK_AUTHORIZED_PARTIES ?? "")
+    .split(",")
+    .map((party) => party.trim())
+    .filter(Boolean);
+}
+
+function isPublicHttpsOrigin(party: string): boolean {
   try {
-    const hostname = new URL(party).hostname;
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+    const url = new URL(party);
+    if (
+      url.protocol !== "https:"
+      || url.username
+      || url.password
+      || url.pathname !== "/"
+      || url.search
+      || url.hash
+    ) {
+      return false;
+    }
+
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
+
+    const ipv4 = hostname.split(".").map(Number);
+    if (ipv4.length === 4 && ipv4.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
+      const [first, second] = ipv4;
+      return !(
+        first === 0
+        || first === 10
+        || first === 127
+        || (first === 169 && second === 254)
+        || (first === 172 && second >= 16 && second <= 31)
+        || (first === 192 && second === 168)
+      );
+    }
+
+    const normalizedIpv6 = hostname.toLowerCase();
+    return normalizedIpv6 !== "::" && normalizedIpv6 !== "::1"
+      && !normalizedIpv6.startsWith("fc")
+      && !normalizedIpv6.startsWith("fd")
+      && !normalizedIpv6.startsWith("fe80:");
   } catch {
     return false;
   }
+}
+
+/**
+ * Reads the same Clerk audience list used by native auth. In deployed processes
+ * it rejects malformed, local, and non-HTTPS values before `verifyToken` sees
+ * them; startup validation alone is not an authorization boundary.
+ */
+export function getClerkAuthorizedParties(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const parties = clerkAuthorizedParties(env);
+  if (!isLocalDevelopment(env) && parties.some((party) => !isPublicHttpsOrigin(party))) {
+    throw new Error(
+      "CLERK_AUTHORIZED_PARTIES must contain only public HTTPS origins outside local development.",
+    );
+  }
+  return parties;
 }
 
 export type Env = z.infer<typeof envSchema>;
