@@ -1,6 +1,6 @@
 begin;
 
-select plan(70);
+select plan(88);
 
 -- Issue #524 fences the included first AI run by physical device, so every
 -- non-guest tenant here needs the reserved claim a real redemption would have
@@ -15,7 +15,8 @@ select
   'reserved'
 from unnest(array[
   'rc-user-ledger',
-  'rc-user-legacy'
+  'rc-user-legacy',
+  'rc-user-production-retry'
 ]) as tenant;
 
 select ok(
@@ -244,6 +245,84 @@ select is(
      and event.event_id = 'rc-direct-sandbox'),
   'sandbox_ignored',
   'the direct sandbox RPC denial remains auditable'
+);
+
+select * from public.bind_revenuecat_customer(
+  'rc-user-sandbox-reconcile', 'rc-user-sandbox-reconcile'
+);
+select * from public.resolve_revenuecat_customer(
+  'rc-user-sandbox-reconcile', 'rc-user-sandbox-reconcile',
+  'rc-original-sandbox-reconcile'
+);
+select ok(
+  public.record_verified_revenuecat_ai_item_period(
+    'rc-user-sandbox-reconcile', 'rc-user-sandbox-reconcile', 'PRODUCTION',
+    'rc-original-sandbox-reconcile:p1', 'rc-original-sandbox-reconcile',
+    date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+    'active', null, 24, 'rc-sandbox-reconcile-production', 'INITIAL_PURCHASE',
+    date_trunc('month', now()) + interval '1 minute'
+  ),
+  'the sandbox reconciliation fixture begins with verified production authority'
+);
+select ok(
+  not public.require_revenuecat_reconciliation(
+    'rc-user-sandbox-reconcile', 'rc-user-sandbox-reconcile',
+    'rc-original-sandbox-reconcile', 'SANDBOX', 'rc-sandbox-product-change',
+    'PRODUCT_CHANGE', date_trunc('month', now()) + interval '2 minutes'
+  ),
+  'a direct service-role sandbox reconciliation call is audit-only'
+);
+select is(
+  (select binding.transition_state
+   from public.revenuecat_customer_bindings binding
+   where binding.user_id = 'rc-user-sandbox-reconcile'),
+  'not_required',
+  'sandbox reconciliation leaves the production transition flag unchanged'
+);
+select is(
+  (select binding.lifecycle_state
+   from public.revenuecat_customer_bindings binding
+   where binding.user_id = 'rc-user-sandbox-reconcile'),
+  'active',
+  'sandbox reconciliation leaves the production lifecycle state unchanged'
+);
+select is(
+  (select binding.last_event_id
+   from public.revenuecat_customer_bindings binding
+   where binding.user_id = 'rc-user-sandbox-reconcile'),
+  'rc-sandbox-reconcile-production',
+  'sandbox reconciliation leaves the production binding cursor unchanged'
+);
+select is(
+  (select event.outcome
+   from private.revenuecat_webhook_events event
+   where event.environment = 'SANDBOX'
+     and event.event_id = 'rc-sandbox-product-change'),
+  'sandbox_ignored',
+  'sandbox reconciliation is audited as sandbox_ignored'
+);
+select lives_ok(
+  $$
+    select public.record_verified_revenuecat_ai_item_period(
+      'rc-user-sandbox-reconcile', 'rc-user-sandbox-reconcile', 'PRODUCTION',
+      'rc-original-sandbox-reconcile:p2', 'rc-original-sandbox-reconcile',
+      date_trunc('month', now()) + interval '1 month',
+      date_trunc('month', now()) + interval '2 months',
+      'active', null, 24, 'rc-sandbox-reconcile-renewal', 'RENEWAL',
+      date_trunc('month', now()) + interval '1 month 1 minute'
+    )
+  $$,
+  'a later verified production renewal remains unblocked'
+);
+select is(
+  (select count(*)::integer
+   from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-sandbox-reconcile'
+     and period.source = 'storekit'
+     and period.period_key = 'rc-original-sandbox-reconcile:p2'
+     and period.state = 'active'),
+  1,
+  'the production renewal creates its verified active period'
 );
 select ok(
   public.record_verified_revenuecat_ai_item_period(
@@ -524,6 +603,119 @@ select is(
   'the verified status reads the same monthly ledger without stacking credits'
 );
 
+select * from public.bind_revenuecat_customer(
+  'rc-user-production-retry', 'rc-user-production-retry'
+);
+select * from public.resolve_revenuecat_customer(
+  'rc-user-production-retry', 'rc-user-production-retry',
+  'rc-original-production-retry'
+);
+select public.record_verified_revenuecat_ai_item_period(
+  'rc-user-production-retry', 'rc-user-production-retry', 'PRODUCTION',
+  'rc-original-production-retry:p1', 'rc-original-production-retry',
+  date_trunc('month', now()), date_trunc('month', now()) + interval '1 month',
+  'active', null, 2, 'rc-production-retry-active', 'INITIAL_PURCHASE',
+  date_trunc('month', now()) + interval '1 minute'
+);
+create temp table rc_production_retry_runs (
+  sequence integer primary key,
+  run_id uuid not null
+);
+grant select on rc_production_retry_runs to authenticated;
+insert into rc_production_retry_runs (sequence, run_id)
+select 1, staged.run_id
+from public.stage_pipeline_batch(
+  'rc-user-production-retry',
+  '17300000-0000-4000-8000-000000000004'::uuid,
+  jsonb_build_array(jsonb_build_object(
+    'idempotency_key', 'rc-production-retry-included',
+    'source', 'single',
+    'autopilot_enabled', false,
+    'photo_paths', jsonb_build_array('rc-user-production-retry/included.jpg'),
+    'cost_basis', null
+  )),
+  100,
+  100
+) staged;
+insert into rc_production_retry_runs (sequence, run_id)
+select 2, staged.run_id
+from public.stage_pipeline_batch(
+  'rc-user-production-retry',
+  '17300000-0000-4000-8000-000000000005'::uuid,
+  jsonb_build_array(jsonb_build_object(
+    'idempotency_key', 'rc-production-retry-storekit',
+    'source', 'single',
+    'autopilot_enabled', false,
+    'photo_paths', jsonb_build_array('rc-user-production-retry/storekit.jpg'),
+    'cost_basis', null
+  )),
+  100,
+  100
+) staged;
+update public.pipeline_runs
+set status = 'running',
+    stage = 'pricing',
+    attempt_count = 1,
+    started_at = statement_timestamp(),
+    last_attempted_at = statement_timestamp(),
+    lease_token = '17310000-0000-4000-8000-000000000001',
+    lease_expires_at = statement_timestamp() + interval '1 minute'
+where id = (select run_id from rc_production_retry_runs where sequence = 2);
+update public.pipeline_runs
+set status = 'failed',
+    failure_code = 'attempts_exhausted',
+    safe_failure_message = 'The production-backed retry fixture failed.',
+    completed_at = statement_timestamp(),
+    lease_token = null,
+    lease_expires_at = null
+where id = (select run_id from rc_production_retry_runs where sequence = 2);
+select is(
+  (select period.source
+   from rc_production_retry_runs run
+   join public.ai_item_credit_reservations reservation
+     on reservation.pipeline_run_id = run.run_id
+   join public.ai_item_allowance_periods period
+     on period.id = reservation.allowance_period_id
+   where run.sequence = 2),
+  'storekit',
+  'the production retry fixture is backed by verified StoreKit credit'
+);
+select is(
+  (select reservation.state
+   from rc_production_retry_runs run
+   join public.ai_item_credit_reservations reservation
+     on reservation.pipeline_run_id = run.run_id
+   where run.sequence = 2),
+  'restored',
+  'the production-backed failed run restores its retry reservation'
+);
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"rc-user-production-retry","role":"authenticated"}',
+  true
+);
+select is(
+  public.apply_mobile_run_operation(
+    (select run_id from rc_production_retry_runs where sequence = 2),
+    'retry',
+    '17320000-0000-4000-8000-000000000001'::uuid
+  ) #>> '{status}',
+  'queued',
+  'a production-backed restored reservation can still reclaim for retry'
+);
+reset role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select is(
+  (select reservation.retry_reservation_count
+   from rc_production_retry_runs run
+   join public.ai_item_credit_reservations reservation
+     on reservation.pipeline_run_id = run.run_id
+   where run.sequence = 2),
+  1,
+  'the production-backed retry records one reclaim'
+);
+
 -- Upgrade-state proof: this reproduces the state left by the old
 -- environment-blind RevenueCat RPC, then runs the migration quarantine seam.
 select * from public.bind_revenuecat_customer('rc-user-legacy', 'rc-user-legacy');
@@ -546,8 +738,13 @@ insert into private.revenuecat_webhook_events (
   date_trunc('month', now()) + interval '1 minute', md5('legacy-sandbox-payload'),
   'applied'
 );
-create temp table rc_legacy_runs as
-select staged.run_id
+create temp table rc_legacy_runs (
+  sequence integer primary key,
+  run_id uuid not null
+);
+grant select on rc_legacy_runs to authenticated;
+insert into rc_legacy_runs (sequence, run_id)
+select 1, staged.run_id
 from public.stage_pipeline_batch(
   'rc-user-legacy',
   '17300000-0000-4000-8000-000000000003'::uuid,
@@ -566,6 +763,58 @@ select is(
    from public.get_verified_ai_item_entitlement('rc-user-legacy') entitlement),
   2,
   'a pre-migration sandbox-minted grace period would grant paid credit'
+);
+insert into rc_legacy_runs (sequence, run_id)
+select 2, staged.run_id
+from public.stage_pipeline_batch(
+  'rc-user-legacy',
+  '17300000-0000-4000-8000-000000000006'::uuid,
+  jsonb_build_array(jsonb_build_object(
+    'idempotency_key', 'rc-legacy-storekit',
+    'source', 'single',
+    'autopilot_enabled', false,
+    'photo_paths', jsonb_build_array('rc-user-legacy/storekit.jpg'),
+    'cost_basis', null
+  )),
+  100,
+  100
+) staged;
+update public.pipeline_runs
+set status = 'running',
+    stage = 'pricing',
+    attempt_count = 1,
+    started_at = statement_timestamp(),
+    last_attempted_at = statement_timestamp(),
+    lease_token = '17310000-0000-4000-8000-000000000002',
+    lease_expires_at = statement_timestamp() + interval '1 minute'
+where id = (select run_id from rc_legacy_runs where sequence = 2);
+update public.pipeline_runs
+set status = 'failed',
+    failure_code = 'attempts_exhausted',
+    safe_failure_message = 'The legacy-backed retry fixture failed.',
+    completed_at = statement_timestamp(),
+    lease_token = null,
+    lease_expires_at = null
+where id = (select run_id from rc_legacy_runs where sequence = 2);
+select is(
+  (select period.source
+   from rc_legacy_runs run
+   join public.ai_item_credit_reservations reservation
+     on reservation.pipeline_run_id = run.run_id
+   join public.ai_item_allowance_periods period
+     on period.id = reservation.allowance_period_id
+   where run.sequence = 2),
+  'storekit',
+  'the legacy retry fixture is backed by the pre-migration StoreKit period'
+);
+select is(
+  (select reservation.state
+   from rc_legacy_runs run
+   join public.ai_item_credit_reservations reservation
+     on reservation.pipeline_run_id = run.run_id
+   where run.sequence = 2),
+  'restored',
+  'the legacy-backed failed run begins with a reclaimable restored reservation'
 );
 select is(
   private.quarantine_legacy_revenuecat_allowances(),
@@ -591,6 +840,48 @@ select is(
    from public.get_verified_ai_item_entitlement('rc-user-legacy') entitlement),
   0,
   'the quarantined legacy allowance cannot grant another credit'
+);
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"rc-user-legacy","role":"authenticated"}',
+  true
+);
+select is(
+  public.apply_mobile_run_operation(
+    (select run_id from rc_legacy_runs where sequence = 2),
+    'retry',
+    '17320000-0000-4000-8000-000000000002'::uuid
+  ) #>> '{mobileRunOperationError,code}',
+  '55000',
+  'a quarantined-period-backed reservation cannot reclaim through manual retry'
+);
+select is(
+  public.apply_mobile_run_operation(
+    (select run_id from rc_legacy_runs where sequence = 2),
+    'retry',
+    '17320000-0000-4000-8000-000000000002'::uuid
+  ) #>> '{mobileRunOperationError,message}',
+  'AI-item credit allowance period is ambiguous',
+  'the retry denial reports the quarantined allowance authority'
+);
+reset role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select is(
+  (select status
+   from public.pipeline_runs
+   where id = (select run_id from rc_legacy_runs where sequence = 2)),
+  'failed',
+  'the quarantined retry leaves the failed run stopped'
+);
+select is(
+  (select reservation.retry_reservation_count
+   from rc_legacy_runs run
+   join public.ai_item_credit_reservations reservation
+     on reservation.pipeline_run_id = run.run_id
+   where run.sequence = 2),
+  0,
+  'the quarantined retry leaves reconciliation counters untouched'
 );
 select ok(
   not public.record_verified_revenuecat_ai_item_period(
