@@ -14,6 +14,15 @@ import {
 
 const secret = "offline-webhook-secret";
 const now = new Date("2026-07-17T12:00:00.000Z");
+const webhookConfig = {
+  signingSecret: secret,
+  authorization: "Bearer offline",
+  appId: "app_test",
+  entitlementId: "pro",
+  monthlyProductId: "snaplist-pro-fixture",
+  monthlyAllowance: 24,
+  allowedEnvironment: "PRODUCTION",
+} satisfies RevenueCatWebhookConfig;
 
 function payload(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
@@ -133,15 +142,7 @@ describe("RevenueCat webhook authentication", () => {
       rawBody,
       signature: signature(rawBody),
       authorization: "Bearer offline",
-      config: {
-        signingSecret: secret,
-        authorization: "Bearer offline",
-        appId: "app_test",
-        entitlementId: "pro",
-        monthlyProductId: "snaplist-pro-fixture",
-        monthlyAllowance: 24,
-        allowedEnvironment: "PRODUCTION",
-      },
+      config: webhookConfig,
       now,
     });
 
@@ -159,15 +160,7 @@ describe("RevenueCat webhook authentication", () => {
         rawBody,
         signature: signatureValue === "valid" ? signature(rawBody) : signatureValue,
         authorization,
-        config: {
-          signingSecret: secret,
-          authorization: "Bearer offline",
-          appId: "app_test",
-          entitlementId: "pro",
-          monthlyProductId: "snaplist-pro-fixture",
-          monthlyAllowance: 24,
-          allowedEnvironment: "PRODUCTION",
-        },
+        config: webhookConfig,
         now,
       }),
     ).toThrow();
@@ -181,15 +174,7 @@ describe("RevenueCat webhook authentication", () => {
         rawBody,
         signature: signature(rawBody, oldTimestamp),
         authorization: "Bearer offline",
-        config: {
-          signingSecret: secret,
-          authorization: "Bearer offline",
-          appId: "app_test",
-          entitlementId: "pro",
-          monthlyProductId: "snaplist-pro-fixture",
-          monthlyAllowance: 24,
-          allowedEnvironment: "PRODUCTION",
-        },
+        config: webhookConfig,
         now,
       }),
     ).toThrow("timestamp");
@@ -268,15 +253,7 @@ describe("RevenueCat persistence composition", () => {
       ],
       error: null,
     });
-    const bridge = createSupabaseNativeSubscriptionBridge({ rpc } as never, {
-      signingSecret: secret,
-      authorization: "Bearer offline",
-      appId: "app_test",
-      entitlementId: "pro",
-      monthlyProductId: "snaplist-pro-fixture",
-      monthlyAllowance: 24,
-      allowedEnvironment: "PRODUCTION",
-    });
+    const bridge = createSupabaseNativeSubscriptionBridge({ rpc } as never, webhookConfig);
 
     await expect(bridge.entitlementFor("user_123")).resolves.toEqual({
       billingSource: "included",
@@ -292,20 +269,10 @@ describe("RevenueCat persistence composition", () => {
 });
 
 describe("RevenueCat verified lifecycle bridge", () => {
-  const config = {
-    signingSecret: secret,
-    authorization: "Bearer offline",
-    appId: "app_test",
-    entitlementId: "pro",
-    monthlyProductId: "snaplist-pro-fixture",
-    monthlyAllowance: 24,
-    allowedEnvironment: "PRODUCTION" as const,
-  };
-
   async function handle(
     overrides: Record<string, unknown>,
     storeOverrides: Partial<RevenueCatEntitlementStore> = {},
-    selectedConfig: RevenueCatWebhookConfig = config,
+    selectedConfig: RevenueCatWebhookConfig = webhookConfig,
   ) {
     const rawBody = payload(overrides);
     const event = parseAndVerifyRevenueCatWebhook({
@@ -326,7 +293,7 @@ describe("RevenueCat verified lifecycle bridge", () => {
     const { result, fake } = await handle(
       { environment: "SANDBOX" },
       {},
-      { ...config, allowedEnvironment: "SANDBOX" },
+      { ...webhookConfig, allowedEnvironment: "SANDBOX" },
     );
 
     expect(result).toEqual({ processed: true });

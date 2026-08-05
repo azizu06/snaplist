@@ -1,6 +1,6 @@
 begin;
 
-select plan(53);
+select plan(55);
 
 -- Issue #524 fences the included first AI run by physical device, so every
 -- non-guest tenant here needs the reserved claim a real redemption would have
@@ -64,6 +64,18 @@ select ok(
     'execute'
   ),
   'sellers cannot call the verified provider event seam'
+);
+select ok(
+  to_regprocedure(
+    'public.record_verified_revenuecat_ai_item_period(text,text,text,text,timestamptz,timestamptz,text,timestamptz,integer,text,text,timestamptz)'
+  ) is null,
+  'the environment-blind period RPC signature no longer exists'
+);
+select ok(
+  to_regprocedure(
+    'public.require_revenuecat_reconciliation(text,text,text,text,text,timestamptz)'
+  ) is null,
+  'the environment-blind reconciliation RPC signature no longer exists'
 );
 select has_trigger(
   'public',
