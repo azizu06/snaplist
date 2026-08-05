@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -91,6 +92,47 @@ class IncrementalGraphifyContractTest(unittest.TestCase):
 
         self.assertEqual(merged["nodes"], [{"id": "kept", "source_file": "src/lib/kept.ts"}])
         self.assertEqual(merged["edges"], [])
+
+    def test_related_unchanged_source_is_reextracted_for_cross_file_edge(self) -> None:
+        extraction = {
+            "nodes": [
+                {"id": "changed", "source_file": "src/lib/changed.ts"},
+                {"id": "stable", "source_file": "src/lib/stable.ts"},
+            ],
+            "edges": [
+                {"source": "stable", "target": "changed", "relation": "uses", "source_file": "src/lib/stable.ts"},
+            ],
+        }
+
+        self.assertEqual(
+            GRAPHIFY.related_sources(extraction, {"src/lib/changed.ts"}),
+            {"src/lib/changed.ts", "src/lib/stable.ts"},
+        )
+
+    def test_changed_scope_paths_uses_committed_source_delta(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            source = repo / "src/lib/core.ts"
+            source.parent.mkdir(parents=True)
+            source.write_text("export const graph = 'before';\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "before"],
+                check=True,
+            )
+            before = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            source.write_text("export const graph = 'after';\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-am", "after"],
+                check=True,
+            )
+            after = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+            self.assertEqual(
+                GRAPHIFY.changed_scope_paths(repo, before, after, {"src/lib/core.ts"}),
+                {"src/lib/core.ts"},
+            )
 
 
 if __name__ == "__main__":

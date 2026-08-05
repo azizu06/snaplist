@@ -112,6 +112,22 @@ def remove_sources(extraction: dict, sources: set[str]) -> dict:
     return {"nodes": nodes, "edges": edges, "hyperedges": []}
 
 
+def related_sources(extraction: dict, changed_sources: set[str]) -> set[str]:
+    """Re-extract unchanged sources whose AST edges point at changed nodes."""
+    changed_node_ids = {
+        node.get("id")
+        for node in extraction.get("nodes", [])
+        if node.get("source_file") in changed_sources
+    }
+    related = set(changed_sources)
+    for edge in extraction.get("edges", []):
+        if edge.get("source") in changed_node_ids or edge.get("target") in changed_node_ids:
+            source = edge.get("source_file")
+            if isinstance(source, str):
+                related.add(source)
+    return related
+
+
 def merge_incremental_extraction(previous: dict, changed: dict, changed_sources: set[str]) -> dict:
     """Replace only graph records produced by changed scoped sources."""
     preserved = remove_sources(previous, changed_sources)
@@ -409,20 +425,21 @@ def main() -> None:
     else:
         run_mode = "incremental"
         changed_paths = changed_scope_paths(repo, state["source_commit"], args.source_commit, set(scope))
+        reextract_paths = related_sources(state["extraction"], changed_paths)
         changed_code_paths = [
             corpus / relative
-            for relative in changed_paths
+            for relative in reextract_paths
             if (corpus / relative).exists()
             and (corpus / relative) in {Path(path) for path in detection.get("files", {}).get("code", [])}
         ]
         for relative in SAFE_LOCAL_AST_OVERRIDES:
             override = corpus / relative
-            if relative in changed_paths and override.exists() and override not in changed_code_paths:
+            if relative in reextract_paths and override.exists() and override not in changed_code_paths:
                 changed_code_paths.append(override)
         ast = extract(changed_code_paths, cache_root=corpus)
         changed_extraction = normalize_extraction(ast, corpus)
-        add_scope_nodes(changed_extraction, scope, corpus, changed_paths)
-        extraction = merge_incremental_extraction(state["extraction"], changed_extraction, changed_paths)
+        add_scope_nodes(changed_extraction, scope, corpus, reextract_paths)
+        extraction = merge_incremental_extraction(state["extraction"], changed_extraction, reextract_paths)
 
     represented = {node.get("source_file") for node in extraction["nodes"]}
     missing = sorted(set(scope) - represented)
