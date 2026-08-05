@@ -84,6 +84,9 @@ SHA, scoped and changed file counts, node and edge counts, run mode/fallback rea
 and zero semantic tokens. The workflow never contacts a model/provider, commits,
 deploys, or mutates a database.
 
+Use the receipt before making a PR Graphify-impact report; it is the exact-SHA
+source of node and edge counts, not a claim inferred from the workflow status.
+
 ## Current snapshot
 
 - Graphify: `graphifyy v0.8.33`
