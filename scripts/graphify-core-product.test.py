@@ -76,6 +76,22 @@ class IncrementalGraphifyContractTest(unittest.TestCase):
                 "committed scope changed",
             )
 
+    def test_incremental_merge_prunes_deleted_source_records(self) -> None:
+        previous = {
+            "nodes": [
+                {"id": "deleted", "source_file": "src/lib/deleted.ts"},
+                {"id": "kept", "source_file": "src/lib/kept.ts"},
+            ],
+            "edges": [
+                {"source": "deleted", "target": "kept", "relation": "uses", "source_file": "src/lib/deleted.ts"},
+            ],
+        }
+
+        merged = GRAPHIFY.merge_incremental_extraction(previous, {"nodes": [], "edges": []}, {"src/lib/deleted.ts"})
+
+        self.assertEqual(merged["nodes"], [{"id": "kept", "source_file": "src/lib/kept.ts"}])
+        self.assertEqual(merged["edges"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
