@@ -453,9 +453,9 @@ private struct SettingsReauthenticationView: View {
         guard !working else { return true }
         guard profile.method == .emailCode else { return false }
         switch emailCodeDelivery {
-        case .sending: true
-        case .sent: code.count != 6
-        case .failed: false
+        case .sending: return true
+        case .sent: return code.count != 6
+        case .failed: return false
         }
     }
 
