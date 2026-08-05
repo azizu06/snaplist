@@ -242,6 +242,7 @@ src/lib/marketplace/ebay/map.ts
 src/lib/marketplace/ebay/message-photo-erasure.ts
 src/lib/marketplace/ebay/mobile-oauth-store.ts
 src/lib/marketplace/ebay/mobile-oauth.ts
+src/lib/marketplace/ebay/mobile-operator-activation.ts
 src/lib/marketplace/ebay/mobile-publish.ts
 src/lib/marketplace/ebay/mock.ts
 src/lib/marketplace/ebay/oauth.ts

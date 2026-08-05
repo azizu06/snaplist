@@ -14,6 +14,7 @@ import {
   publishListingToEbayAndNotify,
   type PublishOutcome,
 } from "./publish";
+import { assertMobileEbayOperatorActivation } from "./mobile-operator-activation";
 
 export interface MobileEbayPublishStatus {
   listingId: string;
@@ -81,6 +82,7 @@ export function createMobileEbayPublishService(input: {
     client: SupabaseClient,
     completionClient: SupabaseClient,
     userId: string,
+    env: Record<string, string | undefined>,
   ) => Promise<EbayAdapter>;
   env?: () => Record<string, string | undefined>;
 }): MobileEbayPublishGateway {
@@ -167,8 +169,11 @@ export function createMobileEbayPublishService(input: {
       );
     },
     async publish(operation) {
-      const env = input.env?.() ?? process.env;
-      assertSandboxOnly(env.EBAY_BASE_URL);
+      const configuredEnv = input.env?.() ?? process.env;
+      const env = {
+        ...configuredEnv,
+        EBAY_BASE_URL: assertMobileEbayOperatorActivation(configuredEnv),
+      };
       const client = input.clientForBearer(operation.bearerToken);
       const currentStatus = await readMobilePublishStatus(
         client,
@@ -189,7 +194,12 @@ export function createMobileEbayPublishService(input: {
         client,
         operation.userId,
         operation.listingId,
-        await input.adapterFor(client, completionClient, operation.userId),
+        await input.adapterFor(
+          client,
+          completionClient,
+          operation.userId,
+          env,
+        ),
         {
           completionClient,
           env: () => env,
@@ -250,24 +260,4 @@ function mobilePublishStatus(outcome: PublishOutcome): MobileEbayPublishStatus {
     ebayOfferId: outcome.ebayOfferId,
     alreadyPublished: outcome.alreadyPublished,
   };
-}
-
-function assertSandboxOnly(baseUrl: string | undefined): void {
-  const configured = baseUrl ?? "https://api.sandbox.ebay.com";
-  let parsed: URL;
-  try {
-    parsed = new URL(configured);
-  } catch {
-    throw new Error("The mobile eBay adapter is not configured for Sandbox.");
-  }
-  if (
-    parsed.origin !== "https://api.sandbox.ebay.com"
-    || (parsed.pathname !== "" && parsed.pathname !== "/")
-    || parsed.username
-    || parsed.password
-    || parsed.search
-    || parsed.hash
-  ) {
-    throw new Error("The mobile eBay adapter is restricted to Sandbox.");
-  }
 }

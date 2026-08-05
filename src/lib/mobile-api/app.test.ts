@@ -2207,13 +2207,14 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(String(reportError.mock.calls[0]?.[1])).not.toContain(returnUrl);
   });
 
-  it("refuses a callback if the OAuth capability is no longer configured for Sandbox", async () => {
+  it("reports a production callback when operator activation is missing", async () => {
     const rows = new Map<
       string,
       { sessionId: string; userId: string; expiresAt: string }
     >();
     const exchangeCode = vi.fn();
     const completeSession = vi.fn();
+    const reportError = vi.fn();
     const env = {
       EBAY_BASE_URL: "https://api.sandbox.ebay.com",
       EBAY_CLIENT_ID: "sandbox-client-id",
@@ -2261,6 +2262,7 @@ describe("mobile API v1 provider-neutral handler", () => {
     const api = handler({
       authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
       ebayOauth,
+      reportError,
     });
     const session = await api(
       new Request("http://localhost/v1/ebay/oauth/sessions", {
@@ -2282,9 +2284,12 @@ describe("mobile API v1 provider-neutral handler", () => {
       ),
     );
 
-    expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(
-      "https://snaplist.example/mobile/ebay/oauth?result=failed",
+    expect(response.status).toBe(503);
+    expect(reportError).toHaveBeenCalledWith(
+      "mobile-api.ebay-oauth-callback",
+      expect.objectContaining({
+        message: expect.stringContaining("EBAY_PRODUCTION_MOBILE_ENABLED"),
+      }),
     );
     expect(exchangeCode).not.toHaveBeenCalled();
     expect(completeSession).not.toHaveBeenCalled();

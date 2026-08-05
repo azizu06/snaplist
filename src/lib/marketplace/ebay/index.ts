@@ -101,9 +101,11 @@ export async function createEbayAdapterForUser(
   userId?: string,
   options: {
     credentialClient?: SupabaseClient | (() => Promise<SupabaseClient>);
+    env?: () => Record<string, string | undefined>;
     scheduled?: boolean;
   } = {},
 ): Promise<EbayAdapter> {
+  const readEnv = options.env ?? (() => process.env);
   const { connected } = await getEbayConnectionStatus(
     supabase,
     userId,
@@ -116,12 +118,15 @@ export async function createEbayAdapterForUser(
     );
     return new HttpEbayAdapter({
       tokenProvider: new UserTokenProvider(credentialClient, {
+        env: readEnv,
         userId,
         scheduled: options.scheduled,
       }),
+      env: readEnv,
     });
   }
-  assertOperatorSandboxFallback(userId);
+  const env = readEnv();
+  assertOperatorSandboxFallback(userId, env);
   const credentialClient = await resolveCredentialClient(
     supabase,
     options.credentialClient,
@@ -131,10 +136,12 @@ export async function createEbayAdapterForUser(
       credentialClient,
       userId,
       options.scheduled ?? false,
+      env,
     ),
+    env: readEnv,
     publishFallbackBinding: options.scheduled
       ? undefined
-      : operatorSandboxPublishBinding(),
+      : operatorSandboxPublishBinding(env),
   });
 }
 
@@ -196,44 +203,51 @@ function operatorSandboxTokenProvider(
   supabase: SupabaseClient,
   userId: string | undefined,
   scheduled: boolean,
+  env: Record<string, string | undefined>,
 ): OperatorSandboxTokenProvider {
-  const identity = assertOperatorSandboxFallback(userId);
+  const identity = assertOperatorSandboxFallback(userId, env);
   return new OperatorSandboxTokenProvider(
     supabase,
     identity.userId,
     identity.sellerId,
     scheduled,
+    { env: () => env },
   );
 }
 
-function assertOperatorSandboxFallback(userId: string | undefined): {
+function assertOperatorSandboxFallback(
+  userId: string | undefined,
+  env: Record<string, string | undefined> = process.env,
+): {
   userId: string;
   sellerId: string;
 } {
-  const baseUrl = process.env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+  const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
   if (!isExactEbaySandboxApiBase(baseUrl)) {
     throw new Error(
       "Production eBay writes require the seller's connected account.",
     );
   }
-  if (!hasEbayMessagingSandboxFallback(userId)) {
+  if (!hasEbayMessagingSandboxFallback(userId, env)) {
     throw new Error(
       "App-level eBay Sandbox credentials are restricted to the configured operator tenant.",
     );
   }
-  const sellerId = process.env.EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID;
+  const sellerId = env.EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID;
   if (!userId || !sellerId) {
     throw new Error("App-level eBay Sandbox identity is not configured.");
   }
   return { userId, sellerId };
 }
 
-function operatorSandboxPublishBinding() {
+function operatorSandboxPublishBinding(
+  env: Record<string, string | undefined> = process.env,
+) {
   const values = {
-    fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID,
-    paymentPolicyId: process.env.EBAY_PAYMENT_POLICY_ID,
-    returnPolicyId: process.env.EBAY_RETURN_POLICY_ID,
-    merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY,
+    fulfillmentPolicyId: env.EBAY_FULFILLMENT_POLICY_ID,
+    paymentPolicyId: env.EBAY_PAYMENT_POLICY_ID,
+    returnPolicyId: env.EBAY_RETURN_POLICY_ID,
+    merchantLocationKey: env.EBAY_MERCHANT_LOCATION_KEY,
   };
   const missing = Object.entries(values)
     .filter(([, value]) => !value)
@@ -244,7 +258,7 @@ function operatorSandboxPublishBinding() {
     );
   }
   return {
-    marketplaceId: process.env.EBAY_MARKETPLACE_ID ?? "EBAY_US",
+    marketplaceId: env.EBAY_MARKETPLACE_ID ?? "EBAY_US",
     connectionGeneration: null,
     fulfillmentPolicyId: values.fulfillmentPolicyId!,
     paymentPolicyId: values.paymentPolicyId!,
