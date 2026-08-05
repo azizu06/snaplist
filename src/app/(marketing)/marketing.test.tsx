@@ -599,14 +599,22 @@ describe("feature explorer semantics", () => {
     expect($(`#${labelledBy}`).attr("role")).toBe("tab");
   });
 
-  it("marks the screen the native design package has not frozen", () => {
-    const candidates = site.FEATURE_STEPS.filter((step) => step.candidate);
-    expect(candidates.length).toBeGreaterThan(0);
-
+  it("keeps includes cards free of design-stage labels and uses a neutral hero phone", () => {
     const $ = load(renderToStaticMarkup(<LandingPage />));
-    for (const step of candidates) {
-      const card = $(`#mkt-feature-tab-${step.id}`);
-      expect(card.find(".mkt-chip").text(), `${step.title} must be marked`).toBe("Candidate");
-    }
+
+    expect($(".mkt-tab .mkt-chip, .mkt-explorer__device .mkt-phone__chip").length).toBe(0);
+    expect($(".mkt-hero__minimal-phone").length).toBe(1);
+    expect($(".mkt-hero__minimal-phone .mkt-hero__neutral-screen").length).toBe(1);
+    expect($(".mkt-hero__sbar, .mkt-hero__lbar, .mkt-hero__lbody").length).toBe(0);
+    expect($("body").text()).not.toMatch(/\b(?:candidate|illustrative)\b/i);
+  });
+
+  it("keeps five truthful two-line descriptions, including one optional bounded voice note", () => {
+    const bodies = site.FEATURE_STEPS.map((step) => step.body);
+
+    expect(bodies).toHaveLength(5);
+    expect(bodies.every((body) => body.length >= 100 && body.length <= 130)).toBe(true);
+    expect(bodies.filter((body) => /optional voice note.*15 seconds/i.test(body))).toHaveLength(1);
+    expect(bodies.join(" ")).toMatch(/handoff you finish/i);
   });
 });

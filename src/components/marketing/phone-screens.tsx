@@ -1,14 +1,11 @@
 import { TROPHY_WALL_ROWS } from "@/lib/marketing/site";
 
 /**
- * Illustrative phone screens for the marketing surface.
+ * Marketing phone screens for the feature explorer.
  *
- * These are drawings of the product, not captures of it, so every frame carries
- * an `Illustrative` chip and the Photo Review frame carries `Candidate` because
- * that screen is not frozen in the native design package. Nothing here may show
- * a state the product does not have; the Publish screen in particular labels
- * Mercari, Facebook Marketplace, and Depop as assisted handoffs rather than
- * destinations SnapList posts to.
+ * Nothing here may show a state the product does not have; the Publish screen
+ * in particular labels Mercari, Facebook Marketplace, and Depop as assisted
+ * handoffs rather than destinations SnapList posts to.
  *
  * The 9px uppercase field labels are decorative chrome. They sit below AA on
  * purpose and repeat nothing the page does not also state at full size.
@@ -39,7 +36,6 @@ export function PhotoReviewScreen() {
     <div className="mkt-scr">
       <div className="mkt-scr__bar" style={{ justifyContent: "flex-start" }}>
         <span className="mkt-scr__title">Photo Review</span>
-        <span className="mkt-chip">Candidate</span>
       </div>
       <div className="mkt-scr__body" style={{ gap: 12 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
@@ -53,9 +49,6 @@ export function PhotoReviewScreen() {
           <div className="mkt-scr__tool">Crop</div>
           <div className="mkt-scr__tool">Rotate</div>
         </div>
-      </div>
-      <div style={{ padding: "0 16px 20px" }}>
-        <span style={{ fontSize: 12, color: "var(--ink-2)" }}>Candidate screen</span>
       </div>
     </div>
   );
