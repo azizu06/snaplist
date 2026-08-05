@@ -137,7 +137,7 @@ final class EbayPublishDeliveryTests: XCTestCase {
                     "ebayListingId": "110377000011",
                     "ebayOfferId": "offer-377",
                     "alreadyPublished": false,
-                    "listingUrl": "https://www.ebay.com/itm/110377000011",
+                    "listingUrl": "https://www.sandbox.ebay.com/itm/110377000011",
                     "ebayEnvironment": "sandbox"
                   },
                   "meta": { "requestId": "req-377" }
@@ -163,7 +163,7 @@ final class EbayPublishDeliveryTests: XCTestCase {
                 EbayPublishedListing(
                     ebayListingID: "110377000011",
                     listingURL: URL(
-                        string: "https://www.ebay.com/itm/110377000011"
+                        string: "https://www.sandbox.ebay.com/itm/110377000011"
                     )!
                 )
             )

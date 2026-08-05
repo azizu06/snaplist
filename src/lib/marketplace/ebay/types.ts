@@ -80,6 +80,8 @@ export interface EbayPublishResult {
   listingId: string;
   /** The Sell Inventory offer id (kept for retry/withdraw). */
   offerId: string;
+  /** Provider-returned canonical listing URL, when the provider supplies one. */
+  listingUrl?: string;
   /** Adapter-side lifecycle; a successful publish is always "published". */
   status: "published";
 }

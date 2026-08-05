@@ -47,6 +47,23 @@ class AmbiguousThenRecoveringAdapter extends MockEbayAdapter {
   }
 }
 
+class ProviderURLMockEbayAdapter extends MockEbayAdapter {
+  override async publishListing(
+    request: EbayPublishRequest,
+    complete?: EbayPublishCompletion,
+  ): Promise<EbayPublishResult> {
+    this.requests.push(request);
+    const result: EbayPublishResult = {
+      listingId: `MOCK-EBAY-LISTING-${request.sku}`,
+      offerId: `MOCK-EBAY-OFFER-${request.sku}`,
+      status: "published",
+      listingUrl: "https://www.ebay.com/itm/provider-canonical-listing",
+    };
+    await complete?.(result, null);
+    return result;
+  }
+}
+
 function publishFixtureClient() {
   const listing = {
     id: LISTING_ID,
@@ -409,6 +426,35 @@ describe("mobile eBay publish boundary", () => {
     expect(adapter.requests).toHaveLength(1);
   });
 
+  it("emits the provider listing URL and production environment for a publish", async () => {
+    const { client } = publishFixtureClient();
+    const handler = ebayHandler({
+      adapter: new ProviderURLMockEbayAdapter(),
+      client,
+      env: {
+        EBAY_BASE_URL: "https://api.ebay.com",
+        EBAY_PRODUCTION_MOBILE_ENABLED: "true",
+      },
+      requestId: "request-683-publish-contract",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: {
+        listingId: LISTING_ID,
+        outcome: "published",
+        ebayListingId: `MOCK-EBAY-LISTING-${LISTING_ID}`,
+        ebayOfferId: `MOCK-EBAY-OFFER-${LISTING_ID}`,
+        alreadyPublished: false,
+        listingUrl: "https://www.ebay.com/itm/provider-canonical-listing",
+        ebayEnvironment: "production",
+      },
+      meta: { requestId: "request-683-publish-contract" },
+    });
+  });
+
   it("replays an unacknowledged provider mutation with one mutation and one canonical identity", async () => {
     const { client, notifications } = publishFixtureClient();
     const adapter = new AmbiguousThenRecoveringAdapter();
@@ -718,6 +764,8 @@ describe("mobile eBay publish boundary", () => {
         ebayListingId: null,
         ebayOfferId: null,
         alreadyPublished: false,
+        listingUrl: null,
+        ebayEnvironment: "sandbox",
       },
       meta: { requestId: "request-628-status" },
     });

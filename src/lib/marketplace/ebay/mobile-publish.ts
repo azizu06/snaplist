@@ -26,6 +26,8 @@ export interface MobileEbayPublishStatus {
   ebayListingId: string | null;
   ebayOfferId: string | null;
   alreadyPublished: boolean;
+  listingUrl: string | null;
+  ebayEnvironment: "sandbox" | "production";
 }
 
 export interface MobileEbayPublishGateway {
@@ -163,9 +165,11 @@ export function createMobileEbayPublishService(input: {
       };
     },
     async status(operation) {
+      const environment = ebayEnvironment(input.env?.() ?? process.env);
       return readMobilePublishStatus(
         input.clientForBearer(operation.bearerToken),
         operation.listingId,
+        environment,
       );
     },
     async publish(operation) {
@@ -178,6 +182,7 @@ export function createMobileEbayPublishService(input: {
       const currentStatus = await readMobilePublishStatus(
         client,
         operation.listingId,
+        ebayEnvironment(env),
       );
       if (currentStatus.outcome === "published") {
         const connection = await getEbayConnectionStatus(client);
@@ -207,7 +212,7 @@ export function createMobileEbayPublishService(input: {
           idempotencyKey: operation.idempotencyKey,
         },
       );
-      return mobilePublishStatus(outcome);
+      return mobilePublishStatus(outcome, ebayEnvironment(env));
     },
   };
 }
@@ -215,6 +220,7 @@ export function createMobileEbayPublishService(input: {
 async function readMobilePublishStatus(
   client: SupabaseClient,
   listingId: string,
+  environment: "sandbox" | "production",
 ): Promise<MobileEbayPublishStatus> {
   const result = await client
     .from("listings")
@@ -249,15 +255,36 @@ async function readMobilePublishStatus(
     ebayListingId: published ? listing.ebay_listing_id : null,
     ebayOfferId: published ? listing.ebay_offer_id : null,
     alreadyPublished: published,
+    listingUrl: null,
+    ebayEnvironment: environment,
   };
 }
 
-function mobilePublishStatus(outcome: PublishOutcome): MobileEbayPublishStatus {
+function mobilePublishStatus(
+  outcome: PublishOutcome,
+  environment: "sandbox" | "production",
+): MobileEbayPublishStatus {
   return {
     listingId: outcome.listingId,
     outcome: "published",
     ebayListingId: outcome.ebayListingId,
     ebayOfferId: outcome.ebayOfferId,
     alreadyPublished: outcome.alreadyPublished,
+    listingUrl: outcome.listingUrl,
+    ebayEnvironment: environment,
   };
+}
+
+function ebayEnvironment(
+  env: Record<string, string | undefined>,
+): "sandbox" | "production" {
+  try {
+    return new URL(
+      env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com",
+    ).hostname.toLowerCase() === "api.ebay.com"
+      ? "production"
+      : "sandbox";
+  } catch {
+    return "sandbox";
+  }
 }

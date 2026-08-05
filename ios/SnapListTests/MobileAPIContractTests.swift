@@ -142,7 +142,7 @@ final class MobileAPIContractTests: XCTestCase {
             environment: [:],
             apiOriginBundleValue: "https://snaplist.dev",
             clerkPublishableKeyBundleValue: "pk_test_checked_in_public_key",
-            allowsLocalDevelopment: false
+            allowsLocalDevelopment: true
         )
 
         XCTAssertEqual(
@@ -152,6 +152,31 @@ final class MobileAPIContractTests: XCTestCase {
         XCTAssertEqual(
             configuration.clerkPublishableKey,
             "pk_test_checked_in_public_key"
+        )
+    }
+
+    func testNativeAppConfigurationRejectsTestClerkKeyOutsideDevelopmentBuild() {
+        XCTAssertThrowsError(
+            try NativeAppConfiguration.resolve(
+                environment: [:],
+                apiOriginBundleValue: "https://snaplist.dev",
+                clerkPublishableKeyBundleValue: "pk_test_release_fixture",
+                allowsLocalDevelopment: false
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? NativeAppConfigurationError,
+                .invalidClerkPublishableKey
+            )
+        }
+
+        XCTAssertNoThrow(
+            try NativeAppConfiguration.resolve(
+                environment: [:],
+                apiOriginBundleValue: "https://snaplist.dev",
+                clerkPublishableKeyBundleValue: "pk_live_release_fixture",
+                allowsLocalDevelopment: false
+            )
         )
     }
 
