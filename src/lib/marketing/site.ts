@@ -92,7 +92,7 @@ export const FEATURE_STEPS = [
     id: "scan",
     title: "Scan",
     body:
-      "Take 1 to 5 photos, then add one optional voice note up to 15 seconds when a detail is easier to say before you start the draft.",
+      "Take 1 to 5 photos, then add one optional voice note up to 15 seconds before you start a draft.",
   },
   {
     id: "photo-review",
@@ -110,7 +110,7 @@ export const FEATURE_STEPS = [
     id: "publish",
     title: "Publish",
     body:
-      "Publish to eBay only after you confirm. For Mercari, Facebook Marketplace, and Depop, SnapList prepares a handoff you finish.",
+      "Confirm before eBay publishing. Facebook Marketplace, Mercari, and Depop get a prepared handoff you finish.",
   },
   {
     id: "trophy-wall",
