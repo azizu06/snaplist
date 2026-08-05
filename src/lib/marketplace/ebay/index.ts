@@ -211,6 +211,7 @@ function operatorSandboxTokenProvider(
     identity.userId,
     identity.sellerId,
     scheduled,
+    { env: () => env },
   );
 }
 

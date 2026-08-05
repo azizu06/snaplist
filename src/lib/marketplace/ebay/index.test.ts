@@ -5,7 +5,17 @@ const { getEbayConnectionStatus, userTokenProvider } = vi.hoisted(() => ({
   getEbayConnectionStatus: vi.fn(),
   userTokenProvider: vi.fn(function UserTokenProvider(...args: unknown[]) {
     void args;
-    return { getAccessToken: async () => "user-access-token" };
+    return {
+      getAccessToken: async () => "user-access-token",
+      beginProviderDispatch: async () => ({
+        accountGeneration: "operator-generation",
+        connectionGeneration: null,
+        publishClaimId: null,
+        attemptToken: "operator-attempt",
+        signal: new AbortController().signal,
+        release: async () => undefined,
+      }),
+    };
   }),
 }));
 
@@ -143,6 +153,84 @@ describe("eBay adapter composition", () => {
       "https://api.ebay.com/sell/inventory/v1/offer/offer-674/publish",
     ]);
     expect(urls.every((url) => !url.includes(".com//sell/"))).toBe(true);
+  });
+
+  it("uses the normalized Sandbox base URL for operator token refresh", async () => {
+    getEbayConnectionStatus.mockResolvedValue({
+      connected: false,
+      ebayUsername: null,
+    });
+    const rawEnv = {
+      EBAY_BASE_URL: "https://API.SANDBOX.EBAY.COM:443/",
+      EBAY_REFRESH_TOKEN: "sandbox-refresh-token",
+      EBAY_CLIENT_ID: "sandbox-client-id",
+      EBAY_CLIENT_SECRET: "sandbox-client-secret",
+      EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID: "user_operator",
+      EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID: "sandbox-seller-id",
+      EBAY_FULFILLMENT_POLICY_ID: "operator-fulfillment",
+      EBAY_PAYMENT_POLICY_ID: "operator-payment",
+      EBAY_RETURN_POLICY_ID: "operator-return",
+      EBAY_MERCHANT_LOCATION_KEY: "operator-location",
+    };
+    const normalizedEnv = {
+      ...rawEnv,
+      EBAY_BASE_URL: assertMobileEbayOperatorActivation(rawEnv),
+    };
+    for (const [key, value] of Object.entries(rawEnv)) {
+      vi.stubEnv(key, value);
+    }
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/identity/v1/oauth2/token")) {
+        return new Response(
+          JSON.stringify({ access_token: "sandbox-access-token", expires_in: 7200 }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/inventory_item/")) {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/offer")) {
+        return new Response(JSON.stringify({ offerId: "offer-674" }), {
+          status: 201,
+        });
+      }
+      return new Response(JSON.stringify({ listingId: "listing-674" }), {
+        status: 200,
+      });
+    });
+    const supabase = {
+      rpc: vi.fn(async () => ({ data: "operator-generation", error: null })),
+    } as unknown as SupabaseClient;
+
+    const adapter = await createEbayAdapterForUser(supabase, "user_operator", {
+      credentialClient: supabase,
+      env: () => normalizedEnv,
+    });
+    await adapter.publishListing({
+      sku: "listing-674",
+      marketplaceId: "EBAY_US",
+      connectionGeneration: null,
+      publishClaimId: "22222222-2222-4222-8222-222222222222",
+      fulfillmentPolicyId: "operator-fulfillment",
+      paymentPolicyId: "operator-payment",
+      returnPolicyId: "operator-return",
+      merchantLocationKey: "operator-location",
+      title: "Normalized Sandbox token refresh",
+      description: "Operator Sandbox token refresh URL regression proof.",
+      aspects: {},
+      condition: "USED_GOOD",
+      price: { value: "10.00", currency: "USD" },
+      quantity: 1,
+      categoryId: "1234",
+      imageUrls: ["https://example.com/photo.jpg"],
+    });
+
+    expect(urls[0]).toBe(
+      "https://api.sandbox.ebay.com/identity/v1/oauth2/token",
+    );
   });
 
   it("rejects app-level credentials for an unconnected non-operator", async () => {
