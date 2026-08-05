@@ -108,6 +108,38 @@ struct SettingsFlow: Equatable {
     }
 
     mutating func keepAccount() { screen = .settings }
+
+    mutating func returnFromDeletionConfirmation() {
+        guard screen == .deletionConfirmation else { return }
+        screen = .reauthentication(failed: false)
+    }
+}
+
+enum SettingsEntitlementRefreshPlan: Equatable {
+    case stop
+    case requestServerTruth
+
+    static func afterInitialLoad(_ state: SubscriptionStore.State) -> Self {
+        if case .available = state { return .requestServerTruth }
+        return .stop
+    }
+
+    static func afterRestore(_ state: SubscriptionStore.State) -> Self {
+        switch state {
+        case .restoreNotFound, .awaitingServerVerification:
+            .requestServerTruth
+        default:
+            .stop
+        }
+    }
+}
+
+struct SettingsSubscriptionVisibility: Equatable {
+    let isVisible: Bool
+
+    init(identity: SettingsIdentity, deletionOutstanding: Bool) {
+        isVisible = identity != .guest && !deletionOutstanding
+    }
 }
 
 struct SettingsSubscriptionPresentation: Equatable {
@@ -153,6 +185,16 @@ struct SettingsSubscriptionPresentation: Equatable {
 
     var remainingItems: Int? {
         facts.first { $0.label == "AI listings left" }.flatMap { Int($0.value) }
+    }
+
+    var accessibilityAnnouncement: String {
+        var parts = ["SnapList Pro"]
+        if !status.isEmpty { parts.append(status) }
+        parts += facts.map { "\($0.label), \($0.value)" }
+        if let note { parts.append(note) }
+        let punctuation = CharacterSet(charactersIn: ". ")
+        return parts.map { $0.trimmingCharacters(in: punctuation) }
+            .joined(separator: ". ") + "."
     }
 
     init(
@@ -310,7 +352,14 @@ enum SettingsDeletionSubscriptionTruth: Equatable {
     case ambiguous
     case unknown
 
-    init(state: SubscriptionStore.State) {
+    init(
+        state: SubscriptionStore.State,
+        loadPhase: SettingsSubscriptionPresentation.LoadPhase = .loaded
+    ) {
+        guard loadPhase == .loaded else {
+            self = .unknown
+            return
+        }
         switch state {
         case .awaitingServerVerification:
             self = .billing

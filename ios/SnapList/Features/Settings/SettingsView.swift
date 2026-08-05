@@ -9,6 +9,7 @@ struct SettingsView: View {
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
     private let deletionBoundary: () -> Void
+    private let deletionOutstanding: Bool
     @State private var hasLocalData: Bool
     @State private var subscriptionStore: SubscriptionStore
     @State private var subscriptionLoadPhase =
@@ -21,11 +22,13 @@ struct SettingsView: View {
         subscriptionClient: any SubscriptionClient,
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
+        deletionOutstanding: Bool = false,
         deletionBoundary: @escaping () -> Void = {}
     ) {
         profile = .current(configuration: configuration)
         self.mobileAPIClient = mobileAPIClient
         self.removeLocalData = removeLocalData
+        self.deletionOutstanding = deletionOutstanding
         self.deletionBoundary = deletionBoundary
         _hasLocalData = State(initialValue: hasLocalData)
         _subscriptionStore = State(
@@ -48,7 +51,12 @@ struct SettingsView: View {
                 valueRow("Photos", "Selected photos", chevron: true)
                 valueRow("Notifications", "On", chevron: true)
             }
-            if !profile.isGuest { subscriptionSection }
+            if SettingsSubscriptionVisibility(
+                identity: profile.identity,
+                deletionOutstanding: deletionOutstanding
+            ).isVisible {
+                subscriptionSection
+            }
             Section("About") {
                 navigationRow("Help")
                 navigationRow("Privacy Policy")
@@ -82,14 +90,13 @@ struct SettingsView: View {
             }
             if !profile.isGuest {
                 Section("Account management") {
-                    Button("Sign out") {
-                        Task { try? await Clerk.shared.auth.signOut() }
-                    }
-                    .accessibilityLabel("Sign out of SnapList")
                     NavigationLink {
                         SettingsDeletionConsequencesView(
                             profile: profile,
-                            subscriptionState: subscriptionStore.state,
+                            subscriptionTruth: SettingsDeletionSubscriptionTruth(
+                                state: subscriptionStore.state,
+                                loadPhase: subscriptionLoadPhase
+                            ),
                             deletionBoundary: deletionBoundary
                         )
                     } label: {
@@ -166,10 +173,12 @@ struct SettingsView: View {
                     .accessibilityHint("Opens the App Store")
                 case .restore:
                     Button("Restore purchase") {
-                        Task { await subscriptionStore.restore() }
+                        Task { await restoreSubscription() }
                     }
+                    .accessibilityHint("Asks Apple for a purchase on this Apple Account, then waits for the server to confirm it")
                 case .retry:
                     Button("Try again") { Task { await loadSubscription() } }
+                        .accessibilityHint("Loads your subscription details again")
                 }
             }
         } header: {
@@ -183,6 +192,11 @@ struct SettingsView: View {
             }
         }
         .accessibilityIdentifier("settings.subscription.\(presentation.stateID.lowercased())")
+        .onChange(of: presentation) { _, reading in
+            AccessibilityNotification.Announcement(
+                reading.accessibilityAnnouncement
+            ).post()
+        }
     }
 
     private func loadSubscription() async {
@@ -191,13 +205,31 @@ struct SettingsView: View {
             let configuration = try await mobileAPIClient
                 .getRevenueCatConfiguration().data.subscriptionConfiguration
             await subscriptionStore.load(configuration: configuration)
-            let verified = try await mobileAPIClient
-                .getAiItemEntitlement().data.serverVerifiedSubscription
-            subscriptionStore.applyServerVerification(verified)
             subscriptionLoadPhase = .loaded
+            guard SettingsEntitlementRefreshPlan.afterInitialLoad(
+                subscriptionStore.state
+            ) == .requestServerTruth else { return }
+            try await refreshServerEntitlement()
         } catch {
             subscriptionLoadPhase = .failed
         }
+    }
+
+    private func restoreSubscription() async {
+        subscriptionLoadPhase = .loaded
+        await subscriptionStore.restore()
+        guard SettingsEntitlementRefreshPlan.afterRestore(
+            subscriptionStore.state
+        ) == .requestServerTruth else { return }
+        do { try await refreshServerEntitlement() }
+        catch { subscriptionLoadPhase = .failed }
+    }
+
+    private func refreshServerEntitlement() async throws {
+        let verified = try await mobileAPIClient
+            .getAiItemEntitlement().data.serverVerifiedSubscription
+        subscriptionStore.applyServerVerification(verified)
+        subscriptionLoadPhase = .loaded
     }
 
     private func valueRow(_ label: String, _ value: String, chevron: Bool = false) -> some View {
@@ -265,12 +297,11 @@ private struct SettingsLocalRemovalView: View {
 private struct SettingsDeletionConsequencesView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
-    let subscriptionState: SubscriptionStore.State
+    let subscriptionTruth: SettingsDeletionSubscriptionTruth
     let deletionBoundary: () -> Void
     @State private var managesSubscription = false
 
     var body: some View {
-        let truth = SettingsDeletionSubscriptionTruth(state: subscriptionState)
         SettingsExplanationPage(
             title: "Delete your SnapList account",
             lead: "Read what this does before you continue. You can still stop at every step."
@@ -287,7 +318,7 @@ private struct SettingsDeletionConsequencesView: View {
             )
             SettingsFactSection(title: "What this does not do", bullets: [
                 "It does not end your eBay listings\nListings you already published stay on eBay and keep selling. Deleting this account removes the eBay connection from SnapList, so SnapList can no longer see or change them. Ending a listing is done in eBay.",
-                "It does not cancel SnapList Pro\n\(truth.longCopy)"
+                "It does not cancel SnapList Pro\n\(subscriptionTruth.longCopy)"
             ], usesBullets: false)
             Button("Manage subscription in the App Store") { managesSubscription = true }
             Text("Nothing is deleted yet. The next step confirms it is you.")
@@ -306,7 +337,7 @@ private struct SettingsDeletionConsequencesView: View {
                 secondaryAction: { dismiss() },
                 destination: SettingsReauthenticationView(
                     profile: profile,
-                    subscriptionTruth: truth,
+                    subscriptionTruth: subscriptionTruth,
                     deletionBoundary: deletionBoundary,
                     keepAccount: { dismiss() }
                 )
@@ -327,6 +358,7 @@ private struct SettingsReauthenticationView: View {
     @State private var confirmed = false
     @State private var working = false
     @AccessibilityFocusState private var errorFocused: Bool
+    @FocusState private var codeFocused: Bool
 
     var body: some View {
         SettingsExplanationPage(
@@ -352,6 +384,14 @@ private struct SettingsReauthenticationView: View {
                         code = String(value.filter(\.isNumber).prefix(6))
                     }
                     .textFieldStyle(.roundedBorder)
+                    .focused($codeFocused)
+                    .accessibilityValue("\(code.count) of 6 digits entered")
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8).stroke(
+                            codeFocused ? SnapListColorToken.action.color : .clear,
+                            lineWidth: 2
+                        )
+                    }
             }
             Text("Nothing has been deleted. Leaving this screen keeps your account exactly as it is.")
                 .foregroundStyle(.secondary)
@@ -365,7 +405,7 @@ private struct SettingsReauthenticationView: View {
                 destructive: false,
                 disabled: working || (profile.method == .emailCode && code.count != 6),
                 primaryAction: verify,
-                secondaryAction: { dismiss() }
+                secondaryAction: cancelReauthentication
             )
         }
         .navigationDestination(isPresented: $confirmed) {
@@ -375,10 +415,12 @@ private struct SettingsReauthenticationView: View {
                 keepAccount: keepAccount
             )
         }
-        .task {
-            guard profile.method == .emailCode else { return }
-            do { try await SettingsReauthentication.prepareEmailCode() }
-            catch { showFailure() }
+        .task { await prepareEmailCodeIfNeeded() }
+        .onChange(of: confirmed) { wasConfirmed, isConfirmed in
+            guard wasConfirmed && !isConfirmed else { return }
+            code = ""
+            failed = false
+            Task { await prepareEmailCodeIfNeeded() }
         }
         .accessibilityIdentifier(failed ? "settings.state.del-02f" : "settings.state.del-02")
     }
@@ -394,6 +436,9 @@ private struct SettingsReauthenticationView: View {
                 if !confirmed { showFailure() }
             } catch let error as ASAuthorizationError where error.code == .canceled {
                 failed = false
+                AccessibilityNotification.Announcement(
+                    "Cancelled. Nothing has been deleted."
+                ).post()
             } catch {
                 showFailure()
             }
@@ -405,6 +450,19 @@ private struct SettingsReauthenticationView: View {
         code = ""
         failed = true
         errorFocused = true
+    }
+
+    private func prepareEmailCodeIfNeeded() async {
+        guard profile.method == .emailCode else { return }
+        do { try await SettingsReauthentication.prepareEmailCode() }
+        catch { showFailure() }
+    }
+
+    private func cancelReauthentication() {
+        AccessibilityNotification.Announcement(
+            "Cancelled. Nothing has been deleted."
+        ).post()
+        dismiss()
     }
 }
 
@@ -451,7 +509,7 @@ private struct SettingsExplanationPage<Content: View>: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text(title)
-                    .font(.system(size: 28, weight: .bold))
+                    .font(.title.bold())
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityFocused($headingFocused)
                 if let lead { Text(lead).font(.body) }
@@ -582,6 +640,9 @@ private struct SettingsProfile {
     let initials: String
     let method: SettingsAuthenticationMethod
     var methodLabel: String { method == .apple ? "Apple" : "Email code" }
+    var identity: SettingsIdentity {
+        isGuest ? .guest : .member(method: method, email: email)
+    }
 
     @MainActor
     static func current(configuration: LaunchConfiguration) -> Self {
@@ -621,7 +682,10 @@ private enum SettingsReauthentication {
         switch method {
         case .emailCode:
             guard let session = Clerk.shared.session else { return false }
-            return try await session.verifyWithEmailCode(code: code).status == .complete
+            guard try await session.verifyWithEmailCode(code: code).status == .complete else {
+                return false
+            }
+            return try await session.getToken(.init(skipCache: true)) != nil
         case .apple:
             guard let originalUserID = Clerk.shared.user?.id else { return false }
             let result = try await Clerk.shared.auth.signInWithApple(requestedScopes: [], transferable: false)
@@ -631,7 +695,7 @@ private enum SettingsReauthentication {
                   let fresh = Clerk.shared.client?.sessions.first(where: { $0.id == sessionID }),
                   fresh.user?.id == originalUserID else { return false }
             try await Clerk.shared.auth.setActive(sessionId: sessionID)
-            return true
+            return try await fresh.getToken(.init(skipCache: true)) != nil
         }
     }
 }

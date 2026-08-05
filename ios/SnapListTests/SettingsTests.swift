@@ -82,6 +82,12 @@ final class SettingsTests: XCTestCase {
 
         flow.keepAccount()
         XCTAssertEqual(flow.stateID, "SET-01")
+
+        flow.openDeletion()
+        flow.continueToReauthentication()
+        flow.resolveReauthentication(.succeeded)
+        flow.returnFromDeletionConfirmation()
+        XCTAssertEqual(flow.stateID, "DEL-02")
     }
 
     func testSubscriptionPresentationKeepsEveryFrozenReadingDistinct() {
@@ -208,6 +214,72 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(
             SettingsDeletionSubscriptionTruth(state: .available([])),
             .none
+        )
+        XCTAssertEqual(
+            SettingsDeletionSubscriptionTruth(
+                state: .restoreNotFound,
+                loadPhase: .failed
+            ),
+            .unknown
+        )
+    }
+
+    func testEntitlementRefreshPlanPreservesServerTruthAcrossLoadAndRestore() {
+        XCTAssertEqual(
+            SettingsEntitlementRefreshPlan.afterInitialLoad(.unconfigured),
+            .stop
+        )
+        XCTAssertEqual(
+            SettingsEntitlementRefreshPlan.afterInitialLoad(.available([])),
+            .requestServerTruth
+        )
+        XCTAssertEqual(
+            SettingsEntitlementRefreshPlan.afterInitialLoad(.failed("offline")),
+            .stop
+        )
+        XCTAssertEqual(
+            SettingsEntitlementRefreshPlan.afterRestore(.restoreNotFound),
+            .requestServerTruth
+        )
+        XCTAssertEqual(
+            SettingsEntitlementRefreshPlan.afterRestore(
+                .awaitingServerVerification(action: .restore)
+            ),
+            .requestServerTruth
+        )
+        XCTAssertEqual(
+            SettingsEntitlementRefreshPlan.afterRestore(.failed("offline")),
+            .stop
+        )
+    }
+
+    func testSubscriptionGroupIsAbsentForGuestAndDeletionOutstanding() {
+        XCTAssertFalse(
+            SettingsSubscriptionVisibility(
+                identity: .guest,
+                deletionOutstanding: false
+            ).isVisible
+        )
+        XCTAssertFalse(
+            SettingsSubscriptionVisibility(
+                identity: .member(method: .apple, email: "seller@example.com"),
+                deletionOutstanding: true
+            ).isVisible
+        )
+        XCTAssertTrue(
+            SettingsSubscriptionVisibility(
+                identity: .member(method: .apple, email: "seller@example.com"),
+                deletionOutstanding: false
+            ).isVisible
+        )
+    }
+
+    func testSubscriptionAnnouncementUsesTheVisibleSellerReading() {
+        let presentation = SettingsSubscriptionPresentation(state: .restoring)
+
+        XCTAssertEqual(
+            presentation.accessibilityAnnouncement,
+            "SnapList Pro. Checking for a purchase."
         )
     }
 }
