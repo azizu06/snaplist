@@ -24,6 +24,7 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SECRET_KEY =
   process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SERVER_RPC_SECRET = process.env.SERVER_RPC_SECRET;
 const TEST_TIMEOUT_MS = 30_000;
 const OAUTH_ENCRYPTION_KEY = randomBytes(32).toString("base64");
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
@@ -56,7 +57,7 @@ function startSession(token: string, idempotencyKey: string) {
 }
 
 beforeAll(async () => {
-  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SECRET_KEY?.startsWith("sb_secret_")] });
+  reachable = await stackReachable({ url: SUPABASE_URL, apiKey: ANON_KEY, requiredValues: [ANON_KEY, SECRET_KEY?.startsWith("sb_secret_"), SERVER_RPC_SECRET] });
   await whenStackReachable(reachable, async () => {
 
   lease = await acquireExclusiveTestResource(
@@ -87,6 +88,7 @@ beforeAll(async () => {
     store: createSupabaseMobileEbayOauthSessionStore({
       supabaseURL: SUPABASE_URL,
       secretKey: SECRET_KEY!,
+      serverRpcSecret: SERVER_RPC_SECRET!,
     }),
     env: () => ({
       EBAY_BASE_URL: "https://api.sandbox.ebay.com",

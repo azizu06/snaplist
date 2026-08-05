@@ -118,7 +118,7 @@ select set_config(
   '{"sub":"dispatch-completion-a","role":"authenticated"}',
   true
 );
-select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}', true);
 
 create temporary table publish_dispatch_fixture on commit drop as
 select (lease->>'account_generation')::uuid as account_generation,
@@ -204,7 +204,7 @@ select set_config(
   '{"sub":"dispatch-completion-a","role":"authenticated"}',
   true
 );
-select set_config('request.headers', '{"apikey":"sb_secret_local_test"}', true);
+select set_config('request.headers', '{"x-snaplist-server-auth":"snaplist-local-server-rpc-secret-do-not-use-in-hosted"}', true);
 
 update public.listings
 set status = 'draft',

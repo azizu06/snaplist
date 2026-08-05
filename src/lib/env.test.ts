@@ -5,6 +5,7 @@ const valid = {
   OPENAI_API_KEY: "sk-test",
   NEXT_PUBLIC_SUPABASE_URL: "http://localhost:54321",
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-test",
+  SERVER_RPC_SECRET: "server-rpc-secret-with-at-least-32-characters",
 };
 
 describe("parseEnv", () => {
@@ -272,6 +273,39 @@ describe("parseEnv", () => {
     const env = parseEnv(valid);
     expect(env.TAVILY_API_KEY).toBeUndefined();
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
+  });
+
+  it("requires a high-entropy server RPC secret in deployed environments", () => {
+    const deployed = {
+      ...valid,
+      NODE_ENV: "production",
+      LLM_PROVIDER: "openai",
+      EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      APPLE_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+      REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
+      REVENUECAT_PROJECT_ID: "proj_test",
+      CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
+    };
+    const { SERVER_RPC_SECRET, ...withoutServerRpcSecret } = deployed;
+    void SERVER_RPC_SECRET;
+
+    expect(() =>
+      parseEnv(withoutServerRpcSecret),
+    ).toThrowError(/SERVER_RPC_SECRET/);
+
+    expect(parseEnv(deployed).SERVER_RPC_SECRET).toBe(
+      "server-rpc-secret-with-at-least-32-characters",
+    );
+  });
+
+  it("rejects a configured server RPC secret that is too short", () => {
+    expect(() =>
+      parseEnv({ ...valid, SERVER_RPC_SECRET: "too-short" }),
+    ).toThrowError(/SERVER_RPC_SECRET/);
   });
 
   it("accepts the server-only listing-example experiment controls", () => {

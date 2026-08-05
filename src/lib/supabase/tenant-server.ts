@@ -2,6 +2,7 @@ import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { createClient } from "@supabase/supabase-js";
 import { getEnv } from "@/lib/env";
+import { serverRpcHeaders } from "./server-rpc-auth";
 
 export async function createTenantServerClient() {
   const env = getEnv();
@@ -16,6 +17,7 @@ export async function createTenantServerClient() {
 
   return createClient(env.NEXT_PUBLIC_SUPABASE_URL, apiKey, {
     accessToken: async () => token,
+    global: { headers: serverRpcHeaders(env.SERVER_RPC_SECRET ?? "") },
     auth: {
       persistSession: false,
       autoRefreshToken: false,

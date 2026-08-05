@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
+import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
 import {
   createMobileEbayOauthOperations,
   type MobileEbayOauthSessionStore,
@@ -52,6 +53,7 @@ function rpcFailure(context: string, error: { message: string } | null): void {
 export interface ConfiguredMobileEbayOauthInput {
   supabaseURL: string;
   secretKey: string;
+  serverRpcSecret: string;
 }
 
 export function createSupabaseMobileEbayOauthSessionStore(
@@ -62,11 +64,13 @@ export function createSupabaseMobileEbayOauthSessionStore(
   }
 
   const serviceClient = createClient(input.supabaseURL, input.secretKey, {
+    global: { headers: serverRpcHeaders(input.serverRpcSecret) },
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const tenantClient = (bearerToken: string) =>
     createClient(input.supabaseURL, input.secretKey, {
       accessToken: async () => bearerToken,
+      global: { headers: serverRpcHeaders(input.serverRpcSecret) },
       auth: { persistSession: false, autoRefreshToken: false },
     });
 

@@ -13,10 +13,15 @@ function configuredOperations() {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const secretKey = process.env.SUPABASE_SECRET_KEY?.trim()
     || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!supabaseURL || !secretKey) {
+  const serverRpcSecret = process.env.SERVER_RPC_SECRET?.trim();
+  if (!supabaseURL || !secretKey || !serverRpcSecret) {
     throw new Error("The mobile eBay OAuth store is not configured.");
   }
-  return createConfiguredMobileEbayOauthOperations({ supabaseURL, secretKey });
+  return createConfiguredMobileEbayOauthOperations({
+    supabaseURL,
+    secretKey,
+    serverRpcSecret,
+  });
 }
 
 const handler = createMobileApiHandler({

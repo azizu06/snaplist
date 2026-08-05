@@ -26,6 +26,7 @@ const environmentKeys = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "SUPABASE_SECRET_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
+  "SERVER_RPC_SECRET",
 ] as const;
 
 beforeEach(() => {
@@ -33,6 +34,8 @@ beforeEach(() => {
   process.env.CLERK_AUTHORIZED_PARTIES = "https://snaplist.example";
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
   process.env.SUPABASE_SECRET_KEY = "sb_secret_release";
+  process.env.SERVER_RPC_SECRET =
+    "server-rpc-secret-with-at-least-32-characters";
   verifyToken.mockResolvedValue({ sub: "tenant_release" });
   createSession.mockResolvedValue({
     sessionId: "38700000-0000-4000-8000-000000000081",
@@ -74,6 +77,7 @@ describe("production mobile eBay Sandbox OAuth routes", () => {
     expect(createConfiguredMobileEbayOauthOperations).toHaveBeenCalledWith({
       supabaseURL: "https://project.supabase.co",
       secretKey: "sb_secret_release",
+      serverRpcSecret: "server-rpc-secret-with-at-least-32-characters",
     });
     expect(createSession).toHaveBeenCalledWith({
       userId: "tenant_release",

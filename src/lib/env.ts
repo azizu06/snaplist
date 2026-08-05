@@ -1,11 +1,11 @@
 import { z } from "zod";
 import {
   SELLER_MEDIA_ROLES,
+  isLocalDevelopment,
   llmProviderConfigError,
   resolveApiKey,
   resolveProvider,
   sellerMediaConfigError,
-  isLocalDevelopment,
 } from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
 
@@ -144,6 +144,7 @@ const envSchema = z.object({
   // Current server key required by the account-erasure handler.
   SUPABASE_SECRET_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  SERVER_RPC_SECRET: z.string().trim().min(32).optional(),
   // Isolated imported ES256 signer for <=60s verified-guest operation JWTs.
   // Production and preview use distinct key ids/private keys.
   SUPABASE_GUEST_JWT_KEY_ID: z.string().min(1).optional(),
@@ -257,6 +258,11 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
   if (isLocalDevelopment(env)) return [];
 
   const issues: string[] = [];
+  if (!env.SERVER_RPC_SECRET?.trim()) {
+    issues.push(
+      "  - SERVER_RPC_SECRET: Required in every deployed environment for tenant-bound server RPC authorization.",
+    );
+  }
   const appAttestTeamId = env.APPLE_TEAM_ID?.trim();
   if (!appAttestTeamId) {
     issues.push(

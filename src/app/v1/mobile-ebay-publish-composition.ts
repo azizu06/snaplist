@@ -4,11 +4,13 @@ import {
   createEbayAdapterForUser,
   createMobileEbayPublishService,
 } from "@/lib/marketplace/ebay";
+import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
 import { clerkPrincipal, unavailableWorker } from "./mobile-api-composition";
 
 function configuredClient(
   bearerToken: string,
   apiKey: string,
+  serverRpcSecret?: string,
 ): SupabaseClient {
   const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   if (!supabaseURL) {
@@ -16,6 +18,9 @@ function configuredClient(
   }
   return createClient(supabaseURL, apiKey, {
     accessToken: async () => bearerToken,
+    ...(serverRpcSecret
+      ? { global: { headers: serverRpcHeaders(serverRpcSecret) } }
+      : {}),
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
@@ -25,13 +30,18 @@ function configuredEbayPublish() {
     || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
   const secretKey = process.env.SUPABASE_SECRET_KEY?.trim()
     || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!publishableKey || !secretKey?.startsWith("sb_secret_")) return undefined;
+  const serverRpcSecret = process.env.SERVER_RPC_SECRET?.trim();
+  if (
+    !publishableKey
+    || !secretKey?.startsWith("sb_secret_")
+    || !serverRpcSecret
+  ) return undefined;
 
   return createMobileEbayPublishService({
     clientForBearer: (bearerToken) =>
       configuredClient(bearerToken, publishableKey),
     completionClientForBearer: (bearerToken) =>
-      configuredClient(bearerToken, secretKey),
+      configuredClient(bearerToken, secretKey, serverRpcSecret),
     adapterFor: (client, completionClient, userId, env) =>
       createEbayAdapterForUser(client, userId, {
         credentialClient: completionClient,
