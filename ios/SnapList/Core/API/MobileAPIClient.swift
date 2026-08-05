@@ -528,6 +528,7 @@ struct AppDependencies {
     let captureDraftStore: any CaptureDraftStoring
     let subscriptionClient: any SubscriptionClient
     let analyticsClient: any AnalyticsClient
+    let funnelAnalytics: any FunnelAnalyticsEventSinking
     let assistedExportService: any AssistedExportServing
     let ebayPublishService: any EbayPublishFeatureServing
     let guestClaimService: any GuestClaimServing
@@ -594,6 +595,7 @@ struct AppDependencies {
                 // A zero-network build must never transmit, whatever the build
                 // configured, so the fixture composition stays no-op.
                 analyticsClient: NoOpAnalyticsClient(),
+                funnelAnalytics: NoOpFunnelAnalyticsEventSink(),
                 assistedExportService: AssistedExportFixtureService(),
                 ebayPublishService: UnavailableEbayPublishFeatureService(),
                 guestClaimService: UnavailableGuestClaimService(),
@@ -616,6 +618,10 @@ struct AppDependencies {
                 session: session
             )
         )
+        let analyticsClient = makeAnalyticsClient(
+            launchInputs: analyticsLaunchInputs,
+            transportFactory: analyticsTransportFactory
+        )
         return AppDependencies(
             mobileAPIClient: URLSessionMobileAPIClient(
                 baseURL: origin,
@@ -631,10 +637,8 @@ struct AppDependencies {
             nativeIntake: nativeIntake,
             captureDraftStore: captureDraftStore,
             subscriptionClient: RevenueCatSubscriptionClient(),
-            analyticsClient: makeAnalyticsClient(
-                launchInputs: analyticsLaunchInputs,
-                transportFactory: analyticsTransportFactory
-            ),
+            analyticsClient: analyticsClient,
+            funnelAnalytics: AnalyticsFunnelEventSink(client: analyticsClient),
             assistedExportService: AssistedExportAPIClient(
                 baseURL: origin,
                 tokenProvider: tokenProvider,

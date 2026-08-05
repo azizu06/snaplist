@@ -83,6 +83,7 @@ enum AnalyticsEvent: Equatable, Sendable {
         cadence: AnalyticsBillingCadence
     )
     case publishIntent(eventID: UUID, accountState: AnalyticsAccountState)
+    case funnel(eventID: UUID, event: FunnelAnalyticsEvent)
 }
 
 enum AnalyticsPropertyValue: Equatable, Sendable {

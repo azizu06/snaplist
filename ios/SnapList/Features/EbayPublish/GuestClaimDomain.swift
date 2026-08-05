@@ -49,6 +49,11 @@ enum GuestClaimServiceError: Error, Equatable {
 protocol GuestAccountAuthenticating: Sendable {
     func sendCode(to email: String) async throws
     func verify(code: String) async throws
+    func activeClerkUserID() async -> String?
+}
+
+extension GuestAccountAuthenticating {
+    func activeClerkUserID() async -> String? { nil }
 }
 
 protocol GuestClaimServing: Sendable {
@@ -189,7 +194,10 @@ final class GuestClaimStore {
     private let attemptStore: any GuestClaimAttemptStoring
     private let authorityStore: any GuestClaimAuthorityStoring
     private let credentialStore: (any GuestRecoveryCredentialStoring)?
+    private let funnelAnalytics: any FunnelAnalyticsEventSinking
+    private let authenticatedUserID: @MainActor () -> String?
     private var isWorking = false
+    private var hasEmittedAccountClaim = false
 
     init(
         authority: GuestClaimAuthority,
@@ -197,7 +205,9 @@ final class GuestClaimStore {
         service: any GuestClaimServing,
         attemptStore: any GuestClaimAttemptStoring = FileGuestClaimAttemptStore(),
         authorityStore: any GuestClaimAuthorityStoring = NoopGuestClaimAuthorityStore(),
-        credentialStore: (any GuestRecoveryCredentialStoring)? = nil
+        credentialStore: (any GuestRecoveryCredentialStoring)? = nil,
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink(),
+        authenticatedUserID: @escaping @MainActor () -> String? = { nil }
     ) {
         self.authority = authority
         self.authenticator = authenticator
@@ -205,6 +215,8 @@ final class GuestClaimStore {
         self.attemptStore = attemptStore
         self.authorityStore = authorityStore
         self.credentialStore = credentialStore
+        self.funnelAnalytics = funnelAnalytics
+        self.authenticatedUserID = authenticatedUserID
     }
 
     func showEmailEntry() async {
@@ -384,7 +396,16 @@ final class GuestClaimStore {
     private func applyTerminal(_ outcome: GuestClaimOutcome) async throws {
         try await purgeTerminalAuthority()
         switch outcome {
-        case .claimed(let listing): state = .claimed(listing)
+        case .claimed(let listing):
+            state = .claimed(listing)
+            if !hasEmittedAccountClaim {
+                hasEmittedAccountClaim = true
+                if let clerkUserID = await authenticator.activeClerkUserID()
+                    ?? authenticatedUserID() {
+                    funnelAnalytics.alias(clerkUserID: clerkUserID)
+                }
+                funnelAnalytics.record(.accountClaimed, eventID: listing.runID)
+            }
         case .expired(let listing): state = .expired(listing)
         }
     }

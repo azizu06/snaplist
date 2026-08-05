@@ -81,6 +81,49 @@ final class AnalyticsContractTests: XCTestCase {
         }
     }
 
+    func testFunnelTaxonomyCarriesOnlyEventIDsAndUsesSharedNames() throws {
+        let eventID = UUID(uuidString: "63300000-0000-4000-8000-000000000001")!
+
+        for event in FunnelAnalyticsEvent.allCases {
+            let payload = try XCTUnwrap(
+                AnalyticsSanitizer().sanitize(
+                    event: .funnel(eventID: eventID, event: event),
+                    metadata: metadata
+                )
+            )
+            XCTAssertEqual(payload.name, event.name)
+            XCTAssertEqual(
+                payload.properties,
+                [
+                    FunnelAnalyticsConstants.PropertyName.eventID:
+                        eventID.uuidString.lowercased(),
+                    "environment": "testflight",
+                    "app_version": "0.1.0",
+                    "app_build": "270",
+                ]
+            )
+        }
+    }
+
+    func testFunnelEventSinkCapturesEachTransitionExactlyOnce() {
+        let client = RecordingFunnelAnalyticsClient()
+        let sink = AnalyticsFunnelEventSink(client: client)
+
+        for event in FunnelAnalyticsEvent.allCases {
+            sink.record(event, eventID: UUID())
+        }
+
+        XCTAssertEqual(
+            client.events.map { event in
+                guard case let .funnel(_, funnel) = event else {
+                    return nil
+                }
+                return funnel
+            },
+            FunnelAnalyticsEvent.allCases.map(Optional.some)
+        )
+    }
+
     func testRawSanitizerRejectsUnknownPIIContentIdentifiersErrorsAndUnboundedValues() {
         let sanitizer = AnalyticsSanitizer()
         let eventID = AnalyticsPropertyValue.string(UUID().uuidString)
@@ -1555,6 +1598,25 @@ final class AnalyticsContractTests: XCTestCase {
             return try XCTUnwrap(object as? [String: Any])
         }
     }
+}
+
+private final class RecordingFunnelAnalyticsClient: AnalyticsClient {
+    private(set) var events: [AnalyticsEvent] = []
+
+    func capture(_ event: AnalyticsEvent) { events.append(event) }
+    func screen(_ screen: AnalyticsScreen) {}
+    func identify(clerkUserID: String) {}
+    func reset() {}
+    func setConsent(_ consent: AnalyticsConsent) throws {}
+    func flush() {}
+}
+
+final class FunnelAnalyticsEventSinkSpy: FunnelAnalyticsEventSinking {
+    private(set) var events: [FunnelAnalyticsEvent] = []
+    private(set) var identifiedUserIDs: [String] = []
+
+    func record(_ event: FunnelAnalyticsEvent, eventID: UUID) { events.append(event) }
+    func alias(clerkUserID: String) { identifiedUserIDs.append(clerkUserID) }
 }
 
 private final class RecordingAnalyticsDebugSink: AnalyticsDebugSinking {

@@ -43,6 +43,7 @@ ios/SnapList/Core/Analytics/AnalyticsContracts.swift
 ios/SnapList/Core/Analytics/AnalyticsPersistence.swift
 ios/SnapList/Core/Analytics/AnalyticsRouting.swift
 ios/SnapList/Core/Analytics/AnalyticsSanitizer.swift
+ios/SnapList/Core/Analytics/FunnelAnalytics.swift
 ios/SnapList/Core/Analytics/PostHogAnalyticsClient.swift
 ios/SnapList/Core/CrashReporting/SentryCrashReporting.swift
 ios/SnapList/Core/Fixtures/LaunchConfiguration.swift

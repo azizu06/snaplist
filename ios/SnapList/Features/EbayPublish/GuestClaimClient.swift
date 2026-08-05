@@ -500,4 +500,8 @@ final class ClerkGuestAccountAuthenticator:
         }
         try await Clerk.shared.auth.setActive(sessionId: sessionID)
     }
+
+    func activeClerkUserID() async -> String? {
+        Clerk.shared.user?.id
+    }
 }

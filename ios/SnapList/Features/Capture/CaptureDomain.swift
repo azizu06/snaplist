@@ -1134,6 +1134,7 @@ final class CaptureFlowModel {
     private let intake: NativeIntake?
     private let store: (any CaptureDraftStoring)?
     private let policy: FramingEvaluationPolicy
+    private let funnelAnalytics: any FunnelAnalyticsEventSinking
     private var stabilizer: FramingGuidanceStabilizer
     private var evaluationInFlight = false
     private var activeCaptureID: UUID?
@@ -1144,6 +1145,7 @@ final class CaptureFlowModel {
     private var intakeEventTask: Task<Void, Never>?
     private var snapshotWaiters: [SnapshotWaiter] = []
     private var publishedSnapshotVersions: Set<NativeIntake.Version> = []
+    private var hasEmittedScanStarted = false
 #if DEBUG
     private var nativeIntakeEventProjectionHook:
         (@MainActor () async -> Void)?
@@ -1161,7 +1163,8 @@ final class CaptureFlowModel {
         evaluator: any FramingEvaluating,
         intake: NativeIntake,
         policy: FramingEvaluationPolicy = FramingEvaluationPolicy(),
-        stabilizer: FramingGuidanceStabilizer = FramingGuidanceStabilizer()
+        stabilizer: FramingGuidanceStabilizer = FramingGuidanceStabilizer(),
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
     ) {
         self.camera = camera
         self.evaluator = evaluator
@@ -1169,6 +1172,7 @@ final class CaptureFlowModel {
         store = nil
         self.policy = policy
         self.stabilizer = stabilizer
+        self.funnelAnalytics = funnelAnalytics
     }
 
 #if DEBUG
@@ -1177,7 +1181,8 @@ final class CaptureFlowModel {
         evaluator: any FramingEvaluating,
         store: any CaptureDraftStoring,
         policy: FramingEvaluationPolicy = FramingEvaluationPolicy(),
-        stabilizer: FramingGuidanceStabilizer = FramingGuidanceStabilizer()
+        stabilizer: FramingGuidanceStabilizer = FramingGuidanceStabilizer(),
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
     ) {
         self.camera = camera
         self.evaluator = evaluator
@@ -1185,6 +1190,7 @@ final class CaptureFlowModel {
         self.store = store
         self.policy = policy
         self.stabilizer = stabilizer
+        self.funnelAnalytics = funnelAnalytics
     }
 
     /// The durable draft Photo Review's intake writes through, so both surfaces stage
@@ -1331,6 +1337,7 @@ final class CaptureFlowModel {
     func dropIntakeDiscardedElsewhere() {
         stagedPhotos = []
         phase = .idle
+        hasEmittedScanStarted = false
     }
 
     func startCamera() async {
@@ -1369,6 +1376,7 @@ final class CaptureFlowModel {
             }
             phase = .camera
             resumeAfterBackground = true
+            recordScanStartedIfNeeded()
         } catch {
             phase = .unavailable
         }
@@ -1926,6 +1934,11 @@ final class CaptureFlowModel {
             intakeSnapshot = snapshot
             publishedSnapshotVersions.insert(snapshot.version)
             stagedPhotos = snapshot.photos
+            if snapshot.photos.isEmpty {
+                hasEmittedScanStarted = false
+            } else if hasCompletedRestoration {
+                recordScanStartedIfNeeded()
+            }
             if previousActivationID != nil,
                previousActivationID != snapshot.version.activationID {
                 activeCaptureID = nil
@@ -1943,6 +1956,12 @@ final class CaptureFlowModel {
             }
             ready.forEach { $0.continuation.resume(returning: snapshot) }
         }
+    }
+
+    private func recordScanStartedIfNeeded() {
+        guard !hasEmittedScanStarted else { return }
+        hasEmittedScanStarted = true
+        funnelAnalytics.record(.scanStarted, eventID: UUID())
     }
 
     private func waitForSnapshot(

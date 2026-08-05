@@ -229,19 +229,23 @@ final class EbayPublishFlowStore {
     private let service: any EbayPublishFeatureServing
     private let oauth: any EbayOAuthRunning
     private let attemptStore: any EbayPublishAttemptStoring
+    private let funnelAnalytics: any FunnelAnalyticsEventSinking
     private(set) var preparedUsername: String?
     private var oauthIdempotencyKey = UUID()
+    private var hasEmittedEbayPublishConfirmed = false
 
     init(
         listingID: UUID,
         service: any EbayPublishFeatureServing,
         oauth: any EbayOAuthRunning,
-        attemptStore: any EbayPublishAttemptStoring = FileEbayPublishAttemptStore()
+        attemptStore: any EbayPublishAttemptStoring = FileEbayPublishAttemptStore(),
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
     ) {
         self.listingID = listingID
         self.service = service
         self.oauth = oauth
         self.attemptStore = attemptStore
+        self.funnelAnalytics = funnelAnalytics
     }
 
     func load() async {
@@ -362,6 +366,7 @@ final class EbayPublishFlowStore {
         case .published:
             publishedListing = delivery.publishedListing
             screen = .result(.published)
+            recordEbayPublishConfirmedIfNeeded()
         case .staleRevision:
             await reloadAfterConflict()
         case .outcomeNotYetKnown:
@@ -477,6 +482,7 @@ final class EbayPublishFlowStore {
         if let published = status.publishedListing {
             publishedListing = published
             screen = .result(.published)
+            recordEbayPublishConfirmedIfNeeded()
             return true
         }
         switch status.outcome {
@@ -492,5 +498,11 @@ final class EbayPublishFlowStore {
             screen = .result(.outcomeNotYetKnown)
             return true
         }
+    }
+
+    private func recordEbayPublishConfirmedIfNeeded() {
+        guard !hasEmittedEbayPublishConfirmed else { return }
+        hasEmittedEbayPublishConfirmed = true
+        funnelAnalytics.record(.ebayPublishConfirmed, eventID: listingID)
     }
 }

@@ -105,6 +105,15 @@ struct AnalyticsSanitizer: Sendable {
                 ],
                 metadata: metadata
             )
+        case let .funnel(eventID, event):
+            return sanitize(
+                eventName: event.name,
+                properties: [
+                    FunnelAnalyticsConstants.PropertyName.eventID:
+                        .string(eventID.uuidString.lowercased()),
+                ],
+                metadata: metadata
+            )
         }
     }
 
@@ -180,7 +189,18 @@ private struct EventSchema {
             keys: ["event_id", "account_state"],
             allowedValues: ["account_state": values(AnalyticsAccountState.self)]
         ),
+        FunnelAnalyticsConstants.EventName.scanStarted: .eventIDOnly,
+        FunnelAnalyticsConstants.EventName.intakeSubmitted: .eventIDOnly,
+        FunnelAnalyticsConstants.EventName.listingReadyToReview: .eventIDOnly,
+        FunnelAnalyticsConstants.EventName.accountClaimed: .eventIDOnly,
+        FunnelAnalyticsConstants.EventName.ebayPublishConfirmed: .eventIDOnly,
+        FunnelAnalyticsConstants.EventName.exportPackShared: .eventIDOnly,
     ]
+
+    static let eventIDOnly = EventSchema(
+        keys: [FunnelAnalyticsConstants.PropertyName.eventID],
+        allowedValues: [:]
+    )
 
     private static func values<Value>(_ type: Value.Type) -> Set<String>
     where Value: CaseIterable & RawRepresentable, Value.RawValue == String {

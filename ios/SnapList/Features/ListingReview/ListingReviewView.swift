@@ -686,6 +686,7 @@ struct ListingReviewView: View {
                     pack: pack,
                     summary: summary,
                     service: dependencies.assistedExportService,
+                    funnelAnalytics: dependencies.funnelAnalytics,
                     refreshPack: refreshAssistedExportPack
                 )
             }

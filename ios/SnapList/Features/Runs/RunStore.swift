@@ -20,8 +20,10 @@ final class RunDetailStore {
     private let guestClaimAuthorities:
         any GuestClaimAuthorityStoring
     private let now: @Sendable () -> Date
+    private let funnelAnalytics: any FunnelAnalyticsEventSinking
     private var requestedRunID: UUID?
     private var requestGeneration = 0
+    private var emittedListingReadyRunIDs: Set<UUID> = []
 
     init(
         service: any RunServing,
@@ -32,13 +34,15 @@ final class RunDetailStore {
         guestClaimAuthorities:
             any GuestClaimAuthorityStoring =
                 KeychainGuestClaimAuthorityStore(),
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
     ) {
         self.service = service
         self.tokenProvider = tokenProvider
         self.guestRecoveryCredentials = guestRecoveryCredentials
         self.guestClaimAuthorities = guestClaimAuthorities
         self.now = now
+        self.funnelAnalytics = funnelAnalytics
     }
 
     func load(runID: UUID) async {
@@ -112,6 +116,11 @@ final class RunDetailStore {
                 }
             }
             state = .loaded(run)
+            if run.legalActions.canOpenReview,
+               run.review != nil,
+               emittedListingReadyRunIDs.insert(run.id).inserted {
+                funnelAnalytics.record(.listingReadyToReview, eventID: run.id)
+            }
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             state = .idle
@@ -140,7 +149,8 @@ enum RunDetailStoreFactory {
         configuration: LaunchConfiguration,
         apiOrigin: URL?,
         tokenProvider: any BearerTokenProviding,
-        session: URLSession
+        session: URLSession,
+        funnelAnalytics: any FunnelAnalyticsEventSinking = NoOpFunnelAnalyticsEventSink()
     ) -> RunDetailStore {
 #if DEBUG
         if configuration.usesZeroNetworkFixtures {
@@ -179,7 +189,8 @@ enum RunDetailStoreFactory {
         } ?? UnavailableRunService()
         return RunDetailStore(
             service: service,
-            tokenProvider: tokenProvider
+            tokenProvider: tokenProvider,
+            funnelAnalytics: funnelAnalytics
         )
     }
 }

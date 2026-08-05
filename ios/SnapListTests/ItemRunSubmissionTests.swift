@@ -1323,6 +1323,7 @@ final class ItemRunSubmissionTests: XCTestCase {
                 )
             ]
         )
+        let funnelAnalytics = FunnelAnalyticsEventSinkSpy()
         let host = ItemRunSubmissionHost(
             coordinator: ItemRunSubmissionCoordinator(
                 submitter: submitter,
@@ -1337,7 +1338,8 @@ final class ItemRunSubmissionTests: XCTestCase {
                 },
                 voiceLocaleHint: { "en-US" },
                 newIdempotencyKey: { Self.firstKey }
-            )
+            ),
+            funnelAnalytics: funnelAnalytics
         )
         host.synchronizePrincipal(
             snapshot: native.snapshot,
@@ -1353,6 +1355,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         await submission.value
 
         XCTAssertEqual(host.acceptedRun?.runID, Self.canonicalRunID)
+        XCTAssertEqual(funnelAnalytics.events, [.intakeSubmitted])
         XCTAssertTrue(host.clearedIntake)
         let storedAttempt = try await LocalItemRunSubmissionAttemptStore(
             principalRootDirectory: scopeRoot

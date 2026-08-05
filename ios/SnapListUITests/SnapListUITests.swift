@@ -1823,10 +1823,11 @@ final class SnapListUITests: XCTestCase {
                 XCTAssertTrue(deny.waitForExistence(timeout: 1))
                 deny.tap()
             } else if state == "settings-handoff" {
+                XCUIDevice.shared.press(.home)
                 if let settings {
                     XCTAssertTrue(
-                        processTermination.terminate(settings),
-                        "Settings did not terminate after settings-handoff"
+                        settings.wait(for: .runningBackground, timeout: 3),
+                        "Settings did not leave foreground after settings-handoff"
                     )
                 } else {
                     XCTFail("Settings lifecycle proxy was not retained")
