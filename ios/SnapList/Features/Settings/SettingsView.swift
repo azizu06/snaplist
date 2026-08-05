@@ -54,7 +54,7 @@ struct SettingsView: View {
                 navigationRow("Privacy Policy")
                 navigationRow("Terms of Service")
             }
-            Section("This iPhone") {
+            Section {
                 if hasLocalData {
                     NavigationLink {
                         SettingsLocalRemovalView(
@@ -75,6 +75,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("settings.local-empty")
                 }
+            } header: {
+                Text("This iPhone")
             } footer: {
                 Text("This covers the copies SnapList keeps on this iPhone. It does not reach anything the server holds.")
             }
@@ -150,7 +152,7 @@ struct SettingsView: View {
             state: subscriptionStore.state,
             loadPhase: subscriptionLoadPhase
         )
-        Section("Subscription") {
+        Section {
             valueRow("SnapList Pro", presentation.status)
             ForEach(Array(presentation.facts.enumerated()), id: \.offset) { _, fact in
                 valueRow(fact.label, fact.value)
@@ -170,6 +172,8 @@ struct SettingsView: View {
                     Button("Try again") { Task { await loadSubscription() } }
                 }
             }
+        } header: {
+            Text("Subscription")
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 if let note = presentation.note { Text(note) }
@@ -579,6 +583,7 @@ private struct SettingsProfile {
     let method: SettingsAuthenticationMethod
     var methodLabel: String { method == .apple ? "Apple" : "Email code" }
 
+    @MainActor
     static func current(configuration: LaunchConfiguration) -> Self {
 #if DEBUG
         if configuration.usesZeroNetworkFixtures && configuration.fixture == .account {
