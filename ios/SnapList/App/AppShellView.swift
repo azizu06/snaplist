@@ -485,16 +485,21 @@ struct AppShellView: View {
                 configuration: configuration,
                 mobileAPIClient: dependencies.mobileAPIClient,
                 subscriptionClient: dependencies.subscriptionClient,
-                hasLocalData: captureFlow.intakeSnapshot.map {
+                hasLocalData: (captureFlow.intakeSnapshot.map {
                     !$0.photos.isEmpty || $0.voice != nil
-                } ?? false,
+                } ?? false) || settingsCachedData.hasData,
                 removeLocalData: {
-                    guard let snapshot = captureFlow.intakeSnapshot else {
-                        return true
-                    }
-                    return await dependencies.nativeIntake.perform(
-                        .discard(expected: snapshot.version)
-                    ) == .committed
+                    await SettingsLocalRemovalTransaction.perform(
+                        removeIntake: {
+                            guard let snapshot = captureFlow.intakeSnapshot else {
+                                return true
+                            }
+                            return await dependencies.nativeIntake.perform(
+                                .discard(expected: snapshot.version)
+                            ) == .committed
+                        },
+                        removeCachedItems: { settingsCachedData.removeAll() }
+                    )
                 }
             )
         case .activity:
@@ -524,6 +529,10 @@ struct AppShellView: View {
         case .future(let boundary):
             FoundationDestinationView(destination: boundary)
         }
+    }
+
+    private var settingsCachedData: SettingsLocalCachedDataStore {
+        SettingsLocalCachedDataStore()
     }
 
     private var reduceMotion: Bool {

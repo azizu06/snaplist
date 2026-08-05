@@ -45,6 +45,95 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(member.localGroupStateID, "SET-04")
     }
 
+    func testLocalRemovalClearsEveryOwnedDeviceCacheBeforeReportingEmpty() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "settings-local-removal-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listingReview = root
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent("ListingReview", isDirectory: true)
+        let captureDraft = root
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent("CaptureDraft", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: listingReview,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: captureDraft,
+            withIntermediateDirectories: true
+        )
+        let snapshot = ListingReviewLaunchFixture.review()
+        let persistence = LocalListingReviewDraftPersistence(
+            rootDirectory: listingReview
+        )
+        let token = ListingReviewDraftPersistenceToken(
+            sessionID: UUID(),
+            generation: 0
+        )
+        let activated = await persistence.activate(
+            token,
+            runID: snapshot.binding.runID
+        )
+        XCTAssertTrue(activated)
+        let saved = try await persistence.save(
+            PersistedListingReviewDraft(
+                snapshot: snapshot,
+                draft: ListingReviewDraft(snapshot: snapshot),
+                pendingSave: nil,
+                expiresAt: Date().addingTimeInterval(3_600)
+            ),
+            runID: snapshot.binding.runID,
+            token: token
+        )
+        XCTAssertTrue(saved)
+        try Data("unsent capture".utf8).write(
+            to: captureDraft.appendingPathComponent("manifest.json")
+        )
+
+        let cachedData = SettingsLocalCachedDataStore(
+            applicationSupportDirectory: root
+        )
+        var intakeRemovalCalled = false
+        XCTAssertTrue(cachedData.hasData)
+
+        let removed = await SettingsLocalRemovalTransaction.perform(
+            removeIntake: {
+                intakeRemovalCalled = true
+                return true
+            },
+            removeCachedItems: { cachedData.removeAll() }
+        )
+
+        XCTAssertTrue(removed)
+        XCTAssertTrue(intakeRemovalCalled)
+        XCTAssertFalse(cachedData.hasData)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: listingReview.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: captureDraft.path))
+        let persisted = try await persistence.load(
+            runID: snapshot.binding.runID,
+            token: token
+        )
+        XCTAssertNil(persisted)
+    }
+
+    func testLocalRemovalDoesNotReportEmptyWhenAnyOwnedStoreFails() async {
+        var cachedRemovalCalled = false
+
+        let removed = await SettingsLocalRemovalTransaction.perform(
+            removeIntake: { false },
+            removeCachedItems: {
+                cachedRemovalCalled = true
+                return true
+            }
+        )
+
+        XCTAssertFalse(removed)
+        XCTAssertTrue(cachedRemovalCalled)
+    }
+
     func testGuestSettingsStopsBeforeEntitlementsAndAccountManagement() {
         var flow = SettingsFlow(identity: .guest, hasLocalData: false)
 
@@ -280,6 +369,43 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(
             presentation.accessibilityAnnouncement,
             "SnapList Pro. Checking for a purchase."
+        )
+    }
+
+    func testEmailCodePresentationUsesSixBoxesAsOneProgressReading() {
+        let empty = SettingsEmailCodePresentation(code: "")
+        let partial = SettingsEmailCodePresentation(code: "12a34")
+        let complete = SettingsEmailCodePresentation(code: "1234567")
+
+        XCTAssertEqual(empty.digits, [])
+        XCTAssertEqual(empty.focusedBoxIndex, 0)
+        XCTAssertEqual(empty.accessibilityValue, "0 of 6 digits entered")
+        XCTAssertEqual(partial.digits, ["1", "2", "3", "4"])
+        XCTAssertEqual(partial.focusedBoxIndex, 4)
+        XCTAssertEqual(partial.accessibilityValue, "4 of 6 digits entered")
+        XCTAssertEqual(complete.digits, ["1", "2", "3", "4", "5", "6"])
+        XCTAssertEqual(complete.focusedBoxIndex, 5)
+        XCTAssertEqual(complete.accessibilityValue, "6 of 6 digits entered")
+    }
+
+    func testAppleReauthenticationRequiresTheSameClerkAccount() {
+        XCTAssertTrue(
+            SettingsReauthenticationGate.isSameAccount(
+                originalUserID: "user_385",
+                verifiedUserID: "user_385"
+            )
+        )
+        XCTAssertFalse(
+            SettingsReauthenticationGate.isSameAccount(
+                originalUserID: "user_385",
+                verifiedUserID: "user_other"
+            )
+        )
+        XCTAssertFalse(
+            SettingsReauthenticationGate.isSameAccount(
+                originalUserID: "user_385",
+                verifiedUserID: nil
+            )
         )
     }
 }

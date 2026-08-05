@@ -377,21 +377,13 @@ private struct SettingsReauthenticationView: View {
                     "Apple asks you to confirm. SnapList never sees a password, and this step alone deletes nothing."
                 ], usesBullets: false)
             } else {
-                TextField("6-digit code", text: $code)
-                    .keyboardType(.numberPad)
-                    .textContentType(.oneTimeCode)
-                    .onChange(of: code) { _, value in
-                        code = String(value.filter(\.isNumber).prefix(6))
-                    }
-                    .textFieldStyle(.roundedBorder)
-                    .focused($codeFocused)
-                    .accessibilityValue("\(code.count) of 6 digits entered")
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8).stroke(
-                            codeFocused ? SnapListColorToken.action.color : .clear,
-                            lineWidth: 2
-                        )
-                    }
+                SettingsEmailCodeField(
+                    code: $code,
+                    isFocused: $codeFocused
+                )
+                Text("Tap the boxes to enter the code. Resend is available after a minute.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Text("Nothing has been deleted. Leaving this screen keeps your account exactly as it is.")
                 .foregroundStyle(.secondary)
@@ -496,6 +488,52 @@ private struct SettingsDeletionConfirmationView: View {
             )
         }
         .accessibilityIdentifier("settings.state.del-03")
+    }
+}
+
+private struct SettingsEmailCodeField: View {
+    @Binding var code: String
+    let isFocused: FocusState<Bool>.Binding
+
+    var body: some View {
+        let presentation = SettingsEmailCodePresentation(code: code)
+        ZStack {
+            HStack(spacing: 8) {
+                ForEach(0..<6, id: \.self) { index in
+                    Text(index < presentation.digits.count
+                        ? presentation.digits[index]
+                        : "")
+                        .font(.title2.bold())
+                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            let isActive = isFocused.wrappedValue
+                                && presentation.focusedBoxIndex == index
+                            RoundedRectangle(cornerRadius: 12).stroke(
+                                isActive
+                                    ? SnapListColorToken.action.color
+                                    : Color(hex: "#D6D8DC"),
+                                lineWidth: isActive ? 2 : 1
+                            )
+                        }
+                }
+            }
+            .accessibilityHidden(true)
+
+            TextField("6-digit code", text: $code)
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
+                .onChange(of: code) { _, value in
+                    code = String(value.filter(\.isNumber).prefix(6))
+                }
+                .focused(isFocused)
+                .foregroundStyle(.clear)
+                .tint(.clear)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .contentShape(Rectangle())
+                .accessibilityValue(presentation.accessibilityValue)
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -693,7 +731,10 @@ private enum SettingsReauthentication {
                   signIn.status == .complete,
                   let sessionID = signIn.createdSessionId,
                   let fresh = Clerk.shared.client?.sessions.first(where: { $0.id == sessionID }),
-                  fresh.user?.id == originalUserID else { return false }
+                  SettingsReauthenticationGate.isSameAccount(
+                    originalUserID: originalUserID,
+                    verifiedUserID: fresh.user?.id
+                  ) else { return false }
             try await Clerk.shared.auth.setActive(sessionId: sessionID)
             return try await fresh.getToken(.init(skipCache: true)) != nil
         }

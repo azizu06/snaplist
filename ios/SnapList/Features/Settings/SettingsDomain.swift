@@ -115,6 +115,76 @@ struct SettingsFlow: Equatable {
     }
 }
 
+struct SettingsLocalCachedDataStore {
+    private let applicationSupportDirectory: URL
+    private let fileManager: FileManager
+
+    init(
+        applicationSupportDirectory: URL? = nil,
+        fileManager: FileManager = .default
+    ) {
+        self.fileManager = fileManager
+        self.applicationSupportDirectory = applicationSupportDirectory
+            ?? fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            )[0]
+    }
+
+    var hasData: Bool {
+        ownedRoots.contains { fileManager.fileExists(atPath: $0.path) }
+    }
+
+    func removeAll() -> Bool {
+        var removedEveryRoot = true
+        for root in ownedRoots where fileManager.fileExists(atPath: root.path) {
+            do { try fileManager.removeItem(at: root) }
+            catch { removedEveryRoot = false }
+        }
+        return removedEveryRoot
+    }
+
+    private var ownedRoots: [URL] {
+        let snapList = applicationSupportDirectory
+            .appendingPathComponent("SnapList", isDirectory: true)
+        return [
+            snapList.appendingPathComponent("CaptureDraft", isDirectory: true),
+            snapList.appendingPathComponent("ListingReview", isDirectory: true),
+        ]
+    }
+}
+
+enum SettingsLocalRemovalTransaction {
+    static func perform(
+        removeIntake: () async -> Bool,
+        removeCachedItems: () async -> Bool
+    ) async -> Bool {
+        let removedIntake = await removeIntake()
+        let removedCachedItems = await removeCachedItems()
+        return removedIntake && removedCachedItems
+    }
+}
+
+struct SettingsEmailCodePresentation: Equatable {
+    let digits: [String]
+
+    init(code: String) {
+        digits = code.filter(\.isNumber).prefix(6).map(String.init)
+    }
+
+    var focusedBoxIndex: Int { min(digits.count, 5) }
+    var accessibilityValue: String { "\(digits.count) of 6 digits entered" }
+}
+
+enum SettingsReauthenticationGate {
+    static func isSameAccount(
+        originalUserID: String,
+        verifiedUserID: String?
+    ) -> Bool {
+        verifiedUserID == originalUserID
+    }
+}
+
 enum SettingsEntitlementRefreshPlan: Equatable {
     case stop
     case requestServerTruth
