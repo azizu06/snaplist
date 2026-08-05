@@ -96,6 +96,7 @@ const envSchema = z.object({
   REVENUECAT_APP_ID: z.string().min(1).optional(),
   REVENUECAT_ENTITLEMENT_ID: z.string().min(1).optional(),
   REVENUECAT_MONTHLY_PRODUCT_ID: z.string().min(1).optional(),
+  REVENUECAT_ALLOWED_ENVIRONMENT: z.enum(["PRODUCTION", "SANDBOX"]).optional(),
   REVENUECAT_IOS_PUBLIC_SDK_KEY: z.string().min(1).optional(),
   REVENUECAT_OFFERING_ID: z.string().min(1).optional(),
   SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: z.string().min(1).optional(),

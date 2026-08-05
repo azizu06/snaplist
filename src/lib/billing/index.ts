@@ -53,6 +53,7 @@ export {
   parseAndVerifyRevenueCatWebhook,
   resolveRevenueCatServerConfig,
   type RevenueCatEntitlementStore,
+  type RevenueCatEnvironment,
   type RevenueCatServerConfig,
   type RevenueCatWebhookConfig,
   type VerifiedStoreKitPeriod,

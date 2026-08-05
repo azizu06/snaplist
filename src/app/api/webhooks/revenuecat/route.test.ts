@@ -2,17 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
 import { NextRequest } from "next/server";
 
-const { createAdminClient } = vi.hoisted(() => ({
+const { createAdminClient, logEvent } = vi.hoisted(() => ({
   createAdminClient: vi.fn(() => {
     throw new Error("database must not be reached before verification");
   }),
+  logEvent: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient,
 }));
 vi.mock("@/lib/sentry", () => ({ reportServerError: vi.fn() }));
-vi.mock("@/lib/observability", () => ({ logEvent: vi.fn() }));
+vi.mock("@/lib/observability", () => ({ logEvent }));
 
 import { POST } from "./route";
 
@@ -22,6 +23,7 @@ const keys = [
   "REVENUECAT_APP_ID",
   "REVENUECAT_ENTITLEMENT_ID",
   "REVENUECAT_MONTHLY_PRODUCT_ID",
+  "REVENUECAT_ALLOWED_ENVIRONMENT",
   "SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE",
 ] as const;
 
@@ -31,6 +33,7 @@ afterEach(() => {
   createAdminClient.mockImplementation(() => {
     throw new Error("database must not be reached before verification");
   });
+  logEvent.mockReset();
 });
 
 function configure() {
@@ -39,7 +42,43 @@ function configure() {
   process.env.REVENUECAT_APP_ID = "app_fixture";
   process.env.REVENUECAT_ENTITLEMENT_ID = "pro";
   process.env.REVENUECAT_MONTHLY_PRODUCT_ID = "snaplist-pro-fixture";
+  process.env.REVENUECAT_ALLOWED_ENVIRONMENT = "PRODUCTION";
   process.env.SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE = "24";
+}
+
+function signedRequest(environment: "PRODUCTION" | "SANDBOX") {
+  const eventTimestamp = Date.now();
+  const rawBody = JSON.stringify({
+    api_version: "1.0",
+    event: {
+      id: `route-event-${environment.toLowerCase()}`,
+      type: "INITIAL_PURCHASE",
+      event_timestamp_ms: eventTimestamp,
+      app_id: "app_fixture",
+      app_user_id: "user_fixture",
+      original_app_user_id: "user_fixture",
+      aliases: ["user_fixture"],
+      product_id: "snaplist-pro-fixture",
+      entitlement_ids: ["pro"],
+      purchased_at_ms: Date.parse("2026-07-01T00:00:00Z"),
+      expiration_at_ms: Date.parse("2026-08-01T00:00:00Z"),
+      environment,
+      store: "APP_STORE",
+      original_transaction_id: "original-fixture",
+    },
+  });
+  const timestamp = Math.floor(eventTimestamp / 1000);
+  const signature = createHmac("sha256", "offline-secret")
+    .update(`${timestamp}.${rawBody}`)
+    .digest("hex");
+  return new NextRequest("http://localhost/api/webhooks/revenuecat", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer offline",
+      "x-revenuecat-webhook-signature": `t=${timestamp},v1=${signature}`,
+    },
+    body: rawBody,
+  });
 }
 
 describe("RevenueCat webhook route boundary", () => {
@@ -69,31 +108,23 @@ describe("RevenueCat webhook route boundary", () => {
     expect(createAdminClient).not.toHaveBeenCalled();
   });
 
+  it("rejects and logs a sandbox purchase under production configuration without database access", async () => {
+    configure();
+
+    const response = await POST(signedRequest("SANDBOX"));
+
+    expect(response.status).toBe(200);
+    expect(createAdminClient).not.toHaveBeenCalled();
+    expect(logEvent).toHaveBeenCalledWith("billing.revenuecat.handled", {
+      type: "INITIAL_PURCHASE",
+      environment: "SANDBOX",
+      processed: false,
+      reason: "environment_mismatch",
+    });
+  });
+
   it("returns the provider-required 200 after verified idempotent processing", async () => {
     configure();
-    const eventTimestamp = Date.now();
-    const rawBody = JSON.stringify({
-      api_version: "1.0",
-      event: {
-        id: "route-event",
-        type: "INITIAL_PURCHASE",
-        event_timestamp_ms: eventTimestamp,
-        app_id: "app_fixture",
-        app_user_id: "user_fixture",
-        original_app_user_id: "user_fixture",
-        aliases: ["user_fixture"],
-        product_id: "snaplist-pro-fixture",
-        entitlement_ids: ["pro"],
-        purchased_at_ms: Date.parse("2026-07-01T00:00:00Z"),
-        expiration_at_ms: Date.parse("2026-08-01T00:00:00Z"),
-        store: "APP_STORE",
-        original_transaction_id: "original-fixture",
-      },
-    });
-    const timestamp = Math.floor(eventTimestamp / 1000);
-    const signature = createHmac("sha256", "offline-secret")
-      .update(`${timestamp}.${rawBody}`)
-      .digest("hex");
     const rpc = vi.fn(async (name: string) => {
       if (name === "resolve_revenuecat_customer") {
         return {
@@ -108,16 +139,7 @@ describe("RevenueCat webhook route boundary", () => {
     });
     createAdminClient.mockReturnValue({ rpc } as never);
 
-    const response = await POST(
-      new NextRequest("http://localhost/api/webhooks/revenuecat", {
-        method: "POST",
-        headers: {
-          authorization: "Bearer offline",
-          "x-revenuecat-webhook-signature": `t=${timestamp},v1=${signature}`,
-        },
-        body: rawBody,
-      }),
-    );
+    const response = await POST(signedRequest("PRODUCTION"));
 
     expect(response.status).toBe(200);
     expect(rpc).toHaveBeenCalledTimes(2);

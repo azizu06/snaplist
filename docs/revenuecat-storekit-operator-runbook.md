@@ -62,12 +62,15 @@ Required server environment:
 - `REVENUECAT_APP_ID`
 - `REVENUECAT_ENTITLEMENT_ID`
 - `REVENUECAT_MONTHLY_PRODUCT_ID`
+- `REVENUECAT_ALLOWED_ENVIRONMENT` (`PRODUCTION` for production delivery; use `SANDBOX` only in an isolated TestFlight configuration)
 - `REVENUECAT_IOS_PUBLIC_SDK_KEY`
 - optional `REVENUECAT_OFFERING_ID`
 - `SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE`
 
 Leaving every value unset is the supported offline/unconfigured state. Partial server configuration
-is rejected. Missing native SDK key returns an unconfigured client response and makes no provider
+is rejected. There is no default RevenueCat environment: production delivery must explicitly set
+`PRODUCTION`, while sandbox acceptance requires a separate configuration explicitly set to
+`SANDBOX`. Missing native SDK key returns an unconfigured client response and makes no provider
 request. The server and native client both accept only the exact configured monthly product ID; do
 not map an annual product to the entitlement until a separately approved monthly-ledger semantic
 exists for annual billing.
@@ -88,7 +91,9 @@ exists for annual billing.
 | Unknown App User ID or original transaction mismatch | Fail closed; no tenant is selected from aliases or client data |
 
 RevenueCat retries are safe because the bridge verifies raw-body HMAC and timestamp before parsing,
-then deduplicates the provider event ID and delegates to #168's monotonic period event ledger.
+rejects events outside the configured provider environment, then deduplicates the provider event ID
+within that environment and delegates to #168's monotonic period event ledger. The persisted audit
+row and downstream StoreKit event identity both retain the environment boundary.
 
 ## Legacy Stripe reconciliation
 

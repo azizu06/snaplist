@@ -16,7 +16,7 @@ const revenueCatEventSchema = z
     purchased_at_ms: z.number().int().nonnegative().optional(),
     expiration_at_ms: z.number().int().nonnegative().nullable().optional(),
     grace_period_expiration_at_ms: z.number().int().nonnegative().nullable().optional(),
-    environment: z.string().min(1).optional(),
+    environment: z.enum(["PRODUCTION", "SANDBOX"]),
     transaction_id: z.string().min(1).optional(),
     original_transaction_id: z.string().min(1).optional(),
     store: z.string().min(1).optional(),
@@ -33,6 +33,7 @@ const revenueCatEnvelopeSchema = z
   .passthrough();
 
 export type RevenueCatWebhook = z.infer<typeof revenueCatEnvelopeSchema>;
+export type RevenueCatEnvironment = RevenueCatWebhook["event"]["environment"];
 
 export interface RevenueCatWebhookConfig {
   signingSecret: string;
@@ -41,6 +42,7 @@ export interface RevenueCatWebhookConfig {
   entitlementId: string;
   monthlyProductId: string;
   monthlyAllowance: number;
+  allowedEnvironment: RevenueCatEnvironment;
 }
 
 export interface RevenueCatServerConfig extends RevenueCatWebhookConfig {
@@ -62,6 +64,7 @@ export function resolveRevenueCatServerConfig(
   const appId = nonBlank(environment.REVENUECAT_APP_ID);
   const entitlementId = nonBlank(environment.REVENUECAT_ENTITLEMENT_ID);
   const monthlyProductId = nonBlank(environment.REVENUECAT_MONTHLY_PRODUCT_ID);
+  const allowedEnvironment = nonBlank(environment.REVENUECAT_ALLOWED_ENVIRONMENT);
   const allowanceValue = nonBlank(environment.SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE);
   const iosPublicSdkKey = nonBlank(environment.REVENUECAT_IOS_PUBLIC_SDK_KEY);
   const offeringId = nonBlank(environment.REVENUECAT_OFFERING_ID);
@@ -71,6 +74,7 @@ export function resolveRevenueCatServerConfig(
     appId,
     entitlementId,
     monthlyProductId,
+    allowedEnvironment,
     allowanceValue,
   ];
   if ([...required, iosPublicSdkKey, offeringId].every((value) => value === undefined)) {
@@ -83,6 +87,9 @@ export function resolveRevenueCatServerConfig(
   if (!Number.isSafeInteger(monthlyAllowance) || monthlyAllowance < 1 || monthlyAllowance > 10_000) {
     throw new Error("RevenueCat monthly allowance must be an integer from 1 to 10000.");
   }
+  if (allowedEnvironment !== "PRODUCTION" && allowedEnvironment !== "SANDBOX") {
+    throw new Error("RevenueCat allowed environment must be PRODUCTION or SANDBOX.");
+  }
   return {
     signingSecret: signingSecret!,
     authorization: authorization!,
@@ -90,6 +97,7 @@ export function resolveRevenueCatServerConfig(
     entitlementId: entitlementId!,
     monthlyProductId: monthlyProductId!,
     monthlyAllowance,
+    allowedEnvironment,
     ...(iosPublicSdkKey ? { iosPublicSdkKey } : {}),
     ...(offeringId ? { offeringId } : {}),
   };
@@ -132,7 +140,7 @@ export interface VerifiedStoreKitPeriod {
   eventCreatedAt: string;
   eventType: string;
   transactionId: string | null;
-  environment: string | null;
+  environment: RevenueCatEnvironment;
 }
 
 export interface RevenueCatEntitlementStore {
@@ -146,6 +154,7 @@ export interface RevenueCatEntitlementStore {
     eventId: string;
     eventType: string;
     eventCreatedAt: string;
+    environment: RevenueCatEnvironment;
   }): Promise<void>;
 }
 
@@ -281,7 +290,11 @@ export type RevenueCatHandleResult =
   | { processed: true }
   | {
       processed: false;
-      reason: "duplicate" | "ignored" | "reconciliation_required";
+      reason:
+        | "duplicate"
+        | "environment_mismatch"
+        | "ignored"
+        | "reconciliation_required";
     };
 
 /**
@@ -291,10 +304,16 @@ export type RevenueCatHandleResult =
  */
 export async function handleRevenueCatWebhook(
   webhook: RevenueCatWebhook,
-  store: RevenueCatEntitlementStore,
+  storeOrFactory: RevenueCatEntitlementStore | (() => RevenueCatEntitlementStore),
   config: RevenueCatWebhookConfig,
 ): Promise<RevenueCatHandleResult> {
   const event = webhook.event;
+  if (event.environment !== config.allowedEnvironment) {
+    return { processed: false, reason: "environment_mismatch" };
+  }
+
+  const store =
+    typeof storeOrFactory === "function" ? storeOrFactory() : storeOrFactory;
   if (
     event.app_id !== config.appId ||
     event.store !== "APP_STORE" ||
@@ -311,6 +330,7 @@ export async function handleRevenueCatWebhook(
       eventId: event.id,
       eventType: event.type,
       eventCreatedAt,
+      environment: event.environment,
     });
     return { processed: false, reason: "reconciliation_required" };
   }
@@ -346,7 +366,7 @@ export async function handleRevenueCatWebhook(
     eventCreatedAt,
     eventType: event.type,
     transactionId: event.transaction_id ?? null,
-    environment: event.environment ?? null,
+    environment: event.environment,
   });
   return applied
     ? { processed: true }

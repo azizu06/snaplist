@@ -40,10 +40,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const store = createSupabaseRevenueCatEntitlementStore(createAdminClient());
-    const result = await handleRevenueCatWebhook(webhook, store, config);
+    const result = await handleRevenueCatWebhook(
+      webhook,
+      () => createSupabaseRevenueCatEntitlementStore(createAdminClient()),
+      config,
+    );
     logEvent("billing.revenuecat.handled", {
       type: webhook.event.type,
+      environment: webhook.event.environment,
       processed: result.processed,
       ...(!result.processed ? { reason: result.reason } : {}),
     });
