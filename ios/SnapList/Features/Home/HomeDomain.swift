@@ -529,11 +529,12 @@ final class TrophyWallStore {
         principalScope: TrophyWallPrincipalScope,
         repository: any TrophyWallRepository
     ) {
-        self.principalScope = principalScope
-        cards = repository.initialCards(for: principalScope)
+        let initialCards = repository.initialCards(for: principalScope)
             .filter { $0.principalScope == principalScope }
             .sorted { $0.orderKey > $1.orderKey }
-        canonicalHistoryStates = cards.reduce(into: [:]) { states, card in
+        self.principalScope = principalScope
+        cards = initialCards
+        canonicalHistoryStates = initialCards.reduce(into: [:]) { states, card in
             guard case .run(let runID) = card.identity else {
                 return
             }
