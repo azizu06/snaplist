@@ -7,9 +7,12 @@ create extension if not exists pgtap with schema extensions;
 -- guarantees are structural: a seller reads only their own rows, cannot write
 -- either table by any client path, and every write function is fenced.
 --
--- CI builds a clean stack from migrations. A shared local stack that has not
--- applied this branch migration skips rather than reporting a false failure for
--- work it does not contain.
+-- CI builds a clean stack from this branch's migrations and sets the flag
+-- below, so the sync surface must exist there. A shared local stack that has
+-- not applied this branch migration skips instead of reporting a false failure
+-- for work it does not contain.
+select to_regclass('pgtap_ci.require_installed_migrations') is not null
+  as require_installed_migration \gset
 select to_regclass('public.ebay_listing_sync_state') is not null
   and to_regclass('public.ebay_listing_sync_conflicts') is not null
   as sync_installed \gset
@@ -142,8 +145,21 @@ select throws_ok(
 
 \else
 
+-- Where the migrations are guaranteed, an absent surface is a real defect, not
+-- an unapplied migration. Skipping there would report sixteen green assertions
+-- for a contract that never ran — exactly the false green the flag exists to
+-- prevent.
+\if :require_installed_migration
+do $$
+begin
+  raise exception
+    'ebay listing sync migration is missing on a stack that requires it';
+end
+$$;
+\endif
+
 select skip(
-  'eBay listing sync migration is not installed on this stack', 16
+  'eBay listing sync migration is not installed on this shared local stack', 16
 );
 
 \endif
