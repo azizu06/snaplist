@@ -140,9 +140,12 @@ enum UIProcessRetirement {
     /// be triaged: the reader cannot tell a wedged app from a budget that was
     /// simply too small for a contended fleet. Name both the state still
     /// observed and how long it was waited for.
-    func failureDescription(_ subject: String) -> String {
+    ///
+    /// `nil` when the process retired — a successful retirement has no failure
+    /// to describe, and callers branch on that rather than on an empty string.
+    func failureDescription(_ subject: String) -> String? {
         guard case let .stuck(observed, waited) = self else {
-            return ""
+            return nil
         }
         return """
             \(subject) did not retire: waited \(Int(waited.rounded()))s for \
@@ -210,9 +213,8 @@ struct UIProcessTerminationBoundary {
         line: UInt = #line
     ) {
         let outcome = retire(process, timeout: timeout)
-        guard outcome.isRetired else {
-            XCTFail(outcome.failureDescription(subject), file: file, line: line)
-            return
+        if let failure = outcome.failureDescription(subject) {
+            XCTFail(failure, file: file, line: line)
         }
     }
 }
@@ -237,6 +239,12 @@ struct UILaunchBoundary {
     init(
         terminationBoundary: UIProcessTerminationBoundary = UIProcessTerminationBoundary(),
         report: @escaping (String) -> Void = { message in
+            // An activity alone lands only in the result bundle, and the CI
+            // shard jobs keep just the console log — the one artifact that
+            // survives is the one that would not have carried this line. Emit
+            // it to both: the activity keeps the report readable in Xcode, and
+            // NSLog puts it where a shard failure is actually triaged from.
+            NSLog("%@", message)
             XCTContext.runActivity(named: message) { _ in }
         }
     ) {
@@ -251,7 +259,7 @@ struct UILaunchBoundary {
         issueLaunch: () -> Void
     ) -> Bool {
         let retirement = terminationBoundary.retire(process, timeout: timeout)
-        if !retirement.isRetired {
+        if let failure = retirement.failureDescription("The prior instance") {
             // The launch still goes ahead — skipping it would convert a flake
             // into a silent hole — but XCTest will now terminate the live
             // instance implicitly inside its own launch budget, and reports
@@ -259,7 +267,7 @@ struct UILaunchBoundary {
             // nothing naming the cause. Record what was observed so the next
             // occurrence distinguishes an unretired prior instance from runner
             // starvation.
-            report(retirement.failureDescription("The prior instance"))
+            report(failure)
         }
         issueLaunch()
         return retirement.isRetired
@@ -447,6 +455,28 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         )
     }
 
+    func testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget() {
+        let process = ContendedFleetUIProcess(
+            backgroundsAt: 2.5,
+            witnessResolvesAt: nil
+        )
+        let boundary = UIProcessTerminationBoundary {}
+
+        XCTAssertTrue(
+            boundary.terminate(
+                process,
+                timeout: UIProcessLifecycleBudget.transition
+            )
+        )
+        XCTAssertEqual(
+            process.witnessBudgets,
+            [2],
+            "The witness share is min(timeout / 3, 2). At the real transition"
+                + " budget the two-second cap has to bind, or a thirty-second"
+                + " budget would hand ten of them to advisory corroboration."
+        )
+    }
+
     func testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget() {
         func retire(within timeout: TimeInterval) -> Bool {
             UIProcessTerminationBoundary {}.terminate(
@@ -477,9 +507,11 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         )
 
         XCTAssertFalse(outcome.isRetired)
-        let description = outcome.failureDescription(
+        guard let description = outcome.failureDescription(
             "SnapList after ONB-09-camera"
-        )
+        ) else {
+            return XCTFail("A stuck retirement must describe its failure.")
+        }
         XCTAssertTrue(
             description.contains("SnapList after ONB-09-camera"),
             "Unexpected failure description: \(description)"

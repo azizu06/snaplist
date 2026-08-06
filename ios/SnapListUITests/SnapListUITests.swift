@@ -2057,8 +2057,16 @@ final class SnapListUITests: XCTestCase {
                 let settingsApp = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
                 settings = settingsApp
                 XCTAssertTrue(
-                    settingsApp.wait(for: .runningForeground, timeout: 3),
-                    "Settings handoff did not foreground the system Settings app"
+                    settingsApp.wait(
+                        for: .runningForeground,
+                        timeout: UIProcessLifecycleBudget.transition
+                    ),
+                    """
+                    Settings handoff did not foreground the system Settings \
+                    app: waited \
+                    \(Int(UIProcessLifecycleBudget.transition))s and still \
+                    observed \(settingsApp.state.reportedName)
+                    """
                 )
                 if requiresCanonicalViewport {
                     XCTAssertEqual(settingsApp.windows.firstMatch.frame.size.width, 393)
