@@ -232,8 +232,9 @@ const envSchema = z.object({
   CLERK_AUTHORIZED_PARTIES: z.string().min(1).optional(),
 
   // The public origin eBay fetches published pictures from (issue #705).
-  // Optional here for local development; deployed validation below requires it
-  // so the picture origin never falls back to CLERK_AUTHORIZED_PARTIES order.
+  // Optional here for local development, where the CLERK_AUTHORIZED_PARTIES
+  // fallback still applies; deployed validation below requires it, so that
+  // fallback never decides a real listing's picture origin.
   SNAPLIST_PUBLIC_ORIGIN: z.string().min(1).optional(),
 
   // eBay (adapter; sandbox by default — flip to production via this URL + keys)
@@ -426,7 +427,7 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
   const publicOrigin = env.SNAPLIST_PUBLIC_ORIGIN?.trim();
   if (!publicOrigin) {
     issues.push(
-      "  - SNAPLIST_PUBLIC_ORIGIN: SNAPLIST_PUBLIC_ORIGIN is required outside local development; without it the eBay picture origin falls back to CLERK_AUTHORIZED_PARTIES ordering.",
+      "  - SNAPLIST_PUBLIC_ORIGIN: SNAPLIST_PUBLIC_ORIGIN is required outside local development; the eBay picture origin has no deployed fallback, and the local-only CLERK_AUTHORIZED_PARTIES fallback carries no meaningful ordering.",
     );
   } else if (!isPublicHttpsOrigin(publicOrigin)) {
     issues.push(

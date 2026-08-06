@@ -239,6 +239,10 @@ function fakePublishClient(
     },
     async rpc(name: string, params: Record<string, unknown>) {
       if (name === "issue_ebay_photo_access_tokens") {
+        // Pin the TTL the REAL publish path requests. Asserting the default
+        // only where `issueEbayPhotoUrls` is called directly would leave
+        // publish free to reintroduce its own week-long value unnoticed.
+        expect(params.p_ttl_seconds).toBe(3600);
         // The RPC returns one row per photo it could bind to a private object.
         // It skips a photo whose Storage row or mimetype it cannot verify, so
         // a short list is the shape a partial drop actually arrives in.

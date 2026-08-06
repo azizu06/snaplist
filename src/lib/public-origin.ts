@@ -7,9 +7,10 @@
  * second opinion at either site is how a value that startup rejects still
  * reaches eBay's fetcher.
  *
- * It lives here rather than in `env.ts` so the unauthenticated media route can
- * import it without pulling in Zod, the provider registry, and the whole
- * environment schema.
+ * It lives here rather than in `env.ts` so importing the predicate does not
+ * drag in Zod and the whole environment schema, whose module graph exists to
+ * validate a process at startup rather than to answer one question about one
+ * string.
  */
 export function isPublicHttpsOrigin(candidate: string): boolean {
   try {

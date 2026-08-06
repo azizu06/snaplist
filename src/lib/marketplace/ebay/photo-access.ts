@@ -8,6 +8,15 @@ import { isPublicHttpsOrigin } from "@/lib/public-origin";
 // retries. Anything longer is an unauthenticated read of a private object that
 // nothing needs. The RPC still caps an explicit TTL at seven days.
 const DEFAULT_TOKEN_TTL_SECONDS = 60 * 60;
+// eBay's documented ceiling is 500 characters per `pictureUrl` — the limit
+// Supabase signed URLs blew through, and the reason this route exists at all
+// (see the migration header for issue #705). Both bounds below are SnapList's
+// own, deliberately stricter, and are not eBay-published figures. A token URL
+// is origin + "/m/" + 43 characters, so 200 leaves generous room for a long
+// custom domain while still catching a value that has stopped being a token
+// URL. The 3975 total is a defensive budget across a five-picture set: no
+// per-URL check can catch an aggregate that has grown unreasonable, and
+// failing here is cheaper than a rejected publish.
 const EBAY_PICTURE_URL_LIMIT = 200;
 const EBAY_PICTURE_URLS_TOTAL_LIMIT = 3975;
 const OPAQUE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -57,6 +66,12 @@ export async function issueEbayPhotoUrls(
   itemId: string,
   options: { baseUrl: string; ttlSeconds?: number },
 ): Promise<string[]> {
+  // Validate the origin BEFORE the RPC. Minting tokens first means a bad
+  // origin still leaves live bearer capabilities behind for their whole TTL,
+  // and an unparseable value threw a bare TypeError from outside this module's
+  // error vocabulary.
+  const baseUrl = parsedPhotoOrigin(options.baseUrl);
+
   const { data, error } = await client.rpc("issue_ebay_photo_access_tokens", {
     p_item_id: itemId,
     p_ttl_seconds: options.ttlSeconds ?? DEFAULT_TOKEN_TTL_SECONDS,
@@ -66,17 +81,6 @@ export async function issueEbayPhotoUrls(
   }
 
   const rows = Array.isArray(data) ? data as PhotoTokenRow[] : [];
-  const baseUrl = new URL(options.baseUrl);
-  if (
-    !["http:", "https:"].includes(baseUrl.protocol)
-    || baseUrl.username
-    || baseUrl.password
-    || baseUrl.pathname !== "/"
-    || baseUrl.search
-    || baseUrl.hash
-  ) {
-    throw new Error("Failed to resolve photos for eBay: invalid public media origin.");
-  }
   const urls = rows
     .sort((left, right) => left.photo_ordinal - right.photo_ordinal)
     .map(({ token }) => {
@@ -96,14 +100,38 @@ export async function issueEbayPhotoUrls(
   return urls;
 }
 
+function parsedPhotoOrigin(baseUrl: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error("Failed to resolve photos for eBay: invalid public media origin.");
+  }
+  if (
+    !["http:", "https:"].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new Error("Failed to resolve photos for eBay: invalid public media origin.");
+  }
+  return parsed;
+}
+
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
  * The origin eBay fetches published pictures from. `SNAPLIST_PUBLIC_ORIGIN` is the
  * only variable that MEANS this. `CLERK_AUTHORIZED_PARTIES` is an authentication
  * setting whose order carries no meaning for Clerk, so reading its first entry made
- * an unrelated config edit able to redirect every published listing's pictures. It
- * stays only as a fallback for deployments that predate the dedicated variable.
+ * an unrelated config edit able to redirect every published listing's pictures.
+ *
+ * That fallback is now unreachable in any deployed process: startup validation
+ * requires `SNAPLIST_PUBLIC_ORIGIN` and refuses to boot without it. It survives
+ * only for local development, where a Clerk list is often the sole origin a
+ * machine has configured.
  */
 export function resolveEbayPhotoBaseUrl(
   env: Record<string, string | undefined>,

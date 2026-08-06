@@ -61,7 +61,11 @@ export interface PublishOptions {
   env?: () => Record<string, string | undefined>;
   /** Public SnapList origin hosting the short eBay media route. */
   photoBaseUrl?: string;
-  /** Seven days preserves the prior bounded retry window. */
+  /**
+   * Overrides the issuing module's one-hour default, which covers the publish
+   * call and its bounded retries. The SQL function caps any explicit value at
+   * seven days.
+   */
   photoUrlTtlSeconds?: number;
   completionClient?: SupabaseClient;
   /** Client-observed review token. Mobile publish must supply this and fail closed when stale. */

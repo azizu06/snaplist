@@ -48,6 +48,24 @@ describe("issueEbayPhotoUrls", () => {
     });
   });
 
+  it.each([
+    ["an unparseable origin", "not-a-url"],
+    ["an origin carrying a path", "https://snaplist.dev/media"],
+    ["an origin carrying credentials", "https://user:pw@snaplist.dev"],
+  ])("rejects %s before minting any token", async (_name, baseUrl) => {
+    // Validating after the RPC leaves live bearer capabilities behind for
+    // their whole TTL on a call that can never produce a usable URL, and an
+    // unparseable value escaped as a bare TypeError.
+    const rpc = vi.fn();
+
+    await expect(
+      issueEbayPhotoUrls({ rpc }, "11111111-1111-4111-8111-111111111111", {
+        baseUrl,
+      }),
+    ).rejects.toThrow(/Failed to resolve photos for eBay: invalid public media origin/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("uses 256 cryptographically random bits and stores only the token digest", () => {
     const migration = readFileSync(
       "supabase/migrations/20260806120000_ebay_photo_access_tokens.sql",
