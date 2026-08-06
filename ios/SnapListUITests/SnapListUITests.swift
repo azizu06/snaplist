@@ -1871,7 +1871,7 @@ final class SnapListUITests: XCTestCase {
     /// accessibility elements. Each example row ends in
     /// `.accessibilityElement(children: .combine)`, so a spinner inside a row is folded
     /// away and cannot be counted here;
-    /// `OnboardingFlowTests.testBackgroundExampleRowsCarryNoProgressAffordance` reads the
+    /// `OnboardingFlowTests.testBackgroundExampleRowBodyWritesNoProgressAffordance` reads the
     /// row's rendered type and carries that half of the guarantee.
     func testFirstValueOnboardingONB05IllustratesWithoutClaimingLiveProgress() {
         let app = launchFirstValueOnboarding(resetProgress: true)
