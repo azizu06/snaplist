@@ -477,8 +477,16 @@ async function bindPublishClaimToConnection(
     },
   );
   if (error) {
+    // The RPC answers this way both when the fence genuinely moved and when the
+    // call itself was refused (`42501 permission denied for function
+    // bind_ebay_publish_connection_generation` on an unprovisioned server-RPC
+    // secret). Interpolating `error.message` would ship the schema name and
+    // privilege model to the device (CWE-209), so the seller gets the one
+    // sentence that is true either way and the PostgREST detail rides `cause`
+    // to the server log — which the 422 branch keys on to report at all.
     throw new PublishValidationError(
-      `The eBay connection changed before provider dispatch: ${error.message}`,
+      "The eBay connection changed before publishing. Try again.",
+      { cause: error },
     );
   }
 }

@@ -4,6 +4,7 @@ import { createMobileApiHandler } from "./app";
 import { createMobileEbayPublishService } from "@/lib/marketplace/ebay/mobile-publish";
 import {
   EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE,
+  EbayApiError,
   EbayWriteAmbiguousError,
   MockEbayAdapter,
   type EbayAdapter,
@@ -92,10 +93,10 @@ function publishFixtureClient() {
     review_revision: REVIEW_REVISION,
     condition: "like new",
     photos: ["user-1/item-1.jpg"],
-    price_override: "177.77",
+    price_override: "177.77" as string | null,
   };
   const prediction = {
-    price: 199.99,
+    price: 199.99 as number | null,
     autopilot_enabled: true as boolean | null,
     autopilot_eligible: true as boolean | null,
   };
@@ -140,6 +141,7 @@ function publishFixtureClient() {
   const notifications: Array<Record<string, unknown>> = [];
   let beforeReviewSnapshot: (() => void) | undefined;
   let failPublishedPersistence = false;
+  let bindConnectionFailure: { code?: string; message: string } | null = null;
 
   const client = {
     from(table: string) {
@@ -304,6 +306,9 @@ function publishFixtureClient() {
         return { data: binding, error: null };
       }
       if (name === "bind_ebay_publish_connection_generation") {
+        if (bindConnectionFailure) {
+          return { data: null, error: bindConnectionFailure };
+        }
         listing.ebay_publish_connection_generation = CONNECTION_GENERATION;
         listing.ebay_publish_binding = {
           marketplaceId: "EBAY_US",
@@ -341,6 +346,9 @@ function publishFixtureClient() {
     },
     failPublishedPersistence() {
       failPublishedPersistence = true;
+    },
+    failBindConnection(error: { code?: string; message: string }) {
+      bindConnectionFailure = error;
     },
     reconnect() {
       connectionState.current = connectionFor(activeConnectionGeneration);
@@ -920,8 +928,13 @@ describe("mobile eBay publish boundary", () => {
   it("logs the internal cause behind a seller-safe refusal", async () => {
     const fixture = publishFixtureClient();
     fixture.connectionState.current!.policy_location_bindings = {};
-    const readFailure = new Error(
+    // The shape the HTTP discovery adapter really throws when eBay refuses the
+    // Account API read: a bare `Error` here would be a lower-fidelity fixture
+    // than production, and the classifier is deliberately blind to it.
+    const readFailure = new EbayApiError(
       "eBay GET /sell/account/v1/return_policy failed (HTTP 500)",
+      500,
+      undefined,
     );
     const reportError = vi.fn();
     const handler = ebayHandler({
@@ -946,5 +959,89 @@ describe("mobile eBay publish boundary", () => {
       "mobile-api.ebay-publish",
       expect.objectContaining({ cause: readFailure }),
     );
+  });
+
+  /**
+   * Binding the claim to the connection generation runs on the completion
+   * client, so its failure is a PostgREST failure — `42501 permission denied
+   * for function bind_ebay_publish_connection_generation` when the server-RPC
+   * shared secret is unprovisioned. Interpolating that into the refusal ships
+   * the schema name, the privilege model, and the RPC's existence to whoever
+   * holds the device (CWE-209), and constructing it without a `cause` also
+   * means the 422 branch never calls `reportError` — the one failure that most
+   * needs a server trace would leave none.
+   */
+  it("refuses a failed connection binding without leaking the provider error", async () => {
+    const fixture = publishFixtureClient();
+    const bindFailure = {
+      code: "42501",
+      message:
+        "permission denied for function bind_ebay_publish_connection_generation",
+    };
+    fixture.failBindConnection(bindFailure);
+    const reportError = vi.fn();
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      client: fixture.client,
+      reportError,
+      requestId: "request-47-binding-refusal",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({
+      error: {
+        code: "invalid_request",
+        message: "The eBay connection changed before publishing. Try again.",
+      },
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("permission denied");
+    expect(serialized).not.toContain("bind_ebay_publish_connection_generation");
+    expect(serialized).not.toContain("42501");
+    expect(reportError).toHaveBeenCalledWith(
+      "mobile-api.ebay-publish",
+      expect.objectContaining({ cause: bindFailure }),
+    );
+    expect(adapter.requests).toEqual([]);
+  });
+
+  /**
+   * Preflight and publish refuse for the SAME reasons — no usable price, no
+   * title — so they must classify identically. Mapping preflight's refusal to
+   * 503 tells the seller to retry a condition only they can clear, and does it
+   * on the screen that exists to surface exactly that condition.
+   */
+  it("classifies a preflight refusal the same way publish does", async () => {
+    const fixture = publishFixtureClient();
+    fixture.item.price_override = null;
+    fixture.prediction.price = null;
+    const reportError = vi.fn();
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: fixture.client,
+      reportError,
+      requestId: "request-47-preflight-refusal",
+    });
+
+    const response = await handler(
+      new Request(
+        `https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/preflight`,
+        { headers: { authorization: "Bearer clerk-jwt" } },
+      ),
+    );
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "invalid_request",
+        message: "This listing has no usable price. Set a price before publishing.",
+      },
+    });
+    // No `cause`: nothing internal happened, so nothing belongs in the log.
+    expect(reportError).not.toHaveBeenCalled();
   });
 });

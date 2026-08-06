@@ -731,6 +731,13 @@ export function createMobileApiHandler(
             "This listing is unavailable.",
           );
         }
+        // ORDER IS LOAD-BEARING: this 409 branch MUST stay above the 422
+        // branch below. `PublishedReplayConflictError` and
+        // `PublishReviewRevisionConflictError` both extend
+        // `PublishValidationError` (publish.ts:111,113), so a 422 branch placed
+        // first would swallow both — a stale-revision or already-published
+        // conflict would answer 422 without its `reason`, and the client would
+        // treat an authority conflict as a seller-fixable input problem.
         if (
           error instanceof PublishReviewRevisionConflictError
           || error instanceof PublishedReplayConflictError
@@ -825,6 +832,16 @@ export function createMobileApiHandler(
             "not_found",
             "This listing is unavailable.",
           );
+        }
+        // Preflight refuses for the SAME seller-fixable reasons publish does —
+        // no usable price, no title — so it classifies identically. Answering
+        // 503 on the screen that exists to surface those conditions tells the
+        // seller to retry something only they can clear.
+        if (error instanceof PublishValidationError) {
+          if (error.cause !== undefined) {
+            dependencies.reportError?.("mobile-api.ebay-preflight", error);
+          }
+          return errorResponse(requestId, 422, "invalid_request", error.message);
         }
         dependencies.reportError?.("mobile-api.ebay-preflight", error);
         return errorResponse(

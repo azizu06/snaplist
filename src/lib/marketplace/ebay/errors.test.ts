@@ -64,6 +64,33 @@ describe("isEbayAuthError", () => {
     ).toBe(true);
   });
 
+  it("does NOT classify every ACCESS-domain 403 as an expired connection", () => {
+    // eBay reuses the ACCESS domain for refusals no reconnect can fix — the
+    // application itself blocked, the marketplace not enabled for the account.
+    // Only `errorId` 1100 ("Access denied", insufficient permissions) is the
+    // scope signal. Reporting the rest as an expired connection sends the
+    // seller through a re-consent that rotates `connection_generation`, wipes
+    // their policy bindings, and leaves them refused for the same reason.
+    expect(
+      isEbayAuthError(
+        new EbayApiError(
+          "eBay GET /sell/account/v1/return_policy failed (HTTP 403)",
+          403,
+          {
+            errors: [
+              {
+                errorId: 1120,
+                domain: "ACCESS",
+                category: "REQUEST",
+                message: "Application access blocked",
+              },
+            ],
+          },
+        ),
+      ),
+    ).toBe(false);
+  });
+
   it("does NOT classify a 403 that is not a scope or access refusal", () => {
     expect(
       isEbayAuthError(

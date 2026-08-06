@@ -7,6 +7,7 @@ import {
   discoverAndBindEbayPolicyLocation,
   type EbayPolicyLocationBindingStore,
 } from "./policy-location-discovery";
+import { EbayApiError } from "./types";
 
 /**
  * Per-connection eBay policy/location setup (issue #47).
@@ -95,17 +96,24 @@ export const EBAY_POLICY_SETUP_UNAVAILABLE_MESSAGE =
   + "Check your eBay connection, then try publishing again.";
 
 /**
- * Tags a throw by ORIGIN: it escaped the adapter call that reads the seller's
- * own eBay account. Only that origin may become the seller-facing `unavailable`
- * outcome, because only that origin describes something on eBay's side.
+ * Tags a throw that is BOTH from the adapter call that reads the seller's own
+ * eBay account AND produced by eBay itself (`EbayApiError` — a non-2xx answer
+ * from the Account/Inventory API, or from the token endpoint rejecting the
+ * refresh grant). Only that combination may become the seller-facing
+ * `unavailable` outcome, because only that combination describes something on
+ * eBay's side.
  *
- * Discovery also reads the connection row, re-checks the generation fence, and
- * writes the binding through an RPC. Those are SnapList faults. Flattening them
- * into "check your eBay connection" invites the seller to reconnect, and a
- * reconnect rotates `connection_generation`, wipes `policy_location_bindings`,
- * and forces re-consent — a destructive act induced by our own database
+ * Origin alone is too coarse. The adapter call also mints the access token
+ * first, and `getAccessToken` reads the connection row through Supabase,
+ * decrypts it with EBAY_TOKEN_ENC_KEY, and checks EBAY_CLIENT_ID/SECRET before
+ * the first Account API GET. Discovery around it likewise reads the connection
+ * row, re-checks the generation fence, and writes the binding through an RPC.
+ * Those are SnapList faults. Flattening them into "check your eBay connection"
+ * invites the seller to reconnect, and a reconnect rotates
+ * `connection_generation`, wipes `policy_location_bindings`, and forces
+ * re-consent — a destructive act induced by our own key rotation or database
  * failure, with no 5xx and no server log to show for it. So the discriminator
- * is where the error came from, never what its message says.
+ * is where the error came from and who produced it, never what its message says.
  */
 class EbayPolicyAccountReadError extends Error {
   constructor(readonly readCause: unknown) {
@@ -161,6 +169,10 @@ export async function ensureEbayPolicyLocationBinding(input: {
           try {
             return await readCandidates.call(input.adapter, request);
           } catch (cause) {
+            // Wrap ONLY what eBay itself refused. A token-mint or other
+            // infrastructure failure inside the same call keeps its own
+            // identity and propagates, so the caller answers 500 and logs it.
+            if (!(cause instanceof EbayApiError)) throw cause;
             throw new EbayPolicyAccountReadError(cause);
           }
         },

@@ -412,6 +412,9 @@ describe("publishListingToEbayAndNotify effective-price contract", () => {
       }
     ).connectionGeneration = replacementGeneration;
     const retryAdapter = new MockEbayAdapter();
+    // The refusal names the condition without naming the RPC: the same branch
+    // also fires when PostgREST refuses the call outright, and that message
+    // carries the function name and privilege model (CWE-209).
     await expect(
       publishListingToEbayAndNotify(
         client,
@@ -419,7 +422,7 @@ describe("publishListingToEbayAndNotify effective-price contract", () => {
         listing.id,
         retryAdapter,
       ),
-    ).rejects.toThrow(/connection changed before provider dispatch/i);
+    ).rejects.toThrow("The eBay connection changed before publishing. Try again.");
     expect(retryAdapter.requests).toHaveLength(0);
     expect(listing.ebay_publish_connection_generation).toBe(initialGeneration);
     expect(listing.ebay_publish_binding).toEqual({

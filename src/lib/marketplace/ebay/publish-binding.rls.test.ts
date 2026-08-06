@@ -1204,7 +1204,15 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
     ): Promise<Response> => {
       const url = String(input);
       calls.push({ url, init });
-      if (url.includes("/sell/account/v1/")) {
+      // Discovery reads the three business policies AND the inventory
+      // locations concurrently, so all four have to model the same eBay
+      // outage. Letting the location read crash with a bare `Error` instead
+      // would make this assert the wrong thing: only a refusal eBay itself
+      // returned may become the seller-facing "could not read your policies".
+      if (
+        url.includes("/sell/account/v1/")
+        || url.includes("/sell/inventory/v1/location")
+      ) {
         return Response.json(
           { errors: [{ errorId: 1001, message: "Account API unavailable" }] },
           { status: 500 },

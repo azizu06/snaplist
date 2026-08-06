@@ -5,6 +5,7 @@ import type {
   EbayPolicyLocationCandidates,
 } from "./policy-location-contract";
 import type { EbayPolicyLocationSetupStore } from "./policy-location-setup";
+import { EbayApiError } from "./types";
 
 const CONNECTION_GENERATION = "11111111-1111-4111-8111-111111111111";
 const NEXT_CONNECTION_GENERATION = "22222222-2222-4222-8222-222222222222";
@@ -248,7 +249,14 @@ describe("ensureEbayPolicyLocationBinding", () => {
   });
 
   it("reports an unavailable read instead of substituting another seller's ids", async () => {
-    const failure = new Error("eBay GET /sell/account/v1/payment_policy failed (HTTP 500)");
+    // eBay itself answering non-2xx is the ONE failure on this path that is
+    // genuinely about the seller's eBay side, and the HTTP discovery adapter
+    // reports exactly that shape (`EbayApiError`) — never a bare `Error`.
+    const failure = new EbayApiError(
+      "eBay GET /sell/account/v1/payment_policy failed (HTTP 500)",
+      500,
+      undefined,
+    );
     const setup = await ensureEbayPolicyLocationBinding({
       marketplaceId: "EBAY_US",
       adapter: {
@@ -266,6 +274,32 @@ describe("ensureEbayPolicyLocationBinding", () => {
         + "Check your eBay connection, then try publishing again.",
     );
     expect(setup.cause).toBe(failure);
+  });
+
+  it("propagates a token or infrastructure failure instead of blaming the eBay connection", async () => {
+    // Reaching the Account API first requires `getAccessToken`, which reads the
+    // connection row through Supabase, decrypts the refresh token with
+    // EBAY_TOKEN_ENC_KEY, and checks EBAY_CLIENT_ID/EBAY_CLIENT_SECRET — all
+    // BEFORE one eBay GET is issued. An encryption-key rotation or a degraded
+    // Supabase is a SnapList fault; answering "check your eBay connection"
+    // invites a reconnect that rotates `connection_generation`, wipes
+    // `policy_location_bindings`, and forces re-consent for nothing. Only a
+    // failure eBay itself produced may become the seller-facing outcome.
+    const tokenFailure = new Error(
+      "Failed to decrypt the stored eBay refresh token: EBAY_TOKEN_ENC_KEY is invalid.",
+    );
+
+    await expect(
+      ensureEbayPolicyLocationBinding({
+        marketplaceId: "EBAY_US",
+        adapter: {
+          async discoverPolicyLocationCandidates() {
+            throw tokenFailure;
+          },
+        },
+        store: fakeStore(),
+      }),
+    ).rejects.toBe(tokenFailure);
   });
 
   it("propagates a binding-store write failure instead of blaming the eBay connection", async () => {

@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { verifyToken } = vi.hoisted(() => ({ verifyToken: vi.fn() }));
+const { verifyToken, logServerError } = vi.hoisted(() => ({
+  verifyToken: vi.fn(),
+  logServerError: vi.fn(),
+}));
 
 vi.mock("@clerk/nextjs/server", () => ({ verifyToken }));
+vi.mock("@/lib/api/errors", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/errors")>()),
+  logServerError,
+}));
 
 import { handleMobileEbayPublishRequest } from "./mobile-ebay-publish-composition";
 
@@ -14,6 +21,11 @@ import { handleMobileEbayPublishRequest } from "./mobile-ebay-publish-compositio
  * the swallowed-error shape that cost a night of production diagnosis on the
  * items-runs handler, and the publish path is the launch surface where it hurts
  * most.
+ *
+ * A bare `console.error` is only half a fix: on Vercel it is a log line nobody
+ * is paged for. `logServerError` is the canonical seam every other route
+ * reports through, and it forwards to Sentry (#62), so the report reaches the
+ * place failures are actually watched.
  */
 describe("mobile eBay publish composition", () => {
   let consoleError: ReturnType<typeof vi.spyOn>;
@@ -27,11 +39,12 @@ describe("mobile eBay publish composition", () => {
   afterEach(() => {
     consoleError.mockRestore();
     verifyToken.mockReset();
+    logServerError.mockReset();
     delete process.env.CLERK_SECRET_KEY;
     delete process.env.CLERK_AUTHORIZED_PARTIES;
   });
 
-  it("reports the underlying failure server-side instead of only answering the client", async () => {
+  it("reports the underlying failure through the Sentry seam, not a bare console line", async () => {
     const failure = new Error("Clerk verification exploded");
     verifyToken.mockRejectedValue(failure);
 
@@ -54,8 +67,8 @@ describe("mobile eBay publish composition", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(consoleError).toHaveBeenCalledWith(
-      "[mobile-api.authenticate]",
+    expect(logServerError).toHaveBeenCalledWith(
+      "mobile-api.authenticate",
       failure,
     );
   });

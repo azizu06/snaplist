@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EbayPolicyLocationCandidates } from "./policy-location-contract";
 import { MockEbayAdapter } from "./mock";
+import { EbayApiError } from "./types";
 import {
   ensureEbayPolicyLocationBinding,
   type EbayPolicyLocationSetupStore,
@@ -90,8 +91,11 @@ describe("MockEbayAdapter policy/location discovery (issue #47)", () => {
   });
 
   it("reports a configured provider failure instead of a usable binding", async () => {
+    // `EbayApiError`, not a bare `Error`: only a failure eBay itself produced
+    // may become the seller-facing `unavailable` outcome, and that is exactly
+    // what the HTTP discovery adapter throws for a non-2xx Account API answer.
     const adapter = new MockEbayAdapter({
-      discoveryFailWith: new Error("eBay Account API is down"),
+      discoveryFailWith: new EbayApiError("eBay Account API is down", 500, undefined),
     });
 
     const setup = await ensureEbayPolicyLocationBinding({
