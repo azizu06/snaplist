@@ -292,6 +292,12 @@ final class EbayPublishDeliveryTests: XCTestCase {
             flow.screen,
             .result(.sellerFixableRefusal(message: refusalMessage))
         )
+        guard case .result(let resultState) = flow.screen else {
+            return XCTFail("Expected the seller-fixable refusal result screen.")
+        }
+        let copy = EbayResultCopy(state: resultState)
+        XCTAssertEqual(copy.headline, "This listing was not posted.")
+        XCTAssertEqual(copy.body, refusalMessage)
         XCTAssertEqual(requests.publishStatusRequestCount, 1)
     }
 

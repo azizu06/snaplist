@@ -835,7 +835,7 @@ private struct EbayConnectionCopy {
     }
 }
 
-private struct EbayResultCopy {
+struct EbayResultCopy {
     let headline: String
     let chip: String
     let body: String
@@ -866,7 +866,7 @@ private struct EbayResultCopy {
             )
         case .sellerFixableRefusal(let message):
             (headline, chip, body, primary, secondary, identifier, chipVariant) = (
-                "Update your eBay account to post this listing.", "Not posted",
+                "This listing was not posted.", "Not posted",
                 message,
                 "Go to Trophy Wall", nil, "seller-fixable-refusal", .neutral
             )
