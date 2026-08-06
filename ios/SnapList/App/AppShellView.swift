@@ -290,7 +290,6 @@ struct AppShellView: View {
 #endif
                     let nextScopeProof = submissionHost.trophyWallPrincipalScopeProof
                     if let currentScopeProof = trophyWallPrincipalScopeProof,
-                       let nextScopeProof,
                        currentScopeProof != nextScopeProof {
                         trophyWallStore.resetForPrincipalTransition()
                     }
@@ -576,8 +575,9 @@ struct AppShellView: View {
                     repository: trophyWallHistoryRepository,
                     openRoute: { destination in
                         if destination == .localRecovery {
-                            router.reset(tab: .scan)
-                            router.selectedTab = .scan
+                            router.openLocalRecovery(
+                                photos: captureFlow.stagedPhotos
+                            )
                         } else {
                             router.navigate(to: .home(destination))
                         }

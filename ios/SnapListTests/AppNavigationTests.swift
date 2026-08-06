@@ -124,6 +124,37 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertNil(router.presentedFullScreen)
     }
 
+    @MainActor
+    func testLocalPendingRecoveryOpensTheExactOrderedIntakeInPhotoReview() {
+        let photos = (0..<2).map { index in
+            StagedCapturePhoto(
+                id: UUID(),
+                photoURL: URL(fileURLWithPath: "/tmp/recovery-photo-\(index).jpg"),
+                thumbnailURL: URL(fileURLWithPath: "/tmp/recovery-thumb-\(index).jpg"),
+                createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
+            )
+        }
+        let router = AppRouter(
+            initialTab: .trophyWall,
+            initialRoute: .home(.processing),
+            initialFullScreen: .guidedCamera
+        )
+
+        router.openLocalRecovery(photos: photos)
+
+        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [])
+        XCTAssertEqual(
+            router.captureBoundaryRequest,
+            CaptureBoundaryRequest(
+                destination: .photoReview,
+                photos: photos,
+                opener: .trophyWallTab
+            )
+        )
+        XCTAssertNil(router.presentedFullScreen)
+    }
+
     func testLaunchArgumentsAcceptApprovedStatesAndRejectCandidateStates() {
         for state in ApprovedVisualStateID.allCases {
             let configuration = LaunchConfiguration.parse(

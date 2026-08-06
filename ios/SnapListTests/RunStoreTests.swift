@@ -334,6 +334,13 @@ final class RunStoreTests: XCTestCase {
         XCTAssertEqual(run.sellerFacingDetail, detail)
     }
 
+    func testAcceptedRunUsesAcceptedLanguageWithoutQueueTerms() {
+        let run = Self.makeRun(status: .queued, stage: .queued)
+
+        XCTAssertEqual(run.status.sellerFacingLabel, "Accepted")
+        XCTAssertEqual(run.sellerFacingDetail, "Accepted")
+    }
+
     private static func makeRun(
         id: UUID = UUID(uuidString: "31700000-0000-4000-8000-000000000010")!,
         status: DurableRunStatus = .running,

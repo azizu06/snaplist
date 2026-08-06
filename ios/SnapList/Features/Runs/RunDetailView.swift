@@ -215,10 +215,10 @@ extension DurableRun {
     }
 }
 
-private extension DurableRunStatus {
+extension DurableRunStatus {
     var sellerFacingLabel: String {
         switch self {
-        case .queued: "Queued"
+        case .queued: "Accepted"
         case .running: "Processing"
         case .retrying: "Trying again"
         case .succeeded: "Ready"
@@ -241,7 +241,7 @@ private extension DurableRunStatus {
 private extension DurableRunStage {
     var sellerFacingActiveLabel: String {
         switch self {
-        case .queued: "Waiting to start"
+        case .queued: "Accepted"
         case .identifying: "Identifying your item"
         case .pricing: "Researching pricing evidence"
         case .generating: "Writing your listing"

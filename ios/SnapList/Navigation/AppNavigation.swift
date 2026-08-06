@@ -220,6 +220,16 @@ final class AppRouter {
         presentedFullScreen = nil
     }
 
+    func openLocalRecovery(photos: [StagedCapturePhoto]) {
+        reset(tab: .trophyWall)
+        selectedTab = .scan
+        openCaptureBoundary(
+            destination: .photoReview,
+            photos: photos,
+            opener: .trophyWallTab
+        )
+    }
+
     func returnFromPhotoReview(_ request: PhotoReviewScanReturn) {
         selectedTab = .scan
         photoReviewScanReturn = request
