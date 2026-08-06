@@ -262,7 +262,7 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["home.listing.20800000-0000-4000-8000-000000000044"].exists)
     }
 
-    func testStandardHomeCanReachFocusedSearchWithoutAVisualStateFixture() {
+    func testTrophyWallFixtureUsesValidatedWallAndPushedProcessing() {
         let app = XCUIApplication()
         app.launchArguments = [
             "--fixture=trophy-wall",
@@ -271,13 +271,22 @@ final class HomeUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let openSearch = app.buttons["home.search.open"]
-        XCTAssertTrue(openSearch.waitForExistence(timeout: 3))
-        openSearch.tap()
+        let wall = app.otherElements["trophy.wall"]
+        XCTAssertTrue(wall.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Trophy Wall"].exists)
+        XCTAssertFalse(app.buttons["home.search.open"].exists)
+        XCTAssertFalse(app.staticTexts["Orders"].exists)
 
-        XCTAssertTrue(app.textFields["home.search.field"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["dock.scan"].exists)
+        let processing = app.buttons["trophy.wall.processing"]
+        XCTAssertTrue(processing.isHittable)
+        XCTAssertGreaterThanOrEqual(processing.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(processing.frame.height, 44)
+        processing.tap()
+
+        XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 2))
+        app.buttons["trophy.processing.back"].tap()
+        XCTAssertTrue(wall.waitForExistence(timeout: 2))
+        XCTAssertTrue(processing.isHittable)
     }
 
     func testHomeRemainsReachableAtAccessibilityTypeWithReducedMotion() {

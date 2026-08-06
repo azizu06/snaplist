@@ -16,7 +16,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.buttons["dock.scan"].isSelected)
 
         app.buttons["dock.trophy-wall"].tap()
-        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.staticTexts["scan.recovery-title"].exists)
 
         XCTAssertFalse(app.buttons["dock.inbox"].exists)
@@ -111,7 +111,7 @@ final class SnapListUITests: XCTestCase {
         let app = launch()
 
         app.buttons["dock.trophy-wall"].tap()
-        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
         app.buttons["dock.capture"].tap()
         XCTAssertTrue(app.buttons["capture.take-one-item"].waitForExistence(timeout: 2))
         app.buttons["capture.take-one-item"].tap()
@@ -1594,25 +1594,25 @@ final class SnapListUITests: XCTestCase {
         addScreenshot(named: "CAP-02b2-LANDSCAPE.png")
     }
 
-    func testHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets() {
+    func testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets() {
         let app = launch()
         app.buttons["dock.trophy-wall"].tap()
-        let activity = app.buttons["header.activity"]
-        let account = app.buttons["header.account"]
+        let processing = app.buttons["trophy.wall.processing"]
+        let account = app.buttons["trophy.wall.account"]
         let capture = app.buttons["dock.capture"]
 
-        for control in [activity, account, capture] {
+        for control in [processing, account, capture] {
             XCTAssertTrue(control.exists)
             XCTAssertGreaterThanOrEqual(control.frame.width, 44)
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
         }
 
-        XCTAssertEqual(activity.label, "Open activity")
-        XCTAssertEqual(account.label, "Open Settings")
+        XCTAssertEqual(processing.label, "Processing")
+        XCTAssertEqual(account.label, "Account, opens Settings")
         XCTAssertEqual(capture.label, "Capture a new item")
 
-        activity.tap()
-        XCTAssertTrue(app.staticTexts["route.activity.title"].waitForExistence(timeout: 2))
+        processing.tap()
+        XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 2))
     }
 
     func testKeyboardHidesTheFloatingDock() {
@@ -1690,9 +1690,9 @@ final class SnapListUITests: XCTestCase {
         let app = launch(extraArguments: ["--dynamic-type=accessibility3"])
         app.buttons["dock.trophy-wall"].tap()
 
-        XCTAssertTrue(app.scrollViews["home.active"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["header.activity"].exists)
-        XCTAssertTrue(app.buttons["header.account"].exists)
+        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["trophy.wall.processing"].exists)
+        XCTAssertTrue(app.buttons["trophy.wall.account"].exists)
         XCTAssertTrue(app.buttons["dock.capture"].exists)
     }
 

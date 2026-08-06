@@ -142,6 +142,31 @@ struct RunDetailView: View {
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .accessibilityIdentifier("run.review.open-failed")
             }
+
+            if run.legalActions.canRetry {
+                Button {
+                    Task { await store.retry() }
+                } label: {
+                    Text(store.isRetrying ? "Retrying" : "Retry")
+                        .snapListTypography(.rowTitle)
+                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                        .padding(.horizontal, 16)
+                        .background(
+                            SnapListColorToken.action.color.opacity(0.1),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.action.color)
+                .disabled(store.isRetrying)
+                .accessibilityIdentifier("run.retry")
+            } else if run.legalActions.canStartNewCapture {
+                Button("Scan", action: startNewItem)
+                    .buttonStyle(.borderedProminent)
+                    .tint(SnapListColorToken.action.color)
+                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                    .accessibilityIdentifier("run.scan")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(SnapListMetrics.screenGutter)
@@ -204,10 +229,10 @@ extension DurableRun {
     }
 }
 
-private extension DurableRunStatus {
+extension DurableRunStatus {
     var sellerFacingLabel: String {
         switch self {
-        case .queued: "Queued"
+        case .queued: "Accepted"
         case .running: "Processing"
         case .retrying: "Trying again"
         case .succeeded: "Ready"
@@ -230,7 +255,7 @@ private extension DurableRunStatus {
 private extension DurableRunStage {
     var sellerFacingActiveLabel: String {
         switch self {
-        case .queued: "Waiting to start"
+        case .queued: "Accepted"
         case .identifying: "Identifying your item"
         case .pricing: "Researching pricing evidence"
         case .generating: "Writing your listing"

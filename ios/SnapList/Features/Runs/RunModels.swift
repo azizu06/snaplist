@@ -218,6 +218,7 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
     let allowance: RunAllowanceTruth
     let legalActions: RunActionTruth
     let review: ListingReviewResult?
+    let delivery: DurableRunDeliveryTruth?
     let lastMeaningfulUpdateAt: String
     let retentionCleanedAt: String?
 
@@ -239,7 +240,8 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         legalActions: RunActionTruth,
         lastMeaningfulUpdateAt: String,
         retentionCleanedAt: String?,
-        review: ListingReviewResult? = nil
+        review: ListingReviewResult? = nil,
+        delivery: DurableRunDeliveryTruth? = nil
     ) {
         self.id = id
         self.itemID = itemID
@@ -257,6 +259,7 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         self.allowance = allowance
         self.legalActions = legalActions
         self.review = review
+        self.delivery = delivery
         self.lastMeaningfulUpdateAt = lastMeaningfulUpdateAt
         self.retentionCleanedAt = retentionCleanedAt
     }
@@ -278,6 +281,7 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         case allowance
         case legalActions
         case review
+        case delivery
         case lastMeaningfulUpdateAt
         case retentionCleanedAt
     }
@@ -308,6 +312,10 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         review = values.contains(.review)
             ? try values.decode(ListingReviewResult.self, forKey: .review)
             : nil
+        delivery = try values.decodeIfPresent(
+            DurableRunDeliveryTruth.self,
+            forKey: .delivery
+        )
         lastMeaningfulUpdateAt = try values.decode(String.self, forKey: .lastMeaningfulUpdateAt)
         retentionCleanedAt = try values.decodeRequiredIfPresent(
             String.self,
@@ -332,6 +340,21 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
         } else {
             try values.require(!legalActions.canOpenReview, forKey: .review)
         }
+    }
+}
+
+enum DurableRunDeliveryState: String, Decodable, Equatable, Sendable {
+    case publishedToEbay = "published_to_ebay"
+    case exportPrepared = "export_prepared"
+}
+
+struct DurableRunDeliveryTruth: Decodable, Equatable, Sendable {
+    let state: DurableRunDeliveryState
+    let coverPhotoURL: URL?
+
+    private enum CodingKeys: String, CodingKey {
+        case state
+        case coverPhotoURL = "coverPhotoUrl"
     }
 }
 

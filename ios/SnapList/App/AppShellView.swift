@@ -8,9 +8,11 @@ struct AppShellView: View {
     @Bindable var firstValueOnboardingModel: FirstValueOnboardingModel
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
+    @Bindable var trophyWallStore: TrophyWallStore
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
     @Bindable var submissionHost: ItemRunSubmissionHost
+    let trophyWallHistoryRepository: any TrophyWallRunHistoryRepository
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -28,6 +30,9 @@ struct AppShellView: View {
     @State private var proGateStore: ProGateStore?
     @State private var proGateFocusRequest: UUID?
     @State private var handlingProGateEventID: UUID?
+    @State private var recoverableLocalPendingIdentity: TrophyWallLogicalIdentity?
+    @State private var trophyWallCollectionRefreshState =
+        TrophyWallCollectionRefreshState()
     @State private var activationCompletionChecked = false
     @State private var hasCompletedActivation = false
     @State private var activationAuthentication = ActivationAuthenticationState.unknown
@@ -245,6 +250,8 @@ struct AppShellView: View {
         // the shell while it is open, so anything attached to the shell stops observing
         // scene changes exactly when the seller is most likely to background the app.
         .onChange(of: scenePhase) { _, phase in
+#if DEBUG
+            guard configuration.visualState?.ownerIssue == 208 else { return }
             switch phase {
             case .active:
                 homeStore.resumeUpdates()
@@ -257,6 +264,7 @@ struct AppShellView: View {
             @unknown default:
                 break
             }
+#endif
         }
         .onChange(
             of: submissionHost.pendingPresentationEvent,
@@ -267,11 +275,27 @@ struct AppShellView: View {
             ) {
                 advanceActivationGuidance(for: action)
             }
-            guard case .destinationHandoff(
+            switch event {
+            case .destinationHandoff(
                 eventID: let eventID,
                 handoff: .pay01
-            )? = event else { return }
-            Task { await presentProGate(eventID: eventID) }
+            )?:
+                Task { await presentProGate(eventID: eventID) }
+            case .itemSaved(_, let handoff)?:
+                trophyWallStore.ingest(
+                    TrophyWallCanonicalAcceptedRun(
+                        principalScope: trophyWallStore.principalScope,
+                        runID: handoff.acceptedRun.runID,
+                        linkedLogicalIdentity: TrophyWallLogicalIdentity(
+                            idempotencyKey: handoff.idempotencyKey
+                        ),
+                        state: .accepted,
+                        lastMeaningfulUpdateAt: Date()
+                    )
+                )
+            case nil, .submissionRejected?, .destinationHandoff?:
+                break
+            }
         }
         .task(id: activationPresentationInputs) {
             guard !hasCompletedActivation,
@@ -328,6 +352,36 @@ struct AppShellView: View {
                         intake: dependencies.nativeIntake
                     )
 #endif
+                    if trophyWallCollectionRefreshState.observePrincipal(
+                        submissionHost.trophyWallPrincipalScopeProof
+                    ) {
+                        trophyWallStore.resetForPrincipalTransition()
+                        // The reset drops the collection back to `unknown`, and the
+                        // tab-keyed refresh below does not re-run on its own, so a
+                        // seller already sitting on the wall would watch it stay
+                        // blank until they navigated away and back.
+                    }
+                    let recoveryScope = trophyWallStore.principalScope
+                    let localCardRecovery = await TrophyWallPendingCardRecovery
+                        .resolve(
+                            scopedTo: recoveryScope,
+                            currentScope: { trophyWallStore.principalScope }
+                        ) {
+                            await submissionHost
+                                .recoverableTrophyWallPendingCard(
+                                    principalScope: recoveryScope
+                                )
+                        }
+                    if case .current(let localCard) = localCardRecovery {
+                        recoverableLocalPendingIdentity =
+                            localCard?.identity.logicalIdentity
+                        trophyWallStore.withdrawLocalPendingCards(
+                            keeping: recoverableLocalPendingIdentity
+                        )
+                        if let localCard {
+                            trophyWallStore.ingest(localCard)
+                        }
+                    }
                     let activeReviewDeparted =
                         photoReviewHost.session?.intakeActivationID
                         .map { $0 != snapshot.version.activationID }
@@ -529,12 +583,23 @@ struct AppShellView: View {
                 onScan: {},
                 onTryAgain: {}
             )
-        } else {
+        } else if configuration.visualState?.ownerIssue == 208 {
             sellerHomeFeature
+        } else {
+            trophyWallFeature
         }
 #else
-        sellerHomeFeature
+        trophyWallFeature
 #endif
+    }
+
+    private var trophyWallFeature: some View {
+        TrophyWallFeatureView(
+            router: router,
+            store: trophyWallStore,
+            repository: trophyWallHistoryRepository,
+            refreshState: $trophyWallCollectionRefreshState
+        )
     }
 
     private var sellerHomeFeature: some View {
@@ -578,6 +643,28 @@ struct AppShellView: View {
             FoundationDestinationView(destination: .activity)
         case .home(let route):
             switch route {
+            case .processing:
+                TrophyWallProcessingDestinationView(
+                    store: trophyWallStore,
+                    repository: trophyWallHistoryRepository,
+                    openRoute: { destination in
+                        if case .localRecovery(let logicalIdentity) = destination {
+                            router.openLocalRecovery(
+                                logicalIdentity,
+                                matching: recoverableLocalPendingIdentity,
+                                photos: captureFlow.stagedPhotos
+                            )
+                        } else {
+                            router.navigate(to: .home(destination))
+                        }
+                    },
+                    onScan: {
+                        router.reset(tab: .scan)
+                        router.selectedTab = .scan
+                    }
+                )
+            case .localRecovery:
+                EmptyView()
             case .run(let runID):
                 RunDetailView(
                     runID: runID,
@@ -1485,9 +1572,135 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
     }
 }
 
+/// Device-local Trophy Wall state belongs to exactly one principal, so it must be
+/// cleared whenever the principal changes. Observation is tracked on its own
+/// rather than inferred from the stored proof being nil: a signed-out principal
+/// has no proof, so the nil check reset on sign-out but not on sign-in, and one
+/// seller's local pending card could surface on the next seller's wall. Cold
+/// launch still resets nothing, which keeps the DEBUG fixture seed intact.
+struct TrophyWallPrincipalFence {
+    private var hasObservedScopeProof = false
+    private var scopeProof: ItemRunSubmissionPrincipalScopeProof?
+
+    /// Returns whether this observation is a principal transition.
+    mutating func observe(
+        _ nextScopeProof: ItemRunSubmissionPrincipalScopeProof?
+    ) -> Bool {
+        defer {
+            hasObservedScopeProof = true
+            scopeProof = nextScopeProof
+        }
+        return hasObservedScopeProof && scopeProof != nextScopeProof
+    }
+}
+
+/// Trophy Wall refreshes on tab entry, and also whenever the shell proves the
+/// saved collection can no longer be trusted — a principal transition, or the
+/// seller asking to try again after a failed load.
+struct TrophyWallCollectionRefreshKey: Equatable {
+    let tab: PrimaryTab
+    let generation: Int
+}
+
+struct TrophyWallCollectionRefreshState {
+    private var principalFence = TrophyWallPrincipalFence()
+    private(set) var generation = 0
+
+    mutating func observePrincipal(
+        _ scopeProof: ItemRunSubmissionPrincipalScopeProof?
+    ) -> Bool {
+        let didTransition = principalFence.observe(scopeProof)
+        if didTransition {
+            generation += 1
+        }
+        return didTransition
+    }
+
+    mutating func tryAgain() {
+        generation += 1
+    }
+
+    func taskID(tab: PrimaryTab) -> TrophyWallCollectionRefreshKey {
+        TrophyWallCollectionRefreshKey(tab: tab, generation: generation)
+    }
+}
+
+enum TrophyWallPendingCardRecovery: Equatable {
+    case current(TrophyWallCard?)
+    case stalePrincipal
+
+    @MainActor
+    static func resolve(
+        scopedTo principalScope: TrophyWallPrincipalScope,
+        currentScope: @MainActor () -> TrophyWallPrincipalScope,
+        load: @MainActor () async -> TrophyWallCard?
+    ) async -> TrophyWallPendingCardRecovery {
+        let card = await load()
+        guard currentScope() == principalScope else {
+            return .stalePrincipal
+        }
+        return .current(card)
+    }
+}
+
+@MainActor
+struct TrophyWallFeatureView: View {
+    @Bindable var router: AppRouter
+    @Bindable var store: TrophyWallStore
+    let repository: any TrophyWallRunHistoryRepository
+    @Binding var refreshState: TrophyWallCollectionRefreshState
+
+    var body: some View {
+        TrophyWallView(
+            store: store,
+            openProcessing: {
+                router.navigate(to: .home(.processing))
+            },
+            openAccount: { router.navigate(to: .settings) },
+            onScan: {
+                router.reset(tab: .scan)
+                router.selectedTab = .scan
+            },
+            onTryAgain: { refreshState.tryAgain() }
+        )
+        .task(id: refreshState.taskID(tab: router.selectedTab)) {
+            guard router.selectedTab == .trophyWall else { return }
+            await store.refreshCollection(using: repository)
+        }
+    }
+}
+
+@MainActor
+private struct TrophyWallProcessingDestinationView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @Bindable var store: TrophyWallStore
+    let repository: any TrophyWallRunHistoryRepository
+    let openRoute: (HomeRoute) -> Void
+    let onScan: () -> Void
+
+    var body: some View {
+        TrophyWallProcessingView(
+            rows: store.processingRows,
+            collectionOutcome: store.collectionOutcome,
+            onBack: { dismiss() },
+            openRoute: openRoute,
+            onScan: onScan,
+            onTryAgain: {
+                Task { await store.refreshCollection(using: repository) }
+            }
+        )
+        .navigationBarBackButtonHidden(true)
+    }
+}
+
 #if DEBUG
 #Preview("Foundation shell") {
     let dependencies = AppDependencies.make(configuration: .preview)
+    let trophyWallStore = TrophyWallStoreFactory.make(
+        configuration: .preview,
+        principalScope: TrophyWallPrincipalScope(opaqueValue: "preview")
+    )
     AppShellView(
         router: AppRouter(),
         onboardingModel: OnboardingFlowModel(
@@ -1505,6 +1718,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             intake: dependencies.nativeIntake
         ),
         homeStore: HomeStore(repository: HomeFixtureRepository(model: HomeFixtures.active)),
+        trophyWallStore: trophyWallStore,
         runStore: RunDetailStore(
             service: UnavailableRunService(),
             tokenProvider: PreviewBearerTokenProvider()
@@ -1516,6 +1730,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             session: .shared
         ),
         submissionHost: ItemRunSubmissionHost(coordinator: nil),
+        trophyWallHistoryRepository: UnavailableTrophyWallRunHistoryRepository(),
         configuration: .preview
     )
 }

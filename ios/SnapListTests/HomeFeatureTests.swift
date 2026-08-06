@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SwiftUI
 import UIKit
 import XCTest
@@ -696,7 +697,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: exactCards,
-                expectedDestinations: [nil, .run(fixture.runID)]
+                expectedDestinations: [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong principal",
@@ -706,7 +707,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [nil, nil]
+                expectedDestinations: [.localRecovery(fixture.logicalID), .localRecovery(fixture.unrelatedLogicalID)]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong run",
@@ -716,7 +717,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [nil, nil]
+                expectedDestinations: [.localRecovery(fixture.logicalID), .localRecovery(fixture.unrelatedLogicalID)]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong item",
@@ -726,7 +727,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.otherItemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [nil, nil]
+                expectedDestinations: [.localRecovery(fixture.logicalID), .localRecovery(fixture.unrelatedLogicalID)]
             ),
         ]
 
@@ -791,7 +792,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [nil, .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
         )
     }
 
@@ -848,7 +849,7 @@ final class TrophyWallDomainTests: XCTestCase {
             )
             XCTAssertEqual(
                 store.processingRows.map(\.destination),
-                [nil, .run(fixture.runID)],
+                [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)],
                 testCase.name
             )
         }
@@ -952,7 +953,7 @@ final class TrophyWallDomainTests: XCTestCase {
             [.local(fixture.unrelatedLogicalID)]
         )
         XCTAssertEqual(store.processingRows.map(\.stateLabel), ["Pending upload"])
-        XCTAssertEqual(store.processingRows.map(\.destination), [nil])
+        XCTAssertEqual(store.processingRows.map(\.destination), [.localRecovery(fixture.unrelatedLogicalID)])
     }
 
     func testStoreKeepsValidNeedsRetryCardForMalformedNewerCanonicalTruth() throws {
@@ -1060,7 +1061,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [nil, .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
         )
         XCTAssertEqual(
             page.entries.first?.run.lastMeaningfulUpdateAt,
@@ -1094,7 +1095,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.run(fixture.runID), nil]
+            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID)]
         )
         XCTAssertEqual(
             store.processingRows.map(\.accessibilityLabel),
@@ -1151,6 +1152,83 @@ final class TrophyWallDomainTests: XCTestCase {
                     historyOrderAt: fixture.runDetailUpdate
                 ),
             ]
+        )
+    }
+
+    func testStoreProjectsPersistedExportPackTruthIntoTheSettledTrophyWall() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let historyPage = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded,
+            deliveryState: "export_prepared"
+        )
+
+        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
+
+        XCTAssertEqual(store.processingRows.map(\.id), [.local(fixture.unrelatedLogicalID)])
+        XCTAssertEqual(
+            store.settledTiles,
+            [
+                TrophyWallSettledTile(
+                    id: .run(fixture.runID),
+                    itemName: fixture.matchedItemName,
+                    stateLabel: "Export prepared",
+                    historyOrderAt: fixture.runDetailUpdate
+                ),
+            ]
+        )
+    }
+
+    func testSettledTileAccessibilityNamesTruthDateAndStaticResult() {
+        let historyOrderAt = Date(timeIntervalSince1970: 1_753_015_200)
+        let tile = TrophyWallSettledTile(
+            id: .run(UUID()),
+            itemName: "Vintage denim jacket",
+            stateLabel: "Export prepared",
+            historyOrderAt: historyOrderAt
+        )
+        let relevantDate = historyOrderAt.formatted(
+            .dateTime.month(.wide).day()
+        )
+
+        XCTAssertEqual(
+            tile.accessibilityLabel,
+            "Vintage denim jacket, photo unavailable, Export prepared, "
+                + "\(relevantDate). Completed item in your collection."
+        )
+    }
+
+    func testStoreWithdrawsInvalidatedExportTruthWithoutReorderingTheRun() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let prepared = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded,
+            deliveryState: "export_prepared"
+        )
+        let invalidated = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded
+        )
+
+        store.ingest(historyPage: prepared, principalScope: fixture.principal)
+        store.ingest(historyPage: invalidated, principalScope: fixture.principal)
+
+        XCTAssertTrue(store.settledTiles.isEmpty)
+        XCTAssertEqual(store.processingRows.map(\.stateLabel), [
+            "Pending upload",
+            "Ready to review",
+        ])
+        XCTAssertEqual(
+            store.cards.last?.orderKey.lastMeaningfulUpdateAt,
+            fixture.runDetailUpdate
         )
     }
 
@@ -1341,7 +1419,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             standardRows.map(\.destination),
-            [.run(fixture.runID), nil, .run(fixture.thirdRunID)]
+            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID), .run(fixture.thirdRunID)]
         )
         XCTAssertEqual(
             smallestHeightRows.map(\.id),
@@ -1352,7 +1430,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             smallestHeightRows.map(\.destination),
-            [.run(fixture.runID), nil]
+            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID)]
         )
         let standardImage = await captureHostedTrophyWallProcessingView(
             rows: store.processingRows,
@@ -1493,6 +1571,57 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertNil(loaded.disclosureLabel)
     }
 
+    func testCollectionRefreshConsumesEveryStableHistoryPageWithoutRepeatOrSkip() async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        let newer = try fixture.historyPage(
+            status: .queued,
+            stage: .queued,
+            terminalOutcome: nil
+        )
+        let olderRunID = fixture.thirdRunID
+        let olderRun = try fixture.decodedRunDetail(
+            runID: olderRunID,
+            itemID: fixture.otherItemID,
+            status: .running,
+            stage: .pricing,
+            lastMeaningfulUpdateAt: "1970-01-01T00:00:04.000Z"
+        )
+        let older = TrophyWallRunHistoryPage(
+            entries: [
+                TrophyWallRunHistoryEntry(
+                    logicalIdentity: fixture.unrelatedLogicalID,
+                    orderKey: TrophyWallOrderKey(
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 4),
+                        stableIdentity: olderRunID.uuidString.lowercased()
+                    ),
+                    run: olderRun
+                ),
+            ],
+            nextCursor: nil
+        )
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [
+                .page(
+                    TrophyWallRunHistoryPage(
+                        entries: newer.entries,
+                        nextCursor: "stable-page-2"
+                    )
+                ),
+                .page(older),
+            ]
+        )
+
+        await store.refreshCollection(using: repository)
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        XCTAssertEqual(store.cards.map(\.identity), [
+            .run(fixture.runID),
+            .run(olderRunID),
+        ])
+        XCTAssertEqual(repository.requestedPages.map(\.cursor), [nil, "stable-page-2"])
+    }
+
     func testUnavailableCollectionOffersTryAgainAndNeverClaimsEmptyOrSavedTruth() async throws {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: [])
@@ -1604,6 +1733,328 @@ final class TrophyWallDomainTests: XCTestCase {
 
         XCTAssertEqual(store.collectionOutcome, .loaded)
         XCTAssertEqual(repository.requestCount, 1)
+    }
+
+    func testPrincipalTransitionClearsSavedCardsAndFencesAnOlderRefresh() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let repository = GatedTrophyWallRunHistoryRepository()
+
+        async let departingRefresh: Void = store.refreshCollection(using: repository)
+        await repository.entered.wait()
+        store.resetForPrincipalTransition()
+        await repository.release.open()
+        await departingRefresh
+
+        XCTAssertTrue(store.cards.isEmpty)
+        XCTAssertEqual(store.collectionOutcome, .unknown)
+        XCTAssertTrue(store.processingRows.isEmpty)
+        XCTAssertTrue(store.settledTiles.isEmpty)
+    }
+
+    func testPendingCardRecoveryDropsAResultFromADepartedPrincipal() async {
+        let fixture = TrophyWallTestFixture()
+        let entered = RefreshGate()
+        let release = RefreshGate()
+        var currentScope = fixture.principal
+
+        let recovery = Task { @MainActor in
+            await TrophyWallPendingCardRecovery.resolve(
+                scopedTo: fixture.principal,
+                currentScope: { currentScope }
+            ) {
+                await entered.open()
+                await release.wait()
+                return fixture.initialCards[0]
+            }
+        }
+
+        await entered.wait()
+        currentScope = fixture.otherPrincipal
+        await release.open()
+
+        let result = await recovery.value
+        XCTAssertEqual(result, .stalePrincipal)
+    }
+
+    func testCollectionRefreshTaskRerunsForPrincipalTransitionAndWallTryAgain()
+        async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(RunAPIError.unavailable)]
+        )
+        let driver = TrophyWallRefreshTestDriver()
+        let root = TrophyWallFeatureTestRoot(
+            driver: driver,
+            router: AppRouter(initialTab: .trophyWall),
+            store: store,
+            repository: repository
+        )
+        let host = HostedTrophyWallTestWindow(
+            rootView: root,
+            size: CGSize(width: 390, height: 844)
+        )
+        defer { host.close() }
+
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 1
+                && store.collectionOutcome == .unavailable
+        }
+        let initialTaskID = driver.refreshState.taskID(tab: .trophyWall)
+
+        XCTAssertFalse(driver.refreshState.observePrincipal(nil))
+        let signedIn = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "new-principal"
+            )
+        )
+        XCTAssertTrue(driver.refreshState.observePrincipal(signedIn))
+        let principalTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        XCTAssertNotEqual(principalTaskID, initialTaskID)
+
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 2
+        }
+
+        let renderedWall = try XCTUnwrap(
+            Mirror(reflecting: root.feature.body).children
+                .first(where: { $0.label == "content" })?.value
+                as? TrophyWallView
+        )
+        renderedWall.onTryAgain()
+        let retryTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        XCTAssertNotEqual(retryTaskID, principalTaskID)
+
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 3
+        }
+    }
+
+    /// A local pending card only means something while the intake that produced it
+    /// is still staged. Nothing used to withdraw one, so a discarded or replaced
+    /// intake left a card on the wall that routed to the wrong item, or to nothing.
+    @MainActor
+    func testWithdrawingLocalPendingCardsKeepsOnlyTheStillRecoverableIntake() {
+        let fixture = TrophyWallTestFixture()
+        let cases: [(name: String, kept: TrophyWallLogicalIdentity?, expected: [TrophyWallCardIdentity])] = [
+            (
+                "one intake is still recoverable",
+                fixture.unrelatedLogicalID,
+                [
+                    .local(fixture.unrelatedLogicalID),
+                    .run(fixture.thirdRunID),
+                    .run(fixture.hiddenRunID),
+                ]
+            ),
+            (
+                "no intake is recoverable any more",
+                nil,
+                [.run(fixture.thirdRunID), .run(fixture.hiddenRunID)]
+            ),
+        ]
+
+        for testCase in cases {
+            let store = fixture.makeStore(cards: fixture.processingInitialCards)
+
+            store.withdrawLocalPendingCards(keeping: testCase.kept)
+
+            XCTAssertEqual(
+                Set(store.cards.map(\.identity)),
+                Set(testCase.expected),
+                testCase.name
+            )
+            XCTAssertEqual(
+                store.cards.count,
+                testCase.expected.count,
+                testCase.name
+            )
+        }
+    }
+
+    /// Trophy Wall is the seller's one return destination, so a failed collection
+    /// refresh may not leave it a blank canvas. It reuses the same offline notice
+    /// and recovery group the pushed Processing screen already ships.
+    func testWallRendersItsOwnOfflineAndUnavailableGroupInsteadOfABlankCanvas()
+        async {
+        let unavailable = TrophyWallProcessingView.unavailableCollectionMessage
+        let offlineNotice = TrophyWallProcessingView.offlineNoticeText
+        let cases: [(
+            name: String,
+            hasSettledTiles: Bool,
+            outcome: TrophyWallCollectionOutcome,
+            expected: TrophyWallView.Presentation
+        )] = [
+            (
+                "nothing proved yet claims nothing",
+                false,
+                .unknown,
+                .init(
+                    showsGrid: false,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: nil
+                )
+            ),
+            (
+                "proved empty earns the empty screen",
+                false,
+                .loaded,
+                .init(
+                    showsGrid: false,
+                    showsEmptyView: true,
+                    offlineNotice: nil,
+                    collectionMessage: nil
+                )
+            ),
+            (
+                "offline without saved tiles offers recovery",
+                false,
+                .offline,
+                .init(
+                    showsGrid: false,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: unavailable
+                )
+            ),
+            (
+                "unavailable without saved tiles offers recovery",
+                false,
+                .unavailable,
+                .init(
+                    showsGrid: false,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: unavailable
+                )
+            ),
+            (
+                "offline with saved tiles keeps them and says so",
+                true,
+                .offline,
+                .init(
+                    showsGrid: true,
+                    showsEmptyView: false,
+                    offlineNotice: offlineNotice,
+                    collectionMessage: nil
+                )
+            ),
+            (
+                "unavailable with saved tiles keeps them without a false claim",
+                true,
+                .unavailable,
+                .init(
+                    showsGrid: true,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: nil
+                )
+            ),
+            (
+                "loaded with saved tiles is the plain grid",
+                true,
+                .loaded,
+                .init(
+                    showsGrid: true,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: nil
+                )
+            ),
+        ]
+
+        for testCase in cases {
+            XCTAssertEqual(
+                TrophyWallView.presentation(
+                    hasSettledTiles: testCase.hasSettledTiles,
+                    collectionOutcome: testCase.outcome
+                ),
+                testCase.expected,
+                testCase.name
+            )
+        }
+
+        let renderCases: [(name: String, error: any Error)] = [
+            ("offline", URLError(.notConnectedToInternet)),
+            ("unavailable", RunAPIError.unavailable),
+        ]
+        for renderCase in renderCases {
+            let store = TrophyWallTestFixture().makeStore(cards: [])
+            let repository = ScriptedTrophyWallRunHistoryRepository(
+                results: [.failure(renderCase.error)]
+            )
+            await store.refreshCollection(using: repository)
+            let host = HostedTrophyWallTestWindow(
+                rootView: TrophyWallView(
+                    store: store,
+                    openProcessing: {},
+                    openAccount: {},
+                    onScan: {},
+                    onTryAgain: {}
+                ),
+                size: CGSize(width: 390, height: 844)
+            )
+            await host.settle()
+            let image = host.captureImage()
+            host.close()
+
+            XCTAssertGreaterThan(
+                image.opaqueDarkPixelCount(
+                    in: CGRect(x: 0, y: 100, width: 390, height: 640)
+                ),
+                100,
+                "The actual Wall must render its \(renderCase.name) recovery group."
+            )
+        }
+    }
+
+    func testCollectionMessageContainsItsActionAccessibilityElements() {
+        let cases: [(
+            name: String,
+            message: TrophyWallProcessingView.CollectionMessage,
+            actionIdentifier: String
+        )] = [
+            (
+                "proved empty",
+                .init(
+                    heading: "Nothing is processing.",
+                    action: .scan(label: "Scan an item"),
+                    scoutImageName: "ScoutUncertain",
+                    scoutAccessibilityLabel: "Scout"
+                ),
+                "trophy.processing.collection.scan"
+            ),
+            (
+                "failed collection",
+                TrophyWallProcessingView.unavailableCollectionMessage,
+                "trophy.processing.collection.try-again"
+            ),
+        ]
+
+        for testCase in cases {
+            let view = TrophyWallCollectionMessageView(
+                message: testCase.message,
+                onScan: {},
+                onTryAgain: {}
+            )
+            var renderedStructure = ""
+            dump(view.body, to: &renderedStructure)
+
+            XCTAssertTrue(
+                renderedStructure.contains(
+                    "AccessibilityChildBehavior.Contain"
+                ),
+                "The collection must contain descendants: \(testCase.name)"
+            )
+            XCTAssertTrue(
+                renderedStructure.contains(testCase.actionIdentifier),
+                "The contained action must keep its identifier: \(testCase.name)"
+            )
+        }
     }
 
     func testCollectionStatesRenderTheirApprovedGroupAtBothDynamicTypeRoots() async {
@@ -1759,7 +2210,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [nil, .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
         )
         XCTAssertEqual(store.cards, firstCards)
         XCTAssertEqual(store.processingRows, firstRows)
@@ -1773,6 +2224,88 @@ final class TrophyWallDomainTests: XCTestCase {
             )
             XCTAssertEqual(inconsistentStore.cards, initialCards, testCase.name)
         }
+    }
+
+    private func waitForTrophyWallCondition(
+        _ predicate: @escaping @MainActor () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<200 where !predicate() {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertTrue(predicate(), file: file, line: line)
+    }
+}
+
+@MainActor
+@Observable
+private final class TrophyWallRefreshTestDriver {
+    var refreshState = TrophyWallCollectionRefreshState()
+}
+
+@MainActor
+private struct TrophyWallFeatureTestRoot: View {
+    @Bindable var driver: TrophyWallRefreshTestDriver
+    @Bindable var router: AppRouter
+    @Bindable var store: TrophyWallStore
+    let repository: any TrophyWallRunHistoryRepository
+
+    var feature: TrophyWallFeatureView {
+        TrophyWallFeatureView(
+            router: router,
+            store: store,
+            repository: repository,
+            refreshState: $driver.refreshState
+        )
+    }
+
+    var body: some View {
+        feature
+    }
+}
+
+@MainActor
+private final class HostedTrophyWallTestWindow {
+    private let hostingController: UIHostingController<AnyView>
+    private let window: UIWindow
+    private let size: CGSize
+
+    init<Content: View>(rootView: Content, size: CGSize) {
+        self.size = size
+        hostingController = UIHostingController(
+            rootView: AnyView(rootView.background(Color.white))
+        )
+        window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.backgroundColor = .white
+        window.isOpaque = true
+        window.rootViewController = hostingController
+        hostingController.loadViewIfNeeded()
+        hostingController.view.frame = window.bounds
+        hostingController.view.backgroundColor = .white
+        hostingController.view.isOpaque = true
+        window.makeKeyAndVisible()
+    }
+
+    func settle() async {
+        for _ in 0..<3 {
+            await Task.yield()
+            window.setNeedsLayout()
+            window.layoutIfNeeded()
+            hostingController.view.setNeedsLayout()
+            hostingController.view.layoutIfNeeded()
+        }
+        hostingController.view.setNeedsDisplay()
+        hostingController.view.layer.displayIfNeeded()
+    }
+
+    func captureImage() -> UIImage {
+        renderOpaqueRGBA8(view: hostingController.view, size: size)
+    }
+
+    func close() {
+        window.isHidden = true
+        withExtendedLifetime(window) {}
     }
 }
 
@@ -2079,7 +2612,8 @@ private struct TrophyWallTestFixture {
         canStartNewCapture: Bool = false,
         historyOrderAt: Date? = nil,
         lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z",
-        retentionCleanedAt: String? = nil
+        retentionCleanedAt: String? = nil,
+        deliveryState: String? = nil
     ) throws -> TrophyWallRunHistoryPage {
         let run = try decodedRunDetail(
             runID: runID,
@@ -2091,7 +2625,8 @@ private struct TrophyWallTestFixture {
             retryTruth: retryTruth,
             canStartNewCapture: canStartNewCapture,
             lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
-            retentionCleanedAt: retentionCleanedAt
+            retentionCleanedAt: retentionCleanedAt,
+            deliveryState: deliveryState
         )
         return TrophyWallRunHistoryPage(
             entries: [
@@ -2119,7 +2654,8 @@ private struct TrophyWallTestFixture {
         canStartNewCapture: Bool = false,
         canOpenReview: Bool = false,
         lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z",
-        retentionCleanedAt: String? = nil
+        retentionCleanedAt: String? = nil,
+        deliveryState: String? = nil
     ) throws -> DurableRun {
         let listingIDJSON = listingID.map { "\"\($0.uuidString.lowercased())\"" } ?? "null"
         let terminalOutcomeJSON = terminalOutcome.map { "\"\($0.rawValue)\"" } ?? "null"
@@ -2132,6 +2668,9 @@ private struct TrophyWallTestFixture {
             "retryable":\(canRetry),"workPreserved":\($0.workPreserved)}
             """
         } ?? "null"
+        let deliveryJSON = deliveryState.map {
+            ",\n          \"delivery\": { \"state\": \"\($0)\" }"
+        } ?? ""
         let json = """
         {
           "id": "\(runID.uuidString.lowercased())",
@@ -2162,7 +2701,7 @@ private struct TrophyWallTestFixture {
             "canCancel": false,
             "canOpenReview": \(canOpenReview),
             "canStartNewCapture": \(canStartNewCapture)
-          },
+          }\(deliveryJSON),
           "lastMeaningfulUpdateAt": "\(lastMeaningfulUpdateAt)",
           "retentionCleanedAt": \(retentionCleanedAtJSON)
         }

@@ -62,6 +62,8 @@ enum FutureBoundary: String, Hashable {
 }
 
 enum HomeRoute: Hashable {
+    case processing
+    case localRecovery(TrophyWallLogicalIdentity)
     case run(UUID)
     case order(UUID)
     case conversation(UUID)
@@ -216,6 +218,28 @@ final class AppRouter {
             opener: opener
         )
         presentedFullScreen = nil
+    }
+
+    /// The tapped card names one specific local item. Every refusal is decided
+    /// before any navigation state moves, because a stale card that switched tabs
+    /// and then failed to open anything left the seller on Scan with no
+    /// explanation, and one whose intake had been replaced opened the wrong item.
+    func openLocalRecovery(
+        _ logicalIdentity: TrophyWallLogicalIdentity,
+        matching recoverableIdentity: TrophyWallLogicalIdentity?,
+        photos: [StagedCapturePhoto]
+    ) {
+        guard logicalIdentity == recoverableIdentity,
+              (1...5).contains(photos.count) else {
+            return
+        }
+        reset(tab: .trophyWall)
+        selectedTab = .scan
+        openCaptureBoundary(
+            destination: .photoReview,
+            photos: photos,
+            opener: .trophyWallTab
+        )
     }
 
     func returnFromPhotoReview(_ request: PhotoReviewScanReturn) {

@@ -224,6 +224,8 @@ final class ItemRunSubmissionHost {
         ItemRunSubmissionCoordinator.AmbiguousRetry?
     private var activePrincipalGeneration: UUID?
     private var activePrincipalContext: ItemRunSubmissionPrincipalContext?
+    private(set) var trophyWallPrincipalScopeProof:
+        ItemRunSubmissionPrincipalScopeProof? = nil
     private var activeSubmissionID: UUID?
     private var preparationTask:
         Task<ItemRunSubmissionCoordinator.Preparation, Never>?
@@ -290,6 +292,29 @@ final class ItemRunSubmissionHost {
         activePrincipalContext = ItemRunSubmissionPrincipalContext(
             snapshot: snapshot,
             intake: intake
+        )
+        trophyWallPrincipalScopeProof = activePrincipalContext?.scopeProof
+    }
+
+    func recoverableTrophyWallPendingCard(
+        principalScope: TrophyWallPrincipalScope
+    ) async -> TrophyWallCard? {
+        guard let context = activePrincipalContext,
+              !context.photos.isEmpty,
+              let coordinator,
+              let attempt = await coordinator.recoverableAttempt(
+                  for: context
+              ),
+              activePrincipalContext?.generation == context.generation else {
+            return nil
+        }
+        return TrophyWallCard.pending(
+            principalScope: principalScope,
+            logicalIdentity: TrophyWallLogicalIdentity(
+                idempotencyKey: attempt.idempotencyKey
+            ),
+            itemName: "Local item",
+            lastMeaningfulUpdateAt: context.photos.map(\.createdAt).max() ?? Date()
         )
     }
 
@@ -925,6 +950,38 @@ final class ItemRunSubmissionCoordinator {
         self.readData = readData
         self.voiceLocaleHint = voiceLocaleHint
         self.newIdempotencyKey = newIdempotencyKey
+    }
+
+    fileprivate func recoverableAttempt(
+        for context: ItemRunSubmissionPrincipalContext
+    ) async -> ItemRunSubmissionAttempt? {
+        guard await context.validatesFilesystemContext() else {
+            return nil
+        }
+        let readData = readData
+        let localeHint = voiceLocaleHint()
+        let intake: ItemRunSubmissionSnapshot.Result
+        do {
+            intake = try await Task.detached(priority: .userInitiated) {
+                try ItemRunSubmissionSnapshot.make(
+                    for: context.photos,
+                    voice: context.voice,
+                    localeHint: localeHint,
+                    readData: readData
+                )
+            }.value
+        } catch {
+            return nil
+        }
+        guard await context.validatesFilesystemContext(),
+              let attempt = try? await context.attemptStore.loadAttempt(),
+              attempt.standsFor(
+                  intake.photos,
+                  voiceContext: intake.voiceContext
+              ) else {
+            return nil
+        }
+        return attempt
     }
 
     func submit(photos: [StagedCapturePhoto]) async -> ItemRunSubmissionOutcome {

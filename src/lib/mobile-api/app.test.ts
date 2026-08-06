@@ -303,6 +303,11 @@ describe("mobile API v1 provider-neutral handler", () => {
     });
     const clientForBearer = vi.fn().mockResolvedValue({
       listRunHistoryPage,
+      readDeliveryProjections: vi.fn().mockResolvedValue({
+        data: [],
+        error: null,
+      }),
+      signCoverPhotoUrls: vi.fn().mockResolvedValue(new Map()),
       readRun: vi.fn().mockResolvedValue({
         data: {
           id: runId,

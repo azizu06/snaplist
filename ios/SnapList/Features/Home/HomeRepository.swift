@@ -29,6 +29,103 @@ struct AuthenticatedTrophyWallRunHistoryRepository: TrophyWallRunHistoryReposito
     }
 }
 
+struct UnavailableTrophyWallRunHistoryRepository: TrophyWallRunHistoryRepository {
+    func fetchPage(limit: Int, cursor: String?) async throws -> TrophyWallRunHistoryPage {
+        throw HomeRepositoryError.operationUnavailable
+    }
+}
+
+#if DEBUG
+private struct FixtureTrophyWallRunHistoryRepository: TrophyWallRunHistoryRepository {
+    func fetchPage(limit: Int, cursor: String?) async throws -> TrophyWallRunHistoryPage {
+        TrophyWallRunHistoryPage(entries: [], nextCursor: nil)
+    }
+}
+#endif
+
+enum TrophyWallRunHistoryRepositoryFactory {
+    static func make(
+        configuration: LaunchConfiguration,
+        apiOrigin: URL?,
+        tokenProvider: any BearerTokenProviding,
+        session: URLSession
+    ) -> any TrophyWallRunHistoryRepository {
+#if DEBUG
+        if configuration.usesZeroNetworkFixtures {
+            return FixtureTrophyWallRunHistoryRepository()
+        }
+#endif
+        guard let apiOrigin else {
+            return UnavailableTrophyWallRunHistoryRepository()
+        }
+        return AuthenticatedTrophyWallRunHistoryRepository(
+            service: RunAPIClient(baseURL: apiOrigin, session: session),
+            tokenProvider: tokenProvider
+        )
+    }
+}
+
+private struct TrophyWallInitialRepository: TrophyWallRepository {
+    let cards: [TrophyWallCard]
+
+    func initialCards(for principalScope: TrophyWallPrincipalScope) -> [TrophyWallCard] {
+        cards.filter { $0.principalScope == principalScope }
+    }
+}
+
+@MainActor
+enum TrophyWallStoreFactory {
+    static func make(
+        configuration: LaunchConfiguration,
+        principalScope: TrophyWallPrincipalScope
+    ) -> TrophyWallStore {
+#if DEBUG
+        if configuration.fixture == .trophyWall {
+            return TrophyWallStore(
+                principalScope: principalScope,
+                repository: TrophyWallInitialRepository(
+                    cards: fixtureCards(principalScope: principalScope)
+                )
+            )
+        }
+#endif
+        return TrophyWallStore(
+            principalScope: principalScope,
+            repository: TrophyWallInitialRepository(cards: [])
+        )
+    }
+
+#if DEBUG
+    private static func fixtureCards(
+        principalScope: TrophyWallPrincipalScope
+    ) -> [TrophyWallCard] {
+        [
+            .accepted(
+                principalScope: principalScope,
+                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000021")!,
+                state: .publishedToEbay,
+                itemName: "Vintage Pyrex bowl set",
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 40)
+            ),
+            .accepted(
+                principalScope: principalScope,
+                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000022")!,
+                state: .exportPrepared,
+                itemName: "Canon AE-1 film camera",
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 30)
+            ),
+            .accepted(
+                principalScope: principalScope,
+                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000023")!,
+                state: .workingPricing,
+                itemName: "Nintendo Game Boy",
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 20)
+            ),
+        ]
+    }
+#endif
+}
+
 enum HomeRepositoryFactory {
     static func make(
         configuration: LaunchConfiguration,

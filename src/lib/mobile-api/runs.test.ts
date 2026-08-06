@@ -44,6 +44,8 @@ function runRow(overrides: Record<string, unknown> = {}) {
 function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunDataClient {
   return {
     listRunHistoryPage: vi.fn().mockResolvedValue({ data: [], error: null }),
+    readDeliveryProjections: vi.fn().mockResolvedValue({ data: [], error: null }),
+    signCoverPhotoUrls: vi.fn().mockResolvedValue(new Map()),
     readRun: vi.fn().mockResolvedValue({ data: runRow(), error: null }),
     readItem: vi.fn().mockResolvedValue({
       data: {
@@ -307,6 +309,265 @@ describe("mobile durable-run operations", () => {
     expect(readRun).not.toHaveBeenCalled();
     expect(readItem).not.toHaveBeenCalled();
     expect(readRetryProjection).not.toHaveBeenCalled();
+  });
+
+  it("projects only persisted delivery truth for the tenant history page", async () => {
+    const listingId = "24100000-0000-4000-8000-000000000006";
+    const baseHistoryRow = runHistoryProjectionRow({
+      runId: RUN_ID,
+      itemId: ITEM_ID,
+      logicalKey: LOGICAL_KEY,
+      frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+      snapshotRevision: "7",
+      status: "succeeded",
+      stage: "completed",
+    });
+    const historyRow = {
+      ...baseHistoryRow,
+      run_projection: {
+        ...baseHistoryRow.run_projection,
+        listing_id: listingId,
+        completed_at: "2026-07-19T18:01:00.000Z",
+      },
+    };
+    const listRunHistoryPage = vi.fn().mockResolvedValue({
+      data: [historyRow],
+      error: null,
+    });
+    const readDeliveryProjections = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: listingId,
+          user_id: "user_native",
+          item_id: ITEM_ID,
+          platform: "ebay",
+          source_review_revision: null,
+          ebay_listing_id: "123456789012",
+          ebay_status: "published",
+          item: {
+            review_content_revision:
+              "24100000-0000-4000-8000-000000000008",
+          },
+        },
+      ],
+      error: null,
+    });
+    const signCoverPhotoUrls = vi.fn().mockResolvedValue(
+      new Map([
+        [
+          "user_native/items/front.jpg",
+          "https://media.snaplist.dev/signed/front.jpg",
+        ],
+      ]),
+    );
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage,
+        readDeliveryProjections,
+        signCoverPhotoUrls,
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 20,
+    });
+
+    expect(page.entries[0]?.run.delivery).toEqual({
+      state: "published_to_ebay",
+      coverPhotoUrl: "https://media.snaplist.dev/signed/front.jpg",
+    });
+    expect(readDeliveryProjections).toHaveBeenCalledExactlyOnceWith([ITEM_ID]);
+  });
+
+  it("projects a current assisted pack as prepared without claiming it was shared", async () => {
+    const historyRow = runHistoryProjectionRow({
+      runId: RUN_ID,
+      itemId: ITEM_ID,
+      logicalKey: LOGICAL_KEY,
+      frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+      snapshotRevision: "7",
+      status: "succeeded",
+      stage: "completed",
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage: vi.fn().mockResolvedValue({
+          data: [historyRow],
+          error: null,
+        }),
+        readDeliveryProjections: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: "24100000-0000-4000-8000-000000000007",
+              user_id: "user_native",
+              item_id: ITEM_ID,
+              platform: "mercari",
+              source_review_revision:
+                "24100000-0000-4000-8000-000000000008",
+              ebay_listing_id: null,
+              ebay_status: null,
+              item: {
+                review_content_revision:
+                  "24100000-0000-4000-8000-000000000008",
+              },
+            },
+          ],
+          error: null,
+        }),
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 20,
+    });
+
+    expect(page.entries[0]?.run.delivery).toEqual({
+      state: "export_prepared",
+    });
+    expect(JSON.stringify(page)).not.toContain("shared");
+  });
+
+  it("does not project a stale assisted pack after the item content revision advances", async () => {
+    const historyRow = runHistoryProjectionRow({
+      runId: RUN_ID,
+      itemId: ITEM_ID,
+      logicalKey: LOGICAL_KEY,
+      frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+      snapshotRevision: "7",
+      status: "succeeded",
+      stage: "completed",
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage: vi.fn().mockResolvedValue({
+          data: [historyRow],
+          error: null,
+        }),
+        readDeliveryProjections: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: "24100000-0000-4000-8000-000000000007",
+              user_id: "user_native",
+              item_id: ITEM_ID,
+              platform: "facebook",
+              source_review_revision:
+                "24100000-0000-4000-8000-000000000008",
+              ebay_listing_id: null,
+              ebay_status: null,
+              item: {
+                review_content_revision:
+                  "24100000-0000-4000-8000-000000000009",
+              },
+            },
+          ],
+          error: null,
+        }),
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 20,
+    });
+
+    expect(page.entries[0]?.run.delivery).toBeUndefined();
+  });
+
+  it("does not promote a withheld Depop pack into settled Trophy Wall truth", async () => {
+    const historyRow = runHistoryProjectionRow({
+      runId: RUN_ID,
+      itemId: ITEM_ID,
+      logicalKey: LOGICAL_KEY,
+      frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+      snapshotRevision: "7",
+      status: "succeeded",
+      stage: "completed",
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage: vi.fn().mockResolvedValue({
+          data: [historyRow],
+          error: null,
+        }),
+        readDeliveryProjections: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: "24100000-0000-4000-8000-000000000007",
+              user_id: "user_native",
+              item_id: ITEM_ID,
+              platform: "depop",
+              source_review_revision:
+                "24100000-0000-4000-8000-000000000008",
+              ebay_listing_id: null,
+              ebay_status: null,
+              item: {
+                review_content_revision:
+                  "24100000-0000-4000-8000-000000000008",
+              },
+            },
+          ],
+          error: null,
+        }),
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 20,
+    });
+
+    expect(page.entries[0]?.run.delivery).toBeUndefined();
+  });
+
+  it("fails closed when a delivery projection crosses the tenant boundary", async () => {
+    const historyRow = runHistoryProjectionRow({
+      runId: RUN_ID,
+      itemId: ITEM_ID,
+      logicalKey: LOGICAL_KEY,
+      frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+      snapshotRevision: "7",
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage: vi.fn().mockResolvedValue({
+          data: [historyRow],
+          error: null,
+        }),
+        readDeliveryProjections: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: "24100000-0000-4000-8000-000000000007",
+              user_id: "another_tenant",
+              item_id: ITEM_ID,
+              platform: "depop",
+              source_review_revision:
+                "24100000-0000-4000-8000-000000000008",
+              ebay_listing_id: null,
+              ebay_status: null,
+              item: {
+                review_content_revision:
+                  "24100000-0000-4000-8000-000000000008",
+              },
+            },
+          ],
+          error: null,
+        }),
+      })
+    );
+
+    await expect(
+      operations.list({
+        userId: "user_native",
+        bearerToken: "signed-jwt",
+        limit: 20,
+      }),
+    ).rejects.toBeInstanceOf(MobileRunUnavailableError);
   });
 
   it("maps the authenticated RLS row into the full provider-neutral run detail", async () => {
@@ -646,6 +907,7 @@ describe("mobile durable-run operations", () => {
     const query = {
       select: vi.fn(() => query),
       eq: vi.fn(() => query),
+      in: vi.fn(() => query),
       maybeSingle,
     };
     const projectionMaybeSingle = vi.fn().mockResolvedValue({
@@ -665,6 +927,7 @@ describe("mobile durable-run operations", () => {
 
     await client.readRun(RUN_ID);
     await client.readItem(ITEM_ID);
+    await client.readDeliveryProjections([ITEM_ID]);
     await client.readRetryProjection(RUN_ID);
     const retryKey = "24100000-0000-4000-8000-000000000003";
     const cancelKey = "24100000-0000-4000-8000-000000000004";
@@ -673,6 +936,12 @@ describe("mobile durable-run operations", () => {
 
     expect(supabase.from).toHaveBeenNthCalledWith(1, "pipeline_runs");
     expect(supabase.from).toHaveBeenNthCalledWith(2, "items");
+    expect(supabase.from).toHaveBeenNthCalledWith(3, "listings");
+    expect(query.select).toHaveBeenNthCalledWith(
+      3,
+      "id,user_id,item_id,platform,source_review_revision,ebay_listing_id,ebay_status,item:items!listings_item_user_fkey(review_content_revision)",
+    );
+    expect(query.in).toHaveBeenCalledWith("item_id", [ITEM_ID]);
     expect(rpc).toHaveBeenNthCalledWith(1, "get_pipeline_run_retry_projection", {
       p_run_id: RUN_ID,
     });

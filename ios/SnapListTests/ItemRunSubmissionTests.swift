@@ -543,6 +543,100 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Ambiguous outcome and exact retry
 
+    func testPendingTrophyWallProjectionRejectsAStoredAttemptForChangedPhotos()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pending-trophy-wall-attempt-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let currentBytes = SubmissionIntakeFixture.jpeg(
+            filling: "current-intake",
+            repeated: 1
+        )
+        let staleBytes = SubmissionIntakeFixture.jpeg(
+            filling: "stale-attempt",
+            repeated: 1
+        )
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: applicationSupport,
+            verifiedClerkSubject: "user_pending_projection",
+            photoData: currentBytes
+        )
+        let principalRoot = native.snapshot.photos[0].photoURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let currentSnapshot = try ItemRunSubmissionSnapshot.make(
+            for: native.snapshot.photos,
+            readData: { try Data(contentsOf: $0) }
+        )
+        let staleAttempt = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.firstKey,
+            photos: currentSnapshot.photos.map { photo in
+                ItemRunSubmissionPhoto(
+                    photoID: photo.photoID,
+                    ordinal: photo.ordinal,
+                    contentSha256: LocalPhotoFingerprint.digest(
+                        of: staleBytes
+                    ),
+                    byteLength: staleBytes.count,
+                    mediaType: .jpeg
+                )
+            }
+        )
+        let attemptStore = LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: principalRoot
+        )
+        try await attemptStore.saveAttempt(staleAttempt)
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: nil,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider {
+                    "clerk-session-token"
+                },
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        let principalScope = TrophyWallPrincipalScope(
+            opaqueValue: "pending-projection-test"
+        )
+
+        let staleCard = await host.recoverableTrophyWallPendingCard(
+            principalScope: principalScope
+        )
+
+        XCTAssertNil(staleCard)
+
+        let matchingAttempt = ItemRunSubmissionAttempt(
+            idempotencyKey: Self.secondKey,
+            photos: currentSnapshot.photos
+        )
+        try await attemptStore.saveAttempt(matchingAttempt)
+
+        let matchingCard = await host.recoverableTrophyWallPendingCard(
+            principalScope: principalScope
+        )
+
+        XCTAssertEqual(
+            matchingCard?.identity,
+            .local(
+                TrophyWallLogicalIdentity(
+                    idempotencyKey: Self.secondKey
+                )
+            )
+        )
+    }
+
     func testSubmissionNeverCombinesPriorPrincipalPayloadWithCurrentPrincipalBearer()
         async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(

@@ -3,6 +3,52 @@ import XCTest
 @testable import SnapList
 
 final class RunAPIClientTests: XCTestCase {
+    func testRetryPostsTheExactRunWithFreshBearerAndStableIdentity()
+        async throws {
+        let runID = UUID(
+            uuidString: "31700000-0000-4000-8000-000000000001"
+        )!
+        let idempotencyKey = UUID(
+            uuidString: "37500000-0000-4000-8000-000000000041"
+        )!
+        let session = makeSession { request in
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/runs/31700000-0000-4000-8000-000000000001/retry"
+            )
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Bearer fresh-retry-token"
+            )
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Idempotency-Key"),
+                idempotencyKey.uuidString.lowercased()
+            )
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 202,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(Self.runningEnvelope.utf8)
+            )
+        }
+        let client = RunAPIClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            session: session
+        )
+
+        let run = try await client.retryRun(
+            id: runID,
+            idempotencyKey: idempotencyKey,
+            bearerToken: "fresh-retry-token"
+        )
+
+        XCTAssertEqual(run.id, runID)
+    }
+
     func testRunHistoryRepositoryPreservesFrozenOrderAndLogicalIdentity() async throws {
         let expectedRunID = UUID(
             uuidString: "37500000-0000-4000-8000-000000000031"

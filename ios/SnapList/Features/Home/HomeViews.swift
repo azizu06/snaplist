@@ -801,6 +801,258 @@ private struct HomeHowItWorksStep: View {
     }
 }
 
+// MARK: - Trophy Wall
+
+struct TrophyWallView: View {
+    /// What the wall body may claim, given the tiles it holds and what the client
+    /// actually proved about the collection.
+    struct Presentation: Equatable {
+        let showsGrid: Bool
+        let showsEmptyView: Bool
+        let offlineNotice: String?
+        let collectionMessage: TrophyWallProcessingView.CollectionMessage?
+    }
+
+    @Bindable var store: TrophyWallStore
+    let openProcessing: () -> Void
+    let openAccount: () -> Void
+    let onScan: () -> Void
+    let onTryAgain: () -> Void
+
+    @ScaledMetric(relativeTo: .title) private var titleSize = 28
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("Trophy Wall")
+                    .font(.system(size: titleSize, weight: .bold))
+                    .tracking(-0.5)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .accessibilityAddTraits(.isHeader)
+
+                Spacer(minLength: 0)
+
+                Button(action: openProcessing) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 21, weight: .medium))
+                        .frame(
+                            width: SnapListMetrics.minimumTouchTarget,
+                            height: SnapListMetrics.minimumTouchTarget
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .accessibilityLabel("Processing")
+                .accessibilityIdentifier("trophy.wall.processing")
+
+                Button(action: openAccount) {
+                    Text("A")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        .frame(width: 36, height: 36)
+                        .background(SnapListColorToken.hairline.color)
+                        .clipShape(.circle)
+                        .frame(
+                            width: SnapListMetrics.minimumTouchTarget,
+                            height: SnapListMetrics.minimumTouchTarget
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Account, opens Settings")
+                .accessibilityIdentifier("trophy.wall.account")
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 14)
+            .padding(.bottom, 12)
+
+            wallBody
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(SnapListColorToken.canvas.color)
+        // On a plain stack the identifier binds to no element of its own and
+        // propagates down instead, so the header buttons were all published as
+        // `trophy.wall` and `trophy.wall.processing` resolved to nothing.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("trophy.wall")
+    }
+
+    /// Trophy Wall is the seller's one return destination, so a collection it
+    /// could not load may not render as a blank canvas. The offline notice is a
+    /// claim about saved items and stays truthful only while there are saved
+    /// items; without them, both reachability failures collapse to the same
+    /// recovery group the pushed Processing screen already ships.
+    static func presentation(
+        hasSettledTiles: Bool,
+        collectionOutcome: TrophyWallCollectionOutcome
+    ) -> Presentation {
+        guard !hasSettledTiles else {
+            return Presentation(
+                showsGrid: true,
+                showsEmptyView: false,
+                offlineNotice: collectionOutcome == .offline
+                    ? TrophyWallProcessingView.offlineNoticeText
+                    : nil,
+                collectionMessage: nil
+            )
+        }
+
+        switch collectionOutcome {
+        case .unknown:
+            // Nothing has been proved, so no empty success may be claimed.
+            return Presentation(
+                showsGrid: false,
+                showsEmptyView: false,
+                offlineNotice: nil,
+                collectionMessage: nil
+            )
+        case .loaded:
+            return Presentation(
+                showsGrid: false,
+                showsEmptyView: true,
+                offlineNotice: nil,
+                collectionMessage: nil
+            )
+        case .offline, .unavailable:
+            return Presentation(
+                showsGrid: false,
+                showsEmptyView: false,
+                offlineNotice: nil,
+                collectionMessage: TrophyWallProcessingView
+                    .unavailableCollectionMessage
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var wallBody: some View {
+        let presentation = Self.presentation(
+            hasSettledTiles: !store.settledTiles.isEmpty,
+            collectionOutcome: store.collectionOutcome
+        )
+
+        if let offlineNotice = presentation.offlineNotice {
+            TrophyWallOfflineNoticeView(text: offlineNotice)
+        }
+
+        if let collectionMessage = presentation.collectionMessage {
+            TrophyWallCollectionMessageView(
+                message: collectionMessage,
+                onScan: onScan,
+                onTryAgain: onTryAgain
+            )
+        }
+
+        if presentation.showsEmptyView {
+            TrophyWallEmptyView(onScan: onScan)
+        }
+
+        if presentation.showsGrid {
+            ScrollView {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12),
+                    ],
+                    spacing: 12
+                ) {
+                    ForEach(store.settledTiles) { tile in
+                        TrophyWallSettledTileView(tile: tile)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(
+                    .bottom,
+                    SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset + 48
+                )
+            }
+            .scrollIndicators(.hidden)
+            .accessibilityIdentifier("trophy.wall.grid")
+        }
+    }
+}
+
+private struct TrophyWallSettledTileView: View {
+    let tile: TrophyWallSettledTile
+
+    var body: some View {
+        ZStack {
+            SnapListColorToken.quietFill.color
+            if let coverPhotoURL = tile.coverPhotoURL {
+                AsyncImage(url: coverPhotoURL) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    fallback
+                }
+            } else {
+                fallback
+            }
+        }
+        .aspectRatio(4 / 5, contentMode: .fit)
+        .clipShape(.rect(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tile.accessibilityLabel)
+        .accessibilityAddTraits(.isImage)
+    }
+
+    private var fallback: some View {
+        Text(tile.itemName)
+            .snapListTypography(.status)
+            .fontWeight(.semibold)
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .multilineTextAlignment(.center)
+            .padding(12)
+    }
+}
+
+private struct TrophyWallEmptyView: View {
+    let onScan: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image("ScoutUncertain")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 150)
+                .accessibilityLabel("Scout, the SnapList camera helper")
+
+            Text("No items yet")
+                .snapListTypography(.cardTitle)
+                .fontWeight(.bold)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .multilineTextAlignment(.center)
+
+            Button(action: onScan) {
+                Text("Scan an item")
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.canvas.color)
+                    .padding(.horizontal, 28)
+                    .frame(minHeight: 52)
+                    .background(SnapListColorToken.action.color)
+                    .clipShape(.rect(cornerRadius: 14))
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("trophy.wall.scan")
+        }
+        .padding(.horizontal, 34)
+        .padding(.bottom, 104)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Same plain-stack binding as `trophy.wall`: without this the identifier
+        // propagates down and overwrites `trophy.wall.scan` on the button above.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("trophy.wall.empty")
+    }
+}
+
 // MARK: - Trophy Wall Processing
 
 struct TrophyWallProcessingView: View {
@@ -835,14 +1087,16 @@ struct TrophyWallProcessingView: View {
     private static let compactRowLimit = 3
     private static let smallestHeightRowLimit = 2
     private static let scoutAccessibilityLabel = "Scout, the SnapList camera helper"
-    private static let offlineNoticeText = "You're offline. Showing saved items."
+    // Trophy Wall and the pushed Processing screen describe the same collection
+    // failure, so they share one sentence for it rather than drifting into two.
+    static let offlineNoticeText = "You're offline. Showing saved items."
     private static let emptyCollectionMessage = CollectionMessage(
         heading: "Nothing is processing.",
         action: .scan(label: "Scan an item"),
         scoutImageName: "ScoutUncertain",
         scoutAccessibilityLabel: scoutAccessibilityLabel
     )
-    private static let unavailableCollectionMessage = CollectionMessage(
+    static let unavailableCollectionMessage = CollectionMessage(
         heading: "Processing unavailable",
         action: .tryAgain(label: "Try again"),
         scoutImageName: "ScoutRetryReview",
@@ -998,6 +1252,9 @@ struct TrophyWallProcessingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .background(SnapListColorToken.canvas.color)
+        // Same plain-stack binding as `trophy.wall`: without this the identifier
+        // publishes no element of its own and propagates onto the descendants.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.processing")
     }
 
@@ -1125,7 +1382,7 @@ private struct TrophyWallOfflineNoticeView: View {
     }
 }
 
-private struct TrophyWallCollectionMessageView: View {
+struct TrophyWallCollectionMessageView: View {
     // Only the approved static Scout artwork ships today. It is the approved
     // Reduced Motion fallback, so it stays honest under any motion setting.
     private static let scoutHeight: CGFloat = 150
@@ -1157,6 +1414,7 @@ private struct TrophyWallCollectionMessageView: View {
         .padding(.top, 24)
         .padding(.bottom, 104)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.processing.collection")
     }
 
@@ -1278,6 +1536,8 @@ struct HomeRouteBoundaryView: View {
 private extension HomeRoute {
     var identifier: String {
         switch self {
+        case .processing: "processing"
+        case .localRecovery: "local-recovery"
         case .run: "run"
         case .order: "order"
         case .conversation: "conversation"
@@ -1291,6 +1551,8 @@ private extension HomeRoute {
 
     var title: String {
         switch self {
+        case .processing: "Processing"
+        case .localRecovery: "Local item"
         case .run: "Run"
         case .order: "Order"
         case .conversation: "Conversation"
@@ -1304,6 +1566,8 @@ private extension HomeRoute {
 
     var systemImage: String {
         switch self {
+        case .processing: "clock"
+        case .localRecovery: "camera.viewfinder"
         case .run: "sparkles"
         case .order, .orders: "shippingbox"
         case .conversation: "bubble.left.and.bubble.right"

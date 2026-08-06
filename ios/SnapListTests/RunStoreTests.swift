@@ -77,6 +77,64 @@ final class RunStoreTests: XCTestCase {
         )
     }
 
+    func testRetryReusesOneIdentityAfterFailureAndKeepsPreservedRunLoaded()
+        async throws {
+        let safeFailure = try JSONDecoder().decode(
+            RunSafeFailure.self,
+            from: JSONSerialization.data(withJSONObject: [
+                "reason": "This run couldn’t finish",
+                "detail": "Upload didn't finish.",
+                "retryable": true,
+                "workPreserved": true,
+            ])
+        )
+        let failed = Self.makeRun(
+            status: .failed,
+            stage: .completed,
+            safeFailure: safeFailure
+        )
+        let retrying = Self.makeRun(status: .retrying, stage: .queued)
+        let service = RetryRunService(
+            initial: failed,
+            retryResults: [
+                .failure(RunAPIError.unavailable),
+                .success(retrying),
+            ]
+        )
+        let tokens = FreshTokenSource(tokens: [
+            "fresh-load-token",
+            "fresh-retry-token-1",
+            "fresh-retry-token-2",
+        ])
+        let store = RunDetailStore(
+            service: service,
+            tokenProvider: RunStoreBearerTokenProvider {
+                try await tokens.next()
+            }
+        )
+
+        await store.load(runID: failed.id)
+        await store.retry()
+
+        XCTAssertEqual(store.state, .loaded(failed))
+        XCTAssertFalse(store.isRetrying)
+
+        await store.retry()
+
+        XCTAssertEqual(store.state, .loaded(retrying))
+        XCTAssertFalse(store.isRetrying)
+        let retryRequests = await service.retryRequests
+        XCTAssertEqual(retryRequests.count, 2)
+        XCTAssertEqual(
+            retryRequests.map(\.idempotencyKey),
+            [retryRequests[0].idempotencyKey, retryRequests[0].idempotencyKey]
+        )
+        XCTAssertEqual(
+            retryRequests.map(\.bearerToken),
+            ["fresh-retry-token-1", "fresh-retry-token-2"]
+        )
+    }
+
     func testNewExactLoadCannotPublishThePreviousRun() async {
         let first = Self.makeRun()
         let second = Self.makeRun(
@@ -97,6 +155,55 @@ final class RunStoreTests: XCTestCase {
         XCTAssertEqual(store.state, .loaded(second))
         let requests = await service.requests
         XCTAssertEqual(requests.map(\.runID), [first.id, second.id])
+    }
+
+    func testLateSuccessfulRetryCannotOverwriteAnotherOpenedRun() async throws {
+        let state = try await stateAfterLateRetry(
+            retryResult: .success(
+                Self.makeRun(status: .retrying, stage: .queued)
+            )
+        )
+
+        XCTAssertEqual(state, .loaded(Self.makeRun(id: Self.openedRunID)))
+    }
+
+    func testLateFailedRetryCannotRepublishThePreviousRun() async throws {
+        let state = try await stateAfterLateRetry(
+            retryResult: .failure(RunAPIError.unavailable)
+        )
+
+        XCTAssertEqual(state, .loaded(Self.makeRun(id: Self.openedRunID)))
+    }
+
+    private func stateAfterLateRetry(
+        retryResult: Result<DurableRun, Error>
+    ) async throws -> RunDetailLoadState {
+        let failed = Self.makeRun(
+            status: .failed,
+            stage: .completed,
+            safeFailure: try Self.makeRetryableFailure()
+        )
+        let opened = Self.makeRun(id: Self.openedRunID)
+        let service = LateRetryRunService(
+            failed: failed,
+            opened: opened,
+            retryResult: retryResult
+        )
+        let store = RunDetailStore(
+            service: service,
+            tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
+        )
+
+        await store.load(runID: failed.id)
+        let lateRetry = Task { await store.retry() }
+        await service.waitForRetryRequest()
+        await store.load(runID: opened.id)
+        await service.resumeRetryRequest()
+        await lateRetry.value
+
+        let retryRequests = await service.retryRequests
+        XCTAssertEqual(retryRequests, [failed.id])
+        return store.state
     }
 
     func testReadyGuestRunPersistsLocallyAssembledClaimAuthority()
@@ -274,6 +381,29 @@ final class RunStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(run.sellerFacingDetail, detail)
+    }
+
+    func testAcceptedRunUsesAcceptedLanguageWithoutQueueTerms() {
+        let run = Self.makeRun(status: .queued, stage: .queued)
+
+        XCTAssertEqual(run.status.sellerFacingLabel, "Accepted")
+        XCTAssertEqual(run.sellerFacingDetail, "Accepted")
+    }
+
+    private static let openedRunID = UUID(
+        uuidString: "31700000-0000-4000-8000-000000000022"
+    )!
+
+    private static func makeRetryableFailure() throws -> RunSafeFailure {
+        try JSONDecoder().decode(
+            RunSafeFailure.self,
+            from: JSONSerialization.data(withJSONObject: [
+                "reason": "This run couldn’t finish",
+                "detail": "Upload didn't finish.",
+                "retryable": true,
+                "workPreserved": true,
+            ])
+        )
     }
 
     private static func makeRun(
@@ -513,5 +643,96 @@ private actor RecordingRunService: RunServing {
         requests.append(.init(runID: id, bearerToken: bearerToken))
         guard !results.isEmpty else { throw RunAPIError.unavailable }
         return try results.removeFirst().get()
+    }
+}
+
+private actor LateRetryRunService: RunServing {
+    private let failed: DurableRun
+    private let opened: DurableRun
+    private let retryResult: Result<DurableRun, Error>
+    private var retryRequested = false
+    private var retryRequestWaiters: [CheckedContinuation<Void, Never>] = []
+    private var retryResponse: CheckedContinuation<Void, Never>?
+    private(set) var retryRequests: [UUID] = []
+
+    init(
+        failed: DurableRun,
+        opened: DurableRun,
+        retryResult: Result<DurableRun, Error>
+    ) {
+        self.failed = failed
+        self.opened = opened
+        self.retryResult = retryResult
+    }
+
+    func waitForRetryRequest() async {
+        guard !retryRequested else { return }
+        await withCheckedContinuation { retryRequestWaiters.append($0) }
+    }
+
+    func resumeRetryRequest() {
+        retryResponse?.resume()
+        retryResponse = nil
+    }
+
+    func fetchRun(id: UUID, bearerToken: String) async throws -> DurableRun {
+        if id == failed.id { return failed }
+        guard id == opened.id else { throw RunAPIError.invalidResponse }
+        return opened
+    }
+
+    func retryRun(
+        id: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> DurableRun {
+        retryRequests.append(id)
+        retryRequested = true
+        let waiters = retryRequestWaiters
+        retryRequestWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { retryResponse = $0 }
+        return try retryResult.get()
+    }
+}
+
+private actor RetryRunService: RunServing {
+    struct RetryRequest: Equatable {
+        let runID: UUID
+        let idempotencyKey: UUID
+        let bearerToken: String
+    }
+
+    private let initial: DurableRun
+    private var retryResults: [Result<DurableRun, Error>]
+    private(set) var retryRequests: [RetryRequest] = []
+
+    init(
+        initial: DurableRun,
+        retryResults: [Result<DurableRun, Error>]
+    ) {
+        self.initial = initial
+        self.retryResults = retryResults
+    }
+
+    func fetchRun(id: UUID, bearerToken: String) async throws -> DurableRun {
+        guard id == initial.id else { throw RunAPIError.invalidResponse }
+        return initial
+    }
+
+    func retryRun(
+        id: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> DurableRun {
+        retryRequests.append(
+            RetryRequest(
+                runID: id,
+                idempotencyKey: idempotencyKey,
+                bearerToken: bearerToken
+            )
+        )
+        guard !retryResults.isEmpty else { throw RunAPIError.unavailable }
+        return try retryResults.removeFirst().get()
     }
 }

@@ -8,11 +8,13 @@ struct SnapListApp: App {
     @State private var firstValueOnboardingModel: FirstValueOnboardingModel
     @State private var captureFlow: CaptureFlowModel
     @State private(set) var homeStore: HomeStore
+    @State private var trophyWallStore: TrophyWallStore
     @State private var runStore: RunDetailStore
     @State private var listingReviewStore: ListingReviewStore
     @State private var submissionHost: ItemRunSubmissionHost
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
+    private let trophyWallHistoryRepository: any TrophyWallRunHistoryRepository
 
     init() {
         // First statement in the real app entry point so a crash while the
@@ -67,6 +69,21 @@ struct SnapListApp: App {
             tokenProvider: tokenProvider,
             nativeIntakeIdentitySource:
                 ClerkAuthenticationComposition.makeNativeIntakeIdentitySource(),
+            session: urlSession
+        )
+        let trophyWallPrincipal = TrophyWallPrincipalScope(
+            opaqueValue: UUID().uuidString.lowercased()
+        )
+        _trophyWallStore = State(
+            initialValue: TrophyWallStoreFactory.make(
+                configuration: configuration,
+                principalScope: trophyWallPrincipal
+            )
+        )
+        trophyWallHistoryRepository = TrophyWallRunHistoryRepositoryFactory.make(
+            configuration: configuration,
+            apiOrigin: apiOrigin,
+            tokenProvider: tokenProvider,
             session: urlSession
         )
         _router = State(
@@ -181,9 +198,11 @@ struct SnapListApp: App {
                 firstValueOnboardingModel: firstValueOnboardingModel,
                 captureFlow: captureFlow,
                 homeStore: homeStore,
+                trophyWallStore: trophyWallStore,
                 runStore: runStore,
                 listingReviewStore: listingReviewStore,
                 submissionHost: submissionHost,
+                trophyWallHistoryRepository: trophyWallHistoryRepository,
                 configuration: configuration
             )
                 .environment(\.appDependencies, dependencies)
@@ -195,7 +214,7 @@ struct SnapListApp: App {
                         )
 #endif
                     async let captureRestoration = captureFlow.restore()
-                    async let homeLoad: Void = homeStore.load()
+                    async let homeLoad: Void = loadLegacyHomeFixtureIfNeeded()
                     let restoration = await captureRestoration
                     if restoration == .stagedPhoto {
                         firstValueOnboardingModel.reconcileExistingProgress()
@@ -206,5 +225,13 @@ struct SnapListApp: App {
                     await homeLoad
                 }
         }
+    }
+
+    @MainActor
+    private func loadLegacyHomeFixtureIfNeeded() async {
+#if DEBUG
+        guard configuration.visualState?.ownerIssue == 208 else { return }
+        await homeStore.load()
+#endif
     }
 }
