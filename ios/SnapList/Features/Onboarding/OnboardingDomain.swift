@@ -316,16 +316,41 @@ struct OnboardingMotionPolicy: Equatable {
     }
 }
 
+/// One illustrative Trophy Wall row on ONB-05.
+///
+/// The asset name travels with the copy it labels. A row and its image were once two
+/// arrays joined by subscript, so a fourth copy row without a fourth asset name crashed
+/// the screen with an index-out-of-range that no test could reach.
+struct BackgroundExampleRow: Equatable, Identifiable {
+    let imageName: String
+    let item: String
+    let state: String
+
+    var id: String { item }
+}
+
 enum FirstValueOnboardingCopy {
     /// ONB-05 shows what the Trophy Wall looks like while items finish. No item exists
     /// during onboarding, so the screen is labelled as an illustration and carries no
     /// spinner, percentage, or other affordance that would claim work is happening now.
     static let backgroundExampleCaption = "An example — nothing is running yet"
 
-    static let backgroundExampleRows = [
-        (item: "Denim trucker jacket", state: "Writing the listing"),
-        (item: "Desk lamp", state: "Checking sold prices"),
-        (item: "White sneakers", state: "Reading your voice note"),
+    static let backgroundExampleRows: [BackgroundExampleRow] = [
+        .init(
+            imageName: "FirstValueJacket",
+            item: "Denim trucker jacket",
+            state: "Writing the listing"
+        ),
+        .init(
+            imageName: "FirstValueLamp",
+            item: "Desk lamp",
+            state: "Checking sold prices"
+        ),
+        .init(
+            imageName: "FirstValueSneaker",
+            item: "White sneakers",
+            state: "Reading your voice note"
+        ),
     ]
 }
 

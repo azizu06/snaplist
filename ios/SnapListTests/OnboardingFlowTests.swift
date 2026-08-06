@@ -760,6 +760,68 @@ final class OnboardingFlowTests: XCTestCase {
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.state),
             ["Writing the listing", "Checking sold prices", "Reading your voice note"]
         )
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.backgroundExampleRows.map(\.imageName),
+            ["FirstValueJacket", "FirstValueLamp", "FirstValueSneaker"],
+            "Each row carries its own asset, so a new row cannot outrun the image list."
+        )
+    }
+
+    /// The XCUI counterpart cannot carry this. Each row ends in
+    /// `.accessibilityElement(children: .combine)`, which folds every descendant into a
+    /// single element, so a restored `ProgressView` never reaches the accessibility tree
+    /// and `app.progressIndicators.count == 0` stays true whether or not the spinner is
+    /// there. SwiftUI encodes the entire static subtree in `body`'s concrete type, so read
+    /// that instead: a spinner anywhere in the row makes `ProgressView` appear in it.
+    @MainActor
+    func testBackgroundExampleRowsCarryNoProgressAffordance() {
+        let affordances = ["ProgressView", "ProgressViewStyle", "Gauge"]
+
+        for row in FirstValueOnboardingCopy.backgroundExampleRows {
+            let renderedType = String(
+                reflecting: type(of: BackgroundExampleRowView(row: row).body)
+            )
+            for affordance in affordances {
+                XCTAssertFalse(
+                    renderedType.contains(affordance),
+                    """
+                    ONB-05 row "\(row.item)" renders a \(affordance). Nothing is running \
+                    while onboarding is on screen, so the row must claim no progress: \
+                    \(renderedType)
+                    """
+                )
+            }
+        }
+    }
+
+    /// The Scout clip allocates its `WKWebView` through the Objective-C runtime, and the
+    /// ownership there balances two references that ARC and the `init` family each think
+    /// they own. An extra retain would not crash — it would strand one `WKWebView` and its
+    /// WebContent process per screen transition, six times over the flow — so assert the
+    /// balance directly: the view must deallocate once the last strong reference drops.
+    @MainActor
+    func testScoutClipWebViewLeavesNoUnbalancedRetain() throws {
+        weak var firstObserved: AnyObject?
+        weak var secondObserved: AnyObject?
+
+        try autoreleasepool {
+            guard let first = WebKitRuntime.makeConfiguredWebView(),
+                  let second = WebKitRuntime.makeConfiguredWebView() else {
+                throw XCTSkip("WebKit is unavailable in this runner.")
+            }
+            XCTAssertFalse(first === second)
+            firstObserved = first
+            secondObserved = second
+        }
+
+        XCTAssertNil(
+            firstObserved,
+            "The Scout clip web view outlived its last strong reference."
+        )
+        XCTAssertNil(
+            secondObserved,
+            "The Scout clip web view outlived its last strong reference."
+        )
     }
 
     @MainActor
