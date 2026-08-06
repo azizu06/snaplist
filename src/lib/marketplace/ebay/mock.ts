@@ -1,3 +1,4 @@
+import type { EbayPolicyLocationCandidates } from "./policy-location-contract";
 import type {
   EbayAdapter,
   EbayPublishCompletion,
@@ -29,6 +30,47 @@ export class MockEbayAdapter implements EbayAdapter {
 
   /** When set, revisePrice rejects with this error instead of succeeding. */
   reviseFailWith?: Error;
+
+  /**
+   * What this "seller's" eBay account holds (issue #47). Left undefined, the
+   * adapter has NO discovery capability at all — the honest offline default,
+   * since a mock cannot invent another account's policy ids. Set it to model a
+   * connected seller; an empty family models one who never created that policy.
+   */
+  policyLocationCandidates?: EbayPolicyLocationCandidates;
+
+  /** When set, discovery rejects with this error instead of answering. */
+  discoveryFailWith?: Error;
+
+  /** Every discovery request received, in order. */
+  readonly discoveryRequests: Array<{
+    marketplaceId: string;
+    accountGeneration: string;
+  }> = [];
+
+  /**
+   * Present only when candidates (or a failure) are configured: an adapter that
+   * silently answered "nothing" would look like a seller with an empty eBay
+   * account instead of a capability the caller does not have.
+   */
+  discoverPolicyLocationCandidates?: (input: {
+    marketplaceId: string;
+    accountGeneration: string;
+  }) => Promise<EbayPolicyLocationCandidates>;
+
+  constructor(options: {
+    policyLocationCandidates?: EbayPolicyLocationCandidates;
+    discoveryFailWith?: Error;
+  } = {}) {
+    this.policyLocationCandidates = options.policyLocationCandidates;
+    this.discoveryFailWith = options.discoveryFailWith;
+    if (!this.policyLocationCandidates && !this.discoveryFailWith) return;
+    this.discoverPolicyLocationCandidates = async (input) => {
+      this.discoveryRequests.push(input);
+      if (this.discoveryFailWith) throw this.discoveryFailWith;
+      return this.policyLocationCandidates!;
+    };
+  }
 
   async publishListing(
     request: EbayPublishRequest,

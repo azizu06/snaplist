@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createMobileApiHandler } from "./app";
 import { createMobileEbayPublishService } from "@/lib/marketplace/ebay/mobile-publish";
 import {
+  EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE,
+  EbayApiError,
   EbayWriteAmbiguousError,
   MockEbayAdapter,
   type EbayAdapter,
@@ -17,6 +19,7 @@ const RUN_ID = "33333333-3333-4333-8333-333333333333";
 const REVIEW_REVISION = "44444444-4444-4444-8444-444444444444";
 const CLAIM_ID = "55555555-5555-4555-8555-555555555555";
 const CONNECTION_GENERATION = "66666666-6666-4666-8666-666666666666";
+const ACCOUNT_GENERATION = "88888888-8888-4888-8888-888888888888";
 const RECONNECTED_GENERATION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const IDEMPOTENCY_KEY = "77777777-7777-4777-8777-777777777777";
 
@@ -90,10 +93,10 @@ function publishFixtureClient() {
     review_revision: REVIEW_REVISION,
     condition: "like new",
     photos: ["user-1/item-1.jpg"],
-    price_override: "177.77",
+    price_override: "177.77" as string | null,
   };
   const prediction = {
-    price: 199.99,
+    price: 199.99 as number | null,
     autopilot_enabled: true as boolean | null,
     autopilot_eligible: true as boolean | null,
   };
@@ -124,9 +127,12 @@ function publishFixtureClient() {
     discoveredAt: "2026-08-03T12:00:00.000Z",
   });
   const connectionFor = (connectionGeneration: string) => ({
+    account_generation: ACCOUNT_GENERATION,
     connection_generation: connectionGeneration,
     ebay_username: "sandbox-seller",
-    policy_location_bindings: { EBAY_US: bindingFor(connectionGeneration) },
+    policy_location_bindings: {
+      EBAY_US: bindingFor(connectionGeneration),
+    } as Record<string, unknown>,
   });
   let activeConnectionGeneration = CONNECTION_GENERATION;
   const connectionState: { current: ReturnType<typeof connectionFor> | null } = {
@@ -135,6 +141,7 @@ function publishFixtureClient() {
   const notifications: Array<Record<string, unknown>> = [];
   let beforeReviewSnapshot: (() => void) | undefined;
   let failPublishedPersistence = false;
+  let bindConnectionFailure: { code?: string; message: string } | null = null;
 
   const client = {
     from(table: string) {
@@ -289,7 +296,19 @@ function publishFixtureClient() {
           error: null,
         };
       }
+      if (name === "save_ebay_policy_location_binding") {
+        const binding = params.p_binding as Record<string, unknown>;
+        if (connectionState.current) {
+          connectionState.current.policy_location_bindings[
+            params.p_marketplace_id as string
+          ] = binding;
+        }
+        return { data: binding, error: null };
+      }
       if (name === "bind_ebay_publish_connection_generation") {
+        if (bindConnectionFailure) {
+          return { data: null, error: bindConnectionFailure };
+        }
         listing.ebay_publish_connection_generation = CONNECTION_GENERATION;
         listing.ebay_publish_binding = {
           marketplaceId: "EBAY_US",
@@ -327,6 +346,9 @@ function publishFixtureClient() {
     },
     failPublishedPersistence() {
       failPublishedPersistence = true;
+    },
+    failBindConnection(error: { code?: string; message: string }) {
+      bindConnectionFailure = error;
     },
     reconnect() {
       connectionState.current = connectionFor(activeConnectionGeneration);
@@ -835,5 +857,191 @@ describe("mobile eBay publish boundary", () => {
       },
     });
     expect(adapter.requests).toHaveLength(1);
+  });
+
+  /**
+   * The native client is the only launch surface for publish, so a refusal it
+   * cannot read is a refusal that does not exist. A seller whose eBay account
+   * has no return policy must be told that — told "eBay publishing is
+   * temporarily unavailable" instead, they retry forever, and every retry
+   * re-runs four eBay Account API GETs. These assert at the mobile-api seam, one
+   * level above `publishListingToEbay`, because that is the seam the client
+   * actually consumes.
+   */
+  it("delivers a seller-fixable policy refusal to the native client with its message intact", async () => {
+    const fixture = publishFixtureClient();
+    fixture.connectionState.current!.policy_location_bindings = {};
+    const adapter = new MockEbayAdapter({
+      policyLocationCandidates: {
+        fulfillmentPolicies: [
+          { id: "fulfillment-1", label: "Fulfillment", providerDefault: false },
+        ],
+        paymentPolicies: [
+          { id: "payment-1", label: "Payment", providerDefault: false },
+        ],
+        returnPolicies: [],
+        inventoryLocations: [
+          { id: "location-1", label: "Location", providerDefault: false },
+        ],
+      },
+    });
+    const handler = ebayHandler({
+      adapter,
+      client: fixture.client,
+      requestId: "request-47-policy-setup-required",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "invalid_request",
+        message:
+          "Your eBay account has no return policy for EBAY_US. "
+          + "Add it in eBay, then try publishing again.",
+      },
+    });
+    expect(adapter.requests).toEqual([]);
+  });
+
+  it("uses the one canonical not-connected copy the setup service exports", async () => {
+    const fixture = publishFixtureClient();
+    fixture.connectionState.current = null;
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: fixture.client,
+      requestId: "request-47-not-connected",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "invalid_request",
+        message: EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE,
+      },
+    });
+  });
+
+  it("logs the internal cause behind a seller-safe refusal", async () => {
+    const fixture = publishFixtureClient();
+    fixture.connectionState.current!.policy_location_bindings = {};
+    // The shape the HTTP discovery adapter really throws when eBay refuses the
+    // Account API read: a bare `Error` here would be a lower-fidelity fixture
+    // than production, and the classifier is deliberately blind to it.
+    const readFailure = new EbayApiError(
+      "eBay GET /sell/account/v1/return_policy failed (HTTP 500)",
+      500,
+      undefined,
+    );
+    const reportError = vi.fn();
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter({ discoveryFailWith: readFailure }),
+      client: fixture.client,
+      reportError,
+      requestId: "request-47-policy-read-failure",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "invalid_request",
+        message:
+          "SnapList could not read your eBay shipping, payment, and return "
+          + "policies. Check your eBay connection, then try publishing again.",
+      },
+    });
+    expect(reportError).toHaveBeenCalledWith(
+      "mobile-api.ebay-publish",
+      expect.objectContaining({ cause: readFailure }),
+    );
+  });
+
+  /**
+   * Binding the claim to the connection generation runs on the completion
+   * client, so its failure is a PostgREST failure — `42501 permission denied
+   * for function bind_ebay_publish_connection_generation` when the server-RPC
+   * shared secret is unprovisioned. Interpolating that into the refusal ships
+   * the schema name, the privilege model, and the RPC's existence to whoever
+   * holds the device (CWE-209), and constructing it without a `cause` also
+   * means the 422 branch never calls `reportError` — the one failure that most
+   * needs a server trace would leave none.
+   */
+  it("refuses a failed connection binding without leaking the provider error", async () => {
+    const fixture = publishFixtureClient();
+    const bindFailure = {
+      code: "42501",
+      message:
+        "permission denied for function bind_ebay_publish_connection_generation",
+    };
+    fixture.failBindConnection(bindFailure);
+    const reportError = vi.fn();
+    const adapter = new MockEbayAdapter();
+    const handler = ebayHandler({
+      adapter,
+      client: fixture.client,
+      reportError,
+      requestId: "request-47-binding-refusal",
+    });
+
+    const response = await confirmedPublishRequest(handler);
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({
+      error: {
+        code: "invalid_request",
+        message: "The eBay connection changed before publishing. Try again.",
+      },
+    });
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain("permission denied");
+    expect(serialized).not.toContain("bind_ebay_publish_connection_generation");
+    expect(serialized).not.toContain("42501");
+    expect(reportError).toHaveBeenCalledWith(
+      "mobile-api.ebay-publish",
+      expect.objectContaining({ cause: bindFailure }),
+    );
+    expect(adapter.requests).toEqual([]);
+  });
+
+  /**
+   * Preflight and publish refuse for the SAME reasons — no usable price, no
+   * title — so they must classify identically. Mapping preflight's refusal to
+   * 503 tells the seller to retry a condition only they can clear, and does it
+   * on the screen that exists to surface exactly that condition.
+   */
+  it("classifies a preflight refusal the same way publish does", async () => {
+    const fixture = publishFixtureClient();
+    fixture.item.price_override = null;
+    fixture.prediction.price = null;
+    const reportError = vi.fn();
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: fixture.client,
+      reportError,
+      requestId: "request-47-preflight-refusal",
+    });
+
+    const response = await handler(
+      new Request(
+        `https://api.snaplist.test/v1/listings/${LISTING_ID}/ebay/preflight`,
+        { headers: { authorization: "Bearer clerk-jwt" } },
+      ),
+    );
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "invalid_request",
+        message: "This listing has no usable price. Set a price before publishing.",
+      },
+    });
+    // No `cause`: nothing internal happened, so nothing belongs in the log.
+    expect(reportError).not.toHaveBeenCalled();
   });
 });

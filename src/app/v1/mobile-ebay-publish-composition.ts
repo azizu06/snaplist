@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { logServerError } from "@/lib/api/errors";
 import { createMobileApiHandler } from "@/lib/mobile-api";
 import {
   createEbayAdapterForUser,
@@ -69,6 +70,14 @@ export function handleMobileEbayPublishRequest(
   return createMobileApiHandler({
     authenticate: clerkPrincipal,
     ebayPublish: configuredEbayPublish(),
+    // Every internal failure on this path reaches the native client as the same
+    // generic 503. Without this the reporter is optional-chained away, so the
+    // failure leaves no trace at all — the response says "temporarily
+    // unavailable" and the server says nothing. `logServerError` is the
+    // canonical seam the rest of the API reports through; it forwards to Sentry
+    // (#62), so the trace lands where failures are actually watched instead of
+    // in a console line nobody is paged for.
+    reportError: logServerError,
     worker: unavailableWorker("eBay publish"),
   })(request);
 }

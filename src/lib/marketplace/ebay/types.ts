@@ -14,6 +14,8 @@
  * interface itself is already per-call stateless.
  */
 
+import type { EbayPolicyLocationCandidates } from "./policy-location-contract";
+
 /** eBay's enumerated item conditions (the subset SnapList maps onto). */
 export type EbayCondition =
   | "NEW"
@@ -109,9 +111,10 @@ export interface EbayReviseResult {
 }
 
 /**
- * The adapter boundary. Two capabilities: publish a listing (issue #14) and
- * revise a live listing's price (issue #102). Withdraw/etc. are added HERE
- * when their slices land, so callers keep a single seam to mock.
+ * The adapter boundary. Two write capabilities: publish a listing (issue #14)
+ * and revise a live listing's price (issue #102), plus one read-only capability
+ * (issue #47). Withdraw/etc. are added HERE when their slices land, so callers
+ * keep a single seam to mock.
  */
 export interface EbayAdapter {
   publishListing(
@@ -123,6 +126,20 @@ export interface EbayAdapter {
     request: EbayReviseRequest,
     complete?: EbayReviseCompletion,
   ): Promise<EbayReviseResult>;
+  /**
+   * READ-ONLY (issue #47): the business policies and inventory locations that
+   * belong to THIS connection's eBay account, read with the seller's own token
+   * through the Sell Account/Inventory APIs. Never mutates the marketplace.
+   *
+   * Optional so a caller can hold an adapter that cannot reach the Account API
+   * (the offline mock without configured candidates, or a future capability-
+   * reduced adapter); the setup service then reports an honest unavailable
+   * state rather than substituting anyone else's policy ids.
+   */
+  discoverPolicyLocationCandidates?(input: {
+    marketplaceId: string;
+    accountGeneration: string;
+  }): Promise<EbayPolicyLocationCandidates>;
   /**
    * Present only on the exact-tenant, exact-origin Sandbox operator adapter.
    * Normal connected sellers resolve offer values from their RLS-owned

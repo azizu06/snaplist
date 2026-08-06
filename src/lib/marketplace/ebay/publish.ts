@@ -8,7 +8,12 @@ import {
   type EbayPublishResult,
 } from "./types";
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
-import { ebayPolicyLocationBindingSchema } from "./policy-location-contract";
+import type { EbayPolicyLocationBinding } from "./policy-location-contract";
+import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
+import {
+  EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE,
+  ensureEbayPolicyLocationBinding,
+} from "./policy-location-setup";
 import {
   PublishValidationError,
   isEbayAuthError,
@@ -251,6 +256,7 @@ export async function publishListingToEbay(
     supabase,
     marketplaceId,
     adapter,
+    options.completionClient,
   );
 
   // 3. Pull the current review token used by the atomic publish claim. The claim
@@ -471,25 +477,59 @@ async function bindPublishClaimToConnection(
     },
   );
   if (error) {
+    // The RPC answers this way both when the fence genuinely moved and when the
+    // call itself was refused (`42501 permission denied for function
+    // bind_ebay_publish_connection_generation` on an unprovisioned server-RPC
+    // secret). Interpolating `error.message` would ship the schema name and
+    // privilege model to the device (CWE-209), so the seller gets the one
+    // sentence that is true either way and the PostgREST detail rides `cause`
+    // to the server log — which the 422 branch keys on to report at all.
     throw new PublishValidationError(
-      `The eBay connection changed before provider dispatch: ${error.message}`,
+      "The eBay connection changed before publishing. Try again.",
+      { cause: error },
     );
   }
 }
 
+/**
+ * The offer values for THIS seller's current connection (issue #47).
+ *
+ * Business policies and inventory locations belong to the eBay account that
+ * created them, so the ids come from the seller's own account: the setup
+ * service reuses their stored binding when it still governs this marketplace
+ * and connection generation, and otherwise reads their account through the
+ * adapter's read-only discovery capability and persists the result under RLS.
+ * A process-wide env policy id is never substituted here; the exact-tenant
+ * Sandbox operator fallback applies only when no connection row exists at all.
+ *
+ * Every unusable outcome throws BEFORE the publish claim, so a seller whose
+ * policies cannot be resolved gets an honest message and zero eBay writes
+ * rather than an offer built from someone else's ids.
+ */
 async function readEbayOfferBinding(
   supabase: SupabaseClient,
   marketplaceId: string,
   adapter: EbayAdapter,
+  /**
+   * Persisting a freshly discovered binding goes through the completion client
+   * when the caller has one: `save_ebay_policy_location_binding` is a
+   * server-guarded RPC a publishable-key client cannot reach. It is bound to the
+   * same seller JWT, so RLS still decides the row. Reads stay on the caller's
+   * own client.
+   */
+  persistClient?: SupabaseClient,
 ): Promise<EbayOfferBinding> {
-  const { data, error } = await supabase
-    .from("ebay_connections")
-    .select("connection_generation, policy_location_bindings")
-    .maybeSingle();
-  if (error) {
-    throw new Error(`Failed to read eBay offer setup: ${error.message}`);
-  }
-  if (!data) {
+  const reads = createSupabaseEbayPolicyLocationBindingStore(supabase);
+  const writes = persistClient
+    ? createSupabaseEbayPolicyLocationBindingStore(persistClient)
+    : reads;
+  const setup = await ensureEbayPolicyLocationBinding({
+    marketplaceId,
+    adapter,
+    store: { ...reads, saveBinding: writes.saveBinding },
+  });
+
+  if (setup.state === "notConnected") {
     const fallback = adapter.getPublishFallbackBinding?.();
     if (
       fallback
@@ -498,25 +538,38 @@ async function readEbayOfferBinding(
     ) {
       return fallback;
     }
-    throw new PublishValidationError(
-      "Connect eBay and finish policy/location setup before publishing.",
-    );
+    throw new PublishValidationError(EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE);
   }
-  const bindings = data.policy_location_bindings;
-  const rawBinding =
-    bindings && typeof bindings === "object" && !Array.isArray(bindings)
-      ? (bindings as Record<string, unknown>)[marketplaceId]
-      : undefined;
-  const parsed = ebayPolicyLocationBindingSchema.safeParse(rawBinding);
+
+  if (setup.state !== "ready" || !setup.binding) {
+    // An expired grant is the one failure with a better-known fix than "try
+    // again": it is the same reconnect the rest of the publish path reports.
+    const message = isEbayAuthError(setup.cause)
+      ? EBAY_RECONNECT_MESSAGE
+      : setup.message
+        ?? `Finish eBay policy/location setup for ${marketplaceId} before publishing.`;
+    throw new PublishValidationError(message, { cause: setup.cause });
+  }
+
+  return offerBindingFromReady(setup.binding, marketplaceId);
+}
+
+/**
+ * A `ready` binding is defined by the contract to have all four parts bound.
+ * Re-checking each part keeps that guarantee at the type level and refuses the
+ * publish if a future contract change ever loosens it.
+ */
+function offerBindingFromReady(
+  binding: EbayPolicyLocationBinding,
+  marketplaceId: string,
+): EbayOfferBinding {
+  const { fulfillmentPolicy, paymentPolicy, returnPolicy, inventoryLocation } =
+    binding;
   if (
-    !parsed.success
-    || parsed.data.state !== "ready"
-    || parsed.data.marketplaceId !== marketplaceId
-    || parsed.data.connectionGeneration !== data.connection_generation
-    || parsed.data.fulfillmentPolicy.state !== "bound"
-    || parsed.data.paymentPolicy.state !== "bound"
-    || parsed.data.returnPolicy.state !== "bound"
-    || parsed.data.inventoryLocation.state !== "bound"
+    fulfillmentPolicy.state !== "bound"
+    || paymentPolicy.state !== "bound"
+    || returnPolicy.state !== "bound"
+    || inventoryLocation.state !== "bound"
   ) {
     throw new PublishValidationError(
       `Finish eBay policy/location setup for ${marketplaceId} before publishing.`,
@@ -524,11 +577,11 @@ async function readEbayOfferBinding(
   }
   return {
     marketplaceId,
-    connectionGeneration: parsed.data.connectionGeneration,
-    fulfillmentPolicyId: parsed.data.fulfillmentPolicy.selectedId,
-    paymentPolicyId: parsed.data.paymentPolicy.selectedId,
-    returnPolicyId: parsed.data.returnPolicy.selectedId,
-    merchantLocationKey: parsed.data.inventoryLocation.selectedId,
+    connectionGeneration: binding.connectionGeneration,
+    fulfillmentPolicyId: fulfillmentPolicy.selectedId,
+    paymentPolicyId: paymentPolicy.selectedId,
+    returnPolicyId: returnPolicy.selectedId,
+    merchantLocationKey: inventoryLocation.selectedId,
   };
 }
 

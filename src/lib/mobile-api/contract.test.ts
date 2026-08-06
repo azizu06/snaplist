@@ -259,6 +259,27 @@ describe("SwiftUI mobile HTTP contract", () => {
       "x-implementation-status": "implemented",
       responses: { "409": { $ref: "#/components/responses/Conflict" } },
     });
+    // A seller-fixable publish refusal — no return policy in the seller's eBay
+    // account, more than one shipping policy, no usable price — answers 422
+    // with its message intact (app.ts). An undocumented status is one the
+    // native client is free to treat as an unknown failure, which turns the
+    // one refusal only the seller can clear into a silent retry loop.
+    for (const operation of [preflight, publish.get, publish.post]) {
+      expect(
+        (operation as { responses: Record<string, unknown> }).responses["422"],
+      ).toEqual({ $ref: "#/components/responses/UnprocessableEntity" });
+    }
+    expect(
+      (contract.components as unknown as {
+        responses: Record<string, { content?: unknown }>;
+      }).responses.UnprocessableEntity,
+    ).toMatchObject({
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+        },
+      },
+    });
     expect(connection.get).toMatchObject({
       "x-owner-issue": 628,
       "x-implementation-status": "implemented",

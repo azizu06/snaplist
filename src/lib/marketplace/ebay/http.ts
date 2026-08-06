@@ -12,6 +12,8 @@ import type {
 import { EbayApiError, EbayWriteAmbiguousError } from "./types";
 import { EnvTokenProvider } from "./auth";
 import { marketplaceContentLanguage } from "./map";
+import type { EbayPolicyLocationCandidates } from "./policy-location-contract";
+import { HttpEbayPolicyLocationDiscoveryAdapter } from "./policy-location-http";
 
 /**
  * The REAL eBay Sell API adapter (issue #14): publishes a listing with the
@@ -65,6 +67,7 @@ export class HttpEbayAdapter implements EbayAdapter {
   private readonly tokenProvider: EbayTokenProvider;
   private readonly readEnv: () => Record<string, string | undefined>;
   private readonly publishFallbackBinding?: EbayPublishFallbackBinding;
+  private readonly policyLocationDiscovery: HttpEbayPolicyLocationDiscoveryAdapter;
 
   constructor(options: HttpEbayAdapterOptions = {}) {
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -73,10 +76,26 @@ export class HttpEbayAdapter implements EbayAdapter {
     this.tokenProvider =
       options.tokenProvider ??
       new EnvTokenProvider({ fetch: options.fetch, env: options.env });
+    // Read-only Sell Account/Inventory reads share this adapter's token
+    // provider, fetch, and env so a seller's policies are always read with
+    // THEIR credentials against the same configured base (issue #47).
+    this.policyLocationDiscovery = new HttpEbayPolicyLocationDiscoveryAdapter({
+      tokenProvider: this.tokenProvider,
+      fetch: this.fetchImpl,
+      env: this.readEnv,
+    });
   }
 
   getPublishFallbackBinding(): EbayPublishFallbackBinding | undefined {
     return this.publishFallbackBinding;
+  }
+
+  /** Read-only per-connection policy/location discovery (issue #47). */
+  discoverPolicyLocationCandidates(input: {
+    marketplaceId: string;
+    accountGeneration: string;
+  }): Promise<EbayPolicyLocationCandidates> {
+    return this.policyLocationDiscovery.readCandidates(input);
   }
 
   async publishListing(

@@ -273,7 +273,7 @@
         "x-owner-issue": 628,
         "x-implementation-status": "implemented",
         "security": [{ "ClerkBearer": [] }],
-        "responses": { "200": { "description": "Server-mapped listing, connection, and publish-eligibility truth; this read performs no marketplace mutation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishPreflightEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "200": { "description": "Server-mapped listing, connection, and publish-eligibility truth; this read performs no marketplace mutation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishPreflightEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "422": { "$ref": "#/components/responses/UnprocessableEntity" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/v1/listings/{listingId}/ebay/publish": {
@@ -283,7 +283,7 @@
         "x-owner-issue": 628,
         "x-implementation-status": "implemented",
         "security": [{ "ClerkBearer": [] }],
-        "responses": { "200": { "description": "Provider-authoritative persisted outcome, including outcome_not_yet_known when a write may have committed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "200": { "description": "Provider-authoritative persisted outcome, including outcome_not_yet_known when a write may have committed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "422": { "$ref": "#/components/responses/UnprocessableEntity" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       },
       "post": {
         "operationId": "confirmEbayPublish",
@@ -292,7 +292,7 @@
         "security": [{ "ClerkBearer": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishConfirmation" } } } },
-        "responses": { "200": { "description": "Exact-once canonical provider listing identity, including durable replay", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "200": { "description": "Exact-once canonical provider listing identity, including durable replay", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "422": { "$ref": "#/components/responses/UnprocessableEntity" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/v1/ebay/oauth/callback": {
@@ -349,7 +349,8 @@
       "RateLimited": { "description": "Attestation capacity was reached before private verification authority was created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
       "Conflict": { "description": "The durable run changed or the requested transition is not legal", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
       "Unavailable": { "description": "The server could not complete the operation safely; retry is permitted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-      "NotFound": { "description": "Resource absent or hidden by tenant isolation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+      "NotFound": { "description": "Resource absent or hidden by tenant isolation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+      "UnprocessableEntity": { "description": "A seller-fixable refusal the request itself cannot clear; the message names the condition and retrying unchanged will refuse again", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
     },
     "schemas": {
       "ErrorEnvelope": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["unauthorized", "forbidden", "invalid_request", "not_found", "method_not_allowed", "conflict", "rate_limited", "internal_error"] }, "message": { "type": "string" }, "requestId": { "type": "string" }, "details": { "type": "object", "additionalProperties": true } } } } },
