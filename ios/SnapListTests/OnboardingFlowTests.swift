@@ -806,6 +806,14 @@ final class OnboardingFlowTests: XCTestCase {
     /// they own. An extra retain would not crash — it would strand one `WKWebView` and its
     /// WebContent process per screen transition, six times over the flow — so assert the
     /// balance directly: the view must deallocate once the last strong reference drops.
+    ///
+    /// The drop is observed after a bounded run-loop wait rather than synchronously,
+    /// because on iOS a `WKWebView`'s last release lands one main-run-loop turn after the
+    /// local `autoreleasepool` drains — WebKit autoreleases into the pool `CFRunLoop` keeps
+    /// around each iteration, which is the pool *outside* this method. An immediate
+    /// `XCTAssertNil` therefore reports "still alive" for a view whose ownership is
+    /// provably balanced: a plain `WKWebView(frame:configuration:)` fails it exactly as the
+    /// runtime-allocated one does. The wait removes that false failure and nothing else.
     @MainActor
     func testScoutClipWebViewLeavesNoUnbalancedRetain() throws {
         weak var firstObserved: AnyObject?
@@ -821,13 +829,34 @@ final class OnboardingFlowTests: XCTestCase {
             secondObserved = second
         }
 
+        assertDeallocates(firstObserved)
+        assertDeallocates(secondObserved)
+    }
+
+    /// Spins the main run loop until `reference` clears, and fails if it never does.
+    ///
+    /// The budget bounds the wait; it is not a timing tolerance to widen when this gets
+    /// noisy. Deallocation is the thing under test, and the two outcomes are not close
+    /// together: a balanced view clears on the first turn, while one held by a single extra
+    /// retain never clears — it exhausts any budget and fails. Raising the number cannot
+    /// turn that failure green, so a red here is always a real unbalanced retain.
+    @MainActor
+    private func assertDeallocates(
+        _ reference: @autoclosure () -> AnyObject?,
+        within budget: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(budget)
+        while reference() != nil, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+
         XCTAssertNil(
-            firstObserved,
-            "The Scout clip web view outlived its last strong reference."
-        )
-        XCTAssertNil(
-            secondObserved,
-            "The Scout clip web view outlived its last strong reference."
+            reference(),
+            "The Scout clip web view outlived its last strong reference.",
+            file: file,
+            line: line
         )
     }
 
