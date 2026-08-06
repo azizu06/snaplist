@@ -28,10 +28,8 @@ final class ListingReviewUITests: XCTestCase {
         app.buttons["listing-review.back"].tap()
         XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
 
-        XCTAssertTrue(
-            UIProcessTerminationBoundary().terminate(app),
-            "The interruption fixture must exit before relaunch."
-        )
+        UIProcessTerminationBoundary()
+            .assertRetired(app, "The interruption fixture, before relaunch,")
 
         app = launch(resetDraft: false)
         _ = openReview(in: app)
@@ -119,10 +117,8 @@ final class ListingReviewUITests: XCTestCase {
                 app.buttons["listing-review.retry"].exists,
                 expectation.offersRetry
             )
-            XCTAssertTrue(
-                UIProcessTerminationBoundary().terminate(app),
-                "The \(expectation.fixture) fixture must exit cleanly."
-            )
+            UIProcessTerminationBoundary()
+                .assertRetired(app, "The \(expectation.fixture) fixture")
         }
     }
 
@@ -139,10 +135,8 @@ final class ListingReviewUITests: XCTestCase {
             0,
             "Zero evidence must not invent a sold card."
         )
-        XCTAssertTrue(
-            UIProcessTerminationBoundary().terminate(app),
-            "The zero-evidence fixture must exit cleanly."
-        )
+        UIProcessTerminationBoundary()
+            .assertRetired(app, "The zero-evidence fixture")
 
         app = launch(fixture: "five-evidence", resetDraft: true)
         _ = openReview(in: app)
@@ -221,10 +215,8 @@ final class ListingReviewUITests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(secondary.waitForExistence(timeout: 3))
         XCTAssertTrue(secondary.isHittable)
-        XCTAssertTrue(
-            UIProcessTerminationBoundary().terminate(app),
-            "The correction-boundary fixture must exit cleanly."
-        )
+        UIProcessTerminationBoundary()
+            .assertRetired(app, "The correction-boundary fixture")
 
         app = launch(
             fixture: "correction-unavailable",
@@ -267,10 +259,8 @@ final class ListingReviewUITests: XCTestCase {
             "LREV-accessibility5-reduced-motion-correction-unavailable.png"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        XCTAssertTrue(
-            UIProcessTerminationBoundary().terminate(app),
-            "The manual-fallback fixture must exit cleanly."
-        )
+        UIProcessTerminationBoundary()
+            .assertRetired(app, "The manual-fallback fixture")
 
         app = launch(
             fixture: "long-text",

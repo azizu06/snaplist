@@ -2,27 +2,7 @@ import CoreFoundation
 import XCTest
 import UIKit
 
-private extension XCUIApplication.State {
-    /// `XCUIApplication.State` has no readable description, so a lifecycle wait
-    /// that fails can only name the state it wanted, never the one it saw.
-    var reportedName: String {
-        switch self {
-        case .unknown: return "unknown"
-        case .notRunning: return "notRunning"
-        case .runningBackgroundSuspended: return "runningBackgroundSuspended"
-        case .runningBackground: return "runningBackground"
-        case .runningForeground: return "runningForeground"
-        @unknown default: return "unrecognized(\(rawValue))"
-        }
-    }
-}
-
 final class SnapListUITests: XCTestCase {
-    /// Bounds a hung Settings handoff. The wait is driven by Settings' observable
-    /// lifecycle state, so this budget only has to exceed the worst contended
-    /// simulator fleet, not a typical transition (#702).
-    private let settingsBackgroundingTimeout: TimeInterval = 30
-
     override func setUpWithError() throws {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
@@ -959,10 +939,8 @@ final class SnapListUITests: XCTestCase {
                 "top bar must stay above the hero at \(typeSize)"
             )
 
-            XCTAssertTrue(
-                UIProcessTerminationBoundary().terminate(app),
-                "SnapList did not terminate after \(typeSize)"
-            )
+            UIProcessTerminationBoundary()
+                .assertRetired(app, "SnapList after \(typeSize)")
         }
     }
 
@@ -1290,9 +1268,11 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion() {
-        XCTAssertTrue(
-            UIProcessTerminationBoundary().terminate(XCUIApplication()),
-            "Photo Review drag requires a fully stopped prior fixture process."
+        // A native drag replays against whichever process owns the screen, so a
+        // surviving prior fixture silently retargets the gesture.
+        UIProcessTerminationBoundary().assertRetired(
+            XCUIApplication(),
+            "The prior fixture process"
         )
         let app = launch(extraArguments: [
             "--photo-review-state=REV-02",
@@ -2117,11 +2097,12 @@ final class SnapListUITests: XCTestCase {
                     // the states waited for and the one still observed.
                     XCTAssertTrue(
                         settings.waitUntilSafeToTerminate(
-                            timeout: settingsBackgroundingTimeout
+                            timeout: UIProcessLifecycleBudget.transition
                         ),
                         """
                         Settings did not leave the foreground after \
-                        settings-handoff: waited \(Int(settingsBackgroundingTimeout))s \
+                        settings-handoff: waited \
+                        \(Int(UIProcessLifecycleBudget.transition))s \
                         for runningBackground, runningBackgroundSuspended, or \
                         notRunning and still observed \(settings.state.reportedName)
                         """
@@ -2130,10 +2111,7 @@ final class SnapListUITests: XCTestCase {
                     XCTFail("Settings lifecycle proxy was not retained")
                 }
             }
-            XCTAssertTrue(
-                processTermination.terminate(app),
-                "SnapList did not terminate after \(state)"
-            )
+            processTermination.assertRetired(app, "SnapList after \(state)")
         }
     }
 

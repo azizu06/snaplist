@@ -1,5 +1,34 @@
 import XCTest
 
+/// Budgets a UI test spends observing a simulator process through a lifecycle
+/// transition.
+///
+/// Every wait built on this budget returns the instant its condition is
+/// observed, so a healthy run never pays it — only a genuinely slow transition
+/// does. It therefore has to clear the worst contended CoreSimulator fleet
+/// rather than a typical transition. Three seconds was the value observed
+/// failing under contention across two independent runs (#708); thirty is the
+/// budget #702 already proved sufficient for the same class of wait, and is
+/// reused here rather than introducing a second competing number.
+enum UIProcessLifecycleBudget {
+    static let transition: TimeInterval = 30
+}
+
+extension XCUIApplication.State {
+    /// `XCUIApplication.State` has no readable description, so a lifecycle wait
+    /// that fails can only name the state it wanted, never the one it saw.
+    var reportedName: String {
+        switch self {
+        case .unknown: return "unknown"
+        case .notRunning: return "notRunning"
+        case .runningBackgroundSuspended: return "runningBackgroundSuspended"
+        case .runningBackground: return "runningBackground"
+        case .runningForeground: return "runningForeground"
+        @unknown default: return "unrecognized(\(rawValue))"
+        }
+    }
+}
+
 private extension XCUIApplication.State {
     var isSafeToTerminate: Bool {
         switch self {
@@ -20,6 +49,7 @@ protocol UIProcessLifecycle: AnyObject {
     func terminate()
     func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool
     func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool
+    func witnessForegroundExit(timeout: TimeInterval) -> Bool
 }
 
 extension UIProcessLifecycle {
@@ -27,13 +57,42 @@ extension UIProcessLifecycle {
         ProcessInfo.processInfo.systemUptime
     }
 
+    /// A plain lifecycle process has no corroborating observer; its own state is
+    /// the only thing to witness, and it is already authoritative.
+    func witnessForegroundExit(timeout: TimeInterval) -> Bool {
+        true
+    }
+
+    /// Waits until the process is observed in a state it can be terminated from.
+    ///
+    /// The process' own state is the condition under test and owns the whole
+    /// budget. A corroborating witness (see `witnessForegroundExit`) is
+    /// consulted first but is strictly advisory, because before #708 it held
+    /// both powers it must not have:
+    ///
+    /// - **Veto.** A witness that never resolved failed the wait even when the
+    ///   target had demonstrably already left the foreground. SpringBoard is
+    ///   legitimately not foreground whenever another app owns the screen — the
+    ///   golden-states walker's `settings-handoff` step is exactly that case.
+    /// - **Budget.** The witness was given the *full* timeout while the
+    ///   deadline was pinned before it ran, so a slow witness could leave no
+    ///   time at all to observe the target.
+    ///
+    /// The witness now gets a bounded share of the budget and its result is
+    /// discarded, so it can only ever cost time, never a verdict.
     func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
+        let deadline = monotonicUptime + timeout
+        if state.isSafeToTerminate {
+            return true
+        }
+
+        _ = witnessForegroundExit(timeout: min(timeout / 3, 2))
+
         let safeStates: [XCUIApplication.State] = [
             .runningBackground,
             .runningBackgroundSuspended,
             .notRunning
         ]
-        let deadline = monotonicUptime + timeout
         let probeDuration = min(0.1, timeout / 6)
         var safeStateIndex = 0
 
@@ -56,36 +115,40 @@ extension UIProcessLifecycle {
 }
 
 extension XCUIApplication: UIProcessLifecycle {
-    func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
-        let deadline = monotonicUptime + timeout
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        guard springboard.wait(for: .runningForeground, timeout: timeout) else {
-            return false
+    /// SpringBoard returning to the foreground corroborates that a home press
+    /// was actually delivered. Advisory only — see `waitUntilSafeToTerminate`.
+    func witnessForegroundExit(timeout: TimeInterval) -> Bool {
+        XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            .wait(for: .runningForeground, timeout: timeout)
+    }
+}
+
+/// The outcome of retiring a process, carrying enough to diagnose a failure
+/// from a CI log alone.
+enum UIProcessRetirement {
+    case retired
+    case stuck(observed: XCUIApplication.State, waited: TimeInterval)
+
+    var isRetired: Bool {
+        if case .retired = self {
+            return true
         }
+        return false
+    }
 
-        let safeStates: [XCUIApplication.State] = [
-            .runningBackground,
-            .runningBackgroundSuspended,
-            .notRunning
-        ]
-        let probeDuration = min(0.1, timeout / 6)
-        var safeStateIndex = 0
-
-        while true {
-            if state.isSafeToTerminate {
-                return true
-            }
-
-            let remaining = deadline - monotonicUptime
-            guard remaining > 0 else {
-                return state.isSafeToTerminate
-            }
-            let safeState = safeStates[safeStateIndex]
-            if wait(for: safeState, timeout: min(remaining, probeDuration)) {
-                return true
-            }
-            safeStateIndex = (safeStateIndex + 1) % safeStates.count
+    /// A lifecycle failure that only says a process "did not terminate" cannot
+    /// be triaged: the reader cannot tell a wedged app from a budget that was
+    /// simply too small for a contended fleet. Name both the state still
+    /// observed and how long it was waited for.
+    func failureDescription(_ subject: String) -> String {
+        guard case let .stuck(observed, waited) = self else {
+            return ""
         }
+        return """
+            \(subject) did not retire: waited \(Int(waited.rounded()))s for \
+            runningBackground, runningBackgroundSuspended, or notRunning and \
+            still observed \(observed.reportedName)
+            """
     }
 }
 
@@ -98,26 +161,59 @@ struct UIProcessTerminationBoundary {
         self.pressHome = pressHome
     }
 
-    func terminate(
+    func retire(
         _ process: any UIProcessLifecycle,
-        timeout: TimeInterval = 3
-    ) -> Bool {
+        timeout: TimeInterval = UIProcessLifecycleBudget.transition
+    ) -> UIProcessRetirement {
+        let started = process.monotonicUptime
+        func stuck() -> UIProcessRetirement {
+            .stuck(
+                observed: process.state,
+                waited: process.monotonicUptime - started
+            )
+        }
+
         if process.state == .runningForeground {
             pressHome()
             guard process.waitUntilSafeToTerminate(timeout: timeout) else {
-                return false
+                return stuck()
             }
         }
 
         guard process.state.isSafeToTerminate else {
-            return false
+            return stuck()
         }
         guard process.state != .notRunning else {
-            return true
+            return .retired
         }
 
         process.terminate()
         return process.wait(for: .notRunning, timeout: timeout)
+            ? .retired
+            : stuck()
+    }
+
+    func terminate(
+        _ process: any UIProcessLifecycle,
+        timeout: TimeInterval = UIProcessLifecycleBudget.transition
+    ) -> Bool {
+        retire(process, timeout: timeout).isRetired
+    }
+
+    /// Retires `process`, failing the calling test with a message that names the
+    /// state still observed and the budget waited for.
+    func assertRetired(
+        _ process: any UIProcessLifecycle,
+        _ subject: String,
+        timeout: TimeInterval = UIProcessLifecycleBudget.transition,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let outcome = retire(process, timeout: timeout)
+        guard outcome.isRetired else {
+            XCTFail(outcome.failureDescription(subject), file: file, line: line)
+            return
+        }
     }
 }
 
@@ -136,22 +232,37 @@ struct UIProcessTerminationBoundary {
 /// reported to the caller, not converted into a silently absent test.
 struct UILaunchBoundary {
     private let terminationBoundary: UIProcessTerminationBoundary
+    private let report: (String) -> Void
 
     init(
-        terminationBoundary: UIProcessTerminationBoundary = UIProcessTerminationBoundary()
+        terminationBoundary: UIProcessTerminationBoundary = UIProcessTerminationBoundary(),
+        report: @escaping (String) -> Void = { message in
+            XCTContext.runActivity(named: message) { _ in }
+        }
     ) {
         self.terminationBoundary = terminationBoundary
+        self.report = report
     }
 
     @discardableResult
     func launch(
         _ process: any UIProcessLifecycle,
-        timeout: TimeInterval = 3,
+        timeout: TimeInterval = UIProcessLifecycleBudget.transition,
         issueLaunch: () -> Void
     ) -> Bool {
-        let retired = terminationBoundary.terminate(process, timeout: timeout)
+        let retirement = terminationBoundary.retire(process, timeout: timeout)
+        if !retirement.isRetired {
+            // The launch still goes ahead — skipping it would convert a flake
+            // into a silent hole — but XCTest will now terminate the live
+            // instance implicitly inside its own launch budget, and reports
+            // only "Timed out while launching application via Xcode" with
+            // nothing naming the cause. Record what was observed so the next
+            // occurrence distinguishes an unretired prior instance from runner
+            // starvation.
+            report(retirement.failureDescription("The prior instance"))
+        }
         issueLaunch()
-        return retired
+        return retirement.isRetired
     }
 }
 
@@ -298,6 +409,90 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         }
         XCTAssertEqual(process.state, .notRunning)
     }
+
+    // MARK: - #708 contended-fleet lifecycle races
+
+    func testTargetOutOfForegroundRetiresEvenWhenTheWitnessNeverResolves() {
+        let process = ContendedFleetUIProcess(
+            backgroundsAt: 0.5,
+            witnessResolvesAt: nil
+        )
+        let boundary = UIProcessTerminationBoundary {}
+
+        XCTAssertTrue(
+            boundary.terminate(process, timeout: 3),
+            "A witness that never resolves must not veto a target that has"
+                + " already left the foreground: SpringBoard is corroboration,"
+                + " not the condition under test."
+        )
+        XCTAssertEqual(process.state, .notRunning)
+    }
+
+    func testWitnessCannotConsumeTheBudgetTheTargetNeedsToBeObserved() {
+        let process = ContendedFleetUIProcess(
+            backgroundsAt: 2.8,
+            witnessResolvesAt: nil
+        )
+        let boundary = UIProcessTerminationBoundary {}
+
+        XCTAssertTrue(
+            boundary.terminate(process, timeout: 3),
+            "A witness given the full budget leaves no time to observe the"
+                + " target, which is the transition actually being waited on."
+        )
+        XCTAssertEqual(
+            process.witnessBudgets,
+            [1],
+            "The witness may spend at most a third of the budget."
+        )
+    }
+
+    func testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget() {
+        func retire(within timeout: TimeInterval) -> Bool {
+            UIProcessTerminationBoundary {}.terminate(
+                ContendedFleetUIProcess(
+                    backgroundsAt: 4.2,
+                    witnessResolvesAt: 0.4
+                ),
+                timeout: timeout
+            )
+        }
+
+        XCTAssertFalse(
+            retire(within: 3),
+            "Three seconds is the budget observed failing under fleet"
+                + " contention across two independent CI runs (#708)."
+        )
+        XCTAssertTrue(retire(within: UIProcessLifecycleBudget.transition))
+    }
+
+    func testStuckRetirementNamesTheObservedStateAndTheBudgetItWaited() {
+        let process = ContendedFleetUIProcess(
+            backgroundsAt: 9,
+            witnessResolvesAt: 0.1
+        )
+        let outcome = UIProcessTerminationBoundary {}.retire(
+            process,
+            timeout: 3
+        )
+
+        XCTAssertFalse(outcome.isRetired)
+        let description = outcome.failureDescription(
+            "SnapList after ONB-09-camera"
+        )
+        XCTAssertTrue(
+            description.contains("SnapList after ONB-09-camera"),
+            "Unexpected failure description: \(description)"
+        )
+        XCTAssertTrue(
+            description.contains("waited 3s"),
+            "Unexpected failure description: \(description)"
+        )
+        XCTAssertTrue(
+            description.contains("still observed runningForeground"),
+            "Unexpected failure description: \(description)"
+        )
+    }
 }
 
 final class UILaunchBoundaryTests: XCTestCase {
@@ -364,6 +559,80 @@ final class UILaunchBoundaryTests: XCTestCase {
             "A test must still run when the prior process cannot be retired;"
                 + " skipping it would convert a flake into a silent hole."
         )
+    }
+
+    func testUnverifiableRetirementIsReportedBeforeTheLaunchIsIssued() {
+        let process = FakeUIProcess(initialState: .unknown)
+        var order: [String] = []
+        var reported: [String] = []
+        let boundary = UILaunchBoundary(report: {
+            reported.append($0)
+            order.append("report")
+        })
+
+        XCTAssertFalse(
+            boundary.launch(process, timeout: 4) {
+                order.append("launch")
+                process.recordLaunch()
+            }
+        )
+        XCTAssertEqual(
+            order,
+            ["report", "launch"],
+            "An implicit terminate inside the launch budget reports only a"
+                + " launch timeout, so the observed prior state has to be"
+                + " recorded before the launch is issued."
+        )
+        XCTAssertEqual(
+            reported.first?.contains("still observed unknown"),
+            true,
+            "Unexpected report: \(reported)"
+        )
+    }
+}
+
+/// A target whose foreground exit and corroborating witness resolve at
+/// independent, controllable times on a simulated clock — the shape #708
+/// observed on a contended CoreSimulator fleet.
+private final class ContendedFleetUIProcess: UIProcessLifecycle {
+    private(set) var state = XCUIApplication.State.runningForeground
+    private(set) var monotonicUptime: TimeInterval = 0
+    private(set) var witnessBudgets: [TimeInterval] = []
+    private let backgroundsAt: TimeInterval
+    private let witnessResolvesAt: TimeInterval?
+
+    init(backgroundsAt: TimeInterval, witnessResolvesAt: TimeInterval?) {
+        self.backgroundsAt = backgroundsAt
+        self.witnessResolvesAt = witnessResolvesAt
+    }
+
+    func terminate() {
+        state = .notRunning
+    }
+
+    func wait(for target: XCUIApplication.State, timeout: TimeInterval) -> Bool {
+        let deadline = monotonicUptime + timeout
+        if state == .notRunning {
+            return target == .notRunning
+        }
+        if target == .runningBackgroundSuspended, backgroundsAt <= deadline {
+            monotonicUptime = max(monotonicUptime, backgroundsAt)
+            state = .runningBackgroundSuspended
+            return true
+        }
+        monotonicUptime = deadline
+        return false
+    }
+
+    func witnessForegroundExit(timeout: TimeInterval) -> Bool {
+        witnessBudgets.append(timeout)
+        let deadline = monotonicUptime + timeout
+        guard let witnessResolvesAt, witnessResolvesAt <= deadline else {
+            monotonicUptime = deadline
+            return false
+        }
+        monotonicUptime = max(monotonicUptime, witnessResolvesAt)
+        return true
     }
 }
 
@@ -610,10 +879,7 @@ final class HomeVisualRegressionTests: XCTestCase {
             attachment.name = "\(state).png"
             attachment.lifetime = .keepAlways
             add(attachment)
-            XCTAssertTrue(
-                processTermination.terminate(app),
-                "SnapList did not terminate after \(state)"
-            )
+            processTermination.assertRetired(app, "SnapList after \(state)")
         }
     }
 }
