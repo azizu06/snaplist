@@ -99,8 +99,6 @@ interface EbayOfferBinding {
  */
 const GENERIC_CATEGORY_ID = "88433";
 
-const PHOTO_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
-
 /**
  * The currency every persisted price is denominated in: the pricing pipeline's
  * comps (sold/asking lookups, depreciation tables) are USD. `prediction_logs`
@@ -370,7 +368,10 @@ export async function publishListingToEbay(
           claim.itemId,
           {
             baseUrl: options.photoBaseUrl ?? resolveEbayPhotoBaseUrl(env),
-            ttlSeconds: options.photoUrlTtlSeconds ?? PHOTO_URL_TTL_SECONDS,
+            // A second local copy of this TTL is a second thing to forget to
+            // shorten. The capability's lifetime belongs to the module that
+            // issues it.
+            ttlSeconds: options.photoUrlTtlSeconds,
           },
         );
   } catch (error) {
@@ -386,6 +387,19 @@ export async function publishListingToEbay(
         : `Listing ${listingId} has ${photoPaths.length} photo(s) but none could be ` +
           "resolved into a fetchable URL, and eBay requires at least one image. " +
           "Re-upload the item's photos before publishing.",
+    );
+  }
+  if (imageUrls.length !== photoPaths.length) {
+    // The token RPC returns one row per photo it can bind to a verified private
+    // object and silently skips the rest. Publishing the survivors would list
+    // the item with photos missing and tell the seller nothing, so a partial
+    // set fails the whole publish.
+    await markPublishFailed(supabase, listingId, claimId, offerBinding);
+    throw new PublishValidationError(
+      `Listing ${listingId} has ${photoPaths.length} photo(s) but only ` +
+        `${imageUrls.length} could be resolved into a fetchable URL. ` +
+        "Publishing a partial photo set would misrepresent the item, so " +
+        "re-upload the item's photos before publishing.",
     );
   }
 

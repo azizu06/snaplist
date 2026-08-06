@@ -66,7 +66,8 @@ operational metadata has the existing 30-day ceiling; the remaining tenant run i
 outlive item deletion or account erasure under this policy.
 
 The eBay photo route stores only a SHA-256 digest of each 256-bit random bearer token. Live access
-expires within seven days. Photo removal and item deletion revoke the bound row, account erasure
+expires one hour after issue, and seven days is the ceiling an explicit longer
+TTL cannot exceed. Photo removal and item deletion revoke the bound row, account erasure
 revokes every tenant row when erasure begins, and an expired digest is inert while it follows the
 retained photo lifecycle. The public route returns the same not-found response for unknown and
 expired tokens and never accepts a Storage path or bucket from its caller.

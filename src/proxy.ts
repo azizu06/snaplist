@@ -70,7 +70,10 @@ export const config = {
     // App Attest authenticates its exact evidence route inside the handler.
     // Native bearer routes authenticate inside their handlers. Keep the whole
     // /v1 surface outside cookie middleware so missing web configuration cannot
-    // replace their own HTTP contracts with a login redirect.
-    "/((?!_next/static|_next/image|favicon.ico|api/app-attest/?$|v1(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
+    // replace their own HTTP contracts with a login redirect. /m is the eBay
+    // photo surface: its caller is eBay's picture fetcher, which holds no Clerk
+    // cookie, and the opaque token is the route's whole authentication
+    // contract — a redirect here publishes listings with unloadable pictures.
+    "/((?!_next/static|_next/image|favicon.ico|api/app-attest/?$|v1(?:/|$)|m(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
   ],
 };

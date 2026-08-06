@@ -168,6 +168,16 @@ describe("auth proxy", () => {
     expect(doesProxyMatch("/dashboard")).toBe(true);
   });
 
+  it("keeps the eBay photo surface outside cookie middleware", () => {
+    // eBay's picture fetcher holds no Clerk cookie; the opaque token is the
+    // route's whole authentication contract. A login redirect here publishes
+    // listings whose pictures eBay can never load.
+    expect(doesProxyMatch(`/m/${"A".repeat(43)}`)).toBe(false);
+    expect(doesProxyMatch("/m")).toBe(false);
+    expect(doesProxyMatch("/m2/token")).toBe(true);
+    expect(doesProxyMatch("/media")).toBe(true);
+  });
+
   it("lets only the exact App Attest endpoint own its evidence boundary", () => {
     expect(doesProxyMatch("/api/app-attest")).toBe(false);
     expect(doesProxyMatch("/api/app-attest/")).toBe(false);

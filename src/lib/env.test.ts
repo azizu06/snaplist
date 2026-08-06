@@ -34,6 +34,7 @@ describe("parseEnv", () => {
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
+      SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
       CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
     };
 
@@ -61,6 +62,7 @@ describe("parseEnv", () => {
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
+      SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
       CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
     };
 
@@ -111,6 +113,7 @@ describe("parseEnv", () => {
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
+      SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
       CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
     };
 
@@ -144,6 +147,7 @@ describe("parseEnv", () => {
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
+      SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
     };
 
     expect(() => parseEnv(deployed)).toThrowError(/CLERK_AUTHORIZED_PARTIES/);
@@ -188,6 +192,7 @@ describe("parseEnv", () => {
         SUPABASE_SECRET_KEY: "sb_secret_test",
         REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
         REVENUECAT_PROJECT_ID: "proj_test",
+        SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
         CLERK_AUTHORIZED_PARTIES: party,
       }),
     ).toThrowError(/CLERK_AUTHORIZED_PARTIES/);
@@ -208,6 +213,7 @@ describe("parseEnv", () => {
         SUPABASE_SECRET_KEY: "sb_secret_test",
         REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
         REVENUECAT_PROJECT_ID: "proj_test",
+        SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
         CLERK_AUTHORIZED_PARTIES:
           "https://[2001:4860:4860::8888],https://app.snaplist.example",
       }),
@@ -232,6 +238,7 @@ describe("parseEnv", () => {
         SUPABASE_SECRET_KEY: "sb_secret_test",
         REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
         REVENUECAT_PROJECT_ID: "proj_test",
+        SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
         CLERK_AUTHORIZED_PARTIES: party,
       }),
     ).toThrowError(/CLERK_AUTHORIZED_PARTIES/);
@@ -298,6 +305,7 @@ describe("parseEnv", () => {
       SUPABASE_SECRET_KEY: "sb_secret_test",
       REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
       REVENUECAT_PROJECT_ID: "proj_test",
+      SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
       CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
     };
     const { SERVER_RPC_SECRET, ...withoutServerRpcSecret } = deployed;
@@ -330,6 +338,55 @@ describe("parseEnv", () => {
         generatedSecret,
       );
     }
+  });
+
+  it("requires a public HTTPS eBay photo origin in deployed environments", () => {
+    const deployed = {
+      ...valid,
+      SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
+      NODE_ENV: "production",
+      LLM_PROVIDER: "openai",
+      EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      APPLE_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+      APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
+      APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+      REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
+      REVENUECAT_PROJECT_ID: "proj_test",
+      SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
+      CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
+    };
+
+    expect(() => parseEnv(deployed)).not.toThrow();
+
+    const { SNAPLIST_PUBLIC_ORIGIN, ...withoutOrigin } = deployed;
+    void SNAPLIST_PUBLIC_ORIGIN;
+    // Without enforcement the origin eBay fetches published pictures from
+    // silently falls back to CLERK_AUTHORIZED_PARTIES ordering — the exact
+    // defect the dedicated variable exists to close.
+    expect(() => parseEnv(withoutOrigin)).toThrowError(/SNAPLIST_PUBLIC_ORIGIN/);
+
+    for (const invalidOrigin of [
+      "/m",
+      "ftp://snaplist.example",
+      "http://snaplist.example",
+      "https://localhost",
+      "https://10.0.0.5",
+      "https://snaplist.example/media",
+    ]) {
+      expect(() =>
+        parseEnv({ ...deployed, SNAPLIST_PUBLIC_ORIGIN: invalidOrigin }),
+      ).toThrowError(/SNAPLIST_PUBLIC_ORIGIN/);
+    }
+  });
+
+  it("keeps the eBay photo origin optional in local development", () => {
+    expect(() => parseEnv(valid)).not.toThrow();
+    expect(
+      parseEnv({ ...valid, SNAPLIST_PUBLIC_ORIGIN: "http://localhost:3000" })
+        .SNAPLIST_PUBLIC_ORIGIN,
+    ).toBe("http://localhost:3000");
   });
 
   it("keeps local and test server RPC fixtures permissive", () => {
