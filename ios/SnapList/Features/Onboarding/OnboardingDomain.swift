@@ -111,6 +111,11 @@ final class FirstValueOnboardingModel {
         complete(with: .skipped)
     }
 
+    func reconcileRestoredCapture() {
+        guard !hasCompletedOnboarding else { return }
+        completionStore.markCompleted()
+    }
+
     private func complete(with signal: FirstValueOnboardingCompletionSignal) {
         completionStore.markCompleted()
         completionSignal = signal

@@ -182,9 +182,15 @@ struct SnapListApp: App {
                             configuration: configuration
                         )
 #endif
-                    async let restoration = captureFlow.restore()
+                    async let captureRestoration = captureFlow.restore()
                     async let homeLoad: Void = homeStore.load()
-                    router.handleCaptureRestoration(await restoration)
+                    let restoration = await captureRestoration
+                    if restoration == .stagedPhoto {
+                        firstValueOnboardingModel.reconcileRestoredCapture()
+                        onboardingModel
+                            .beginPhotoPermissionAfterFirstValueOnboarding()
+                    }
+                    router.handleCaptureRestoration(restoration)
                     await homeLoad
                 }
         }
