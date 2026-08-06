@@ -214,8 +214,8 @@
 		317E00000000000000000002 /* RunAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunAPIClient.swift; sourceTree = "<group>"; };
 		317E00000000000000000003 /* RunStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunStore.swift; sourceTree = "<group>"; };
 		325E00000000000000000001 /* RunDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunDetailView.swift; sourceTree = "<group>"; };
-		566F00000000000000000001 /* ActivationGuidanceDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivationGuidance/ActivationGuidanceDomain.swift; sourceTree = "<group>"; };
-		566F00000000000000000002 /* ActivationGuidanceCoachMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivationGuidance/ActivationGuidanceCoachMark.swift; sourceTree = "<group>"; };
+		566F00000000000000000001 /* ActivationGuidanceDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapList/Features/ActivationGuidance/ActivationGuidanceDomain.swift; sourceTree = "<group>"; };
+		566F00000000000000000002 /* ActivationGuidanceCoachMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapList/Features/ActivationGuidance/ActivationGuidanceCoachMark.swift; sourceTree = "<group>"; };
 		566F00000000000000000003 /* ActivationGuidance */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/ActivationGuidance; sourceTree = "<group>"; };
 		376E00000000000000000001 /* ListingReviewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListingReviewModels.swift; sourceTree = "<group>"; };
 		558E00000000000000000001 /* ListingReviewClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListingReviewClient.swift; sourceTree = "<group>"; };
