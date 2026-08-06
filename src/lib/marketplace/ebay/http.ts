@@ -164,6 +164,7 @@ export class HttpEbayAdapter implements EbayAdapter {
         },
       },
       contentLanguage,
+      marketplaceId,
       signal,
     );
 
@@ -195,6 +196,7 @@ export class HttpEbayAdapter implements EbayAdapter {
         `${baseUrl}/sell/inventory/v1/offer`,
         offerBody,
         contentLanguage,
+        marketplaceId,
         signal,
       );
       if (!created?.offerId) {
@@ -251,6 +253,7 @@ export class HttpEbayAdapter implements EbayAdapter {
         `${baseUrl}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`,
         offerBody,
         contentLanguage,
+        marketplaceId,
         signal,
       );
     }
@@ -262,6 +265,7 @@ export class HttpEbayAdapter implements EbayAdapter {
       `${baseUrl}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`,
       {},
       contentLanguage,
+      marketplaceId,
       signal,
     );
     if (!published?.listingId) {
@@ -340,6 +344,7 @@ export class HttpEbayAdapter implements EbayAdapter {
       `${baseUrl}/sell/inventory/v1/bulk_update_price_quantity`,
       body,
       contentLanguage,
+      marketplaceId,
       signal,
     );
 
@@ -402,6 +407,7 @@ export class HttpEbayAdapter implements EbayAdapter {
         `${baseUrl}/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}&marketplace_id=${encodeURIComponent(marketplaceId)}`,
         undefined,
         contentLanguage,
+        marketplaceId,
         signal,
       );
       const offers = found?.offers ?? [];
@@ -426,17 +432,20 @@ export class HttpEbayAdapter implements EbayAdapter {
     url: string,
     body: unknown,
     contentLanguage: string,
+    marketplaceId: string,
     signal?: AbortSignal,
   ): Promise<T | undefined> {
     const headers: Record<string, string> = {
       authorization: `Bearer ${token}`,
       accept: "application/json",
+      "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
     };
     if (method !== "GET") {
       headers["content-type"] = "application/json";
       // Required by the Sell Inventory API on create/update calls; locale
       // must match the target marketplace (derived in publishListing).
       headers["content-language"] = contentLanguage;
+      headers["accept-language"] = contentLanguage;
     }
     let res: Response;
     try {
