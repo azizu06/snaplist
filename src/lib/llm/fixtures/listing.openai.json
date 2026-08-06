@@ -1,12 +1,12 @@
 {
   "title": "Sony WH-1000XM4 Wireless Noise Cancelling Headphones Black - Good Condition",
-  "itemSpecifics": {
-    "Brand": "Sony",
-    "Model": "WH-1000XM4",
-    "Color": "Black",
-    "Connectivity": "Wireless",
-    "Type": "Over-Ear"
-  },
+  "itemSpecifics": [
+    { "name": "Brand", "value": "Sony" },
+    { "name": "Model", "value": "WH-1000XM4" },
+    { "name": "Color", "value": "Black" },
+    { "name": "Connectivity", "value": "Wireless" },
+    { "name": "Type", "value": "Over-Ear" }
+  ],
   "description": "Sony WH-1000XM4 over-ear wireless noise-cancelling headphones in good used condition. Fully tested and working with minor cosmetic wear. Includes the headphones only.",
   "tags": ["sony", "wh-1000xm4", "noise cancelling", "wireless headphones"]
 }

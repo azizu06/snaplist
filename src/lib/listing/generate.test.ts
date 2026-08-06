@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { listingCopySchema, type ExtractedAttributes } from "../pipeline/types";
 import type { FewShotExamples, ReferenceMatch } from "../rag";
-import { EBAY_TITLE_MAX_LENGTH, ebayListingSchema, type EbayListing } from "./schema";
+import {
+  EBAY_TITLE_MAX_LENGTH,
+  ebayListingSchema,
+  itemSpecificsToPairs,
+  type EbayListing,
+} from "./schema";
 import {
   fallbackEbayListing,
   corpusReadKey,
@@ -70,7 +75,13 @@ const EXEMPLARS = fewShotOf(
   "Bose QuietComfort 35 II Noise Cancelling Headphones, Silver. Good used condition.",
 );
 
-/** A queue-backed fake `generate`: returns the next scripted listing per call. */
+/**
+ * A queue-backed fake `generate`: returns the next scripted listing per call.
+ *
+ * Cases are authored in the readable name→value shape, then emitted in the
+ * MODEL-FACING ordered pair shape (#691) — the fake speaks exactly what a provider
+ * returns against `ebayListingRawSchema`.
+ */
 function scriptedGenerate(results: EbayListing[]): {
   generate: ListingGenerate;
   calls: Array<Parameters<ListingGenerate>[0]>;
@@ -81,7 +92,7 @@ function scriptedGenerate(results: EbayListing[]): {
     calls.push(args);
     const r = results[Math.min(i, results.length - 1)];
     i += 1;
-    return r;
+    return { ...r, itemSpecifics: itemSpecificsToPairs(r.itemSpecifics) };
   };
   return { generate, calls };
 }
@@ -267,6 +278,40 @@ describe("listing/generate — seller-voice hard-list repair (#669)", () => {
 
     expect(calls).toHaveLength(2);
     expect(listing).toEqual(fallbackEbayListing(CORE));
+  });
+
+  it("catches a banned value hiding in a DUPLICATE specific the record conversion drops (#691)", async () => {
+    // The model emits two entries under one name. `itemSpecificsFromPairs` keeps the
+    // first, so the banned second value never reaches the record — the seller-voice
+    // check therefore has to run on the emitted PAIRS, not on the deduped record.
+    const clean = fallbackEbayListing(CORE);
+    // Distinguishing signal: the pass-through path KEEPS these tags, the
+    // seller-voice fallback drops them. Without it the two paths are identical here.
+    const smuggling = {
+      ...clean,
+      description: "Sony WH-1000XM4 headphones in good used condition.",
+      tags: ["sony", "headphones"],
+      itemSpecifics: [
+        ...itemSpecificsToPairs(clean.itemSpecifics),
+        { name: "Condition", value: "stunning" },
+      ],
+    };
+    let calls = 0;
+    const generate: ListingGenerate = async () => {
+      calls += 1;
+      return smuggling;
+    };
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    expect(calls).toBe(2); // violation detected → retried
+    expect(listing).toEqual(fallbackEbayListing(CORE));
+    expect(listing.tags).toEqual([]); // the model's tags did not survive
   });
 
   it("does not flag a banned adjective inside a longer word", async () => {
@@ -622,7 +667,10 @@ describe("listing/generate — grounded by injected few-shot retrieval", () => {
   });
 
   it("does not touch the network when generate + few-shot are injected (offline)", async () => {
-    const generate = vi.fn(async () => GOOD_LISTING);
+    const generate = vi.fn(async () => ({
+      ...GOOD_LISTING,
+      itemSpecifics: itemSpecificsToPairs(GOOD_LISTING.itemSpecifics),
+    }));
     await generateEbayListing({ attributes: CORE, fewShot: EXEMPLARS, generate });
     expect(generate).toHaveBeenCalledOnce();
   });

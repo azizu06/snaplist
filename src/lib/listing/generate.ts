@@ -15,6 +15,7 @@ import {
   EBAY_TITLE_MAX_LENGTH,
   ebayListingRawSchema,
   ebayListingSchema,
+  itemSpecificsFromPairs,
   type EbayListing,
   type RawEbayListing,
 } from "./schema";
@@ -201,7 +202,9 @@ function listingViolatesSellerVoice(raw: RawEbayListing): boolean {
   return (
     SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(raw.description)) ||
     SELLER_VOICE_MULTIPLE_EXCLAMATION_MARKS.test(raw.description) ||
-    Object.values(raw.itemSpecifics).some((value) =>
+    // Every emitted pair is checked, including duplicates the record conversion drops:
+    // a banned value must not slip through just because its name repeated.
+    raw.itemSpecifics.some(({ value }) =>
       SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(value)),
     )
   );
@@ -334,6 +337,14 @@ export async function generateEbayListing(
       attributes.title,
       ...(attributes.specs ?? []),
     ];
+    // The model speaks in an ordered pair LIST (the only item-specifics shape OpenAI
+    // structured outputs can express); every check below and every consumer downstream
+    // works on the name→value record, so convert once, here, under the documented
+    // duplicate-name rule.
+    const rawListing: EbayListing = {
+      ...raw,
+      itemSpecifics: itemSpecificsFromPairs(raw.itemSpecifics),
+    };
     const modelSellerVoiceViolates = listingViolatesSellerVoice(raw);
     const modelCopyViolates =
       sellerTitleViolations(raw.title, titleCore).length > 0 ||
@@ -345,7 +356,7 @@ export async function generateEbayListing(
     const reconciled: EbayListing = modelCopyViolates || modelTagsViolate
       ? fallbackEbayListing(attributes)
       : {
-          ...raw,
+          ...rawListing,
           title: enforceTitleLength(raw.title),
           itemSpecifics: reconcileSpecifics(attributes),
           // Descriptions cannot be completely fact-checked after generation. Build
@@ -366,7 +377,9 @@ export async function generateEbayListing(
     // the model can self-correct; the reconciled candidate is already clean, so we
     // keep it as the fallback for the final attempt.
     if (
-      (listingHallucinatesAttributes(raw, attributes) || modelCopyViolates || modelTagsViolate) &&
+      (listingHallucinatesAttributes(rawListing, attributes) ||
+        modelCopyViolates ||
+        modelTagsViolate) &&
       attempt < attempts - 1
     ) {
       lastError = modelCopyViolates || modelTagsViolate
@@ -522,8 +535,9 @@ const LISTING_SYSTEM_PROMPT =
   "supplied attribute facts (brand, model, category, condition, specs) — never invent " +
   "a brand, model, or spec that is not given. Ground your tone and structure in the " +
   "provided example listings. The title must be a keyword-dense eBay title of 80 " +
-  "characters or fewer. Provide eBay item specifics as name→value pairs drawn from the " +
-  "given attributes, a clear description, and relevant search tags. Description and item " +
+  "characters or fewer. Provide eBay item specifics as a LIST of {name, value} entries " +
+  "drawn from the given attributes, with each name appearing at most once, plus a clear " +
+  "description, and relevant search tags. Description and item " +
   "specifics must use plain seller voice: no em dashes or en dashes; no promotional " +
   "adjectives (stunning, elevate, boasts, must-have, exquisite, seamless, vibrant, " +
   "top-notch, sleek, gorgeous, breathtaking); no urgency or hype (don't miss, act fast, " +
