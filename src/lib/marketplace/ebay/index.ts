@@ -7,6 +7,7 @@
  */
 export type {
   EbayAdapter,
+  EbayListingSnapshot,
   EbayPublishRequest,
   EbayPublishResult,
   EbayReviseRequest,
@@ -59,6 +60,33 @@ export {
   type EbayPolicyLocationSetupStore,
 } from "./policy-location-setup";
 export { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
+// Post-publish provider authority (issue #169). SnapList owns an unpublished
+// draft; once a confirmed publish supplies an external identity, only confirmed
+// eBay results become local truth and every disagreement is an explicit
+// conflict. See docs/ebay-listing-sync.md for the polling/webhook boundary.
+export {
+  applyConfirmedEbayListingPrice,
+  ingestEbayListingObservation,
+  readEbayListingObservation,
+  type ApplyProviderTruthInput,
+  type EbayListingObservationRead,
+  type EbayListingSyncAuthority,
+  type EbayListingSyncOutcome,
+  type EbayListingSyncRefusal,
+  type EbayListingSyncStore,
+  type OpenConflictInput,
+} from "./listing-sync";
+export {
+  ebayListingObservationSchema,
+  ebayListingSyncConflictFields,
+  ebayListingSyncConflictKinds,
+  ebayProviderListingStatuses,
+  type EbayListingObservation,
+  type EbayListingProviderTruth,
+  type EbayListingSyncConflict,
+  type EbayProviderListingStatus,
+} from "./listing-sync-contract";
+export { createSupabaseEbayListingSyncStore } from "./listing-sync-store";
 export type {
   EbayPolicyLocationBinding,
   EbayPolicyLocationCandidates,
