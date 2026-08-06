@@ -119,6 +119,7 @@ struct AppShellView: View {
                         if reordered != nil {
                             advanceActivationGuidance(for: .reorderedPhotos)
                         }
+                        return reordered
                     },
                     // Photo Review consumes #469's Voice note event locally. Start
                     // listing submits the committed NativeIntake snapshot: displayed
