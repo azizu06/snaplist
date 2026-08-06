@@ -38,6 +38,13 @@ const tenantIds = new Set<string>();
  * nothing and the queue-depth pgTAP contracts inherit the residue.
  */
 const seededItemIds = new Set<string>();
+/**
+ * Run ids every credited fixture staged. `stage_pipeline_batch` enqueues one
+ * `pipeline_jobs` message per run and no worker runs here to consume it, so the
+ * message outlives both the run row and the item `delete_item` removes.
+ */
+const seededRunIds = new Set<string>();
+let queueDepthAtStart = 0;
 
 /**
  * A tenant per behaviour. AI-item allowance is per seller and deliberately
@@ -148,6 +155,19 @@ async function storageCleanupJob(itemId: string): Promise<{
   return rows[0] ?? null;
 }
 
+/**
+ * How many wake-up messages the shared `pipeline_jobs` queue is holding. The
+ * database CI job runs the RLS suites and the pgTAP contracts against one
+ * Postgres, and `pipeline_operations_health()` reports an absolute `queueDepth`,
+ * so a message this suite leaves behind is read later as live pipeline backlog.
+ */
+async function queuedPipelineMessages(): Promise<number> {
+  const { rows } = await database.query<{ count: number }>(
+    "select count(*)::integer count from pgmq.q_pipeline_jobs",
+  );
+  return rows[0]!.count;
+}
+
 function stageArgs(userId: string, idempotencyKey: string, photoPath: string) {
   return {
     p_batch_id: crypto.randomUUID(),
@@ -188,6 +208,7 @@ async function seedCreditedItem(
   const row = (staged.data as Array<{ item_id: string; run_id: string }>)[0];
   if (!row) throw new Error("Credited item fixture did not stage.");
   seededItemIds.add(row.item_id);
+  seededRunIds.add(row.run_id);
 
   await database.query(
     `update public.pipeline_runs
@@ -371,6 +392,9 @@ beforeAll(async () => {
     lease = await acquireExclusiveTestResource("pipeline_jobs");
     database = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
     await database.connect();
+    // Taken under the queue lease, so nothing else can move it while this suite
+    // runs and teardown can prove the suite put the queue back as it found it.
+    queueDepthAtStart = await queuedPipelineMessages();
     admin = createClient(SUPABASE_URL, SECRET_KEY!, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -444,9 +468,20 @@ afterAll(async () => {
       "delete from public.ai_item_allowance_periods where user_id = any($1::text[])",
       [tenants],
     ).catch(() => undefined);
+    // The staged runs' queue messages have no cascade to ride: `delete_item`
+    // removes the run, and pgmq keeps the wake-up message. Left behind, the
+    // pgTAP contract `health exposes queue depth` reads them as live backlog and
+    // fails a suite this one never touched. The error is not swallowed here —
+    // silence is exactly what let the residue reach an unrelated contract.
+    await database.query(
+      "delete from pgmq.q_pipeline_jobs where message->>'run_id' = any($1::text[])",
+      [[...seededRunIds]],
+    );
+    const queueDepthAtEnd = await queuedPipelineMessages();
     await cleanupClerkTestUsers(admin, tenants);
     await database.end();
     await lease.release();
+    expect(queueDepthAtEnd).toBe(queueDepthAtStart);
   });
 });
 
