@@ -30,8 +30,9 @@ struct AppShellView: View {
     @State private var proGateStore: ProGateStore?
     @State private var proGateFocusRequest: UUID?
     @State private var handlingProGateEventID: UUID?
-    @State private var trophyWallPrincipalScopeProof:
-        ItemRunSubmissionPrincipalScopeProof?
+    @State private var trophyWallPrincipalFence = TrophyWallPrincipalFence()
+    @State private var recoverableLocalPendingIdentity: TrophyWallLogicalIdentity?
+    @State private var trophyWallCollectionRefreshGeneration = 0
 
     var body: some View {
         Group {
@@ -308,16 +309,26 @@ struct AppShellView: View {
                         intake: dependencies.nativeIntake
                     )
 #endif
-                    let nextScopeProof = submissionHost.trophyWallPrincipalScopeProof
-                    if let currentScopeProof = trophyWallPrincipalScopeProof,
-                       currentScopeProof != nextScopeProof {
+                    if trophyWallPrincipalFence.observe(
+                        submissionHost.trophyWallPrincipalScopeProof
+                    ) {
                         trophyWallStore.resetForPrincipalTransition()
+                        // The reset drops the collection back to `unknown`, and the
+                        // tab-keyed refresh below does not re-run on its own, so a
+                        // seller already sitting on the wall would watch it stay
+                        // blank until they navigated away and back.
+                        trophyWallCollectionRefreshGeneration += 1
                     }
-                    trophyWallPrincipalScopeProof = nextScopeProof
-                    if let localCard = await submissionHost
+                    let localCard = await submissionHost
                         .recoverableTrophyWallPendingCard(
                             principalScope: trophyWallStore.principalScope
-                        ) {
+                        )
+                    recoverableLocalPendingIdentity =
+                        localCard?.identity.logicalIdentity
+                    trophyWallStore.withdrawLocalPendingCards(
+                        keeping: recoverableLocalPendingIdentity
+                    )
+                    if let localCard {
                         trophyWallStore.ingest(localCard)
                     }
                     let activeReviewDeparted =
@@ -538,9 +549,15 @@ struct AppShellView: View {
             onScan: {
                 router.reset(tab: .scan)
                 router.selectedTab = .scan
-            }
+            },
+            onTryAgain: { trophyWallCollectionRefreshGeneration += 1 }
         )
-        .task(id: router.selectedTab) {
+        .task(
+            id: TrophyWallCollectionRefreshKey(
+                tab: router.selectedTab,
+                generation: trophyWallCollectionRefreshGeneration
+            )
+        ) {
             guard router.selectedTab == .trophyWall else { return }
             await trophyWallStore.refreshCollection(
                 using: trophyWallHistoryRepository
@@ -594,8 +611,10 @@ struct AppShellView: View {
                     store: trophyWallStore,
                     repository: trophyWallHistoryRepository,
                     openRoute: { destination in
-                        if destination == .localRecovery {
+                        if case .localRecovery(let logicalIdentity) = destination {
                             router.openLocalRecovery(
+                                logicalIdentity,
+                                matching: recoverableLocalPendingIdentity,
                                 photos: captureFlow.stagedPhotos
                             )
                         } else {
@@ -1264,6 +1283,36 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             content
         }
     }
+}
+
+/// Device-local Trophy Wall state belongs to exactly one principal, so it must be
+/// cleared whenever the principal changes. Observation is tracked on its own
+/// rather than inferred from the stored proof being nil: a signed-out principal
+/// has no proof, so the nil check reset on sign-out but not on sign-in, and one
+/// seller's local pending card could surface on the next seller's wall. Cold
+/// launch still resets nothing, which keeps the DEBUG fixture seed intact.
+struct TrophyWallPrincipalFence {
+    private var hasObservedScopeProof = false
+    private var scopeProof: ItemRunSubmissionPrincipalScopeProof?
+
+    /// Returns whether this observation is a principal transition.
+    mutating func observe(
+        _ nextScopeProof: ItemRunSubmissionPrincipalScopeProof?
+    ) -> Bool {
+        defer {
+            hasObservedScopeProof = true
+            scopeProof = nextScopeProof
+        }
+        return hasObservedScopeProof && scopeProof != nextScopeProof
+    }
+}
+
+/// Trophy Wall refreshes on tab entry, and also whenever the shell proves the
+/// saved collection can no longer be trusted — a principal transition, or the
+/// seller asking to try again after a failed load.
+private struct TrophyWallCollectionRefreshKey: Equatable {
+    let tab: PrimaryTab
+    let generation: Int
 }
 
 @MainActor

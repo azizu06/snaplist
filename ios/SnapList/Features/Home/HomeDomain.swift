@@ -195,6 +195,13 @@ struct TrophyWallLogicalIdentity: Hashable, Sendable {
 enum TrophyWallCardIdentity: Hashable, Sendable {
     case local(TrophyWallLogicalIdentity)
     case run(UUID)
+
+    var logicalIdentity: TrophyWallLogicalIdentity? {
+        guard case .local(let logicalIdentity) = self else {
+            return nil
+        }
+        return logicalIdentity
+    }
 }
 
 enum TrophyWallCardState: Hashable, Sendable {
@@ -315,14 +322,15 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
         switch card.state {
         case .pendingUpload:
             stateLabel = "Pending upload"
-            destination = .localRecovery
-            if case .local(let logicalIdentity) = card.identity {
-                accessibilityIdentifier =
-                    "trophy.processing.row.local."
-                    + logicalIdentity.persistedKey.lowercased()
-            } else {
+            guard case .local(let logicalIdentity) = card.identity else {
                 return nil
             }
+            // The destination names this exact local item so recovery can refuse
+            // an intake that is no longer the one behind the card.
+            destination = .localRecovery(logicalIdentity)
+            accessibilityIdentifier =
+                "trophy.processing.row.local."
+                + logicalIdentity.persistedKey.lowercased()
             accessibilityLabel =
                 "\(itemName), pending upload. Local item, not sent yet."
         case .accepted,
@@ -594,6 +602,20 @@ final class TrophyWallStore {
                 return
             }
             collectionOutcome = Self.outcome(forFailure: error)
+        }
+    }
+
+    /// A local pending card is only truthful while the intake behind it is still
+    /// staged and recoverable. Once the client proves it is not, the card leaves
+    /// the wall instead of sitting there pointing at an item that is gone.
+    func withdrawLocalPendingCards(
+        keeping recoverableIdentity: TrophyWallLogicalIdentity?
+    ) {
+        cards.removeAll { card in
+            guard let logicalIdentity = card.identity.logicalIdentity else {
+                return false
+            }
+            return logicalIdentity != recoverableIdentity
         }
     }
 

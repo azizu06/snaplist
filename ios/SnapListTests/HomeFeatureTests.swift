@@ -696,7 +696,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: exactCards,
-                expectedDestinations: [.localRecovery, .run(fixture.runID)]
+                expectedDestinations: [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong principal",
@@ -706,7 +706,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [.localRecovery, .localRecovery]
+                expectedDestinations: [.localRecovery(fixture.logicalID), .localRecovery(fixture.unrelatedLogicalID)]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong run",
@@ -716,7 +716,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [.localRecovery, .localRecovery]
+                expectedDestinations: [.localRecovery(fixture.logicalID), .localRecovery(fixture.unrelatedLogicalID)]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong item",
@@ -726,7 +726,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.otherItemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [.localRecovery, .localRecovery]
+                expectedDestinations: [.localRecovery(fixture.logicalID), .localRecovery(fixture.unrelatedLogicalID)]
             ),
         ]
 
@@ -791,7 +791,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.localRecovery, .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
         )
     }
 
@@ -848,7 +848,7 @@ final class TrophyWallDomainTests: XCTestCase {
             )
             XCTAssertEqual(
                 store.processingRows.map(\.destination),
-                [.localRecovery, .run(fixture.runID)],
+                [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)],
                 testCase.name
             )
         }
@@ -952,7 +952,7 @@ final class TrophyWallDomainTests: XCTestCase {
             [.local(fixture.unrelatedLogicalID)]
         )
         XCTAssertEqual(store.processingRows.map(\.stateLabel), ["Pending upload"])
-        XCTAssertEqual(store.processingRows.map(\.destination), [.localRecovery])
+        XCTAssertEqual(store.processingRows.map(\.destination), [.localRecovery(fixture.unrelatedLogicalID)])
     }
 
     func testStoreKeepsValidNeedsRetryCardForMalformedNewerCanonicalTruth() throws {
@@ -1060,7 +1060,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.localRecovery, .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
         )
         XCTAssertEqual(
             page.entries.first?.run.lastMeaningfulUpdateAt,
@@ -1094,7 +1094,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.run(fixture.runID), .localRecovery]
+            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID)]
         )
         XCTAssertEqual(
             store.processingRows.map(\.accessibilityLabel),
@@ -1418,7 +1418,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             standardRows.map(\.destination),
-            [.run(fixture.runID), .localRecovery, .run(fixture.thirdRunID)]
+            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID), .run(fixture.thirdRunID)]
         )
         XCTAssertEqual(
             smallestHeightRows.map(\.id),
@@ -1429,7 +1429,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             smallestHeightRows.map(\.destination),
-            [.run(fixture.runID), .localRecovery]
+            [.run(fixture.runID), .localRecovery(fixture.unrelatedLogicalID)]
         )
         let standardImage = await captureHostedTrophyWallProcessingView(
             rows: store.processingRows,
@@ -1751,6 +1751,150 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertTrue(store.settledTiles.isEmpty)
     }
 
+    /// A local pending card only means something while the intake that produced it
+    /// is still staged. Nothing used to withdraw one, so a discarded or replaced
+    /// intake left a card on the wall that routed to the wrong item, or to nothing.
+    @MainActor
+    func testWithdrawingLocalPendingCardsKeepsOnlyTheStillRecoverableIntake() {
+        let fixture = TrophyWallTestFixture()
+        let cases: [(name: String, kept: TrophyWallLogicalIdentity?, expected: [TrophyWallCardIdentity])] = [
+            (
+                "one intake is still recoverable",
+                fixture.unrelatedLogicalID,
+                [
+                    .local(fixture.unrelatedLogicalID),
+                    .run(fixture.thirdRunID),
+                    .run(fixture.hiddenRunID),
+                ]
+            ),
+            (
+                "no intake is recoverable any more",
+                nil,
+                [.run(fixture.thirdRunID), .run(fixture.hiddenRunID)]
+            ),
+        ]
+
+        for testCase in cases {
+            let store = fixture.makeStore(cards: fixture.processingInitialCards)
+
+            store.withdrawLocalPendingCards(keeping: testCase.kept)
+
+            XCTAssertEqual(
+                Set(store.cards.map(\.identity)),
+                Set(testCase.expected),
+                testCase.name
+            )
+            XCTAssertEqual(
+                store.cards.count,
+                testCase.expected.count,
+                testCase.name
+            )
+        }
+    }
+
+    /// Trophy Wall is the seller's one return destination, so a failed collection
+    /// refresh may not leave it a blank canvas. It reuses the same offline notice
+    /// and recovery group the pushed Processing screen already ships.
+    func testWallRendersItsOwnOfflineAndUnavailableGroupInsteadOfABlankCanvas() {
+        let unavailable = TrophyWallProcessingView.unavailableCollectionMessage
+        let offlineNotice = TrophyWallProcessingView.offlineNoticeText
+        let cases: [(
+            name: String,
+            hasSettledTiles: Bool,
+            outcome: TrophyWallCollectionOutcome,
+            expected: TrophyWallView.Presentation
+        )] = [
+            (
+                "nothing proved yet claims nothing",
+                false,
+                .unknown,
+                .init(
+                    showsGrid: false,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: nil
+                )
+            ),
+            (
+                "proved empty earns the empty screen",
+                false,
+                .loaded,
+                .init(
+                    showsGrid: false,
+                    showsEmptyView: true,
+                    offlineNotice: nil,
+                    collectionMessage: nil
+                )
+            ),
+            (
+                "offline without saved tiles offers recovery",
+                false,
+                .offline,
+                .init(
+                    showsGrid: false,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: unavailable
+                )
+            ),
+            (
+                "unavailable without saved tiles offers recovery",
+                false,
+                .unavailable,
+                .init(
+                    showsGrid: false,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: unavailable
+                )
+            ),
+            (
+                "offline with saved tiles keeps them and says so",
+                true,
+                .offline,
+                .init(
+                    showsGrid: true,
+                    showsEmptyView: false,
+                    offlineNotice: offlineNotice,
+                    collectionMessage: nil
+                )
+            ),
+            (
+                "unavailable with saved tiles keeps them without a false claim",
+                true,
+                .unavailable,
+                .init(
+                    showsGrid: true,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: nil
+                )
+            ),
+            (
+                "loaded with saved tiles is the plain grid",
+                true,
+                .loaded,
+                .init(
+                    showsGrid: true,
+                    showsEmptyView: false,
+                    offlineNotice: nil,
+                    collectionMessage: nil
+                )
+            ),
+        ]
+
+        for testCase in cases {
+            XCTAssertEqual(
+                TrophyWallView.presentation(
+                    hasSettledTiles: testCase.hasSettledTiles,
+                    collectionOutcome: testCase.outcome
+                ),
+                testCase.expected,
+                testCase.name
+            )
+        }
+    }
+
     func testCollectionStatesRenderTheirApprovedGroupAtBothDynamicTypeRoots() async {
         let fixture = TrophyWallTestFixture()
         let savedRows = fixture.makeStore(cards: fixture.processingInitialCards)
@@ -1904,7 +2048,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.localRecovery, .run(fixture.runID)]
+            [.localRecovery(fixture.unrelatedLogicalID), .run(fixture.runID)]
         )
         XCTAssertEqual(store.cards, firstCards)
         XCTAssertEqual(store.processingRows, firstRows)

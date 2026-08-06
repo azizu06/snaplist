@@ -126,21 +126,15 @@ final class AppNavigationTests: XCTestCase {
 
     @MainActor
     func testLocalPendingRecoveryOpensTheExactOrderedIntakeInPhotoReview() {
-        let photos = (0..<2).map { index in
-            StagedCapturePhoto(
-                id: UUID(),
-                photoURL: URL(fileURLWithPath: "/tmp/recovery-photo-\(index).jpg"),
-                thumbnailURL: URL(fileURLWithPath: "/tmp/recovery-thumb-\(index).jpg"),
-                createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
-            )
-        }
-        let router = AppRouter(
-            initialTab: .trophyWall,
-            initialRoute: .home(.processing),
-            initialFullScreen: .guidedCamera
-        )
+        let photos = Self.recoveryPhotos(count: 2)
+        let cardIdentity = Self.logicalIdentity(1)
+        let router = Self.processingRouter()
 
-        router.openLocalRecovery(photos: photos)
+        router.openLocalRecovery(
+            cardIdentity,
+            matching: cardIdentity,
+            photos: photos
+        )
 
         XCTAssertEqual(router.selectedTab, .scan)
         XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [])
@@ -153,6 +147,105 @@ final class AppNavigationTests: XCTestCase {
             )
         )
         XCTAssertNil(router.presentedFullScreen)
+    }
+
+    /// A pending card names one specific local item. Recovery used to ignore that
+    /// name and open whatever happened to be staged, after it had already switched
+    /// tabs — so a stale card either opened the wrong intake or opened nothing and
+    /// stranded the seller on Scan.
+    @MainActor
+    func testLocalPendingRecoveryRefusesAnIntakeThatIsNotTheTappedCard() {
+        let cardIdentity = Self.logicalIdentity(1)
+        let cases: [(name: String, intake: TrophyWallLogicalIdentity?, photos: Int)] = [
+            ("a different item is staged now", Self.logicalIdentity(2), 2),
+            ("the staged photos were discarded", nil, 0),
+            ("the card outlived its own intake", nil, 2),
+            ("the intake matches but holds no photo", cardIdentity, 0),
+        ]
+
+        for testCase in cases {
+            let router = Self.processingRouter()
+
+            router.openLocalRecovery(
+                cardIdentity,
+                matching: testCase.intake,
+                photos: Self.recoveryPhotos(count: testCase.photos)
+            )
+
+            XCTAssertEqual(router.selectedTab, .trophyWall, testCase.name)
+            XCTAssertEqual(
+                router.pathBinding(for: .trophyWall).wrappedValue,
+                [.home(.processing)],
+                testCase.name
+            )
+            XCTAssertNil(router.captureBoundaryRequest, testCase.name)
+            XCTAssertEqual(
+                router.presentedFullScreen,
+                .guidedCamera,
+                testCase.name
+            )
+        }
+    }
+
+    /// The fence used to read "have we observed a principal yet?" off the stored
+    /// proof being nil. A signed-out principal has no proof, so signed-in to
+    /// signed-out reset but signed-out to signed-in did not, and one seller's local
+    /// pending card survived onto another seller's Trophy Wall.
+    func testPrincipalFenceResetsOnEveryObservedScopeChangeIncludingFromSignedOut()
+        throws {
+        let signedIn = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(verifiedClerkSubject: "user_a")
+        )
+        let otherSignedIn = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(verifiedClerkSubject: "user_b")
+        )
+        var fence = TrophyWallPrincipalFence()
+
+        XCTAssertFalse(
+            fence.observe(nil),
+            "the first observation is not a transition"
+        )
+        XCTAssertTrue(
+            fence.observe(signedIn),
+            "a guest signing in changes the principal"
+        )
+        XCTAssertFalse(fence.observe(signedIn), "the same principal is not a change")
+        XCTAssertTrue(fence.observe(otherSignedIn))
+        XCTAssertTrue(fence.observe(nil), "signing out changes the principal")
+
+        // A cold launch that already carries a proof must stay quiet too, or the
+        // DEBUG `--fixture=trophy-wall` seed would be wiped before it renders.
+        var coldSignedInFence = TrophyWallPrincipalFence()
+        XCTAssertFalse(coldSignedInFence.observe(signedIn))
+        XCTAssertTrue(coldSignedInFence.observe(nil))
+    }
+
+    @MainActor
+    private static func processingRouter() -> AppRouter {
+        AppRouter(
+            initialTab: .trophyWall,
+            initialRoute: .home(.processing),
+            initialFullScreen: .guidedCamera
+        )
+    }
+
+    private static func recoveryPhotos(count: Int) -> [StagedCapturePhoto] {
+        (0..<count).map { index in
+            StagedCapturePhoto(
+                id: UUID(),
+                photoURL: URL(fileURLWithPath: "/tmp/recovery-photo-\(index).jpg"),
+                thumbnailURL: URL(fileURLWithPath: "/tmp/recovery-thumb-\(index).jpg"),
+                createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
+            )
+        }
+    }
+
+    private static func logicalIdentity(_ ordinal: Int) -> TrophyWallLogicalIdentity {
+        TrophyWallLogicalIdentity(
+            idempotencyKey: UUID(
+                uuidString: "37500000-0000-4000-8000-00000000001\(ordinal)"
+            )!
+        )
     }
 
     func testLaunchArgumentsAcceptApprovedStatesAndRejectCandidateStates() {

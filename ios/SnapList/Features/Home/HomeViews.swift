@@ -804,10 +804,20 @@ private struct HomeHowItWorksStep: View {
 // MARK: - Trophy Wall
 
 struct TrophyWallView: View {
+    /// What the wall body may claim, given the tiles it holds and what the client
+    /// actually proved about the collection.
+    struct Presentation: Equatable {
+        let showsGrid: Bool
+        let showsEmptyView: Bool
+        let offlineNotice: String?
+        let collectionMessage: TrophyWallProcessingView.CollectionMessage?
+    }
+
     @Bindable var store: TrophyWallStore
     let openProcessing: () -> Void
     let openAccount: () -> Void
     let onScan: () -> Void
+    let onTryAgain: () -> Void
 
     @ScaledMetric(relativeTo: .title) private var titleSize = 28
 
@@ -868,15 +878,77 @@ struct TrophyWallView: View {
         .accessibilityIdentifier("trophy.wall")
     }
 
+    /// Trophy Wall is the seller's one return destination, so a collection it
+    /// could not load may not render as a blank canvas. The offline notice is a
+    /// claim about saved items and stays truthful only while there are saved
+    /// items; without them, both reachability failures collapse to the same
+    /// recovery group the pushed Processing screen already ships.
+    static func presentation(
+        hasSettledTiles: Bool,
+        collectionOutcome: TrophyWallCollectionOutcome
+    ) -> Presentation {
+        guard !hasSettledTiles else {
+            return Presentation(
+                showsGrid: true,
+                showsEmptyView: false,
+                offlineNotice: collectionOutcome == .offline
+                    ? TrophyWallProcessingView.offlineNoticeText
+                    : nil,
+                collectionMessage: nil
+            )
+        }
+
+        switch collectionOutcome {
+        case .unknown:
+            // Nothing has been proved, so no empty success may be claimed.
+            return Presentation(
+                showsGrid: false,
+                showsEmptyView: false,
+                offlineNotice: nil,
+                collectionMessage: nil
+            )
+        case .loaded:
+            return Presentation(
+                showsGrid: false,
+                showsEmptyView: true,
+                offlineNotice: nil,
+                collectionMessage: nil
+            )
+        case .offline, .unavailable:
+            return Presentation(
+                showsGrid: false,
+                showsEmptyView: false,
+                offlineNotice: nil,
+                collectionMessage: TrophyWallProcessingView
+                    .unavailableCollectionMessage
+            )
+        }
+    }
+
     @ViewBuilder
     private var wallBody: some View {
-        if store.settledTiles.isEmpty {
-            if store.collectionOutcome == .loaded {
-                TrophyWallEmptyView(onScan: onScan)
-            } else {
-                Color.clear
-            }
-        } else {
+        let presentation = Self.presentation(
+            hasSettledTiles: !store.settledTiles.isEmpty,
+            collectionOutcome: store.collectionOutcome
+        )
+
+        if let offlineNotice = presentation.offlineNotice {
+            TrophyWallOfflineNoticeView(text: offlineNotice)
+        }
+
+        if let collectionMessage = presentation.collectionMessage {
+            TrophyWallCollectionMessageView(
+                message: collectionMessage,
+                onScan: onScan,
+                onTryAgain: onTryAgain
+            )
+        }
+
+        if presentation.showsEmptyView {
+            TrophyWallEmptyView(onScan: onScan)
+        }
+
+        if presentation.showsGrid {
             ScrollView {
                 LazyVGrid(
                     columns: [
@@ -974,6 +1046,9 @@ private struct TrophyWallEmptyView: View {
         .padding(.horizontal, 34)
         .padding(.bottom, 104)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Same plain-stack binding as `trophy.wall`: without this the identifier
+        // propagates down and overwrites `trophy.wall.scan` on the button above.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.wall.empty")
     }
 }
@@ -1012,14 +1087,16 @@ struct TrophyWallProcessingView: View {
     private static let compactRowLimit = 3
     private static let smallestHeightRowLimit = 2
     private static let scoutAccessibilityLabel = "Scout, the SnapList camera helper"
-    private static let offlineNoticeText = "You're offline. Showing saved items."
+    // Trophy Wall and the pushed Processing screen describe the same collection
+    // failure, so they share one sentence for it rather than drifting into two.
+    static let offlineNoticeText = "You're offline. Showing saved items."
     private static let emptyCollectionMessage = CollectionMessage(
         heading: "Nothing is processing.",
         action: .scan(label: "Scan an item"),
         scoutImageName: "ScoutUncertain",
         scoutAccessibilityLabel: scoutAccessibilityLabel
     )
-    private static let unavailableCollectionMessage = CollectionMessage(
+    static let unavailableCollectionMessage = CollectionMessage(
         heading: "Processing unavailable",
         action: .tryAgain(label: "Try again"),
         scoutImageName: "ScoutRetryReview",
