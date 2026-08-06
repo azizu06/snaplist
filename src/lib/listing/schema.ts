@@ -56,6 +56,18 @@ export const ebayListingSchema = z.object({
 export type EbayListing = z.infer<typeof ebayListingSchema>;
 
 /**
+ * A candidate SHAPED like an eBay listing that has NOT passed `ebayListingSchema` —
+ * its title may still exceed the cap and its item specifics may still be empty.
+ *
+ * Zod's `.max()` and `.refine()` constrain values at PARSE time but do not narrow
+ * `z.infer`, so `EbayListing` cannot express "validated" and the typechecker cannot
+ * tell a parsed listing from a raw candidate. This alias says "not yet" out loud, so
+ * a repair-path value cannot be mistaken for a publishable one. Only
+ * `ebayListingSchema.safeParse` promotes a candidate to an `EbayListing`.
+ */
+export type UnvalidatedEbayListing = z.input<typeof ebayListingSchema>;
+
+/**
  * One model-emitted eBay item specific. The MODEL-FACING representation is an ordered
  * LIST of name→value pairs rather than a dictionary: `generateObject` compiles the
  * supplied Zod schema to JSON Schema, a Zod `record` compiles to `propertyNames`, and
@@ -64,7 +76,7 @@ export type EbayListing = z.infer<typeof ebayListingSchema>;
  * expressible in every provider's structured-output dialect. `itemSpecificsFromPairs`
  * converts back to the name→value record everything downstream consumes.
  */
-export const ebayItemSpecificSchema = z.object({
+const ebayItemSpecificSchema = z.object({
   /** The specific's name, e.g. "Brand". */
   name: z.string(),
   /** The specific's value, e.g. "Sony". */
@@ -98,9 +110,20 @@ function specificNameKey(name: string): string {
 }
 
 /**
- * Convert the model's ORDERED pair list into the name→value record every consumer
- * downstream expects (`ebayListingSchema`, the repair/whitelist step, eBay mapping,
- * mobile publish, the listing-review read path).
+ * Convert the model's ORDERED pair list into a name→value record.
+ *
+ * SOLE CONSUMER: the hallucination check inside `generateEbayListing`
+ * (`listingHallucinatesAttributes`), which asks whether the model asserted a Brand or
+ * Model the validated core never established. NOTHING here reaches persistence, eBay
+ * publish, an export pack, or the listing-review read path: the returned listing's
+ * specifics are UNCONDITIONALLY `reconcileSpecifics(attributes)` — the core whitelist —
+ * on both the pass-through path and the `fallbackEbayListing` path, so no model-emitted
+ * specific survives into any output.
+ *
+ * That bounds what the collision rule below can cost: it cannot lose or corrupt a
+ * grounded value in anything a seller or marketplace sees, only nudge the retry
+ * heuristic. It is NOT a reason to relax the core whitelist — the whitelist is what
+ * makes this conversion harmless in the first place.
  *
  * COLLISION RULE — a list can carry two entries under one name; a record cannot:
  *  - names are compared trimmed and case-insensitively;
@@ -122,11 +145,4 @@ export function itemSpecificsFromPairs(
     out[name.trim()] = value;
   }
   return out;
-}
-
-/** Convert a name→value record back into the model-facing ordered pair list. */
-export function itemSpecificsToPairs(
-  specifics: Record<string, string>,
-): EbayItemSpecific[] {
-  return Object.entries(specifics).map(([name, value]) => ({ name, value }));
 }

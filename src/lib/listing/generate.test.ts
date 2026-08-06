@@ -4,9 +4,10 @@ import type { FewShotExamples, ReferenceMatch } from "../rag";
 import {
   EBAY_TITLE_MAX_LENGTH,
   ebayListingSchema,
-  itemSpecificsToPairs,
+  itemSpecificsFromPairs,
   type EbayListing,
 } from "./schema";
+import { itemSpecificsToPairs } from "./schema.testing";
 import {
   fallbackEbayListing,
   corpusReadKey,
@@ -449,8 +450,27 @@ describe("listing/generate — no attributes invented beyond the validated core"
       ...GOOD_LISTING,
       itemSpecifics: { ...GOOD_LISTING.itemSpecifics, Brand: "Bose", Model: "QC45" },
     };
-    expect(listingHallucinatesAttributes(lying, CORE)).toBe(true);
-    expect(listingHallucinatesAttributes(GOOD_LISTING, CORE)).toBe(false);
+    expect(listingHallucinatesAttributes(lying.itemSpecifics, CORE)).toBe(true);
+    expect(listingHallucinatesAttributes(GOOD_LISTING.itemSpecifics, CORE)).toBe(false);
+  });
+
+  it("detects a contradicting Brand whatever CASING the model chose (#697)", () => {
+    // The dedupe key is case-insensitive but the retained record key keeps the first
+    // occurrence's own casing, so a model that writes `brand` before `Brand` yields
+    // `{ brand: "Bose" }` — the properly-cased, core-matching entry is dropped and the
+    // contradicting one is what survives. A literal `specifics["Brand"]` lookup saw
+    // nothing there and reported the listing clean, losing the retry nudge.
+    const emitted = itemSpecificsFromPairs([
+      { name: "brand", value: "Bose" },
+      { name: "Brand", value: "Sony" },
+    ]);
+    expect(emitted).toEqual({ brand: "Bose" });
+    expect(listingHallucinatesAttributes(emitted, CORE)).toBe(true);
+    // The same insensitivity must not invent a hallucination: a lowercase key whose
+    // value AGREES with the core is still clean.
+    expect(
+      listingHallucinatesAttributes({ brand: "Sony", model: "WH-1000XM4" }, CORE),
+    ).toBe(false);
   });
 
   it("detects a brand invented when the core never established one", () => {
@@ -461,7 +481,7 @@ describe("listing/generate — no attributes invented beyond the validated core"
       description: "Headphones.",
       tags: [],
     };
-    expect(listingHallucinatesAttributes(invented, genericCore)).toBe(true);
+    expect(listingHallucinatesAttributes(invented.itemSpecifics, genericCore)).toBe(true);
   });
 
   it("retries on a hallucinated brand and returns the compliant retry", async () => {
@@ -478,7 +498,7 @@ describe("listing/generate — no attributes invented beyond the validated core"
     });
     expect(calls.length).toBe(2); // hallucinated → retried
     expect(listing.itemSpecifics.Brand).toBe("Sony"); // back to the core's truth
-    expect(listingHallucinatesAttributes(listing, CORE)).toBe(false);
+    expect(listingHallucinatesAttributes(listing.itemSpecifics, CORE)).toBe(false);
   });
 
   it("reconciles away a hallucinated brand even if the model never complies", async () => {
@@ -497,7 +517,7 @@ describe("listing/generate — no attributes invented beyond the validated core"
     });
     // Whatever the model said, the returned listing's brand is the core's brand.
     expect(listing.itemSpecifics.Brand).toBe("Sony");
-    expect(listingHallucinatesAttributes(listing, CORE)).toBe(false);
+    expect(listingHallucinatesAttributes(listing.itemSpecifics, CORE)).toBe(false);
   });
 
   it("drops item specifics not backed by the core (Color, Storage, Manufacturer, …)", async () => {

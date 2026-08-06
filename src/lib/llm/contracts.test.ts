@@ -30,6 +30,12 @@ import { MODEL_FACING_SCHEMAS } from "./contracts";
  *
  * These tests assert on the COMPILED schema — the same artifact the SDK sends — using
  * the SDK's own `zodSchema` compiler, so no live provider call is involved.
+ *
+ * EVERY rule carries a POSITIVE CONTROL proving it can still fail (#697 item 6). The
+ * roles are all clean, so every role assertion passes whether or not the walk actually
+ * matches anything — a rule that quietly stopped firing would look exactly like a
+ * codebase with nothing wrong in it. Each control is a schema that MUST be reported,
+ * and each was verified by disabling its rule and watching only that control die.
  */
 
 /** JSON Schema constructs OpenAI structured outputs reject. */
@@ -45,9 +51,50 @@ function isNode(value: unknown): value is JsonSchemaNode {
 }
 
 /**
+ * Positions holding ONE subschema. `items` may instead hold an ARRAY (draft-07's
+ * positional/tuple form), which the walk accepts for every keyword here rather than
+ * special-casing one.
+ */
+const SINGLE_SUBSCHEMA_KEYWORDS = [
+  "items",
+  "additionalItems",
+  "additionalProperties",
+  "propertyNames",
+  "contains",
+  "not",
+  "if",
+  "then",
+  "else",
+] as const;
+
+/** Positions holding an ARRAY of subschemas. */
+const SUBSCHEMA_LIST_KEYWORDS = ["anyOf", "oneOf", "allOf", "prefixItems"] as const;
+
+/**
+ * Positions holding a MAP of name → subschema. `properties` is walked separately
+ * because rule 3 has to cross-check each key against the node's own `required`.
+ */
+const SUBSCHEMA_MAP_KEYWORDS = ["patternProperties", "$defs", "definitions"] as const;
+
+/**
  * Walk the compiled JSON Schema through SCHEMA positions only (so a property that
  * happens to be *named* `propertyNames` is not mistaken for the keyword) and collect
  * every construct OpenAI structured outputs refuse.
+ *
+ * COVERAGE (#697 item 7). Every position the draft-07 vocabulary can nest a subschema
+ * in is walked: `properties`, the three keyword groups above, and the array form of
+ * `items`. Most are unreachable from today's five roles — the SDK compiles Zod to
+ * draft-07, where a tuple lands in array-form `items` rather than `prefixItems`, and
+ * nothing in Zod compiles to `patternProperties`, `if`/`then`/`else`, `not`, or
+ * `contains` at all. They are walked regardless, because a guard whose coverage
+ * depends on compiler internals stops being a guard the moment those internals move.
+ *
+ * ONE position is deliberately NOT followed: the `$ref` string itself. Its target is
+ * always a `$defs`/`definitions` entry in the same document (the SDK emits no external
+ * references), and those entries are walked directly — so a violation inside a
+ * referenced definition is reported at its definition path. Resolving refs would find
+ * nothing new and would need cycle detection, since a recursive schema's definition
+ * refers back to itself. The `$ref` control below proves the definition path fires.
  */
 function collectViolations(
   node: unknown,
@@ -87,7 +134,7 @@ function collectViolations(
       collectViolations(child, `${path}.properties.${key}`, violations);
     }
   }
-  for (const keyword of ["items", "additionalProperties", "propertyNames"] as const) {
+  for (const keyword of SINGLE_SUBSCHEMA_KEYWORDS) {
     const child = node[keyword];
     if (isNode(child)) collectViolations(child, `${path}.${keyword}`, violations);
     // Draft-07 also allows the ARRAY form of `items` (positional/tuple schemas):
@@ -99,7 +146,7 @@ function collectViolations(
       );
     }
   }
-  for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
+  for (const keyword of SUBSCHEMA_LIST_KEYWORDS) {
     const branches = node[keyword];
     if (Array.isArray(branches)) {
       branches.forEach((branch, index) =>
@@ -107,11 +154,11 @@ function collectViolations(
       );
     }
   }
-  for (const keyword of ["$defs", "definitions"] as const) {
-    const defs = node[keyword];
-    if (isNode(defs)) {
-      for (const [name, def] of Object.entries(defs)) {
-        collectViolations(def, `${path}.${keyword}.${name}`, violations);
+  for (const keyword of SUBSCHEMA_MAP_KEYWORDS) {
+    const entries = node[keyword];
+    if (isNode(entries)) {
+      for (const [name, entry] of Object.entries(entries)) {
+        collectViolations(entry, `${path}.${keyword}.${name}`, violations);
       }
     }
   }
@@ -190,6 +237,88 @@ describe("every model-facing schema compiles to OpenAI-acceptable JSON Schema (#
       path: "control.properties.pair.items[0]",
       reason:
         "'a' is in properties but missing from required (optional fields are not permitted)",
+    });
+  });
+
+  it("flags an object left OPEN — the rule with no control until now (#697)", () => {
+    // Positive control for rule 2. It is HAND-BUILT rather than compiled from Zod
+    // because no Zod schema can produce the violation today: the SDK's `zodSchema`
+    // stamps `additionalProperties: false` onto every object node it emits, including
+    // `z.looseObject` and `.catchall()`. That is exactly the fragility this control
+    // exists for — the day the compiler stops stamping it, rule 2 becomes the thing
+    // standing between us and a 400, and without a control proving the rule can fire
+    // we would have no way to notice it had gone silent instead.
+    const open = {
+      type: "object",
+      properties: { a: { type: "string" } },
+      required: ["a"],
+    };
+    expect(collectViolations(open, "control")).toEqual([
+      {
+        path: "control",
+        reason: "object requires additionalProperties: false (found undefined)",
+      },
+    ]);
+  });
+
+  it("walks the subschema positions no current role reaches (#697)", () => {
+    // Coverage control for the WALK. None of these positions can be produced by the
+    // SDK's compiler today — it emits draft-07, so `z.tuple()` becomes the array form
+    // of `items` and never `prefixItems`, and nothing in Zod compiles to
+    // `patternProperties`, `if`/`then`/`else`, `not`, or `contains`. They are walked
+    // anyway, and asserted here on hand-built nodes, because the alternative is a
+    // guard whose coverage silently depends on compiler internals: a schema dialect
+    // bump or a `z.custom()` carrying a raw JSON Schema would move a role's subtree
+    // into a position the walk skipped, and the guard would still report clean.
+    const open = {
+      type: "object",
+      properties: { a: { type: "string" } },
+      required: ["a"],
+    };
+    const positions: Array<[string, JsonSchemaNode]> = [
+      ["prefixItems", { type: "array", prefixItems: [open] }],
+      [
+        "patternProperties",
+        { type: "object", additionalProperties: false, patternProperties: { "^s_": open } },
+      ],
+      ["if", { if: open }],
+      ["then", { then: open }],
+      ["else", { else: open }],
+      ["not", { not: open }],
+      ["contains", { type: "array", contains: open }],
+      ["additionalItems", { type: "array", additionalItems: open }],
+    ];
+    for (const [keyword, node] of positions) {
+      const path =
+        keyword === "prefixItems"
+          ? "control.prefixItems[0]"
+          : keyword === "patternProperties"
+            ? "control.patternProperties.^s_"
+            : `control.${keyword}`;
+      expect(
+        collectViolations(node, "control"),
+        `${keyword} subtree was not walked`,
+      ).toContainEqual({
+        path,
+        reason: "object requires additionalProperties: false (found undefined)",
+      });
+    }
+  });
+
+  it("reports a violation inside a $ref target, reached at its definition", () => {
+    // `$ref` needs no dereferencing: a recursive role schema compiles to a `$ref`
+    // plus a `definitions` entry, and the walk visits that entry DIRECTLY — so the
+    // violation is found and reported at its definition path, once, however many
+    // `$ref`s point at it. Walking through the `$ref` string instead would add
+    // nothing and would have to guard against the reference cycle this shape creates.
+    const Node: z.ZodType = z.lazy(() =>
+      z.object({ child: Node.nullable(), label: z.string().optional() }),
+    );
+    const compiled = zodSchema(z.object({ root: Node })).jsonSchema;
+    expect(collectViolations(compiled, "control")).toContainEqual({
+      path: "control.definitions.__schema0",
+      reason:
+        "'label' is in properties but missing from required (optional fields are not permitted)",
     });
   });
 

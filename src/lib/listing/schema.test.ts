@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  ebayListingRawSchema,
-  itemSpecificsFromPairs,
-  itemSpecificsToPairs,
-} from "./schema";
+import { ebayListingRawSchema, itemSpecificsFromPairs } from "./schema";
+import { itemSpecificsToPairs } from "./schema.testing";
 
 /**
  * The model-facing item-specifics representation (issue #691).
