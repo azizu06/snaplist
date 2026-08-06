@@ -29,7 +29,7 @@ final class SnapListUITests: XCTestCase {
         let app = launch(extraArguments: [
             "--activation-onboarded-fixture",
             "--reset-activation-guidance",
-            "--visual-state=run-detail",
+            "--visual-state=RUN-02",
             "--run-detail-fixture=reviewable",
             "--activation-guidance-step=listingReview",
             "--listing-review-fixture=loaded"
@@ -45,7 +45,7 @@ final class SnapListUITests: XCTestCase {
         app.launchArguments = [
             "--zero-network-fixtures",
             "--activation-onboarded-fixture",
-            "--visual-state=run-detail",
+            "--visual-state=RUN-02",
             "--run-detail-fixture=reviewable",
             "--listing-review-fixture=loaded"
         ]
