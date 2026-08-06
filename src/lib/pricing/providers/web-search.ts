@@ -267,7 +267,7 @@ export type ExtractComps = (args: {
  * Current strong text model for comp extraction (overridable via
  * `PRICING_MODEL` — AGENTS.md "env-configurable everything").
  */
-export const DEFAULT_PRICING_MODEL = "gpt-5.5";
+export const DEFAULT_PRICING_MODEL = "gpt-5.6-terra";
 
 /**
  * Resolve the pricing model id (override → `PRICING_MODEL` env → default).

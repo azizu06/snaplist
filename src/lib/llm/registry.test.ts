@@ -110,7 +110,7 @@ describe("resolveProvider", () => {
 
 describe("resolveModelId", () => {
   it("falls back to the active provider's per-role default", () => {
-    expect(resolveModelId("vision", { provider: "openai", env: {} })).toBe("gpt-5.5");
+    expect(resolveModelId("vision", { provider: "openai", env: {} })).toBe("gpt-5.6-terra");
     expect(resolveModelId("vision", { provider: "google", env: {} })).toBe("gemini-2.5-flash");
     expect(resolveModelId("judge", { provider: "google", env: {} })).toBe("gemini-2.5-flash");
   });
@@ -122,7 +122,7 @@ describe("resolveModelId", () => {
       "explicit-id",
     );
     // A role's env var only affects that role.
-    expect(resolveModelId("listing", { provider: "openai", env })).toBe("gpt-5.5");
+    expect(resolveModelId("listing", { provider: "openai", env })).toBe("gpt-5.6-terra");
   });
 
   it("maps each role to its own env override var", () => {
