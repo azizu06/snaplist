@@ -105,7 +105,8 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
 - **eBay policy/location binding** — the connected seller's fulfillment, payment, and return policy
   choices plus enabled inventory location for one eBay marketplace and one eBay connection
   generation. A unique usable choice may bind automatically; otherwise the binding remains
-  **setup required** or **selection required**. Candidate labels never include addresses, phone
+  **setup required** or **selection required**. SnapList reads it from the seller's OWN eBay account
+  whenever no stored binding governs the publish, so two connected sellers never share policy ids. Candidate labels never include addresses, phone
   numbers, seller descriptions, or other provider-private details.
 - **Adapter** — an isolating interface around an eBay capability. The transactional eBay adapter is
   the only direct marketplace mutation seam and must remain testable against mocks.

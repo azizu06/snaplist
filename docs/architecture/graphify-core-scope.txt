@@ -249,6 +249,7 @@ src/lib/marketplace/ebay/oauth.ts
 src/lib/marketplace/ebay/policy-location-contract.ts
 src/lib/marketplace/ebay/policy-location-discovery.ts
 src/lib/marketplace/ebay/policy-location-http.ts
+src/lib/marketplace/ebay/policy-location-setup.ts
 src/lib/marketplace/ebay/policy-location-store.ts
 src/lib/marketplace/ebay/publish.ts
 src/lib/marketplace/ebay/types.ts

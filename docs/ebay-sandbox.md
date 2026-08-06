@@ -84,7 +84,13 @@ call live eBay.
    /sell/inventory/v1/location/{key}` or Seller Hub). For a connected seller,
    SnapList discovers and stores the selected marketplace values on that
    seller's current connection generation; publish remains blocked until that
-   binding is ready. Set `EBAY_FULFILLMENT_POLICY_ID`,
+   binding is ready. Discovery is automatic: the first publish of a connection
+   generation reads that seller's own Sell Account policies and inventory
+   location with their own token and persists the result, and any later publish
+   whose stored binding no longer governs (reconnect, different marketplace,
+   unresolved) re-reads it. A seller whose eBay account has no usable policy —
+   or several, where SnapList must not choose — gets a plain-language refusal
+   naming what to fix, and no eBay write happens. Set `EBAY_FULFILLMENT_POLICY_ID`,
    `EBAY_PAYMENT_POLICY_ID`, `EBAY_RETURN_POLICY_ID`, and
    `EBAY_MERCHANT_LOCATION_KEY` only for the exact operator fallback described
    above. Those shared values are refused for every other tenant and every

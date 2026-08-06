@@ -14,8 +14,13 @@
 
 import { EbayApiError } from "./types";
 export class PublishValidationError extends Error {
-  constructor(message: string) {
-    super(message);
+  /**
+   * `cause` carries the INTERNAL failure behind a seller-safe message (for
+   * example the eBay Account API error behind "could not read your policies").
+   * It is for server-side logging and classification only — never surfaced.
+   */
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = "PublishValidationError";
   }
 }
