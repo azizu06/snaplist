@@ -1382,7 +1382,7 @@ private struct TrophyWallOfflineNoticeView: View {
     }
 }
 
-private struct TrophyWallCollectionMessageView: View {
+struct TrophyWallCollectionMessageView: View {
     // Only the approved static Scout artwork ships today. It is the approved
     // Reduced Motion fallback, so it stays honest under any motion setting.
     private static let scoutHeight: CGFloat = 150
@@ -1414,6 +1414,7 @@ private struct TrophyWallCollectionMessageView: View {
         .padding(.top, 24)
         .padding(.bottom, 104)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.processing.collection")
     }
 

@@ -30,9 +30,9 @@ struct AppShellView: View {
     @State private var proGateStore: ProGateStore?
     @State private var proGateFocusRequest: UUID?
     @State private var handlingProGateEventID: UUID?
-    @State private var trophyWallPrincipalFence = TrophyWallPrincipalFence()
     @State private var recoverableLocalPendingIdentity: TrophyWallLogicalIdentity?
-    @State private var trophyWallCollectionRefreshGeneration = 0
+    @State private var trophyWallCollectionRefreshState =
+        TrophyWallCollectionRefreshState()
     @State private var activationCompletionChecked = false
     @State private var hasCompletedActivation = false
     @State private var activationAuthentication = ActivationAuthenticationState.unknown
@@ -352,7 +352,7 @@ struct AppShellView: View {
                         intake: dependencies.nativeIntake
                     )
 #endif
-                    if trophyWallPrincipalFence.observe(
+                    if trophyWallCollectionRefreshState.observePrincipal(
                         submissionHost.trophyWallPrincipalScopeProof
                     ) {
                         trophyWallStore.resetForPrincipalTransition()
@@ -360,19 +360,27 @@ struct AppShellView: View {
                         // tab-keyed refresh below does not re-run on its own, so a
                         // seller already sitting on the wall would watch it stay
                         // blank until they navigated away and back.
-                        trophyWallCollectionRefreshGeneration += 1
                     }
-                    let localCard = await submissionHost
-                        .recoverableTrophyWallPendingCard(
-                            principalScope: trophyWallStore.principalScope
+                    let recoveryScope = trophyWallStore.principalScope
+                    let localCardRecovery = await TrophyWallPendingCardRecovery
+                        .resolve(
+                            scopedTo: recoveryScope,
+                            currentScope: { trophyWallStore.principalScope }
+                        ) {
+                            await submissionHost
+                                .recoverableTrophyWallPendingCard(
+                                    principalScope: recoveryScope
+                                )
+                        }
+                    if case .current(let localCard) = localCardRecovery {
+                        recoverableLocalPendingIdentity =
+                            localCard?.identity.logicalIdentity
+                        trophyWallStore.withdrawLocalPendingCards(
+                            keeping: recoverableLocalPendingIdentity
                         )
-                    recoverableLocalPendingIdentity =
-                        localCard?.identity.logicalIdentity
-                    trophyWallStore.withdrawLocalPendingCards(
-                        keeping: recoverableLocalPendingIdentity
-                    )
-                    if let localCard {
-                        trophyWallStore.ingest(localCard)
+                        if let localCard {
+                            trophyWallStore.ingest(localCard)
+                        }
                     }
                     let activeReviewDeparted =
                         photoReviewHost.session?.intakeActivationID
@@ -586,29 +594,12 @@ struct AppShellView: View {
     }
 
     private var trophyWallFeature: some View {
-        TrophyWallView(
+        TrophyWallFeatureView(
+            router: router,
             store: trophyWallStore,
-            openProcessing: {
-                router.navigate(to: .home(.processing))
-            },
-            openAccount: { router.navigate(to: .settings) },
-            onScan: {
-                router.reset(tab: .scan)
-                router.selectedTab = .scan
-            },
-            onTryAgain: { trophyWallCollectionRefreshGeneration += 1 }
+            repository: trophyWallHistoryRepository,
+            refreshState: $trophyWallCollectionRefreshState
         )
-        .task(
-            id: TrophyWallCollectionRefreshKey(
-                tab: router.selectedTab,
-                generation: trophyWallCollectionRefreshGeneration
-            )
-        ) {
-            guard router.selectedTab == .trophyWall else { return }
-            await trophyWallStore.refreshCollection(
-                using: trophyWallHistoryRepository
-            )
-        }
     }
 
     private var sellerHomeFeature: some View {
@@ -1606,9 +1597,77 @@ struct TrophyWallPrincipalFence {
 /// Trophy Wall refreshes on tab entry, and also whenever the shell proves the
 /// saved collection can no longer be trusted — a principal transition, or the
 /// seller asking to try again after a failed load.
-private struct TrophyWallCollectionRefreshKey: Equatable {
+struct TrophyWallCollectionRefreshKey: Equatable {
     let tab: PrimaryTab
     let generation: Int
+}
+
+struct TrophyWallCollectionRefreshState {
+    private var principalFence = TrophyWallPrincipalFence()
+    private(set) var generation = 0
+
+    mutating func observePrincipal(
+        _ scopeProof: ItemRunSubmissionPrincipalScopeProof?
+    ) -> Bool {
+        let didTransition = principalFence.observe(scopeProof)
+        if didTransition {
+            generation += 1
+        }
+        return didTransition
+    }
+
+    mutating func tryAgain() {
+        generation += 1
+    }
+
+    func taskID(tab: PrimaryTab) -> TrophyWallCollectionRefreshKey {
+        TrophyWallCollectionRefreshKey(tab: tab, generation: generation)
+    }
+}
+
+enum TrophyWallPendingCardRecovery: Equatable {
+    case current(TrophyWallCard?)
+    case stalePrincipal
+
+    @MainActor
+    static func resolve(
+        scopedTo principalScope: TrophyWallPrincipalScope,
+        currentScope: @MainActor () -> TrophyWallPrincipalScope,
+        load: @MainActor () async -> TrophyWallCard?
+    ) async -> TrophyWallPendingCardRecovery {
+        let card = await load()
+        guard currentScope() == principalScope else {
+            return .stalePrincipal
+        }
+        return .current(card)
+    }
+}
+
+@MainActor
+struct TrophyWallFeatureView: View {
+    @Bindable var router: AppRouter
+    @Bindable var store: TrophyWallStore
+    let repository: any TrophyWallRunHistoryRepository
+    @Binding var refreshState: TrophyWallCollectionRefreshState
+
+    var body: some View {
+        TrophyWallView(
+            store: store,
+            openProcessing: {
+                router.navigate(to: .home(.processing))
+            },
+            openAccount: { router.navigate(to: .settings) },
+            onScan: {
+                router.reset(tab: .scan)
+                router.selectedTab = .scan
+            },
+            onTryAgain: { refreshState.tryAgain() }
+        )
+        .task(id: refreshState.taskID(tab: router.selectedTab)) {
+            guard router.selectedTab == .trophyWall else { return }
+            await store.refreshCollection(using: repository)
+        }
+    }
 }
 
 @MainActor

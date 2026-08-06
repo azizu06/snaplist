@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SwiftUI
 import UIKit
 import XCTest
@@ -1751,6 +1752,88 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertTrue(store.settledTiles.isEmpty)
     }
 
+    func testPendingCardRecoveryDropsAResultFromADepartedPrincipal() async {
+        let fixture = TrophyWallTestFixture()
+        let entered = RefreshGate()
+        let release = RefreshGate()
+        var currentScope = fixture.principal
+
+        let recovery = Task { @MainActor in
+            await TrophyWallPendingCardRecovery.resolve(
+                scopedTo: fixture.principal,
+                currentScope: { currentScope }
+            ) {
+                await entered.open()
+                await release.wait()
+                return fixture.initialCards[0]
+            }
+        }
+
+        await entered.wait()
+        currentScope = fixture.otherPrincipal
+        await release.open()
+
+        let result = await recovery.value
+        XCTAssertEqual(result, .stalePrincipal)
+    }
+
+    func testCollectionRefreshTaskRerunsForPrincipalTransitionAndWallTryAgain()
+        async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(RunAPIError.unavailable)]
+        )
+        let driver = TrophyWallRefreshTestDriver()
+        let root = TrophyWallFeatureTestRoot(
+            driver: driver,
+            router: AppRouter(initialTab: .trophyWall),
+            store: store,
+            repository: repository
+        )
+        let host = HostedTrophyWallTestWindow(
+            rootView: root,
+            size: CGSize(width: 390, height: 844)
+        )
+        defer { host.close() }
+
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 1
+                && store.collectionOutcome == .unavailable
+        }
+        let initialTaskID = driver.refreshState.taskID(tab: .trophyWall)
+
+        XCTAssertFalse(driver.refreshState.observePrincipal(nil))
+        let signedIn = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "new-principal"
+            )
+        )
+        XCTAssertTrue(driver.refreshState.observePrincipal(signedIn))
+        let principalTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        XCTAssertNotEqual(principalTaskID, initialTaskID)
+
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 2
+        }
+
+        let renderedWall = try XCTUnwrap(
+            Mirror(reflecting: root.feature.body).children
+                .first(where: { $0.label == "content" })?.value
+                as? TrophyWallView
+        )
+        renderedWall.onTryAgain()
+        let retryTaskID = driver.refreshState.taskID(tab: .trophyWall)
+        XCTAssertNotEqual(retryTaskID, principalTaskID)
+
+        await host.settle()
+        await waitForTrophyWallCondition {
+            repository.requestedPages.count == 3
+        }
+    }
+
     /// A local pending card only means something while the intake that produced it
     /// is still staged. Nothing used to withdraw one, so a discarded or replaced
     /// intake left a card on the wall that routed to the wrong item, or to nothing.
@@ -1795,7 +1878,8 @@ final class TrophyWallDomainTests: XCTestCase {
     /// Trophy Wall is the seller's one return destination, so a failed collection
     /// refresh may not leave it a blank canvas. It reuses the same offline notice
     /// and recovery group the pushed Processing screen already ships.
-    func testWallRendersItsOwnOfflineAndUnavailableGroupInsteadOfABlankCanvas() {
+    func testWallRendersItsOwnOfflineAndUnavailableGroupInsteadOfABlankCanvas()
+        async {
         let unavailable = TrophyWallProcessingView.unavailableCollectionMessage
         let offlineNotice = TrophyWallProcessingView.offlineNoticeText
         let cases: [(
@@ -1891,6 +1975,84 @@ final class TrophyWallDomainTests: XCTestCase {
                 ),
                 testCase.expected,
                 testCase.name
+            )
+        }
+
+        let renderCases: [(name: String, error: any Error)] = [
+            ("offline", URLError(.notConnectedToInternet)),
+            ("unavailable", RunAPIError.unavailable),
+        ]
+        for renderCase in renderCases {
+            let store = TrophyWallTestFixture().makeStore(cards: [])
+            let repository = ScriptedTrophyWallRunHistoryRepository(
+                results: [.failure(renderCase.error)]
+            )
+            await store.refreshCollection(using: repository)
+            let host = HostedTrophyWallTestWindow(
+                rootView: TrophyWallView(
+                    store: store,
+                    openProcessing: {},
+                    openAccount: {},
+                    onScan: {},
+                    onTryAgain: {}
+                ),
+                size: CGSize(width: 390, height: 844)
+            )
+            await host.settle()
+            let image = host.captureImage()
+            host.close()
+
+            XCTAssertGreaterThan(
+                image.opaqueDarkPixelCount(
+                    in: CGRect(x: 0, y: 100, width: 390, height: 640)
+                ),
+                100,
+                "The actual Wall must render its \(renderCase.name) recovery group."
+            )
+        }
+    }
+
+    func testCollectionMessageContainsItsActionAccessibilityElements() {
+        let cases: [(
+            name: String,
+            message: TrophyWallProcessingView.CollectionMessage,
+            actionIdentifier: String
+        )] = [
+            (
+                "proved empty",
+                .init(
+                    heading: "Nothing is processing.",
+                    action: .scan(label: "Scan an item"),
+                    scoutImageName: "ScoutUncertain",
+                    scoutAccessibilityLabel: "Scout"
+                ),
+                "trophy.processing.collection.scan"
+            ),
+            (
+                "failed collection",
+                TrophyWallProcessingView.unavailableCollectionMessage,
+                "trophy.processing.collection.try-again"
+            ),
+        ]
+
+        for testCase in cases {
+            let view = TrophyWallCollectionMessageView(
+                message: testCase.message,
+                onScan: {},
+                onTryAgain: {}
+            )
+            var renderedStructure = ""
+            dump(view.body, to: &renderedStructure)
+
+            XCTAssertTrue(
+                renderedStructure.contains(
+                    "AccessibilityChildBehavior.Contain"
+                ),
+                "The collection must contain descendants: \(testCase.name)"
+            )
+            XCTAssertTrue(
+                renderedStructure.contains(testCase.actionIdentifier),
+                "The contained action must keep its identifier: \(testCase.name)"
             )
         }
     }
@@ -2062,6 +2224,88 @@ final class TrophyWallDomainTests: XCTestCase {
             )
             XCTAssertEqual(inconsistentStore.cards, initialCards, testCase.name)
         }
+    }
+
+    private func waitForTrophyWallCondition(
+        _ predicate: @escaping @MainActor () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<200 where !predicate() {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertTrue(predicate(), file: file, line: line)
+    }
+}
+
+@MainActor
+@Observable
+private final class TrophyWallRefreshTestDriver {
+    var refreshState = TrophyWallCollectionRefreshState()
+}
+
+@MainActor
+private struct TrophyWallFeatureTestRoot: View {
+    @Bindable var driver: TrophyWallRefreshTestDriver
+    @Bindable var router: AppRouter
+    @Bindable var store: TrophyWallStore
+    let repository: any TrophyWallRunHistoryRepository
+
+    var feature: TrophyWallFeatureView {
+        TrophyWallFeatureView(
+            router: router,
+            store: store,
+            repository: repository,
+            refreshState: $driver.refreshState
+        )
+    }
+
+    var body: some View {
+        feature
+    }
+}
+
+@MainActor
+private final class HostedTrophyWallTestWindow {
+    private let hostingController: UIHostingController<AnyView>
+    private let window: UIWindow
+    private let size: CGSize
+
+    init<Content: View>(rootView: Content, size: CGSize) {
+        self.size = size
+        hostingController = UIHostingController(
+            rootView: AnyView(rootView.background(Color.white))
+        )
+        window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.backgroundColor = .white
+        window.isOpaque = true
+        window.rootViewController = hostingController
+        hostingController.loadViewIfNeeded()
+        hostingController.view.frame = window.bounds
+        hostingController.view.backgroundColor = .white
+        hostingController.view.isOpaque = true
+        window.makeKeyAndVisible()
+    }
+
+    func settle() async {
+        for _ in 0..<3 {
+            await Task.yield()
+            window.setNeedsLayout()
+            window.layoutIfNeeded()
+            hostingController.view.setNeedsLayout()
+            hostingController.view.layoutIfNeeded()
+        }
+        hostingController.view.setNeedsDisplay()
+        hostingController.view.layer.displayIfNeeded()
+    }
+
+    func captureImage() -> UIImage {
+        renderOpaqueRGBA8(view: hostingController.view, size: size)
+    }
+
+    func close() {
+        window.isHidden = true
+        withExtendedLifetime(window) {}
     }
 }
 
