@@ -480,6 +480,33 @@ enum TrophyWallCollectionOutcome: Equatable, Sendable {
     case unavailable
 }
 
+/// How far the client has got through recovering a refused collection refresh
+/// on its own initiative. A boundary that answers badly does not heal the way
+/// connectivity does, so SnapList retries a bounded number of times before it
+/// says anything; one bad answer is not yet a seller-facing failure.
+enum TrophyWallCollectionRefreshRecovery: Equatable, Sendable {
+    /// Nothing is refused, or a later refresh proved the collection again.
+    case idle
+    /// A refusal is outstanding and automatic attempts still remain.
+    case recovering
+    /// The automatic attempts are spent, so the seller may now be told.
+    case exhausted
+}
+
+/// The bounded automatic-recovery schedule for a refused collection refresh.
+/// It is deliberately short: the seller is looking at cached rows the whole
+/// time, and a longer silence would be a worse lie than an honest notice.
+enum TrophyWallCollectionRecoveryPolicy {
+    static let maximumAutomaticAttempts = 3
+
+    /// The wait before the given 1-based attempt. Attempt 1 is the original
+    /// request and never waits, so only attempts 2 and up have a backoff.
+    static func backoff(beforeAttempt attempt: Int) -> Duration {
+        precondition(attempt >= 2)
+        return .milliseconds(500 << (attempt - 2))
+    }
+}
+
 @MainActor
 @Observable
 final class TrophyWallStore {
@@ -500,6 +527,7 @@ final class TrophyWallStore {
     let principalScope: TrophyWallPrincipalScope
     private(set) var cards: [TrophyWallCard]
     private(set) var collectionOutcome: TrophyWallCollectionOutcome = .unknown
+    private(set) var collectionRefreshRecovery: TrophyWallCollectionRefreshRecovery = .idle
     private var canonicalHistoryStates: [UUID: CanonicalHistoryState]
     private var runIDsByListingID: [UUID: UUID]
     private var isRefreshingCollection = false
@@ -597,11 +625,50 @@ final class TrophyWallStore {
                 ingest(historyPage: page, principalScope: principalScope)
             }
             collectionOutcome = .loaded
+            collectionRefreshRecovery = .idle
         } catch {
             guard collectionRequestGeneration == requestGeneration else {
                 return
             }
             collectionOutcome = Self.outcome(forFailure: error)
+            // A refusal only ever opens recovery here. Exhaustion is claimed by
+            // `recoverCollection`, which is the only thing that knows how many
+            // attempts have actually been spent.
+            collectionRefreshRecovery =
+                collectionOutcome == .unavailable ? .recovering : .idle
+        }
+    }
+
+    /// Refreshes the collection and, when the boundary refuses the answer,
+    /// keeps trying on the client's own initiative. Only once the bounded
+    /// attempts are spent may the wall carry a refresh-unavailable notice, so
+    /// the seller is never interrupted by a failure SnapList could fix itself.
+    ///
+    /// Cancellation leaves recovery open rather than claiming exhaustion: a
+    /// seller who navigated away has not been told anything.
+    func recoverCollection(
+        using repository: any TrophyWallRunHistoryRepository,
+        waiting: @MainActor (Duration) async -> Void = {
+            try? await Task.sleep(for: $0)
+        }
+    ) async {
+        await refreshCollection(using: repository)
+
+        var attempt = 1
+        while collectionOutcome == .unavailable,
+              attempt < TrophyWallCollectionRecoveryPolicy.maximumAutomaticAttempts {
+            attempt += 1
+            await waiting(
+                TrophyWallCollectionRecoveryPolicy.backoff(beforeAttempt: attempt)
+            )
+            guard !Task.isCancelled else {
+                return
+            }
+            await refreshCollection(using: repository)
+        }
+
+        if collectionOutcome == .unavailable {
+            collectionRefreshRecovery = .exhausted
         }
     }
 
@@ -626,6 +693,7 @@ final class TrophyWallStore {
         canonicalHistoryStates = [:]
         runIDsByListingID = [:]
         collectionOutcome = .unknown
+        collectionRefreshRecovery = .idle
     }
 
     /// A server that answered badly is not the same as a device that could not

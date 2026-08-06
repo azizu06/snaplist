@@ -1665,7 +1665,7 @@ struct TrophyWallFeatureView: View {
         )
         .task(id: refreshState.taskID(tab: router.selectedTab)) {
             guard router.selectedTab == .trophyWall else { return }
-            await store.refreshCollection(using: repository)
+            await store.recoverCollection(using: repository)
         }
     }
 }
@@ -1683,11 +1683,12 @@ private struct TrophyWallProcessingDestinationView: View {
         TrophyWallProcessingView(
             rows: store.processingRows,
             collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
             onBack: { dismiss() },
             openRoute: openRoute,
             onScan: onScan,
             onTryAgain: {
-                Task { await store.refreshCollection(using: repository) }
+                Task { await store.recoverCollection(using: repository) }
             }
         )
         .navigationBarBackButtonHidden(true)

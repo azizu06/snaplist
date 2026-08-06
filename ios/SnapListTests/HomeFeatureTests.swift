@@ -1527,6 +1527,197 @@ final class TrophyWallDomainTests: XCTestCase {
         )
     }
 
+    func testRefusedCollectionRefreshRecoversAutomaticallyBeforeTellingTheSeller() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let savedCards = store.cards
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(URLError(.badServerResponse))]
+        )
+        var observedWaits: [Duration] = []
+
+        await store.recoverCollection(using: repository) { duration in
+            observedWaits.append(duration)
+        }
+
+        XCTAssertEqual(store.collectionOutcome, .unavailable)
+        XCTAssertEqual(store.collectionRefreshRecovery, .exhausted)
+        XCTAssertEqual(store.cards, savedCards)
+        XCTAssertEqual(
+            repository.requestedPages.count,
+            TrophyWallCollectionRecoveryPolicy.maximumAutomaticAttempts,
+            "A refused collection must be retried on the client's own initiative."
+        )
+        XCTAssertEqual(
+            observedWaits,
+            (2...TrophyWallCollectionRecoveryPolicy.maximumAutomaticAttempts).map {
+                TrophyWallCollectionRecoveryPolicy.backoff(beforeAttempt: $0)
+            },
+            "Automatic attempts must back off rather than hammer the boundary."
+        )
+    }
+
+    func testSingleRefusedCollectionRefreshStaysSilentWhileRecoveryRemains() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(URLError(.badServerResponse))]
+        )
+
+        await store.refreshCollection(using: repository)
+
+        XCTAssertEqual(store.collectionOutcome, .unavailable)
+        XCTAssertEqual(store.collectionRefreshRecovery, .recovering)
+
+        let presentation = TrophyWallProcessingView.presentation(
+            from: store.processingRows,
+            collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
+            availableHeight: 844,
+            isExpanded: false
+        )
+
+        XCTAssertNil(
+            presentation.refreshUnavailableNotice,
+            "One bad answer is not yet a seller-facing failure."
+        )
+    }
+
+    func testRecoveredCollectionClearsTheRefreshUnavailableNoticeWithoutSellerAction() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(URLError(.badServerResponse))]
+        )
+
+        await store.recoverCollection(using: repository) { _ in }
+        XCTAssertEqual(store.collectionRefreshRecovery, .exhausted)
+
+        let recovering = ScriptedTrophyWallRunHistoryRepository(
+            results: [.page(TrophyWallRunHistoryPage(entries: [], nextCursor: nil))]
+        )
+        await store.refreshCollection(using: recovering)
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        XCTAssertEqual(store.collectionRefreshRecovery, .idle)
+        XCTAssertNil(
+            TrophyWallProcessingView.presentation(
+                from: store.processingRows,
+                collectionOutcome: store.collectionOutcome,
+                refreshRecovery: store.collectionRefreshRecovery,
+                availableHeight: 844,
+                isExpanded: false
+            ).refreshUnavailableNotice
+        )
+    }
+
+    func testEveryCollectionOutcomeMapsToExactlyOneTrophyWallPresentation() {
+        let fixture = TrophyWallTestFixture()
+        let rows = fixture.makeStore(cards: fixture.processingInitialCards).processingRows
+        XCTAssertFalse(rows.isEmpty)
+
+        struct Expectation {
+            let outcome: TrophyWallCollectionOutcome
+            let recovery: TrophyWallCollectionRefreshRecovery
+            let offlineNotice: String?
+            let refreshUnavailableNotice: String?
+            let collectionMessageHeading: String?
+        }
+
+        let expectations: [Expectation] = [
+            .init(
+                outcome: .unknown,
+                recovery: .idle,
+                offlineNotice: nil,
+                refreshUnavailableNotice: nil,
+                collectionMessageHeading: nil
+            ),
+            .init(
+                outcome: .loaded,
+                recovery: .idle,
+                offlineNotice: nil,
+                refreshUnavailableNotice: nil,
+                collectionMessageHeading: nil
+            ),
+            .init(
+                outcome: .offline,
+                recovery: .idle,
+                offlineNotice: "You're offline. Showing saved items.",
+                refreshUnavailableNotice: nil,
+                collectionMessageHeading: nil
+            ),
+            .init(
+                outcome: .unavailable,
+                recovery: .exhausted,
+                offlineNotice: nil,
+                refreshUnavailableNotice: "Can't refresh. Showing saved items.",
+                collectionMessageHeading: nil
+            ),
+        ]
+
+        for expectation in expectations {
+            let rowsMode = TrophyWallProcessingView.presentation(
+                from: rows,
+                collectionOutcome: expectation.outcome,
+                refreshRecovery: expectation.recovery,
+                availableHeight: 844,
+                isExpanded: false
+            )
+            XCTAssertEqual(
+                rowsMode.offlineNotice,
+                expectation.offlineNotice,
+                "\(expectation.outcome) offline strip"
+            )
+            XCTAssertEqual(
+                rowsMode.refreshUnavailableNotice,
+                expectation.refreshUnavailableNotice,
+                "\(expectation.outcome) refresh-unavailable strip"
+            )
+            XCTAssertNil(
+                rowsMode.collectionMessage,
+                "\(expectation.outcome) must never replace a populated rows region."
+            )
+            XCTAssertFalse(rowsMode.visibleRows.isEmpty)
+
+            let wall = TrophyWallView.presentation(
+                hasSettledTiles: true,
+                collectionOutcome: expectation.outcome,
+                refreshRecovery: expectation.recovery
+            )
+            XCTAssertEqual(wall.offlineNotice, expectation.offlineNotice)
+            XCTAssertEqual(
+                wall.refreshUnavailableNotice,
+                expectation.refreshUnavailableNotice
+            )
+            XCTAssertTrue(wall.showsGrid)
+
+            let emptyRowsMode = TrophyWallProcessingView.presentation(
+                from: [],
+                collectionOutcome: expectation.outcome,
+                refreshRecovery: expectation.recovery,
+                availableHeight: 844,
+                isExpanded: false
+            )
+            XCTAssertNil(emptyRowsMode.offlineNotice)
+            XCTAssertNil(emptyRowsMode.refreshUnavailableNotice)
+            XCTAssertEqual(
+                emptyRowsMode.collectionMessage?.heading,
+                expectation.collectionMessageHeading
+                    ?? Self.emptyRowsCollectionHeading(for: expectation.outcome)
+            )
+        }
+    }
+
+    private static func emptyRowsCollectionHeading(
+        for outcome: TrophyWallCollectionOutcome
+    ) -> String? {
+        switch outcome {
+        case .unknown: nil
+        case .loaded: "Nothing is processing."
+        case .offline, .unavailable: "Processing unavailable"
+        }
+    }
+
     func testEmptyProcessingStateAppearsOnlyAfterSuccessfulCollectionTruth() async {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: [])
@@ -1896,6 +2087,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: false,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1907,6 +2099,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: false,
                     showsEmptyView: true,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1918,6 +2111,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: false,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: unavailable
                 )
             ),
@@ -1929,6 +2123,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: false,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: unavailable
                 )
             ),
@@ -1940,6 +2135,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: true,
                     showsEmptyView: false,
                     offlineNotice: offlineNotice,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1951,6 +2147,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: true,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1962,6 +2159,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: true,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
