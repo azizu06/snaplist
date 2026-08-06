@@ -874,7 +874,7 @@ html:has(.mkt) {
 }
 
 .mkt-loop-section {
-  padding: 0 0 clamp(64px, 7vw, 104px);
+  padding: clamp(20px, 3vw, 44px) 0 clamp(64px, 7vw, 104px);
   overflow: hidden;
 }
 
