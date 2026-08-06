@@ -157,6 +157,7 @@ protocol EbayPublishFeatureServing: EbayPublishServing {
 enum EbayPublishClientError: Error, Equatable {
     case invalidResponse
     case httpStatus(Int, message: String?, reason: String?)
+    case sellerFixableRefusal(message: String)
 }
 
 struct UnavailableEbayPublishFeatureService: EbayPublishFeatureServing {
@@ -284,6 +285,9 @@ struct EbayPublishAPIClient: EbayPublishFeatureServing {
                 response: EbayPublishStatus.self
             )
             return Self.outcome(from: status)
+        } catch let EbayPublishClientError.httpStatus(status, message?, _)
+            where status == 422 {
+            throw EbayPublishClientError.sellerFixableRefusal(message: message)
         } catch let EbayPublishClientError.httpStatus(status, _, reason)
             where status == 409 {
             if reason == "ebay_published_authority_changed" {

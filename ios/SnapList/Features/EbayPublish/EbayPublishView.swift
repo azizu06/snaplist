@@ -864,6 +864,12 @@ private struct EbayResultCopy {
                 "Your listing was not posted. It is saved and ready to send when eBay is back.",
                 "Try again", "Go to Trophy Wall", "unavailable", .neutral
             )
+        case .sellerFixableRefusal(let message):
+            (headline, chip, body, primary, secondary, identifier, chipVariant) = (
+                "Update your eBay account to post this listing.", "Not posted",
+                message,
+                "Go to Trophy Wall", nil, "seller-fixable-refusal", .neutral
+            )
         case .outcomeNotYetKnown:
             (headline, chip, body, primary, secondary, identifier, chipVariant) = (
                 "SnapList does not know yet whether eBay accepted this listing.",
