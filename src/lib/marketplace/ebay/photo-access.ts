@@ -89,20 +89,54 @@ export async function issueEbayPhotoUrls(
   return urls;
 }
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The origin eBay fetches published pictures from. `SNAPLIST_PUBLIC_ORIGIN` is the
+ * only variable that MEANS this. `CLERK_AUTHORIZED_PARTIES` is an authentication
+ * setting whose order carries no meaning for Clerk, so reading its first entry made
+ * an unrelated config edit able to redirect every published listing's pictures. It
+ * stays only as a fallback for deployments that predate the dedicated variable.
+ */
 export function resolveEbayPhotoBaseUrl(
   env: Record<string, string | undefined>,
 ): string {
-  const configured = env.CLERK_AUTHORIZED_PARTIES
-    ?.split(",")
-    .map((party) => party.trim())
-    .find(Boolean);
-  if (configured) return new URL(configured).origin;
+  const configured = env.SNAPLIST_PUBLIC_ORIGIN?.trim()
+    || env.CLERK_AUTHORIZED_PARTIES
+      ?.split(",")
+      .map((party) => party.trim())
+      .find(Boolean);
+  if (configured) return publicOrigin(configured);
   if (env.NODE_ENV === "production") {
     throw new Error(
       "Failed to resolve photos for eBay: no public SnapList origin is configured.",
     );
   }
   return "http://localhost:3000";
+}
+
+/**
+ * eBay fetches these URLs from the public internet, so a relative value, a
+ * non-HTTP scheme, or plaintext HTTP on a routable host cannot serve a real
+ * listing. Reject them here rather than publishing pictures eBay cannot load.
+ */
+function publicOrigin(configured: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    throw new Error(
+      "Failed to resolve photos for eBay: no public SnapList origin is configured.",
+    );
+  }
+  const insecure = parsed.protocol === "http:"
+    && LOOPBACK_HOSTS.has(parsed.hostname);
+  if (parsed.protocol !== "https:" && !insecure) {
+    throw new Error(
+      "Failed to resolve photos for eBay: no public SnapList origin is configured.",
+    );
+  }
+  return parsed.origin;
 }
 
 const notFound = () => new Response("Not found.", {

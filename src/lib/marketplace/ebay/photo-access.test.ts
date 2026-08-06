@@ -58,6 +58,33 @@ describe("issueEbayPhotoUrls", () => {
       /no public SnapList origin/i,
     );
   });
+
+  it("prefers the dedicated origin over the Clerk authentication list", () => {
+    expect(resolveEbayPhotoBaseUrl({
+      SNAPLIST_PUBLIC_ORIGIN: "https://snaplist.dev",
+      // Reordering this list is a routine Clerk change. It must not decide where
+      // eBay fetches a published listing's pictures from.
+      CLERK_AUTHORIZED_PARTIES:
+        "https://preview.snaplist.dev,https://snaplist.dev",
+    })).toBe("https://snaplist.dev");
+  });
+
+  it.each([
+    ["a relative value", "/m"],
+    ["a non-HTTP scheme", "ftp://snaplist.dev"],
+    ["plaintext HTTP on a routable host", "http://snaplist.dev"],
+  ])("refuses %s that eBay could not fetch", (_name, origin) => {
+    expect(() => resolveEbayPhotoBaseUrl({
+      SNAPLIST_PUBLIC_ORIGIN: origin,
+      NODE_ENV: "production",
+    })).toThrow(/no public SnapList origin/i);
+  });
+
+  it("still allows a loopback origin outside production", () => {
+    expect(resolveEbayPhotoBaseUrl({
+      SNAPLIST_PUBLIC_ORIGIN: "http://localhost:3000",
+    })).toBe("http://localhost:3000");
+  });
 });
 
 describe("serveEbayPhoto", () => {
