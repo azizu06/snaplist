@@ -63,7 +63,6 @@ final class RunDetailStore {
               run.legalActions.canRetry else { return }
         isRetrying = true
         defer { isRetrying = false }
-        let generation = requestGeneration
         let key = retryIdempotencyKeys[run.id] ?? UUID()
         retryIdempotencyKeys[run.id] = key
         do {
@@ -77,12 +76,8 @@ final class RunDetailStore {
                 throw RunAPIError.invalidResponse
             }
             retryIdempotencyKeys[run.id] = nil
-            guard generation == requestGeneration,
-                  requestedRunID == run.id else { return }
             state = .loaded(retried)
         } catch {
-            guard generation == requestGeneration,
-                  requestedRunID == run.id else { return }
             state = .loaded(run)
         }
     }
