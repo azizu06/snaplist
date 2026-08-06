@@ -226,6 +226,12 @@ function publishFixtureClient() {
       throw new Error(`Unexpected table ${table}`);
     },
     async rpc(name: string, params: Record<string, unknown>) {
+      if (name === "issue_ebay_photo_access_tokens") {
+        return {
+          data: [{ photo_ordinal: 0, token: "A".repeat(43) }],
+          error: null,
+        };
+      }
       if (name === "get_review_snapshot") {
         beforeReviewSnapshot?.();
         return {
@@ -320,17 +326,6 @@ function publishFixtureClient() {
         return { data: null, error: null };
       }
       throw new Error(`Unexpected RPC ${name}`);
-    },
-    storage: {
-      from: () => ({
-        createSignedUrls: async (paths: string[]) => ({
-          data: paths.map((path) => ({
-            path,
-            signedUrl: `https://storage.example/${path}`,
-          })),
-          error: null,
-        }),
-      }),
     },
   } as unknown as SupabaseClient;
 

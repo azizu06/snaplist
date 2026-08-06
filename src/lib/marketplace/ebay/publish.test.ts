@@ -199,7 +199,9 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
       return publishResult;
     };
 
-    const outcome = await publishListingToEbay(serverA, listingId, adapter);
+    const outcome = await publishListingToEbay(serverA, listingId, adapter, {
+      photoBaseUrl: "https://snaplist.dev",
+    });
 
     expect(outcome).toEqual({
       listingId,
@@ -222,9 +224,16 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     });
     expect(sent.condition).toBe(toEbayCondition(result.attributes.condition));
     expect(sent.quantity).toBe(1);
-    // The private photo was signed into a fetchable URL for eBay.
+    // eBay receives only the short opaque route, never the long private
+    // Supabase object endpoint or its path-bearing signed JWT.
     expect(sent.imageUrls.length).toBeGreaterThan(0);
-    expect(sent.imageUrls[0]).toContain("/photos/");
+    expect(sent.imageUrls[0]).toMatch(
+      /^https:\/\/snaplist\.dev\/m\/[A-Za-z0-9_-]{43}$/,
+    );
+    expect(sent.imageUrls.every((url) => url.length <= 200)).toBe(true);
+    expect(
+      sent.imageUrls.reduce((length, url) => length + url.length, 0),
+    ).toBeLessThan(3975);
 
     // Persisted state, read back AS THE OWNER (the acceptance seam).
     const { data: row } = await userA.client
@@ -438,7 +447,9 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
 
     const adapter = new MockEbayAdapter();
     await expect(
-      publishListingToEbay(serverA, listing!.id as string, adapter),
+      publishListingToEbay(serverA, listing!.id as string, adapter, {
+        env: () => ({ NODE_ENV: "production" }),
+      }),
     ).rejects.toThrowError(/has no photos/i);
     expect(adapter.requests).toHaveLength(0); // never reached eBay
 
@@ -494,7 +505,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     const adapter = new MockEbayAdapter();
     await expect(
       publishListingToEbay(serverA, listing!.id as string, adapter),
-    ).rejects.toThrowError(/none could be signed/i);
+    ).rejects.toThrowError(/none could be resolved/i);
     expect(adapter.requests).toHaveLength(0); // never reached eBay
 
     const { data: row } = await userA.client

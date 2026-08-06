@@ -98,6 +98,7 @@ describe("lean-MVP release retention contract", () => {
       "local-intake-photos",
       "local-intake-voice",
       "private-storage-photos",
+      "ebay-photo-access-tokens",
       "private-storage-raw-voice",
       "hosted-transcription-provider-copy",
       "seller-voice-transcript",

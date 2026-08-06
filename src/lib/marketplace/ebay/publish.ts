@@ -19,9 +19,12 @@ import {
   isEbayAuthError,
   EBAY_RECONNECT_MESSAGE,
 } from "./errors";
-import { batchSignPhotoUrls } from "../../vision/photos";
 import { createNotification } from "../../notifications";
 import { effectivePrice } from "../../pipeline";
+import {
+  issueEbayPhotoUrls,
+  resolveEbayPhotoBaseUrl,
+} from "./photo-access";
 
 /**
  * Publish ONE persisted SnapList listing to eBay through the adapter seam and
@@ -56,12 +59,10 @@ export interface PublishOutcome {
 export interface PublishOptions {
   /** Injectable env reader; defaults to process.env. Read lazily per call. */
   env?: () => Record<string, string | undefined>;
-  /**
-   * TTL for the signed photo URLs handed to eBay. eBay copies images into its
-   * own hosting at listing time, so the URL only has to outlive the publish
-   * call; 7 days is comfortable for retries.
-   */
-  signedUrlTtlSeconds?: number;
+  /** Public SnapList origin hosting the short eBay media route. */
+  photoBaseUrl?: string;
+  /** Seven days preserves the prior bounded retry window. */
+  photoUrlTtlSeconds?: number;
   completionClient?: SupabaseClient;
   /** Client-observed review token. Mobile publish must supply this and fail closed when stale. */
   expectedReviewRevision?: string;
@@ -98,7 +99,7 @@ interface EbayOfferBinding {
  */
 const GENERIC_CATEGORY_ID = "88433";
 
-const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
+const PHOTO_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * The currency every persisted price is denominated in: the pricing pipeline's
@@ -362,11 +363,16 @@ export async function publishListingToEbay(
   const photoPaths = claim.photos;
   let imageUrls: string[];
   try {
-    imageUrls = await signPhotoUrls(
-      supabase,
-      photoPaths,
-      options.signedUrlTtlSeconds ?? SIGNED_URL_TTL_SECONDS,
-    );
+    imageUrls = photoPaths.length === 0
+      ? []
+      : await issueEbayPhotoUrls(
+          supabase,
+          claim.itemId,
+          {
+            baseUrl: options.photoBaseUrl ?? resolveEbayPhotoBaseUrl(env),
+            ttlSeconds: options.photoUrlTtlSeconds ?? PHOTO_URL_TTL_SECONDS,
+          },
+        );
   } catch (error) {
     await markPublishFailed(supabase, listingId, claimId, offerBinding);
     throw error;
@@ -378,7 +384,7 @@ export async function publishListingToEbay(
         ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
           "Add a photo to the item before publishing."
         : `Listing ${listingId} has ${photoPaths.length} photo(s) but none could be ` +
-          "signed into a fetchable URL, and eBay requires at least one image. " +
+          "resolved into a fetchable URL, and eBay requires at least one image. " +
           "Re-upload the item's photos before publishing.",
     );
   }
@@ -793,22 +799,4 @@ async function markPublishFailed(
   } catch {
     // Best effort: never mask the publish error being reported.
   }
-}
-
-/**
- * Sign each private photo path, IN ORDER; a bad PATH is skipped (a genuinely
- * missing photo shouldn't block the rest), but a storage/transport failure
- * THROWS (`batchSignPhotoUrls`) so a transient outage surfaces as a retryable
- * internal error — never as "none of your photos could be signed, re-upload"
- * (Codex P2 on #98).
- */
-async function signPhotoUrls(
-  supabase: SupabaseClient,
-  paths: string[],
-  ttlSeconds: number,
-): Promise<string[]> {
-  const signed = await batchSignPhotoUrls(supabase, paths, { expiresIn: ttlSeconds });
-  return paths
-    .map((path) => signed.get(path))
-    .filter((url): url is string => Boolean(url));
 }

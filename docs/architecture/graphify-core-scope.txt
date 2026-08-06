@@ -123,6 +123,7 @@ src/app/api/internal/pipeline-worker/route.ts
 src/app/api/search/route.ts
 src/app/api/webhooks/revenuecat/route.ts
 src/app/api/webhooks/stripe/route.ts
+src/app/m/[token]/route.ts
 src/app/v1/account/erasure/handler.ts
 src/app/v1/account/erasure/route.ts
 src/app/v1/activation-guidance/route.ts
@@ -251,6 +252,7 @@ src/lib/marketplace/ebay/mobile-operator-activation.ts
 src/lib/marketplace/ebay/mobile-publish.ts
 src/lib/marketplace/ebay/mock.ts
 src/lib/marketplace/ebay/oauth.ts
+src/lib/marketplace/ebay/photo-access.ts
 src/lib/marketplace/ebay/policy-location-contract.ts
 src/lib/marketplace/ebay/policy-location-discovery.ts
 src/lib/marketplace/ebay/policy-location-http.ts
@@ -483,6 +485,7 @@ supabase/migrations/20260805160000_revenuecat_environment_gate.sql
 supabase/migrations/20260805170000_hosted_server_api_guard.sql
 supabase/migrations/20260805200000_server_rpc_forwarded_secret.sql
 supabase/migrations/20260805210000_activation_guidance_completion.sql
+supabase/migrations/20260806120000_ebay_photo_access_tokens.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

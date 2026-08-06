@@ -236,6 +236,12 @@ function fakePublishClient(
       throw new Error(`unexpected table ${table}`);
     },
     async rpc(name: string, params: Record<string, unknown>) {
+      if (name === "issue_ebay_photo_access_tokens") {
+        return {
+          data: [{ photo_ordinal: 0, token: "A".repeat(43) }],
+          error: null,
+        };
+      }
       if (name === "bind_ebay_publish_connection_generation") {
         const requestedBinding = {
           marketplaceId: params.p_marketplace_id as string,
@@ -296,17 +302,6 @@ function fakePublishClient(
         },
         error: null,
       };
-    },
-    storage: {
-      from: () => ({
-        createSignedUrls: async (paths: string[]) => ({
-          data: paths.map((path) => ({
-            path,
-            signedUrl: `https://storage.example/${path}`,
-          })),
-          error: null,
-        }),
-      }),
     },
   } as unknown as SupabaseClient;
 
