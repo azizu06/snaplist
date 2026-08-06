@@ -685,6 +685,38 @@ extension SettingsTests {
         XCTAssertEqual(presentation.hint?.message, message)
     }
 
+    /// The hint row combines its children so VoiceOver reads the warning and
+    /// its link as one sentence. Combining also deletes the `Link` from the
+    /// accessibility tree, so a VoiceOver seller can no longer activate it. The
+    /// row re-exposes the same destination as an action on the combined
+    /// element, which reaches VoiceOver through the actions rotor.
+    ///
+    /// XCUITest cannot observe this: the combined element has no children to
+    /// find, and `XCUIElement.hasFocus` reads UIKit focus rather than VoiceOver
+    /// focus. The seam is the rendered body type, which names the whole static
+    /// subtree including the modifier that attaches the action. That type does
+    /// not vary with the hint's data, so one fixture proves the composition;
+    /// whether the action fires for a hint with no link is the modifier's own
+    /// `if let`, not something this type can show.
+    @MainActor
+    func testPolicyHintOffersTheEbayLinkAsAnActionOnTheCombinedElement() {
+        let row = SettingsSellingHintRow(
+            hint: SettingsSellingPresentation.Hint(
+                message: "Your eBay account has no payment policy.",
+                helpURL: URL(
+                    string: "https://www.bizpolicy.ebay.com/businesspolicy/manage"
+                )
+            )
+        )
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("SettingsSellingHintPolicyAction"),
+            "The combined hint element carries no policy action: \(rendered)"
+        )
+    }
+
     func testConnectionDecodesAServerAnswerThatCarriesNoPolicySetup() throws {
         let json = Data(#"{"connected":true,"ebayUsername":"sandbox-seller"}"#.utf8)
 

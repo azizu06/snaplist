@@ -65,7 +65,7 @@ struct SettingsView: View {
                     chevron: true
                 )
                 if let hint = sellingPresentation.hint {
-                    sellingHintRow(hint)
+                    SettingsSellingHintRow(hint: hint)
                 }
                 valueRow("Photos", "Selected photos", chevron: true)
                 valueRow("Notifications", "On", chevron: true)
@@ -293,23 +293,6 @@ struct SettingsView: View {
             connection: ebayConnection,
             loadPhase: ebayConnectionLoadPhase
         )
-    }
-
-    @ViewBuilder
-    private func sellingHintRow(
-        _ hint: SettingsSellingPresentation.Hint
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(hint.message, systemImage: "exclamationmark.triangle")
-                .font(.footnote)
-                .labelStyle(.titleAndIcon)
-            if let helpURL = hint.helpURL {
-                Link("Open business policies on eBay", destination: helpURL)
-                    .font(.footnote)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("settings.ebay-policy-hint")
     }
 
     /// Settings reads the connection the seller already has. A guest has none,
