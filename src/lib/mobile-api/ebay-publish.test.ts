@@ -1040,3 +1040,130 @@ describe("mobile eBay publish boundary", () => {
     expect(reportError).not.toHaveBeenCalled();
   });
 });
+
+describe("eBay connection policy setup hint (#694)", () => {
+  function connectionRequest(handler: (request: Request) => Promise<Response>) {
+    return handler(
+      new Request("https://api.snaplist.test/v1/ebay/connection", {
+        headers: { authorization: "Bearer clerk-jwt" },
+      }),
+    );
+  }
+
+  it("reports a ready policy setup for a seller whose stored binding is complete", async () => {
+    const { client } = publishFixtureClient();
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client,
+      requestId: "request-694-ready",
+    });
+
+    const response = await connectionRequest(handler);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        connected: true,
+        policySetup: {
+          state: "ready",
+          marketplaceId: "EBAY_US",
+          missing: [],
+          ambiguous: [],
+          message: null,
+        },
+      },
+    });
+  });
+
+  it("names the families the seller's eBay account is missing", async () => {
+    const harness = publishFixtureClient();
+    const stored = harness.connectionState.current!
+      .policy_location_bindings.EBAY_US as Record<string, unknown>;
+    stored.state = "setupRequired";
+    stored.paymentPolicy = { state: "setupRequired", selectedId: null, candidates: [] };
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: harness.client,
+      requestId: "request-694-setup-required",
+    });
+
+    const response = await connectionRequest(handler);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        connected: true,
+        policySetup: {
+          state: "setupRequired",
+          missing: ["paymentPolicy"],
+          message:
+            "Your eBay account has no payment policy for EBAY_US. "
+            + "Add it in eBay before you publish.",
+          helpUrl: "https://www.bizpolicy.ebay.com/businesspolicy/manage",
+        },
+      },
+    });
+  });
+
+  it("asks a connected seller to check eBay when nothing is stored yet", async () => {
+    const harness = publishFixtureClient();
+    harness.connectionState.current!.policy_location_bindings = {};
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: harness.client,
+      requestId: "request-694-not-checked",
+    });
+
+    const response = await connectionRequest(handler);
+
+    expect(await response.json()).toMatchObject({
+      data: { connected: true, policySetup: { state: "notChecked", missing: [] } },
+    });
+  });
+
+  it("omits the hint entirely for a seller with no eBay connection", async () => {
+    const harness = publishFixtureClient();
+    harness.connectionState.current = null;
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: harness.client,
+      requestId: "request-694-not-connected",
+    });
+
+    const response = await connectionRequest(handler);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { connected: false, ebayUsername: null, policySetup: null },
+    });
+  });
+
+  it("reads no eBay account API while answering Settings", async () => {
+    const harness = publishFixtureClient();
+    harness.connectionState.current!.policy_location_bindings = {};
+    const adapter = new MockEbayAdapter({
+      policyLocationCandidates: {
+        fulfillmentPolicies: [
+          { id: "fulfillment-1", label: "Fulfillment", providerDefault: false },
+        ],
+        paymentPolicies: [
+          { id: "payment-1", label: "Payment", providerDefault: false },
+        ],
+        returnPolicies: [
+          { id: "return-1", label: "Return", providerDefault: false },
+        ],
+        inventoryLocations: [
+          { id: "location-1", label: "Location", providerDefault: false },
+        ],
+      },
+    });
+    const handler = ebayHandler({
+      adapter,
+      client: harness.client,
+      requestId: "request-694-no-account-read",
+    });
+
+    expect((await connectionRequest(handler)).status).toBe(200);
+    expect(adapter.discoveryRequests).toEqual([]);
+  });
+});

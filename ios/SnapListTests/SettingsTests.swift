@@ -553,3 +553,171 @@ private final class FailingSettingsAnalyticsClient: AnalyticsClient {
     }
     func flush() {}
 }
+
+// MARK: - Selling section eBay policy hint (#694)
+
+extension SettingsTests {
+    private func hint(
+        state: String,
+        message: String?,
+        missing: [String] = [],
+        helpURL: URL? = URL(string: "https://www.bizpolicy.ebay.com/businesspolicy/manage")
+    ) -> EbayPolicySetupHint {
+        EbayPolicySetupHint(
+            state: state,
+            marketplaceID: "EBAY_US",
+            missing: missing,
+            ambiguous: [],
+            message: message,
+            helpURL: helpURL
+        )
+    }
+
+    func testSellingSectionShowsNoHintUntilTheConnectionIsKnown() {
+        let loading = SettingsSellingPresentation(connection: nil, loadPhase: .loading)
+
+        XCTAssertEqual(loading.marketplaceValue, "Checking")
+        XCTAssertNil(loading.hint)
+
+        let failed = SettingsSellingPresentation(connection: nil, loadPhase: .failed)
+
+        XCTAssertEqual(failed.marketplaceValue, "Not available")
+        XCTAssertNil(failed.hint)
+    }
+
+    func testSellingSectionShowsNoHintForASellerWhoIsNotConnected() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: false,
+                ebayUsername: nil,
+                policySetup: nil
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "Not connected")
+        XCTAssertNil(presentation.hint)
+    }
+
+    func testSellingSectionShowsNoHintForAConnectedSellerWhoIsReadyToPublish() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(state: "ready", message: nil)
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertNil(presentation.hint)
+    }
+
+    func testSellingSectionNamesTheMissingFamilyBeforePublishIsAttempted() {
+        let message = "Your eBay account has no payment policy for EBAY_US. "
+            + "Add it in eBay before you publish."
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(
+                    state: "setupRequired",
+                    message: message,
+                    missing: ["paymentPolicy"]
+                )
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertEqual(presentation.hint?.message, message)
+        XCTAssertEqual(
+            presentation.hint?.helpURL,
+            URL(string: "https://www.bizpolicy.ebay.com/businesspolicy/manage")
+        )
+    }
+
+    func testSellingSectionKeepsTheHintWhenTheServerOffersNoLink() {
+        let message = "SnapList has not read your eBay shipping, payment, and "
+            + "return policies yet. Check that your eBay account has one of "
+            + "each before you publish."
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(state: "notChecked", message: message, helpURL: nil)
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.hint?.message, message)
+        XCTAssertNil(presentation.hint?.helpURL)
+    }
+
+    func testSellingSectionStaysSilentWhenTheServerSendsNoWordingToShow() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(state: "setupRequired", message: nil)
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertNil(presentation.hint)
+    }
+
+    func testSellingSectionStillWarnsOnAStateThisBuildDoesNotKnow() {
+        let message = "Your eBay account needs attention before you publish."
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(
+                    state: "somethingNewerThanThisBuild",
+                    message: message
+                )
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.hint?.message, message)
+    }
+
+    func testConnectionDecodesAServerAnswerThatCarriesNoPolicySetup() throws {
+        let json = Data(#"{"connected":true,"ebayUsername":"sandbox-seller"}"#.utf8)
+
+        let status = try JSONDecoder().decode(EbayConnectionStatus.self, from: json)
+
+        XCTAssertTrue(status.connected)
+        XCTAssertNil(status.policySetup)
+    }
+
+    func testConnectionDecodesTheStoredPolicyHint() throws {
+        let json = Data(#"""
+        {
+          "connected": true,
+          "ebayUsername": "sandbox-seller",
+          "policySetup": {
+            "state": "setupRequired",
+            "marketplaceId": "EBAY_US",
+            "missing": ["paymentPolicy", "returnPolicy"],
+            "ambiguous": [],
+            "message": "Your eBay account has no payment policy or return policy for EBAY_US. Add them in eBay before you publish.",
+            "helpUrl": "https://www.bizpolicy.ebay.com/businesspolicy/manage"
+          }
+        }
+        """#.utf8)
+
+        let status = try JSONDecoder().decode(EbayConnectionStatus.self, from: json)
+
+        XCTAssertEqual(status.policySetup?.state, "setupRequired")
+        XCTAssertEqual(status.policySetup?.missing, ["paymentPolicy", "returnPolicy"])
+        XCTAssertEqual(status.policySetup?.marketplaceID, "EBAY_US")
+        XCTAssertEqual(
+            status.policySetup?.helpURL,
+            URL(string: "https://www.bizpolicy.ebay.com/businesspolicy/manage")
+        )
+    }
+}

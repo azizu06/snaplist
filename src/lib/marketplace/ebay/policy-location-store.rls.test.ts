@@ -16,6 +16,7 @@ import {
   type EbayPolicyLocationDiscoveryAdapter,
 } from "./policy-location-discovery";
 import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
+import { readEbayPolicyLocationSettingsHint } from "./policy-location-setup";
 import { serverRpcHeaders } from "@/lib/supabase/server-rpc-auth";
 
 const SUPABASE_URL =
@@ -415,5 +416,47 @@ describe("eBay policy/location binding (DB-gated)", () => {
       .eq("user_id", tenantAId)
       .single();
     expect(rowA.data?.policy_location_bindings).toEqual({});
+  }, TEST_TIMEOUT_MS);
+
+  /**
+   * The Settings hint (issue #694) is a read of this same tenant-owned column,
+   * so it inherits RLS rather than adding a second path to the binding. This
+   * proves that by giving the two tenants DIFFERENT setup states: if the read
+   * ever crossed tenants, one of these two assertions reports the other
+   * seller's state.
+   */
+  it("shows each tenant only their own eBay policy setup in Settings", async () => {
+    const contextA = await storeA.readConnectionContext();
+    expect(contextA).not.toBeNull();
+    const missingPayment = {
+      ...bindingA,
+      state: "setupRequired",
+      connectionGeneration: contextA!.connectionGeneration,
+      paymentPolicy: { state: "setupRequired", selectedId: null, candidates: [] },
+    };
+    const written = await admin
+      .from("ebay_connections")
+      .update({ policy_location_bindings: { EBAY_US: missingPayment } })
+      .eq("user_id", tenantAId);
+    expect(written.error).toBeNull();
+
+    const [hintA, hintB] = await Promise.all([
+      readEbayPolicyLocationSettingsHint({
+        marketplaceId: "EBAY_US",
+        store: storeA,
+      }),
+      readEbayPolicyLocationSettingsHint({
+        marketplaceId: "EBAY_US",
+        store: storeB,
+      }),
+    ]);
+
+    expect(hintA).toMatchObject({
+      state: "setupRequired",
+      missing: ["paymentPolicy"],
+    });
+    expect(hintB).toMatchObject({ state: "ready", message: null });
+    expect(JSON.stringify(hintA)).not.toContain("seller-b");
+    expect(JSON.stringify(hintB)).not.toContain("seller-a");
   }, TEST_TIMEOUT_MS);
 });

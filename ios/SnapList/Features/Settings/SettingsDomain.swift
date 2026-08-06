@@ -281,6 +281,63 @@ enum SettingsEntitlementServerRefresh {
     }
 }
 
+/// The Selling section's eBay reading (issue #694).
+///
+/// A connected seller whose eBay account cannot produce usable business
+/// policies learns it here rather than at publish. The client makes exactly one
+/// decision, whether a hint is owed; the wording and the link are server truth,
+/// so this build cannot drift from what publish would refuse with.
+struct SettingsSellingPresentation: Equatable {
+    enum LoadPhase: Equatable {
+        case loading
+        case loaded
+        case failed
+    }
+
+    struct Hint: Equatable {
+        let message: String
+        let helpURL: URL?
+    }
+
+    let marketplaceValue: String
+    let hint: Hint?
+
+    init(connection: EbayConnectionStatus?, loadPhase: LoadPhase) {
+        switch loadPhase {
+        case .loading:
+            marketplaceValue = "Checking"
+            hint = nil
+            return
+        case .failed:
+            // The connection was not readable. Saying "Not connected" would
+            // claim something SnapList does not know.
+            marketplaceValue = "Not available"
+            hint = nil
+            return
+        case .loaded:
+            break
+        }
+        guard let connection, connection.connected else {
+            marketplaceValue = "Not connected"
+            hint = nil
+            return
+        }
+        marketplaceValue = "eBay"
+        // `ready` and any state this build does not recognise both stay silent.
+        // A hint with no message would be a warning the seller cannot act on.
+        guard
+            let setup = connection.policySetup,
+            setup.state != "ready",
+            let message = setup.message,
+            !message.isEmpty
+        else {
+            hint = nil
+            return
+        }
+        hint = Hint(message: message, helpURL: setup.helpURL)
+    }
+}
+
 struct SettingsSubscriptionVisibility: Equatable {
     let isVisible: Bool
 

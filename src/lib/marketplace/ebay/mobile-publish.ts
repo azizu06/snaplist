@@ -15,6 +15,11 @@ import {
   type PublishOutcome,
 } from "./publish";
 import { assertMobileEbayOperatorActivation } from "./mobile-operator-activation";
+import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
+import {
+  readEbayPolicyLocationSettingsHint,
+  type EbayPolicyLocationSettingsHint,
+} from "./policy-location-setup";
 
 export interface MobileEbayPublishStatus {
   listingId: string;
@@ -30,15 +35,26 @@ export interface MobileEbayPublishStatus {
   ebayEnvironment: "sandbox" | "production";
 }
 
+/**
+ * What Settings needs about the seller's eBay account in one read (issue #694):
+ * whether they are connected, and whether the policies eBay requires are
+ * actually usable. The hint is `null` for a disconnected seller, so the
+ * "not connected shows no hint" rule holds by shape rather than by a client
+ * remembering to check `connected` first.
+ */
+export interface EbayConnectionSettings extends EbayConnectionStatus {
+  policySetup: EbayPolicyLocationSettingsHint | null;
+}
+
 export interface MobileEbayPublishGateway {
   connection(input: {
     userId: string;
     bearerToken: string;
-  }): Promise<EbayConnectionStatus>;
+  }): Promise<EbayConnectionSettings>;
   disconnect(input: {
     userId: string;
     bearerToken: string;
-  }): Promise<EbayConnectionStatus>;
+  }): Promise<EbayConnectionSettings>;
   preflight(input: {
     userId: string;
     bearerToken: string;
@@ -90,16 +106,18 @@ export function createMobileEbayPublishService(input: {
 }): MobileEbayPublishGateway {
   return {
     async connection(operation) {
-      return getEbayConnectionStatus(
+      return connectionSettings(
         input.clientForBearer(operation.bearerToken),
+        marketplaceId(input.env?.() ?? process.env),
       );
     },
     async disconnect(operation) {
       await deleteEbayConnection(
         input.completionClientForBearer(operation.bearerToken),
       );
-      return getEbayConnectionStatus(
+      return connectionSettings(
         input.clientForBearer(operation.bearerToken),
+        marketplaceId(input.env?.() ?? process.env),
       );
     },
     async preflight(operation) {
@@ -149,7 +167,7 @@ export function createMobileEbayPublishService(input: {
         description: snapshot.listing.description ?? "",
         effectivePrice: { amount: price, label: "What will be listed" },
         photoCount: Array.isArray(item.photos) ? item.photos.length : 0,
-        marketplace: (input.env?.() ?? process.env).EBAY_MARKETPLACE_ID ?? "EBAY_US",
+        marketplace: marketplaceId(input.env?.() ?? process.env),
         ebayCondition: toEbayCondition(item.condition),
         itemSpecifics: toEbayAspects(
           snapshot.listing.copy && typeof snapshot.listing.copy === "object"
@@ -215,6 +233,31 @@ export function createMobileEbayPublishService(input: {
       return mobilePublishStatus(outcome, ebayEnvironment(env));
     },
   };
+}
+
+/**
+ * Connection truth plus the policy hint, read through the SAME tenant client so
+ * one seller can never see another's binding. The hint read is deliberately
+ * store-only: Settings must not spend the seller's eBay Account API budget or
+ * fail because eBay is down.
+ */
+async function connectionSettings(
+  client: SupabaseClient,
+  marketplace: string,
+): Promise<EbayConnectionSettings> {
+  const status = await getEbayConnectionStatus(client);
+  if (!status.connected) return { ...status, policySetup: null };
+  return {
+    ...status,
+    policySetup: await readEbayPolicyLocationSettingsHint({
+      marketplaceId: marketplace,
+      store: createSupabaseEbayPolicyLocationBindingStore(client),
+    }),
+  };
+}
+
+function marketplaceId(env: Record<string, string | undefined>): string {
+  return env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
 }
 
 async function readMobilePublishStatus(
