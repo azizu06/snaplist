@@ -861,6 +861,10 @@ struct TrophyWallView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(SnapListColorToken.canvas.color)
+        // On a plain stack the identifier binds to no element of its own and
+        // propagates down instead, so the header buttons were all published as
+        // `trophy.wall` and `trophy.wall.processing` resolved to nothing.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.wall")
     }
 
