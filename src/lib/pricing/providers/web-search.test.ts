@@ -13,6 +13,8 @@ import {
   type SearchClient,
   type SearchResult,
   type WebComp,
+  rawWebCompSchema,
+  webCompFromRaw,
 } from "./web-search";
 import { PriceRouter } from "../router";
 import { priceResultSchema, type ItemSignal, type PriceResult } from "../types";
@@ -644,5 +646,45 @@ describe("judged comp agreement on the result (#10 round-4)", () => {
     // The mapping is the provider's own tightness judgement, on the result.
     expect(spreadToAgreement(0)).toBe(1);
     expect(spreadToAgreement(0.5)).toBe(TIGHT_AGREEMENT_MIN);
+  });
+});
+
+describe("model-facing comp shape (#696): absence lives in the VALUE", () => {
+  it("requires the title KEY and accepts null as 'this result had no title'", () => {
+    // OpenAI structured outputs in strict mode reject a compiled schema whose
+    // `properties` carry a key missing from `required`, so the model-facing
+    // schema may not make `title` optional. The key is mandatory; `null` is how
+    // the model says it has no value. (`llm/contracts.test.ts` walks the
+    // compiled artifact; this pins the Zod contract at the pricing seam.)
+    const base = { url: "https://www.ebay.com/itm/q1-1", price: 178, kind: "sold" as const };
+    expect(rawWebCompSchema.safeParse(base).success).toBe(false);
+    expect(rawWebCompSchema.safeParse({ ...base, title: null }).success).toBe(true);
+    expect(rawWebCompSchema.safeParse({ ...base, title: "SOLD 1" }).success).toBe(true);
+  });
+
+  it("repairs a null/blank title to an absent key, so cited sources stay label-free", async () => {
+    // The deterministic repair back to the internal shape. A `null` that leaked
+    // through would land in `PriceSource.title` (an optional STRING) and fail
+    // the price-result contract; an empty string would surface as a blank source
+    // label in the seller-visible evidence list.
+    const comps = [
+      { url: "https://www.ebay.com/itm/q1-1", title: null, price: 178, kind: "sold" as const },
+      { url: "https://www.ebay.com/itm/q1-2", title: "   ", price: 185.5, kind: "sold" as const },
+      { url: "https://www.mercari.com/us/item/q1-3", title: "Sony WH-1000XM4 Black", price: 190, kind: "sold" as const },
+    ].map(webCompFromRaw);
+    expect(comps.map((c) => "title" in c)).toEqual([false, false, true]);
+
+    const provider = createBrandedWebPricingProvider({
+      searchClient: fakeSearch(),
+      extractComps: fakeExtractor([comps]),
+    });
+    const result = (await provider.price(BRANDED_SIGNAL))!;
+    const parsed = priceResultSchema.safeParse(result);
+    expect(parsed.success, JSON.stringify((parsed as { error?: unknown }).error)).toBe(true);
+    expect(result.sources.map((s) => s.title)).toEqual([
+      undefined,
+      undefined,
+      "Sony WH-1000XM4 Black",
+    ]);
   });
 });
