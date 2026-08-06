@@ -42,7 +42,7 @@ export interface ModelFacingSchema {
   role: LlmRole;
   /** The exact schema handed to `generateObject`. */
   schema: z.ZodType;
-  /** `path:line` of the `generateObject` call, so a failure names the caller. */
+  /** Source file holding this `generateObject` call. */
   callSite: string;
   /** True for the schema this role's recorded fixtures are captured against. */
   fixture?: true;

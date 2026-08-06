@@ -16,8 +16,10 @@ import {
   ebayListingRawSchema,
   ebayListingSchema,
   itemSpecificsFromPairs,
+  safeParseEbayListing,
   type EbayListing,
   type RawEbayListing,
+  type UnvalidatedEbayListing,
 } from "./schema";
 
 /**
@@ -145,19 +147,38 @@ function norm(s: string): string {
 }
 
 /**
- * Does the generated listing introduce a brand or model NOT present in the validated
- * core? A non-empty core `brand`/`model` that the listing's structured specifics
+ * Read a specific by name, insensitive to the CASING and padding the model chose.
+ *
+ * `itemSpecificsFromPairs` de-duplicates names case-insensitively but retains the
+ * first occurrence's own casing, so a model emitting `brand` produces the record key
+ * `brand`. A literal `specifics["Brand"]` lookup missed it, and a contradicting brand
+ * became invisible to the check below purely because of how the model capitalized it.
+ */
+function specificValue(
+  specifics: Record<string, string>,
+  name: string,
+): string | undefined {
+  const target = norm(name);
+  return Object.entries(specifics).find(([key]) => norm(key) === target)?.[1];
+}
+
+/**
+ * Do the generated item specifics introduce a brand or model NOT present in the
+ * validated core? A non-empty core `brand`/`model` that the structured specifics
  * CONTRADICT (a different non-empty value) is a hallucination. A core that is silent on
  * brand/model must NOT gain one from the model out of thin air either — so a structured
  * `Brand`/`Model` specific whose value is absent from the core is rejected.
+ *
+ * Takes the SPECIFICS RECORD, not a listing: the only caller holds the model's
+ * converted pairs and no validated listing, and widening those pairs into an
+ * `EbayListing`-typed object just to call this would assert a validation that never ran.
  */
 export function listingHallucinatesAttributes(
-  listing: EbayListing,
+  specifics: Record<string, string>,
   attrs: ExtractedAttributes,
 ): boolean {
-  const specifics = listing.itemSpecifics;
   for (const key of ["Brand", "Model"] as const) {
-    const emitted = specifics[key];
+    const emitted = specificValue(specifics, key);
     if (emitted == null || norm(emitted) === "") continue;
     const coreValue = key === "Brand" ? attrs.brand : attrs.model;
     // The model asserted a brand/model the core never established, or one that
@@ -202,8 +223,29 @@ function listingViolatesSellerVoice(raw: RawEbayListing): boolean {
   return (
     SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(raw.description)) ||
     SELLER_VOICE_MULTIPLE_EXCLAMATION_MARKS.test(raw.description) ||
-    // Every emitted pair is checked, including duplicates the record conversion drops:
-    // a banned value must not slip through just because its name repeated.
+    // Every emitted pair's VALUE is checked, including duplicates the record conversion
+    // drops: a banned value must not slip through just because its name repeated.
+    //
+    // NAMES ARE DELIBERATELY OUT OF SCOPE (#697 item 5). The pair shape made specific
+    // names model-authored text for the first time, so `{name: "Sleek Finish", value:
+    // "Yes"}` passes this scan. That is the intended behavior, for two reasons:
+    //
+    //  1. Neither names nor values reach any output — the returned specifics are
+    //     always `reconcileSpecifics(attributes)`, whose keys are the fixed literals
+    //     Brand/Model/Type/Condition. So this scan is not an output guard; it is a
+    //     SIGNAL that the model slipped into marketing voice, and what it protects is
+    //     the seller-visible description and tags.
+    //  2. A hit discards the model's description and tags for the factual fallback.
+    //     Judging that on a string the seller never sees means a name drawn from
+    //     eBay's own aspect vocabulary could veto a description that was fine. The
+    //     added signal is marginal; the false-positive cost is a real UX downgrade.
+    //
+    // Keeping values-only also preserves exact parity with the pre-#693
+    // `Object.values()` behavior, so the pair-shape migration carries no silent
+    // change in what triggers the fallback. REVISIT THIS if model-emitted names ever
+    // become publishable — i.e. if the core whitelist in `reconcileSpecifics` is
+    // relaxed to let a model-chosen specific through. Then names are output, and an
+    // output guard is required rather than a signal.
     raw.itemSpecifics.some(({ value }) =>
       SELLER_VOICE_BANNED_PATTERNS.some((pattern) => pattern.test(value)),
     )
@@ -256,8 +298,15 @@ export function buildCoreListingDescription(attributes: ExtractedAttributes): st
   return sentences.join(" ");
 }
 
-/** The bounded-retry fallback: a complete eBay listing made only from validated facts. */
-export function fallbackEbayListing(attributes: ExtractedAttributes): EbayListing {
+/**
+ * The bounded-retry fallback: a complete eBay listing candidate made only from
+ * validated facts. A CANDIDATE and not an `EbayListing` for the same reason as
+ * `reconciled` below — a core that established no brand, model, category or condition
+ * yields empty item specifics, which `ebayListingSchema` rejects. Callers must parse.
+ */
+export function fallbackEbayListing(
+  attributes: ExtractedAttributes,
+): UnvalidatedEbayListing {
   return {
     title: enforceTitleLength(fallbackListingName(attributes)),
     itemSpecifics: reconcileSpecifics(attributes),
@@ -338,13 +387,11 @@ export async function generateEbayListing(
       ...(attributes.specs ?? []),
     ];
     // The model speaks in an ordered pair LIST (the only item-specifics shape OpenAI
-    // structured outputs can express); every check below and every consumer downstream
-    // works on the name→value record, so convert once, here, under the documented
-    // duplicate-name rule.
-    const rawListing: EbayListing = {
-      ...raw,
-      itemSpecifics: itemSpecificsFromPairs(raw.itemSpecifics),
-    };
+    // structured outputs can express); the hallucination check reads a name→value
+    // record, so convert once, here, under the documented duplicate-name rule. Only
+    // the SPECIFICS are converted — widening `raw` into a listing-shaped object would
+    // claim a validation this candidate has not passed.
+    const modelSpecifics = itemSpecificsFromPairs(raw.itemSpecifics);
     const modelSellerVoiceViolates = listingViolatesSellerVoice(raw);
     const modelCopyViolates =
       sellerTitleViolations(raw.title, titleCore).length > 0 ||
@@ -353,18 +400,21 @@ export async function generateEbayListing(
     const modelTagsViolate = raw.tags.some(
       (tag) => sellerTitleViolations(tag, titleCore).length > 0,
     );
-    const reconciled: EbayListing = modelCopyViolates || modelTagsViolate
+    // Still a CANDIDATE, not an `EbayListing`: `reconcileSpecifics` returns `{}` for a
+    // core that established nothing, which `ebayListingSchema` forbids. The safeParse
+    // below is what promotes it; nothing may consume it before that.
+    const reconciled: UnvalidatedEbayListing = modelCopyViolates || modelTagsViolate
       ? fallbackEbayListing(attributes)
       : {
-          ...rawListing,
           title: enforceTitleLength(raw.title),
           itemSpecifics: reconcileSpecifics(attributes),
           // Descriptions cannot be completely fact-checked after generation. Build
           // this seller-visible field from the validated core instead.
           description: buildCoreListingDescription(attributes),
+          tags: raw.tags,
         };
 
-    const parsed = ebayListingSchema.safeParse(reconciled);
+    const parsed = safeParseEbayListing(reconciled);
     if (!parsed.success) {
       lastError = parsed.error.issues
         .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
@@ -377,7 +427,7 @@ export async function generateEbayListing(
     // the model can self-correct; the reconciled candidate is already clean, so we
     // keep it as the fallback for the final attempt.
     if (
-      (listingHallucinatesAttributes(rawListing, attributes) ||
+      (listingHallucinatesAttributes(modelSpecifics, attributes) ||
         modelCopyViolates ||
         modelTagsViolate) &&
       attempt < attempts - 1
