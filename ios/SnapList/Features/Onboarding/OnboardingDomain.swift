@@ -321,12 +321,12 @@ struct OnboardingMotionPolicy: Equatable {
 /// The asset name travels with the copy it labels. A row and its image were once two
 /// arrays joined by subscript, so a fourth copy row without a fourth asset name crashed
 /// the screen with an index-out-of-range that no test could reach.
-struct BackgroundExampleRow: Equatable, Identifiable {
+/// `Hashable` so `ForEach` can key on the whole row. Keying on the copy alone would
+/// re-introduce a silent desync of its own the first time two rows shared a name.
+struct BackgroundExampleRow: Hashable {
     let imageName: String
     let item: String
     let state: String
-
-    var id: String { item }
 }
 
 enum FirstValueOnboardingCopy {

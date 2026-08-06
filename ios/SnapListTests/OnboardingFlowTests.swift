@@ -771,26 +771,33 @@ final class OnboardingFlowTests: XCTestCase {
     /// `.accessibilityElement(children: .combine)`, which folds every descendant into a
     /// single element, so a restored `ProgressView` never reaches the accessibility tree
     /// and `app.progressIndicators.count == 0` stays true whether or not the spinner is
-    /// there. SwiftUI encodes the entire static subtree in `body`'s concrete type, so read
-    /// that instead: a spinner anywhere in the row makes `ProgressView` appear in it.
+    /// there. SwiftUI derives `body`'s concrete type from the subtree written in it, so
+    /// read that instead.
+    ///
+    /// This reaches exactly one revert: a progress affordance written **directly** in the
+    /// row's own body, which is where the deleted one lived. One reached through a nested
+    /// `View` type or an `AnyView` stays hidden behind that type's name, so this is a
+    /// tripwire on the row, not a proof about the whole screen.
+    ///
+    /// The rendered type does not vary with the row's data — the three rows differ only in
+    /// the strings they carry — so one row proves it for all of them.
     @MainActor
-    func testBackgroundExampleRowsCarryNoProgressAffordance() {
-        let affordances = ["ProgressView", "ProgressViewStyle", "Gauge"]
+    func testBackgroundExampleRowBodyWritesNoProgressAffordance() throws {
+        let row = try XCTUnwrap(FirstValueOnboardingCopy.backgroundExampleRows.first)
+        let renderedType = String(
+            reflecting: type(of: BackgroundExampleRowView(row: row).body)
+        )
 
-        for row in FirstValueOnboardingCopy.backgroundExampleRows {
-            let renderedType = String(
-                reflecting: type(of: BackgroundExampleRowView(row: row).body)
+        // `ProgressViewStyle` is deliberately absent: every type naming it also names
+        // `ProgressView`, so asserting it separately could never fail on its own.
+        for affordance in ["ProgressView", "Gauge"] {
+            XCTAssertFalse(
+                renderedType.contains(affordance),
+                """
+                An ONB-05 example row writes a \(affordance). Nothing is running while \
+                onboarding is on screen, so the row must claim no progress: \(renderedType)
+                """
             )
-            for affordance in affordances {
-                XCTAssertFalse(
-                    renderedType.contains(affordance),
-                    """
-                    ONB-05 row "\(row.item)" renders a \(affordance). Nothing is running \
-                    while onboarding is on screen, so the row must claim no progress: \
-                    \(renderedType)
-                    """
-                )
-            }
         }
     }
 

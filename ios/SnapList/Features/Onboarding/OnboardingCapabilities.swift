@@ -400,18 +400,16 @@ final class UserDefaultsFirstValueOnboardingCompletionStore:
     private let defaults: UserDefaults
     private let key: String
 
-    /// No migration reads the legacy `…v1.completed` Bool, deliberately.
-    ///
-    /// That key existed only on unmerged #687 branch builds; no merged commit and no
-    /// shipped build ever wrote it, so the only installs that can carry it are developer
-    /// and CI simulators. On those, reading `nil` shows onboarding once more, which is
-    /// what a developer wants anyway.
-    ///
-    /// Migrating would also have to invent an outcome. A bare Bool cannot say whether the
-    /// seller completed, skipped, or was superseded by existing progress, and mapping it
-    /// to `.completed` would tell #566 the seller saw the six screens when they may not
-    /// have — exactly the "look taught by accident" failure this store's contract exists
-    /// to prevent.
+    // The key below replaced a legacy `…v1.completed` Bool, and nothing migrates from it.
+    //
+    // That Bool was written only by unmerged #687 branch builds — no merged commit and no
+    // shipped build ever wrote it — so the only installs that can carry it are developer
+    // and CI simulators, where reading `nil` shows onboarding once more and costs nothing.
+    //
+    // Migrating would also have to invent an outcome. A bare Bool cannot say whether the
+    // seller completed, skipped, or was superseded by existing progress, and mapping it to
+    // `.completed` would tell #566 the seller saw the six screens when they may not have —
+    // the "look taught by accident" failure this type's contract exists to prevent.
     init(
         defaults: UserDefaults = .standard,
         key: String = "snaplist.first-value-onboarding.v1.outcome"

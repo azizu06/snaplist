@@ -305,7 +305,10 @@ struct FirstValueOnboardingView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(FirstValueOnboardingCopy.backgroundExampleRows) { row in
+                    ForEach(
+                        FirstValueOnboardingCopy.backgroundExampleRows,
+                        id: \.self
+                    ) { row in
                         BackgroundExampleRowView(row: row)
                     }
                 }
@@ -492,9 +495,11 @@ struct FirstValueOnboardingView: View {
 /// The row is a named type rather than a helper on the screen so that guarantee is
 /// testable. `.accessibilityElement(children: .combine)` folds every descendant into one
 /// element, so a restored spinner never reaches the XCUI tree and no count of
-/// `app.progressIndicators` can see it. SwiftUI encodes the whole static subtree in
-/// `body`'s concrete type instead, which
-/// `OnboardingFlowTests.testBackgroundExampleRowsCarryNoProgressAffordance` reads.
+/// `app.progressIndicators` can see it. SwiftUI derives `body`'s concrete type from the
+/// subtree written here instead, which
+/// `OnboardingFlowTests.testBackgroundExampleRowBodyWritesNoProgressAffordance` reads —
+/// so keep any progress-bearing view out of this body rather than behind a nested type
+/// the rendered type name would hide.
 struct BackgroundExampleRowView: View {
     let row: BackgroundExampleRow
 
