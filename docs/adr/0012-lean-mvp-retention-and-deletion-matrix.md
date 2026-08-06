@@ -22,8 +22,8 @@ be inferred from current code or historical policy.
 covers local photos and voice, private Storage photos and raw voice, a possible hosted transcription
 copy, retained transcripts, items, eBay drafts, export packs, pipeline runs, pricing evidence,
 per-run telemetry, tenant user settings, guest recovery, AI-item credits, eBay connections and
-publish receipts, Clerk identity, Apple/RevenueCat references, and the PostHog person plus
-historical account-linked analytics events.
+publish receipts, short-lived eBay photo bearer capabilities, Clerk identity, Apple/RevenueCat
+references, and the PostHog person plus historical account-linked analytics events.
 
 Every release datum has exactly one disposition. A complete disposition names:
 
@@ -64,6 +64,13 @@ run telemetry may remain only while their owning item lifecycle requires them. U
 staging and unclaimed guest recovery have the existing 24-hour ceilings. Terminal pipeline
 operational metadata has the existing 30-day ceiling; the remaining tenant run identity cannot
 outlive item deletion or account erasure under this policy.
+
+The eBay photo route stores only a SHA-256 digest of each 256-bit random bearer token. Live access
+expires one hour after issue, and seven days is the ceiling an explicit longer
+TTL cannot exceed. Photo removal and item deletion revoke the bound row, account erasure
+revokes every tenant row when erasure begins, and an expired digest is inert while it follows the
+retained photo lifecycle. The public route returns the same not-found response for unknown and
+expired tokens and never accepts a Storage path or bucket from its caller.
 
 Guest claim transfers the same result atomically; it does not copy a second result. Guest expiry
 deletes the unclaimed result at 24 hours. Credit reservations must settle or restore before account

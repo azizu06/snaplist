@@ -8,6 +8,7 @@ import {
   sellerMediaConfigError,
 } from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
+import { isPublicHttpsOrigin } from "./public-origin";
 
 const LOCAL_SERVER_RPC_SECRET =
   "snaplist-local-server-rpc-secret-do-not-use-in-hosted";
@@ -230,6 +231,12 @@ const envSchema = z.object({
   // Native endpoints use Clerk's authorized-party list for `azp` validation.
   CLERK_AUTHORIZED_PARTIES: z.string().min(1).optional(),
 
+  // The public origin eBay fetches published pictures from (issue #705).
+  // Optional here for local development, where the CLERK_AUTHORIZED_PARTIES
+  // fallback still applies; deployed validation below requires it, so that
+  // fallback never decides a real listing's picture origin.
+  SNAPLIST_PUBLIC_ORIGIN: z.string().min(1).optional(),
+
   // eBay (adapter; sandbox by default — flip to production via this URL + keys)
   EBAY_BASE_URL: z.string().min(1).default("https://api.sandbox.ebay.com"),
   // Native OAuth and publishing stay behind an explicit operator gate. When the
@@ -417,6 +424,17 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
     );
   }
 
+  const publicOrigin = env.SNAPLIST_PUBLIC_ORIGIN?.trim();
+  if (!publicOrigin) {
+    issues.push(
+      "  - SNAPLIST_PUBLIC_ORIGIN: SNAPLIST_PUBLIC_ORIGIN is required outside local development; the eBay picture origin has no deployed fallback, and the local-only CLERK_AUTHORIZED_PARTIES fallback carries no meaningful ordering.",
+    );
+  } else if (!isPublicHttpsOrigin(publicOrigin)) {
+    issues.push(
+      "  - SNAPLIST_PUBLIC_ORIGIN: must be a public HTTPS origin with no path, credentials, or query.",
+    );
+  }
+
   const baseUrl = env.EBAY_BASE_URL?.trim();
   if (!baseUrl) {
     issues.push(
@@ -438,98 +456,6 @@ function clerkAuthorizedParties(env: Record<string, string | undefined>): string
     .split(",")
     .map((party) => party.trim())
     .filter(Boolean);
-}
-
-function isPublicHttpsOrigin(party: string): boolean {
-  try {
-    const url = new URL(party);
-    if (
-      url.protocol !== "https:"
-      || url.username
-      || url.password
-      || url.pathname !== "/"
-      || url.search
-      || url.hash
-    ) {
-      return false;
-    }
-
-    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-    if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
-
-    const ipv4 = hostname.split(".").map(Number);
-    if (ipv4.length === 4 && ipv4.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
-      return isPublicIpv4(ipv4);
-    }
-
-    if (!hostname.includes(":")) return true;
-
-    const ipv6 = parseIpv6Hextets(hostname);
-    if (!ipv6) return false;
-
-    if (isIpv4EmbeddedIpv6(ipv6)) {
-      return isPublicIpv4([
-        ipv6[6] >> 8,
-        ipv6[6] & 0xff,
-        ipv6[7] >> 8,
-        ipv6[7] & 0xff,
-      ]);
-    }
-
-    return !(
-      (ipv6[0] & 0xfe00) === 0xfc00
-      || (ipv6[0] & 0xffc0) === 0xfe80
-      || (ipv6[0] & 0xffc0) === 0xfec0
-      || (ipv6[0] & 0xff00) === 0xff00
-      || (ipv6[0] === 0x2001 && ipv6[1] === 0x0db8)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isPublicIpv4([first, second]: number[]): boolean {
-  return !(
-    first === 0
-    || first === 10
-    || first === 127
-    || (first === 169 && second === 254)
-    || (first === 172 && second >= 16 && second <= 31)
-    || (first === 192 && second === 168)
-  );
-}
-
-function parseIpv6Hextets(hostname: string): number[] | undefined {
-  const parts = hostname.toLowerCase().split("::");
-  if (parts.length > 2) return undefined;
-
-  const left = parts[0] ? parts[0].split(":") : [];
-  const right = parts[1] ? parts[1].split(":") : [];
-  const hextets = [...left, ...right];
-  if (
-    (parts.length === 1 && hextets.length !== 8)
-    || (parts.length === 2 && hextets.length >= 8)
-    || hextets.some((hextet) => !/^[0-9a-f]{1,4}$/.test(hextet))
-  ) {
-    return undefined;
-  }
-
-  const values = hextets.map((hextet) => Number.parseInt(hextet, 16));
-  return parts.length === 1
-    ? values
-    : [...values.slice(0, left.length), ...Array(8 - values.length).fill(0), ...values.slice(left.length)];
-}
-
-function isIpv4EmbeddedIpv6(ipv6: number[]): boolean {
-  return (
-    ipv6.slice(0, 6).every((hextet) => hextet === 0)
-    || (ipv6.slice(0, 5).every((hextet) => hextet === 0) && ipv6[5] === 0xffff)
-    || (
-      ipv6.slice(0, 4).every((hextet) => hextet === 0)
-      && ipv6[4] === 0xffff
-      && ipv6[5] === 0
-    )
-  );
 }
 
 /**

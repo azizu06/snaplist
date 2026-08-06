@@ -39,6 +39,8 @@ function fakePublishClient(
   priceOverride: unknown,
   suggestedPrice = 44.44,
   connected = true,
+  photos: string[] = ["user-1/item-1.jpg"],
+  issuedTokenCount = photos.length,
 ): {
   client: SupabaseClient;
   listing: FakeListing;
@@ -191,7 +193,7 @@ function fakePublishClient(
                 data: {
                   review_revision: reviewRevision,
                   condition: "good",
-                  photos: ["user-1/item-1.jpg"],
+                  photos,
                 },
                 error: null,
               }),
@@ -236,6 +238,22 @@ function fakePublishClient(
       throw new Error(`unexpected table ${table}`);
     },
     async rpc(name: string, params: Record<string, unknown>) {
+      if (name === "issue_ebay_photo_access_tokens") {
+        // Pin the TTL the REAL publish path requests. Asserting the default
+        // only where `issueEbayPhotoUrls` is called directly would leave
+        // publish free to reintroduce its own week-long value unnoticed.
+        expect(params.p_ttl_seconds).toBe(3600);
+        // The RPC returns one row per photo it could bind to a private object.
+        // It skips a photo whose Storage row or mimetype it cannot verify, so
+        // a short list is the shape a partial drop actually arrives in.
+        return {
+          data: Array.from({ length: issuedTokenCount }, (_, ordinal) => ({
+            photo_ordinal: ordinal,
+            token: String.fromCharCode(65 + ordinal).repeat(43),
+          })),
+          error: null,
+        };
+      }
       if (name === "bind_ebay_publish_connection_generation") {
         const requestedBinding = {
           marketplaceId: params.p_marketplace_id as string,
@@ -290,23 +308,12 @@ function fakePublishClient(
           description: listing.description,
           copy: listing.copy,
           condition: "good",
-          photos: ["user-1/item-1.jpg"],
+          photos,
           price: suggestedPrice,
           priceOverride,
         },
         error: null,
       };
-    },
-    storage: {
-      from: () => ({
-        createSignedUrls: async (paths: string[]) => ({
-          data: paths.map((path) => ({
-            path,
-            signedUrl: `https://storage.example/${path}`,
-          })),
-          error: null,
-        }),
-      }),
     },
   } as unknown as SupabaseClient;
 
@@ -432,6 +439,49 @@ describe("publishListingToEbayAndNotify effective-price contract", () => {
       returnPolicyId: "return-1",
       merchantLocationKey: "location-1",
     });
+  });
+
+  it("refuses to publish a partial photo set and never reaches eBay", async () => {
+    // The token RPC skips any photo it cannot bind to a verified private
+    // object, so a five-photo item can come back with three URLs. Listing an
+    // item with photos silently missing misrepresents it, and the seller gets
+    // no signal at all — so the whole publish fails instead.
+    const { client, listing, notifications } = fakePublishClient(
+      177.77,
+      44.44,
+      true,
+      ["user-1/item-1.jpg", "user-1/item-2.jpg", "user-1/item-3.jpg"],
+      2,
+    );
+    const adapter = new MockEbayAdapter();
+
+    await expect(
+      publishListingToEbayAndNotify(client, "user-1", listing.id, adapter),
+    ).rejects.toThrowError(/3 photo\(s\) but only 2/i);
+
+    expect(adapter.requests).toHaveLength(0);
+    expect(listing).toMatchObject({
+      ebay_status: "failed",
+      ebay_listing_id: null,
+    });
+    expect(notifications).toEqual([
+      expect.objectContaining({ kind: "listing_failed" }),
+    ]);
+  });
+
+  it("publishes every photo when each one resolves into a fetchable URL", async () => {
+    const { client, listing } = fakePublishClient(
+      177.77,
+      44.44,
+      true,
+      ["user-1/item-1.jpg", "user-1/item-2.jpg", "user-1/item-3.jpg"],
+    );
+    const adapter = new MockEbayAdapter();
+
+    await publishListingToEbayAndNotify(client, "user-1", listing.id, adapter);
+
+    expect(adapter.requests).toHaveLength(1);
+    expect(adapter.requests[0]!.imageUrls).toHaveLength(3);
   });
 
   it("clears generation and binding together after a definite pre-ack failure", async () => {

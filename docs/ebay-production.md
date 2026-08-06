@@ -20,6 +20,7 @@ the ordered checklist for the flip. Sandbox setup itself is documented in
 | `APPLE_TEAM_ID` / `APP_ATTEST_APP_ID` | local/test values | real 10-character Apple Team ID plus exact registered bundle ID; placeholder `TEAMID1234` is rejected |
 | `APP_ATTEST_TEAM_ID` / `APP_ATTEST_BUNDLE_ID` | local/test values | real 10-character Apple Team ID plus exact registered bundle ID for guest-claim handoff; placeholder `TEAMID1234` is rejected |
 | `CLERK_AUTHORIZED_PARTIES` | localhost origins allowed | every deployed value is a public HTTPS origin, e.g. `https://snaplist.vercel.app` |
+| `SNAPLIST_PUBLIC_ORIGIN` | localhost allowed | the public HTTPS origin eBay fetches published pictures from, e.g. `https://snaplist.dev`; required in every deployed environment |
 | `EBAY_PRODUCTION_MOBILE_ENABLED` | `false` or unset | set `true` only with `EBAY_BASE_URL=https://api.ebay.com` exactly |
 | policy ids (`EBAY_*_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`) | optional exact-operator fallback only | **unset**; each connected seller's verified binding |
 | `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` | sandbox convenience | **unset** — production publishes use per-user OAuth |
@@ -39,11 +40,18 @@ Sandbox default is available only to local/test processes. If
 
 Every deployed environment also needs `SUPABASE_SECRET_KEY`,
 `REVENUECAT_SECRET_API_KEY`, `REVENUECAT_PROJECT_ID`, `APPLE_TEAM_ID`,
-`APP_ATTEST_APP_ID`, `APP_ATTEST_TEAM_ID`, `APP_ATTEST_BUNDLE_ID`, and
-`CLERK_AUTHORIZED_PARTIES`. Use real Apple Team IDs and registered App Attest
-bundle IDs for both consumers, current `sb_secret_...` Supabase key, and only
-public HTTPS Clerk authorized parties. The `SUPABASE_SERVICE_ROLE_KEY` legacy name
-does not satisfy account erasure.
+`APP_ATTEST_APP_ID`, `APP_ATTEST_TEAM_ID`, `APP_ATTEST_BUNDLE_ID`,
+`CLERK_AUTHORIZED_PARTIES`, and `SNAPLIST_PUBLIC_ORIGIN`. Use real Apple Team IDs
+and registered App Attest bundle IDs for both consumers, current `sb_secret_...`
+Supabase key, and only public HTTPS Clerk authorized parties. The
+`SUPABASE_SERVICE_ROLE_KEY` legacy name does not satisfy account erasure.
+
+`SNAPLIST_PUBLIC_ORIGIN` must be a public HTTPS origin with no path,
+credentials, or query, and deployed startup rejects the process without it. eBay
+fetches each published picture from this origin, so leaving it to a fallback
+would let whichever entry happens to be first in `CLERK_AUTHORIZED_PARTIES` —
+an ordering Clerk itself gives no meaning to — decide where a real listing's
+pictures come from.
 
 ## Ordered checklist
 

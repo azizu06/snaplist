@@ -42,6 +42,19 @@
       }]
     },
     {
+      "id": "ebay-photo-access-tokens",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["photo-removed-from-item", "item-deletion", "account-erasure"],
+        "maximumRetention": "the bearer capability grants access for no more than 7 days, and the issued default is 1 hour; its inactive SHA-256 digest record may remain only while the same photo remains referenced by the retained item, and never after photo removal, item deletion, or account erasure begins",
+        "executor": "ebay-photo-access-expiry-and-database-lifecycle-capability",
+        "completionProof": "the unauthenticated media route returns the same not-found response for expired and unknown tokens; photo removal and item deletion leave no matching token row; account-erasure start deletes every tenant token row, and the exhaustive owned-row count includes the table",
+        "ownerDecision": "eBay copies a listing's pictures onto its own CDN during the publish call, so the issued default is 1 hour: long enough for that call and its bounded retries, and no longer. Seven days remains the ceiling an explicit longer TTL cannot exceed. Only a 256-bit random token leaves the server; the database stores its SHA-256 digest, tenant, exact private object binding, and expiry. An expired digest is inert and follows the retained photo lifecycle rather than requiring another hosted cleanup schedule."
+      }]
+    },
+    {
       "id": "private-storage-raw-voice",
       "releaseDatum": true,
       "dispositions": [{

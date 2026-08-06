@@ -39,6 +39,7 @@ describe("register", () => {
       REVENUECAT_PROJECT_ID: "project-test",
       REVENUECAT_SECRET_API_KEY: "revenuecat-secret",
       SERVER_RPC_SECRET: "dOD9IRVTwgq/GTVsIoNQ29nsUWHdqgRjpgdYQN7Yy0QUqS7yFBsMq6fknzT+jiTI",
+      SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
       SUPABASE_SECRET_KEY: "supabase-secret",
     })) {
       vi.stubEnv(name, value);

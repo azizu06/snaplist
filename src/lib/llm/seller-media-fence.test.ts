@@ -164,6 +164,7 @@ describe("parseEnv", () => {
     APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
     APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
     CLERK_AUTHORIZED_PARTIES: "https://snaplist.vercel.app",
+    SNAPLIST_PUBLIC_ORIGIN: "https://snaplist.vercel.app",
     EBAY_BASE_URL: "https://api.sandbox.ebay.com",
     GEMINI_API_KEY: "g",
   };

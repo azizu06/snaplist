@@ -103,6 +103,9 @@ jobs:
           echo "::add-mask::$SECRET_KEY"
           {
             echo "SUPABASE_URL=$API_URL"
+            # Route handlers read NEXT_PUBLIC_SUPABASE_URL, so a suite that calls
+            # one in-process needs it too, not just the server-side alias.
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
             echo "SUPABASE_PUBLISHABLE_KEY=$PUBLISHABLE_KEY"
             echo "SUPABASE_ANON_KEY=$PUBLISHABLE_KEY"
             echo "SUPABASE_SECRET_KEY=$SECRET_KEY"

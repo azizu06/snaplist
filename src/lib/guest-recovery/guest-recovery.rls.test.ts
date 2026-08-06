@@ -32,6 +32,7 @@ import { encryptGuestRecoveryPhotoEnvelope } from "./photo-encryption";
 import { createListingReviewReader } from "@/lib/listing-review/read";
 import { MockEbayAdapter } from "@/lib/marketplace/ebay/mock";
 import { publishListingToEbay } from "@/lib/marketplace/ebay/publish";
+import { GET as getEbayPhoto } from "@/app/m/[token]/route";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -688,10 +689,18 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       fixture.target.client,
       fixture.draftId,
       adapter,
-      { env: () => ({ EBAY_MARKETPLACE_ID: "EBAY_US" }) },
+      {
+        env: () => ({ EBAY_MARKETPLACE_ID: "EBAY_US" }),
+        photoBaseUrl: "https://snaplist.dev",
+      },
     )).resolves.toMatchObject({ ebayStatus: "published" });
     expect(adapter.requests).toHaveLength(1);
-    const publishedPhoto = await fetch(adapter.requests[0]!.imageUrls[0]!);
+    const publishedPhotoUrl = new URL(adapter.requests[0]!.imageUrls[0]!);
+    const token = publishedPhotoUrl.pathname.split("/").at(-1)!;
+    const publishedPhoto = await getEbayPhoto(
+      new Request(publishedPhotoUrl),
+      { params: Promise.resolve({ token }) },
+    );
     expect(publishedPhoto.ok).toBe(true);
     expect(new Uint8Array(await publishedPhoto.arrayBuffer())).toEqual(
       fixture.plaintextPhotos[0],
