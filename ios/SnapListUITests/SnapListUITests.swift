@@ -30,28 +30,30 @@ final class SnapListUITests: XCTestCase {
             "--activation-onboarded-fixture",
             "--reset-activation-guidance",
             "--visual-state=run-detail",
+            "--run-detail-fixture=reviewable",
             "--activation-guidance-step=listingReview",
             "--listing-review-fixture=loaded"
         ])
 
         XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
         app.buttons["run.review.open"].tap()
-        XCTAssertTrue(app.otherElements["activation-guidance"].waitForExistence(timeout: 3))
+        XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
         app.buttons["activation-guidance.got-it"].tap()
-        XCTAssertFalse(app.otherElements["activation-guidance"].exists)
+        XCTAssertFalse(activationGuidance(in: app).exists)
 
         app.terminate()
         app.launchArguments = [
             "--zero-network-fixtures",
             "--activation-onboarded-fixture",
             "--visual-state=run-detail",
+            "--run-detail-fixture=reviewable",
             "--listing-review-fixture=loaded"
         ]
         app.launch()
 
         XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
         app.buttons["run.review.open"].tap()
-        XCTAssertFalse(app.otherElements["activation-guidance"].waitForExistence(timeout: 1))
+        XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 1))
     }
 
     func testActivationSkipSuppressesTheCoachMarkAcrossRelaunch() {
@@ -60,7 +62,7 @@ final class SnapListUITests: XCTestCase {
             "--reset-activation-guidance"
         ])
 
-        let guidance = app.otherElements["activation-guidance"]
+        let guidance = activationGuidance(in: app)
         XCTAssertTrue(guidance.waitForExistence(timeout: 2))
         guidance.swipeDown()
         XCTAssertFalse(guidance.waitForExistence(timeout: 2))
@@ -72,7 +74,7 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launch()
 
-        XCTAssertFalse(app.otherElements["activation-guidance"].waitForExistence(timeout: 1))
+        XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 1))
     }
 
     func testCapturePresentsAndDismissesAnItemDrivenSheet() {
@@ -1786,13 +1788,13 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
         XCTAssertTrue(app.buttons["capture.choose-library"].exists)
-        XCTAssertTrue(app.otherElements["activation-guidance"].waitForExistence(timeout: 3))
+        XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["One item, up to five photos."].exists)
 
         app.buttons["capture.take-one-item"].tap()
         XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["scan.choose-library"].exists)
-        XCTAssertTrue(app.otherElements["activation-guidance"].exists)
+        XCTAssertTrue(activationGuidance(in: app).exists)
     }
 
     func testCameraDeniedAndRestrictedUseLibraryRecovery() {
@@ -2014,6 +2016,10 @@ final class SnapListUITests: XCTestCase {
             .completed
         )
         return app
+    }
+
+    private func activationGuidance(in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)["activation-guidance"]
     }
 
     private func assertPhotoReviewThumbnailCatalog(
