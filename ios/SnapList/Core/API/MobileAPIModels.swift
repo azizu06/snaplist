@@ -23,6 +23,15 @@ struct SessionEnvelope: Codable, Equatable {
     let meta: ResponseMeta
 }
 
+struct ActivationGuidanceEnvelope: Codable, Equatable {
+    struct DataPayload: Codable, Equatable {
+        let completed: Bool
+    }
+
+    let data: DataPayload
+    let meta: ResponseMeta
+}
+
 struct MobileItemSubmissionEnvelope: Codable, Equatable {
     struct PhotoIdentity: Codable, Equatable {
         let kind: String

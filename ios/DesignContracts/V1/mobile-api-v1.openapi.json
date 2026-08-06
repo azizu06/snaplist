@@ -32,6 +32,30 @@
         }
       }
     },
+    "/v1/activation-guidance": {
+      "get": {
+        "operationId": "getActivationGuidanceCompletion",
+        "x-owner-issue": 566,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Tenant-scoped monotonic completion state for first-listing guidance", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ActivationGuidanceEnvelope" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "operationId": "completeActivationGuidance",
+        "x-owner-issue": 566,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Idempotently records this seller's completion marker", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ActivationGuidanceEnvelope" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
     "/v1/home": {
       "get": {
         "operationId": "getHome",
@@ -331,6 +355,7 @@
       "ErrorEnvelope": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["unauthorized", "forbidden", "invalid_request", "not_found", "method_not_allowed", "conflict", "rate_limited", "internal_error"] }, "message": { "type": "string" }, "requestId": { "type": "string" }, "details": { "type": "object", "additionalProperties": true } } } } },
       "HealthEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["apiVersion", "status"], "properties": { "apiVersion": { "const": "v1" }, "status": { "const": "ok" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "SessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "string" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "ActivationGuidanceEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "type": "object", "additionalProperties": false, "required": ["completed"], "properties": { "completed": { "type": "boolean" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "HomeEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/HomeProjection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "HomeProjection": { "type": "object", "additionalProperties": false, "required": ["revision", "sellerState", "unreadNotificationCount", "summary", "attention", "currentRun", "readyToFinish", "listings", "recentSearches"], "properties": { "revision": { "type": "integer", "minimum": 0 }, "sellerState": { "type": "string", "enum": ["active", "newSeller"] }, "unreadNotificationCount": { "type": "integer", "minimum": 0 }, "summary": { "$ref": "#/components/schemas/HomeSummary" }, "attention": { "type": "array", "items": { "$ref": "#/components/schemas/HomeAttentionTask" } }, "currentRun": { "oneOf": [{ "$ref": "#/components/schemas/HomeCurrentRun" }, { "type": "null" }] }, "readyToFinish": { "type": "array", "items": { "$ref": "#/components/schemas/HomeFinishItem" } }, "listings": { "type": "array", "items": { "$ref": "#/components/schemas/HomeListing" } }, "recentSearches": { "type": "array", "items": { "type": "string", "minLength": 1 } } } },
       "HomeSummary": { "type": "object", "additionalProperties": false, "required": ["active", "drafts", "orders"], "properties": { "active": { "type": "integer", "minimum": 0 }, "drafts": { "type": "integer", "minimum": 0 }, "orders": { "type": ["integer", "null"], "minimum": 0 } } },

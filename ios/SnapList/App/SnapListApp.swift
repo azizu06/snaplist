@@ -88,6 +88,14 @@ struct SnapListApp: App {
             dependencies.firstValueOnboardingCompletionStore.clear()
             dependencies.stagedLibraryPhotos.clear()
         }
+        if configuration.resetActivationGuidance {
+            for key in UserDefaults.standard.dictionaryRepresentation().keys
+            where key.hasPrefix("snaplist.activation-guidance-completed-v1.")
+                || key.hasPrefix("snaplist.activation-guidance-progress-v1.")
+                || key == "snaplist.fixture-activation-guidance-completed" {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
         if let count = configuration.stagedLibraryPhotoFixtureCount, count > 0 {
             let photos = (0..<count).map { Data("fixture-photo-\($0)".utf8) }
             onboardingModel.didStageLibraryPhotos(photos)

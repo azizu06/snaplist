@@ -386,6 +386,14 @@ private actor ProGateMobileAPIStub: MobileAPIClient {
         throw MobileAPIClientError.httpStatus(500)
     }
 
+    func getActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
+    func completeActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
     func getRevenueCatConfiguration() async throws
         -> RevenueCatConfigurationEnvelope {
         configurationCalls += 1

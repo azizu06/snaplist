@@ -60,6 +60,13 @@ export const sessionEnvelopeSchema = z
   })
   .strict();
 
+export const activationGuidanceEnvelopeSchema = z
+  .object({
+    data: z.object({ completed: z.boolean() }).strict(),
+    meta: apiMetaSchema,
+  })
+  .strict();
+
 export const ebayOauthSessionSchema = z
   .object({
     sessionId: z.string().uuid(),

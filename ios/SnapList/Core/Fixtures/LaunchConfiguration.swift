@@ -245,6 +245,9 @@ struct LaunchConfiguration: Equatable {
     var usesZeroNetworkFixtures: Bool
     var cameraAuthorizationFixture: CameraAuthorizationStatus?
     var resetOnboardingProgress: Bool
+    var activationOnboardedFixture: Bool
+    var resetActivationGuidance: Bool
+    var activationGuidanceFixtureState: ActivationGuidanceState?
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
     var submissionFixture: SubmissionFixture?
@@ -268,6 +271,9 @@ struct LaunchConfiguration: Equatable {
         usesZeroNetworkFixtures: false,
         cameraAuthorizationFixture: nil,
         resetOnboardingProgress: false,
+        activationOnboardedFixture: false,
+        resetActivationGuidance: false,
+        activationGuidanceFixtureState: nil,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
@@ -291,6 +297,9 @@ struct LaunchConfiguration: Equatable {
         usesZeroNetworkFixtures: true,
         cameraAuthorizationFixture: .authorized,
         resetOnboardingProgress: false,
+        activationOnboardedFixture: false,
+        resetActivationGuidance: false,
+        activationGuidanceFixtureState: nil,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
@@ -317,6 +326,18 @@ struct LaunchConfiguration: Equatable {
                 configuration.usesZeroNetworkFixtures = true
             } else if argument == "--reset-onboarding-progress" {
                 configuration.resetOnboardingProgress = true
+            } else if argument == "--activation-onboarded-fixture" {
+                configuration.activationOnboardedFixture = true
+                configuration.usesZeroNetworkFixtures = true
+            } else if argument == "--reset-activation-guidance" {
+                configuration.resetActivationGuidance = true
+            } else if argument.hasPrefix("--activation-guidance-step=") {
+                let value = String(
+                    argument.dropFirst("--activation-guidance-step=".count)
+                )
+                configuration.activationGuidanceFixtureState =
+                    ActivationGuidanceState(fixtureValue: value)
+                configuration.usesZeroNetworkFixtures = true
             } else if argument.hasPrefix("--fixture-staged-library-photos=") {
                 let value = String(
                     argument.dropFirst("--fixture-staged-library-photos=".count)
@@ -424,6 +445,9 @@ struct LaunchConfiguration: Equatable {
     }
 
     var usesOnboarding: Bool {
+        if activationOnboardedFixture {
+            return false
+        }
         if photoReviewState != nil {
             return false
         }
@@ -462,6 +486,9 @@ struct LaunchConfiguration: Equatable {
     }
 
     var initialOnboardingState: OnboardingFlowState {
+        if activationOnboardedFixture {
+            return .init(screen: .captureBoundary)
+        }
         guard let visualState,
               let screen = OnboardingScreen(visualState: visualState) else {
             return .init()
