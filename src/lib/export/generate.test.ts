@@ -14,6 +14,7 @@ import {
   DEPOP_MAX_HASHTAGS,
   DEPOP_PLATFORM,
   depopPackSchema,
+  rawExportPacksSchema,
   type RawExportPacks,
 } from "./schema";
 import {
@@ -852,5 +853,57 @@ describe("generateExportPacks — Depop", () => {
     // Everything after the description is hashtags and nothing else.
     const tail = lines.slice(1).join("\n").trim();
     expect(tail).toBe(res.depop.pack.hashtags.join(" "));
+  });
+});
+
+describe("model-facing pack shape (#696): absence lives in the VALUE", () => {
+  it("requires the description KEY and accepts null as 'I wrote no description'", () => {
+    // OpenAI structured outputs in strict mode reject a compiled schema whose
+    // `properties` carry a key missing from `required`, so this permissive
+    // schema may not make `description` optional. The key is mandatory; `null`
+    // is how a model that was told not to write descriptions complies.
+    const base = {
+      facebook: { title: "Sony WH-1000XM4 headphones" },
+      mercari: { title: "Sony WH-1000XM4 Headphones", hashtags: ["#sony"] },
+    };
+    expect(rawExportPacksSchema.safeParse(base).success).toBe(false);
+    expect(
+      rawExportPacksSchema.safeParse({
+        facebook: { ...base.facebook, description: null },
+        mercari: { ...base.mercari, description: null },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("still publishes complete core-built descriptions when the model sends null", async () => {
+    // The whole point of the permissive half of the split: a null description
+    // reaches the deterministic assembly instead of failing the run, and every
+    // destination comes back with the same core-built copy it always had.
+    const nulled: RawExportPacks = {
+      facebook: { title: "Sony WH-1000XM4 headphones", description: null },
+      mercari: {
+        title: "Sony WH-1000XM4 Headphones",
+        description: null,
+        hashtags: ["#sony", "#headphones"],
+      },
+    };
+    const { generate } = scriptedGenerate([nulled]);
+    const res = await generateExportPacks({ attributes: CORE, generate });
+
+    expect(res.facebook.pack.description).toBe(buildFacebookDescription(CORE));
+    expect(res.mercari.pack.description).toBe(buildMercariDescription(CORE));
+    expect(facebookPackSchema.safeParse(res.facebook.pack).success).toBe(true);
+    expect(mercariPackSchema.safeParse(res.mercari.pack).success).toBe(true);
+    expect(depopPackSchema.safeParse(res.depop.pack).success).toBe(true);
+
+    // Export-pack honesty: the copy the seller pastes describes the ITEM. It
+    // never says SnapList filled in, listed, posted, or published the form.
+    for (const block of [
+      res.facebook.copyBlock,
+      res.mercari.copyBlock,
+      res.depop.copyBlock,
+    ]) {
+      expect(block).not.toMatch(/\b(listed|posted|published|we (filled|listed|posted))\b/i);
+    }
   });
 });

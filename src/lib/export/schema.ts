@@ -157,23 +157,33 @@ export type DepopPack = z.infer<typeof depopPackSchema>;
  * instead of throwing inside `generateObject`. The repaired packs are then
  * validated against the strict schemas above.
  *
- * DESCRIPTIONS are deliberately OPTIONAL and IGNORED: the published
- * descriptions are assembled deterministically from the validated core in
- * `generate.ts` (an invented digit-free claim like "Includes charger" cannot
- * be detected deterministically in model free text, so model-authored
- * description copy is never published). The fields remain accepted here only
- * so a model that emits one anyway does not fail schema validation.
+ * DESCRIPTIONS are deliberately IGNORED: the published descriptions are
+ * assembled deterministically from the validated core in `generate.ts` (an
+ * invented digit-free claim like "Includes charger" cannot be detected
+ * deterministically in model free text, so model-authored description copy is
+ * never published). The fields remain accepted here only so a model that emits
+ * one anyway does not fail schema validation.
+ *
+ * They are NULLABLE, never `.optional()` (issue #696). OpenAI structured
+ * outputs in strict mode reject a compiled schema in which any key of
+ * `properties` is absent from `required` — an `.optional()` field 400s the
+ * request outright with `'description' is required to be supplied and to be
+ * not null`, killing every production run that reaches export-pack generation.
+ * So the KEY is always required and "I have no description" is expressed in the
+ * VALUE as `null`. Nothing reads it either way: `reconcilePacks` builds every
+ * published description from the core, so `null` reaches exactly the same
+ * deterministic assembly that model-authored text does.
  */
 export const rawExportPacksSchema = z.object({
   facebook: z.object({
     title: z.string().min(1, "Facebook title is required"),
-    /** Accepted but IGNORED — published FB descriptions are core-built. */
-    description: z.string().optional(),
+    /** Accepted but IGNORED — published FB descriptions are core-built. `null` = none. */
+    description: z.string().nullable(),
   }),
   mercari: z.object({
     title: z.string().min(1, "Mercari title is required"),
-    /** Accepted but IGNORED — published Mercari descriptions are core-built. */
-    description: z.string().optional(),
+    /** Accepted but IGNORED — published Mercari descriptions are core-built. `null` = none. */
+    description: z.string().nullable(),
     hashtags: z.array(z.string()),
   }),
 });
