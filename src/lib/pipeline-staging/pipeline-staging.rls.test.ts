@@ -28,6 +28,64 @@ let mixedUserA: ClerkTestUser;
 let mixedUserB: ClerkTestUser;
 const messageIds = new Set<string>();
 
+// A reservation and the refusal it is supposed to cause only agree while both
+// land in the same per-minute bucket, and that bucket comes from the database's
+// own clock (`date_trunc('minute', statement_timestamp())`), which this process
+// cannot pin. So read the stack's clock instead and refuse to start a
+// minute-sensitive sequence in a minute with too little left (#702).
+const CAPACITY_MINUTE_HEADROOM_SECONDS = 10;
+const STACK_CLOCK_PROBE_TIMEOUT_MS = 5_000;
+// Probes, so at most two waits to a minute boundary.
+const CAPACITY_MINUTE_GUARD_PROBES = 3;
+const CAPACITY_MINUTE_GUARD_MAX_WAIT_MS =
+  CAPACITY_MINUTE_GUARD_PROBES * STACK_CLOCK_PROBE_TIMEOUT_MS +
+  (CAPACITY_MINUTE_GUARD_PROBES - 1) *
+    ((CAPACITY_MINUTE_HEADROOM_SECONDS + 1) * 1_000);
+// The guard legitimately waits out a low-headroom minute before the test's
+// first RPC, which the default 5s per-test budget cannot cover. Derive the
+// test's budget from the guard's own bound so the two cannot drift apart.
+const CAPACITY_MINUTE_TEST_TIMEOUT_MS =
+  CAPACITY_MINUTE_GUARD_MAX_WAIT_MS + 20_000;
+
+async function stackSecondsRemainingInMinute(): Promise<number> {
+  // Every response from the local stack carries an RFC 9110 `Date` header, and
+  // its containers share one host clock with Postgres. `/auth/v1/health` is the
+  // same endpoint the suite's reachability probe uses.
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
+    headers: ANON_KEY ? { apikey: ANON_KEY } : undefined,
+    signal: AbortSignal.timeout(STACK_CLOCK_PROBE_TIMEOUT_MS),
+  });
+  const header = response.headers.get("date");
+  const stackNow = new Date(header ?? Number.NaN);
+  if (Number.isNaN(stackNow.getTime())) {
+    throw new Error(
+      `The Supabase stack returned no usable Date header: ${header ?? "<missing>"}`,
+    );
+  }
+  // The header is truncated to the second, so the stack may be up to a second
+  // further into the minute than it reports. Assume it is.
+  return 60 - stackNow.getUTCSeconds() - 1;
+}
+
+async function awaitCapacityMinuteWithHeadroom(): Promise<void> {
+  let remaining = 0;
+  for (let probe = 0; probe < CAPACITY_MINUTE_GUARD_PROBES; probe += 1) {
+    remaining = await stackSecondsRemainingInMinute();
+    if (remaining >= CAPACITY_MINUTE_HEADROOM_SECONDS) return;
+    await new Promise((resolve) =>
+      setTimeout(resolve, (remaining + 1) * 1_000 + 250),
+    );
+  }
+  // Say what was waited for and what the clock last reported, so exhausting the
+  // guard reads as a stack-clock problem rather than an opaque test timeout.
+  throw new Error(
+    `Waited for a per-minute capacity window with ` +
+      `${CAPACITY_MINUTE_HEADROOM_SECONDS}s of headroom across ` +
+      `${CAPACITY_MINUTE_GUARD_PROBES} probes; the Supabase stack clock last ` +
+      `reported ${remaining}s left in the minute`,
+  );
+}
+
 function entry(userId: string, key: string, source: "single" | "batch" = "single") {
   return {
     idempotency_key: key,
@@ -321,6 +379,10 @@ describe("durable pipeline staging RPC and RLS", () => {
   });
 
   it("shares daily capacity across legacy and durable entry points without crossing tenants", async () => {
+    // Own the window this test asserts in: everything below reserves capacity
+    // and then asserts the refusal that reservation causes, which only holds
+    // inside one database minute.
+    await awaitCapacityMinuteWithHeadroom();
 
     const legacyReservationId = crypto.randomUUID();
     const legacyArgs = {
@@ -351,7 +413,9 @@ describe("durable pipeline staging RPC and RLS", () => {
       p_daily_limit: 10,
       p_per_minute_limit: 1,
     });
-    expect(durableMinuteBlocked.error?.message).toMatch(/per-minute capacity/i);
+    expect(
+      durableMinuteBlocked.error?.message ?? "stage_pipeline_batch was accepted",
+    ).toMatch(/per-minute capacity/i);
 
     const otherTenant = await admin.rpc("stage_pipeline_batch", {
       p_user_id: mixedUserB.id,
@@ -372,7 +436,10 @@ describe("durable pipeline staging RPC and RLS", () => {
       p_daily_limit: 10,
       p_per_minute_limit: 1,
     });
-    expect(legacyMinuteBlocked.error?.message).toMatch(/per-minute capacity/i);
+    expect(
+      legacyMinuteBlocked.error?.message ??
+        "reserve_legacy_pipeline_usage was accepted",
+    ).toMatch(/per-minute capacity/i);
 
     const released = await admin.rpc("release_legacy_pipeline_usage", {
       p_reservation_id: legacyReservationId,
@@ -409,5 +476,5 @@ describe("durable pipeline staging RPC and RLS", () => {
       legacyArgs,
     );
     expect(sellerCall.error).not.toBeNull();
-  });
+  }, CAPACITY_MINUTE_TEST_TIMEOUT_MS);
 });
