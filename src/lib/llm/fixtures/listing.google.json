@@ -1,11 +1,11 @@
 {
   "title": "Catan 5th Edition Strategy Board Game Complete - Like New",
-  "itemSpecifics": {
-    "Brand": "Catan Studio",
-    "Theme": "Strategy",
-    "Number of Players": "3-4",
-    "Recommended Age Range": "10+"
-  },
+  "itemSpecifics": [
+    { "name": "Brand", "value": "Catan Studio" },
+    { "name": "Theme", "value": "Strategy" },
+    { "name": "Number of Players", "value": "3-4" },
+    { "name": "Recommended Age Range", "value": "10+" }
+  ],
   "description": "Catan 5th Edition base game in like-new condition. All pieces present and counted. Box shows minimal shelf wear. Great for family game night.",
   "tags": ["catan", "board game", "strategy", "family game"]
 }

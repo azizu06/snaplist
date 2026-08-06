@@ -47,10 +47,13 @@ function client(input?: {
   rpcError?: { message: string } | null;
 }) {
   const maybeSingle = vi.fn(async () => ({
-    data: input?.row ?? {
-      account_generation: ACCOUNT_GENERATION,
-      connection_generation: CONNECTION_GENERATION,
-    },
+    data:
+      input && "row" in input
+        ? input.row
+        : {
+            account_generation: ACCOUNT_GENERATION,
+            connection_generation: CONNECTION_GENERATION,
+          },
     error: null,
   }));
   const query = {
@@ -93,6 +96,46 @@ describe("createSupabaseEbayPolicyLocationBindingStore", () => {
         p_binding: BINDING,
       },
     );
+  });
+
+  it("reads the stored binding for one marketplace with its connection generation", async () => {
+    const mock = client({
+      row: {
+        connection_generation: CONNECTION_GENERATION,
+        policy_location_bindings: { EBAY_US: BINDING },
+      },
+    });
+    const store = createSupabaseEbayPolicyLocationBindingStore(mock.supabase);
+
+    await expect(store.readStoredBinding("EBAY_US")).resolves.toEqual({
+      connectionGeneration: CONNECTION_GENERATION,
+      binding: BINDING,
+    });
+    expect(mock.query.select).toHaveBeenCalledWith(
+      "connection_generation, policy_location_bindings",
+    );
+  });
+
+  it("reports no stored binding for a marketplace the connection has never bound", async () => {
+    const mock = client({
+      row: {
+        connection_generation: CONNECTION_GENERATION,
+        policy_location_bindings: { EBAY_GB: BINDING },
+      },
+    });
+    const store = createSupabaseEbayPolicyLocationBindingStore(mock.supabase);
+
+    await expect(store.readStoredBinding("EBAY_US")).resolves.toEqual({
+      connectionGeneration: CONNECTION_GENERATION,
+      binding: undefined,
+    });
+  });
+
+  it("reports a missing connection rather than an empty binding", async () => {
+    const mock = client({ row: null });
+    const store = createSupabaseEbayPolicyLocationBindingStore(mock.supabase);
+
+    await expect(store.readStoredBinding("EBAY_US")).resolves.toBeNull();
   });
 
   it("rejects database results outside the display-safe binding contract", async () => {

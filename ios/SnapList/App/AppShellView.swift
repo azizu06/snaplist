@@ -33,6 +33,15 @@ struct AppShellView: View {
     @State private var trophyWallPrincipalFence = TrophyWallPrincipalFence()
     @State private var recoverableLocalPendingIdentity: TrophyWallLogicalIdentity?
     @State private var trophyWallCollectionRefreshGeneration = 0
+    @State private var activationCompletionChecked = false
+    @State private var hasCompletedActivation = false
+    @State private var activationAuthentication = ActivationAuthenticationState.unknown
+    @State private var isCompletingActivation = false
+    @State private var activationProgress = ActivationGuidanceProgress()
+    @State private var activationListingReviewPresented = false
+    private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
+    private let activationGuestCompletionStore =
+        UserDefaultsActivationGuidanceGuestCompletionStore()
 
     var body: some View {
         Group {
@@ -127,16 +136,23 @@ struct AppShellView: View {
                         discardPhotoReviewSaveFailure(session)
                     },
                     commitReorder: { photoID, destinationIndex in
-                        await session.commitReorder(
+                        let reordered = await session.commitReorder(
                             photoID: photoID,
                             destinationIndex: destinationIndex,
                             captureFlow: captureFlow
                         )
+                        if reordered != nil {
+                            advanceActivationGuidance(for: .reorderedPhotos)
+                        }
+                        return reordered
                     },
                     // Photo Review consumes #469's Voice note event locally. Start
                     // listing submits the committed NativeIntake snapshot: displayed
                     // photo order plus #541's optional recovered WAV under one key.
                     openBoundary: { event in
+                        if event == .openVoiceNote {
+                            advanceActivationGuidance(for: .openedVoiceNote)
+                        }
                         if PhotoReviewSubmissionPrimaryActionConsumer.consume(
                             event,
                             submissionHost: submissionHost
@@ -176,6 +192,11 @@ struct AppShellView: View {
             }
         }
         .modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
+        .overlay(alignment: .bottom) {
+            if router.presentedSheet == nil {
+                activationGuidanceOverlay
+            }
+        }
         .sheet(
             isPresented: proGatePresentationBinding,
             onDismiss: restoreProGateStartListingFocus
@@ -223,6 +244,7 @@ struct AppShellView: View {
                     activationID: activationID
                 )
             }
+            advanceActivationGuidance(for: .capturedFirstPhoto)
         }
         // Home's update loop is suspended from the outermost view. Photo Review replaces
         // the shell while it is open, so anything attached to the shell stops observing
@@ -236,6 +258,7 @@ struct AppShellView: View {
                 Task { await proGateStore?.refreshPendingVerification() }
             case .background:
                 homeStore.suspendUpdates()
+                recordActivationInterruptionIfNeeded()
             case .inactive:
                 break
             @unknown default:
@@ -247,6 +270,11 @@ struct AppShellView: View {
             of: submissionHost.pendingPresentationEvent,
             initial: true
         ) { _, event in
+            if let action = ActivationGuidanceSubmissionEventPolicy.action(
+                for: event
+            ) {
+                advanceActivationGuidance(for: action)
+            }
             switch event {
             case .destinationHandoff(
                 eventID: let eventID,
@@ -268,6 +296,21 @@ struct AppShellView: View {
             case nil, .submissionRejected?, .destinationHandoff?:
                 break
             }
+        }
+        .task(id: activationPresentationInputs) {
+            guard !hasCompletedActivation,
+                  ActivationPresentationPolicy.shouldPresent(
+                    hasOnboarded: onboardingModel.state.screen == .captureBoundary,
+                    hasCompletedActivation: hasCompletedActivation
+                  ),
+                  !activationCompletionChecked else { return }
+            await bootstrapActivationCompletion()
+        }
+        .task(id: hasCompletedActivation) {
+            guard hasCompletedActivation,
+                  activationAuthentication == .guest,
+                  activationGuestCompletionStore.isCompleted else { return }
+            await promoteCompletedGuestMarkerWhenAuthenticated()
         }
         .onChange(of: photoReviewHost.isCommitting) { _, isCommitting in
             guard !isCommitting, awaitsCommittedEmptyDismissal else {
@@ -485,6 +528,9 @@ struct AppShellView: View {
                         pendingCapturePresentation = .stagedPhoto
                     }
                 )
+                .overlay(alignment: .bottom) {
+                    activationGuidanceOverlay
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -643,6 +689,18 @@ struct AppShellView: View {
                     startNewItem: {
                         router.reset(tab: .scan)
                         router.selectedTab = .scan
+                    },
+                    activationProcessingOpened: {
+                        advanceActivationGuidance(for: .openedProcessing)
+                    },
+                    activationListingReviewOpened: {
+                        activationListingReviewPresented = true
+                    },
+                    activationListingReviewDismissed: {
+                        activationListingReviewPresented = false
+                    },
+                    activationListingReviewInteraction: {
+                        advanceActivationGuidance(for: .editedListing)
                     }
                 )
             default:
@@ -669,6 +727,239 @@ struct AppShellView: View {
             // intake there, by deleting the last photo in Photo Review, must leave them
             // in zero-photo Scan rather than restart onboarding behind the camera.
             && router.presentedFullScreen != .guidedCamera
+    }
+
+    private var activationPresentationInputs: ActivationPresentationInputs {
+        .init(
+            onboardingScreen: onboardingModel.state.screen,
+            hasCompletedActivation: hasCompletedActivation
+        )
+    }
+
+    private var shouldPresentActivation: Bool {
+        activationCompletionChecked
+            && activationAuthentication != .unknown
+            && ActivationPresentationPolicy.shouldPresent(
+                hasOnboarded: onboardingModel.state.screen == .captureBoundary,
+                hasCompletedActivation: hasCompletedActivation
+            )
+    }
+
+    private var activationIdentity: String? {
+        switch activationAuthentication {
+        case .guest:
+            "guest"
+        case .authenticated(let userID):
+            userID
+        case .unknown:
+            nil
+        }
+    }
+
+    private var activationSurface: ActivationGuidanceSurface? {
+        if activationListingReviewPresented {
+            return .listingReview
+        }
+        if photoReviewHost.session != nil {
+            return .photoReview
+        }
+        if router.selectedTab == .trophyWall,
+           router.presentedSheet == nil,
+           router.presentedFullScreen == nil {
+            return .trophyWall
+        }
+        if router.selectedTab == .scan,
+           router.presentedSheet == nil || router.presentedSheet == .capture,
+           router.presentedFullScreen == nil
+                || router.presentedFullScreen == .guidedCamera {
+            return .scan
+        }
+        return nil
+    }
+
+    private var activationCoachMark: ActivationCoachMark? {
+        guard shouldPresentActivation,
+              !activationProgress.hasAcknowledgedCurrentState,
+              let surface = activationSurface else { return nil }
+        return ActivationCoachMark(
+            state: activationProgress.state,
+            surface: surface
+        )
+    }
+
+    @ViewBuilder
+    private var activationGuidanceOverlay: some View {
+        if let coachMark = activationCoachMark {
+            ActivationGuidanceCoachMark(
+                coachMark: coachMark,
+                dismiss: dismissActivationGuidance,
+                skip: skipActivationGuidance,
+                isCompleting: isCompletingActivation
+            )
+            .padding(.horizontal, 18)
+            .padding(.bottom, activationBottomInset)
+        }
+    }
+
+    private var activationBottomInset: CGFloat {
+        guard let coachMark = activationCoachMark else { return 24 }
+        // One anchor contract, proved at the policy seam, so the shell and the
+        // coach mark can never disagree about where a state docks.
+        return ActivationCoachMarkAnchorPolicy.anchor(
+            for: coachMark,
+            reduceMotion: reduceMotion
+        ).bottomInset
+    }
+
+    private func dismissActivationGuidance() {
+        advanceActivationGuidance(for: .gotIt)
+    }
+
+    private func skipActivationGuidance() {
+        guard shouldPresentActivation else { return }
+        advanceActivationGuidance(for: .skip)
+    }
+
+    private func advanceActivationGuidance(for action: ActivationGuidanceAction) {
+        guard shouldPresentActivation else { return }
+        switch activationProgress.advance(for: action) {
+        case .completionRequested:
+            saveActivationProgress()
+            completeActivationGuidance()
+        case .advanced, .completionRecorded:
+            saveActivationProgress()
+        case .unchanged:
+            break
+        }
+    }
+
+    private func completeActivationGuidance() {
+        switch activationAuthentication {
+        case .guest:
+            activationGuestCompletionStore.recordCompletion()
+            _ = activationProgress.advance(for: .completionRecorded)
+            hasCompletedActivation = true
+            activationProgressStore.clear(for: "guest")
+        case .authenticated(let userID):
+            guard !isCompletingActivation else { return }
+            isCompletingActivation = true
+            Task {
+                defer { isCompletingActivation = false }
+                while !Task.isCancelled {
+                    do {
+                        guard try await dependencies.mobileAPIClient
+                            .completeActivationGuidance().data.completed else {
+                            try await Task.sleep(for: .seconds(2))
+                            continue
+                        }
+                        _ = activationProgress.advance(for: .completionRecorded)
+                        hasCompletedActivation = true
+                        activationProgressStore.clear(for: userID)
+                        return
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        try? await Task.sleep(for: .seconds(2))
+                    }
+                }
+            }
+        case .unknown:
+            break
+        }
+    }
+
+    private func recordActivationInterruptionIfNeeded() {
+        guard shouldPresentActivation,
+              activationProgress.recordInterruption() == .advanced else { return }
+        saveActivationProgress()
+    }
+
+    private func saveActivationProgress() {
+        guard let activationIdentity else { return }
+        activationProgressStore.save(
+            activationProgress,
+            for: activationIdentity
+        )
+    }
+
+    private func bootstrapActivationCompletion() async {
+        while !Task.isCancelled {
+            guard onboardingModel.state.screen == .captureBoundary,
+                  !hasCompletedActivation else { return }
+
+            let guestCompleted = activationGuestCompletionStore.isCompleted
+            let result = await ActivationCompletionBootstrapCoordinator.resolve(
+                guestCompleted: guestCompleted,
+                loadProgress: { identity in
+                    configuration.activationGuidanceFixtureState
+                        .map { ActivationGuidanceProgress(state: $0) }
+                        ?? activationProgressStore.load(for: identity)
+                },
+                fetchSessionUserID: {
+                    let session = try await dependencies.mobileAPIClient.getSession()
+                    return session.data.userId
+                },
+                fetchTenantCompleted: {
+                    try await dependencies.mobileAPIClient
+                        .getActivationGuidance().data.completed
+                },
+                writeTenantCompletion: {
+                    try await dependencies.mobileAPIClient
+                        .completeActivationGuidance().data.completed
+                }
+            )
+
+            switch result {
+            case .present(let authentication, _, let progress):
+                activationAuthentication = authentication
+                hasCompletedActivation = false
+                activationProgress = progress
+                activationCompletionChecked = true
+                return
+            case .completed(let authentication, let identity):
+                activationAuthentication = authentication
+                hasCompletedActivation = true
+                activationProgress = .recordedInstall
+                activationProgressStore.clear(for: identity)
+                activationCompletionChecked = true
+                return
+            case .retry(let authentication):
+                activationAuthentication = authentication
+                activationCompletionChecked = false
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    private func promoteCompletedGuestMarkerWhenAuthenticated() async {
+        while !Task.isCancelled,
+              activationAuthentication == .guest,
+              activationGuestCompletionStore.isCompleted {
+            let result = await ActivationGuestCompletionPromotionCoordinator
+                .attempt(
+                    fetchSessionUserID: {
+                        let session = try await dependencies.mobileAPIClient.getSession()
+                        return session.data.userId
+                    },
+                    fetchTenantCompleted: {
+                        try await dependencies.mobileAPIClient
+                            .getActivationGuidance().data.completed
+                    },
+                    writeTenantCompletion: {
+                        try await dependencies.mobileAPIClient
+                            .completeActivationGuidance().data.completed
+                    }
+                )
+            switch result {
+            case .promoted(let userID):
+                activationAuthentication = .authenticated(userID: userID)
+                activationProgressStore.clear(for: "guest")
+                activationProgressStore.clear(for: userID)
+                return
+            case .waitingForSession, .retry:
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 
     private var shouldShowFirstValueOnboarding: Bool {
@@ -985,6 +1276,11 @@ enum AppShellDepartedPhotoReviewTransaction {
         await captureFlow.startCamera()
         return true
     }
+}
+
+private struct ActivationPresentationInputs: Equatable {
+    let onboardingScreen: OnboardingScreen
+    let hasCompletedActivation: Bool
 }
 
 @MainActor

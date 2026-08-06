@@ -184,7 +184,12 @@ export function createDefaultSearchClient(): SearchClient {
 // Injected comp-extraction seam (the LLM call)
 // ---------------------------------------------------------------------------
 
-/** A concrete price comp the extractor pulled out of the search results. */
+/**
+ * A concrete price comp the extractor pulled out of the search results — the
+ * INTERNAL shape every consumer downstream (judge, synthesis, `PriceSource`)
+ * reads. A comp whose page carried no usable title simply has no `title`, which
+ * is what `PriceSource.title` (also optional) expects.
+ */
 export const webCompSchema = z.object({
   /** Must be one of the search-result URLs (enforced post-hoc — anti-hallucination). */
   url: z.string().min(1),
@@ -197,7 +202,54 @@ export const webCompSchema = z.object({
 
 export type WebComp = z.infer<typeof webCompSchema>;
 
-const webCompListSchema = z.object({ comps: z.array(webCompSchema) });
+/**
+ * The MODEL-FACING comp shape (issue #696) — the permissive half of the same
+ * permissive/strict split `listing/schema.ts` uses, and the schema actually
+ * handed to `generateObject`.
+ *
+ * `title` may NOT be `.optional()` here: `generateObject` compiles this to JSON
+ * Schema, and OpenAI structured outputs in strict mode reject any object whose
+ * `properties` carry a key absent from `required` — the request 400s before a
+ * single token, taking the whole web-search pricing tier (and with it every item
+ * whose pricing falls through to it) down. So the KEY is always required and the
+ * model says "this result had no title" in the VALUE, as `null`.
+ *
+ * `webCompFromRaw` performs the deterministic repair back to the internal shape,
+ * exactly as `itemSpecificsFromPairs` does for the listing role.
+ */
+export const rawWebCompSchema = z.object({
+  url: z.string().min(1),
+  /** Page/listing title, or `null` when the result carries none. */
+  title: z.string().nullable(),
+  price: z.number().positive(),
+  kind: z.enum(["sold", "asking"]),
+});
+
+export type RawWebComp = z.infer<typeof rawWebCompSchema>;
+
+/**
+ * The exact object `generateObject` is given for the `pricingAgent` role — and
+ * therefore the artifact the role-contract guard must walk. Exported so
+ * `llm/contracts.ts` names THIS schema rather than reconstructing an
+ * equivalent-looking one that could silently drift from it.
+ */
+export const webCompListSchema = z.object({ comps: z.array(rawWebCompSchema) });
+
+/**
+ * Deterministic normalization from the model-facing comp to the internal one:
+ * a `null` (or blank/whitespace) title means "no title", so the key is dropped
+ * rather than carried through as an empty string that would surface as an empty
+ * source label in the seller-visible evidence list.
+ */
+export function webCompFromRaw(raw: RawWebComp): WebComp {
+  const title = raw.title?.trim();
+  return {
+    url: raw.url,
+    price: raw.price,
+    kind: raw.kind,
+    ...(title ? { title } : {}),
+  };
+}
 
 /**
  * The injectable model call: given the item identity, the query, and the raw
@@ -234,6 +286,7 @@ const EXTRACT_SYSTEM_PROMPT =
   "(matching brand/model/UPC). For each comp give the USD price, the source URL " +
   "(it MUST be one of the provided result URLs, verbatim), and whether it is a " +
   "completed/sold sale ('sold') or an active asking-price listing ('asking'). " +
+  "Give the result's title, or null when it has none — never invent one. " +
   "Skip retail/new prices, accessories, parts-only listings, and anything you " +
   "cannot tie to a concrete dollar amount. Return an empty list when nothing fits.";
 
@@ -281,7 +334,9 @@ export function createOpenAICompExtractor(
       system: EXTRACT_SYSTEM_PROMPT,
       prompt: `Item identity:\n${identity}\n\nSearch query: ${query}\n\nSearch results:\n${hits}`,
     });
-    return object.comps;
+    // Deterministic repair back to the internal comp shape: `title: null` (the
+    // only way strict mode lets the model say "no title") becomes an absent key.
+    return object.comps.map(webCompFromRaw);
   };
 }
 

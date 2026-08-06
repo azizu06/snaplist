@@ -9878,6 +9878,14 @@ private actor ProGateReplayMobileAPIStub: MobileAPIClient {
         throw MobileAPIClientError.httpStatus(500)
     }
 
+    func getActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
+    func completeActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
     func getRevenueCatConfiguration() async throws
         -> RevenueCatConfigurationEnvelope {
         RevenueCatConfigurationEnvelope(
@@ -9925,6 +9933,14 @@ private actor SuspendedProGateMobileAPIStub: MobileAPIClient {
     }
 
     func getSession() async throws -> SessionEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
+    func getActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        throw MobileAPIClientError.httpStatus(500)
+    }
+
+    func completeActivationGuidance() async throws -> ActivationGuidanceEnvelope {
         throw MobileAPIClientError.httpStatus(500)
     }
 

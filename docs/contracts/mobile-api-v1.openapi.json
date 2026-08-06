@@ -32,6 +32,30 @@
         }
       }
     },
+    "/v1/activation-guidance": {
+      "get": {
+        "operationId": "getActivationGuidanceCompletion",
+        "x-owner-issue": 566,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Tenant-scoped monotonic completion state for first-listing guidance", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ActivationGuidanceEnvelope" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "operationId": "completeActivationGuidance",
+        "x-owner-issue": 566,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Idempotently records this seller's completion marker", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ActivationGuidanceEnvelope" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
     "/v1/home": {
       "get": {
         "operationId": "getHome",
@@ -249,7 +273,7 @@
         "x-owner-issue": 628,
         "x-implementation-status": "implemented",
         "security": [{ "ClerkBearer": [] }],
-        "responses": { "200": { "description": "Server-mapped listing, connection, and publish-eligibility truth; this read performs no marketplace mutation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishPreflightEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "200": { "description": "Server-mapped listing, connection, and publish-eligibility truth; this read performs no marketplace mutation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishPreflightEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "422": { "$ref": "#/components/responses/UnprocessableEntity" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/v1/listings/{listingId}/ebay/publish": {
@@ -259,7 +283,7 @@
         "x-owner-issue": 628,
         "x-implementation-status": "implemented",
         "security": [{ "ClerkBearer": [] }],
-        "responses": { "200": { "description": "Provider-authoritative persisted outcome, including outcome_not_yet_known when a write may have committed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "200": { "description": "Provider-authoritative persisted outcome, including outcome_not_yet_known when a write may have committed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "422": { "$ref": "#/components/responses/UnprocessableEntity" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       },
       "post": {
         "operationId": "confirmEbayPublish",
@@ -268,7 +292,7 @@
         "security": [{ "ClerkBearer": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishConfirmation" } } } },
-        "responses": { "200": { "description": "Exact-once canonical provider listing identity, including durable replay", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "200": { "description": "Exact-once canonical provider listing identity, including durable replay", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayPublishStatusEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "422": { "$ref": "#/components/responses/UnprocessableEntity" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/v1/ebay/oauth/callback": {
@@ -325,12 +349,14 @@
       "RateLimited": { "description": "Attestation capacity was reached before private verification authority was created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
       "Conflict": { "description": "The durable run changed or the requested transition is not legal", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
       "Unavailable": { "description": "The server could not complete the operation safely; retry is permitted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
-      "NotFound": { "description": "Resource absent or hidden by tenant isolation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+      "NotFound": { "description": "Resource absent or hidden by tenant isolation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+      "UnprocessableEntity": { "description": "A seller-fixable refusal the request itself cannot clear; the message names the condition and retrying unchanged will refuse again", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
     },
     "schemas": {
       "ErrorEnvelope": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["unauthorized", "forbidden", "invalid_request", "not_found", "method_not_allowed", "conflict", "rate_limited", "internal_error"] }, "message": { "type": "string" }, "requestId": { "type": "string" }, "details": { "type": "object", "additionalProperties": true } } } } },
       "HealthEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["apiVersion", "status"], "properties": { "apiVersion": { "const": "v1" }, "status": { "const": "ok" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "SessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "string" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "ActivationGuidanceEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "type": "object", "additionalProperties": false, "required": ["completed"], "properties": { "completed": { "type": "boolean" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "HomeEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/HomeProjection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "HomeProjection": { "type": "object", "additionalProperties": false, "required": ["revision", "sellerState", "unreadNotificationCount", "summary", "attention", "currentRun", "readyToFinish", "listings", "recentSearches"], "properties": { "revision": { "type": "integer", "minimum": 0 }, "sellerState": { "type": "string", "enum": ["active", "newSeller"] }, "unreadNotificationCount": { "type": "integer", "minimum": 0 }, "summary": { "$ref": "#/components/schemas/HomeSummary" }, "attention": { "type": "array", "items": { "$ref": "#/components/schemas/HomeAttentionTask" } }, "currentRun": { "oneOf": [{ "$ref": "#/components/schemas/HomeCurrentRun" }, { "type": "null" }] }, "readyToFinish": { "type": "array", "items": { "$ref": "#/components/schemas/HomeFinishItem" } }, "listings": { "type": "array", "items": { "$ref": "#/components/schemas/HomeListing" } }, "recentSearches": { "type": "array", "items": { "type": "string", "minLength": 1 } } } },
       "HomeSummary": { "type": "object", "additionalProperties": false, "required": ["active", "drafts", "orders"], "properties": { "active": { "type": "integer", "minimum": 0 }, "drafts": { "type": "integer", "minimum": 0 }, "orders": { "type": ["integer", "null"], "minimum": 0 } } },

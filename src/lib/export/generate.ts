@@ -801,11 +801,17 @@ export async function generateExportPacks(
  * model has no free-text description channel to hallucinate into. The hard
  * no-hallucination instruction is the prompt-side complement to the code-side
  * guards (title grounding + length caps, hashtag whitelist).
+ *
+ * The `description` KEY is nonetheless mandatory in the compiled schema (#696 —
+ * OpenAI strict mode permits no optional field), so "do not write descriptions"
+ * alone would leave the model with a required key and no legal way to fill it.
+ * The instruction therefore names the honest value: `null`.
  */
 const EXPORT_PACK_SYSTEM_PROMPT =
   "You write the TITLES and Mercari HASHTAGS for copy-paste resale listings on " +
   "Facebook Marketplace and Mercari. Descriptions are assembled separately from " +
-  "the validated facts — do not write descriptions. " +
+  "the validated facts — do not write descriptions; set every 'description' " +
+  "field to null. " +
   "Use ONLY the supplied attribute facts (brand, model, category, condition, specs) — " +
   "never invent a brand, model, spec, measurement, flaw, or accessory that is not given. " +
   "Never state a price; pricing is handled separately. " +

@@ -116,7 +116,15 @@ stored AES-256-GCM-encrypted (`ebay_connections`, RLS-scoped); the seller can
 disconnect any time. Publishes now run under the seller's own identity — the
 `EbayTokenProvider` seam swaps per-user tokens in without touching the adapter.
 Policy/location discovery stores the seller's selected marketplace tuple on the
-same connection generation. A normal publish is rejected before any eBay write
+same connection generation. It runs automatically at that generation's first
+publish — the seller's own Sell Account policies and inventory location, read
+with their own token — and re-runs whenever the stored binding can no longer
+govern the publish (reconnect, another marketplace, unresolved). Every
+connected seller therefore publishes with their OWN policy ids; no env global
+and no other seller's binding can be substituted. When the seller's account has
+no usable policy, or more than one where SnapList must not choose, the publish
+is refused with a plain-language message naming the fix and performs zero eBay
+writes. A normal publish is rejected before any eBay write
 unless that exact binding is still ready when dispatch begins.
 The same per-user provider resolves authenticated pre-sale messaging tokens;
 connections created before the `commerce.message` scope was added must

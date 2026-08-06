@@ -29,6 +29,85 @@ describe("isEbayAuthError", () => {
     expect(isEbayAuthError(err)).toBe(true);
   });
 
+  it("classifies an HTTP 403 insufficient_scope from the Sell Account API", () => {
+    // Policy discovery (#47) needs `sell.account.readonly`. A connection minted
+    // before that scope joined EBAY_OAUTH_SCOPES carries a token without it, and
+    // eBay answers 403 rather than 401 — reconnecting is exactly the fix, and
+    // exactly what the generic "unavailable" copy fails to tell the seller.
+    expect(
+      isEbayAuthError(
+        new EbayApiError(
+          "eBay GET /sell/account/v1/return_policy failed (HTTP 403)",
+          403,
+          {
+            errors: [
+              {
+                errorId: 1100,
+                domain: "ACCESS",
+                category: "REQUEST",
+                message: "Access denied",
+                longMessage: "Insufficient permissions to fulfill the request.",
+              },
+            ],
+          },
+        ),
+      ),
+    ).toBe(true);
+    // The OAuth bearer-token spelling of the same refusal.
+    expect(
+      isEbayAuthError(
+        new EbayApiError("eBay GET /sell/account/v1/fulfillment_policy failed (HTTP 403)", 403, {
+          error: "insufficient_scope",
+          error_description: "the request requires higher privileges than provided by the access token",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT classify every ACCESS-domain 403 as an expired connection", () => {
+    // eBay reuses the ACCESS domain for refusals no reconnect can fix — the
+    // application itself blocked, the marketplace not enabled for the account.
+    // Only `errorId` 1100 ("Access denied", insufficient permissions) is the
+    // scope signal. Reporting the rest as an expired connection sends the
+    // seller through a re-consent that rotates `connection_generation`, wipes
+    // their policy bindings, and leaves them refused for the same reason.
+    expect(
+      isEbayAuthError(
+        new EbayApiError(
+          "eBay GET /sell/account/v1/return_policy failed (HTTP 403)",
+          403,
+          {
+            errors: [
+              {
+                errorId: 1120,
+                domain: "ACCESS",
+                category: "REQUEST",
+                message: "Application access blocked",
+              },
+            ],
+          },
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("does NOT classify a 403 that is not a scope or access refusal", () => {
+    expect(
+      isEbayAuthError(
+        new EbayApiError("eBay GET /sell/account/v1/return_policy failed (HTTP 403)", 403, {
+          errors: [
+            {
+              errorId: 20403,
+              domain: "API_ACCOUNT",
+              category: "BUSINESS",
+              message: "The seller account is not eligible for business policies.",
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("does NOT classify a non-auth eBay failure (listing validation, server error)", () => {
     expect(
       isEbayAuthError(

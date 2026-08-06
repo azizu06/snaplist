@@ -47,6 +47,22 @@ export {
   isEbayAuthError,
   EBAY_RECONNECT_MESSAGE,
 } from "./errors";
+// Per-connection policy/location setup (issue #47). Publishing resolves this
+// internally; the seam is exported so a seller-facing setup surface can report
+// the same state without duplicating the discovery rules.
+export {
+  ensureEbayPolicyLocationBinding,
+  EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE,
+  EBAY_POLICY_SETUP_UNAVAILABLE_MESSAGE,
+  type EbayPolicyLocationSetup,
+  type EbayPolicyLocationSetupState,
+  type EbayPolicyLocationSetupStore,
+} from "./policy-location-setup";
+export { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
+export type {
+  EbayPolicyLocationBinding,
+  EbayPolicyLocationCandidates,
+} from "./policy-location-contract";
 export { UserTokenProvider } from "./user-token-provider";
 export {
   getEbayConnectionStatus,

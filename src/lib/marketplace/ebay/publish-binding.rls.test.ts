@@ -252,6 +252,164 @@ function failingEbayFetch(
   return { fetch: fetchImpl as typeof fetch, calls };
 }
 
+/**
+ * A fake eBay that also answers the read-only Sell Account/Inventory discovery
+ * GETs (issue #47), so a publish with no stored binding runs the whole
+ * discover -> persist -> offer path offline. Override a policy family with an
+ * empty array to model a seller who never created it in eBay.
+ */
+function discoveringEbayFetch(
+  prefix: string,
+  missing: Partial<Record<
+    "fulfillmentPolicies" | "paymentPolicies" | "returnPolicies" | "locations",
+    unknown[]
+  >> = {},
+): { fetch: typeof fetch; calls: RecordedCall[] } {
+  const calls: RecordedCall[] = [];
+  const policy = (kind: string, idKey: string) => ({
+    [idKey]: `${prefix}-${kind}`,
+    name: `${prefix} ${kind}`,
+    marketplaceId: "EBAY_US",
+    categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
+  });
+  const fetchImpl = async (
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+  ): Promise<Response> => {
+    const url = String(input);
+    calls.push({ url, init });
+    if (url.includes("/sell/account/v1/fulfillment_policy")) {
+      return Response.json({
+        fulfillmentPolicies:
+          missing.fulfillmentPolicies
+          ?? [policy("fulfillment", "fulfillmentPolicyId")],
+      });
+    }
+    if (url.includes("/sell/account/v1/payment_policy")) {
+      return Response.json({
+        paymentPolicies:
+          missing.paymentPolicies ?? [policy("payment", "paymentPolicyId")],
+      });
+    }
+    if (url.includes("/sell/account/v1/return_policy")) {
+      return Response.json({
+        returnPolicies:
+          missing.returnPolicies ?? [policy("return", "returnPolicyId")],
+      });
+    }
+    if (url.includes("/sell/inventory/v1/location?")) {
+      const locations = missing.locations ?? [
+        {
+          merchantLocationKey: `${prefix}-location`,
+          merchantLocationStatus: "ENABLED",
+          name: `${prefix} location`,
+        },
+      ];
+      return Response.json({ total: locations.length, locations });
+    }
+    if (url.includes("/inventory_item/")) {
+      return new Response(null, { status: 204 });
+    }
+    if (url.endsWith("/sell/inventory/v1/offer")) {
+      return Response.json({ offerId: `${prefix}-offer` }, { status: 201 });
+    }
+    if (url.endsWith(`/offer/${prefix}-offer/publish`)) {
+      return Response.json({ listingId: `${prefix}-listing` });
+    }
+    throw new Error(`Unexpected fake eBay call: ${url}`);
+  };
+  return { fetch: fetchImpl as typeof fetch, calls };
+}
+
+function adapterFor(
+  server: SupabaseClient,
+  fetchImpl: typeof fetch,
+): HttpEbayAdapter {
+  const noTokenEgress = async () => {
+    throw new Error("Cached seller token should prevent OAuth egress");
+  };
+  return new HttpEbayAdapter({
+    fetch: fetchImpl,
+    tokenProvider: new UserTokenProvider(server, {
+      fetch: noTokenEgress as typeof fetch,
+      env: () => TEST_ENV,
+    }),
+    env: () => SHARED_ENV_FALLBACK,
+  });
+}
+
+function authorizations(calls: RecordedCall[], pathFragment: string): string[] {
+  return [
+    ...new Set(
+      calls
+        .filter(({ url }) => url.includes(pathFragment))
+        .map(({ init }) =>
+          String((init.headers as Record<string, string> | undefined)
+            ?.authorization),
+        ),
+    ),
+  ];
+}
+
+/** Drop every tenant's stored binding so the next publish must discover. */
+async function clearStoredBindings(): Promise<void> {
+  const { error } = await admin
+    .from("ebay_connections")
+    .update({ policy_location_bindings: {} })
+    .in("user_id", [userA.id, userB.id]);
+  if (error) {
+    throw new Error(`Failed to clear binding fixtures: ${error.message}`);
+  }
+}
+
+/**
+ * A freshly connected seller with nothing bound yet — the state every eBay
+ * connection starts in. Re-saving the connection also undoes any generation
+ * rotation an earlier case left behind, so a discovery test does not depend on
+ * the order the suite happened to run in.
+ */
+async function connectWithoutBinding(): Promise<void> {
+  await Promise.all([
+    saveEbayConnection(
+      serverA,
+      {
+        accessToken: "seller-a-access-token",
+        refreshToken: "seller-a-refresh-token",
+        accessTokenExpiresAt: Date.now() + 2 * 60 * 60 * 1000,
+        scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+      },
+      { userId: ebayIdentityA.userId, username: ebayIdentityA.username },
+      TEST_ENV,
+    ),
+    saveEbayConnection(
+      serverB,
+      {
+        accessToken: "seller-b-access-token",
+        refreshToken: "seller-b-refresh-token",
+        accessTokenExpiresAt: Date.now() + 2 * 60 * 60 * 1000,
+        scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+      },
+      { userId: ebayIdentityB.userId, username: ebayIdentityB.username },
+      TEST_ENV,
+    ),
+  ]);
+  await clearStoredBindings();
+}
+
+async function readStoredBinding(
+  user: ClerkTestUser,
+): Promise<EbayPolicyLocationBinding | null> {
+  const { data, error } = await user.client
+    .from("ebay_connections")
+    .select("policy_location_bindings")
+    .maybeSingle();
+  if (error) throw new Error(`Failed to read binding: ${error.message}`);
+  const bindings = data?.policy_location_bindings as
+    | Record<string, EbayPolicyLocationBinding>
+    | null;
+  return bindings?.EBAY_US ?? null;
+}
+
 function offerBody(calls: RecordedCall[]): Record<string, unknown> {
   const call = calls.find(
     ({ url, init }) =>
@@ -433,7 +591,15 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
     expect(JSON.stringify(offerBody(fakeB.calls))).not.toContain("seller-a");
   }, TEST_TIMEOUT_MS);
 
-  it("performs zero eBay writes for missing, stale, foreign, cross-marketplace, or unresolved bindings", async () => {
+  /**
+   * Issue #47 changed the outcome here, not the guarantee. A stored binding
+   * that cannot govern this publish — absent, from a retired connection
+   * generation, another seller's, another marketplace's, or unresolved — is
+   * still never used to build an offer. It now re-reads the seller's own eBay
+   * account instead of refusing, so the only ids that reach eBay are the ones
+   * discovered under this connection.
+   */
+  it("re-discovers rather than offering with a missing, stale, foreign, cross-marketplace, or unresolved binding", async () => {
 
     const storeA = createSupabaseEbayPolicyLocationBindingStore(serverA);
     const storeB = createSupabaseEbayPolicyLocationBindingStore(serverB);
@@ -486,47 +652,49 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
       },
     ];
 
-    for (const fixture of cases) {
+    for (const [index, fixture] of cases.entries()) {
       const { error } = await admin
         .from("ebay_connections")
         .update({ policy_location_bindings: fixture.bindings })
         .eq("user_id", userA.id);
       expect(error, fixture.name).toBeNull();
       const listingId = await persistedListing(userA);
-      const fake = fakeEbayFetch(fixture.name);
-      const adapter = new HttpEbayAdapter({
-        fetch: fake.fetch,
-        tokenProvider: new UserTokenProvider(serverA, {
-          fetch: async () => {
-            throw new Error("Rejected setup must not reach OAuth");
-          },
-          env: () => TEST_ENV,
-        }),
-        env: () => SHARED_ENV_FALLBACK,
-      });
+      // A distinct prefix per fixture keeps the external listing ids unique and
+      // makes "these ids came from discovery" unambiguous.
+      const discovered = `rediscovered-${index}`;
+      const fake = discoveringEbayFetch(discovered);
 
-      const result = await publishListingToEbay(
+      const published = await publishListingToEbay(
         userA.client,
         listingId,
-        adapter,
-        {
-          completionClient: serverA,
-        },
-      ).catch((error: unknown) => error);
-      const { data: listing } = await userA.client
-        .from("listings")
-        .select("ebay_status, ebay_listing_id")
-        .eq("id", listingId)
-        .single();
-      expect.soft(fake.calls, fixture.name).toHaveLength(0);
-      expect.soft(listing, fixture.name).toMatchObject({
-        ebay_status: null,
-        ebay_listing_id: null,
-      });
-      expect(result, fixture.name).toBeInstanceOf(Error);
-      expect((result as Error).message, fixture.name).toMatch(
-        /policy.location setup|finish policy.location/i,
+        adapterFor(serverA, fake.fetch),
+        { completionClient: serverA },
       );
+
+      expect.soft(published.ebayListingId, fixture.name).toBe(
+        `${discovered}-listing`,
+      );
+      expect.soft(offerBody(fake.calls), fixture.name).toMatchObject({
+        listingPolicies: {
+          fulfillmentPolicyId: `${discovered}-fulfillment`,
+          paymentPolicyId: `${discovered}-payment`,
+          returnPolicyId: `${discovered}-return`,
+        },
+        merchantLocationKey: `${discovered}-location`,
+      });
+      // No unusable stored id and no process-wide env id survives into the offer.
+      const offerJson = JSON.stringify(offerBody(fake.calls));
+      for (const rejected of [
+        "stale",
+        "seller-a-gb",
+        "seller-b",
+        "unresolved",
+        "shared-env",
+      ]) {
+        expect.soft(offerJson, `${fixture.name}: ${rejected}`).not.toContain(
+          rejected,
+        );
+      }
     }
 
     await storeA.saveBinding(
@@ -945,5 +1113,151 @@ describe("connection-generation eBay publish boundary (DB-gated, offline)", () =
       ebay_status: "published",
     });
     expect(replayFake.calls).toHaveLength(3);
+  }, TEST_TIMEOUT_MS);
+
+  /**
+   * Issue #47: with no stored binding, each seller's FIRST publish reads that
+   * seller's own Sell Account policies and inventory location with their own
+   * token, persists them under their RLS-owned row, and offers with them. The
+   * env fallback ids in SHARED_ENV_FALLBACK must reach neither offer.
+   */
+  it("discovers each connected seller's own policies at first publish", async () => {
+    await connectWithoutBinding();
+    const [listingA, listingB] = await Promise.all([
+      persistedListing(userA),
+      persistedListing(userB),
+    ]);
+    const fakeA = discoveringEbayFetch("discovered-a");
+    const fakeB = discoveringEbayFetch("discovered-b");
+
+    const [publishedA, publishedB] = await Promise.all([
+      publishListingToEbay(serverA, listingA, adapterFor(serverA, fakeA.fetch), {
+        completionClient: serverA,
+      }),
+      publishListingToEbay(serverB, listingB, adapterFor(serverB, fakeB.fetch), {
+        completionClient: serverB,
+      }),
+    ]);
+
+    expect(publishedA.ebayListingId).toBe("discovered-a-listing");
+    expect(publishedB.ebayListingId).toBe("discovered-b-listing");
+    expect(offerBody(fakeA.calls)).toMatchObject({
+      listingPolicies: {
+        fulfillmentPolicyId: "discovered-a-fulfillment",
+        paymentPolicyId: "discovered-a-payment",
+        returnPolicyId: "discovered-a-return",
+      },
+      merchantLocationKey: "discovered-a-location",
+    });
+    expect(offerBody(fakeB.calls)).toMatchObject({
+      listingPolicies: {
+        fulfillmentPolicyId: "discovered-b-fulfillment",
+        paymentPolicyId: "discovered-b-payment",
+        returnPolicyId: "discovered-b-return",
+      },
+      merchantLocationKey: "discovered-b-location",
+    });
+    // Neither the other seller's ids nor the process-wide env values leak in.
+    expect(JSON.stringify(offerBody(fakeA.calls))).not.toContain("discovered-b");
+    expect(JSON.stringify(offerBody(fakeB.calls))).not.toContain("discovered-a");
+    for (const calls of [fakeA.calls, fakeB.calls]) {
+      expect(JSON.stringify(offerBody(calls))).not.toContain("shared-env");
+    }
+    // Each seller's own token authorized their own Account API reads.
+    expect(
+      authorizations(fakeA.calls, "/sell/account/v1/"),
+    ).toEqual(["Bearer seller-a-access-token"]);
+    expect(
+      authorizations(fakeB.calls, "/sell/account/v1/"),
+    ).toEqual(["Bearer seller-b-access-token"]);
+
+    // Persisted per tenant, readable only by its owner.
+    const [rowA, rowB] = await Promise.all([
+      readStoredBinding(userA),
+      readStoredBinding(userB),
+    ]);
+    expect(rowA?.fulfillmentPolicy.selectedId).toBe("discovered-a-fulfillment");
+    expect(rowB?.fulfillmentPolicy.selectedId).toBe("discovered-b-fulfillment");
+    expect(rowA?.connectionGeneration).not.toBe(rowB?.connectionGeneration);
+
+    // A second publish reuses the stored binding — no further Account reads.
+    const repeatListing = await persistedListing(userA);
+    const repeatFake = discoveringEbayFetch("repeat-a");
+    await publishListingToEbay(
+      serverA,
+      repeatListing,
+      adapterFor(serverA, repeatFake.fetch),
+      { completionClient: serverA },
+    );
+    expect(
+      repeatFake.calls.filter(({ url }) => url.includes("/sell/account/v1/")),
+    ).toHaveLength(0);
+  }, TEST_TIMEOUT_MS);
+
+  it("refuses the publish when the seller's own policies cannot be read", async () => {
+    await connectWithoutBinding();
+    const listingId = await persistedListing(userA);
+    const calls: RecordedCall[] = [];
+    const fetchImpl = async (
+      input: RequestInfo | URL,
+      init: RequestInit = {},
+    ): Promise<Response> => {
+      const url = String(input);
+      calls.push({ url, init });
+      // Discovery reads the three business policies AND the inventory
+      // locations concurrently, so all four have to model the same eBay
+      // outage. Letting the location read crash with a bare `Error` instead
+      // would make this assert the wrong thing: only a refusal eBay itself
+      // returned may become the seller-facing "could not read your policies".
+      if (
+        url.includes("/sell/account/v1/")
+        || url.includes("/sell/inventory/v1/location")
+      ) {
+        return Response.json(
+          { errors: [{ errorId: 1001, message: "Account API unavailable" }] },
+          { status: 500 },
+        );
+      }
+      throw new Error(`Unexpected eBay call after a failed discovery: ${url}`);
+    };
+
+    await expect(
+      publishListingToEbay(
+        serverA,
+        listingId,
+        adapterFor(serverA, fetchImpl as typeof fetch),
+        { completionClient: serverA },
+      ),
+    ).rejects.toThrow(/could not read your eBay/i);
+
+    // Zero marketplace writes: a failed read never becomes a wrong-policy offer.
+    expect(
+      calls.filter(({ init }) => (init.method ?? "GET") !== "GET"),
+    ).toHaveLength(0);
+    const row = await userA.client
+      .from("listings")
+      .select("ebay_status, ebay_listing_id")
+      .eq("id", listingId)
+      .single();
+    expect(row.data?.ebay_listing_id).toBeNull();
+  }, TEST_TIMEOUT_MS);
+
+  it("refuses the publish when the seller's eBay account has no usable policies", async () => {
+    await connectWithoutBinding();
+    const listingId = await persistedListing(userA);
+    const empty = discoveringEbayFetch("discovered-a", { returnPolicies: [] });
+
+    await expect(
+      publishListingToEbay(
+        serverA,
+        listingId,
+        adapterFor(serverA, empty.fetch),
+        { completionClient: serverA },
+      ),
+    ).rejects.toThrow(/no return policy for EBAY_US/i);
+
+    expect(
+      empty.calls.filter(({ init }) => (init.method ?? "GET") !== "GET"),
+    ).toHaveLength(0);
   }, TEST_TIMEOUT_MS);
 });

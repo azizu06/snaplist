@@ -25,6 +25,58 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["You"].exists)
     }
 
+    func testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch() {
+        let app = launch(extraArguments: [
+            "--activation-onboarded-fixture",
+            "--reset-activation-guidance",
+            "--visual-state=RUN-02",
+            "--run-detail-fixture=reviewable",
+            "--activation-guidance-step=listingReview",
+            "--listing-review-fixture=loaded"
+        ])
+
+        XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
+        app.buttons["run.review.open"].tap()
+        XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
+        app.buttons["activation-guidance.got-it"].tap()
+        XCTAssertFalse(activationGuidance(in: app).exists)
+
+        app.terminate()
+        app.launchArguments = [
+            "--zero-network-fixtures",
+            "--activation-onboarded-fixture",
+            "--visual-state=RUN-02",
+            "--run-detail-fixture=reviewable",
+            "--listing-review-fixture=loaded"
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
+        app.buttons["run.review.open"].tap()
+        XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 1))
+    }
+
+    func testActivationSkipSuppressesTheCoachMarkAcrossRelaunch() {
+        let app = launch(extraArguments: [
+            "--activation-onboarded-fixture",
+            "--reset-activation-guidance"
+        ])
+
+        let guidance = activationGuidance(in: app)
+        XCTAssertTrue(guidance.waitForExistence(timeout: 2))
+        guidance.swipeDown()
+        XCTAssertFalse(guidance.waitForExistence(timeout: 2))
+
+        app.terminate()
+        app.launchArguments = [
+            "--zero-network-fixtures",
+            "--activation-onboarded-fixture"
+        ]
+        app.launch()
+
+        XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 1))
+    }
+
     func testCapturePresentsAndDismissesAnItemDrivenSheet() {
         let app = launch()
 
@@ -1698,6 +1750,36 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.buttons["scan.choose-library"].exists)
     }
 
+    func testActualOnboardingCaptureEntryPresentsACT01BeforeCameraOrLibrary() {
+        let app = launchFirstValueOnboarding(
+            resetProgress: true,
+            extraArguments: ["--reset-activation-guidance"]
+        )
+        advanceFirstValueOnboarding(to: "ONB-06", in: app)
+
+        let startScanning = app.buttons["first-value-onboarding.start-scanning"]
+        XCTAssertTrue(startScanning.waitForExistence(timeout: 2))
+        startScanning.tap()
+
+        let useCamera = app.buttons["button.primary.use-camera"]
+        XCTAssertTrue(useCamera.waitForExistence(timeout: 2))
+        useCamera.tap()
+        let continueToCapture = app.buttons["button.primary.continue-to-capture"]
+        XCTAssertTrue(continueToCapture.waitForExistence(timeout: 2))
+        continueToCapture.tap()
+
+        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
+        XCTAssertTrue(app.buttons["capture.choose-library"].exists)
+        XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["One item, up to five photos."].exists)
+
+        app.buttons["capture.take-one-item"].tap()
+        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["scan.choose-library"].exists)
+        XCTAssertTrue(activationGuidance(in: app).exists)
+    }
+
     func testFirstValueOnboardingPresentsOnceInOrder() {
         let app = launchFirstValueOnboarding(resetProgress: true)
 
@@ -2047,6 +2129,10 @@ final class SnapListUITests: XCTestCase {
             .completed
         )
         return app
+    }
+
+    private func activationGuidance(in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)["activation-guidance"]
     }
 
     private func assertPhotoReviewThumbnailCatalog(

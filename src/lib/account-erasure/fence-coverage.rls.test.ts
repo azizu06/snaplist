@@ -60,6 +60,21 @@ function tablesDeclaredInThisTree(): Set<string> {
   return declared;
 }
 
+async function waitsOnAdvisoryLock(
+  observer: Client,
+  backendPID: number,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const { rows: [activity] } = await observer.query<{ wait_event: string | null }>(
+      "select wait_event from pg_stat_activity where pid = $1",
+      [backendPID],
+    );
+    if (activity?.wait_event === "advisory") return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
 let reachable = false;
 let database: Client;
 
@@ -130,6 +145,108 @@ describe.runIf(DATABASE_URL)("account erasure fence coverage", () => {
     );
 
     expect({ unfenced, uncounted }).toEqual({ unfenced: [], uncounted: [] });
+  });
+
+  it("serializes activation completion with erasure start so no marker can land late", async (context) => {
+    const { rows: [availability] } = await database.query<{ table_name: string | null }>(
+      "select to_regclass('public.activation_guidance_completions')::text as table_name",
+    );
+    if (!availability.table_name) {
+      context.skip();
+      return;
+    }
+
+    const userID = "user_566_erasure_race";
+    const lateUserID = "user_566_erasure_starts_first";
+    const idempotencyKey = "56600000-0000-4000-8000-000000000002";
+    const lateIdempotencyKey = "56600000-0000-4000-8000-000000000003";
+    const writer = new Client({ connectionString: DATABASE_URL });
+    const eraser = new Client({ connectionString: DATABASE_URL });
+    await Promise.all([writer.connect(), eraser.connect()]);
+
+    try {
+      const { rows: [eraserBackend] } = await eraser.query<{ pid: number }>(
+        "select pg_backend_pid() as pid",
+      );
+      const { rows: [writerBackend] } = await writer.query<{ pid: number }>(
+        "select pg_backend_pid() as pid",
+      );
+      await eraser.query(
+        "select set_config('request.jwt.claims', $1, false)",
+        [JSON.stringify({ role: "service_role" })],
+      );
+      await writer.query("begin");
+      await writer.query(
+        "insert into public.activation_guidance_completions (user_id) values ($1)",
+        [userID],
+      );
+
+      const erasureStart = eraser.query(
+        "select public.begin_account_erasure($1, $2::uuid)",
+        [userID, idempotencyKey],
+      );
+
+      await expect(
+        waitsOnAdvisoryLock(database, eraserBackend.pid),
+      ).resolves.toBe(true);
+
+      await writer.query("commit");
+      await erasureStart;
+
+      const { rows: [residue] } = await database.query<{ count: number }>(
+        `select count(*)::integer as count
+         from public.activation_guidance_completions
+         where user_id = $1`,
+        [userID],
+      );
+      expect(residue.count).toBe(0);
+      await expect(
+        database.query(
+          "insert into public.activation_guidance_completions (user_id) values ($1)",
+          [userID],
+        ),
+      ).rejects.toThrow(/Account erasure has started/);
+
+      await eraser.query("begin");
+      await eraser.query(
+        "select public.begin_account_erasure($1, $2::uuid)",
+        [lateUserID, lateIdempotencyKey],
+      );
+      // Settle the outcome as the query is issued. The insert rejects the
+      // instant the eraser commits and releases the advisory lock, which is
+      // two awaits before this test reads it. A handler attached only at that
+      // point arrives after Node has already reported an unhandled rejection,
+      // failing the whole run while the assertion below still passes.
+      const lateCompletion = writer
+        .query(
+          "insert into public.activation_guidance_completions (user_id) values ($1)",
+          [lateUserID],
+        )
+        .then(() => undefined, (error: unknown) => error);
+      await expect(
+        waitsOnAdvisoryLock(database, writerBackend.pid),
+      ).resolves.toBe(true);
+      await eraser.query("commit");
+      expect(String(await lateCompletion)).toMatch(
+        /retry after account erasure serialization/,
+      );
+
+      const { rows: [lateResidue] } = await database.query<{ count: number }>(
+        `select count(*)::integer as count
+         from public.activation_guidance_completions
+         where user_id = $1`,
+        [lateUserID],
+      );
+      expect(lateResidue.count).toBe(0);
+    } finally {
+      await writer.query("rollback").catch(() => undefined);
+      await eraser.query("rollback").catch(() => undefined);
+      await database.query(
+        "delete from private.account_erasure_generations where user_id = any($1::text[])",
+        [[userID, lateUserID]],
+      );
+      await Promise.all([writer.end(), eraser.end()]);
+    }
   });
 
 });

@@ -6,6 +6,8 @@ import {
   MAX_RETAIL_SEARCHES,
   buildRetailQueries,
   createDepreciationPricingProvider,
+  rawRetailFindingSchema,
+  retailFindingFromRaw,
   type ExtractRetail,
   type RetailFinding,
 } from "./depreciation";
@@ -316,5 +318,47 @@ describe("autopilot sub-gate by construction", () => {
     expect(best.score).toBeLessThan(0.75);
     expect(best.band).not.toBe("high");
     expect(best.autopilotEligible).toBe(false);
+  });
+});
+
+describe("model-facing retail-finding shape (#696): absence lives in the VALUE", () => {
+  it("requires the title KEY and accepts null as 'this result had no title'", () => {
+    // Same rule as the web tiers' `rawWebCompSchema`: OpenAI structured outputs
+    // in strict mode reject a compiled schema whose `properties` carry a key
+    // missing from `required`, so the schema handed to `generateObject` may not
+    // make `title` optional. `llm/contracts.test.ts` walks the compiled artifact;
+    // this pins the Zod contract at the depreciation seam.
+    const base = { url: "https://www.walmart.com/ip/q1-1", price: 100 };
+    expect(rawRetailFindingSchema.safeParse(base).success).toBe(false);
+    expect(rawRetailFindingSchema.safeParse({ ...base, title: null }).success).toBe(true);
+    expect(rawRetailFindingSchema.safeParse({ ...base, title: "new at Walmart" }).success).toBe(
+      true,
+    );
+  });
+
+  it("repairs a null/blank title to an absent key, so cited sources stay label-free", async () => {
+    // The deterministic repair back to the internal shape. `PriceSource.title` is
+    // an OPTIONAL STRING on a `.strict()` schema, so a `null` forwarded straight
+    // through `synthesize` would fail the price-result contract outright; a blank
+    // string would surface as an empty label in the seller-visible evidence list.
+    const findings = [
+      { url: "https://www.walmart.com/ip/q1-1", title: null, price: 90 },
+      { url: "https://www.target.com/p/q1-2", title: "   ", price: 110 },
+    ].map(retailFindingFromRaw);
+    expect(findings.map((f) => "title" in f)).toEqual([false, false]);
+
+    const result = (await makeProvider([findings]).price(GENERIC_SIGNAL))!;
+    const parsed = priceResultSchema.safeParse(result);
+    expect(parsed.success, JSON.stringify((parsed as { error?: unknown }).error)).toBe(true);
+    expect(result.sources.map((s) => s.title)).toEqual([undefined, undefined]);
+  });
+
+  it("keeps a real title, so a usable retail label still reaches the seller", async () => {
+    const findings = [
+      { url: "https://www.walmart.com/ip/q1-1", title: "  Hamilton Beach blender — new  ", price: 100 },
+    ].map(retailFindingFromRaw);
+    const result = (await makeProvider([findings]).price(GENERIC_SIGNAL))!;
+    expect(priceResultSchema.safeParse(result).success).toBe(true);
+    expect(result.sources[0].title).toBe("Hamilton Beach blender — new");
   });
 });

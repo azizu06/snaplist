@@ -565,3 +565,82 @@ describe("HttpEbayAdapter.publishListing", () => {
     for (const call of calls) expect(call.url.startsWith(prod)).toBe(true);
   });
 });
+
+describe("HttpEbayAdapter.discoverPolicyLocationCandidates", () => {
+  it("reads the CONNECTED seller's own policies and location (issue #47)", async () => {
+    const { fetch, calls } = fakeFetch((url) => {
+      if (url.includes("/sell/account/v1/fulfillment_policy")) {
+        return json(200, {
+          fulfillmentPolicies: [
+            {
+              fulfillmentPolicyId: "seller-b-fulfillment",
+              name: "Standard shipping",
+              marketplaceId: "EBAY_US",
+              categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
+            },
+          ],
+        });
+      }
+      if (url.includes("/sell/account/v1/payment_policy")) {
+        return json(200, {
+          paymentPolicies: [
+            {
+              paymentPolicyId: "seller-b-payment",
+              name: "Immediate payment",
+              marketplaceId: "EBAY_US",
+              categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
+            },
+          ],
+        });
+      }
+      if (url.includes("/sell/account/v1/return_policy")) {
+        return json(200, {
+          returnPolicies: [
+            {
+              returnPolicyId: "seller-b-return",
+              name: "30 day returns",
+              marketplaceId: "EBAY_US",
+              categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
+            },
+          ],
+        });
+      }
+      return json(200, {
+        total: 1,
+        locations: [
+          {
+            merchantLocationKey: "seller-b-location",
+            merchantLocationStatus: "ENABLED",
+            name: "Home",
+          },
+        ],
+      });
+    });
+    const adapter = new HttpEbayAdapter({
+      fetch,
+      tokenProvider,
+      env: () => sellerEnv,
+    });
+
+    const candidates = await adapter.discoverPolicyLocationCandidates({
+      marketplaceId: "EBAY_US",
+      accountGeneration: "44444444-4444-4444-8444-444444444444",
+    });
+
+    expect(candidates.fulfillmentPolicies[0]!.id).toBe("seller-b-fulfillment");
+    expect(candidates.paymentPolicies[0]!.id).toBe("seller-b-payment");
+    expect(candidates.returnPolicies[0]!.id).toBe("seller-b-return");
+    expect(candidates.inventoryLocations[0]!.id).toBe("seller-b-location");
+    // Read-only Account/Inventory GETs against the configured base only.
+    for (const call of calls) {
+      expect(call.url.startsWith(BASE)).toBe(true);
+      expect(call.init.method).toBe("GET");
+    }
+    // The seller's OWN token authorizes the read; no env policy id is consulted.
+    for (const call of calls) {
+      expect(
+        (call.init.headers as Record<string, string>).authorization,
+      ).toBe("Bearer test-access-token");
+    }
+  });
+});
