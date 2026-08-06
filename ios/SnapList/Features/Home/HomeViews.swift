@@ -1175,6 +1175,9 @@ struct TrophyWallProcessingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .background(SnapListColorToken.canvas.color)
+        // Same plain-stack binding as `trophy.wall`: without this the identifier
+        // publishes no element of its own and propagates onto the descendants.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trophy.processing")
     }
 
