@@ -5,7 +5,9 @@ import {
   EBAY_TITLE_MAX_LENGTH,
   ebayListingSchema,
   itemSpecificsFromPairs,
+  safeParseEbayListing,
   type EbayListing,
+  type UnvalidatedEbayListing,
 } from "./schema";
 import { itemSpecificsToPairs } from "./schema.testing";
 import {
@@ -44,7 +46,13 @@ const CORE: ExtractedAttributes = {
 };
 
 /** A clean, in-spec eBay listing a well-behaved model would emit for CORE. */
-const GOOD_LISTING: EbayListing = {
+function validatedListing(candidate: UnvalidatedEbayListing): EbayListing {
+  const parsed = safeParseEbayListing(candidate);
+  if (!parsed.success) throw new Error(`invalid test listing: ${parsed.error.message}`);
+  return parsed.data;
+}
+
+const GOOD_LISTING = validatedListing({
   title: "Sony WH-1000XM4 Wireless Noise-Cancelling Headphones, Good Condition",
   itemSpecifics: {
     Brand: "Sony",
@@ -56,7 +64,7 @@ const GOOD_LISTING: EbayListing = {
     "Sony WH-1000XM4 over-ear wireless headphones in good used condition. " +
     "Industry-leading noise cancelling, long battery life. Tested and working.",
   tags: ["sony", "headphones", "noise cancelling", "wireless"],
-};
+});
 
 /** Build few-shot exemplars from raw content strings (the rag `fewShotExamples` shape). */
 function fewShotOf(...contents: string[]): FewShotExamples {
@@ -83,7 +91,7 @@ const EXEMPLARS = fewShotOf(
  * MODEL-FACING ordered pair shape (#691) — the fake speaks exactly what a provider
  * returns against `ebayListingRawSchema`.
  */
-function scriptedGenerate(results: EbayListing[]): {
+function scriptedGenerate(results: UnvalidatedEbayListing[]): {
   generate: ListingGenerate;
   calls: Array<Parameters<ListingGenerate>[0]>;
 } {
@@ -160,7 +168,7 @@ describe("listing/generate — seller-visible copy contract (#243)", () => {
   });
 
   it("retries a violating generated draft, then publishes only a core-built fallback", async () => {
-    const violating: EbayListing = {
+    const violating: UnvalidatedEbayListing = {
       ...GOOD_LISTING,
       title: "Sure! Sony WH-1000XM4 — not just headphones",
       description:
@@ -182,7 +190,7 @@ describe("listing/generate — seller-visible copy contract (#243)", () => {
   });
 
   it("does not let a digit-free invented accessory bypass the title schema", async () => {
-    const inventedAccessory: EbayListing = {
+    const inventedAccessory: UnvalidatedEbayListing = {
       ...GOOD_LISTING,
       title: "Sony WH-1000XM4 Includes Charger",
     };
@@ -201,7 +209,7 @@ describe("listing/generate — seller-visible copy contract (#243)", () => {
   });
 
   it("does not let a violating generated tag bypass the copy contract", async () => {
-    const violatingTag: EbayListing = {
+    const violatingTag: UnvalidatedEbayListing = {
       ...GOOD_LISTING,
       tags: ["Ships fast"],
     };
@@ -242,7 +250,7 @@ describe("listing/generate — seller-voice hard-list repair (#669)", () => {
     ["whether you're X or Y", "Whether you're a collector or a casual listener, these work."],
     ["more than one exclamation mark", "Tested and working! Includes case!"],
   ])("retries then replaces a raw description with %s", async (_label, description) => {
-    const violating: EbayListing = {
+    const violating: UnvalidatedEbayListing = {
       ...fallbackEbayListing(CORE),
       description,
     };
@@ -260,7 +268,7 @@ describe("listing/generate — seller-voice hard-list repair (#669)", () => {
   });
 
   it("retries and falls back when an item-specific value contains a banned pattern", async () => {
-    const violating: EbayListing = {
+    const violating: UnvalidatedEbayListing = {
       ...fallbackEbayListing(CORE),
       description: "Sony WH-1000XM4 headphones in good used condition.",
       itemSpecifics: {
@@ -316,7 +324,7 @@ describe("listing/generate — seller-voice hard-list repair (#669)", () => {
   });
 
   it("does not flag a banned adjective inside a longer word", async () => {
-    const clean: EbayListing = {
+    const clean: UnvalidatedEbayListing = {
       ...fallbackEbayListing(CORE),
       description: "These headphones are stunningly well kept and tested.",
     };
@@ -351,7 +359,7 @@ describe("listing/generate — seller-voice hard-list repair (#669)", () => {
 
 describe("listing/generate — eBay title-length constraint (≤ 80) is guaranteed", () => {
   it("truncates an over-length model title so the RETURNED title fits the cap", async () => {
-    const overLong: EbayListing = {
+    const overLong: UnvalidatedEbayListing = {
       ...GOOD_LISTING,
       // 100+ chars — well over the 80-char eBay cap.
       title:
@@ -388,7 +396,7 @@ describe("listing/generate — required eBay fields present (validation)", () =>
     // rule. With a core that ALSO has no brand/model/category/condition, reconciliation
     // cannot backfill specifics, so the listing stays invalid → clear throw.
     const emptyCore: ExtractedAttributes = { title: "Mystery item" };
-    const noSpecifics: EbayListing = {
+    const noSpecifics: UnvalidatedEbayListing = {
       title: "Mystery item for sale",
       itemSpecifics: {},
       description: "An item.",
@@ -409,7 +417,7 @@ describe("listing/generate — required eBay fields present (validation)", () =>
   it("backfills required item specifics from the core when the model omits them", async () => {
     // Model omits specifics, but the core HAS brand/model/category/condition →
     // reconciliation supplies them so the eBay required-field rule is satisfied.
-    const omitted: EbayListing = {
+    const omitted: UnvalidatedEbayListing = {
       title: "Sony WH-1000XM4 Headphones - Good Condition",
       itemSpecifics: {},
       description: "Sony over-ear headphones, good condition.",
@@ -446,7 +454,7 @@ describe("listing/generate — required eBay fields present (validation)", () =>
 
 describe("listing/generate — no attributes invented beyond the validated core", () => {
   it("detects a hallucinated brand/model that contradicts the core", () => {
-    const lying: EbayListing = {
+    const lying: UnvalidatedEbayListing = {
       ...GOOD_LISTING,
       itemSpecifics: { ...GOOD_LISTING.itemSpecifics, Brand: "Bose", Model: "QC45" },
     };
@@ -475,7 +483,7 @@ describe("listing/generate — no attributes invented beyond the validated core"
 
   it("detects a brand invented when the core never established one", () => {
     const genericCore: ExtractedAttributes = { category: "electronics", title: "Headphones" };
-    const invented: EbayListing = {
+    const invented: UnvalidatedEbayListing = {
       title: "Premium Headphones",
       itemSpecifics: { Brand: "Sony", Type: "electronics" },
       description: "Headphones.",
@@ -485,7 +493,7 @@ describe("listing/generate — no attributes invented beyond the validated core"
   });
 
   it("retries on a hallucinated brand and returns the compliant retry", async () => {
-    const lying: EbayListing = {
+    const lying: UnvalidatedEbayListing = {
       ...GOOD_LISTING,
       itemSpecifics: { ...GOOD_LISTING.itemSpecifics, Brand: "Bose" },
     };
@@ -504,7 +512,7 @@ describe("listing/generate — no attributes invented beyond the validated core"
   it("reconciles away a hallucinated brand even if the model never complies", async () => {
     // Model keeps inventing a different brand on every attempt. The returned listing is
     // STILL clean because reconciliation strips/overwrites identity specifics to the core.
-    const lying: EbayListing = {
+    const lying: UnvalidatedEbayListing = {
       ...GOOD_LISTING,
       itemSpecifics: { ...GOOD_LISTING.itemSpecifics, Brand: "Bose" },
     };
@@ -525,7 +533,7 @@ describe("listing/generate — no attributes invented beyond the validated core"
     // never established. Reconciliation whitelists to the core-backed set, so the invented
     // specifics never reach the returned listing — enforcing "no attributes beyond the
     // validated core" for ALL keys, not just brand/model.
-    const withInvented: EbayListing = {
+    const withInvented: UnvalidatedEbayListing = {
       ...GOOD_LISTING,
       itemSpecifics: {
         ...GOOD_LISTING.itemSpecifics,

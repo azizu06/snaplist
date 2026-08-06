@@ -16,6 +16,7 @@ import {
   ebayListingRawSchema,
   ebayListingSchema,
   itemSpecificsFromPairs,
+  safeParseEbayListing,
   type EbayListing,
   type RawEbayListing,
   type UnvalidatedEbayListing,
@@ -413,7 +414,7 @@ export async function generateEbayListing(
           tags: raw.tags,
         };
 
-    const parsed = ebayListingSchema.safeParse(reconciled);
+    const parsed = safeParseEbayListing(reconciled);
     if (!parsed.success) {
       lastError = parsed.error.issues
         .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)

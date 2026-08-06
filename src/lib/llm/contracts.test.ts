@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { zodSchema } from "ai";
 import { z } from "zod";
@@ -46,6 +49,42 @@ interface SchemaViolation {
 
 type JsonSchemaNode = Record<string, unknown>;
 
+function productionTypeScriptFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) return productionTypeScriptFiles(entryPath);
+    return entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")
+      ? [entryPath]
+      : [];
+  });
+}
+
+function generateObjectCallSites(projectRoot: string): string[] {
+  return productionTypeScriptFiles(path.join(projectRoot, "src"))
+    .flatMap((file) => {
+      const source = readFileSync(file, "utf8");
+      const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, false);
+      const relativePath = path.relative(projectRoot, file).split(path.sep).join("/");
+      const callSites: string[] = [];
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isCallExpression(node) &&
+          ts.isIdentifier(node.expression) &&
+          node.expression.text === "generateObject"
+        ) {
+          const { line } = sourceFile.getLineAndCharacterOfPosition(
+            node.expression.getStart(sourceFile),
+          );
+          callSites.push(`${relativePath}:${line + 1}`);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      return callSites;
+    })
+    .sort();
+}
+
 function isNode(value: unknown): value is JsonSchemaNode {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -73,8 +112,15 @@ const SUBSCHEMA_LIST_KEYWORDS = ["anyOf", "oneOf", "allOf", "prefixItems"] as co
 /**
  * Positions holding a MAP of name → subschema. `properties` is walked separately
  * because rule 3 has to cross-check each key against the node's own `required`.
+ * `dependencies` may instead contain property-name arrays; `isNode` below ignores
+ * those non-schema entries.
  */
-const SUBSCHEMA_MAP_KEYWORDS = ["patternProperties", "$defs", "definitions"] as const;
+const SUBSCHEMA_MAP_KEYWORDS = [
+  "patternProperties",
+  "dependencies",
+  "$defs",
+  "definitions",
+] as const;
 
 /**
  * Walk the compiled JSON Schema through SCHEMA positions only (so a property that
@@ -176,27 +222,12 @@ describe("every model-facing schema compiles to OpenAI-acceptable JSON Schema (#
     });
   }
 
-  it("covers every generateObject call site, including the multi-call-site roles", () => {
-    // The structural guard on the guard: `pricingAgent` drives THREE model calls
-    // and `vision` TWO. A registry with one entry per role silently checked only
-    // the first of each — which is how the depreciation tier's optional `title`
-    // survived the #696 round-1 fix. Adding a `generateObject` call without
-    // registering it here must break this test, not pass quietly.
-    const byRole = MODEL_FACING_SCHEMAS.reduce<Record<string, number>>((acc, e) => {
-      acc[e.role] = (acc[e.role] ?? 0) + 1;
-      return acc;
-    }, {});
-    expect(byRole).toEqual({
-      vision: 2,
-      listing: 1,
-      export: 1,
-      pricingAgent: 3,
-      judge: 1,
-    });
-    // Every registered call site is distinct — a copy-paste that re-registers an
-    // already-covered file would otherwise inflate the counts above.
-    const callSites = MODEL_FACING_SCHEMAS.map((e) => e.callSite);
-    expect(new Set(callSites).size).toBe(callSites.length);
+  it("registers every production generateObject call site", () => {
+    // Source discovery makes an unregistered new call fail this test. It proves
+    // call-site coverage, not that an entry names the schema the call actually uses.
+    const registered = MODEL_FACING_SCHEMAS.map((entry) => entry.callSite).sort();
+    expect(new Set(registered).size).toBe(registered.length);
+    expect(generateObjectCallSites(process.cwd())).toEqual(registered);
   });
 
   it("flags a Zod record — the construct that broke production", () => {
@@ -265,7 +296,7 @@ describe("every model-facing schema compiles to OpenAI-acceptable JSON Schema (#
     // Coverage control for the WALK. None of these positions can be produced by the
     // SDK's compiler today — it emits draft-07, so `z.tuple()` becomes the array form
     // of `items` and never `prefixItems`, and nothing in Zod compiles to
-    // `patternProperties`, `if`/`then`/`else`, `not`, or `contains`. They are walked
+    // `patternProperties`, `dependencies`, `if`/`then`/`else`, `not`, or `contains`. They are walked
     // anyway, and asserted here on hand-built nodes, because the alternative is a
     // guard whose coverage silently depends on compiler internals: a schema dialect
     // bump or a `z.custom()` carrying a raw JSON Schema would move a role's subtree
@@ -281,6 +312,19 @@ describe("every model-facing schema compiles to OpenAI-acceptable JSON Schema (#
         "patternProperties",
         { type: "object", additionalProperties: false, patternProperties: { "^s_": open } },
       ],
+      [
+        "dependencies",
+        {
+          dependencies: {
+            propertyList: ["a"],
+            dependentSchema: {
+              type: "object",
+              propertyNames: { type: "string" },
+              properties: { optional: { type: "string" } },
+            },
+          },
+        },
+      ],
       ["if", { if: open }],
       ["then", { then: open }],
       ["else", { else: open }],
@@ -294,11 +338,23 @@ describe("every model-facing schema compiles to OpenAI-acceptable JSON Schema (#
           ? "control.prefixItems[0]"
           : keyword === "patternProperties"
             ? "control.patternProperties.^s_"
+            : keyword === "dependencies"
+              ? "control.dependencies.dependentSchema"
             : `control.${keyword}`;
-      expect(
-        collectViolations(node, "control"),
-        `${keyword} subtree was not walked`,
-      ).toContainEqual({
+      const violations = collectViolations(node, "control");
+      if (keyword === "dependencies") {
+        expect(violations, "dependencies schema subtree was not walked").toEqual([
+          { path, reason: "'propertyNames' is not permitted" },
+          { path, reason: "object requires additionalProperties: false (found undefined)" },
+          {
+            path,
+            reason:
+              "'optional' is in properties but missing from required (optional fields are not permitted)",
+          },
+        ]);
+        continue;
+      }
+      expect(violations, `${keyword} subtree was not walked`).toContainEqual({
         path,
         reason: "object requires additionalProperties: false (found undefined)",
       });

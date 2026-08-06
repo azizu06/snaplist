@@ -53,19 +53,35 @@ export const ebayListingSchema = z.object({
   tags: z.array(z.string()),
 });
 
-export type EbayListing = z.infer<typeof ebayListingSchema>;
+declare const ebayListingValidated: unique symbol;
+
+/** A strict-schema result; only `safeParseEbayListing` may create this brand. */
+export type EbayListing = z.output<typeof ebayListingSchema> & {
+  readonly [ebayListingValidated]: true;
+};
 
 /**
  * A candidate SHAPED like an eBay listing that has NOT passed `ebayListingSchema` —
  * its title may still exceed the cap and its item specifics may still be empty.
  *
  * Zod's `.max()` and `.refine()` constrain values at PARSE time but do not narrow
- * `z.infer`, so `EbayListing` cannot express "validated" and the typechecker cannot
- * tell a parsed listing from a raw candidate. This alias says "not yet" out loud, so
- * a repair-path value cannot be mistaken for a publishable one. Only
- * `ebayListingSchema.safeParse` promotes a candidate to an `EbayListing`.
+ * `z.input`, so this alias remains assignable in shape but not in validation status.
+ * The `EbayListing` brand makes that status explicit: a repair-path candidate cannot
+ * reach a validated-listing boundary without `safeParseEbayListing`.
  */
 export type UnvalidatedEbayListing = z.input<typeof ebayListingSchema>;
+
+/**
+ * Strict parse boundary for eBay listing candidates. Its successful result is the
+ * sole constructor of the `EbayListing` validation brand.
+ */
+export function safeParseEbayListing(
+  candidate: UnvalidatedEbayListing,
+): { success: true; data: EbayListing } | { success: false; error: z.ZodError } {
+  const parsed = ebayListingSchema.safeParse(candidate);
+  if (!parsed.success) return { success: false, error: parsed.error };
+  return { success: true, data: parsed.data as EbayListing };
+}
 
 /**
  * One model-emitted eBay item specific. The MODEL-FACING representation is an ordered

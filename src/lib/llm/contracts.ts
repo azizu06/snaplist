@@ -52,45 +52,45 @@ export const MODEL_FACING_SCHEMAS: readonly ModelFacingSchema[] = [
   {
     role: "vision",
     schema: visionResponseSchema,
-    callSite: "src/lib/vision/extract.ts",
+    callSite: "src/lib/vision/extract.ts:344",
     fixture: true,
   },
   {
     role: "vision",
     schema: measurementResponseSchema,
-    callSite: "src/lib/vision/measurements.ts",
+    callSite: "src/lib/vision/measurements.ts:647",
   },
   {
     role: "listing",
     schema: ebayListingRawSchema,
-    callSite: "src/lib/listing/generate.ts",
+    callSite: "src/lib/listing/generate.ts:626",
     fixture: true,
   },
   {
     role: "export",
     schema: rawExportPacksSchema,
-    callSite: "src/lib/export/generate.ts",
+    callSite: "src/lib/export/generate.ts:842",
   },
   {
     role: "pricingAgent",
     schema: webCompListSchema,
-    callSite: "src/lib/pricing/providers/web-search.ts",
+    callSite: "src/lib/pricing/providers/web-search.ts:331",
     fixture: true,
   },
   {
     role: "pricingAgent",
     schema: retailFindingListSchema,
-    callSite: "src/lib/pricing/providers/depreciation.ts",
+    callSite: "src/lib/pricing/providers/depreciation.ts:232",
   },
   {
     role: "pricingAgent",
     schema: llmPriceEstimateSchema,
-    callSite: "src/lib/pricing/providers/llm-only.ts",
+    callSite: "src/lib/pricing/providers/llm-only.ts:103",
   },
   {
     role: "judge",
     schema: judgeScoresSchema,
-    callSite: "src/lib/eval/judge.ts",
+    callSite: "src/lib/eval/judge.ts:195",
     fixture: true,
   },
 ];

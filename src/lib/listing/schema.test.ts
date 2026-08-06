@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ebayListingRawSchema, itemSpecificsFromPairs } from "./schema";
+import {
+  ebayListingRawSchema,
+  itemSpecificsFromPairs,
+  type EbayListing,
+} from "./schema";
 import { itemSpecificsToPairs } from "./schema.testing";
+import { fallbackEbayListing } from "./generate";
+
+function needsValidatedEbayListing(_listing: EbayListing): void {}
 
 /**
  * The model-facing item-specifics representation (issue #691).
@@ -69,6 +76,11 @@ describe("itemSpecificsToPairs", () => {
 });
 
 describe("ebayListingRawSchema (the schema handed to generateObject)", () => {
+  it("does not treat a fallback candidate as a validated listing", () => {
+    // @ts-expect-error A candidate must pass the strict parse before this boundary.
+    needsValidatedEbayListing(fallbackEbayListing({ title: "Vintage lamp" }));
+  });
+
   it("accepts the pair-list shape", () => {
     const parsed = ebayListingRawSchema.safeParse({
       title: "Sony WH-1000XM4 Headphones",
