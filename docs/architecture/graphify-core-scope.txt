@@ -228,6 +228,7 @@ src/lib/listing-review/read.ts
 src/lib/listing-review/save.ts
 src/lib/listing/generate.ts
 src/lib/listing/index.ts
+src/lib/listing/schema.testing.ts
 src/lib/listing/schema.ts
 src/lib/llm/contracts.ts
 src/lib/llm/index.ts
