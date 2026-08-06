@@ -29,6 +29,58 @@ describe("isEbayAuthError", () => {
     expect(isEbayAuthError(err)).toBe(true);
   });
 
+  it("classifies an HTTP 403 insufficient_scope from the Sell Account API", () => {
+    // Policy discovery (#47) needs `sell.account.readonly`. A connection minted
+    // before that scope joined EBAY_OAUTH_SCOPES carries a token without it, and
+    // eBay answers 403 rather than 401 — reconnecting is exactly the fix, and
+    // exactly what the generic "unavailable" copy fails to tell the seller.
+    expect(
+      isEbayAuthError(
+        new EbayApiError(
+          "eBay GET /sell/account/v1/return_policy failed (HTTP 403)",
+          403,
+          {
+            errors: [
+              {
+                errorId: 1100,
+                domain: "ACCESS",
+                category: "REQUEST",
+                message: "Access denied",
+                longMessage: "Insufficient permissions to fulfill the request.",
+              },
+            ],
+          },
+        ),
+      ),
+    ).toBe(true);
+    // The OAuth bearer-token spelling of the same refusal.
+    expect(
+      isEbayAuthError(
+        new EbayApiError("eBay GET /sell/account/v1/fulfillment_policy failed (HTTP 403)", 403, {
+          error: "insufficient_scope",
+          error_description: "the request requires higher privileges than provided by the access token",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT classify a 403 that is not a scope or access refusal", () => {
+    expect(
+      isEbayAuthError(
+        new EbayApiError("eBay GET /sell/account/v1/return_policy failed (HTTP 403)", 403, {
+          errors: [
+            {
+              errorId: 20403,
+              domain: "API_ACCOUNT",
+              category: "BUSINESS",
+              message: "The seller account is not eligible for business policies.",
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("does NOT classify a non-auth eBay failure (listing validation, server error)", () => {
     expect(
       isEbayAuthError(

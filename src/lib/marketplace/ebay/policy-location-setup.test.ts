@@ -268,6 +268,54 @@ describe("ensureEbayPolicyLocationBinding", () => {
     expect(setup.cause).toBe(failure);
   });
 
+  it("propagates a binding-store write failure instead of blaming the eBay connection", async () => {
+    // `save_ebay_policy_location_binding` failing (42501 when the server RPC
+    // auth config is unprovisioned, a degraded Supabase) is a SnapList fault.
+    // Reporting it as `unavailable` tells the seller to check their eBay
+    // connection, and the reconnect that advice invites rotates
+    // `connection_generation`, wipes their bindings, and forces re-consent.
+    const store = fakeStore();
+    const writeFailure = new Error(
+      "Failed to save eBay policy setup: permission denied for function "
+        + "save_ebay_policy_location_binding",
+    );
+    store.saveBinding = async () => {
+      throw writeFailure;
+    };
+
+    await expect(
+      ensureEbayPolicyLocationBinding({
+        marketplaceId: "EBAY_US",
+        adapter: discoveringAdapter(candidatesFor("seller-a")),
+        store,
+      }),
+    ).rejects.toBe(writeFailure);
+  });
+
+  it("propagates the connection-changed fence instead of blaming the eBay connection", async () => {
+    const store = fakeStore();
+    const readConnectionContext = store.readConnectionContext.bind(store);
+    let reads = 0;
+    store.readConnectionContext = async () => {
+      reads += 1;
+      return reads === 1
+        ? readConnectionContext()
+        : {
+            accountGeneration: ACCOUNT_GENERATION,
+            connectionGeneration: NEXT_CONNECTION_GENERATION,
+          };
+    };
+
+    await expect(
+      ensureEbayPolicyLocationBinding({
+        marketplaceId: "EBAY_US",
+        adapter: discoveringAdapter(candidatesFor("seller-a")),
+        store,
+      }),
+    ).rejects.toThrow("The eBay connection changed during policy discovery.");
+    expect(store.saved).toEqual([]);
+  });
+
   it("reports a missing connection without calling eBay", async () => {
     const adapter = discoveringAdapter(candidatesFor("seller-a"));
     const setup = await ensureEbayPolicyLocationBinding({

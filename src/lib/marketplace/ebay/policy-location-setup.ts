@@ -94,6 +94,28 @@ export const EBAY_POLICY_SETUP_UNAVAILABLE_MESSAGE =
   "SnapList could not read your eBay shipping, payment, and return policies. "
   + "Check your eBay connection, then try publishing again.";
 
+/**
+ * Tags a throw by ORIGIN: it escaped the adapter call that reads the seller's
+ * own eBay account. Only that origin may become the seller-facing `unavailable`
+ * outcome, because only that origin describes something on eBay's side.
+ *
+ * Discovery also reads the connection row, re-checks the generation fence, and
+ * writes the binding through an RPC. Those are SnapList faults. Flattening them
+ * into "check your eBay connection" invites the seller to reconnect, and a
+ * reconnect rotates `connection_generation`, wipes `policy_location_bindings`,
+ * and forces re-consent — a destructive act induced by our own database
+ * failure, with no 5xx and no server log to show for it. So the discriminator
+ * is where the error came from, never what its message says.
+ */
+class EbayPolicyAccountReadError extends Error {
+  constructor(readonly readCause: unknown) {
+    super("Reading the seller's eBay policies and locations failed.", {
+      cause: readCause,
+    });
+    this.name = "EbayPolicyAccountReadError";
+  }
+}
+
 export async function ensureEbayPolicyLocationBinding(input: {
   marketplaceId: string;
   adapter: EbayPolicyLocationDiscoveringAdapter;
@@ -135,19 +157,30 @@ export async function ensureEbayPolicyLocationBinding(input: {
     discovered = await discoverAndBindEbayPolicyLocation({
       marketplaceId,
       adapter: {
-        readCandidates: (request) =>
-          readCandidates.call(input.adapter, request),
+        readCandidates: async (request) => {
+          try {
+            return await readCandidates.call(input.adapter, request);
+          } catch (cause) {
+            throw new EbayPolicyAccountReadError(cause);
+          }
+        },
       },
       store: input.store,
       ...(input.now ? { now: input.now } : {}),
     });
-  } catch (cause) {
+  } catch (error) {
+    // Anything that is not an eBay account read is ours: rethrow it so the
+    // caller raises a plain internal error, answers 500, and logs it — the same
+    // treatment `readStoredBinding`'s own failure already gets above.
+    if (!(error instanceof EbayPolicyAccountReadError)) throw error;
     return {
       state: "unavailable",
       marketplaceId,
       message: EBAY_POLICY_SETUP_UNAVAILABLE_MESSAGE,
       binding: null,
-      cause,
+      // The ORIGINAL adapter error, so `isEbayAuthError` can still recognise an
+      // expired grant behind this outcome and offer the reconnect message.
+      cause: error.readCause,
     };
   }
 

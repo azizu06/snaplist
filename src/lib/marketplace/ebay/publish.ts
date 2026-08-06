@@ -10,7 +10,10 @@ import {
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
 import type { EbayPolicyLocationBinding } from "./policy-location-contract";
 import { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
-import { ensureEbayPolicyLocationBinding } from "./policy-location-setup";
+import {
+  EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE,
+  ensureEbayPolicyLocationBinding,
+} from "./policy-location-setup";
 import {
   PublishValidationError,
   isEbayAuthError,
@@ -527,9 +530,7 @@ async function readEbayOfferBinding(
     ) {
       return fallback;
     }
-    throw new PublishValidationError(
-      "Connect eBay and finish policy/location setup before publishing.",
-    );
+    throw new PublishValidationError(EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE);
   }
 
   if (setup.state !== "ready" || !setup.binding) {

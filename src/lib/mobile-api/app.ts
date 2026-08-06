@@ -57,6 +57,7 @@ import {
   PublishedReplayConflictError,
   PublishReviewRevisionConflictError,
 } from "@/lib/marketplace/ebay/publish";
+import { PublishValidationError } from "@/lib/marketplace/ebay/errors";
 import {
   MOBILE_API_VERSION,
   apiErrorEnvelopeSchema,
@@ -744,6 +745,19 @@ export function createMobileApiHandler(
             error.message,
             { reason },
           );
+        }
+        // A seller-fixable refusal — no return policy, more than one shipping
+        // policy, no usable price. Its message is SAFE by construction (see
+        // `PublishValidationError`), and the native client is the only launch
+        // surface for publish, so redacting it to the generic 503 below leaves
+        // the seller retrying a condition only they can clear. `cause`, when
+        // present, is the internal failure behind that safe message and is the
+        // part that belongs in the server log, never in the response.
+        if (error instanceof PublishValidationError) {
+          if (error.cause !== undefined) {
+            dependencies.reportError?.("mobile-api.ebay-publish", error);
+          }
+          return errorResponse(requestId, 422, "invalid_request", error.message);
         }
         dependencies.reportError?.("mobile-api.ebay-publish", error);
         return errorResponse(

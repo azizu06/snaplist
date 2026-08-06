@@ -35,11 +35,17 @@ export const EBAY_RECONNECT_MESSAGE =
 
 /**
  * Is this publish failure an eBay AUTH failure — an expired/invalid token the
- * seller fixes by reconnecting eBay in Settings? Two shapes qualify:
- *  - a Sell API call rejected with HTTP 401 (invalid/expired access token), or
+ * seller fixes by reconnecting eBay in Settings? Three shapes qualify:
+ *  - a Sell API call rejected with HTTP 401 (invalid/expired access token),
  *  - the refresh-token grant rejected with the OAuth `invalid_grant` error
  *    (eBay returns that as HTTP 400 from the token endpoint — the refresh token
- *    itself expired or was revoked).
+ *    itself expired or was revoked), or
+ *  - a Sell API call rejected with HTTP 403 because the token's granted scopes
+ *    do not cover it. Policy discovery (#47) reads the Sell Account API under
+ *    `sell.account.readonly`; a connection minted before that scope joined
+ *    `EBAY_OAUTH_SCOPES` still holds a token without it, and reconnecting is
+ *    the only fix. Recognised by the OAuth `insufficient_scope` code or by an
+ *    eBay `ACCESS`-domain error entry — a field, never message prose.
  * Everything else (validation payloads, 5xx, non-eBay errors) is NOT auth and
  * keeps its own message. Pure and unit-tested — the seam both publish entry
  * points classify through so their copy can never drift.
@@ -48,5 +54,17 @@ export function isEbayAuthError(err: unknown): boolean {
   if (!(err instanceof EbayApiError)) return false;
   if (err.status === 401) return true;
   if (typeof err.body !== "object" || err.body === null) return false;
-  return (err.body as { error?: unknown }).error === "invalid_grant";
+  const body = err.body as { error?: unknown; errors?: unknown };
+  if (body.error === "invalid_grant") return true;
+  if (err.status !== 403) return false;
+  if (body.error === "insufficient_scope") return true;
+  return (
+    Array.isArray(body.errors)
+    && body.errors.some(
+      (entry) =>
+        typeof entry === "object"
+        && entry !== null
+        && (entry as { domain?: unknown }).domain === "ACCESS",
+    )
+  );
 }

@@ -69,6 +69,13 @@ export function handleMobileEbayPublishRequest(
   return createMobileApiHandler({
     authenticate: clerkPrincipal,
     ebayPublish: configuredEbayPublish(),
+    // Every internal failure on this path reaches the native client as the same
+    // generic 503. Without this the reporter is optional-chained away, so the
+    // failure leaves no trace at all — the response says "temporarily
+    // unavailable" and the server says nothing.
+    reportError(context, error) {
+      console.error(`[${context}]`, error);
+    },
     worker: unavailableWorker("eBay publish"),
   })(request);
 }
