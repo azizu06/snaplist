@@ -301,6 +301,109 @@ final class EbayPublishDeliveryTests: XCTestCase {
         XCTAssertEqual(requests.publishStatusRequestCount, 1)
     }
 
+    func testPublishValidationErrorWithUndecodableBodyStillTerminatesAsSellerFixable()
+        async {
+        let listingID = UUID(
+            uuidString: "69900000-0000-4000-8000-000000000003"
+        )!
+        let revision = UUID(
+            uuidString: "69900000-0000-4000-8000-000000000004"
+        )!
+        let requests = EbayPublishRequestRecorder()
+        let session = makeSession { request in
+            requests.record(request)
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/listings/\(listingID.uuidString.lowercased())/ebay/publish"):
+                return Self.response(
+                    status: 200,
+                    json: """
+                    {
+                      "data": {
+                        "listingId": "\(listingID.uuidString.lowercased())",
+                        "outcome": "not_published",
+                        "ebayListingId": null,
+                        "ebayOfferId": null,
+                        "alreadyPublished": false
+                      }
+                    }
+                    """
+                )
+            case ("GET", "/v1/listings/\(listingID.uuidString.lowercased())/ebay/preflight"):
+                return Self.response(
+                    status: 200,
+                    json: """
+                    {
+                      "data": {
+                        "listingId": "\(listingID.uuidString.lowercased())",
+                        "title": "Policy-sensitive listing",
+                        "description": "Seller draft.",
+                        "effectivePrice": { "amount": 58.25, "label": "What will be listed" },
+                        "photoCount": 1,
+                        "marketplace": "EBAY_US",
+                        "ebayCondition": "USED_VERY_GOOD",
+                        "itemSpecifics": {},
+                        "reviewRevision": "\(revision.uuidString.lowercased())",
+                        "connection": { "connected": true, "ebayUsername": "seller" },
+                        "publishEligibility": { "enabled": false, "eligible": false }
+                      }
+                    }
+                    """
+                )
+            case ("POST", "/v1/listings/\(listingID.uuidString.lowercased())/ebay/publish"):
+                // A malformed 422 body (proxy/WAF/gateway error page, or a
+                // differently-keyed payload) must still terminate as
+                // seller-fixable, not fall through to the ambiguous outcome.
+                return (
+                    HTTPURLResponse(
+                        url: URL(string: "https://snaplist.dev")!,
+                        statusCode: 422,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "text/html"]
+                    )!,
+                    Data("<html><body>Bad Gateway</body></html>".utf8)
+                )
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let service = EbayPublishAPIClient(
+            baseURL: URL(string: "https://snaplist.dev")!,
+            tokenProvider: EbayPublishTestBearer(),
+            session: session
+        )
+        let flow = EbayPublishFlowStore(
+            listingID: listingID,
+            service: service,
+            oauth: EbayOAuthFixtureRunner(result: .connected),
+            attemptStore: MemoryEbayPublishAttemptStore()
+        )
+
+        await flow.load()
+        await flow.confirmPublish()
+
+        XCTAssertEqual(
+            flow.screen,
+            .result(
+                .sellerFixableRefusal(
+                    message: EbayPublishAPIClient.fallbackSellerFixableRefusalMessage
+                )
+            )
+        )
+        guard case .result(let resultState) = flow.screen else {
+            return XCTFail("Expected the seller-fixable refusal result screen.")
+        }
+        let copy = EbayResultCopy(state: resultState)
+        XCTAssertEqual(copy.headline, "This listing was not posted.")
+        XCTAssertEqual(
+            copy.body,
+            EbayPublishAPIClient.fallbackSellerFixableRefusalMessage
+        )
+        // The revert guard: routing a non-decodable 422 back through the
+        // generic catch would fall into resolveAmbiguousPublish(), which
+        // issues a second status GET. Exactly one proves the terminal path.
+        XCTAssertEqual(requests.publishStatusRequestCount, 1)
+    }
+
     func testPreflightCarriesTheServerEffectivePriceAndMappedListingTruth() async throws {
         let listingID = UUID(
             uuidString: "37700000-0000-4000-8000-000000000014"
