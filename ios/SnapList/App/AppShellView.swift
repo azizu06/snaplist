@@ -5,6 +5,7 @@ import UIKit
 struct AppShellView: View {
     @Bindable var router: AppRouter
     @Bindable var onboardingModel: OnboardingFlowModel
+    @Bindable var firstValueOnboardingModel: FirstValueOnboardingModel
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
     @Bindable var runStore: RunDetailStore
@@ -36,6 +37,18 @@ struct AppShellView: View {
 #else
                 shell
 #endif
+            } else if shouldShowFirstValueOnboarding {
+                FirstValueOnboardingView(
+                    model: firstValueOnboardingModel,
+                    forceReducedMotion: configuration.forceReducedMotion,
+                    didFinish: onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding
+                )
+            } else if shouldBypassRetiredLegacyIntro {
+                Color.clear
+                    .accessibilityHidden(true)
+                    .task(id: onboardingModel.state.screen) {
+                        onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
+                    }
             } else if shouldShowOnboarding {
                 OnboardingFlowView(
                     model: onboardingModel,
@@ -553,6 +566,20 @@ struct AppShellView: View {
             // intake there, by deleting the last photo in Photo Review, must leave them
             // in zero-photo Scan rather than restart onboarding behind the camera.
             && router.presentedFullScreen != .guidedCamera
+    }
+
+    private var shouldShowFirstValueOnboarding: Bool {
+        FirstValueOnboardingPresentationPolicy.shouldPresent(
+            isFirstLaunch: configuration.usesFirstValueOnboarding,
+            hasCompletedOnboarding:
+                firstValueOnboardingModel.hasCompletedOnboarding
+        )
+    }
+
+    private var shouldBypassRetiredLegacyIntro: Bool {
+        configuration.usesFirstValueOnboarding
+            && firstValueOnboardingModel.hasCompletedOnboarding
+            && !onboardingModel.state.screen.hasCompletedLegacyIntro
     }
 
     private var onboardingCaptureRouteID: OnboardingCaptureRouteID {
@@ -1144,6 +1171,9 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             progressStore: InMemoryOnboardingProgressStore(),
             stagedLibraryPhotos: InMemoryStagedLibraryPhotoStore(),
             guestAllowance: DeferredGuestAllowanceCapability()
+        ),
+        firstValueOnboardingModel: FirstValueOnboardingModel(
+            completionStore: InMemoryFirstValueOnboardingCompletionStore()
         ),
         captureFlow: CaptureFlowModel(
             camera: dependencies.captureCamera,

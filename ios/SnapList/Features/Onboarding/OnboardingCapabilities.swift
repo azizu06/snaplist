@@ -377,6 +377,53 @@ struct DeferredGuestAllowanceCapability: GuestAllowanceCapability {
     )
 }
 
+protocol FirstValueOnboardingCompletionPersisting: AnyObject {
+    var hasCompletedOnboarding: Bool { get }
+    func markCompleted()
+    func clear()
+}
+
+final class UserDefaultsFirstValueOnboardingCompletionStore:
+    FirstValueOnboardingCompletionPersisting
+{
+    private let defaults: UserDefaults
+    private let key: String
+
+    init(
+        defaults: UserDefaults = .standard,
+        key: String = "snaplist.first-value-onboarding.v1.completed"
+    ) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    var hasCompletedOnboarding: Bool {
+        defaults.bool(forKey: key)
+    }
+
+    func markCompleted() {
+        defaults.set(true, forKey: key)
+    }
+
+    func clear() {
+        defaults.removeObject(forKey: key)
+    }
+}
+
+final class InMemoryFirstValueOnboardingCompletionStore:
+    FirstValueOnboardingCompletionPersisting
+{
+    private(set) var hasCompletedOnboarding = false
+
+    func markCompleted() {
+        hasCompletedOnboarding = true
+    }
+
+    func clear() {
+        hasCompletedOnboarding = false
+    }
+}
+
 protocol OnboardingProgressPersisting: AnyObject {
     func load() -> OnboardingFlowState?
     func save(_ state: OnboardingFlowState)

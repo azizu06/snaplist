@@ -229,6 +229,7 @@ struct LaunchConfiguration: Equatable {
 
     var fixture: FoundationFixture
     var visualState: ApprovedVisualStateID?
+    var firstValueOnboardingState: FirstValueOnboardingScreen?
     var photoReviewState: PhotoReviewVisualStateID?
     var forceReducedMotion: Bool
     var keyboardProbe: Bool
@@ -250,6 +251,7 @@ struct LaunchConfiguration: Equatable {
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
         visualState: nil,
+        firstValueOnboardingState: nil,
         photoReviewState: nil,
         forceReducedMotion: false,
         keyboardProbe: false,
@@ -271,6 +273,7 @@ struct LaunchConfiguration: Equatable {
     static let preview = LaunchConfiguration(
         fixture: .scan,
         visualState: nil,
+        firstValueOnboardingState: nil,
         photoReviewState: nil,
         forceReducedMotion: false,
         keyboardProbe: false,
@@ -340,6 +343,16 @@ struct LaunchConfiguration: Equatable {
                 if configuration.visualState == .runDetail {
                     configuration.runDetailFixture = .loaded
                 }
+            } else if argument.hasPrefix("--first-value-onboarding-state=") {
+                let value = String(
+                    argument.dropFirst("--first-value-onboarding-state=".count)
+                )
+                configuration.firstValueOnboardingState =
+                    FirstValueOnboardingScreen.allCases.first {
+                        $0.identifier == value
+                    }
+                configuration.fixture = .onboarding
+                configuration.usesZeroNetworkFixtures = true
             } else if argument.hasPrefix("--photo-review-state=") {
                 let value = String(argument.dropFirst("--photo-review-state=".count))
                 configuration.photoReviewState = PhotoReviewVisualStateID(rawValue: value)
@@ -412,6 +425,14 @@ struct LaunchConfiguration: Equatable {
             return visualState.ownerIssue == 206
         }
         return fixture == .onboarding
+    }
+
+    var usesFirstValueOnboarding: Bool {
+        usesOnboarding && visualState == nil
+    }
+
+    var initialFirstValueOnboardingScreen: FirstValueOnboardingScreen {
+        firstValueOnboardingState ?? .onb01
     }
 
     var initialRoute: AppRoute? {

@@ -1,6 +1,122 @@
 import Foundation
 import Observation
 
+enum FirstValueOnboardingPresentationPolicy {
+    static func shouldPresent(
+        isFirstLaunch: Bool,
+        hasCompletedOnboarding: Bool
+    ) -> Bool {
+        isFirstLaunch && !hasCompletedOnboarding
+    }
+}
+
+enum FirstValueOnboardingScreen: Int, CaseIterable, Codable, Equatable {
+    case onb01 = 1
+    case onb02
+    case onb03
+    case onb04
+    case onb05
+    case onb06
+
+    var identifier: String {
+        "ONB-0\(rawValue)"
+    }
+
+    var next: FirstValueOnboardingScreen? {
+        FirstValueOnboardingScreen(rawValue: rawValue + 1)
+    }
+
+    var previous: FirstValueOnboardingScreen? {
+        FirstValueOnboardingScreen(rawValue: rawValue - 1)
+    }
+
+    var scout: FirstValueScoutPresentation {
+        switch self {
+        case .onb01:
+            .init(clip: "048-seedance-welcome-wave-safe-margin", fallback: "FirstValueScoutONB01", size: 116, leadingPull: -10)
+        case .onb02:
+            .init(clip: "007-seedance-magnifier-inspection", fallback: "FirstValueScoutONB02", size: 126, leadingPull: -14)
+        case .onb03:
+            .init(clip: "032-seedance-barcode-scan", fallback: "FirstValueScoutONB03", size: 123, leadingPull: -12)
+        case .onb04:
+            .init(clip: "040-seedance-recovery-safe-cue", fallback: "FirstValueScoutONB04", size: 147, leadingPull: -10)
+        case .onb05:
+            .init(clip: "030-seedance-box-lower-lift-hflip-candidate", fallback: "FirstValueScoutONB05", size: 122, leadingPull: -4)
+        case .onb06:
+            .init(clip: "042-seedance-reassurance", fallback: "FirstValueScoutONB06", size: 167, leadingPull: -14)
+        }
+    }
+
+    func scoutMedia(reduceMotion: Bool) -> FirstValueScoutMedia {
+        if reduceMotion {
+            return .staticFallbackPNG(asset: scout.fallback)
+        }
+        return .acceptedWebM(resource: scout.clip)
+    }
+}
+
+struct FirstValueScoutPresentation: Equatable {
+    let clip: String
+    let fallback: String
+    let size: CGFloat
+    let leadingPull: CGFloat
+}
+
+enum FirstValueScoutMedia: Equatable {
+    case acceptedWebM(resource: String)
+    case staticFallbackPNG(asset: String)
+}
+
+enum FirstValueOnboardingCompletionSignal: Equatable {
+    case completed
+    case skipped
+}
+
+@MainActor
+@Observable
+final class FirstValueOnboardingModel {
+    private(set) var screen: FirstValueOnboardingScreen
+    private(set) var completionSignal: FirstValueOnboardingCompletionSignal?
+
+    private let completionStore: any FirstValueOnboardingCompletionPersisting
+
+    init(
+        screen: FirstValueOnboardingScreen = .onb01,
+        completionStore: any FirstValueOnboardingCompletionPersisting
+    ) {
+        self.screen = screen
+        self.completionStore = completionStore
+    }
+
+    var hasCompletedOnboarding: Bool {
+        completionStore.hasCompletedOnboarding
+    }
+
+    func continueForward() {
+        guard completionSignal == nil else { return }
+        guard let next = screen.next else {
+            complete(with: .completed)
+            return
+        }
+        screen = next
+    }
+
+    func goBack() {
+        guard completionSignal == nil, let previous = screen.previous else { return }
+        screen = previous
+    }
+
+    func skip() {
+        guard screen != .onb06, completionSignal == nil else { return }
+        complete(with: .skipped)
+    }
+
+    private func complete(with signal: FirstValueOnboardingCompletionSignal) {
+        completionStore.markCompleted()
+        completionSignal = signal
+    }
+}
+
 enum OnboardingScreen: String, Codable, Equatable, Hashable {
     case launch
     case promise
@@ -32,6 +148,16 @@ enum OnboardingScreen: String, Codable, Equatable, Hashable {
             self = .libraryHandoff
         default:
             return nil
+        }
+    }
+
+    var hasCompletedLegacyIntro: Bool {
+        switch self {
+        case .photoPrimer, .denied, .cameraHandoff, .libraryHandoff,
+             .captureBoundary, .settingsHandoff:
+            true
+        case .launch, .promise, .allowance:
+            false
         }
     }
 }
@@ -171,6 +297,16 @@ final class OnboardingFlowModel {
     func startFirstItem() {
         guard state.screen == .promise else { return }
         update(screen: .allowance)
+    }
+
+    func beginPhotoPermissionAfterFirstValueOnboarding() {
+        switch state.screen {
+        case .launch, .promise, .allowance:
+            update(screen: .photoPrimer)
+        case .photoPrimer, .denied, .cameraHandoff, .libraryHandoff,
+             .captureBoundary, .settingsHandoff:
+            break
+        }
     }
 
     func presentReturningSignIn() {

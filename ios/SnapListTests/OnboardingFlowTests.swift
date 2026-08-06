@@ -2,6 +2,132 @@ import XCTest
 @testable import SnapList
 
 final class OnboardingFlowTests: XCTestCase {
+    func testFirstValueOnboardingPresentsOnlyForAnIncompleteFirstLaunch() {
+        XCTAssertTrue(
+            FirstValueOnboardingPresentationPolicy.shouldPresent(
+                isFirstLaunch: true,
+                hasCompletedOnboarding: false
+            )
+        )
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy.shouldPresent(
+                isFirstLaunch: false,
+                hasCompletedOnboarding: false
+            )
+        )
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy.shouldPresent(
+                isFirstLaunch: true,
+                hasCompletedOnboarding: true
+            )
+        )
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy.shouldPresent(
+                isFirstLaunch: false,
+                hasCompletedOnboarding: true
+            )
+        )
+    }
+
+    func testFirstValueOnboardingCompletionPersistsAcrossStoreRecreation() throws {
+        let suiteName = "snaplist.first-value-onboarding.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let firstStore = UserDefaultsFirstValueOnboardingCompletionStore(
+            defaults: defaults
+        )
+
+        XCTAssertFalse(firstStore.hasCompletedOnboarding)
+
+        firstStore.markCompleted()
+
+        let relaunchedStore = UserDefaultsFirstValueOnboardingCompletionStore(
+            defaults: defaults
+        )
+        XCTAssertTrue(relaunchedStore.hasCompletedOnboarding)
+    }
+
+    @MainActor
+    func testFirstValueOnboardingAdvancesInOrderAndEmitsOneCompletionSignal() {
+        let store = InMemoryFirstValueOnboardingCompletionStore()
+        let model = FirstValueOnboardingModel(completionStore: store)
+
+        XCTAssertEqual(model.screen, .onb01)
+        for expected in [
+            FirstValueOnboardingScreen.onb02,
+            .onb03,
+            .onb04,
+            .onb05,
+            .onb06,
+        ] {
+            model.continueForward()
+            XCTAssertEqual(model.screen, expected)
+            XCTAssertNil(model.completionSignal)
+        }
+
+        model.continueForward()
+
+        XCTAssertTrue(store.hasCompletedOnboarding)
+        XCTAssertEqual(model.completionSignal, .completed)
+    }
+
+    @MainActor
+    func testFirstValueOnboardingSkipMarksCompleteAndEmitsSkipSignal() {
+        let store = InMemoryFirstValueOnboardingCompletionStore()
+        let model = FirstValueOnboardingModel(completionStore: store)
+
+        model.skip()
+
+        XCTAssertTrue(store.hasCompletedOnboarding)
+        XCTAssertEqual(model.completionSignal, .skipped)
+    }
+
+    @MainActor
+    func testFirstValueCompletionReplacesOnlyTheLegacyIntroBeforePhotoPermission() {
+        let model = makeModel(camera: .notDetermined)
+
+        model.beginPhotoPermissionAfterFirstValueOnboarding()
+
+        XCTAssertEqual(model.state.screen, .photoPrimer)
+
+        model.restore(.init(screen: .denied))
+        model.beginPhotoPermissionAfterFirstValueOnboarding()
+
+        XCTAssertEqual(model.state.screen, .denied)
+    }
+
+    func testApprovedScoutMediaKeepsPerScreenSizingAndPulls() {
+        XCTAssertEqual(
+            FirstValueOnboardingScreen.allCases.map(\.scout),
+            [
+                .init(clip: "048-seedance-welcome-wave-safe-margin", fallback: "FirstValueScoutONB01", size: 116, leadingPull: -10),
+                .init(clip: "007-seedance-magnifier-inspection", fallback: "FirstValueScoutONB02", size: 126, leadingPull: -14),
+                .init(clip: "032-seedance-barcode-scan", fallback: "FirstValueScoutONB03", size: 123, leadingPull: -12),
+                .init(clip: "040-seedance-recovery-safe-cue", fallback: "FirstValueScoutONB04", size: 147, leadingPull: -10),
+                .init(clip: "030-seedance-box-lower-lift-hflip-candidate", fallback: "FirstValueScoutONB05", size: 122, leadingPull: -4),
+                .init(clip: "042-seedance-reassurance", fallback: "FirstValueScoutONB06", size: 167, leadingPull: -14),
+            ]
+        )
+        XCTAssertTrue(
+            FirstValueOnboardingScreen.allCases.allSatisfy {
+                $0.scout.size >= 56
+            }
+        )
+    }
+
+    func testReduceMotionSelectsEachClipsOwnStaticFallback() {
+        for screen in FirstValueOnboardingScreen.allCases {
+            XCTAssertEqual(
+                screen.scoutMedia(reduceMotion: false),
+                .acceptedWebM(resource: screen.scout.clip)
+            )
+            XCTAssertEqual(
+                screen.scoutMedia(reduceMotion: true),
+                .staticFallbackPNG(asset: screen.scout.fallback)
+            )
+        }
+    }
+
     @MainActor
     func testAccountlessJourneyRetainsReversibleStateAndStopsAtCaptureBoundary() {
         let model = makeModel(camera: .authorized)

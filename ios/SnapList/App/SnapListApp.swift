@@ -5,6 +5,7 @@ import SwiftUI
 struct SnapListApp: App {
     @State private var router: AppRouter
     @State private var onboardingModel: OnboardingFlowModel
+    @State private var firstValueOnboardingModel: FirstValueOnboardingModel
     @State private var captureFlow: CaptureFlowModel
     @State private(set) var homeStore: HomeStore
     @State private var runStore: RunDetailStore
@@ -84,6 +85,7 @@ struct SnapListApp: App {
         )
         if configuration.resetOnboardingProgress {
             dependencies.onboardingProgressStore.clear()
+            dependencies.firstValueOnboardingCompletionStore.clear()
             dependencies.stagedLibraryPhotos.clear()
         }
         if let count = configuration.stagedLibraryPhotoFixtureCount, count > 0 {
@@ -92,6 +94,17 @@ struct SnapListApp: App {
         } else if configuration.visualState == nil && !configuration.usesZeroNetworkFixtures {
             onboardingModel.restorePersistedProgress()
         }
+        if onboardingModel.state.screen.hasCompletedLegacyIntro {
+            dependencies.firstValueOnboardingCompletionStore.markCompleted()
+        }
+        let firstValueOnboardingModel = FirstValueOnboardingModel(
+            screen: configuration.initialFirstValueOnboardingScreen,
+            completionStore: dependencies.firstValueOnboardingCompletionStore
+        )
+        if firstValueOnboardingModel.hasCompletedOnboarding {
+            onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
+        }
+        _firstValueOnboardingModel = State(initialValue: firstValueOnboardingModel)
         _onboardingModel = State(initialValue: onboardingModel)
         _captureFlow = State(
             initialValue: CaptureFlowModel(
@@ -153,6 +166,7 @@ struct SnapListApp: App {
             AppShellView(
                 router: router,
                 onboardingModel: onboardingModel,
+                firstValueOnboardingModel: firstValueOnboardingModel,
                 captureFlow: captureFlow,
                 homeStore: homeStore,
                 runStore: runStore,

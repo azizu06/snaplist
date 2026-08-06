@@ -828,7 +828,7 @@ private struct MarketplaceExplanationSheet: View {
     }
 }
 
-private struct ReturningSignInSheet: View {
+struct ReturningSignInSheet: View {
     let dismiss: () -> Void
 
     var body: some View {
