@@ -575,6 +575,7 @@ struct AppShellView: View {
                 firstValueOnboardingModel.hasCompletedOnboarding
         )
             && captureFlow.stagedPhoto == nil
+            && router.presentedSheet != .capture
     }
 
     private var shouldBypassRetiredLegacyIntro: Bool {

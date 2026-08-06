@@ -1,7 +1,4 @@
 import SwiftUI
-#if !DEBUG
-import WebKit
-#endif
 
 @MainActor
 struct FirstValueOnboardingView: View {
@@ -528,9 +525,26 @@ private struct AcceptedScoutWebMView: UIViewRepresentable {
     let fallbackAsset: String
 
     func makeUIView(context: Context) -> UIView {
+        // iOS 26.5 UI automation injects both WebCore and WebKit accessibility
+        // bundles when a Debug target references WebKit, then crashes later tests.
+        // Keep Debug deterministic on the package's exact accepted PNG; Release
+        // retains the accepted WebM path below for the seller-facing experience.
+        let fallback = UIImageView(image: UIImage(named: fallbackAsset))
+        fallback.contentMode = .scaleAspectFit
+        fallback.isAccessibilityElement = false
+        return fallback
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
+}
+#else
+private struct AcceptedScoutWebMView: UIViewRepresentable {
+    let resource: String
+    let fallbackAsset: String
+
+    func makeUIView(context: Context) -> UIView {
         let container = UIView()
         container.backgroundColor = .clear
-
         guard let webView = WebKitRuntime.makeConfiguredWebView() else {
             installFallback(in: container)
             return container
@@ -589,9 +603,6 @@ private struct AcceptedScoutWebMView: UIViewRepresentable {
 }
 
 private enum WebKitRuntime {
-    // A direct WebKit link loads both WebCore and WebKit accessibility bundles
-    // into every iOS 26.5 UI-test process, even when onboarding is not shown.
-    // Load the public framework only when an accepted WebM is actually rendered.
     private static let frameworkPath =
         "/System/Library/Frameworks/WebKit.framework"
 
@@ -632,7 +643,7 @@ private enum WebKitRuntime {
             selector,
             .zero,
             configuration
-        ).takeRetainedValue() as? UIView
+        ).takeUnretainedValue() as? UIView
     }
 
     private static func load() -> Bool {
@@ -642,43 +653,6 @@ private enum WebKitRuntime {
         return Bundle(path: frameworkPath)?.load() == true
             && NSClassFromString("WKWebView") != nil
     }
-}
-#else
-private struct AcceptedScoutWebMView: UIViewRepresentable {
-    let resource: String
-    let fallbackAsset: String
-
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.mediaTypesRequiringUserActionForPlayback = []
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        view.isOpaque = false
-        view.backgroundColor = .clear
-        view.scrollView.backgroundColor = .clear
-        view.scrollView.isScrollEnabled = false
-        view.isUserInteractionEnabled = false
-        return view
-    }
-
-    func updateUIView(_ view: WKWebView, context: Context) {
-        guard context.coordinator.loadedResource != resource,
-              let url = Bundle.main.url(
-                forResource: resource,
-                withExtension: "webm",
-                subdirectory: "FirstValueOnboarding"
-              ) else { return }
-        context.coordinator.loadedResource = resource
-        let html = """
-        <meta name='viewport' content='width=device-width,initial-scale=1'>
-        <style>*{margin:0}html,body,video{width:100%;height:100%;background:transparent}video{object-fit:contain}</style>
-        <video autoplay muted loop playsinline src='\(url.lastPathComponent)'></video>
-        """
-        view.loadHTMLString(html, baseURL: url.deletingLastPathComponent())
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    final class Coordinator { var loadedResource: String? }
 }
 #endif
 
