@@ -377,6 +377,65 @@ struct DeferredGuestAllowanceCapability: GuestAllowanceCapability {
     )
 }
 
+/// Durable storage for the onboarding completion contract issue #566 consumes.
+///
+/// The recorded value is the outcome, never a bare flag — see
+/// `FirstValueOnboardingOutcome`. An unrecognised stored value reads as `nil` rather
+/// than inventing an outcome, so a future package revision cannot make a seller look
+/// taught by accident.
+protocol FirstValueOnboardingCompletionPersisting: AnyObject {
+    /// `nil` until onboarding reaches a terminal outcome.
+    var outcome: FirstValueOnboardingOutcome? { get }
+    func record(_ outcome: FirstValueOnboardingOutcome)
+    func clear()
+}
+
+extension FirstValueOnboardingCompletionPersisting {
+    var hasCompletedOnboarding: Bool { outcome != nil }
+}
+
+final class UserDefaultsFirstValueOnboardingCompletionStore:
+    FirstValueOnboardingCompletionPersisting
+{
+    private let defaults: UserDefaults
+    private let key: String
+
+    init(
+        defaults: UserDefaults = .standard,
+        key: String = "snaplist.first-value-onboarding.v1.outcome"
+    ) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    var outcome: FirstValueOnboardingOutcome? {
+        guard let rawValue = defaults.string(forKey: key) else { return nil }
+        return FirstValueOnboardingOutcome(rawValue: rawValue)
+    }
+
+    func record(_ outcome: FirstValueOnboardingOutcome) {
+        defaults.set(outcome.rawValue, forKey: key)
+    }
+
+    func clear() {
+        defaults.removeObject(forKey: key)
+    }
+}
+
+final class InMemoryFirstValueOnboardingCompletionStore:
+    FirstValueOnboardingCompletionPersisting
+{
+    private(set) var outcome: FirstValueOnboardingOutcome?
+
+    func record(_ outcome: FirstValueOnboardingOutcome) {
+        self.outcome = outcome
+    }
+
+    func clear() {
+        outcome = nil
+    }
+}
+
 protocol OnboardingProgressPersisting: AnyObject {
     func load() -> OnboardingFlowState?
     func save(_ state: OnboardingFlowState)

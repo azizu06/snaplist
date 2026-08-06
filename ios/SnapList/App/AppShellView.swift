@@ -5,6 +5,7 @@ import UIKit
 struct AppShellView: View {
     @Bindable var router: AppRouter
     @Bindable var onboardingModel: OnboardingFlowModel
+    @Bindable var firstValueOnboardingModel: FirstValueOnboardingModel
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
     @Bindable var runStore: RunDetailStore
@@ -36,6 +37,25 @@ struct AppShellView: View {
 #else
                 shell
 #endif
+            } else if awaitsCaptureRestorationBeforeOnboarding {
+                // Neutral hold: a durable capture may still be restoring, and onboarding
+                // must not flash in front of a returning seller's own work.
+                SnapListColorToken.canvas.color
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+            } else if shouldShowFirstValueOnboarding {
+                FirstValueOnboardingView(
+                    model: firstValueOnboardingModel,
+                    forceReducedMotion: configuration.forceReducedMotion,
+                    usesStaticScoutRendering: configuration.usesStaticScoutRendering,
+                    didFinish: handleFirstValueOnboardingCompletion
+                )
+            } else if shouldBypassRetiredLegacyIntro {
+                Color.clear
+                    .accessibilityHidden(true)
+                    .task(id: onboardingModel.state.screen) {
+                        onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
+                    }
             } else if shouldShowOnboarding {
                 OnboardingFlowView(
                     model: onboardingModel,
@@ -553,6 +573,41 @@ struct AppShellView: View {
             // intake there, by deleting the last photo in Photo Review, must leave them
             // in zero-photo Scan rather than restart onboarding behind the camera.
             && router.presentedFullScreen != .guidedCamera
+    }
+
+    private var shouldShowFirstValueOnboarding: Bool {
+        FirstValueOnboardingPresentationPolicy.shouldPresent(
+            isFirstLaunch: configuration.usesFirstValueOnboarding,
+            hasCompletedOnboarding:
+                firstValueOnboardingModel.hasCompletedOnboarding,
+            hasResolvedCaptureRestoration: captureFlow.hasCompletedRestoration,
+            hasRestoredCapture: captureFlow.stagedPhoto != nil
+        )
+            && router.presentedSheet != .capture
+    }
+
+    private var awaitsCaptureRestorationBeforeOnboarding: Bool {
+        FirstValueOnboardingPresentationPolicy.awaitsCaptureRestoration(
+            isFirstLaunch: configuration.usesFirstValueOnboarding,
+            hasCompletedOnboarding:
+                firstValueOnboardingModel.hasCompletedOnboarding,
+            hasResolvedCaptureRestoration: captureFlow.hasCompletedRestoration
+        )
+    }
+
+    /// The hand-off point for the completion contract issue #566 consumes. #685 owns
+    /// emitting and durably recording the outcome; #566 lands the activation-flow wiring
+    /// that reads `FirstValueOnboardingCompletionPersisting.outcome` in its own PR.
+    private func handleFirstValueOnboardingCompletion(
+        _ outcome: FirstValueOnboardingOutcome
+    ) {
+        onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
+    }
+
+    private var shouldBypassRetiredLegacyIntro: Bool {
+        configuration.usesFirstValueOnboarding
+            && firstValueOnboardingModel.hasCompletedOnboarding
+            && !onboardingModel.state.screen.hasCompletedLegacyIntro
     }
 
     private var onboardingCaptureRouteID: OnboardingCaptureRouteID {
@@ -1144,6 +1199,9 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             progressStore: InMemoryOnboardingProgressStore(),
             stagedLibraryPhotos: InMemoryStagedLibraryPhotoStore(),
             guestAllowance: DeferredGuestAllowanceCapability()
+        ),
+        firstValueOnboardingModel: FirstValueOnboardingModel(
+            completionStore: InMemoryFirstValueOnboardingCompletionStore()
         ),
         captureFlow: CaptureFlowModel(
             camera: dependencies.captureCamera,

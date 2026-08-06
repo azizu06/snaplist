@@ -1663,33 +1663,22 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testFreshAccountlessJourneyEntersTheRealCaptureFlow() {
-        let app = XCUIApplication()
-        app.launchArguments = [
-            "--fixture=onboarding",
-            "--zero-network-fixtures",
-            "--reset-onboarding-progress",
-            "--camera-status=authorized"
-        ]
-        app.launchAfterRetiringPriorInstance()
+        let app = launchFirstValueOnboarding(resetProgress: true)
+        advanceFirstValueOnboarding(to: "ONB-06", in: app)
 
-        XCTAssertTrue(
-            app.buttons["button.primary.start-with-one-item"].waitForExistence(timeout: 3)
-        )
-
-        app.buttons["onboarding.sign-in"].tap()
+        app.buttons["first-value-onboarding.sign-in"].tap()
         XCTAssertTrue(app.staticTexts["Welcome back"].waitForExistence(timeout: 2))
         app.buttons["onboarding.sheet.close"].tap()
-        XCTAssertTrue(app.buttons["onboarding.sign-in"].waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            app.buttons["first-value-onboarding.start-scanning"]
+                .waitForExistence(timeout: 2)
+        )
 
-        app.buttons["button.primary.start-with-one-item"].tap()
-        XCTAssertTrue(app.staticTexts["Your first item is on us"].waitForExistence(timeout: 2))
-
-        app.buttons["onboarding.marketplaces"].tap()
-        XCTAssertTrue(app.staticTexts["Where can I list?"].waitForExistence(timeout: 2))
-        app.buttons["button.primary.got-it"].tap()
-
-        app.buttons["button.primary.continue"].tap()
+        app.buttons["first-value-onboarding.start-scanning"].tap()
         XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 2))
+        app.buttons["onboarding.back"].tap()
+        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["Your first item is on us"].exists)
         app.buttons["button.primary.use-camera"].tap()
         XCTAssertTrue(app.staticTexts["Ready to capture"].waitForExistence(timeout: 2))
 
@@ -1707,6 +1696,136 @@ final class SnapListUITests: XCTestCase {
         app.buttons["capture.take-one-item"].tap()
         XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["scan.choose-library"].exists)
+    }
+
+    func testFirstValueOnboardingPresentsOnceInOrder() {
+        let app = launchFirstValueOnboarding(resetProgress: true)
+
+        for screen in firstValueOnboardingStates {
+            XCTAssertTrue(
+                app.descendants(matching: .any)[
+                    "first-value-onboarding.state.\(screen)"
+                ].waitForExistence(timeout: 3),
+                "Missing \(screen)"
+            )
+            if screen != "ONB-06" {
+                app.buttons["first-value-onboarding.continue"].tap()
+            }
+        }
+    }
+
+    func testFirstValueOnboardingSkipMarksComplete() {
+        let app = launchFirstValueOnboarding(resetProgress: true)
+
+        XCTAssertTrue(app.buttons["first-value-onboarding.skip"].waitForExistence(timeout: 3))
+        app.buttons["first-value-onboarding.skip"].tap()
+
+        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists
+        )
+    }
+
+    func testFirstValueOnboardingRelaunchDoesNotRepresent() {
+        let app = launchFirstValueOnboarding(resetProgress: true)
+        XCTAssertTrue(app.buttons["first-value-onboarding.skip"].waitForExistence(timeout: 3))
+        app.buttons["first-value-onboarding.skip"].tap()
+        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3))
+
+        app.terminate()
+        app.launchArguments = [
+            "--fixture=onboarding",
+            "--zero-network-fixtures",
+            "--camera-status=authorized"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists
+        )
+    }
+
+    func testFirstValueOnboardingONB06HasExactlyTwoControls() {
+        let app = launchFirstValueOnboarding(resetProgress: true)
+        advanceFirstValueOnboarding(to: "ONB-06", in: app)
+        let screen = app.descendants(matching: .any)[
+            "first-value-onboarding.state.ONB-06"
+        ]
+
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertEqual(screen.descendants(matching: .button).count, 2, app.debugDescription)
+        XCTAssertTrue(app.buttons["first-value-onboarding.start-scanning"].exists)
+        XCTAssertTrue(app.buttons["first-value-onboarding.sign-in"].exists)
+        XCTAssertFalse(app.buttons["first-value-onboarding.skip"].exists)
+        XCTAssertFalse(app.buttons["first-value-onboarding.back"].exists)
+    }
+
+    /// ONB-05 illustrates the Trophy Wall. No item exists during onboarding, so the
+    /// screen must be labelled an example and must expose no spinner or other affordance
+    /// that would claim work is running.
+    func testFirstValueOnboardingONB05IllustratesWithoutClaimingLiveProgress() {
+        let app = launchFirstValueOnboarding(resetProgress: true)
+        advanceFirstValueOnboarding(to: "ONB-05", in: app)
+        let screen = app.descendants(matching: .any)[
+            "first-value-onboarding.state.ONB-05"
+        ]
+
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.staticTexts["An example — nothing is running yet"].exists,
+            app.debugDescription
+        )
+        XCTAssertEqual(app.activityIndicators.count, 0, app.debugDescription)
+        XCTAssertEqual(app.progressIndicators.count, 0, app.debugDescription)
+    }
+
+    /// A durable capture is restored asynchronously, so a returning seller's staged photo
+    /// is still nil when the shell first renders. Onboarding must wait for that answer
+    /// instead of taking the screen from work the seller already has in flight.
+    func testRestoredCaptureNeverExposesAFirstValueOnboardingControl() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--reset-onboarding-progress"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists,
+            app.debugDescription
+        )
+        XCTAssertFalse(app.buttons["first-value-onboarding.continue"].exists)
+        XCTAssertFalse(app.buttons["first-value-onboarding.skip"].exists)
+    }
+
+    func testFirstValueOnboardingAccessibilityTypeKeepsEveryPrimaryActionReachable() {
+        let app = launchFirstValueOnboarding(
+            resetProgress: true,
+            extraArguments: ["--dynamic-type=accessibility3", "--reduced-motion"]
+        )
+        let window = app.windows.firstMatch
+
+        for screen in firstValueOnboardingStates {
+            XCTAssertTrue(
+                app.descendants(matching: .any)[
+                    "first-value-onboarding.state.\(screen)"
+                ].waitForExistence(timeout: 3)
+            )
+            let identifier = screen == "ONB-06"
+                ? "first-value-onboarding.start-scanning"
+                : "first-value-onboarding.continue"
+            let primary = app.buttons[identifier]
+            XCTAssertTrue(primary.exists)
+            XCTAssertTrue(primary.isHittable)
+            XCTAssertGreaterThanOrEqual(primary.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(primary.frame.minX, window.frame.minX)
+            XCTAssertLessThanOrEqual(primary.frame.maxX, window.frame.maxX)
+            XCTAssertLessThanOrEqual(primary.frame.maxY, window.frame.maxY)
+            if screen != "ONB-06" { primary.tap() }
+        }
     }
 
     func testCameraDeniedAndRestrictedUseLibraryRecovery() {
@@ -2022,6 +2141,39 @@ final class SnapListUITests: XCTestCase {
         }
         app.launchAfterRetiringPriorInstance()
         return app
+    }
+
+    private func launchFirstValueOnboarding(
+        resetProgress: Bool,
+        extraArguments: [String] = []
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=onboarding",
+            "--zero-network-fixtures",
+            "--camera-status=authorized"
+        ] + (resetProgress ? ["--reset-onboarding-progress"] : []) + extraArguments
+        app.launchAfterRetiringPriorInstance()
+        return app
+    }
+
+    private func advanceFirstValueOnboarding(
+        to destination: String,
+        in app: XCUIApplication
+    ) {
+        for screen in firstValueOnboardingStates {
+            XCTAssertTrue(
+                app.descendants(matching: .any)[
+                    "first-value-onboarding.state.\(screen)"
+                ].waitForExistence(timeout: 3)
+            )
+            if screen == destination { return }
+            app.buttons["first-value-onboarding.continue"].tap()
+        }
+    }
+
+    private var firstValueOnboardingStates: [String] {
+        ["ONB-01", "ONB-02", "ONB-03", "ONB-04", "ONB-05", "ONB-06"]
     }
 
     private func launchVoiceNoteFixture(

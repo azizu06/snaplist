@@ -5,6 +5,7 @@ import SwiftUI
 struct SnapListApp: App {
     @State private var router: AppRouter
     @State private var onboardingModel: OnboardingFlowModel
+    @State private var firstValueOnboardingModel: FirstValueOnboardingModel
     @State private var captureFlow: CaptureFlowModel
     @State private(set) var homeStore: HomeStore
     @State private var runStore: RunDetailStore
@@ -84,6 +85,7 @@ struct SnapListApp: App {
         )
         if configuration.resetOnboardingProgress {
             dependencies.onboardingProgressStore.clear()
+            dependencies.firstValueOnboardingCompletionStore.clear()
             dependencies.stagedLibraryPhotos.clear()
         }
         if let count = configuration.stagedLibraryPhotoFixtureCount, count > 0 {
@@ -92,6 +94,21 @@ struct SnapListApp: App {
         } else if configuration.visualState == nil && !configuration.usesZeroNetworkFixtures {
             onboardingModel.restorePersistedProgress()
         }
+        if onboardingModel.state.screen.hasCompletedLegacyIntro,
+           dependencies.firstValueOnboardingCompletionStore.outcome == nil {
+            // Restored progress already past the retired intro: the six screens were
+            // never shown, and the recorded outcome must not claim otherwise.
+            dependencies.firstValueOnboardingCompletionStore
+                .record(.supersededByExistingProgress)
+        }
+        let firstValueOnboardingModel = FirstValueOnboardingModel(
+            screen: configuration.initialFirstValueOnboardingScreen,
+            completionStore: dependencies.firstValueOnboardingCompletionStore
+        )
+        if firstValueOnboardingModel.hasCompletedOnboarding {
+            onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
+        }
+        _firstValueOnboardingModel = State(initialValue: firstValueOnboardingModel)
         _onboardingModel = State(initialValue: onboardingModel)
         _captureFlow = State(
             initialValue: CaptureFlowModel(
@@ -153,6 +170,7 @@ struct SnapListApp: App {
             AppShellView(
                 router: router,
                 onboardingModel: onboardingModel,
+                firstValueOnboardingModel: firstValueOnboardingModel,
                 captureFlow: captureFlow,
                 homeStore: homeStore,
                 runStore: runStore,
@@ -168,9 +186,15 @@ struct SnapListApp: App {
                             configuration: configuration
                         )
 #endif
-                    async let restoration = captureFlow.restore()
+                    async let captureRestoration = captureFlow.restore()
                     async let homeLoad: Void = homeStore.load()
-                    router.handleCaptureRestoration(await restoration)
+                    let restoration = await captureRestoration
+                    if restoration == .stagedPhoto {
+                        firstValueOnboardingModel.reconcileExistingProgress()
+                        onboardingModel
+                            .beginPhotoPermissionAfterFirstValueOnboarding()
+                    }
+                    router.handleCaptureRestoration(restoration)
                     await homeLoad
                 }
         }
