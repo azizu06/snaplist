@@ -574,6 +574,7 @@ struct AppShellView: View {
             hasCompletedOnboarding:
                 firstValueOnboardingModel.hasCompletedOnboarding
         )
+            && captureFlow.stagedPhoto == nil
     }
 
     private var shouldBypassRetiredLegacyIntro: Bool {

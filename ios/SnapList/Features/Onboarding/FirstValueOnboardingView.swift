@@ -1,5 +1,7 @@
 import SwiftUI
+#if !DEBUG
 import WebKit
+#endif
 
 @MainActor
 struct FirstValueOnboardingView: View {
@@ -506,7 +508,10 @@ private struct FirstValueScoutView: View {
         Group {
             switch screen.scoutMedia(reduceMotion: reduceMotion) {
             case .acceptedWebM(let resource):
-                AcceptedScoutWebMView(resource: resource)
+                AcceptedScoutWebMView(
+                    resource: resource,
+                    fallbackAsset: screen.scout.fallback
+                )
             case .staticFallbackPNG(let asset):
                 Image(asset).resizable().scaledToFit()
             }
@@ -517,8 +522,131 @@ private struct FirstValueScoutView: View {
     }
 }
 
+#if DEBUG
 private struct AcceptedScoutWebMView: UIViewRepresentable {
     let resource: String
+    let fallbackAsset: String
+
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .clear
+
+        guard let webView = WebKitRuntime.makeConfiguredWebView() else {
+            installFallback(in: container)
+            return container
+        }
+        webView.frame = container.bounds
+        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.isUserInteractionEnabled = false
+        if let scrollView = (webView as NSObject).value(forKey: "scrollView")
+            as? UIScrollView {
+            scrollView.backgroundColor = .clear
+            scrollView.isScrollEnabled = false
+        }
+        container.addSubview(webView)
+        context.coordinator.webView = webView
+        return container
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        guard context.coordinator.loadedResource != resource,
+              let webView = context.coordinator.webView,
+              let url = Bundle.main.url(
+                forResource: resource,
+                withExtension: "webm",
+                subdirectory: "FirstValueOnboarding"
+              ) else { return }
+        context.coordinator.loadedResource = resource
+        let html = """
+        <meta name='viewport' content='width=device-width,initial-scale=1'>
+        <style>*{margin:0}html,body,video{width:100%;height:100%;background:transparent}video{object-fit:contain}</style>
+        <video autoplay muted loop playsinline src='\(url.lastPathComponent)'></video>
+        """
+        _ = (webView as NSObject).perform(
+            NSSelectorFromString("loadHTMLString:baseURL:"),
+            with: html,
+            with: url.deletingLastPathComponent()
+        )
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    private func installFallback(in container: UIView) {
+        let fallback = UIImageView(image: UIImage(named: fallbackAsset))
+        fallback.contentMode = .scaleAspectFit
+        fallback.frame = container.bounds
+        fallback.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        fallback.isAccessibilityElement = false
+        container.addSubview(fallback)
+    }
+
+    final class Coordinator {
+        weak var webView: UIView?
+        var loadedResource: String?
+    }
+}
+
+private enum WebKitRuntime {
+    // A direct WebKit link loads both WebCore and WebKit accessibility bundles
+    // into every iOS 26.5 UI-test process, even when onboarding is not shown.
+    // Load the public framework only when an accepted WebM is actually rendered.
+    private static let frameworkPath =
+        "/System/Library/Frameworks/WebKit.framework"
+
+    static func makeConfiguredWebView() -> UIView? {
+        guard load(),
+              let configurationType =
+                NSClassFromString("WKWebViewConfiguration") as? NSObject.Type,
+              let webViewType = NSClassFromString("WKWebView") as? NSObject.Type else {
+            return nil
+        }
+        let configuration = configurationType.init()
+        configuration.setValue(
+            0,
+            forKey: "mediaTypesRequiringUserActionForPlayback"
+        )
+        guard let allocated = class_createInstance(webViewType, 0) as AnyObject? else {
+            return nil
+        }
+        let selector = NSSelectorFromString("initWithFrame:configuration:")
+        guard let implementation = class_getMethodImplementation(
+            webViewType,
+            selector
+        ) else {
+            return nil
+        }
+        typealias InitializeWebView = @convention(c) (
+            AnyObject,
+            Selector,
+            CGRect,
+            AnyObject
+        ) -> Unmanaged<AnyObject>
+        let initialize = unsafeBitCast(
+            implementation,
+            to: InitializeWebView.self
+        )
+        return initialize(
+            allocated,
+            selector,
+            .zero,
+            configuration
+        ).takeRetainedValue() as? UIView
+    }
+
+    private static func load() -> Bool {
+        if NSClassFromString("WKWebView") != nil {
+            return true
+        }
+        return Bundle(path: frameworkPath)?.load() == true
+            && NSClassFromString("WKWebView") != nil
+    }
+}
+#else
+private struct AcceptedScoutWebMView: UIViewRepresentable {
+    let resource: String
+    let fallbackAsset: String
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -552,6 +680,7 @@ private struct AcceptedScoutWebMView: UIViewRepresentable {
 
     final class Coordinator { var loadedResource: String? }
 }
+#endif
 
 private struct SoldBandFixtureChart: View {
     private let samples: [CGFloat] = [85.1, 74.2, 79.6, 66.1, 71.5, 55.3, 63.4, 47.2, 58, 41.8, 49.9, 44.5]
