@@ -589,9 +589,16 @@ final class TrophyWallStore {
     ///
     /// Overlapping refreshes are dropped rather than queued, so a slow failure
     /// can never land after, and downgrade, a newer success.
-    func refreshCollection(using repository: any TrophyWallRunHistoryRepository) async {
+    ///
+    /// Returns whether this call actually reached the boundary. A dropped
+    /// overlap issued no request, so `recoverCollection` must not spend one of
+    /// its bounded attempts on it.
+    @discardableResult
+    func refreshCollection(
+        using repository: any TrophyWallRunHistoryRepository
+    ) async -> Bool {
         guard !isRefreshingCollection else {
-            return
+            return false
         }
         isRefreshingCollection = true
         collectionRequestGeneration += 1
@@ -618,8 +625,10 @@ final class TrophyWallStore {
                 }
             } while cursor != nil
 
+            // A superseded generation still spent a real request at the
+            // boundary; it only lost the right to publish its answer.
             guard collectionRequestGeneration == requestGeneration else {
-                return
+                return true
             }
             for page in pages {
                 ingest(historyPage: page, principalScope: principalScope)
@@ -628,15 +637,22 @@ final class TrophyWallStore {
             collectionRefreshRecovery = .idle
         } catch {
             guard collectionRequestGeneration == requestGeneration else {
-                return
+                return true
             }
             collectionOutcome = Self.outcome(forFailure: error)
             // A refusal only ever opens recovery here. Exhaustion is claimed by
             // `recoverCollection`, which is the only thing that knows how many
             // attempts have actually been spent.
-            collectionRefreshRecovery =
-                collectionOutcome == .unavailable ? .recovering : .idle
+            if collectionOutcome != .unavailable {
+                collectionRefreshRecovery = .idle
+            } else if collectionRefreshRecovery != .exhausted {
+                // Re-entering the wall during a persistent outage must not
+                // reopen recovery: that would pull the notice the seller has
+                // already been shown for the length of another backoff.
+                collectionRefreshRecovery = .recovering
+            }
         }
+        return true
     }
 
     /// Refreshes the collection and, when the boundary refuses the answer,
@@ -652,7 +668,13 @@ final class TrophyWallStore {
             try? await Task.sleep(for: $0)
         }
     ) async {
-        await refreshCollection(using: repository)
+        // An attempt only counts once it has actually reached the boundary. A
+        // dropped overlap issued no request, so it may neither spend one of the
+        // bounded attempts nor let this run claim the attempts were exhausted:
+        // the refresh that owns the flag is still working on the same answer.
+        guard await refreshCollection(using: repository) else {
+            return
+        }
 
         var attempt = 1
         while collectionOutcome == .unavailable,
@@ -664,7 +686,16 @@ final class TrophyWallStore {
             guard !Task.isCancelled else {
                 return
             }
-            await refreshCollection(using: repository)
+            guard await refreshCollection(using: repository) else {
+                return
+            }
+        }
+
+        // Cancellation during the final attempt leaves recovery open for the
+        // same reason it does mid-loop: a seller who navigated away has not
+        // been told anything, so nothing may be claimed on their behalf.
+        guard !Task.isCancelled else {
+            return
         }
 
         if collectionOutcome == .unavailable {

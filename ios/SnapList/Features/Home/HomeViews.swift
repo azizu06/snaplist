@@ -884,10 +884,13 @@ struct TrophyWallView: View {
     /// claim about saved items and stays truthful only while there are saved
     /// items; without them, both reachability failures collapse to the same
     /// recovery group the pushed Processing screen already ships.
+    /// `refreshRecovery` carries no default on purpose. A default let the wall
+    /// itself omit the argument and silently present `.idle`, which made the
+    /// notice unreachable in production while every seam test still passed.
     static func presentation(
         hasSettledTiles: Bool,
         collectionOutcome: TrophyWallCollectionOutcome,
-        refreshRecovery: TrophyWallCollectionRefreshRecovery = .idle
+        refreshRecovery: TrophyWallCollectionRefreshRecovery
     ) -> Presentation {
         guard !hasSettledTiles else {
             return Presentation(
@@ -939,7 +942,8 @@ struct TrophyWallView: View {
     private var wallBody: some View {
         let presentation = Self.presentation(
             hasSettledTiles: !store.settledTiles.isEmpty,
-            collectionOutcome: store.collectionOutcome
+            collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery
         )
 
         if let offlineNotice = presentation.offlineNotice {
@@ -1316,10 +1320,13 @@ struct TrophyWallProcessingView: View {
         return Array(rows.prefix(limit))
     }
 
+    /// `refreshRecovery` carries no default for the same reason it carries none
+    /// on `TrophyWallView.presentation`: an omitted argument must not be able to
+    /// masquerade as a deliberate `.idle`.
     static func presentation(
         from rows: [TrophyWallProcessingRow],
         collectionOutcome: TrophyWallCollectionOutcome = .unknown,
-        refreshRecovery: TrophyWallCollectionRefreshRecovery = .idle,
+        refreshRecovery: TrophyWallCollectionRefreshRecovery,
         availableHeight: CGFloat,
         isExpanded: Bool
     ) -> Presentation {
@@ -1460,7 +1467,19 @@ private struct TrophyWallNoticeStripView: View {
         .accessibilityIdentifier(identifier)
         .onAppear {
             guard announcesOnAppear else { return }
-            UIAccessibility.post(notification: .announcement, argument: text)
+            // Low priority so the notice waits its turn instead of cutting off
+            // whatever VoiceOver is already saying. The seller is looking at
+            // saved rows either way; nothing here is worth an interruption.
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: NSAttributedString(
+                    string: text,
+                    attributes: [
+                        .accessibilitySpeechAnnouncementPriority:
+                            UIAccessibilityPriority.low
+                    ]
+                )
+            )
         }
     }
 }
