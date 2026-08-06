@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { itemLabel } from "@/lib/ui/item-label";
+import { signPhotoUrlMap } from "@/lib/vision/photos";
 import {
   mobileRunCollectionSchema,
   mobileRunSchema,
@@ -53,6 +54,10 @@ export interface MobileRunDataClient {
     snapshotRevision?: string;
     before?: { lastMeaningfulUpdateAt: string; runId: string };
   }): PromiseLike<MobileRunDataResult<unknown[]>>;
+  readDeliveryProjections(
+    itemIds: string[],
+  ): PromiseLike<MobileRunDataResult<unknown[]>>;
+  signCoverPhotoUrls(paths: string[]): PromiseLike<Map<string, string>>;
   readRun(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readItem(itemId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readRetryProjection(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
@@ -214,6 +219,61 @@ const runHistoryRowSchema = z
   })
   .strict();
 
+const deliveryProjectionRowSchema = z
+  .object({
+    id: z.string().uuid(),
+    user_id: z.string().min(1),
+    item_id: z.string().uuid(),
+    platform: z.string().min(1),
+    source_review_revision: z.string().uuid().nullable(),
+    ebay_listing_id: z.string().min(1).nullable(),
+    ebay_status: z.string().nullable(),
+  })
+  .strict();
+
+type DeliveryProjection = NonNullable<MobileRun["delivery"]>;
+
+function deliveryProjection(
+  run: z.infer<typeof runRowSchema>,
+  item: z.infer<typeof itemRowSchema>,
+  rows: z.infer<typeof deliveryProjectionRowSchema>[],
+  userId: string,
+  coverPhotoUrl?: string,
+): DeliveryProjection | undefined {
+  const itemRows = rows.filter((row) => row.item_id === item.id);
+  if (itemRows.some((row) => row.user_id !== userId)) {
+    throw new MobileRunUnavailableError(
+      "Run delivery crossed the verified tenant boundary",
+    );
+  }
+  if (
+    run.listing_id
+    && itemRows.some((row) =>
+      row.id === run.listing_id
+      && row.platform === "ebay"
+      && row.ebay_status === "published"
+      && row.ebay_listing_id !== null
+    )
+  ) {
+    return {
+      state: "published_to_ebay",
+      ...(coverPhotoUrl ? { coverPhotoUrl } : {}),
+    };
+  }
+  if (
+    itemRows.some((row) =>
+      ["facebook", "mercari"].includes(row.platform)
+      && row.source_review_revision !== null
+    )
+  ) {
+    return {
+      state: "export_prepared",
+      ...(coverPhotoUrl ? { coverPhotoUrl } : {}),
+    };
+  }
+  return undefined;
+}
+
 const mutationRejectionSchema = z
   .object({
     mobileRunOperationError: z
@@ -240,6 +300,7 @@ function projectCanonicalRun(
   item: z.infer<typeof itemRowSchema>,
   retryProjection: z.infer<typeof retryProjectionRowSchema>,
   userId: string,
+  delivery?: DeliveryProjection,
 ): MobileRun {
   if (run.user_id !== userId) {
     throw new MobileRunUnavailableError("Run detail crossed the verified tenant boundary");
@@ -299,6 +360,7 @@ function projectCanonicalRun(
       canOpenReview: false,
       canStartNewCapture: expired && terminalOutcome !== null,
     },
+    ...(delivery ? { delivery } : {}),
     lastMeaningfulUpdateAt: run.updated_at,
     retentionCleanedAt: run.retention_cleaned_at,
   });
@@ -386,12 +448,43 @@ export function createMobileRunOperations(
       ) {
         throw new MobileRunUnavailableError("Run history snapshot changed");
       }
+      const itemIds = [...new Set(
+        pageRows.map((row) => row.item_projection.id),
+      )];
+      const coverPhotoPaths = [...new Set(
+        pageRows.flatMap((row) => row.item_projection.photos.slice(0, 1)),
+      )];
+      const [rawDeliveryRows, coverPhotoUrls] = pageRows.length === 0
+        ? [[], new Map<string, string>()] as const
+        : await Promise.all([
+            client.readDeliveryProjections(itemIds).then((result) =>
+              requireData("run delivery history", result)
+            ),
+            client.signCoverPhotoUrls(coverPhotoPaths),
+          ]);
+      if (!rawDeliveryRows) {
+        throw new MobileRunUnavailableError(
+          "Run delivery history was unavailable",
+        );
+      }
+      const deliveryRows = z.array(deliveryProjectionRowSchema).parse(
+        rawDeliveryRows,
+      );
       const runs = pageRows.map((row) =>
         projectCanonicalRun(
           row.run_projection,
           row.item_projection,
           row.retry_projection,
           input.userId,
+          deliveryProjection(
+            row.run_projection,
+            row.item_projection,
+            deliveryRows,
+            input.userId,
+            row.item_projection.photos[0]
+              ? coverPhotoUrls.get(row.item_projection.photos[0])
+              : undefined,
+          ),
         )
       );
       const boundary = rows.length > input.limit ? pageRows.at(-1) : undefined;
@@ -480,6 +573,17 @@ export function createSupabaseMobileRunDataClient(
         p_before_updated_at: input.before?.lastMeaningfulUpdateAt ?? null,
         p_before_run_id: input.before?.runId ?? null,
       });
+    },
+    readDeliveryProjections(itemIds) {
+      return client
+        .from("listings")
+        .select(
+          "id,user_id,item_id,platform,source_review_revision,ebay_listing_id,ebay_status",
+        )
+        .in("item_id", itemIds);
+    },
+    signCoverPhotoUrls(paths) {
+      return signPhotoUrlMap(client, paths);
     },
     readRun(runId) {
       return client

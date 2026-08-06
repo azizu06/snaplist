@@ -211,6 +211,13 @@ export const mobileRunSchema = z
       })
       .strict(),
     review: listingReviewProjectionSchema.optional(),
+    delivery: z
+      .object({
+        state: z.enum(["published_to_ebay", "export_prepared"]),
+        coverPhotoUrl: z.string().url().optional(),
+      })
+      .strict()
+      .optional(),
     lastMeaningfulUpdateAt: z.string().datetime({ offset: true }),
     retentionCleanedAt: nullableTimestampSchema,
   })
