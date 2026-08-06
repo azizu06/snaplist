@@ -8,6 +8,11 @@ import {
   type ExportHandoffPackProjection,
 } from "@/lib/export/handoff";
 import type { ListingReviewReader } from "@/lib/listing-review";
+import {
+  ItemDeletionBlockedError,
+  ItemDeletionNotFoundError,
+  type ItemDeletionReceipt,
+} from "@/lib/item-deletion/service";
 import type { ActivationGuidanceCompletionStore } from "@/lib/activation-guidance/store";
 import {
   ListingReviewIdempotencyConflictError,
@@ -71,6 +76,7 @@ import {
   pricingEvidenceEnvelopeSchema,
   exportHandoffActionSchema,
   exportHandoffsEnvelopeSchema,
+  itemDeletionEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
   ebayConnectionStatusEnvelopeSchema,
   ebayOauthSessionEnvelopeSchema,
@@ -124,6 +130,22 @@ export interface AssistedExportGatewayMutation {
   platform: AssistedExportPlatform;
   reviewContentRevision: string;
   reviewRevision: string;
+}
+
+/**
+ * The seller-reachable half of non-guest item deletion (issue #181).
+ *
+ * Deliberately one method with no read beside it. Deletion is the one native
+ * operation whose success is the absence of everything the client could have
+ * re-read, so the executor's own receipt — what went, and what SnapList does
+ * not own — is the whole answer.
+ */
+export interface ItemDeletionGateway {
+  delete(input: {
+    userId: string;
+    bearerToken: string;
+    itemId: string;
+  }): Promise<ItemDeletionReceipt>;
 }
 
 export interface MobileApiDependencies {
@@ -183,6 +205,8 @@ export interface MobileApiDependencies {
   guidedCorrection?: GuidedCorrector;
   /** Transport over the #580 assisted-export seam; it adds no authority. */
   assistedExport?: AssistedExportHandoffGateway;
+  /** Transport over the #181 deletion executor; it adds no authority. */
+  itemDeletion?: ItemDeletionGateway;
   workerSecret?: string;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
@@ -1424,6 +1448,104 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "Pricing evidence is temporarily unavailable.",
+        );
+      }
+    }
+
+    const itemPath = pathname.match(
+      new RegExp(`^/${MOBILE_API_VERSION}/items/([^/]+)$`),
+    );
+    if (itemPath) {
+      if (request.method !== "DELETE") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      const itemId = z.string().uuid().safeParse(itemPath[1]);
+      if (!itemId.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid item id is required.",
+        );
+      }
+
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      const itemDeletion = dependencies.itemDeletion;
+      if (!itemDeletion) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Deleting items is temporarily unavailable.",
+        );
+      }
+
+      try {
+        const receipt = await itemDeletion.delete({
+          userId: principal.userId,
+          bearerToken: token,
+          itemId: itemId.data,
+        });
+        return json(
+          itemDeletionEnvelopeSchema.parse({
+            data: {
+              itemId: receipt.itemId,
+              retainedRecords: receipt.retainedRecords,
+            },
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        // A refusal is ordinary product behavior, not a fault: reporting it
+        // would bury the operations that actually broke.
+        if (error instanceof ItemDeletionBlockedError) {
+          return errorResponse(
+            requestId,
+            409,
+            "conflict",
+            "This item is busy right now. Try again once it finishes.",
+            { blockedBy: error.blockedBy },
+          );
+        }
+        if (error instanceof ItemDeletionNotFoundError) {
+          return errorResponse(
+            requestId,
+            404,
+            "not_found",
+            "Item was not found.",
+          );
+        }
+        dependencies.reportError?.("mobile-api.item-deletion", error);
+        return errorResponse(
+          requestId,
+          500,
+          "internal_error",
+          "Deleting this item did not finish. Nothing was removed.",
         );
       }
     }

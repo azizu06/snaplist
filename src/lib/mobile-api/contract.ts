@@ -328,6 +328,26 @@ export const exportHandoffActionSchema = z
   })
   .strict();
 
+/**
+ * What the seller is told after deleting an item (#181).
+ *
+ * `retainedRecords` is not a footnote. SnapList deletes what SnapList owns; a
+ * live eBay listing stays live because ending it is the seller's action on
+ * eBay. Naming those records is the difference between an honest receipt and a
+ * claim that SnapList erased something it cannot reach.
+ */
+export const itemDeletionEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        itemId: z.string().uuid(),
+        retainedRecords: z.array(z.string().min(1)),
+      })
+      .strict(),
+    meta: apiMetaSchema,
+  })
+  .strict();
+
 export const revenueCatConfigurationEnvelopeSchema = z
   .object({
     data: z

@@ -85,6 +85,14 @@ afterAll(async () => {
     if (uploadedPaths.size > 0) {
       await admin.storage.from("photos").remove([...uploadedPaths]);
     }
+    // Deleting an item publishes durable Storage cleanup work that deliberately
+    // outlives the item row, so this suite has to retire its own queue entries.
+    // Left behind they inflate the queue-depth contracts other suites assert on.
+    await database.query(
+      `delete from private.pipeline_storage_cleanup_jobs
+       where source_type = 'item_deletion' and photo_paths && $1::text[]`,
+      [[...uploadedPaths]],
+    ).catch(() => undefined);
     await cleanupClerkTestUsers(admin, [owner.id, foreign.id]);
     await database.end();
   }
@@ -294,8 +302,9 @@ describe("GET /m/[token] (real private Storage and token lookup)", () => {
     });
     const token = new URL(url!).pathname.split("/").at(-1)!;
 
-    const deletion = await owner.client.from("items").delete().eq("id", owned.itemId);
+    const deletion = await owner.client.rpc("delete_item", { p_item_id: owned.itemId });
     expect(deletion.error).toBeNull();
+    expect((deletion.data as { status: string }).status).toBe("deleted");
 
     const rows = await database.query<{ count: string }>(
       `select count(*)::text as count
