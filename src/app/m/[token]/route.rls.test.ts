@@ -40,6 +40,21 @@ const originalEnvironment = {
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
 };
 
+async function waitsOnAdvisoryLock(
+  observer: Client,
+  backendPID: number,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const activity = await observer.query<{ wait_event: string | null }>(
+      "select wait_event from pg_stat_activity where pid = $1",
+      [backendPID],
+    );
+    if (activity.rows[0]?.wait_event === "advisory") return true;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return false;
+}
+
 beforeEach((context) => {
   skipIfStackUnreachable(context, reachable);
 });
@@ -337,6 +352,71 @@ describe("GET /m/[token] (real private Storage and token lookup)", () => {
         "delete from private.account_erasure_generations where user_id = $1",
         [owner.id],
       );
+    }
+  });
+
+  it("forces token issuance to retry when account erasure wins the tenant lock", async () => {
+    const owned = await storedPhoto(
+      owner,
+      "erasure-race",
+      Uint8Array.from([137, 80, 78, 71, 1, 3, 5]),
+    );
+    const writer = new Client({ connectionString: resolveLocalTestDatabaseUrl() });
+    const eraser = new Client({ connectionString: resolveLocalTestDatabaseUrl() });
+    const idempotencyKey = crypto.randomUUID();
+    await Promise.all([writer.connect(), eraser.connect()]);
+
+    try {
+      const writerBackend = await writer.query<{ pid: number }>(
+        "select pg_backend_pid() as pid",
+      );
+      await writer.query("set role authenticated");
+      await writer.query(
+        "select set_config('request.jwt.claims', $1, false)",
+        [JSON.stringify({ role: "authenticated", sub: owner.id })],
+      );
+      await eraser.query("set role service_role");
+      await eraser.query(
+        "select set_config('request.jwt.claims', $1, false)",
+        [JSON.stringify({ role: "service_role" })],
+      );
+      await eraser.query("begin");
+      await eraser.query(
+        "select public.begin_account_erasure($1, $2::uuid)",
+        [owner.id, idempotencyKey],
+      );
+
+      const lateIssuance = writer
+        .query(
+          "select * from public.issue_ebay_photo_access_tokens($1::uuid, 604800)",
+          [owned.itemId],
+        )
+        .then(() => undefined, (error: unknown) => error);
+      await expect(
+        waitsOnAdvisoryLock(database, writerBackend.rows[0]!.pid),
+      ).resolves.toBe(true);
+
+      await eraser.query("commit");
+      const lateError = await lateIssuance as { code?: string } | undefined;
+      expect(lateError?.code).toBe("40001");
+      expect(String(lateError)).toMatch(
+        /retry after account erasure serialization/i,
+      );
+      const residue = await database.query<{ count: string }>(
+        `select count(*)::text as count
+         from public.ebay_photo_access_tokens
+         where user_id = $1`,
+        [owner.id],
+      );
+      expect(residue.rows[0]?.count).toBe("0");
+    } finally {
+      await writer.query("rollback").catch(() => undefined);
+      await eraser.query("rollback").catch(() => undefined);
+      await database.query(
+        "delete from private.account_erasure_generations where user_id = $1",
+        [owner.id],
+      );
+      await Promise.all([writer.end(), eraser.end()]);
     }
   });
 });

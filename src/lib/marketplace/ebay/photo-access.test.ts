@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   issueEbayPhotoUrls,
   resolveEbayPhotoBaseUrl,
+  serveEbayPhoto,
 } from "./photo-access";
 
 describe("issueEbayPhotoUrls", () => {
@@ -56,5 +57,27 @@ describe("issueEbayPhotoUrls", () => {
     expect(() => resolveEbayPhotoBaseUrl({ NODE_ENV: "production" })).toThrow(
       /no public SnapList origin/i,
     );
+  });
+});
+
+describe("serveEbayPhoto", () => {
+  it("surfaces a verified object's Storage failure instead of misreporting it as missing", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{
+        storage_bucket: "photos",
+        storage_path: "user-1/items/photo.png",
+        media_type: "image/png",
+      }],
+      error: null,
+    });
+    const download = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "Storage is temporarily unavailable" },
+    });
+
+    await expect(serveEbayPhoto(
+      { rpc, storage: { from: () => ({ download }) } },
+      "A".repeat(43),
+    )).rejects.toThrow(/temporarily unavailable/i);
   });
 });

@@ -136,7 +136,12 @@ export async function serveEbayPhoto(
   }
 
   const photo = await client.storage.from("photos").download(row.storage_path);
-  if (photo.error || !photo.data) return notFound();
+  if (photo.error) {
+    throw new Error(`Failed to download eBay photo: ${photo.error.message}`);
+  }
+  if (!photo.data) {
+    throw new Error("Failed to download eBay photo: Storage returned no data.");
+  }
   return new Response(await photo.data.arrayBuffer(), {
     status: 200,
     headers: {

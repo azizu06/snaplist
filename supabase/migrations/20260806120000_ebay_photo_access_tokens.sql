@@ -62,7 +62,23 @@ begin
     where candidate.user_id is not null
     order by candidate.user_id
   loop
-    perform private.lock_account_erasure(v_user_id);
+    if coalesce(char_length(v_user_id), 0) not between 1 and 255
+      or v_user_id !~ '^[A-Za-z0-9_-]+$' then
+      raise exception using
+        errcode = '22023',
+        message = 'Invalid account erasure tenant';
+    end if;
+    if not pg_try_advisory_xact_lock(
+      hashtextextended('account-erasure:' || v_user_id, 0)
+    ) then
+      -- This statement can hold a snapshot from before the erasure generation
+      -- committed. Wait for the eraser, then require a fresh transaction so the
+      -- standard fence cannot decide from stale visibility.
+      perform private.lock_account_erasure(v_user_id);
+      raise exception using
+        errcode = '40001',
+        message = 'eBay photo access token must retry after account erasure serialization';
+    end if;
   end loop;
   if tg_op = 'DELETE' then return old; end if;
   return new;
