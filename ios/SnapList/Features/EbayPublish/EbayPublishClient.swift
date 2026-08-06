@@ -157,6 +157,7 @@ protocol EbayPublishFeatureServing: EbayPublishServing {
 enum EbayPublishClientError: Error, Equatable {
     case invalidResponse
     case httpStatus(Int, message: String?, reason: String?)
+    case sellerFixableRefusal(message: String)
 }
 
 struct UnavailableEbayPublishFeatureService: EbayPublishFeatureServing {
@@ -284,6 +285,15 @@ struct EbayPublishAPIClient: EbayPublishFeatureServing {
                 response: EbayPublishStatus.self
             )
             return Self.outcome(from: status)
+        } catch let EbayPublishClientError.httpStatus(status, message, _)
+            where status == 422 {
+            // Any 422 means eBay refused the mutation; a body that fails to
+            // decode (malformed JSON, a proxy/WAF/gateway error page, or a
+            // differently-keyed payload) still routes to the terminal
+            // seller-fixable screen instead of the ambiguous-outcome path.
+            throw EbayPublishClientError.sellerFixableRefusal(
+                message: message ?? Self.fallbackSellerFixableRefusalMessage
+            )
         } catch let EbayPublishClientError.httpStatus(status, _, reason)
             where status == 409 {
             if reason == "ebay_published_authority_changed" {
@@ -369,6 +379,12 @@ struct EbayPublishAPIClient: EbayPublishFeatureServing {
             return .outcomeNotYetKnown
         }
     }
+
+    /// Shown when eBay returns a 422 whose body doesn't decode into the
+    /// expected error envelope, so the seller still gets a truthful,
+    /// terminal explanation instead of a fabricated specific.
+    static let fallbackSellerFixableRefusalMessage =
+        "eBay did not accept this listing. Review the details, then try publishing again."
 
     private struct Envelope<Payload: Decodable>: Decodable {
         let data: Payload

@@ -835,7 +835,7 @@ private struct EbayConnectionCopy {
     }
 }
 
-private struct EbayResultCopy {
+struct EbayResultCopy {
     let headline: String
     let chip: String
     let body: String
@@ -863,6 +863,12 @@ private struct EbayResultCopy {
                 "eBay is not responding.", "Not posted",
                 "Your listing was not posted. It is saved and ready to send when eBay is back.",
                 "Try again", "Go to Trophy Wall", "unavailable", .neutral
+            )
+        case .sellerFixableRefusal(let message):
+            (headline, chip, body, primary, secondary, identifier, chipVariant) = (
+                "This listing was not posted.", "Not posted",
+                message,
+                "Go to Trophy Wall", nil, "seller-fixable-refusal", .neutral
             )
         case .outcomeNotYetKnown:
             (headline, chip, body, primary, secondary, identifier, chipVariant) = (

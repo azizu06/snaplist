@@ -27,6 +27,7 @@ enum EbayResultViewState: Equatable, Sendable {
     case publishing
     case published
     case unavailable
+    case sellerFixableRefusal(message: String)
     case outcomeNotYetKnown
     case ebaySideChanged
 }
@@ -373,6 +374,8 @@ final class EbayPublishFlowStore {
             await resolveAmbiguousPublish()
         case .failed:
             screen = .result(.unavailable)
+        case .sellerFixableRefusal(let message):
+            screen = .result(.sellerFixableRefusal(message: message))
         case .providerAuthorityChanged:
             screen = .result(.ebaySideChanged)
         case .ready, .publishing:
