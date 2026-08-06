@@ -228,6 +228,11 @@ const deliveryProjectionRowSchema = z
     source_review_revision: z.string().uuid().nullable(),
     ebay_listing_id: z.string().min(1).nullable(),
     ebay_status: z.string().nullable(),
+    item: z
+      .object({
+        review_content_revision: z.string().uuid(),
+      })
+      .strict(),
   })
   .strict();
 
@@ -264,6 +269,7 @@ function deliveryProjection(
     itemRows.some((row) =>
       ["facebook", "mercari"].includes(row.platform)
       && row.source_review_revision !== null
+      && row.source_review_revision === row.item.review_content_revision
     )
   ) {
     return {
@@ -578,7 +584,7 @@ export function createSupabaseMobileRunDataClient(
       return client
         .from("listings")
         .select(
-          "id,user_id,item_id,platform,source_review_revision,ebay_listing_id,ebay_status",
+          "id,user_id,item_id,platform,source_review_revision,ebay_listing_id,ebay_status,item:items!listings_item_user_fkey(review_content_revision)",
         )
         .in("item_id", itemIds);
     },

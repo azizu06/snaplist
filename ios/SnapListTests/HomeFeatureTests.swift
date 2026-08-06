@@ -1181,6 +1181,25 @@ final class TrophyWallDomainTests: XCTestCase {
         )
     }
 
+    func testSettledTileAccessibilityNamesTruthDateAndStaticResult() {
+        let historyOrderAt = Date(timeIntervalSince1970: 1_753_015_200)
+        let tile = TrophyWallSettledTile(
+            id: .run(UUID()),
+            itemName: "Vintage denim jacket",
+            stateLabel: "Export prepared",
+            historyOrderAt: historyOrderAt
+        )
+        let relevantDate = historyOrderAt.formatted(
+            .dateTime.month(.wide).day()
+        )
+
+        XCTAssertEqual(
+            tile.accessibilityLabel,
+            "Vintage denim jacket, photo unavailable, Export prepared, "
+                + "\(relevantDate). Completed item in your collection."
+        )
+    }
+
     func testStoreWithdrawsInvalidatedExportTruthWithoutReorderingTheRun() throws {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore()

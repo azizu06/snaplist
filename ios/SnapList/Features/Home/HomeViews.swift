@@ -923,7 +923,7 @@ private struct TrophyWallSettledTileView: View {
                 .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(tile.itemName), \(tile.stateLabel).")
+        .accessibilityLabel(tile.accessibilityLabel)
         .accessibilityAddTraits(.isImage)
     }
 

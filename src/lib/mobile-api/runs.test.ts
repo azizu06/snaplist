@@ -344,6 +344,10 @@ describe("mobile durable-run operations", () => {
           source_review_revision: null,
           ebay_listing_id: "123456789012",
           ebay_status: "published",
+          item: {
+            review_content_revision:
+              "24100000-0000-4000-8000-000000000008",
+          },
         },
       ],
       error: null,
@@ -404,6 +408,10 @@ describe("mobile durable-run operations", () => {
                 "24100000-0000-4000-8000-000000000008",
               ebay_listing_id: null,
               ebay_status: null,
+              item: {
+                review_content_revision:
+                  "24100000-0000-4000-8000-000000000008",
+              },
             },
           ],
           error: null,
@@ -421,6 +429,53 @@ describe("mobile durable-run operations", () => {
       state: "export_prepared",
     });
     expect(JSON.stringify(page)).not.toContain("shared");
+  });
+
+  it("does not project a stale assisted pack after the item content revision advances", async () => {
+    const historyRow = runHistoryProjectionRow({
+      runId: RUN_ID,
+      itemId: ITEM_ID,
+      logicalKey: LOGICAL_KEY,
+      frozenUpdatedAt: "2026-07-19T18:01:00.000Z",
+      snapshotRevision: "7",
+      status: "succeeded",
+      stage: "completed",
+    });
+    const operations = mobileRunOperations(async () =>
+      dataClient({
+        listRunHistoryPage: vi.fn().mockResolvedValue({
+          data: [historyRow],
+          error: null,
+        }),
+        readDeliveryProjections: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: "24100000-0000-4000-8000-000000000007",
+              user_id: "user_native",
+              item_id: ITEM_ID,
+              platform: "facebook",
+              source_review_revision:
+                "24100000-0000-4000-8000-000000000008",
+              ebay_listing_id: null,
+              ebay_status: null,
+              item: {
+                review_content_revision:
+                  "24100000-0000-4000-8000-000000000009",
+              },
+            },
+          ],
+          error: null,
+        }),
+      })
+    );
+
+    const page = await operations.list({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 20,
+    });
+
+    expect(page.entries[0]?.run.delivery).toBeUndefined();
   });
 
   it("does not promote a withheld Depop pack into settled Trophy Wall truth", async () => {
@@ -450,6 +505,10 @@ describe("mobile durable-run operations", () => {
                 "24100000-0000-4000-8000-000000000008",
               ebay_listing_id: null,
               ebay_status: null,
+              item: {
+                review_content_revision:
+                  "24100000-0000-4000-8000-000000000008",
+              },
             },
           ],
           error: null,
@@ -491,6 +550,10 @@ describe("mobile durable-run operations", () => {
                 "24100000-0000-4000-8000-000000000008",
               ebay_listing_id: null,
               ebay_status: null,
+              item: {
+                review_content_revision:
+                  "24100000-0000-4000-8000-000000000008",
+              },
             },
           ],
           error: null,
@@ -874,6 +937,10 @@ describe("mobile durable-run operations", () => {
     expect(supabase.from).toHaveBeenNthCalledWith(1, "pipeline_runs");
     expect(supabase.from).toHaveBeenNthCalledWith(2, "items");
     expect(supabase.from).toHaveBeenNthCalledWith(3, "listings");
+    expect(query.select).toHaveBeenNthCalledWith(
+      3,
+      "id,user_id,item_id,platform,source_review_revision,ebay_listing_id,ebay_status,item:items!listings_item_user_fkey(review_content_revision)",
+    );
     expect(query.in).toHaveBeenCalledWith("item_id", [ITEM_ID]);
     expect(rpc).toHaveBeenNthCalledWith(1, "get_pipeline_run_retry_projection", {
       p_run_id: RUN_ID,

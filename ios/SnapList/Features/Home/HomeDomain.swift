@@ -396,6 +396,17 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
         self.coverPhotoURL = coverPhotoURL
         self.historyOrderAt = historyOrderAt
     }
+
+    var accessibilityLabel: String {
+        let identity = coverPhotoURL == nil
+            ? "\(itemName), photo unavailable"
+            : itemName
+        let relevantDate = historyOrderAt.formatted(
+            .dateTime.month(.wide).day()
+        )
+        return "\(identity), \(stateLabel), \(relevantDate). "
+            + "Completed item in your collection."
+    }
 }
 
 struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
