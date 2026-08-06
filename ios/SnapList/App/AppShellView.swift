@@ -686,12 +686,13 @@ struct AppShellView: View {
     }
 
     private var activationBottomInset: CGFloat {
-        switch activationCoachMark {
-        case .act01, .act06: 112
-        case .act04: 84
-        case .act02B: 96
-        case .act02, .act03, nil: 24
-        }
+        guard let coachMark = activationCoachMark else { return 24 }
+        // One anchor contract, proved at the policy seam, so the shell and the
+        // coach mark can never disagree about where a state docks.
+        return ActivationCoachMarkAnchorPolicy.anchor(
+            for: coachMark,
+            reduceMotion: reduceMotion
+        ).bottomInset
     }
 
     private func dismissActivationGuidance() {

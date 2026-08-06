@@ -377,6 +377,75 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
+    // Every approved coach mark docks against the one control its line names.
+    // ACT-02B is the only state whose anchor sits above it, so it is the only
+    // state with a top tail; its inset is round 1's 96 plus the 12 points the
+    // downward tail used to occupy, which keeps the bubble body where the
+    // approved composition put it.
+    func testActivationCoachMarkAnchorsEveryApprovedState() {
+        let expected: [ActivationCoachMark: ActivationCoachMarkAnchor] = [
+            .act01: .init(tailEdge: .bottom, bottomInset: 112),
+            .act02: .init(tailEdge: .bottom, bottomInset: 24),
+            .act02B: .init(tailEdge: .top, bottomInset: 108),
+            .act03: .init(tailEdge: .bottom, bottomInset: 24),
+            .act04: .init(tailEdge: .bottom, bottomInset: 84),
+            .act06: .init(tailEdge: .bottom, bottomInset: 112),
+        ]
+
+        for (coachMark, anchor) in expected {
+            XCTAssertEqual(
+                ActivationCoachMarkAnchorPolicy.anchor(
+                    for: coachMark,
+                    reduceMotion: false
+                ),
+                anchor
+            )
+        }
+    }
+
+    // Activation v1.1 draws the Reduced Motion variant as its own composition,
+    // but "the tail carries the anchoring on its own": the still replaces the
+    // Scout clip and nothing about the anchor moves. Both renderings therefore
+    // point ACT-02B up at the Voice note row from the same band.
+    func testActivationCoachMarkAnchorSurvivesReducedMotion() {
+        for coachMark in [
+            ActivationCoachMark.act01,
+            .act02,
+            .act02B,
+            .act03,
+            .act04,
+            .act06,
+        ] {
+            XCTAssertEqual(
+                ActivationCoachMarkAnchorPolicy.anchor(
+                    for: coachMark,
+                    reduceMotion: true
+                ),
+                ActivationCoachMarkAnchorPolicy.anchor(
+                    for: coachMark,
+                    reduceMotion: false
+                ),
+                "\(coachMark) must anchor identically under Reduced Motion"
+            )
+            XCTAssertNotEqual(
+                ActivationGuidanceAssetPolicy.selection(
+                    for: coachMark.state,
+                    reduceMotion: true
+                ),
+                .none,
+                "\(coachMark) must still render a Reduced Motion Scout"
+            )
+        }
+
+        XCTAssertEqual(
+            ActivationCoachMarkAnchorPolicy.anchor(
+                for: .act02B,
+                reduceMotion: true
+            ).tailEdge,
+            .top
+        )
+    }
+
     @MainActor
     func testAccountlessJourneyRetainsReversibleStateAndStopsAtCaptureBoundary() {
         let model = makeModel(camera: .authorized)

@@ -10,43 +10,15 @@ struct ActivationGuidanceCoachMark: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                scout
-
-                Text(coachMark.copy)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(coachMark.isDarkSurface ? .white : SnapListColorToken.inkPrimary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Button("Got it", action: dismiss)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(dismissalColor)
-                    .frame(
-                        minWidth: SnapListMetrics.minimumTouchTarget,
-                        minHeight: SnapListMetrics.minimumTouchTarget
-                    )
-                    .accessibilityLabel("Got it")
-                    .accessibilityHint(
-                        "Shows the next tip when one remains."
-                    )
-                    .accessibilityIdentifier("activation-guidance.got-it")
-                    .disabled(isCompleting)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(background)
-            .clipShape(.rect(cornerRadius: 16))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(borderColor, lineWidth: 1)
+            if anchor.tailEdge == .top {
+                tail
             }
 
-            Rectangle()
-                .fill(tailColor)
-                .frame(width: 12, height: 12)
-                .rotationEffect(.degrees(45))
-                .offset(y: -6)
-                .accessibilityHidden(true)
+            bubble
+
+            if anchor.tailEdge == .bottom {
+                tail
+            }
         }
         .fixedSize(horizontal: false, vertical: false)
         .accessibilityElement(children: .contain)
@@ -66,6 +38,60 @@ struct ActivationGuidanceCoachMark: View {
                     skip()
                 }
         )
+    }
+
+    private var bubble: some View {
+        HStack(spacing: 12) {
+            scout
+
+            Text(coachMark.copy)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(coachMark.isDarkSurface ? .white : SnapListColorToken.inkPrimary.color)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Got it", action: dismiss)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(dismissalColor)
+                .frame(
+                    minWidth: SnapListMetrics.minimumTouchTarget,
+                    minHeight: SnapListMetrics.minimumTouchTarget
+                )
+                .accessibilityLabel("Got it")
+                .accessibilityHint(
+                    "Shows the next tip when one remains."
+                )
+                .accessibilityIdentifier("activation-guidance.got-it")
+                .disabled(isCompleting)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(background)
+        .clipShape(.rect(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(borderColor, lineWidth: 1)
+        }
+    }
+
+    /// The one anchor contract, shared by the normal and Reduced Motion
+    /// compositions: Activation v1.1 keeps the tail as the anchor in both.
+    var anchor: ActivationCoachMarkAnchor {
+        ActivationCoachMarkAnchorPolicy.anchor(
+            for: coachMark,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    /// Half of the rotated square overlaps the bubble edge it sits on, so the
+    /// visible tail reads as one shape with the bubble rather than a detached
+    /// diamond.
+    private var tail: some View {
+        Rectangle()
+            .fill(tailColor)
+            .frame(width: 12, height: 12)
+            .rotationEffect(.degrees(45))
+            .offset(y: anchor.tailEdge == .top ? 6 : -6)
+            .accessibilityHidden(true)
     }
 
     private var dismissalColor: Color {

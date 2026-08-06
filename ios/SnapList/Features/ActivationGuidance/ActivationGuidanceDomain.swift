@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 enum ActivationPresentationPolicy {
@@ -73,7 +74,7 @@ enum ActivationGuidanceSurface: Equatable {
     case listingReview
 }
 
-enum ActivationCoachMark: Equatable {
+enum ActivationCoachMark: Equatable, Hashable {
     case act01
     case act02
     case act02B
@@ -116,6 +117,57 @@ enum ActivationCoachMark: Equatable {
 
     var isDarkSurface: Bool {
         self == .act01 || self == .act06
+    }
+}
+
+/// Which side of the bubble carries the tail, and therefore which direction the
+/// coach mark points. Activation v1.1 draws the tail below the bubble for every
+/// state that docks above the control its line names, and above the bubble for
+/// the one state that docks below its anchor.
+enum ActivationCoachMarkTailEdge: Equatable {
+    /// Tail drawn on the bubble's top edge, so the bubble hangs below its
+    /// anchor and points up at it.
+    case top
+    /// Tail drawn on the bubble's bottom edge, so the bubble sits above its
+    /// anchor and points down at it.
+    case bottom
+}
+
+struct ActivationCoachMarkAnchor: Equatable {
+    let tailEdge: ActivationCoachMarkTailEdge
+    let bottomInset: CGFloat
+}
+
+enum ActivationCoachMarkAnchorPolicy {
+    /// Activation v1.1 anchors each coach mark against the one control its line
+    /// names. ACT-02B is the single state whose anchor sits above it: the gap
+    /// above the Voice note row measures 44 points against an 82 point bubble,
+    /// so the bubble takes the clear band below the row and points up at it.
+    ///
+    /// `reduceMotion` is accepted so the Reduced Motion composition is proved
+    /// rather than assumed. The package draws that variant with the same
+    /// anchor, because "the tail carries the anchoring on its own", so the
+    /// geometry is deliberately motion-invariant and only the Scout asset
+    /// changes.
+    static func anchor(
+        for coachMark: ActivationCoachMark,
+        reduceMotion: Bool
+    ) -> ActivationCoachMarkAnchor {
+        switch coachMark {
+        case .act01, .act06:
+            return .init(tailEdge: .bottom, bottomInset: 112)
+        case .act02, .act03:
+            return .init(tailEdge: .bottom, bottomInset: 24)
+        case .act02B:
+            // The bubble body keeps the band it already occupied: the tail no
+            // longer consumes its 12 points below the bubble, so the inset
+            // absorbs them. The shell pads inside the safe area, so the
+            // package's screen-bottom measurements port as this relative
+            // correction rather than as their absolute 110.
+            return .init(tailEdge: .top, bottomInset: 108)
+        case .act04:
+            return .init(tailEdge: .bottom, bottomInset: 84)
+        }
     }
 }
 
