@@ -614,7 +614,7 @@ extension SettingsTests {
     }
 
     func testSellingSectionNamesTheMissingFamilyBeforePublishIsAttempted() {
-        let message = "Your eBay account has no payment policy for EBAY_US. "
+        let message = "Your eBay account has no payment policy. "
             + "Add it in eBay before you publish."
         let presentation = SettingsSellingPresentation(
             connection: EbayConnectionStatus(
@@ -704,7 +704,7 @@ extension SettingsTests {
             "marketplaceId": "EBAY_US",
             "missing": ["paymentPolicy", "returnPolicy"],
             "ambiguous": [],
-            "message": "Your eBay account has no payment policy or return policy for EBAY_US. Add them in eBay before you publish.",
+            "message": "Your eBay account has no payment policy or return policy. Add them in eBay before you publish.",
             "helpUrl": "https://www.bizpolicy.ebay.com/businesspolicy/manage"
           }
         }

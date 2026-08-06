@@ -88,12 +88,21 @@ type PartKey = keyof typeof PART_LABELS;
 
 const PART_KEYS = Object.keys(PART_LABELS) as PartKey[];
 
+/** The families a binding reports in one state, in the fixed PART_LABELS order. */
+function partsInState(
+  parts: Record<PartKey, { state: string }>,
+  state: string,
+): PartKey[] {
+  return PART_KEYS.filter((key) => parts[key].state === state);
+}
+
 export const EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE =
   "Connect your eBay account before publishing to eBay.";
 
 export const EBAY_POLICY_SETUP_NOT_CHECKED_MESSAGE =
-  "SnapList has not read your eBay shipping, payment, and return policies yet. "
-  + "Check that your eBay account has one of each before you publish.";
+  "SnapList has not read your eBay shipping, payment, and return policies or "
+  + "your inventory location yet. Check that your eBay account has one of each "
+  + "before you publish.";
 
 /**
  * Where the seller fixes this on eBay. Business policies live on a per-site
@@ -289,9 +298,7 @@ export async function readEbayPolicyLocationSettingsHint(input: {
     return { ...empty, state: "notChecked", message: EBAY_POLICY_SETUP_NOT_CHECKED_MESSAGE };
   }
 
-  const ambiguous = PART_KEYS.filter(
-    (key) => parsed.data[key].state === "selectionRequired",
-  );
+  const ambiguous = partsInState(parsed.data, "selectionRequired");
   if (ambiguous.length > 0) {
     return {
       state: "selectionRequired",
@@ -299,16 +306,14 @@ export async function readEbayPolicyLocationSettingsHint(input: {
       missing: [],
       ambiguous,
       message:
-        `Your eBay account has more than one ${labelList(ambiguous)} for `
-        + `${marketplaceId}, and SnapList cannot choose for you. Keep one usable `
-        + "option in eBay before you publish.",
+        `Your eBay account has more than one ${labelList(ambiguous)}, and `
+        + "SnapList cannot choose for you. Keep one usable option in eBay "
+        + "before you publish.",
       helpUrl,
     };
   }
 
-  const missing = PART_KEYS.filter(
-    (key) => parsed.data[key].state === "setupRequired",
-  );
+  const missing = partsInState(parsed.data, "setupRequired");
   if (missing.length === 0) {
     // Every family is bound yet the binding was not usable above, so the only
     // thing left that can differ is a shape publish would re-discover.
@@ -320,7 +325,7 @@ export async function readEbayPolicyLocationSettingsHint(input: {
     missing,
     ambiguous: [],
     message:
-      `Your eBay account has no ${labelList(missing)} for ${marketplaceId}. `
+      `Your eBay account has no ${labelList(missing)}. `
       + `Add ${missing.length > 1 ? "them" : "it"} in eBay before you publish.`,
     helpUrl,
   };
@@ -333,12 +338,8 @@ function setupFromBinding(
   if (binding.state === "ready") {
     return { state: "ready", marketplaceId, message: null, binding };
   }
-  const missing = PART_KEYS.filter(
-    (key) => binding[key].state === "setupRequired",
-  );
-  const ambiguous = PART_KEYS.filter(
-    (key) => binding[key].state === "selectionRequired",
-  );
+  const missing = partsInState(binding, "setupRequired");
+  const ambiguous = partsInState(binding, "selectionRequired");
   if (ambiguous.length > 0) {
     return {
       state: "selectionRequired",

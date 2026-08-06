@@ -113,7 +113,7 @@ describe("readEbayPolicyLocationSettingsHint", () => {
     expect(hint?.missing).toEqual(["paymentPolicy", "returnPolicy"]);
     expect(hint?.ambiguous).toEqual([]);
     expect(hint?.message).toBe(
-      "Your eBay account has no payment policy or return policy for EBAY_US. "
+      "Your eBay account has no payment policy or return policy. "
       + "Add them in eBay before you publish.",
     );
   });
@@ -128,7 +128,7 @@ describe("readEbayPolicyLocationSettingsHint", () => {
 
     expect(hint?.missing).toEqual(["inventoryLocation"]);
     expect(hint?.message).toBe(
-      "Your eBay account has no inventory location for EBAY_US. "
+      "Your eBay account has no inventory location. "
       + "Add it in eBay before you publish.",
     );
   });
@@ -148,9 +148,8 @@ describe("readEbayPolicyLocationSettingsHint", () => {
     expect(hint?.ambiguous).toEqual(["fulfillmentPolicy"]);
     expect(hint?.missing).toEqual([]);
     expect(hint?.message).toBe(
-      "Your eBay account has more than one shipping policy for EBAY_US, and "
-      + "SnapList cannot choose for you. Keep one usable option in eBay before "
-      + "you publish.",
+      "Your eBay account has more than one shipping policy, and SnapList cannot "
+      + "choose for you. Keep one usable option in eBay before you publish.",
     );
   });
 
@@ -171,8 +170,8 @@ describe("readEbayPolicyLocationSettingsHint", () => {
       expect(hint?.ambiguous).toEqual([]);
       expect(hint?.message).toBe(
         "SnapList has not read your eBay shipping, payment, and return "
-        + "policies yet. Check that your eBay account has one of each before "
-        + "you publish.",
+        + "policies or your inventory location yet. Check that your eBay "
+        + "account has one of each before you publish.",
       );
     },
   );

@@ -1097,7 +1097,7 @@ describe("eBay connection policy setup hint (#694)", () => {
           state: "setupRequired",
           missing: ["paymentPolicy"],
           message:
-            "Your eBay account has no payment policy for EBAY_US. "
+            "Your eBay account has no payment policy. "
             + "Add it in eBay before you publish.",
           helpUrl: "https://www.bizpolicy.ebay.com/businesspolicy/manage",
         },
@@ -1165,5 +1165,24 @@ describe("eBay connection policy setup hint (#694)", () => {
 
     expect((await connectionRequest(handler)).status).toBe(200);
     expect(adapter.discoveryRequests).toEqual([]);
+  });
+
+  it("still answers the connection status when the stored binding cannot be read", async () => {
+    const harness = publishFixtureClient();
+    // A row the binding store refuses to parse. The hint is an extra; losing it
+    // must not take the seller's connection status and disconnect control down.
+    harness.connectionState.current!.connection_generation = "not-a-uuid";
+    const handler = ebayHandler({
+      adapter: new MockEbayAdapter(),
+      client: harness.client,
+      requestId: "request-694-unreadable-binding",
+    });
+
+    const response = await connectionRequest(handler);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { connected: true, ebayUsername: "sandbox-seller", policySetup: null },
+    });
   });
 });

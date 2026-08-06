@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EbayAdapter } from "./types";
 import { effectivePrice } from "@/lib/pipeline";
+import { logEvent } from "@/lib/observability";
 import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
 import { toEbayAspects, toEbayCondition } from "./map";
 import { PublishValidationError } from "./errors";
@@ -247,13 +248,31 @@ async function connectionSettings(
 ): Promise<EbayConnectionSettings> {
   const status = await getEbayConnectionStatus(client);
   if (!status.connected) return { ...status, policySetup: null };
-  return {
-    ...status,
-    policySetup: await readEbayPolicyLocationSettingsHint({
+  return { ...status, policySetup: await policySetupHint(client, marketplace) };
+}
+
+/**
+ * The hint is an extra on top of connection status, so an unreadable or
+ * unparseable binding row degrades to "no hint" instead of failing the whole
+ * request. Settings must still be able to show the connection and disconnect
+ * it. The degradation is logged rather than swallowed.
+ */
+async function policySetupHint(
+  client: SupabaseClient,
+  marketplace: string,
+): Promise<EbayPolicyLocationSettingsHint | null> {
+  try {
+    return await readEbayPolicyLocationSettingsHint({
       marketplaceId: marketplace,
       store: createSupabaseEbayPolicyLocationBindingStore(client),
-    }),
-  };
+    });
+  } catch (error) {
+    logEvent("ebay.policy_setup_hint.unavailable", {
+      marketplaceId: marketplace,
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+    return null;
+  }
 }
 
 function marketplaceId(env: Record<string, string | undefined>): string {

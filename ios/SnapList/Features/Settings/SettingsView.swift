@@ -26,8 +26,7 @@ struct SettingsView: View {
         mobileAPIClient: any MobileAPIClient,
         subscriptionClient: any SubscriptionClient,
         analyticsClient: any AnalyticsClient,
-        ebayPublishService: any EbayPublishFeatureServing =
-            UnavailableEbayPublishFeatureService(),
+        ebayPublishService: any EbayPublishFeatureServing,
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false
