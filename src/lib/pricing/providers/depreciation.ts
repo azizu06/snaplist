@@ -119,9 +119,57 @@ export const retailFindingSchema = z.object({
 
 export type RetailFinding = z.infer<typeof retailFindingSchema>;
 
-const retailFindingListSchema = z.object({
-  findings: z.array(retailFindingSchema),
+/**
+ * The MODEL-FACING retail-finding shape (issue #696) — the permissive half of
+ * the same permissive/strict split `web-search.ts` uses for comps, and the
+ * schema actually handed to `generateObject`.
+ *
+ * `title` may NOT be `.optional()` here: `generateObject` compiles this to JSON
+ * Schema, and OpenAI structured outputs in strict mode reject any object whose
+ * `properties` carry a key absent from `required` — the request 400s before a
+ * single token. That throw is NOT a decline: `price()` does not catch it and
+ * neither does `PriceRouter.price`, so the whole pricing call fails and the
+ * `llm-only` floor below this tier is never reached. An item where the ISBN,
+ * sold-comp, and both web tiers all decline would have failed outright instead
+ * of degrading to an honest estimate. So the KEY is always required and the
+ * model says "this result had no title" in the VALUE, as `null`.
+ *
+ * `retailFindingFromRaw` performs the deterministic repair back to the internal
+ * shape — load-bearing, because `PriceSource.title` is an optional STRING on a
+ * `.strict()` schema and a forwarded `null` would fail `priceResultSchema`.
+ */
+export const rawRetailFindingSchema = z.object({
+  url: z.string().min(1),
+  /** Page/listing title, or `null` when the result carries none. */
+  title: z.string().nullable(),
+  price: z.number().positive(),
 });
+
+export type RawRetailFinding = z.infer<typeof rawRetailFindingSchema>;
+
+/**
+ * The exact object `generateObject` is given at this call site. Exported so
+ * `llm/contracts.ts` names THIS schema rather than reconstructing an
+ * equivalent-looking one that could silently drift from it.
+ */
+export const retailFindingListSchema = z.object({
+  findings: z.array(rawRetailFindingSchema),
+});
+
+/**
+ * Deterministic normalization from the model-facing finding to the internal
+ * one: a `null` (or blank/whitespace) title means "no title", so the key is
+ * dropped rather than carried through as an empty string that would surface as
+ * a blank source label in the seller-visible evidence list.
+ */
+export function retailFindingFromRaw(raw: RawRetailFinding): RetailFinding {
+  const title = raw.title?.trim();
+  return {
+    url: raw.url,
+    price: raw.price,
+    ...(title ? { title } : {}),
+  };
+}
 
 /**
  * The injectable model call: given the item identity, the query, and the raw
@@ -141,7 +189,8 @@ const RETAIL_EXTRACT_SYSTEM_PROMPT =
   "search results. Return only prices that clearly refer to the same product " +
   "sold NEW (not used, refurbished, or for parts). For each finding give the " +
   "USD price and the source URL (it MUST be one of the provided result URLs, " +
-  "verbatim). Skip resale/used listings, accessories, bundles, and anything " +
+  "verbatim). Give the result's title, or null when it has none — never invent " +
+  "one. Skip resale/used listings, accessories, bundles, and anything " +
   "you cannot tie to a concrete dollar amount. Return an empty list when " +
   "nothing fits.";
 
@@ -186,7 +235,9 @@ export function createOpenAIRetailExtractor(
       system: RETAIL_EXTRACT_SYSTEM_PROMPT,
       prompt: `Item identity:\n${identity}\n\nSearch query: ${query}\n\nSearch results:\n${hits}`,
     });
-    return object.findings;
+    // Deterministic repair back to the internal finding shape: `title: null` (the
+    // only way strict mode lets the model say "no title") becomes an absent key.
+    return object.findings.map(retailFindingFromRaw);
   };
 }
 
