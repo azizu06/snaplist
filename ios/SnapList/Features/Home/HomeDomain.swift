@@ -818,25 +818,25 @@ final class TrophyWallStore {
         }
         switch (runDetail.status, runDetail.stage) {
         case (.queued, .queued):
-            .accepted
+            return .accepted
         case (.running, .identifying), (.retrying, .identifying):
-            .workingIdentifying
+            return .workingIdentifying
         case (.running, .generating), (.retrying, .generating):
-            .workingGenerating
+            return .workingGenerating
         case (.running, .pricing), (.retrying, .pricing):
-            .workingPricing
+            return .workingPricing
         case (.running, .persisting), (.retrying, .persisting):
-            .workingPersisting
+            return .workingPersisting
         case (.succeeded, .completed)
             where runDetail.terminalOutcome == .succeeded
                 && runDetail.listingID != nil
                 && runDetail.legalActions.canOpenReview:
-            .readyToReview
+            return .readyToReview
         case (.succeeded, .completed)
             where runDetail.terminalOutcome == .succeeded
                 && runDetail.listingID != nil
                 && !runDetail.legalActions.canOpenReview:
-            .readyToReviewLocked
+            return .readyToReviewLocked
         case (.failed, _)
             where runDetail.terminalOutcome == .failed
                 && runDetail.safeFailure?.retryable == true
@@ -844,11 +844,10 @@ final class TrophyWallStore {
                 && runDetail.legalActions.canRetry
                 && !runDetail.legalActions.canCancel
                 && !runDetail.legalActions.canOpenReview:
-            runDetail.safeFailure.map {
-                .needsRetryLocked(detail: $0.detail)
-            }
+            guard let safeFailure = runDetail.safeFailure else { return nil }
+            return .needsRetryLocked(detail: safeFailure.detail)
         default:
-            nil
+            return nil
         }
     }
 
