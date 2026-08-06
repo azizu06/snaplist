@@ -32,7 +32,7 @@ struct ListingReviewView: View {
     let dismissReview: () -> Void
     let goToTrophyWall: () -> Void
     let startNewItem: () -> Void
-    let activationInteraction: () -> Void = {}
+    var activationInteraction: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize

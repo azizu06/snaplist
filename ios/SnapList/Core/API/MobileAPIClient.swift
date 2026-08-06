@@ -402,7 +402,10 @@ struct ZeroNetworkMobileAPIClient: MobileAPIClient, ContractOnlyFixtureProviding
             true,
             forKey: "snaplist.fixture-activation-guidance-completed"
         )
-        .init(data: .init(completed: true), meta: .init(requestId: "fixture-activation-guidance"))
+        return .init(
+            data: .init(completed: true),
+            meta: .init(requestId: "fixture-activation-guidance")
+        )
     }
 
     func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope {

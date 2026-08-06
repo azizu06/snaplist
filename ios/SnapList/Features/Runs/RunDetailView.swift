@@ -9,10 +9,10 @@ struct RunDetailView: View {
     let forceReducedMotion: Bool
     let goToTrophyWall: () -> Void
     let startNewItem: () -> Void
-    let activationProcessingOpened: () -> Void = {}
-    let activationListingReviewOpened: () -> Void = {}
-    let activationListingReviewDismissed: () -> Void = {}
-    let activationListingReviewInteraction: () -> Void = {}
+    var activationProcessingOpened: () -> Void = {}
+    var activationListingReviewOpened: () -> Void = {}
+    var activationListingReviewDismissed: () -> Void = {}
+    var activationListingReviewInteraction: () -> Void = {}
     @State private var presentsListingReview = false
     @State private var isOpeningReview = false
     @State private var reviewOpenFailed = false
