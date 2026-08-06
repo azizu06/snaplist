@@ -2,11 +2,31 @@ import Foundation
 import Observation
 
 enum FirstValueOnboardingPresentationPolicy {
+    /// Onboarding is a first-launch surface, so it must never win a race with work the
+    /// seller already has in flight. A durable capture is restored asynchronously, and
+    /// until that resolves the shell cannot tell a genuine first launch from a returning
+    /// seller — so presentation waits for the answer instead of guessing from an
+    /// as-yet-empty staged photo.
     static func shouldPresent(
         isFirstLaunch: Bool,
-        hasCompletedOnboarding: Bool
+        hasCompletedOnboarding: Bool,
+        hasResolvedCaptureRestoration: Bool,
+        hasRestoredCapture: Bool
     ) -> Bool {
-        isFirstLaunch && !hasCompletedOnboarding
+        isFirstLaunch
+            && !hasCompletedOnboarding
+            && hasResolvedCaptureRestoration
+            && !hasRestoredCapture
+    }
+
+    /// True while the shell must hold a neutral surface: onboarding would otherwise be
+    /// presented before capture restoration proves whether a capture is waiting.
+    static func awaitsCaptureRestoration(
+        isFirstLaunch: Bool,
+        hasCompletedOnboarding: Bool,
+        hasResolvedCaptureRestoration: Bool
+    ) -> Bool {
+        isFirstLaunch && !hasCompletedOnboarding && !hasResolvedCaptureRestoration
     }
 }
 
@@ -53,6 +73,37 @@ enum FirstValueOnboardingScreen: Int, CaseIterable, Codable, Equatable {
         }
         return .acceptedWebM(resource: scout.clip)
     }
+
+    /// Resolves what the Scout view actually renders, with the accepted clip already
+    /// looked up in the bundle.
+    ///
+    /// The lookup lives here rather than inside the WebKit-backed view so a test can
+    /// prove the normal-motion path selects this screen's accepted clip *and* finds its
+    /// resource, without loading WebKit into the process. `usesStaticRendering` is the
+    /// UI-test seam: iOS 26.5 automation injects WebCore/WebKit accessibility bundles the
+    /// moment a WKWebView is created and crashes later tests in the same shard, so the
+    /// runner opts out of WebKit while Debug and Release builds keep the accepted WebM.
+    /// A clip that cannot be resolved degrades to its own static fallback rather than
+    /// rendering nothing.
+    func scoutRendering(
+        reduceMotion: Bool,
+        usesStaticRendering: Bool = false,
+        bundle: Bundle = .main
+    ) -> FirstValueScoutRendering {
+        guard !usesStaticRendering,
+              case .acceptedWebM(let resource) = scoutMedia(reduceMotion: reduceMotion),
+              let url = bundle.url(
+                forResource: resource,
+                withExtension: Self.scoutResourceExtension,
+                subdirectory: Self.scoutResourceSubdirectory
+              ) else {
+            return .staticFallbackPNG(asset: scout.fallback)
+        }
+        return .acceptedWebM(url: url)
+    }
+
+    static let scoutResourceSubdirectory = "FirstValueOnboarding"
+    static let scoutResourceExtension = "webm"
 }
 
 struct FirstValueScoutPresentation: Equatable {
@@ -67,16 +118,49 @@ enum FirstValueScoutMedia: Equatable {
     case staticFallbackPNG(asset: String)
 }
 
-enum FirstValueOnboardingCompletionSignal: Equatable {
+enum FirstValueScoutRendering: Equatable {
+    case acceptedWebM(url: URL)
+    case staticFallbackPNG(asset: String)
+}
+
+/// The completion contract issue #566's first-listing activation flow consumes.
+///
+/// Onboarding deliberately does not hand #566 a bare "done" flag. The activation flow
+/// has to treat a seller who read all six screens differently from one who skipped them,
+/// and differently again from one who never saw them because a durable capture was
+/// already waiting. Every terminal path writes its outcome through
+/// `FirstValueOnboardingCompletionPersisting` before the flow is dismissed, so a
+/// consumer constructed on a later launch reads exactly what the live
+/// `FirstValueOnboardingModel.outcome` published on this one.
+///
+/// This issue (#685) owns the seam and its persistence; #566 owns the wiring that reads
+/// it, in its own PR.
+enum FirstValueOnboardingOutcome: String, Codable, Equatable, CaseIterable {
+    /// The seller reached ONB-06 and chose `Start scanning`.
     case completed
+    /// The seller used `Skip` before ONB-06.
     case skipped
+    /// The six screens were never shown because the seller already had progress on
+    /// this device — a restored durable capture, or persisted onboarding progress past
+    /// the retired intro. #566 must not treat this seller as taught.
+    case supersededByExistingProgress = "superseded-by-existing-progress"
+
+    /// Whether this seller actually saw the six-screen flow.
+    var hasSeenIntroduction: Bool {
+        switch self {
+        case .completed, .skipped:
+            true
+        case .supersededByExistingProgress:
+            false
+        }
+    }
 }
 
 @MainActor
 @Observable
 final class FirstValueOnboardingModel {
     private(set) var screen: FirstValueOnboardingScreen
-    private(set) var completionSignal: FirstValueOnboardingCompletionSignal?
+    private(set) var outcome: FirstValueOnboardingOutcome?
 
     private let completionStore: any FirstValueOnboardingCompletionPersisting
 
@@ -92,8 +176,13 @@ final class FirstValueOnboardingModel {
         completionStore.hasCompletedOnboarding
     }
 
+    /// The durably recorded outcome, including one written by an earlier launch.
+    var recordedOutcome: FirstValueOnboardingOutcome? {
+        completionStore.outcome
+    }
+
     func continueForward() {
-        guard completionSignal == nil else { return }
+        guard outcome == nil else { return }
         guard let next = screen.next else {
             complete(with: .completed)
             return
@@ -102,23 +191,25 @@ final class FirstValueOnboardingModel {
     }
 
     func goBack() {
-        guard completionSignal == nil, let previous = screen.previous else { return }
+        guard outcome == nil, let previous = screen.previous else { return }
         screen = previous
     }
 
     func skip() {
-        guard screen != .onb06, completionSignal == nil else { return }
+        guard screen != .onb06, outcome == nil else { return }
         complete(with: .skipped)
     }
 
-    func reconcileRestoredCapture() {
+    /// Records that onboarding was superseded by work the seller already has on this
+    /// device, so the six screens are never presented on top of it.
+    func reconcileExistingProgress() {
         guard !hasCompletedOnboarding else { return }
-        completionStore.markCompleted()
+        complete(with: .supersededByExistingProgress)
     }
 
-    private func complete(with signal: FirstValueOnboardingCompletionSignal) {
-        completionStore.markCompleted()
-        completionSignal = signal
+    private func complete(with outcome: FirstValueOnboardingOutcome) {
+        completionStore.record(outcome)
+        self.outcome = outcome
     }
 }
 
@@ -223,6 +314,19 @@ struct OnboardingMotionPolicy: Equatable {
     var focusDelay: Duration {
         reduceMotion ? .zero : .milliseconds(180)
     }
+}
+
+enum FirstValueOnboardingCopy {
+    /// ONB-05 shows what the Trophy Wall looks like while items finish. No item exists
+    /// during onboarding, so the screen is labelled as an illustration and carries no
+    /// spinner, percentage, or other affordance that would claim work is happening now.
+    static let backgroundExampleCaption = "An example — nothing is running yet"
+
+    static let backgroundExampleRows = [
+        (item: "Denim trucker jacket", state: "Writing the listing"),
+        (item: "Desk lamp", state: "Checking sold prices"),
+        (item: "White sneakers", state: "Reading your voice note"),
+    ]
 }
 
 enum OnboardingCopy {

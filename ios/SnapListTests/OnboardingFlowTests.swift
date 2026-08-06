@@ -6,45 +6,146 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertTrue(
             FirstValueOnboardingPresentationPolicy.shouldPresent(
                 isFirstLaunch: true,
-                hasCompletedOnboarding: false
+                hasCompletedOnboarding: false,
+                hasResolvedCaptureRestoration: true,
+                hasRestoredCapture: false
             )
         )
         XCTAssertFalse(
             FirstValueOnboardingPresentationPolicy.shouldPresent(
                 isFirstLaunch: false,
-                hasCompletedOnboarding: false
+                hasCompletedOnboarding: false,
+                hasResolvedCaptureRestoration: true,
+                hasRestoredCapture: false
             )
         )
         XCTAssertFalse(
             FirstValueOnboardingPresentationPolicy.shouldPresent(
                 isFirstLaunch: true,
-                hasCompletedOnboarding: true
+                hasCompletedOnboarding: true,
+                hasResolvedCaptureRestoration: true,
+                hasRestoredCapture: false
             )
         )
         XCTAssertFalse(
             FirstValueOnboardingPresentationPolicy.shouldPresent(
                 isFirstLaunch: false,
-                hasCompletedOnboarding: true
+                hasCompletedOnboarding: true,
+                hasResolvedCaptureRestoration: true,
+                hasRestoredCapture: false
             )
         )
     }
 
-    func testFirstValueOnboardingCompletionPersistsAcrossStoreRecreation() throws {
+    /// A restored durable capture arrives asynchronously. Deciding presentation from an
+    /// as-yet-empty staged photo shows onboarding to a returning seller, so the decision
+    /// waits for restoration to resolve and yields to a capture that survived.
+    func testFirstValueOnboardingNeverPreemptsAnUnresolvedOrRestoredCapture() {
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy.shouldPresent(
+                isFirstLaunch: true,
+                hasCompletedOnboarding: false,
+                hasResolvedCaptureRestoration: false,
+                hasRestoredCapture: false
+            ),
+            "Onboarding must not be presented before restoration resolves."
+        )
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy.shouldPresent(
+                isFirstLaunch: true,
+                hasCompletedOnboarding: false,
+                hasResolvedCaptureRestoration: true,
+                hasRestoredCapture: true
+            ),
+            "A restored capture routes to recovery, never to onboarding."
+        )
+
+        XCTAssertTrue(
+            FirstValueOnboardingPresentationPolicy.awaitsCaptureRestoration(
+                isFirstLaunch: true,
+                hasCompletedOnboarding: false,
+                hasResolvedCaptureRestoration: false
+            )
+        )
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy.awaitsCaptureRestoration(
+                isFirstLaunch: true,
+                hasCompletedOnboarding: false,
+                hasResolvedCaptureRestoration: true
+            )
+        )
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy.awaitsCaptureRestoration(
+                isFirstLaunch: true,
+                hasCompletedOnboarding: true,
+                hasResolvedCaptureRestoration: false
+            ),
+            "An already-onboarded seller never waits on the neutral hold."
+        )
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy.awaitsCaptureRestoration(
+                isFirstLaunch: false,
+                hasCompletedOnboarding: false,
+                hasResolvedCaptureRestoration: false
+            )
+        )
+    }
+
+    /// The completion contract #566 consumes: every terminal outcome survives relaunch
+    /// as itself, not as a bare "done".
+    @MainActor
+    func testEveryOnboardingOutcomeReachesTheDurableCompletionSeam() throws {
+        let terminalPaths: [(FirstValueOnboardingOutcome, (FirstValueOnboardingModel) -> Void)] = [
+            (.completed, { model in
+                for _ in FirstValueOnboardingScreen.allCases { model.continueForward() }
+            }),
+            (.skipped, { model in model.skip() }),
+            (.supersededByExistingProgress, { model in model.reconcileExistingProgress() }),
+        ]
+
+        for (expected, drive) in terminalPaths {
+            let suiteName = "snaplist.first-value-onboarding.tests.\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let store = UserDefaultsFirstValueOnboardingCompletionStore(defaults: defaults)
+            let model = FirstValueOnboardingModel(completionStore: store)
+
+            XCTAssertNil(store.outcome)
+            XCTAssertFalse(store.hasCompletedOnboarding)
+
+            drive(model)
+
+            XCTAssertEqual(model.outcome, expected)
+            XCTAssertEqual(model.recordedOutcome, expected)
+
+            let relaunchedStore = UserDefaultsFirstValueOnboardingCompletionStore(
+                defaults: defaults
+            )
+            XCTAssertEqual(relaunchedStore.outcome, expected)
+            XCTAssertTrue(relaunchedStore.hasCompletedOnboarding)
+            XCTAssertEqual(
+                relaunchedStore.outcome?.hasSeenIntroduction,
+                expected != .supersededByExistingProgress
+            )
+        }
+    }
+
+    /// A stored value this build does not recognise must not read as an outcome — that
+    /// would let a future package revision make an untaught seller look taught.
+    func testUnrecognisedStoredOutcomeReadsAsNoCompletion() throws {
         let suiteName = "snaplist.first-value-onboarding.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let firstStore = UserDefaultsFirstValueOnboardingCompletionStore(
-            defaults: defaults
+        let key = "snaplist.first-value-onboarding.v1.outcome"
+        defaults.set("completed-in-some-future-package", forKey: key)
+
+        let store = UserDefaultsFirstValueOnboardingCompletionStore(
+            defaults: defaults,
+            key: key
         )
 
-        XCTAssertFalse(firstStore.hasCompletedOnboarding)
-
-        firstStore.markCompleted()
-
-        let relaunchedStore = UserDefaultsFirstValueOnboardingCompletionStore(
-            defaults: defaults
-        )
-        XCTAssertTrue(relaunchedStore.hasCompletedOnboarding)
+        XCTAssertNil(store.outcome)
+        XCTAssertFalse(store.hasCompletedOnboarding)
     }
 
     @MainActor
@@ -62,13 +163,14 @@ final class OnboardingFlowTests: XCTestCase {
         ] {
             model.continueForward()
             XCTAssertEqual(model.screen, expected)
-            XCTAssertNil(model.completionSignal)
+            XCTAssertNil(model.outcome)
+            XCTAssertNil(store.outcome)
         }
 
         model.continueForward()
 
-        XCTAssertTrue(store.hasCompletedOnboarding)
-        XCTAssertEqual(model.completionSignal, .completed)
+        XCTAssertEqual(store.outcome, .completed)
+        XCTAssertEqual(model.outcome, .completed)
     }
 
     @MainActor
@@ -78,8 +180,22 @@ final class OnboardingFlowTests: XCTestCase {
 
         model.skip()
 
-        XCTAssertTrue(store.hasCompletedOnboarding)
-        XCTAssertEqual(model.completionSignal, .skipped)
+        XCTAssertEqual(store.outcome, .skipped)
+        XCTAssertEqual(model.outcome, .skipped)
+    }
+
+    @MainActor
+    func testReconciledExistingProgressNeverClaimsTheSellerSawTheSixScreens() {
+        let store = InMemoryFirstValueOnboardingCompletionStore()
+        let model = FirstValueOnboardingModel(completionStore: store)
+
+        model.reconcileExistingProgress()
+
+        XCTAssertEqual(store.outcome, .supersededByExistingProgress)
+        XCTAssertEqual(model.outcome?.hasSeenIntroduction, false)
+
+        model.reconcileExistingProgress()
+        XCTAssertEqual(store.outcome, .supersededByExistingProgress)
     }
 
     @MainActor
@@ -126,6 +242,80 @@ final class OnboardingFlowTests: XCTestCase {
                 .staticFallbackPNG(asset: screen.scout.fallback)
             )
         }
+    }
+
+    /// Normal motion is the shipping path, so it needs a seam a test can execute. This
+    /// asserts the accepted clip is both selected *and* present in the bundle, without
+    /// constructing the WebKit-backed view.
+    func testNormalMotionResolvesEachScreensAcceptedWebMInTheBundle() throws {
+        // These tests are hosted by SnapList.app, so `.main` is the app bundle that
+        // actually carries the accepted clips — the same lookup the view performs.
+        let bundle = Bundle.main
+        for screen in FirstValueOnboardingScreen.allCases {
+            let rendering = screen.scoutRendering(reduceMotion: false, bundle: bundle)
+            guard case .acceptedWebM(let url) = rendering else {
+                XCTFail("ONB-0\(screen.rawValue) did not select its accepted WebM: \(rendering)")
+                continue
+            }
+            XCTAssertEqual(
+                url.deletingPathExtension().lastPathComponent,
+                screen.scout.clip
+            )
+            XCTAssertEqual(url.pathExtension, FirstValueOnboardingScreen.scoutResourceExtension)
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: url.path),
+                "ONB-0\(screen.rawValue) resolved a clip URL that is not in the bundle."
+            )
+        }
+    }
+
+    func testStaticRenderingAndReduceMotionBothYieldTheScreensOwnFallback() {
+        let bundle = Bundle.main
+        for screen in FirstValueOnboardingScreen.allCases {
+            XCTAssertEqual(
+                screen.scoutRendering(
+                    reduceMotion: false,
+                    usesStaticRendering: true,
+                    bundle: bundle
+                ),
+                .staticFallbackPNG(asset: screen.scout.fallback)
+            )
+            XCTAssertEqual(
+                screen.scoutRendering(reduceMotion: true, bundle: bundle),
+                .staticFallbackPNG(asset: screen.scout.fallback)
+            )
+        }
+    }
+
+    /// A clip that cannot be resolved must degrade to that screen's own PNG rather than
+    /// handing the view a URL it cannot load.
+    func testUnresolvableClipDegradesToTheScreensOwnFallback() {
+        let emptyBundle = Bundle(for: XCTestCase.self)
+        for screen in FirstValueOnboardingScreen.allCases {
+            XCTAssertEqual(
+                screen.scoutRendering(reduceMotion: false, bundle: emptyBundle),
+                .staticFallbackPNG(asset: screen.scout.fallback)
+            )
+        }
+    }
+
+    /// ONB-05 shows what the Trophy Wall looks like while items finish, but no item
+    /// exists during onboarding. The screen must say so and must not carry a progress
+    /// affordance that claims work is happening now.
+    func testBackgroundExampleIsLabelledAnIllustrationNotLiveWork() {
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.backgroundExampleCaption,
+            "An example — nothing is running yet"
+        )
+        XCTAssertEqual(FirstValueOnboardingCopy.backgroundExampleRows.count, 3)
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.backgroundExampleRows.map(\.item),
+            ["Denim trucker jacket", "Desk lamp", "White sneakers"]
+        )
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.backgroundExampleRows.map(\.state),
+            ["Writing the listing", "Checking sold prices", "Reading your voice note"]
+        )
     }
 
     @MainActor

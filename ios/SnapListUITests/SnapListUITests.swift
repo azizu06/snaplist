@@ -1761,6 +1761,46 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["first-value-onboarding.back"].exists)
     }
 
+    /// ONB-05 illustrates the Trophy Wall. No item exists during onboarding, so the
+    /// screen must be labelled an example and must expose no spinner or other affordance
+    /// that would claim work is running.
+    func testFirstValueOnboardingONB05IllustratesWithoutClaimingLiveProgress() {
+        let app = launchFirstValueOnboarding(resetProgress: true)
+        advanceFirstValueOnboarding(to: "ONB-05", in: app)
+        let screen = app.descendants(matching: .any)[
+            "first-value-onboarding.state.ONB-05"
+        ]
+
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.staticTexts["An example — nothing is running yet"].exists,
+            app.debugDescription
+        )
+        XCTAssertEqual(app.activityIndicators.count, 0, app.debugDescription)
+        XCTAssertEqual(app.progressIndicators.count, 0, app.debugDescription)
+    }
+
+    /// A durable capture is restored asynchronously, so a returning seller's staged photo
+    /// is still nil when the shell first renders. Onboarding must wait for that answer
+    /// instead of taking the screen from work the seller already has in flight.
+    func testRestoredCaptureNeverExposesAFirstValueOnboardingControl() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--reset-onboarding-progress"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists,
+            app.debugDescription
+        )
+        XCTAssertFalse(app.buttons["first-value-onboarding.continue"].exists)
+        XCTAssertFalse(app.buttons["first-value-onboarding.skip"].exists)
+    }
+
     func testFirstValueOnboardingAccessibilityTypeKeepsEveryPrimaryActionReachable() {
         let app = launchFirstValueOnboarding(
             resetProgress: true,

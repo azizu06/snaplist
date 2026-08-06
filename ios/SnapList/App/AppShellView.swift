@@ -37,11 +37,18 @@ struct AppShellView: View {
 #else
                 shell
 #endif
+            } else if awaitsCaptureRestorationBeforeOnboarding {
+                // Neutral hold: a durable capture may still be restoring, and onboarding
+                // must not flash in front of a returning seller's own work.
+                SnapListColorToken.canvas.color
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
             } else if shouldShowFirstValueOnboarding {
                 FirstValueOnboardingView(
                     model: firstValueOnboardingModel,
                     forceReducedMotion: configuration.forceReducedMotion,
-                    didFinish: onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding
+                    usesStaticScoutRendering: configuration.usesStaticScoutRendering,
+                    didFinish: handleFirstValueOnboardingCompletion
                 )
             } else if shouldBypassRetiredLegacyIntro {
                 Color.clear
@@ -572,10 +579,29 @@ struct AppShellView: View {
         FirstValueOnboardingPresentationPolicy.shouldPresent(
             isFirstLaunch: configuration.usesFirstValueOnboarding,
             hasCompletedOnboarding:
-                firstValueOnboardingModel.hasCompletedOnboarding
+                firstValueOnboardingModel.hasCompletedOnboarding,
+            hasResolvedCaptureRestoration: captureFlow.hasCompletedRestoration,
+            hasRestoredCapture: captureFlow.stagedPhoto != nil
         )
-            && captureFlow.stagedPhoto == nil
             && router.presentedSheet != .capture
+    }
+
+    private var awaitsCaptureRestorationBeforeOnboarding: Bool {
+        FirstValueOnboardingPresentationPolicy.awaitsCaptureRestoration(
+            isFirstLaunch: configuration.usesFirstValueOnboarding,
+            hasCompletedOnboarding:
+                firstValueOnboardingModel.hasCompletedOnboarding,
+            hasResolvedCaptureRestoration: captureFlow.hasCompletedRestoration
+        )
+    }
+
+    /// The hand-off point for the completion contract issue #566 consumes. #685 owns
+    /// emitting and durably recording the outcome; #566 lands the activation-flow wiring
+    /// that reads `FirstValueOnboardingCompletionPersisting.outcome` in its own PR.
+    private func handleFirstValueOnboardingCompletion(
+        _ outcome: FirstValueOnboardingOutcome
+    ) {
+        onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
     }
 
     private var shouldBypassRetiredLegacyIntro: Bool {

@@ -232,6 +232,14 @@ struct LaunchConfiguration: Equatable {
     var firstValueOnboardingState: FirstValueOnboardingScreen?
     var photoReviewState: PhotoReviewVisualStateID?
     var forceReducedMotion: Bool
+    /// Renders each Scout clip's accepted static fallback instead of its WebM.
+    ///
+    /// The UI-test runner sets this: iOS 26.5 automation injects WebCore and WebKit
+    /// accessibility bundles as soon as a WKWebView exists and then crashes later tests
+    /// in the same shard. Debug and Release builds outside the runner keep the accepted
+    /// WebM, so the seller-facing path stays executable — see
+    /// `FirstValueOnboardingScreen.scoutRendering`.
+    var usesStaticScoutRendering: Bool
     var keyboardProbe: Bool
     var dynamicTypeSize: DynamicTypeSize?
     var usesZeroNetworkFixtures: Bool
@@ -254,6 +262,7 @@ struct LaunchConfiguration: Equatable {
         firstValueOnboardingState: nil,
         photoReviewState: nil,
         forceReducedMotion: false,
+        usesStaticScoutRendering: false,
         keyboardProbe: false,
         dynamicTypeSize: nil,
         usesZeroNetworkFixtures: false,
@@ -276,6 +285,7 @@ struct LaunchConfiguration: Equatable {
         firstValueOnboardingState: nil,
         photoReviewState: nil,
         forceReducedMotion: false,
+        usesStaticScoutRendering: false,
         keyboardProbe: false,
         dynamicTypeSize: nil,
         usesZeroNetworkFixtures: true,
@@ -299,6 +309,8 @@ struct LaunchConfiguration: Equatable {
         for argument in arguments {
             if argument == "--reduced-motion" {
                 configuration.forceReducedMotion = true
+            } else if argument == "--static-scout-rendering" {
+                configuration.usesStaticScoutRendering = true
             } else if argument == "--keyboard-probe" {
                 configuration.keyboardProbe = true
             } else if argument == "--zero-network-fixtures" {

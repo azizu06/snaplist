@@ -4,7 +4,9 @@ import SwiftUI
 struct FirstValueOnboardingView: View {
     @Bindable var model: FirstValueOnboardingModel
     let forceReducedMotion: Bool
-    let didFinish: () -> Void
+    let usesStaticScoutRendering: Bool
+    /// Receives the completion contract #566 consumes, never a bare "done".
+    let didFinish: (FirstValueOnboardingOutcome) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var presentsSignIn = false
@@ -145,7 +147,11 @@ struct FirstValueOnboardingView: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            FirstValueScoutView(screen: .onb01, reduceMotion: reduceMotion)
+            FirstValueScoutView(
+                screen: .onb01,
+                reduceMotion: reduceMotion,
+                usesStaticRendering: usesStaticScoutRendering
+            )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, FirstValueOnboardingScreen.onb01.scout.leadingPull)
         }
@@ -164,7 +170,11 @@ struct FirstValueOnboardingView: View {
                     .accessibilitySortPriority(1)
             }
             HStack(spacing: 10) {
-                FirstValueScoutView(screen: .onb02, reduceMotion: reduceMotion)
+                FirstValueScoutView(
+                    screen: .onb02,
+                    reduceMotion: reduceMotion,
+                    usesStaticRendering: usesStaticScoutRendering
+                )
                     .padding(.leading, FirstValueOnboardingScreen.onb02.scout.leadingPull)
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
@@ -234,7 +244,11 @@ struct FirstValueOnboardingView: View {
                     soldRow("Good, small marks", "3 weeks ago", "$49", scale: 1.4, offset: CGSize(width: -3, height: 3))
                 }
             }
-            ScoutLine(screen: .onb03, reduceMotion: reduceMotion) {
+            ScoutLine(
+                screen: .onb03,
+                reduceMotion: reduceMotion,
+                usesStaticRendering: usesStaticScoutRendering
+            ) {
                 Text("You can change the price later.")
             }
         }
@@ -271,7 +285,11 @@ struct FirstValueOnboardingView: View {
                     draftRow("Description", "Four paragraphs")
                 }
             }
-            ScoutLine(screen: .onb04, reduceMotion: reduceMotion) {
+            ScoutLine(
+                screen: .onb04,
+                reduceMotion: reduceMotion,
+                usesStaticRendering: usesStaticScoutRendering
+            ) {
                 Text("Not right? One redo on the same photos is included.")
             }
         }
@@ -280,17 +298,30 @@ struct FirstValueOnboardingView: View {
     private var backgroundScreen: some View {
         VStack(spacing: 12) {
             card {
-                VStack(spacing: 12) {
-                    workRow("FirstValueJacket", "Denim trucker jacket", "Writing the listing")
-                    workRow("FirstValueLamp", "Desk lamp", "Checking sold prices")
-                    workRow("FirstValueSneaker", "White sneakers", "Reading your voice note")
+                VStack(alignment: .leading, spacing: 12) {
+                    // ONB-05 illustrates the Trophy Wall; no item exists yet, so the
+                    // screen says so and shows no spinner or other live-work claim.
+                    Text(FirstValueOnboardingCopy.backgroundExampleCaption)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(
+                        Array(FirstValueOnboardingCopy.backgroundExampleRows.enumerated()),
+                        id: \.offset
+                    ) { index, row in
+                        workRow(backgroundExampleImages[index], row.item, row.state)
+                    }
                 }
             }
             HStack(spacing: 10) {
                 tile("camera.fill", "Scan the next one", "No waiting")
                 tile("trophy.fill", "Trophy Wall", "Finished listings")
             }
-            ScoutLine(screen: .onb05, reduceMotion: reduceMotion) {
+            ScoutLine(
+                screen: .onb05,
+                reduceMotion: reduceMotion,
+                usesStaticRendering: usesStaticScoutRendering
+            ) {
                 Text("Scout keeps working in the background.")
             }
         }
@@ -319,7 +350,11 @@ struct FirstValueOnboardingView: View {
                     }
                 }
             }
-            ScoutLine(screen: .onb06, reduceMotion: reduceMotion) {
+            ScoutLine(
+                screen: .onb06,
+                reduceMotion: reduceMotion,
+                usesStaticRendering: usesStaticScoutRendering
+            ) {
                 Text("No account needed, and you edit every field before anything leaves the app.")
             }
         }
@@ -355,7 +390,7 @@ struct FirstValueOnboardingView: View {
 
     private func finish(using action: () -> Void) {
         action()
-        if model.completionSignal != nil { didFinish() }
+        if let outcome = model.outcome { didFinish(outcome) }
     }
 
     private enum JacketCrop: Equatable { case whole, flaw, details }
@@ -431,6 +466,13 @@ struct FirstValueOnboardingView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private var backgroundExampleImages: [String] {
+        ["FirstValueJacket", "FirstValueLamp", "FirstValueSneaker"]
+    }
+
+    /// An illustrative Trophy Wall row. It carries no `ProgressView`, percentage, or any
+    /// other progress affordance: nothing is running while onboarding is on screen, and
+    /// SnapList never fabricates progress.
     private func workRow(_ image: String, _ title: String, _ status: String) -> some View {
         HStack(spacing: 10) {
             itemImage(image, label: title).frame(width: 44, height: 44)
@@ -440,7 +482,6 @@ struct FirstValueOnboardingView: View {
                 Text(status).font(.caption).foregroundStyle(SnapListColorToken.textSecondary.color)
             }
             Spacer()
-            ProgressView().controlSize(.small).accessibilityHidden(true)
         }
         .accessibilityElement(children: .combine)
     }
@@ -470,22 +511,29 @@ struct FirstValueOnboardingView: View {
 private struct ScoutLine<Content: View>: View {
     let screen: FirstValueOnboardingScreen
     let reduceMotion: Bool
+    let usesStaticRendering: Bool
     let content: Content
 
     init(
         screen: FirstValueOnboardingScreen,
         reduceMotion: Bool,
+        usesStaticRendering: Bool,
         @ViewBuilder content: () -> Content
     ) {
         self.screen = screen
         self.reduceMotion = reduceMotion
+        self.usesStaticRendering = usesStaticRendering
         self.content = content()
     }
 
     var body: some View {
         HStack(spacing: 0) {
-            FirstValueScoutView(screen: screen, reduceMotion: reduceMotion)
-                .padding(.leading, screen.scout.leadingPull)
+            FirstValueScoutView(
+                screen: screen,
+                reduceMotion: reduceMotion,
+                usesStaticRendering: usesStaticRendering
+            )
+            .padding(.leading, screen.scout.leadingPull)
             content
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
@@ -500,13 +548,17 @@ private struct ScoutLine<Content: View>: View {
 private struct FirstValueScoutView: View {
     let screen: FirstValueOnboardingScreen
     let reduceMotion: Bool
+    let usesStaticRendering: Bool
 
     var body: some View {
         Group {
-            switch screen.scoutMedia(reduceMotion: reduceMotion) {
-            case .acceptedWebM(let resource):
+            switch screen.scoutRendering(
+                reduceMotion: reduceMotion,
+                usesStaticRendering: usesStaticRendering
+            ) {
+            case .acceptedWebM(let url):
                 AcceptedScoutWebMView(
-                    resource: resource,
+                    url: url,
                     fallbackAsset: screen.scout.fallback
                 )
             case .staticFallbackPNG(let asset):
@@ -519,27 +571,14 @@ private struct FirstValueScoutView: View {
     }
 }
 
-#if DEBUG
+/// Plays one accepted Scout clip.
+///
+/// WebKit is resolved dynamically and only when this view is actually constructed, which
+/// `FirstValueOnboardingScreen.scoutRendering` decides. That keeps the framework out of
+/// processes that must not load it (the UI-test runner, via `--static-scout-rendering`)
+/// while leaving the seller-facing WebM path identical in Debug and Release.
 private struct AcceptedScoutWebMView: UIViewRepresentable {
-    let resource: String
-    let fallbackAsset: String
-
-    func makeUIView(context: Context) -> UIView {
-        // iOS 26.5 UI automation injects both WebCore and WebKit accessibility
-        // bundles when a Debug target references WebKit, then crashes later tests.
-        // Keep Debug deterministic on the package's exact accepted PNG; Release
-        // retains the accepted WebM path below for the seller-facing experience.
-        let fallback = UIImageView(image: UIImage(named: fallbackAsset))
-        fallback.contentMode = .scaleAspectFit
-        fallback.isAccessibilityElement = false
-        return fallback
-    }
-
-    func updateUIView(_ view: UIView, context: Context) {}
-}
-#else
-private struct AcceptedScoutWebMView: UIViewRepresentable {
-    let resource: String
+    let url: URL
     let fallbackAsset: String
 
     func makeUIView(context: Context) -> UIView {
@@ -565,14 +604,9 @@ private struct AcceptedScoutWebMView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UIView, context: Context) {
-        guard context.coordinator.loadedResource != resource,
-              let webView = context.coordinator.webView,
-              let url = Bundle.main.url(
-                forResource: resource,
-                withExtension: "webm",
-                subdirectory: "FirstValueOnboarding"
-              ) else { return }
-        context.coordinator.loadedResource = resource
+        guard context.coordinator.loadedResource != url,
+              let webView = context.coordinator.webView else { return }
+        context.coordinator.loadedResource = url
         let html = """
         <meta name='viewport' content='width=device-width,initial-scale=1'>
         <style>*{margin:0}html,body,video{width:100%;height:100%;background:transparent}video{object-fit:contain}</style>
@@ -598,7 +632,7 @@ private struct AcceptedScoutWebMView: UIViewRepresentable {
 
     final class Coordinator {
         weak var webView: UIView?
-        var loadedResource: String?
+        var loadedResource: URL?
     }
 }
 
@@ -654,7 +688,6 @@ private enum WebKitRuntime {
             && NSClassFromString("WKWebView") != nil
     }
 }
-#endif
 
 private struct SoldBandFixtureChart: View {
     private let samples: [CGFloat] = [85.1, 74.2, 79.6, 66.1, 71.5, 55.3, 63.4, 47.2, 58, 41.8, 49.9, 44.5]

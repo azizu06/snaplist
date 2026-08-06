@@ -94,8 +94,12 @@ struct SnapListApp: App {
         } else if configuration.visualState == nil && !configuration.usesZeroNetworkFixtures {
             onboardingModel.restorePersistedProgress()
         }
-        if onboardingModel.state.screen.hasCompletedLegacyIntro {
-            dependencies.firstValueOnboardingCompletionStore.markCompleted()
+        if onboardingModel.state.screen.hasCompletedLegacyIntro,
+           dependencies.firstValueOnboardingCompletionStore.outcome == nil {
+            // Restored progress already past the retired intro: the six screens were
+            // never shown, and the recorded outcome must not claim otherwise.
+            dependencies.firstValueOnboardingCompletionStore
+                .record(.supersededByExistingProgress)
         }
         let firstValueOnboardingModel = FirstValueOnboardingModel(
             screen: configuration.initialFirstValueOnboardingScreen,
@@ -186,7 +190,7 @@ struct SnapListApp: App {
                     async let homeLoad: Void = homeStore.load()
                     let restoration = await captureRestoration
                     if restoration == .stagedPhoto {
-                        firstValueOnboardingModel.reconcileRestoredCapture()
+                        firstValueOnboardingModel.reconcileExistingProgress()
                         onboardingModel
                             .beginPhotoPermissionAfterFirstValueOnboarding()
                     }

@@ -377,10 +377,21 @@ struct DeferredGuestAllowanceCapability: GuestAllowanceCapability {
     )
 }
 
+/// Durable storage for the onboarding completion contract issue #566 consumes.
+///
+/// The recorded value is the outcome, never a bare flag — see
+/// `FirstValueOnboardingOutcome`. An unrecognised stored value reads as `nil` rather
+/// than inventing an outcome, so a future package revision cannot make a seller look
+/// taught by accident.
 protocol FirstValueOnboardingCompletionPersisting: AnyObject {
-    var hasCompletedOnboarding: Bool { get }
-    func markCompleted()
+    /// `nil` until onboarding reaches a terminal outcome.
+    var outcome: FirstValueOnboardingOutcome? { get }
+    func record(_ outcome: FirstValueOnboardingOutcome)
     func clear()
+}
+
+extension FirstValueOnboardingCompletionPersisting {
+    var hasCompletedOnboarding: Bool { outcome != nil }
 }
 
 final class UserDefaultsFirstValueOnboardingCompletionStore:
@@ -391,18 +402,19 @@ final class UserDefaultsFirstValueOnboardingCompletionStore:
 
     init(
         defaults: UserDefaults = .standard,
-        key: String = "snaplist.first-value-onboarding.v1.completed"
+        key: String = "snaplist.first-value-onboarding.v1.outcome"
     ) {
         self.defaults = defaults
         self.key = key
     }
 
-    var hasCompletedOnboarding: Bool {
-        defaults.bool(forKey: key)
+    var outcome: FirstValueOnboardingOutcome? {
+        guard let rawValue = defaults.string(forKey: key) else { return nil }
+        return FirstValueOnboardingOutcome(rawValue: rawValue)
     }
 
-    func markCompleted() {
-        defaults.set(true, forKey: key)
+    func record(_ outcome: FirstValueOnboardingOutcome) {
+        defaults.set(outcome.rawValue, forKey: key)
     }
 
     func clear() {
@@ -413,14 +425,14 @@ final class UserDefaultsFirstValueOnboardingCompletionStore:
 final class InMemoryFirstValueOnboardingCompletionStore:
     FirstValueOnboardingCompletionPersisting
 {
-    private(set) var hasCompletedOnboarding = false
+    private(set) var outcome: FirstValueOnboardingOutcome?
 
-    func markCompleted() {
-        hasCompletedOnboarding = true
+    func record(_ outcome: FirstValueOnboardingOutcome) {
+        self.outcome = outcome
     }
 
     func clear() {
-        hasCompletedOnboarding = false
+        outcome = nil
     }
 }
 
