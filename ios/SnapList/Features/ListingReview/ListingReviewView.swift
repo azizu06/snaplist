@@ -32,6 +32,7 @@ struct ListingReviewView: View {
     let dismissReview: () -> Void
     let goToTrophyWall: () -> Void
     let startNewItem: () -> Void
+    let activationInteraction: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -340,6 +341,7 @@ struct ListingReviewView: View {
                 }
             } else {
                 Button {
+                    activationInteraction()
                     priceText = draft.sellerPriceOverride.map {
                         ListingReviewCurrency.string($0, locale: locale)
                     } ?? ""
@@ -513,6 +515,7 @@ struct ListingReviewView: View {
             identifier: "listing-review.\(destination.id)",
             pending: pending
         ) {
+            activationInteraction()
             returnFocus = focus
             self.destination = destination
         }

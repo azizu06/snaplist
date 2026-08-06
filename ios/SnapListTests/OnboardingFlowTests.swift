@@ -2,6 +2,108 @@ import XCTest
 @testable import SnapList
 
 final class OnboardingFlowTests: XCTestCase {
+    func testActivationPresentsForAnOnboardedSellerUntilCompletion() {
+        XCTAssertTrue(
+            ActivationPresentationPolicy.shouldPresent(
+                hasOnboarded: true,
+                hasCompletedActivation: false
+            )
+        )
+    }
+
+    func testActivationNeverPresentsBeforeOnboardingOrAfterCompletion() {
+        XCTAssertFalse(
+            ActivationPresentationPolicy.shouldPresent(
+                hasOnboarded: false,
+                hasCompletedActivation: false
+            )
+        )
+        XCTAssertFalse(
+            ActivationPresentationPolicy.shouldPresent(
+                hasOnboarded: true,
+                hasCompletedActivation: true
+            )
+        )
+        XCTAssertFalse(
+            ActivationPresentationPolicy.shouldPresent(
+                hasOnboarded: false,
+                hasCompletedActivation: true
+            )
+        )
+    }
+
+    func testActivationGuidanceAdvancesOnlyAtItsMatchingSurface() {
+        var progress = ActivationGuidanceProgress()
+
+        XCTAssertEqual(
+            ActivationCoachMark(
+                step: progress.step,
+                surface: .scan,
+                isResumed: false
+            ),
+            .act01
+        )
+        XCTAssertFalse(progress.advance(for: .gotIt))
+        XCTAssertNil(
+            ActivationCoachMark(
+                step: progress.step,
+                surface: .scan,
+                isResumed: false
+            )
+        )
+        XCTAssertEqual(
+            ActivationCoachMark(
+                step: progress.step,
+                surface: .photoReview,
+                isResumed: false
+            ),
+            .act02
+        )
+    }
+
+    func testActivationGuidanceCompletesOnlyAfterListingReviewGuidance() {
+        var progress = ActivationGuidanceProgress()
+
+        XCTAssertFalse(progress.advance(for: .gotIt))
+        XCTAssertFalse(progress.advance(for: .gotIt))
+        XCTAssertFalse(progress.advance(for: .gotIt))
+        XCTAssertFalse(progress.advance(for: .gotIt))
+        XCTAssertEqual(progress.step, .listingReview)
+        XCTAssertTrue(progress.advance(for: .gotIt))
+    }
+
+    func testActivationGuidanceAdvancesForUnderlyingActionsWithoutBlocking() {
+        var progress = ActivationGuidanceProgress()
+
+        XCTAssertFalse(progress.advance(for: .capturedFirstPhoto))
+        XCTAssertEqual(progress.step, .photoReview)
+
+        XCTAssertFalse(progress.advance(for: .reorderedPhotos))
+        XCTAssertEqual(progress.step, .voiceNote)
+
+        XCTAssertFalse(progress.advance(for: .openedVoiceNote))
+        XCTAssertEqual(progress.step, .trophyWall)
+
+        XCTAssertFalse(progress.advance(for: .openedProcessing))
+        XCTAssertEqual(progress.step, .listingReview)
+
+        XCTAssertTrue(progress.advance(for: .editedListing))
+    }
+
+    func testStartingListingBypassesOptionalVoiceGuidance() {
+        var progress = ActivationGuidanceProgress(step: .photoReview)
+
+        XCTAssertFalse(progress.advance(for: .startedListing))
+        XCTAssertEqual(progress.step, .trophyWall)
+    }
+
+    func testActivationGuidanceCanBeSkippedFromAnyStep() {
+        for step in ActivationGuidanceStep.allCases {
+            var progress = ActivationGuidanceProgress(step: step)
+            XCTAssertTrue(progress.advance(for: .skip))
+        }
+    }
+
     @MainActor
     func testAccountlessJourneyRetainsReversibleStateAndStopsAtCaptureBoundary() {
         let model = makeModel(camera: .authorized)

@@ -9,6 +9,10 @@ struct RunDetailView: View {
     let forceReducedMotion: Bool
     let goToTrophyWall: () -> Void
     let startNewItem: () -> Void
+    let activationProcessingOpened: () -> Void = {}
+    let activationListingReviewOpened: () -> Void = {}
+    let activationListingReviewDismissed: () -> Void = {}
+    let activationListingReviewInteraction: () -> Void = {}
     @State private var presentsListingReview = false
     @State private var isOpeningReview = false
     @State private var reviewOpenFailed = false
@@ -62,6 +66,14 @@ struct RunDetailView: View {
         .task(id: runID) {
             await store.load(runID: runID)
         }
+        .onAppear {
+            activationProcessingOpened()
+        }
+        .onChange(of: presentsListingReview) { _, isPresented in
+            if !isPresented {
+                activationListingReviewDismissed()
+            }
+        }
         .navigationDestination(isPresented: $presentsListingReview) {
             ListingReviewView(
                 store: listingReviewStore,
@@ -69,7 +81,8 @@ struct RunDetailView: View {
                 forceReducedMotion: forceReducedMotion,
                 dismissReview: dismissListingReview,
                 goToTrophyWall: goToTrophyWall,
-                startNewItem: startNewItem
+                startNewItem: startNewItem,
+                activationInteraction: activationListingReviewInteraction
             )
         }
     }
@@ -149,6 +162,7 @@ struct RunDetailView: View {
         isOpeningReview = false
         if opened {
             presentsListingReview = true
+            activationListingReviewOpened()
         } else {
             reviewOpenFailed = true
             ListingReviewAnnouncement.post(

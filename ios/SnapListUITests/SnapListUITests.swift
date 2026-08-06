@@ -25,6 +25,56 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["You"].exists)
     }
 
+    func testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch() {
+        let app = launch(extraArguments: [
+            "--activation-onboarded-fixture",
+            "--reset-activation-guidance",
+            "--visual-state=run-detail",
+            "--activation-guidance-step=listingReview",
+            "--listing-review-fixture=loaded"
+        ])
+
+        XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
+        app.buttons["run.review.open"].tap()
+        XCTAssertTrue(app.otherElements["activation-guidance"].waitForExistence(timeout: 3))
+        app.buttons["activation-guidance.got-it"].tap()
+        XCTAssertFalse(app.otherElements["activation-guidance"].exists)
+
+        app.terminate()
+        app.launchArguments = [
+            "--zero-network-fixtures",
+            "--activation-onboarded-fixture",
+            "--visual-state=run-detail",
+            "--listing-review-fixture=loaded"
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
+        app.buttons["run.review.open"].tap()
+        XCTAssertFalse(app.otherElements["activation-guidance"].waitForExistence(timeout: 1))
+    }
+
+    func testActivationSkipSuppressesTheCoachMarkAcrossRelaunch() {
+        let app = launch(extraArguments: [
+            "--activation-onboarded-fixture",
+            "--reset-activation-guidance"
+        ])
+
+        let guidance = app.otherElements["activation-guidance"]
+        XCTAssertTrue(guidance.waitForExistence(timeout: 2))
+        guidance.swipeDown()
+        XCTAssertFalse(guidance.waitForExistence(timeout: 2))
+
+        app.terminate()
+        app.launchArguments = [
+            "--zero-network-fixtures",
+            "--activation-onboarded-fixture"
+        ]
+        app.launch()
+
+        XCTAssertFalse(app.otherElements["activation-guidance"].waitForExistence(timeout: 1))
+    }
+
     func testCapturePresentsAndDismissesAnItemDrivenSheet() {
         let app = launch()
 

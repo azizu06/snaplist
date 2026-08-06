@@ -8,6 +8,7 @@ import {
   type ExportHandoffPackProjection,
 } from "@/lib/export/handoff";
 import type { ListingReviewReader } from "@/lib/listing-review";
+import type { ActivationGuidanceCompletionStore } from "@/lib/activation-guidance/store";
 import {
   ListingReviewIdempotencyConflictError,
   ListingReviewNotEditableError,
@@ -79,6 +80,7 @@ import {
   guestClaimEnvelopeSchema,
   revenueCatConfigurationEnvelopeSchema,
   sessionEnvelopeSchema,
+  activationGuidanceEnvelopeSchema,
   workerSummaryEnvelopeSchema,
   type ApiErrorCode,
   type EbayOauthSession,
@@ -130,6 +132,8 @@ export interface MobileApiDependencies {
    * the concrete verifier; request bodies never supply a user id.
    */
   authenticate(token: string): Promise<MobileApiPrincipal>;
+  /** #566 signed-in seller completion marker, read and written through RLS. */
+  activationGuidance?: ActivationGuidanceCompletionStore;
   /** #387 owns the tenant-bound, one-time mobile eBay Sandbox OAuth seam. */
   ebayOauth?: {
     createSession(input: {
@@ -364,6 +368,79 @@ export function createMobileApiHandler(
           401,
           "unauthorized",
           "Authentication is required.",
+        );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/activation-guidance`) {
+      if (request.method !== "GET" && request.method !== "POST") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      if (!dependencies.activationGuidance || principal.kind === "verifiedGuest") {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Activation guidance is temporarily unavailable.",
+        );
+      }
+      try {
+        if (request.method === "POST") {
+          await dependencies.activationGuidance.complete({
+            bearerToken: token,
+            userId: principal.userId,
+          });
+          return json(
+            activationGuidanceEnvelopeSchema.parse({
+              data: { completed: true },
+              meta: { requestId },
+            }),
+          );
+        }
+        return json(
+          activationGuidanceEnvelopeSchema.parse({
+            data: {
+              completed: await dependencies.activationGuidance.isCompleted({
+                bearerToken: token,
+                userId: principal.userId,
+              }),
+            },
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.activation-guidance", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Activation guidance is temporarily unavailable.",
         );
       }
     }

@@ -6,6 +6,8 @@ import UIKit
 protocol MobileAPIClient {
     func getHealth() async throws -> HealthEnvelope
     func getSession() async throws -> SessionEnvelope
+    func getActivationGuidance() async throws -> ActivationGuidanceEnvelope
+    func completeActivationGuidance() async throws -> ActivationGuidanceEnvelope
     func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope
     func getAiItemEntitlement() async throws -> AiItemEntitlementEnvelope
 }
@@ -42,6 +44,14 @@ struct URLSessionMobileAPIClient: MobileAPIClient {
 
     func getSession() async throws -> SessionEnvelope {
         try await sendAuthenticated(path: "/v1/session", method: "GET")
+    }
+
+    func getActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        try await sendAuthenticated(path: "/v1/activation-guidance", method: "GET")
+    }
+
+    func completeActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        try await sendAuthenticated(path: "/v1/activation-guidance", method: "POST")
     }
 
     func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope {
@@ -374,6 +384,25 @@ struct ZeroNetworkMobileAPIClient: MobileAPIClient, ContractOnlyFixtureProviding
             data: .init(userId: "fixture-clerk-user"),
             meta: .init(requestId: "fixture-session")
         )
+    }
+
+    func getActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        .init(
+            data: .init(
+                completed: UserDefaults.standard.bool(
+                    forKey: "snaplist.fixture-activation-guidance-completed"
+                )
+            ),
+            meta: .init(requestId: "fixture-activation-guidance")
+        )
+    }
+
+    func completeActivationGuidance() async throws -> ActivationGuidanceEnvelope {
+        UserDefaults.standard.set(
+            true,
+            forKey: "snaplist.fixture-activation-guidance-completed"
+        )
+        .init(data: .init(completed: true), meta: .init(requestId: "fixture-activation-guidance"))
     }
 
     func getRevenueCatConfiguration() async throws -> RevenueCatConfigurationEnvelope {
