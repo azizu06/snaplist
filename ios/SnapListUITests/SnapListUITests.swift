@@ -1759,6 +1759,42 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.buttons["scan.choose-library"].exists)
     }
 
+    func testActualOnboardingCaptureEntryPresentsACT01BeforeCameraOrLibrary() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=onboarding",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--reset-activation-guidance",
+            "--camera-status=authorized"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let start = app.buttons["button.primary.start-with-one-item"]
+        XCTAssertTrue(start.waitForExistence(timeout: 3))
+        start.tap()
+        let continueButton = app.buttons["button.primary.continue"]
+        XCTAssertTrue(continueButton.waitForExistence(timeout: 2))
+        continueButton.tap()
+        let useCamera = app.buttons["button.primary.use-camera"]
+        XCTAssertTrue(useCamera.waitForExistence(timeout: 2))
+        useCamera.tap()
+        let continueToCapture = app.buttons["button.primary.continue-to-capture"]
+        XCTAssertTrue(continueToCapture.waitForExistence(timeout: 2))
+        continueToCapture.tap()
+
+        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
+        XCTAssertTrue(app.buttons["capture.choose-library"].exists)
+        XCTAssertTrue(app.otherElements["activation-guidance"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["One item, up to five photos."].exists)
+
+        app.buttons["capture.take-one-item"].tap()
+        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["scan.choose-library"].exists)
+        XCTAssertTrue(app.otherElements["activation-guidance"].exists)
+    }
+
     func testCameraDeniedAndRestrictedUseLibraryRecovery() {
         for status in ["denied", "restricted"] {
             let app = launchOnboarding(state: "ONB-07", cameraStatus: status)

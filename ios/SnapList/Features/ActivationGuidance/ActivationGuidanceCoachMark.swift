@@ -76,12 +76,18 @@ struct ActivationGuidanceCoachMark: View {
 
     @ViewBuilder
     private var scout: some View {
-        if !reduceMotion, let resource = coachMark.motionResourceName {
-            ActivationScoutMotionView(resourceName: resource)
+        switch ActivationGuidanceAssetPolicy.selection(
+            for: coachMark.state,
+            reduceMotion: reduceMotion
+        ) {
+        case .none:
+            EmptyView()
+        case .motion(let resourceName):
+            ActivationScoutMotionView(resourceName: resourceName)
                 .frame(width: 56, height: 56)
                 .accessibilityHidden(true)
-        } else {
-            Image(coachMark.scoutImageName)
+        case .staticImage(let name):
+            Image(name)
                 .resizable()
                 .scaledToFit()
                 .frame(width: 56, height: 56)

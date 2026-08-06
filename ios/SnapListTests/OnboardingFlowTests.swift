@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import SnapList
 
@@ -32,76 +33,348 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
+    func testActivationGuidanceDeclaresTheFullApprovedEightStateSet() {
+        XCTAssertEqual(
+            ActivationGuidanceState.allCases.map(\.rawValue),
+            [
+                "ACT-01",
+                "ACT-02",
+                "ACT-02B",
+                "ACT-03",
+                "ACT-04",
+                "ACT-05",
+                "ACT-06",
+                "ACT-07",
+            ]
+        )
+    }
+
     func testActivationGuidanceAdvancesOnlyAtItsMatchingSurface() {
         var progress = ActivationGuidanceProgress()
 
         XCTAssertEqual(
             ActivationCoachMark(
-                step: progress.step,
-                surface: .scan,
-                isResumed: false
+                state: progress.state,
+                surface: .scan
             ),
             .act01
         )
-        XCTAssertFalse(progress.advance(for: .gotIt))
+        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
         XCTAssertNil(
             ActivationCoachMark(
-                step: progress.step,
-                surface: .scan,
-                isResumed: false
+                state: progress.state,
+                surface: .scan
             )
         )
         XCTAssertEqual(
             ActivationCoachMark(
-                step: progress.step,
-                surface: .photoReview,
-                isResumed: false
+                state: progress.state,
+                surface: .photoReview
             ),
             .act02
         )
     }
 
-    func testActivationGuidanceCompletesOnlyAfterListingReviewGuidance() {
+    func testActivationGuidanceTraversesEveryApprovedStateAndRecordsCompletion() {
         var progress = ActivationGuidanceProgress()
 
-        XCTAssertFalse(progress.advance(for: .gotIt))
-        XCTAssertFalse(progress.advance(for: .gotIt))
-        XCTAssertFalse(progress.advance(for: .gotIt))
-        XCTAssertFalse(progress.advance(for: .gotIt))
-        XCTAssertEqual(progress.step, .listingReview)
-        XCTAssertTrue(progress.advance(for: .gotIt))
+        XCTAssertEqual(progress.state, .act01)
+        XCTAssertEqual(progress.recordInterruption(), .advanced)
+        XCTAssertEqual(progress.state, .act06)
+        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
+        XCTAssertEqual(progress.state, .act02)
+        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
+        XCTAssertEqual(progress.state, .act02B)
+        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
+        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
+        XCTAssertEqual(progress.advance(for: .acceptedRunHandoff), .advanced)
+        XCTAssertEqual(progress.state, .act03)
+        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
+        XCTAssertEqual(progress.state, .act04)
+        XCTAssertEqual(progress.advance(for: .gotIt), .completionRequested)
+        XCTAssertEqual(progress.state, .act04)
+        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
+        XCTAssertTrue(progress.isCompletionPending)
+        XCTAssertEqual(progress.advance(for: .completionRecorded), .completionRecorded)
+        XCTAssertEqual(progress.state, .act05)
+        XCTAssertEqual(progress.advance(for: .recordedInstallLoaded), .completionRecorded)
+        XCTAssertEqual(progress.state, .act07)
     }
 
     func testActivationGuidanceAdvancesForUnderlyingActionsWithoutBlocking() {
         var progress = ActivationGuidanceProgress()
 
-        XCTAssertFalse(progress.advance(for: .capturedFirstPhoto))
-        XCTAssertEqual(progress.step, .photoReview)
+        XCTAssertEqual(progress.advance(for: .capturedFirstPhoto), .advanced)
+        XCTAssertEqual(progress.state, .act02)
 
-        XCTAssertFalse(progress.advance(for: .reorderedPhotos))
-        XCTAssertEqual(progress.step, .voiceNote)
+        XCTAssertEqual(progress.advance(for: .reorderedPhotos), .advanced)
+        XCTAssertEqual(progress.state, .act02B)
 
-        XCTAssertFalse(progress.advance(for: .openedVoiceNote))
-        XCTAssertEqual(progress.step, .trophyWall)
+        XCTAssertEqual(progress.advance(for: .openedVoiceNote), .advanced)
+        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
 
-        XCTAssertFalse(progress.advance(for: .openedProcessing))
-        XCTAssertEqual(progress.step, .listingReview)
+        XCTAssertEqual(progress.advance(for: .acceptedRunHandoff), .advanced)
+        XCTAssertEqual(progress.state, .act03)
 
-        XCTAssertTrue(progress.advance(for: .editedListing))
+        XCTAssertEqual(progress.advance(for: .openedProcessing), .advanced)
+        XCTAssertEqual(progress.state, .act04)
+
+        XCTAssertEqual(progress.advance(for: .editedListing), .completionRequested)
+        XCTAssertEqual(progress.state, .act04)
+        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
+        XCTAssertTrue(progress.isCompletionPending)
     }
 
-    func testStartingListingBypassesOptionalVoiceGuidance() {
-        var progress = ActivationGuidanceProgress(step: .photoReview)
+    func testOnlyDurableAcceptedRunHandoffAdvancesProcessingGuidance() {
+        let eventID = UUID()
+        let handoff = AcceptedItemRunHandoff(
+            idempotencyKey: UUID(),
+            acceptedRun: AcceptedItemRun(
+                runID: UUID(),
+                itemID: UUID(),
+                status: "queued",
+                stage: "accepted"
+            )
+        )
 
-        XCTAssertFalse(progress.advance(for: .startedListing))
-        XCTAssertEqual(progress.step, .trophyWall)
+        XCTAssertNil(
+            ActivationGuidanceSubmissionEventPolicy.action(
+                for: .submissionRejected(eventID: eventID, retention: .rejected)
+            )
+        )
+        XCTAssertNil(
+            ActivationGuidanceSubmissionEventPolicy.action(
+                for: .destinationHandoff(eventID: eventID, handoff: .pay01)
+            )
+        )
+        XCTAssertNil(
+            ActivationGuidanceSubmissionEventPolicy.action(
+                for: .submissionRejected(eventID: eventID, retention: .ambiguous)
+            )
+        )
+        XCTAssertEqual(
+            ActivationGuidanceSubmissionEventPolicy.action(
+                for: .itemSaved(eventID: eventID, handoff: handoff)
+            ),
+            .acceptedRunHandoff
+        )
     }
 
-    func testActivationGuidanceCanBeSkippedFromAnyStep() {
-        for step in ActivationGuidanceStep.allCases {
-            var progress = ActivationGuidanceProgress(step: step)
-            XCTAssertTrue(progress.advance(for: .skip))
+    func testActivationGuidanceCanBeSkippedFromEveryPresentingState() {
+        for state in ActivationGuidanceState.allCases where state.coachMark != nil {
+            var progress = ActivationGuidanceProgress(state: state)
+            XCTAssertEqual(progress.advance(for: .skip), .completionRequested)
+            XCTAssertEqual(progress.state, state)
+            XCTAssertTrue(progress.hasAcknowledgedCurrentState)
+            XCTAssertTrue(progress.isCompletionPending)
         }
+    }
+
+    func testInterruptedCompletionDoesNotReopenAnAcknowledgedACT01() {
+        var progress = ActivationGuidanceProgress(state: .act01)
+
+        XCTAssertEqual(progress.advance(for: .skip), .completionRequested)
+        XCTAssertEqual(progress.recordInterruption(), .unchanged)
+        XCTAssertEqual(progress.state, .act01)
+        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
+        XCTAssertTrue(progress.isCompletionPending)
+    }
+
+    @MainActor
+    func testActivationCompletionBootstrapSurvivesGuestRelaunch() async {
+        let suiteName = "activation-guidance-guest-relaunch-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let firstLaunchStore = UserDefaultsActivationGuidanceGuestCompletionStore(
+            defaults: defaults
+        )
+        firstLaunchStore.recordCompletion()
+        let relaunchStore = UserDefaultsActivationGuidanceGuestCompletionStore(
+            defaults: defaults
+        )
+        var tenantReads = 0
+        var tenantWrites = 0
+        let result = await ActivationCompletionBootstrapCoordinator.resolve(
+            guestCompleted: relaunchStore.isCompleted,
+            loadProgress: { _ in .init() },
+            fetchSessionUserID: {
+                throw BearerTokenProviderError.sessionAbsent
+            },
+            fetchTenantCompleted: {
+                tenantReads += 1
+                return false
+            },
+            writeTenantCompletion: {
+                tenantWrites += 1
+                return true
+            }
+        )
+
+        XCTAssertEqual(
+            result,
+            .completed(authentication: .guest, identity: "guest")
+        )
+        XCTAssertEqual(tenantReads, 0)
+        XCTAssertEqual(tenantWrites, 0)
+    }
+
+    @MainActor
+    func testActivationCompletionBootstrapDefersDuringAuthOutage() async {
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: NSError(
+                    domain: NSURLErrorDomain,
+                    code: NSURLErrorTimedOut
+                )
+            ),
+            .unknown
+        )
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: MobileAPIClientError.httpStatus(401)
+            ),
+            .unknown
+        )
+
+        let result = await ActivationCompletionBootstrapCoordinator.resolve(
+            guestCompleted: true,
+            loadProgress: { _ in .init() },
+            fetchSessionUserID: {
+                throw NSError(
+                    domain: NSURLErrorDomain,
+                    code: NSURLErrorTimedOut
+                )
+            },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: { true }
+        )
+        XCTAssertEqual(
+            result,
+            .retry(authentication: .unknown)
+        )
+    }
+
+    @MainActor
+    func testActivationCompletionBootstrapPromotesGuestMarkerAfterAccountCreation() async {
+        var tenantWrites = 0
+        let result = await ActivationCompletionBootstrapCoordinator.resolve(
+            guestCompleted: true,
+            loadProgress: { _ in .init() },
+            fetchSessionUserID: { "user_566" },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: {
+                tenantWrites += 1
+                return true
+            }
+        )
+
+        XCTAssertEqual(
+            result,
+            .completed(
+                authentication: .authenticated(userID: "user_566"),
+                identity: "user_566"
+            )
+        )
+        XCTAssertEqual(tenantWrites, 1)
+    }
+
+    @MainActor
+    func testActivationCompletionBootstrapUsesTenantMarkerAfterReinstall() async {
+        var tenantWrites = 0
+        let result = await ActivationCompletionBootstrapCoordinator.resolve(
+            guestCompleted: false,
+            loadProgress: { _ in .init() },
+            fetchSessionUserID: { "user_566" },
+            fetchTenantCompleted: { true },
+            writeTenantCompletion: {
+                tenantWrites += 1
+                return true
+            }
+        )
+
+        XCTAssertEqual(
+            result,
+            .completed(
+                authentication: .authenticated(userID: "user_566"),
+                identity: "user_566"
+            )
+        )
+        XCTAssertEqual(tenantWrites, 0)
+    }
+
+    @MainActor
+    func testActivationCompletionBootstrapResumesInterruptedTenantWriteOnRelaunch() async {
+        var pendingProgress = ActivationGuidanceProgress(state: .act04)
+        XCTAssertEqual(
+            pendingProgress.advance(for: .gotIt),
+            .completionRequested
+        )
+        var tenantWrites = 0
+
+        let result = await ActivationCompletionBootstrapCoordinator.resolve(
+            guestCompleted: false,
+            loadProgress: { _ in pendingProgress },
+            fetchSessionUserID: { "user_566" },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: {
+                tenantWrites += 1
+                return true
+            }
+        )
+
+        XCTAssertEqual(
+            result,
+            .completed(
+                authentication: .authenticated(userID: "user_566"),
+                identity: "user_566"
+            )
+        )
+        XCTAssertEqual(tenantWrites, 1)
+    }
+
+    @MainActor
+    func testCompletedGuestMarkerPromotesWhenAccountAppearsInSameSession() async {
+        var tenantWrites = 0
+        let result = await ActivationGuestCompletionPromotionCoordinator.attempt(
+            fetchSessionUserID: { "user_566" },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: {
+                tenantWrites += 1
+                return true
+            }
+        )
+
+        XCTAssertEqual(result, .promoted(userID: "user_566"))
+        XCTAssertEqual(tenantWrites, 1)
+    }
+
+    func testReducedMotionSelectsAnExplicitStaticAssetForEveryACTState() {
+        let expected: [ActivationGuidanceState: ActivationGuidanceAssetSelection] = [
+            .act01: .staticImage(name: "ActivationScoutACT01"),
+            .act02: .staticImage(name: "ActivationScoutACT02"),
+            .act02B: .staticImage(name: "ActivationScoutACT02B"),
+            .act03: .staticImage(name: "ActivationScoutACT03"),
+            .act04: .staticImage(name: "ActivationScoutACT04"),
+            .act05: .none,
+            .act06: .staticImage(name: "ActivationScoutACT06"),
+            .act07: .none,
+        ]
+
+        XCTAssertEqual(Set(expected.keys), Set(ActivationGuidanceState.allCases))
+        for state in ActivationGuidanceState.allCases {
+            XCTAssertEqual(
+                ActivationGuidanceAssetPolicy.selection(
+                    for: state,
+                    reduceMotion: true
+                ),
+                expected[state]
+            )
+        }
+        XCTAssertNotEqual(expected[.act01], expected[.act03])
+        XCTAssertEqual(
+            expected[.act06],
+            .staticImage(name: "ActivationScoutACT06")
+        )
     }
 
     @MainActor

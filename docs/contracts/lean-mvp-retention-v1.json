@@ -129,6 +129,18 @@
       }]
     },
     {
+      "id": "activation-guidance-completion",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["account-erasure"],
+        "maximumRetention": "for the account lifetime; deleted synchronously when account erasure begins",
+        "executor": "snaplist-account-erasure-activation-guidance-completion-trigger",
+        "completionProof": "the tenant activation_guidance_completions row is absent and the exhaustive account-erasure owned-row count includes the table"
+      }]
+    },
+    {
       "id": "ebay-drafts",
       "releaseDatum": true,
       "dispositions": [{

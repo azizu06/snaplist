@@ -29,11 +29,13 @@ struct AppShellView: View {
     @State private var handlingProGateEventID: UUID?
     @State private var activationCompletionChecked = false
     @State private var hasCompletedActivation = false
-    @State private var activationUserID: String?
+    @State private var activationAuthentication = ActivationAuthenticationState.unknown
     @State private var isCompletingActivation = false
     @State private var activationProgress = ActivationGuidanceProgress()
     @State private var activationListingReviewPresented = false
     private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
+    private let activationGuestCompletionStore =
+        UserDefaultsActivationGuidanceGuestCompletionStore()
 
     var body: some View {
         Group {
@@ -122,13 +124,8 @@ struct AppShellView: View {
                     // listing submits the committed NativeIntake snapshot: displayed
                     // photo order plus #541's optional recovered WAV under one key.
                     openBoundary: { event in
-                        switch event {
-                        case .startListing, .retryAmbiguousSubmission:
-                            advanceActivationGuidance(for: .startedListing)
-                        case .openVoiceNote:
+                        if event == .openVoiceNote {
                             advanceActivationGuidance(for: .openedVoiceNote)
-                        case .reviewSubmission, .reviewConflictedSubmission:
-                            break
                         }
                         if PhotoReviewSubmissionPrimaryActionConsumer.consume(
                             event,
@@ -170,15 +167,8 @@ struct AppShellView: View {
         }
         .modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
         .overlay(alignment: .bottom) {
-            if let coachMark = activationCoachMark {
-                ActivationGuidanceCoachMark(
-                    coachMark: coachMark,
-                    dismiss: dismissActivationGuidance,
-                    skip: skipActivationGuidance,
-                    isCompleting: isCompletingActivation
-                )
-                .padding(.horizontal, 18)
-                .padding(.bottom, activationBottomInset)
+            if router.presentedSheet == nil {
+                activationGuidanceOverlay
             }
         }
         .sheet(
@@ -251,6 +241,11 @@ struct AppShellView: View {
             of: submissionHost.pendingPresentationEvent,
             initial: true
         ) { _, event in
+            if let action = ActivationGuidanceSubmissionEventPolicy.action(
+                for: event
+            ) {
+                advanceActivationGuidance(for: action)
+            }
             guard case .destinationHandoff(
                 eventID: let eventID,
                 handoff: .pay01
@@ -264,29 +259,13 @@ struct AppShellView: View {
                     hasCompletedActivation: hasCompletedActivation
                   ),
                   !activationCompletionChecked else { return }
-            do {
-                let session = try await dependencies.mobileAPIClient.getSession()
-                activationUserID = session.data.userId
-                let serverCompleted = try await dependencies.mobileAPIClient
-                    .getActivationGuidance().data.completed
-                hasCompletedActivation = serverCompleted
-                activationProgress = configuration.activationGuidanceFixtureStep
-                    .map { ActivationGuidanceProgress(step: $0) }
-                    ?? activationProgressStore.load(for: activationIdentity)
-            } catch {
-                // A verified seller never falls back to device-local completion.
-                // Only an explicit unauthenticated response may use the guest key.
-                if let apiError = error as? MobileAPIClientError,
-                   apiError == .httpStatus(401) {
-                    hasCompletedActivation = UserDefaults.standard.bool(
-                        forKey: activationCompletionKey(userID: nil)
-                    )
-                    activationProgress = configuration.activationGuidanceFixtureStep
-                        .map { ActivationGuidanceProgress(step: $0) }
-                        ?? activationProgressStore.load(for: activationIdentity)
-                }
-            }
-            activationCompletionChecked = true
+            await bootstrapActivationCompletion()
+        }
+        .task(id: hasCompletedActivation) {
+            guard hasCompletedActivation,
+                  activationAuthentication == .guest,
+                  activationGuestCompletionStore.isCompleted else { return }
+            await promoteCompletedGuestMarkerWhenAuthenticated()
         }
         .onChange(of: photoReviewHost.isCommitting) { _, isCommitting in
             guard !isCommitting, awaitsCommittedEmptyDismissal else {
@@ -482,6 +461,9 @@ struct AppShellView: View {
                         pendingCapturePresentation = .stagedPhoto
                     }
                 )
+                .overlay(alignment: .bottom) {
+                    activationGuidanceOverlay
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -639,14 +621,22 @@ struct AppShellView: View {
 
     private var shouldPresentActivation: Bool {
         activationCompletionChecked
+            && activationAuthentication != .unknown
             && ActivationPresentationPolicy.shouldPresent(
                 hasOnboarded: onboardingModel.state.screen == .captureBoundary,
                 hasCompletedActivation: hasCompletedActivation
             )
     }
 
-    private var activationIdentity: String {
-        activationUserID ?? "guest"
+    private var activationIdentity: String? {
+        switch activationAuthentication {
+        case .guest:
+            "guest"
+        case .authenticated(let userID):
+            userID
+        case .unknown:
+            nil
+        }
     }
 
     private var activationSurface: ActivationGuidanceSurface? {
@@ -662,8 +652,9 @@ struct AppShellView: View {
             return .trophyWall
         }
         if router.selectedTab == .scan,
-           router.presentedSheet == nil,
-           router.presentedFullScreen == nil {
+           router.presentedSheet == nil || router.presentedSheet == .capture,
+           router.presentedFullScreen == nil
+                || router.presentedFullScreen == .guidedCamera {
             return .scan
         }
         return nil
@@ -671,12 +662,26 @@ struct AppShellView: View {
 
     private var activationCoachMark: ActivationCoachMark? {
         guard shouldPresentActivation,
+              !activationProgress.hasAcknowledgedCurrentState,
               let surface = activationSurface else { return nil }
         return ActivationCoachMark(
-            step: activationProgress.step,
-            surface: surface,
-            isResumed: activationProgress.wasInterrupted
+            state: activationProgress.state,
+            surface: surface
         )
+    }
+
+    @ViewBuilder
+    private var activationGuidanceOverlay: some View {
+        if let coachMark = activationCoachMark {
+            ActivationGuidanceCoachMark(
+                coachMark: coachMark,
+                dismiss: dismissActivationGuidance,
+                skip: skipActivationGuidance,
+                isCompleting: isCompletingActivation
+            )
+            .padding(.horizontal, 18)
+            .padding(.bottom, activationBottomInset)
+        }
     }
 
     private var activationBottomInset: CGFloat {
@@ -688,63 +693,155 @@ struct AppShellView: View {
         }
     }
 
-    private func activationCompletionKey(userID: String?) -> String {
-        let identity = userID ?? "guest"
-        return "snaplist.activation-guidance-completed-v1.\(identity)"
-    }
-
     private func dismissActivationGuidance() {
         advanceActivationGuidance(for: .gotIt)
     }
 
     private func skipActivationGuidance() {
         guard shouldPresentActivation else { return }
-        if activationProgress.advance(for: .skip) {
-            completeActivationGuidance()
-        }
+        advanceActivationGuidance(for: .skip)
     }
 
     private func advanceActivationGuidance(for action: ActivationGuidanceAction) {
         guard shouldPresentActivation else { return }
-        let previousStep = activationProgress.step
-        if activationProgress.advance(for: action) {
+        switch activationProgress.advance(for: action) {
+        case .completionRequested:
+            saveActivationProgress()
             completeActivationGuidance()
-            return
+        case .advanced, .completionRecorded:
+            saveActivationProgress()
+        case .unchanged:
+            break
         }
-        guard activationProgress.step != previousStep else { return }
-        activationProgressStore.save(activationProgress, for: activationIdentity)
     }
 
     private func completeActivationGuidance() {
-        if activationUserID == nil {
-            UserDefaults.standard.set(
-                true,
-                forKey: activationCompletionKey(userID: nil)
-            )
+        switch activationAuthentication {
+        case .guest:
+            activationGuestCompletionStore.recordCompletion()
+            _ = activationProgress.advance(for: .completionRecorded)
             hasCompletedActivation = true
-            activationProgressStore.clear(for: activationIdentity)
-            return
-        }
-        guard !isCompletingActivation else { return }
-        isCompletingActivation = true
-        Task {
-            defer { isCompletingActivation = false }
-            do {
-                guard try await dependencies.mobileAPIClient
-                    .completeActivationGuidance().data.completed else { return }
-                hasCompletedActivation = true
-                activationProgressStore.clear(for: activationIdentity)
-            } catch {
-                // Keep the coach mark available. A signed-in seller's completed
-                // state is the RLS row, never an unacknowledged local write.
+            activationProgressStore.clear(for: "guest")
+        case .authenticated(let userID):
+            guard !isCompletingActivation else { return }
+            isCompletingActivation = true
+            Task {
+                defer { isCompletingActivation = false }
+                while !Task.isCancelled {
+                    do {
+                        guard try await dependencies.mobileAPIClient
+                            .completeActivationGuidance().data.completed else {
+                            try await Task.sleep(for: .seconds(2))
+                            continue
+                        }
+                        _ = activationProgress.advance(for: .completionRecorded)
+                        hasCompletedActivation = true
+                        activationProgressStore.clear(for: userID)
+                        return
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        try? await Task.sleep(for: .seconds(2))
+                    }
+                }
             }
+        case .unknown:
+            break
         }
     }
 
     private func recordActivationInterruptionIfNeeded() {
-        guard shouldPresentActivation else { return }
-        activationProgress.wasInterrupted = true
-        activationProgressStore.save(activationProgress, for: activationIdentity)
+        guard shouldPresentActivation,
+              activationProgress.recordInterruption() == .advanced else { return }
+        saveActivationProgress()
+    }
+
+    private func saveActivationProgress() {
+        guard let activationIdentity else { return }
+        activationProgressStore.save(
+            activationProgress,
+            for: activationIdentity
+        )
+    }
+
+    private func bootstrapActivationCompletion() async {
+        while !Task.isCancelled {
+            guard onboardingModel.state.screen == .captureBoundary,
+                  !hasCompletedActivation else { return }
+
+            let guestCompleted = activationGuestCompletionStore.isCompleted
+            let result = await ActivationCompletionBootstrapCoordinator.resolve(
+                guestCompleted: guestCompleted,
+                loadProgress: { identity in
+                    configuration.activationGuidanceFixtureState
+                        .map { ActivationGuidanceProgress(state: $0) }
+                        ?? activationProgressStore.load(for: identity)
+                },
+                fetchSessionUserID: {
+                    let session = try await dependencies.mobileAPIClient.getSession()
+                    return session.data.userId
+                },
+                fetchTenantCompleted: {
+                    try await dependencies.mobileAPIClient
+                        .getActivationGuidance().data.completed
+                },
+                writeTenantCompletion: {
+                    try await dependencies.mobileAPIClient
+                        .completeActivationGuidance().data.completed
+                }
+            )
+
+            switch result {
+            case .present(let authentication, _, let progress):
+                activationAuthentication = authentication
+                hasCompletedActivation = false
+                activationProgress = progress
+                activationCompletionChecked = true
+                return
+            case .completed(let authentication, let identity):
+                activationAuthentication = authentication
+                hasCompletedActivation = true
+                activationProgress = .recordedInstall
+                activationProgressStore.clear(for: identity)
+                activationCompletionChecked = true
+                return
+            case .retry(let authentication):
+                activationAuthentication = authentication
+                activationCompletionChecked = false
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
+    private func promoteCompletedGuestMarkerWhenAuthenticated() async {
+        while !Task.isCancelled,
+              activationAuthentication == .guest,
+              activationGuestCompletionStore.isCompleted {
+            let result = await ActivationGuestCompletionPromotionCoordinator
+                .attempt(
+                    fetchSessionUserID: {
+                        let session = try await dependencies.mobileAPIClient.getSession()
+                        return session.data.userId
+                    },
+                    fetchTenantCompleted: {
+                        try await dependencies.mobileAPIClient
+                            .getActivationGuidance().data.completed
+                    },
+                    writeTenantCompletion: {
+                        try await dependencies.mobileAPIClient
+                            .completeActivationGuidance().data.completed
+                    }
+                )
+            switch result {
+            case .promoted(let userID):
+                activationAuthentication = .authenticated(userID: userID)
+                activationProgressStore.clear(for: "guest")
+                activationProgressStore.clear(for: userID)
+                return
+            case .waitingForSession, .retry:
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 
     private var onboardingCaptureRouteID: OnboardingCaptureRouteID {

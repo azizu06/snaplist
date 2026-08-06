@@ -103,6 +103,7 @@ describe("lean-MVP release retention contract", () => {
       "seller-voice-transcript",
       "items",
       "user-settings",
+      "activation-guidance-completion",
       "ebay-drafts",
       "export-packs",
       "pipeline-runs",
@@ -125,6 +126,30 @@ describe("lean-MVP release retention contract", () => {
       "account-erasure-receipt",
       "waitlist-email",
     ]);
+  });
+
+  it("defines the activation guidance completion deletion disposition", () => {
+    const completion = contract.data.find(
+      ({ id }) => id === "activation-guidance-completion",
+    );
+
+    expect(completion).toEqual({
+      id: "activation-guidance-completion",
+      releaseDatum: true,
+      dispositions: [
+        {
+          treatment: "delete",
+          owner: "seller-snaplist-tenant",
+          deletionTriggers: ["account-erasure"],
+          maximumRetention:
+            "for the account lifetime; deleted synchronously when account erasure begins",
+          executor:
+            "snaplist-account-erasure-activation-guidance-completion-trigger",
+          completionProof:
+            "the tenant activation_guidance_completions row is absent and the exhaustive account-erasure owned-row count includes the table",
+        },
+      ],
+    });
   });
 
   it("defines one bounded waitlist-email disposition", () => {

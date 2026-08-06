@@ -238,7 +238,7 @@ struct LaunchConfiguration: Equatable {
     var resetOnboardingProgress: Bool
     var activationOnboardedFixture: Bool
     var resetActivationGuidance: Bool
-    var activationGuidanceFixtureStep: ActivationGuidanceStep?
+    var activationGuidanceFixtureState: ActivationGuidanceState?
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
     var submissionFixture: SubmissionFixture?
@@ -262,7 +262,7 @@ struct LaunchConfiguration: Equatable {
         resetOnboardingProgress: false,
         activationOnboardedFixture: false,
         resetActivationGuidance: false,
-        activationGuidanceFixtureStep: nil,
+        activationGuidanceFixtureState: nil,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
@@ -286,7 +286,7 @@ struct LaunchConfiguration: Equatable {
         resetOnboardingProgress: false,
         activationOnboardedFixture: false,
         resetActivationGuidance: false,
-        activationGuidanceFixtureStep: nil,
+        activationGuidanceFixtureState: nil,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
@@ -320,8 +320,8 @@ struct LaunchConfiguration: Equatable {
                 let value = String(
                     argument.dropFirst("--activation-guidance-step=".count)
                 )
-                configuration.activationGuidanceFixtureStep =
-                    ActivationGuidanceStep(rawValue: value)
+                configuration.activationGuidanceFixtureState =
+                    ActivationGuidanceState(fixtureValue: value)
                 configuration.usesZeroNetworkFixtures = true
             } else if argument.hasPrefix("--fixture-staged-library-photos=") {
                 let value = String(
