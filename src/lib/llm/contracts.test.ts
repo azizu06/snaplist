@@ -59,30 +59,25 @@ function productionTypeScriptFiles(directory: string): string[] {
   });
 }
 
-function generateObjectCallSites(projectRoot: string): string[] {
-  return productionTypeScriptFiles(path.join(projectRoot, "src"))
-    .flatMap((file) => {
-      const source = readFileSync(file, "utf8");
-      const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, false);
-      const relativePath = path.relative(projectRoot, file).split(path.sep).join("/");
-      const callSites: string[] = [];
-      const visit = (node: ts.Node): void => {
-        if (
-          ts.isCallExpression(node) &&
-          ts.isIdentifier(node.expression) &&
-          node.expression.text === "generateObject"
-        ) {
-          const { line } = sourceFile.getLineAndCharacterOfPosition(
-            node.expression.getStart(sourceFile),
-          );
-          callSites.push(`${relativePath}:${line + 1}`);
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(sourceFile);
-      return callSites;
-    })
-    .sort();
+function generateObjectCallSiteCounts(projectRoot: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const file of productionTypeScriptFiles(path.join(projectRoot, "src"))) {
+    const source = readFileSync(file, "utf8");
+    const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, false);
+    const relativePath = path.relative(projectRoot, file).split(path.sep).join("/");
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "generateObject"
+      ) {
+        counts.set(relativePath, (counts.get(relativePath) ?? 0) + 1);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  return counts;
 }
 
 function isNode(value: unknown): value is JsonSchemaNode {
@@ -222,12 +217,14 @@ describe("every model-facing schema compiles to OpenAI-acceptable JSON Schema (#
     });
   }
 
-  it("registers every production generateObject call site", () => {
+  it("registers every production generateObject call-site file and count", () => {
     // Source discovery makes an unregistered new call fail this test. It proves
     // call-site coverage, not that an entry names the schema the call actually uses.
-    const registered = MODEL_FACING_SCHEMAS.map((entry) => entry.callSite).sort();
-    expect(new Set(registered).size).toBe(registered.length);
-    expect(generateObjectCallSites(process.cwd())).toEqual(registered);
+    const registeredCounts = new Map<string, number>();
+    for (const { callSite } of MODEL_FACING_SCHEMAS) {
+      registeredCounts.set(callSite, (registeredCounts.get(callSite) ?? 0) + 1);
+    }
+    expect(generateObjectCallSiteCounts(process.cwd())).toEqual(registeredCounts);
   });
 
   it("flags a Zod record — the construct that broke production", () => {

@@ -42,7 +42,7 @@ export interface ModelFacingSchema {
   role: LlmRole;
   /** The exact schema handed to `generateObject`. */
   schema: z.ZodType;
-  /** `path:line` of the `generateObject` call, so a failure names the caller. */
+  /** Source file holding this `generateObject` call. */
   callSite: string;
   /** True for the schema this role's recorded fixtures are captured against. */
   fixture?: true;
@@ -52,45 +52,45 @@ export const MODEL_FACING_SCHEMAS: readonly ModelFacingSchema[] = [
   {
     role: "vision",
     schema: visionResponseSchema,
-    callSite: "src/lib/vision/extract.ts:344",
+    callSite: "src/lib/vision/extract.ts",
     fixture: true,
   },
   {
     role: "vision",
     schema: measurementResponseSchema,
-    callSite: "src/lib/vision/measurements.ts:647",
+    callSite: "src/lib/vision/measurements.ts",
   },
   {
     role: "listing",
     schema: ebayListingRawSchema,
-    callSite: "src/lib/listing/generate.ts:626",
+    callSite: "src/lib/listing/generate.ts",
     fixture: true,
   },
   {
     role: "export",
     schema: rawExportPacksSchema,
-    callSite: "src/lib/export/generate.ts:842",
+    callSite: "src/lib/export/generate.ts",
   },
   {
     role: "pricingAgent",
     schema: webCompListSchema,
-    callSite: "src/lib/pricing/providers/web-search.ts:331",
+    callSite: "src/lib/pricing/providers/web-search.ts",
     fixture: true,
   },
   {
     role: "pricingAgent",
     schema: retailFindingListSchema,
-    callSite: "src/lib/pricing/providers/depreciation.ts:232",
+    callSite: "src/lib/pricing/providers/depreciation.ts",
   },
   {
     role: "pricingAgent",
     schema: llmPriceEstimateSchema,
-    callSite: "src/lib/pricing/providers/llm-only.ts:103",
+    callSite: "src/lib/pricing/providers/llm-only.ts",
   },
   {
     role: "judge",
     schema: judgeScoresSchema,
-    callSite: "src/lib/eval/judge.ts:195",
+    callSite: "src/lib/eval/judge.ts",
     fixture: true,
   },
 ];
