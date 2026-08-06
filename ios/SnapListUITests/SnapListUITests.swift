@@ -2,7 +2,27 @@ import CoreFoundation
 import XCTest
 import UIKit
 
+private extension XCUIApplication.State {
+    /// `XCUIApplication.State` has no readable description, so a lifecycle wait
+    /// that fails can only name the state it wanted, never the one it saw.
+    var reportedName: String {
+        switch self {
+        case .unknown: return "unknown"
+        case .notRunning: return "notRunning"
+        case .runningBackgroundSuspended: return "runningBackgroundSuspended"
+        case .runningBackground: return "runningBackground"
+        case .runningForeground: return "runningForeground"
+        @unknown default: return "unrecognized(\(rawValue))"
+        }
+    }
+}
+
 final class SnapListUITests: XCTestCase {
+    /// Bounds a hung Settings handoff. The wait is driven by Settings' observable
+    /// lifecycle state, so this budget only has to exceed the worst contended
+    /// simulator fleet, not a typical transition (#702).
+    private let settingsBackgroundingTimeout: TimeInterval = 30
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
@@ -2088,9 +2108,23 @@ final class SnapListUITests: XCTestCase {
             } else if state == "settings-handoff" {
                 XCUIDevice.shared.press(.home)
                 if let settings {
+                    // A single fixed 3s budget on one expected state lost this
+                    // handoff whenever two iOS runs shared the simulator fleet
+                    // (#702). Poll Settings' own lifecycle state through the
+                    // same seam the termination boundary uses: it returns as
+                    // soon as Settings is observed out of the foreground, in
+                    // any of the states that means, and the failure names both
+                    // the states waited for and the one still observed.
                     XCTAssertTrue(
-                        settings.wait(for: .runningBackground, timeout: 3),
-                        "Settings did not leave foreground after settings-handoff"
+                        settings.waitUntilSafeToTerminate(
+                            timeout: settingsBackgroundingTimeout
+                        ),
+                        """
+                        Settings did not leave the foreground after \
+                        settings-handoff: waited \(Int(settingsBackgroundingTimeout))s \
+                        for runningBackground, runningBackgroundSuspended, or \
+                        notRunning and still observed \(settings.state.reportedName)
+                        """
                     )
                 } else {
                     XCTFail("Settings lifecycle proxy was not retained")
