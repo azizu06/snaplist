@@ -212,15 +212,22 @@ describe.runIf(DATABASE_URL)("account erasure fence coverage", () => {
         "select public.begin_account_erasure($1, $2::uuid)",
         [lateUserID, lateIdempotencyKey],
       );
-      const lateCompletion = writer.query(
-        "insert into public.activation_guidance_completions (user_id) values ($1)",
-        [lateUserID],
-      );
+      // Settle the outcome as the query is issued. The insert rejects the
+      // instant the eraser commits and releases the advisory lock, which is
+      // two awaits before this test reads it. A handler attached only at that
+      // point arrives after Node has already reported an unhandled rejection,
+      // failing the whole run while the assertion below still passes.
+      const lateCompletion = writer
+        .query(
+          "insert into public.activation_guidance_completions (user_id) values ($1)",
+          [lateUserID],
+        )
+        .then(() => undefined, (error: unknown) => error);
       await expect(
         waitsOnAdvisoryLock(database, writerBackend.pid),
       ).resolves.toBe(true);
       await eraser.query("commit");
-      await expect(lateCompletion).rejects.toThrow(
+      expect(String(await lateCompletion)).toMatch(
         /retry after account erasure serialization/,
       );
 
