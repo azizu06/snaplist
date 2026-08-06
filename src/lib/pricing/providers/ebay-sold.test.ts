@@ -23,6 +23,7 @@ import {
   type FetchPage,
 } from "./ebay-sold";
 import { createApifySoldPricingProvider } from "./apify-sold";
+import { withProviderUsageRun } from "../../provider-usage";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
 import {
   SOLD_HALFLIFE_DAYS_DEFAULT,
@@ -3027,5 +3028,33 @@ describe("verified sold finalization is identical across retrieval adapters (#36
       "https://www.ebay.com/itm/e",
     ]);
     expect(finalizedFacts(apify!)).toEqual(finalizedFacts(publicPage!));
+  });
+});
+
+/**
+ * The public-page sold-comp strategy measures what it retrieved (#716,
+ * acceptance criterion 3). It reports no charge: eBay does not bill us for a
+ * page fetch, and `null` says "unmetered" rather than claiming the retrieval
+ * was free of cost to measure.
+ */
+describe("ebay-sold provider usage recording (#716)", () => {
+  it("records the retrieved candidate count for a public-page retrieval", async () => {
+    const { usage } = await withProviderUsageRun(() =>
+      createEbaySoldPricingProvider({
+        fetchPage: fakeFetch(MODERN_FIXTURE_HTML),
+      }).price(BRANDED_SIGNAL),
+    );
+
+    // The first page is bounded to the ten candidates the PRD retrieves before
+    // any expansion, and the fixture carries more parseable sold cards than
+    // that, so a full page comes back and no expansion fires.
+    expect(usage.soldComps).toEqual([
+      {
+        strategy: "ebay-sold",
+        attempts: 1,
+        results: 10,
+        chargedUsd: null,
+      },
+    ]);
   });
 });

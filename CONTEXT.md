@@ -82,6 +82,13 @@ destination; Facebook Marketplace, Mercari, and Depop receive honest **export pa
   `lastMeaningfulUpdateAt`, which may advance as truthful processing state changes.
 - **Pipeline queue envelope** — internal `{ run_id, schema_version }` wake-up data. It contains no
   photo URL, tenant claim, secret, seller copy, or authorization. It is never seller-facing.
+- **Provider usage record** — the tenant-owned measurement of what one pipeline run consumed at paid
+  providers: token counts keyed by model role, the model id the registry actually resolved, and
+  sold-comp retrieval counts with any charge the firing strategy reported for its own run. Counts and
+  counts only — converting them to dollars is a reporting concern and never enters the pipeline. It
+  carries no prompt, response, secret, or seller content, and failing to record it never fails a run.
+  It is the measured input the SnapList Pro allowance is set from; it is not an entitlement,
+  accounting, or billing surface.
 - **AI-item credit** — one logical entitlement reservation for one complete run. Reserve before
   provider work, settle once at usable draft, and restore once on failure/cancel before that point.
   Internal retries, recovery, queue redelivery, and the included guided correction reuse it.

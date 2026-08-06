@@ -262,6 +262,78 @@ describe("run-scoped pipeline worker store", () => {
     expect(wire).not.toContain("\\ud800");
   });
 
+  it("sends the run's measured provider usage through a lease-fenced RPC", async () => {
+    const client = rpcClient({ record_pipeline_run_provider_usage: true });
+    const store = createSupabasePipelineWorkerStore(client);
+
+    await store.recordProviderUsage({
+      runId: RUN_ID,
+      leaseToken: LEASE_TOKEN,
+      usage: {
+        schemaVersion: 1,
+        modelCalls: 1,
+        inputTokens: 1_200,
+        cachedInputTokens: 640,
+        outputTokens: 300,
+        reasoningTokens: 64,
+        models: [
+          {
+            role: "vision",
+            provider: "openai",
+            model: "resolved-vision-model",
+            calls: 1,
+            inputTokens: 1_200,
+            cachedInputTokens: 640,
+            outputTokens: 300,
+            reasoningTokens: 64,
+          },
+        ],
+        soldComps: [
+          { strategy: "apify", attempts: 1, results: 9, chargedUsd: 0.0247 },
+        ],
+      },
+    });
+
+    expect(client.rpc).toHaveBeenCalledWith(
+      "record_pipeline_run_provider_usage",
+      expect.objectContaining({
+        p_run_id: RUN_ID,
+        p_lease_token: LEASE_TOKEN,
+      }),
+    );
+    // No tenant identity crosses the wire: the RPC reads it off the leased run.
+    const [, args] = client.rpc.mock.calls[0] as [string, Record<string, unknown>];
+    expect(Object.keys(args).sort()).toEqual([
+      "p_lease_token",
+      "p_run_id",
+      "p_usage",
+    ]);
+  });
+
+  it("refuses to send a usage payload carrying anything but counts", async () => {
+    const store = createSupabasePipelineWorkerStore(
+      rpcClient({ record_pipeline_run_provider_usage: true }),
+    );
+
+    await expect(
+      store.recordProviderUsage({
+        runId: RUN_ID,
+        leaseToken: LEASE_TOKEN,
+        usage: {
+          schemaVersion: 1,
+          modelCalls: 1,
+          inputTokens: 10,
+          cachedInputTokens: 0,
+          outputTokens: 2,
+          reasoningTokens: 0,
+          models: [],
+          soldComps: [],
+          prompt: "Grandmother's 1968 Seiko",
+        },
+      } as unknown as Parameters<typeof store.recordProviderUsage>[0]),
+    ).rejects.toThrow();
+  });
+
   it("uses lease-fenced failure and message-rejection RPCs", async () => {
     const client = rpcClient({
       finish_pipeline_run_attempt: {

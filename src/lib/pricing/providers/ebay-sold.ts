@@ -17,6 +17,7 @@ import {
 } from "../freshness";
 import type { TtlCache } from "../comp-cache";
 import { logEvent, type LogFields } from "../../observability";
+import { recordSoldCompUsage } from "../../provider-usage";
 import {
   buildEbaySoldProxyRequestUrl,
   resolveEbaySoldEgressConfig,
@@ -1636,6 +1637,11 @@ function createEbaySoldPricingProviderInternal(
     if (combined.length < EBAY_SOLD_MIN_COMPS) {
       emitDiagnostic("pricing.ebay_sold.declined_thin", { compsFound: combined.length });
     }
+    // One retrieval, however many requests it took (#716). Recorded here rather
+    // than at the provider's `price` boundary so a cache hit — which costs
+    // nothing — is not counted as a retrieval. eBay does not bill for a page
+    // fetch, so no charge is reported.
+    recordSoldCompUsage({ strategy: "ebay-sold", results: combined.length });
     return combined;
   }
 

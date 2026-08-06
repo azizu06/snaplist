@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { GuestRecoveryRegistrationProducer } from "@/lib/guest-recovery/producer";
 import type { PipelineResult } from "@/lib/pipeline";
 import { PIPELINE_OPERATIONS_POLICY } from "@/lib/pipeline-operations/policy";
+import { withProviderUsageRun } from "@/lib/provider-usage";
 import { pipelineQueueEnvelopeSchema } from "./envelope";
 import type { PipelineQueue } from "./queue";
 import type {
@@ -29,7 +30,11 @@ export class PipelineWorkerFailure extends Error {
   readonly safeMessage: string;
   readonly retryable: boolean;
 
-  constructor(input: { code: string; safeMessage: string; retryable: boolean }) {
+  constructor(input: {
+    code: string;
+    safeMessage: string;
+    retryable: boolean;
+  }) {
     super(input.safeMessage);
     this.name = "PipelineWorkerFailure";
     this.code = input.code;
@@ -40,18 +45,30 @@ export class PipelineWorkerFailure extends Error {
 
 const optionsSchema = z
   .object({
-    batchSize: z.number().int().min(1).max(10).default(
-      PIPELINE_OPERATIONS_POLICY.worker.batchSize,
-    ),
-    visibilityTimeoutSeconds: z.number().int().min(1).max(3_600).default(
-      PIPELINE_OPERATIONS_POLICY.worker.visibilityTimeoutSeconds,
-    ),
-    retryBaseSeconds: z.number().int().min(1).max(3_600).default(
-      PIPELINE_OPERATIONS_POLICY.worker.retryBaseSeconds,
-    ),
-    retryMaxSeconds: z.number().int().min(1).max(3_600).default(
-      PIPELINE_OPERATIONS_POLICY.worker.retryMaxSeconds,
-    ),
+    batchSize: z
+      .number()
+      .int()
+      .min(1)
+      .max(10)
+      .default(PIPELINE_OPERATIONS_POLICY.worker.batchSize),
+    visibilityTimeoutSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(3_600)
+      .default(PIPELINE_OPERATIONS_POLICY.worker.visibilityTimeoutSeconds),
+    retryBaseSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(3_600)
+      .default(PIPELINE_OPERATIONS_POLICY.worker.retryBaseSeconds),
+    retryMaxSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(3_600)
+      .default(PIPELINE_OPERATIONS_POLICY.worker.retryMaxSeconds),
   })
   .strict();
 
@@ -81,12 +98,17 @@ function classifyFailure(error: unknown): PipelineWorkerFailure {
   }
   return new PipelineWorkerFailure({
     code: "pipeline_temporarily_unavailable",
-    safeMessage: "SnapList could not finish this listing yet and will retry automatically.",
+    safeMessage:
+      "SnapList could not finish this listing yet and will retry automatically.",
     retryable: true,
   });
 }
 
-function retryDelay(attemptCount: number, base: number, maximum: number): number {
+function retryDelay(
+  attemptCount: number,
+  base: number,
+  maximum: number,
+): number {
   return Math.min(maximum, base * 2 ** Math.max(0, attemptCount - 1));
 }
 
@@ -151,23 +173,41 @@ export async function consumePipelineQueue(
     const { context } = acquisition;
     let completed = false;
     try {
-      const result = await dependencies.processor.process({
-        context,
-        onCheckpoint: async (stage, checkpoint) => {
-          const persisted = await dependencies.runs.checkpoint({
-            runId: context.run.id,
-            leaseToken: context.run.lease_token,
-            stage,
-            checkpoint,
-            leaseSeconds: config.visibilityTimeoutSeconds,
-          });
-          await dependencies.queue.defer(
-            message.id,
-            config.visibilityTimeoutSeconds,
-          );
-          return persisted;
-        },
-      });
+      const { value: result, usage } = await withProviderUsageRun(() =>
+        dependencies.processor.process({
+          context,
+          onCheckpoint: async (stage, checkpoint) => {
+            const persisted = await dependencies.runs.checkpoint({
+              runId: context.run.id,
+              leaseToken: context.run.lease_token,
+              stage,
+              checkpoint,
+              leaseSeconds: config.visibilityTimeoutSeconds,
+            });
+            await dependencies.queue.defer(
+              message.id,
+              config.visibilityTimeoutSeconds,
+            );
+            return persisted;
+          },
+        }),
+      );
+      // Cost telemetry (#716), written while the attempt's lease is still live
+      // — completion clears it. Never allowed to fail the attempt: a listing the
+      // seller already paid for cannot be lost to a bookkeeping insert, so the
+      // failure is logged and the run proceeds to completion.
+      try {
+        await dependencies.runs.recordProviderUsage({
+          runId: context.run.id,
+          leaseToken: context.run.lease_token,
+          usage,
+        });
+      } catch (usageError) {
+        console.error(
+          `[pipeline.worker.provider_usage] run ${context.run.id}`,
+          usageError,
+        );
+      }
       const guestRecoveryRegistration = dependencies.guestRecovery
         ? await dependencies.guestRecovery.prepare({
             context,

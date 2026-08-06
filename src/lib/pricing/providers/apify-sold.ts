@@ -14,6 +14,7 @@ import {
   type PricingProvider,
 } from "../types";
 import { logEvent, type LogFields } from "../../observability";
+import { recordSoldCompUsage } from "../../provider-usage";
 import {
   buildSoldSearchQuery,
   canonicalEbayItemUrl,
@@ -223,6 +224,13 @@ export interface ApifySoldRunRequest {
 export interface ApifySoldRunResult {
   status: string;
   items: readonly Record<string, unknown>[];
+  /**
+   * What the Actor itself reported charging for this run (#716). Optional
+   * because it is the PROVIDER's report, not a figure derived from a rate we
+   * hold: an Actor that reports nothing leaves the charge unknown rather than
+   * zero, and the cost record keeps that distinction.
+   */
+  chargedTotalUsd?: number;
 }
 
 /** Injectable zero-network seam used by adapter/router tests. */
@@ -461,7 +469,7 @@ export function createDefaultApifySoldActorRunner(token: string): RunApifySoldAc
       log: null,
     });
     if (run.status !== "SUCCEEDED" || !run.defaultDatasetId) {
-      return { status: run.status, items: [] };
+      return { status: run.status, items: [], chargedTotalUsd: run.usageTotalUsd };
     }
     const readClient = new ApifyClient({
       token,
@@ -476,7 +484,7 @@ export function createDefaultApifySoldActorRunner(token: string): RunApifySoldAc
       (item): item is Record<string, unknown> =>
         Boolean(item) && typeof item === "object" && !Array.isArray(item),
     );
-    return { status: run.status, items };
+    return { status: run.status, items, chargedTotalUsd: run.usageTotalUsd };
   };
 }
 
@@ -1120,6 +1128,14 @@ export function createApifySoldPricingProvider(
         return null;
       }
       const result = actorResult;
+      // Recorded before the non-success branch (#716): a paid Actor run that
+      // returned nothing still cost money, and a cost record that only counts
+      // successes would understate the tier's real price.
+      recordSoldCompUsage({
+        strategy: "apify",
+        results: result.items.length,
+        chargedUsd: result.chargedTotalUsd,
+      });
       if (result.status !== "SUCCEEDED") {
         recordFailure(boundedStatus(result.status));
         return null;

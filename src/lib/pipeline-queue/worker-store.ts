@@ -5,6 +5,8 @@ import {
   pipelineResultSchema,
   type PipelineResult,
 } from "@/lib/pipeline";
+import { providerUsageRecordSchema } from "@/lib/provider-usage/schema";
+import type { ProviderUsageRecord } from "@/lib/provider-usage";
 import {
   pipelineWorkerCheckpointSchema,
   pipelineWorkerCheckpointWriteSchema,
@@ -107,7 +109,8 @@ type PipelineWorkerRpcName =
   | "stage_guest_recovery_upload_cleanup"
   | "complete_pipeline_run_with_guest_recovery"
   | "finish_pipeline_run_attempt"
-  | "reject_pipeline_message";
+  | "reject_pipeline_message"
+  | "record_pipeline_run_provider_usage";
 
 interface PipelineWorkerRpcResult {
   data: unknown;
@@ -147,6 +150,16 @@ export interface PipelineWorkerStore {
     autopilotEnabled: boolean;
     guestRecoveryRegistration?: z.infer<typeof recoveryRegistrationSchema> | null;
   }): Promise<{ listingId: string }>;
+  /**
+   * Persist what the attempt spent at paid providers (#716). Run-scoped and
+   * lease-authenticated like every other worker write, so ownership is derived
+   * from the stored run rather than asserted by the caller.
+   */
+  recordProviderUsage(input: {
+    runId: string;
+    leaseToken: string;
+    usage: ProviderUsageRecord;
+  }): Promise<void>;
   failAttempt(input: {
     runId: string;
     leaseToken: string;
@@ -265,6 +278,23 @@ export function createSupabasePipelineWorkerStore(
         .object({ listingId: z.string().uuid() })
         .strict()
         .parse(rpcData("completion", result));
+    },
+
+    async recordProviderUsage(input) {
+      const parsed = z
+        .object({
+          runId: z.string().uuid(),
+          leaseToken: z.string().uuid(),
+          usage: providerUsageRecordSchema,
+        })
+        .strict()
+        .parse(input);
+      const result = await client.rpc("record_pipeline_run_provider_usage", {
+        p_lease_token: parsed.leaseToken,
+        p_run_id: parsed.runId,
+        p_usage: parsed.usage,
+      });
+      rpcData("provider usage recording", result);
     },
 
     async failAttempt(input) {

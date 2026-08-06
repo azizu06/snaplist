@@ -239,6 +239,7 @@ src/lib/llm/contracts.ts
 src/lib/llm/index.ts
 src/lib/llm/registry.ts
 src/lib/llm/seller-context.ts
+src/lib/llm/usage-recording.ts
 src/lib/marketplace/ebay/auth.ts
 src/lib/marketplace/ebay/connections.ts
 src/lib/marketplace/ebay/deletion.ts
@@ -347,6 +348,10 @@ src/lib/pricing/router.ts
 src/lib/pricing/sold-comp-matcher.ts
 src/lib/pricing/sold-comps-smoke.ts
 src/lib/pricing/types.ts
+src/lib/provider-usage/collector.ts
+src/lib/provider-usage/index.ts
+src/lib/provider-usage/record.ts
+src/lib/provider-usage/schema.ts
 src/lib/public-origin.ts
 src/lib/rag/corpus-data.ts
 src/lib/rag/embedding.ts
@@ -488,6 +493,7 @@ supabase/migrations/20260805170000_hosted_server_api_guard.sql
 supabase/migrations/20260805200000_server_rpc_forwarded_secret.sql
 supabase/migrations/20260805210000_activation_guidance_completion.sql
 supabase/migrations/20260806120000_ebay_photo_access_tokens.sql
+supabase/migrations/20260806140000_pipeline_run_provider_usage.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

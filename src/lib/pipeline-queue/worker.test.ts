@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { recordModelUsage, recordSoldCompUsage } from "../provider-usage";
 import type { PipelineResult } from "@/lib/pipeline";
 import type { PipelineQueue } from "./queue";
 import { createDatabaseCheckpointClock } from "./checkpoint-clock.testing";
@@ -117,6 +118,7 @@ function storeWith(
     complete: vi.fn(async () => ({ listingId: "66666666-6666-4666-8666-666666666666" })),
     failAttempt: vi.fn(async () => failure),
     rejectMessage: vi.fn(async () => true),
+    recordProviderUsage: vi.fn(async () => undefined),
   } as unknown as PipelineWorkerStore & Record<string, ReturnType<typeof vi.fn>>;
 }
 
@@ -375,5 +377,97 @@ describe("durable pipeline queue consumer", () => {
       ),
     ).rejects.toThrow();
     expect(queue.claim).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The run's measured provider cost is persisted alongside the run (#716,
+ * acceptance criteria 2 and 5).
+ *
+ * Tested at the consumer, because the two facts that matter are both about
+ * ordering and failure, not about arithmetic: the write happens while the
+ * attempt's lease is still valid, and no outcome of that write can cost the
+ * seller their listing.
+ */
+describe("durable pipeline queue consumer provider usage", () => {
+  /** A processor that spends provider budget the way a real run does. */
+  function spendingProcessor(): DurablePipelineProcessor {
+    return {
+      process: vi.fn(async () => {
+        recordModelUsage({
+          role: "vision",
+          provider: "openai",
+          model: "resolved-vision-model",
+          inputTokens: 1_500,
+          outputTokens: 200,
+        });
+        recordSoldCompUsage({ strategy: "apify", results: 7, chargedUsd: 0.02 });
+        return RESULT;
+      }),
+    };
+  }
+
+  it("persists what the run spent before the run is completed", async () => {
+    const store = storeWith() as ReturnType<typeof storeWith> &
+      Record<"recordProviderUsage" | "complete", ReturnType<typeof vi.fn>>;
+    const summary = await consumePipelineQueue({
+      queue: queueWith(),
+      runs: store,
+      processor: spendingProcessor(),
+    });
+
+    expect(summary.succeeded).toBe(1);
+    expect(store.recordProviderUsage).toHaveBeenCalledWith({
+      runId: RUN_ID,
+      leaseToken: "33333333-3333-4333-8333-333333333333",
+      usage: {
+        schemaVersion: 1,
+        modelCalls: 1,
+        inputTokens: 1_500,
+        cachedInputTokens: 0,
+        outputTokens: 200,
+        reasoningTokens: 0,
+        models: [
+          {
+            role: "vision",
+            provider: "openai",
+            model: "resolved-vision-model",
+            calls: 1,
+            inputTokens: 1_500,
+            cachedInputTokens: 0,
+            outputTokens: 200,
+            reasoningTokens: 0,
+          },
+        ],
+        soldComps: [
+          { strategy: "apify", attempts: 1, results: 7, chargedUsd: 0.02 },
+        ],
+      },
+    });
+    // The lease the write authenticates with is cleared by completion, so the
+    // write has to land first.
+    expect(store.recordProviderUsage.mock.invocationCallOrder[0]).toBeLessThan(
+      store.complete.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("completes the run even when the usage write throws", async () => {
+    const store = storeWith() as ReturnType<typeof storeWith> &
+      Record<"recordProviderUsage", ReturnType<typeof vi.fn>>;
+    store.recordProviderUsage.mockRejectedValue(
+      new Error("provider usage insert failed"),
+    );
+    const queue = queueWith();
+
+    const summary = await consumePipelineQueue({
+      queue,
+      runs: store,
+      processor: spendingProcessor(),
+    });
+
+    expect(summary).toMatchObject({ succeeded: 1, failed: 0, retrying: 0 });
+    expect(store.complete).toHaveBeenCalledTimes(1);
+    expect(store.failAttempt).not.toHaveBeenCalled();
+    expect(queue.ack).toHaveBeenCalledWith("41");
   });
 });
