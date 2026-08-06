@@ -173,10 +173,10 @@ struct SnapListApp: App {
                 captureFlow: captureFlow,
                 homeStore: homeStore,
                 trophyWallStore: trophyWallStore,
-                trophyWallHistoryRepository: trophyWallHistoryRepository,
                 runStore: runStore,
                 listingReviewStore: listingReviewStore,
                 submissionHost: submissionHost,
+                trophyWallHistoryRepository: trophyWallHistoryRepository,
                 configuration: configuration
             )
                 .environment(\.appDependencies, dependencies)
