@@ -546,6 +546,8 @@ struct AppDependencies {
     let contractFixtureProvider: any ContractOnlyFixtureProviding
     let cameraAuthorization: any CameraAuthorizationProviding
     let onboardingProgressStore: any OnboardingProgressPersisting
+    let firstValueOnboardingCompletionStore:
+        any FirstValueOnboardingCompletionPersisting
     let stagedLibraryPhotos: any StagedLibraryPhotoPersisting
     let guestAllowance: any GuestAllowanceCapability
     let captureCamera: any CaptureCamera
@@ -613,6 +615,8 @@ struct AppDependencies {
                 contractFixtureProvider: client,
                 cameraAuthorization: cameraAuthorization,
                 onboardingProgressStore: InMemoryOnboardingProgressStore(),
+                firstValueOnboardingCompletionStore:
+                    UserDefaultsFirstValueOnboardingCompletionStore(),
                 stagedLibraryPhotos: InMemoryStagedLibraryPhotoStore(),
                 guestAllowance: DeferredGuestAllowanceCapability(),
                 captureCamera: captureCamera,
@@ -658,6 +662,8 @@ struct AppDependencies {
             contractFixtureProvider: ZeroNetworkMobileAPIClient(),
             cameraAuthorization: cameraAuthorization,
             onboardingProgressStore: UserDefaultsOnboardingProgressStore(),
+            firstValueOnboardingCompletionStore:
+                UserDefaultsFirstValueOnboardingCompletionStore(),
             stagedLibraryPhotos: FileSystemStagedLibraryPhotoStore(),
             guestAllowance: DeferredGuestAllowanceCapability(),
             captureCamera: captureCamera,

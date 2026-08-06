@@ -20,6 +20,9 @@ const handler = createMobileItemSubmissionHandler({
   // photos-only until the operator deliberately enables this after that gate.
   acceptVoiceContext: () =>
     process.env.MOBILE_VOICE_SUBMISSION_ENABLED?.trim().toLowerCase() === "true",
+  reportError(context, error) {
+    console.error(`[${context}]`, error);
+  },
   itemSubmission: {
     async resolvePrincipal(bearerToken) {
       if (bearerToken.startsWith("guestcap_")) {

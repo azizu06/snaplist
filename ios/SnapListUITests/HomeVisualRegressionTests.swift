@@ -162,7 +162,16 @@ extension XCUIApplication {
     ///
     /// A retirement that cannot be verified is not fatal: the launch is still
     /// issued, leaving behaviour no worse than an unguarded `launch()`.
+    ///
+    /// Every UI-test launch also opts the Scout illustration out of WebKit. iOS 26.5
+    /// automation injects the WebCore/WebKit accessibility bundles the moment a
+    /// `WKWebView` exists and then crashes later tests in the same shard, so the runner
+    /// renders the accepted clips' static fallbacks. Debug and Release builds still ship
+    /// the accepted WebM; `OnboardingFlowTests` covers that path at the pure seam.
     func launchAfterRetiringPriorInstance() {
+        if !launchArguments.contains("--static-scout-rendering") {
+            launchArguments.append("--static-scout-rendering")
+        }
         UILaunchBoundary().launch(self) { self.launch() }
     }
 }

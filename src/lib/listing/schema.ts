@@ -56,6 +56,24 @@ export const ebayListingSchema = z.object({
 export type EbayListing = z.infer<typeof ebayListingSchema>;
 
 /**
+ * One model-emitted eBay item specific. The MODEL-FACING representation is an ordered
+ * LIST of name→value pairs rather than a dictionary: `generateObject` compiles the
+ * supplied Zod schema to JSON Schema, a Zod `record` compiles to `propertyNames`, and
+ * OpenAI structured outputs reject that construct outright — which took down every
+ * production run on `LLM_PROVIDER=openai` (issue #691). A list of fixed-key objects is
+ * expressible in every provider's structured-output dialect. `itemSpecificsFromPairs`
+ * converts back to the name→value record everything downstream consumes.
+ */
+export const ebayItemSpecificSchema = z.object({
+  /** The specific's name, e.g. "Brand". */
+  name: z.string(),
+  /** The specific's value, e.g. "Sony". */
+  value: z.string(),
+});
+
+export type EbayItemSpecific = z.infer<typeof ebayItemSpecificSchema>;
+
+/**
  * PERMISSIVE schema handed to `generateObject` on the real path. It relaxes exactly
  * the two DETERMINISTICALLY-REPAIRABLE constraints — the title length cap and the
  * "≥ 1 item specific" rule — so the model's output is ACCEPTED by the SDK (which
@@ -67,9 +85,48 @@ export type EbayListing = z.infer<typeof ebayListingSchema>;
  */
 export const ebayListingRawSchema = z.object({
   title: z.string().min(1, "eBay title is required"),
-  itemSpecifics: z.record(z.string(), z.string()),
+  itemSpecifics: z.array(ebayItemSpecificSchema),
   description: z.string().min(1, "eBay description is required"),
   tags: z.array(z.string()),
 });
 
 export type RawEbayListing = z.infer<typeof ebayListingRawSchema>;
+
+/** Normalized comparison key for a specific's name: case- and padding-insensitive. */
+function specificNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/**
+ * Convert the model's ORDERED pair list into the name→value record every consumer
+ * downstream expects (`ebayListingSchema`, the repair/whitelist step, eBay mapping,
+ * mobile publish, the listing-review read path).
+ *
+ * COLLISION RULE — a list can carry two entries under one name; a record cannot:
+ *  - names are compared trimmed and case-insensitively;
+ *  - the FIRST occurrence wins, so a later duplicate can neither overwrite an earlier,
+ *    better-grounded value nor be silently concatenated onto it;
+ *  - the retained key is the first occurrence's TRIMMED name, so a padded variant
+ *    cannot shadow the clean one;
+ *  - an entry whose name is blank is dropped rather than creating an empty key.
+ */
+export function itemSpecificsFromPairs(
+  pairs: readonly EbayItemSpecific[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const { name, value } of pairs) {
+    const key = specificNameKey(name);
+    if (key === "" || seen.has(key)) continue;
+    seen.add(key);
+    out[name.trim()] = value;
+  }
+  return out;
+}
+
+/** Convert a name→value record back into the model-facing ordered pair list. */
+export function itemSpecificsToPairs(
+  specifics: Record<string, string>,
+): EbayItemSpecific[] {
+  return Object.entries(specifics).map(([name, value]) => ({ name, value }));
+}

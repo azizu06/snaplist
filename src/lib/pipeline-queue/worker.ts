@@ -190,6 +190,7 @@ export async function consumePipelineQueue(
       });
       completed = true;
     } catch (error) {
+      console.error(`[pipeline.worker.attempt] run ${context.run.id}`, error);
       const failure = classifyFailure(error);
       const backoff = retryDelay(
         context.run.attempt_count,

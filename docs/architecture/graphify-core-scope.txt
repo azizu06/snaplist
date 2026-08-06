@@ -90,6 +90,7 @@ ios/SnapList/Features/ListingReview/ListingReviewModels.swift
 ios/SnapList/Features/ListingReview/ListingReviewStore.swift
 ios/SnapList/Features/ListingReview/ListingReviewView.swift
 ios/SnapList/Features/ListingReview/SoldMatchDetailView.swift
+ios/SnapList/Features/Onboarding/FirstValueOnboardingView.swift
 ios/SnapList/Features/Onboarding/OnboardingCapabilities.swift
 ios/SnapList/Features/Onboarding/OnboardingDomain.swift
 ios/SnapList/Features/Onboarding/OnboardingFlowView.swift
