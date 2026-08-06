@@ -34,6 +34,18 @@ const messageIds = new Set<string>();
 // cannot pin. So read the stack's clock instead and refuse to start a
 // minute-sensitive sequence in a minute with too little left (#702).
 const CAPACITY_MINUTE_HEADROOM_SECONDS = 10;
+const STACK_CLOCK_PROBE_TIMEOUT_MS = 5_000;
+// Probes, so at most two waits to a minute boundary.
+const CAPACITY_MINUTE_GUARD_PROBES = 3;
+const CAPACITY_MINUTE_GUARD_MAX_WAIT_MS =
+  CAPACITY_MINUTE_GUARD_PROBES * STACK_CLOCK_PROBE_TIMEOUT_MS +
+  (CAPACITY_MINUTE_GUARD_PROBES - 1) *
+    ((CAPACITY_MINUTE_HEADROOM_SECONDS + 1) * 1_000);
+// The guard legitimately waits out a low-headroom minute before the test's
+// first RPC, which the default 5s per-test budget cannot cover. Derive the
+// test's budget from the guard's own bound so the two cannot drift apart.
+const CAPACITY_MINUTE_TEST_TIMEOUT_MS =
+  CAPACITY_MINUTE_GUARD_MAX_WAIT_MS + 20_000;
 
 async function stackSecondsRemainingInMinute(): Promise<number> {
   // Every response from the local stack carries an RFC 9110 `Date` header, and
@@ -41,7 +53,7 @@ async function stackSecondsRemainingInMinute(): Promise<number> {
   // same endpoint the suite's reachability probe uses.
   const response = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
     headers: ANON_KEY ? { apikey: ANON_KEY } : undefined,
-    signal: AbortSignal.timeout(5_000),
+    signal: AbortSignal.timeout(STACK_CLOCK_PROBE_TIMEOUT_MS),
   });
   const header = response.headers.get("date");
   const stackNow = new Date(header ?? Number.NaN);
@@ -56,16 +68,21 @@ async function stackSecondsRemainingInMinute(): Promise<number> {
 }
 
 async function awaitCapacityMinuteWithHeadroom(): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const remaining = await stackSecondsRemainingInMinute();
+  let remaining = 0;
+  for (let probe = 0; probe < CAPACITY_MINUTE_GUARD_PROBES; probe += 1) {
+    remaining = await stackSecondsRemainingInMinute();
     if (remaining >= CAPACITY_MINUTE_HEADROOM_SECONDS) return;
     await new Promise((resolve) =>
       setTimeout(resolve, (remaining + 1) * 1_000 + 250),
     );
   }
+  // Say what was waited for and what the clock last reported, so exhausting the
+  // guard reads as a stack-clock problem rather than an opaque test timeout.
   throw new Error(
-    "The Supabase stack clock never reported a per-minute capacity window with " +
-      `${CAPACITY_MINUTE_HEADROOM_SECONDS}s of headroom`,
+    `Waited for a per-minute capacity window with ` +
+      `${CAPACITY_MINUTE_HEADROOM_SECONDS}s of headroom across ` +
+      `${CAPACITY_MINUTE_GUARD_PROBES} probes; the Supabase stack clock last ` +
+      `reported ${remaining}s left in the minute`,
   );
 }
 
@@ -459,5 +476,5 @@ describe("durable pipeline staging RPC and RLS", () => {
       legacyArgs,
     );
     expect(sellerCall.error).not.toBeNull();
-  });
+  }, CAPACITY_MINUTE_TEST_TIMEOUT_MS);
 });
