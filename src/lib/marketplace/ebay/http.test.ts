@@ -246,7 +246,7 @@ describe("HttpEbayAdapter.publishListing", () => {
     expect(calls[2]!.init.method).toBe("POST");
   });
 
-  it("sends the bearer token and the required Content-Language header", async () => {
+  it("sends the required language and marketplace headers on every publish write", async () => {
     const { fetch, calls } = fakeFetch((url) => {
       if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
       if (url.endsWith("/offer")) return json(201, { offerId: "o" });
@@ -255,14 +255,23 @@ describe("HttpEbayAdapter.publishListing", () => {
     const adapter = new HttpEbayAdapter({ fetch, tokenProvider, env: () => sellerEnv });
     await adapter.publishListing(request);
 
-    for (const call of calls) {
-      const headers = call.init.headers as Record<string, string>;
-      expect(headers.authorization).toBe("Bearer test-access-token");
-      expect(headers["content-language"]).toBe("en-US");
+    const requiredHeaders = {
+      authorization: "Bearer test-access-token",
+      "content-language": "en-US",
+      "accept-language": "en-US",
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    };
+    const publishWrites = [
+      ["inventory_item PUT", calls[0]!],
+      ["offer POST", calls[1]!],
+      ["offer publish POST", calls[2]!],
+    ] as const;
+    for (const [operation, call] of publishWrites) {
+      expect(call.init.headers, operation).toMatchObject(requiredHeaders);
     }
   });
 
-  it("derives Content-Language from the request marketplace (and honors the override)", async () => {
+  it("derives language headers from the request marketplace (and honors the override)", async () => {
     const respond = (url: string) => {
       if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
       if (url.endsWith("/offer")) return json(201, { offerId: "o" });
@@ -277,7 +286,9 @@ describe("HttpEbayAdapter.publishListing", () => {
       env: () => sellerEnv,
     }).publishListing({ ...request, marketplaceId: "EBAY_DE" });
     for (const call of de.calls) {
-      expect((call.init.headers as Record<string, string>)["content-language"]).toBe("de-DE");
+      const headers = call.init.headers as Record<string, string>;
+      expect(headers["content-language"]).toBe("de-DE");
+      expect(headers["accept-language"]).toBe("de-DE");
     }
 
     // Explicit override for multi-language marketplaces (EBAY_BE defaults fr-BE).
@@ -291,7 +302,9 @@ describe("HttpEbayAdapter.publishListing", () => {
       }),
     }).publishListing({ ...request, marketplaceId: "EBAY_BE" });
     for (const call of be.calls) {
-      expect((call.init.headers as Record<string, string>)["content-language"]).toBe("nl-BE");
+      const headers = call.init.headers as Record<string, string>;
+      expect(headers["content-language"]).toBe("nl-BE");
+      expect(headers["accept-language"]).toBe("nl-BE");
     }
   });
 
@@ -409,6 +422,11 @@ describe("HttpEbayAdapter.publishListing", () => {
     // The recovered offer's update-in-place carries the required duration too.
     const updateBody = JSON.parse(String(calls[3]!.init.body));
     expect(updateBody.listingDuration).toBe("GTC");
+    expect(
+      (calls[2]!.init.headers as Record<string, string>)[
+        "X-EBAY-C-MARKETPLACE-ID"
+      ],
+    ).toBe("EBAY_US");
   });
 
   it("returns the live listingId — WITHOUT republishing — when the recovered offer is already PUBLISHED", async () => {
