@@ -801,6 +801,179 @@ private struct HomeHowItWorksStep: View {
     }
 }
 
+// MARK: - Trophy Wall
+
+struct TrophyWallView: View {
+    @Bindable var store: TrophyWallStore
+    let openProcessing: () -> Void
+    let openAccount: () -> Void
+    let onScan: () -> Void
+
+    @ScaledMetric(relativeTo: .title) private var titleSize = 28
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("Trophy Wall")
+                    .font(.system(size: titleSize, weight: .bold))
+                    .tracking(-0.5)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .accessibilityAddTraits(.isHeader)
+
+                Spacer(minLength: 0)
+
+                Button(action: openProcessing) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 21, weight: .medium))
+                        .frame(
+                            width: SnapListMetrics.minimumTouchTarget,
+                            height: SnapListMetrics.minimumTouchTarget
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .accessibilityLabel("Processing")
+                .accessibilityIdentifier("trophy.wall.processing")
+
+                Button(action: openAccount) {
+                    Text("A")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        .frame(width: 36, height: 36)
+                        .background(SnapListColorToken.hairline.color)
+                        .clipShape(.circle)
+                        .frame(
+                            width: SnapListMetrics.minimumTouchTarget,
+                            height: SnapListMetrics.minimumTouchTarget
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Account, opens Settings")
+                .accessibilityIdentifier("trophy.wall.account")
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 14)
+            .padding(.bottom, 12)
+
+            wallBody
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(SnapListColorToken.canvas.color)
+        .accessibilityIdentifier("trophy.wall")
+    }
+
+    @ViewBuilder
+    private var wallBody: some View {
+        if store.settledTiles.isEmpty {
+            if store.collectionOutcome == .loaded {
+                TrophyWallEmptyView(onScan: onScan)
+            } else {
+                Color.clear
+            }
+        } else {
+            ScrollView {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12),
+                    ],
+                    spacing: 12
+                ) {
+                    ForEach(store.settledTiles) { tile in
+                        TrophyWallSettledTileView(tile: tile)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(
+                    .bottom,
+                    SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset + 48
+                )
+            }
+            .scrollIndicators(.hidden)
+            .accessibilityIdentifier("trophy.wall.grid")
+        }
+    }
+}
+
+private struct TrophyWallSettledTileView: View {
+    let tile: TrophyWallSettledTile
+
+    var body: some View {
+        ZStack {
+            SnapListColorToken.quietFill.color
+            if let coverPhotoURL = tile.coverPhotoURL {
+                AsyncImage(url: coverPhotoURL) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    fallback
+                }
+            } else {
+                fallback
+            }
+        }
+        .aspectRatio(4 / 5, contentMode: .fit)
+        .clipShape(.rect(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(tile.itemName), \(tile.stateLabel).")
+        .accessibilityAddTraits(.isImage)
+    }
+
+    private var fallback: some View {
+        Text(tile.itemName)
+            .snapListTypography(.status)
+            .fontWeight(.semibold)
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .multilineTextAlignment(.center)
+            .padding(12)
+    }
+}
+
+private struct TrophyWallEmptyView: View {
+    let onScan: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image("ScoutUncertain")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 150)
+                .accessibilityLabel("Scout, the SnapList camera helper")
+
+            Text("No items yet")
+                .snapListTypography(.cardTitle)
+                .fontWeight(.bold)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .multilineTextAlignment(.center)
+
+            Button(action: onScan) {
+                Text("Scan an item")
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.canvas.color)
+                    .padding(.horizontal, 28)
+                    .frame(minHeight: 52)
+                    .background(SnapListColorToken.action.color)
+                    .clipShape(.rect(cornerRadius: 14))
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("trophy.wall.scan")
+        }
+        .padding(.horizontal, 34)
+        .padding(.bottom, 104)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("trophy.wall.empty")
+    }
+}
+
 // MARK: - Trophy Wall Processing
 
 struct TrophyWallProcessingView: View {
@@ -1278,6 +1451,8 @@ struct HomeRouteBoundaryView: View {
 private extension HomeRoute {
     var identifier: String {
         switch self {
+        case .processing: "processing"
+        case .localRecovery: "local-recovery"
         case .run: "run"
         case .order: "order"
         case .conversation: "conversation"
@@ -1291,6 +1466,8 @@ private extension HomeRoute {
 
     var title: String {
         switch self {
+        case .processing: "Processing"
+        case .localRecovery: "Local item"
         case .run: "Run"
         case .order: "Order"
         case .conversation: "Conversation"
@@ -1304,6 +1481,8 @@ private extension HomeRoute {
 
     var systemImage: String {
         switch self {
+        case .processing: "clock"
+        case .localRecovery: "camera.viewfinder"
         case .run: "sparkles"
         case .order, .orders: "shippingbox"
         case .conversation: "bubble.left.and.bubble.right"

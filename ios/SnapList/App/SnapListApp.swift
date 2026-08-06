@@ -7,11 +7,13 @@ struct SnapListApp: App {
     @State private var onboardingModel: OnboardingFlowModel
     @State private var captureFlow: CaptureFlowModel
     @State private(set) var homeStore: HomeStore
+    @State private var trophyWallStore: TrophyWallStore
     @State private var runStore: RunDetailStore
     @State private var listingReviewStore: ListingReviewStore
     @State private var submissionHost: ItemRunSubmissionHost
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
+    private let trophyWallHistoryRepository: any TrophyWallRunHistoryRepository
 
     init() {
         // First statement in the real app entry point so a crash while the
@@ -66,6 +68,21 @@ struct SnapListApp: App {
             tokenProvider: tokenProvider,
             nativeIntakeIdentitySource:
                 ClerkAuthenticationComposition.makeNativeIntakeIdentitySource(),
+            session: urlSession
+        )
+        let trophyWallPrincipal = TrophyWallPrincipalScope(
+            opaqueValue: UUID().uuidString.lowercased()
+        )
+        _trophyWallStore = State(
+            initialValue: TrophyWallStoreFactory.make(
+                configuration: configuration,
+                principalScope: trophyWallPrincipal
+            )
+        )
+        trophyWallHistoryRepository = TrophyWallRunHistoryRepositoryFactory.make(
+            configuration: configuration,
+            apiOrigin: apiOrigin,
+            tokenProvider: tokenProvider,
             session: urlSession
         )
         _router = State(
@@ -155,6 +172,8 @@ struct SnapListApp: App {
                 onboardingModel: onboardingModel,
                 captureFlow: captureFlow,
                 homeStore: homeStore,
+                trophyWallStore: trophyWallStore,
+                trophyWallHistoryRepository: trophyWallHistoryRepository,
                 runStore: runStore,
                 listingReviewStore: listingReviewStore,
                 submissionHost: submissionHost,
@@ -169,10 +188,18 @@ struct SnapListApp: App {
                         )
 #endif
                     async let restoration = captureFlow.restore()
-                    async let homeLoad: Void = homeStore.load()
+                    async let homeLoad: Void = loadLegacyHomeFixtureIfNeeded()
                     router.handleCaptureRestoration(await restoration)
                     await homeLoad
                 }
         }
+    }
+
+    @MainActor
+    private func loadLegacyHomeFixtureIfNeeded() async {
+#if DEBUG
+        guard configuration.visualState?.ownerIssue == 208 else { return }
+        await homeStore.load()
+#endif
     }
 }

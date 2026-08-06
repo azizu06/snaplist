@@ -7,9 +7,11 @@ struct AppShellView: View {
     @Bindable var onboardingModel: OnboardingFlowModel
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
+    @Bindable var trophyWallStore: TrophyWallStore
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
     @Bindable var submissionHost: ItemRunSubmissionHost
+    let trophyWallHistoryRepository: any TrophyWallRunHistoryRepository
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -27,6 +29,8 @@ struct AppShellView: View {
     @State private var proGateStore: ProGateStore?
     @State private var proGateFocusRequest: UUID?
     @State private var handlingProGateEventID: UUID?
+    @State private var trophyWallPrincipalScopeProof:
+        ItemRunSubmissionPrincipalScopeProof?
 
     var body: some View {
         Group {
@@ -203,6 +207,8 @@ struct AppShellView: View {
         // the shell while it is open, so anything attached to the shell stops observing
         // scene changes exactly when the seller is most likely to background the app.
         .onChange(of: scenePhase) { _, phase in
+#if DEBUG
+            guard configuration.visualState?.ownerIssue == 208 else { return }
             switch phase {
             case .active:
                 homeStore.resumeUpdates()
@@ -214,16 +220,33 @@ struct AppShellView: View {
             @unknown default:
                 break
             }
+#endif
         }
         .onChange(
             of: submissionHost.pendingPresentationEvent,
             initial: true
         ) { _, event in
-            guard case .destinationHandoff(
+            switch event {
+            case .destinationHandoff(
                 eventID: let eventID,
                 handoff: .pay01
-            )? = event else { return }
-            Task { await presentProGate(eventID: eventID) }
+            )?:
+                Task { await presentProGate(eventID: eventID) }
+            case .itemSaved(_, let handoff)?:
+                trophyWallStore.ingest(
+                    TrophyWallCanonicalAcceptedRun(
+                        principalScope: trophyWallStore.principalScope,
+                        runID: handoff.acceptedRun.runID,
+                        linkedLogicalIdentity: TrophyWallLogicalIdentity(
+                            idempotencyKey: handoff.idempotencyKey
+                        ),
+                        state: .accepted,
+                        lastMeaningfulUpdateAt: Date()
+                    )
+                )
+            case nil, .submissionRejected?, .destinationHandoff?:
+                break
+            }
         }
         .onChange(of: photoReviewHost.isCommitting) { _, isCommitting in
             guard !isCommitting, awaitsCommittedEmptyDismissal else {
@@ -265,6 +288,19 @@ struct AppShellView: View {
                         intake: dependencies.nativeIntake
                     )
 #endif
+                    let nextScopeProof = submissionHost.trophyWallPrincipalScopeProof
+                    if let currentScopeProof = trophyWallPrincipalScopeProof,
+                       let nextScopeProof,
+                       currentScopeProof != nextScopeProof {
+                        trophyWallStore.resetForPrincipalTransition()
+                    }
+                    trophyWallPrincipalScopeProof = nextScopeProof
+                    if let localCard = await submissionHost
+                        .recoverableTrophyWallPendingCard(
+                            principalScope: trophyWallStore.principalScope
+                        ) {
+                        trophyWallStore.ingest(localCard)
+                    }
                     let activeReviewDeparted =
                         photoReviewHost.session?.intakeActivationID
                         .map { $0 != snapshot.version.activationID }
@@ -463,12 +499,34 @@ struct AppShellView: View {
                 onScan: {},
                 onTryAgain: {}
             )
-        } else {
+        } else if configuration.visualState?.ownerIssue == 208 {
             sellerHomeFeature
+        } else {
+            trophyWallFeature
         }
 #else
-        sellerHomeFeature
+        trophyWallFeature
 #endif
+    }
+
+    private var trophyWallFeature: some View {
+        TrophyWallView(
+            store: trophyWallStore,
+            openProcessing: {
+                router.navigate(to: .home(.processing))
+            },
+            openAccount: { router.navigate(to: .settings) },
+            onScan: {
+                router.reset(tab: .scan)
+                router.selectedTab = .scan
+            }
+        )
+        .task(id: router.selectedTab) {
+            guard router.selectedTab == .trophyWall else { return }
+            await trophyWallStore.refreshCollection(
+                using: trophyWallHistoryRepository
+            )
+        }
     }
 
     private var sellerHomeFeature: some View {
@@ -512,6 +570,25 @@ struct AppShellView: View {
             FoundationDestinationView(destination: .activity)
         case .home(let route):
             switch route {
+            case .processing:
+                TrophyWallProcessingDestinationView(
+                    store: trophyWallStore,
+                    repository: trophyWallHistoryRepository,
+                    openRoute: { destination in
+                        if destination == .localRecovery {
+                            router.reset(tab: .scan)
+                            router.selectedTab = .scan
+                        } else {
+                            router.navigate(to: .home(destination))
+                        }
+                    },
+                    onScan: {
+                        router.reset(tab: .scan)
+                        router.selectedTab = .scan
+                    }
+                )
+            case .localRecovery:
+                EmptyView()
             case .run(let runID):
                 RunDetailView(
                     runID: runID,
@@ -1134,9 +1211,37 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
     }
 }
 
+@MainActor
+private struct TrophyWallProcessingDestinationView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @Bindable var store: TrophyWallStore
+    let repository: any TrophyWallRunHistoryRepository
+    let openRoute: (HomeRoute) -> Void
+    let onScan: () -> Void
+
+    var body: some View {
+        TrophyWallProcessingView(
+            rows: store.processingRows,
+            collectionOutcome: store.collectionOutcome,
+            onBack: { dismiss() },
+            openRoute: openRoute,
+            onScan: onScan,
+            onTryAgain: {
+                Task { await store.refreshCollection(using: repository) }
+            }
+        )
+        .navigationBarBackButtonHidden(true)
+    }
+}
+
 #if DEBUG
 #Preview("Foundation shell") {
     let dependencies = AppDependencies.make(configuration: .preview)
+    let trophyWallStore = TrophyWallStoreFactory.make(
+        configuration: .preview,
+        principalScope: TrophyWallPrincipalScope(opaqueValue: "preview")
+    )
     AppShellView(
         router: AppRouter(),
         onboardingModel: OnboardingFlowModel(
@@ -1151,6 +1256,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             intake: dependencies.nativeIntake
         ),
         homeStore: HomeStore(repository: HomeFixtureRepository(model: HomeFixtures.active)),
+        trophyWallStore: trophyWallStore,
         runStore: RunDetailStore(
             service: UnavailableRunService(),
             tokenProvider: PreviewBearerTokenProvider()
@@ -1162,6 +1268,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             session: .shared
         ),
         submissionHost: ItemRunSubmissionHost(coordinator: nil),
+        trophyWallHistoryRepository: UnavailableTrophyWallRunHistoryRepository(),
         configuration: .preview
     )
 }

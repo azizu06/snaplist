@@ -62,6 +62,8 @@ enum FutureBoundary: String, Hashable {
 }
 
 enum HomeRoute: Hashable {
+    case processing
+    case localRecovery
     case run(UUID)
     case order(UUID)
     case conversation(UUID)

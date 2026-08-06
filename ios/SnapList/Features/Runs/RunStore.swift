@@ -12,6 +12,7 @@ enum RunDetailLoadState: Equatable, Sendable {
 @Observable
 final class RunDetailStore {
     private(set) var state: RunDetailLoadState = .idle
+    private(set) var isRetrying = false
 
     private let service: any RunServing
     private let tokenProvider: any BearerTokenProviding
@@ -24,6 +25,7 @@ final class RunDetailStore {
     private var requestedRunID: UUID?
     private var requestGeneration = 0
     private var emittedListingReadyRunIDs: Set<UUID> = []
+    private var retryIdempotencyKeys: [UUID: UUID] = [:]
 
     init(
         service: any RunServing,
@@ -53,6 +55,31 @@ final class RunDetailStore {
     func refresh() async {
         guard let requestedRunID else { return }
         await startFetch(runID: requestedRunID)
+    }
+
+    func retry() async {
+        guard !isRetrying,
+              case .loaded(let run) = state,
+              run.legalActions.canRetry else { return }
+        isRetrying = true
+        defer { isRetrying = false }
+        let key = retryIdempotencyKeys[run.id] ?? UUID()
+        retryIdempotencyKeys[run.id] = key
+        do {
+            let token = try await tokenProvider.bearerToken()
+            let retried = try await service.retryRun(
+                id: run.id,
+                idempotencyKey: key,
+                bearerToken: token
+            )
+            guard retried.id == run.id else {
+                throw RunAPIError.invalidResponse
+            }
+            retryIdempotencyKeys[run.id] = nil
+            state = .loaded(retried)
+        } catch {
+            state = .loaded(run)
+        }
     }
 
     private func startFetch(runID: UUID) async {

@@ -2,6 +2,21 @@ import Foundation
 
 protocol RunServing: Sendable {
     func fetchRun(id: UUID, bearerToken: String) async throws -> DurableRun
+    func retryRun(
+        id: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> DurableRun
+}
+
+extension RunServing {
+    func retryRun(
+        id: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> DurableRun {
+        throw RunAPIError.unavailable
+    }
 }
 
 protocol TrophyWallRunHistoryServing: Sendable {
@@ -45,6 +60,44 @@ final class RunAPIClient: RunServing, TrophyWallRunHistoryServing, @unchecked Se
             throw Self.error(for: response.statusCode)
         }
 
+        do {
+            let run = try decoder.decode(RunEnvelope.self, from: data).data
+            guard run.id == id, run.schemaVersion == 1 else {
+                throw RunAPIError.invalidResponse
+            }
+            return run
+        } catch let error as RunAPIError {
+            throw error
+        } catch {
+            throw RunAPIError.invalidResponse
+        }
+    }
+
+    func retryRun(
+        id: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> DurableRun {
+        let url = baseURL
+            .appending(path: "/v1/runs")
+            .appending(path: id.uuidString.lowercased())
+            .appending(path: "retry")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(
+            idempotencyKey.uuidString.lowercased(),
+            forHTTPHeaderField: "Idempotency-Key"
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse else {
+            throw RunAPIError.invalidResponse
+        }
+        guard response.statusCode == 202 else {
+            throw Self.error(for: response.statusCode)
+        }
         do {
             let run = try decoder.decode(RunEnvelope.self, from: data).data
             guard run.id == id, run.schemaVersion == 1 else {

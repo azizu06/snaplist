@@ -77,6 +77,64 @@ final class RunStoreTests: XCTestCase {
         )
     }
 
+    func testRetryReusesOneIdentityAfterFailureAndKeepsPreservedRunLoaded()
+        async throws {
+        let safeFailure = try JSONDecoder().decode(
+            RunSafeFailure.self,
+            from: JSONSerialization.data(withJSONObject: [
+                "reason": "This run couldn’t finish",
+                "detail": "Upload didn't finish.",
+                "retryable": true,
+                "workPreserved": true,
+            ])
+        )
+        let failed = Self.makeRun(
+            status: .failed,
+            stage: .completed,
+            safeFailure: safeFailure
+        )
+        let retrying = Self.makeRun(status: .retrying, stage: .queued)
+        let service = RetryRunService(
+            initial: failed,
+            retryResults: [
+                .failure(RunAPIError.unavailable),
+                .success(retrying),
+            ]
+        )
+        let tokens = FreshTokenSource(tokens: [
+            "fresh-load-token",
+            "fresh-retry-token-1",
+            "fresh-retry-token-2",
+        ])
+        let store = RunDetailStore(
+            service: service,
+            tokenProvider: RunStoreBearerTokenProvider {
+                try await tokens.next()
+            }
+        )
+
+        await store.load(runID: failed.id)
+        await store.retry()
+
+        XCTAssertEqual(store.state, .loaded(failed))
+        XCTAssertFalse(store.isRetrying)
+
+        await store.retry()
+
+        XCTAssertEqual(store.state, .loaded(retrying))
+        XCTAssertFalse(store.isRetrying)
+        let retryRequests = await service.retryRequests
+        XCTAssertEqual(retryRequests.count, 2)
+        XCTAssertEqual(
+            retryRequests.map(\.idempotencyKey),
+            [retryRequests[0].idempotencyKey, retryRequests[0].idempotencyKey]
+        )
+        XCTAssertEqual(
+            retryRequests.map(\.bearerToken),
+            ["fresh-retry-token-1", "fresh-retry-token-2"]
+        )
+    }
+
     func testNewExactLoadCannotPublishThePreviousRun() async {
         let first = Self.makeRun()
         let second = Self.makeRun(
@@ -513,5 +571,46 @@ private actor RecordingRunService: RunServing {
         requests.append(.init(runID: id, bearerToken: bearerToken))
         guard !results.isEmpty else { throw RunAPIError.unavailable }
         return try results.removeFirst().get()
+    }
+}
+
+private actor RetryRunService: RunServing {
+    struct RetryRequest: Equatable {
+        let runID: UUID
+        let idempotencyKey: UUID
+        let bearerToken: String
+    }
+
+    private let initial: DurableRun
+    private var retryResults: [Result<DurableRun, Error>]
+    private(set) var retryRequests: [RetryRequest] = []
+
+    init(
+        initial: DurableRun,
+        retryResults: [Result<DurableRun, Error>]
+    ) {
+        self.initial = initial
+        self.retryResults = retryResults
+    }
+
+    func fetchRun(id: UUID, bearerToken: String) async throws -> DurableRun {
+        guard id == initial.id else { throw RunAPIError.invalidResponse }
+        return initial
+    }
+
+    func retryRun(
+        id: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> DurableRun {
+        retryRequests.append(
+            RetryRequest(
+                runID: id,
+                idempotencyKey: idempotencyKey,
+                bearerToken: bearerToken
+            )
+        )
+        guard !retryResults.isEmpty else { throw RunAPIError.unavailable }
+        return try retryResults.removeFirst().get()
     }
 }

@@ -224,6 +224,8 @@ final class ItemRunSubmissionHost {
         ItemRunSubmissionCoordinator.AmbiguousRetry?
     private var activePrincipalGeneration: UUID?
     private var activePrincipalContext: ItemRunSubmissionPrincipalContext?
+    private(set) var trophyWallPrincipalScopeProof:
+        ItemRunSubmissionPrincipalScopeProof? = nil
     private var activeSubmissionID: UUID?
     private var preparationTask:
         Task<ItemRunSubmissionCoordinator.Preparation, Never>?
@@ -290,6 +292,26 @@ final class ItemRunSubmissionHost {
         activePrincipalContext = ItemRunSubmissionPrincipalContext(
             snapshot: snapshot,
             intake: intake
+        )
+        trophyWallPrincipalScopeProof = activePrincipalContext?.scopeProof
+    }
+
+    func recoverableTrophyWallPendingCard(
+        principalScope: TrophyWallPrincipalScope
+    ) async -> TrophyWallCard? {
+        guard let context = activePrincipalContext,
+              !context.photos.isEmpty,
+              await context.validatesFilesystemContext(),
+              let attempt = try? await context.attemptStore.loadAttempt() else {
+            return nil
+        }
+        return TrophyWallCard.pending(
+            principalScope: principalScope,
+            logicalIdentity: TrophyWallLogicalIdentity(
+                idempotencyKey: attempt.idempotencyKey
+            ),
+            itemName: "Local item",
+            lastMeaningfulUpdateAt: context.photos.map(\.createdAt).max() ?? Date()
         )
     }
 

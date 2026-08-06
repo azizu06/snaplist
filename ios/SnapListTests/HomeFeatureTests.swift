@@ -696,7 +696,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: exactCards,
-                expectedDestinations: [nil, .run(fixture.runID)]
+                expectedDestinations: [.localRecovery, .run(fixture.runID)]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong principal",
@@ -706,7 +706,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [nil, nil]
+                expectedDestinations: [.localRecovery, .localRecovery]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong run",
@@ -716,7 +716,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.itemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [nil, nil]
+                expectedDestinations: [.localRecovery, .localRecovery]
             ),
             TrophyWallRunDetailConvergenceCase(
                 name: "wrong item",
@@ -726,7 +726,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     itemID: fixture.otherItemID
                 ),
                 expectedCards: fixture.initialCards,
-                expectedDestinations: [nil, nil]
+                expectedDestinations: [.localRecovery, .localRecovery]
             ),
         ]
 
@@ -791,7 +791,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [nil, .run(fixture.runID)]
+            [.localRecovery, .run(fixture.runID)]
         )
     }
 
@@ -848,7 +848,7 @@ final class TrophyWallDomainTests: XCTestCase {
             )
             XCTAssertEqual(
                 store.processingRows.map(\.destination),
-                [nil, .run(fixture.runID)],
+                [.localRecovery, .run(fixture.runID)],
                 testCase.name
             )
         }
@@ -952,7 +952,7 @@ final class TrophyWallDomainTests: XCTestCase {
             [.local(fixture.unrelatedLogicalID)]
         )
         XCTAssertEqual(store.processingRows.map(\.stateLabel), ["Pending upload"])
-        XCTAssertEqual(store.processingRows.map(\.destination), [nil])
+        XCTAssertEqual(store.processingRows.map(\.destination), [.localRecovery])
     }
 
     func testStoreKeepsValidNeedsRetryCardForMalformedNewerCanonicalTruth() throws {
@@ -1060,7 +1060,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [nil, .run(fixture.runID)]
+            [.localRecovery, .run(fixture.runID)]
         )
         XCTAssertEqual(
             page.entries.first?.run.lastMeaningfulUpdateAt,
@@ -1094,7 +1094,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [.run(fixture.runID), nil]
+            [.run(fixture.runID), .localRecovery]
         )
         XCTAssertEqual(
             store.processingRows.map(\.accessibilityLabel),
@@ -1151,6 +1151,64 @@ final class TrophyWallDomainTests: XCTestCase {
                     historyOrderAt: fixture.runDetailUpdate
                 ),
             ]
+        )
+    }
+
+    func testStoreProjectsPersistedExportPackTruthIntoTheSettledTrophyWall() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let historyPage = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded,
+            deliveryState: "export_prepared"
+        )
+
+        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
+
+        XCTAssertEqual(store.processingRows.map(\.id), [.local(fixture.unrelatedLogicalID)])
+        XCTAssertEqual(
+            store.settledTiles,
+            [
+                TrophyWallSettledTile(
+                    id: .run(fixture.runID),
+                    itemName: fixture.matchedItemName,
+                    stateLabel: "Export prepared",
+                    historyOrderAt: fixture.runDetailUpdate
+                ),
+            ]
+        )
+    }
+
+    func testStoreWithdrawsInvalidatedExportTruthWithoutReorderingTheRun() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let prepared = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded,
+            deliveryState: "export_prepared"
+        )
+        let invalidated = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .succeeded,
+            stage: .completed,
+            terminalOutcome: .succeeded
+        )
+
+        store.ingest(historyPage: prepared, principalScope: fixture.principal)
+        store.ingest(historyPage: invalidated, principalScope: fixture.principal)
+
+        XCTAssertTrue(store.settledTiles.isEmpty)
+        XCTAssertEqual(store.processingRows.map(\.stateLabel), [
+            "Pending upload",
+            "Ready to review",
+        ])
+        XCTAssertEqual(
+            store.cards.last?.orderKey.lastMeaningfulUpdateAt,
+            fixture.runDetailUpdate
         )
     }
 
@@ -1341,7 +1399,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             standardRows.map(\.destination),
-            [.run(fixture.runID), nil, .run(fixture.thirdRunID)]
+            [.run(fixture.runID), .localRecovery, .run(fixture.thirdRunID)]
         )
         XCTAssertEqual(
             smallestHeightRows.map(\.id),
@@ -1352,7 +1410,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             smallestHeightRows.map(\.destination),
-            [.run(fixture.runID), nil]
+            [.run(fixture.runID), .localRecovery]
         )
         let standardImage = await captureHostedTrophyWallProcessingView(
             rows: store.processingRows,
@@ -1493,6 +1551,57 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertNil(loaded.disclosureLabel)
     }
 
+    func testCollectionRefreshConsumesEveryStableHistoryPageWithoutRepeatOrSkip() async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        let newer = try fixture.historyPage(
+            status: .queued,
+            stage: .queued,
+            terminalOutcome: nil
+        )
+        let olderRunID = fixture.thirdRunID
+        let olderRun = try fixture.decodedRunDetail(
+            runID: olderRunID,
+            itemID: fixture.otherItemID,
+            status: .running,
+            stage: .pricing,
+            lastMeaningfulUpdateAt: "1970-01-01T00:00:04.000Z"
+        )
+        let older = TrophyWallRunHistoryPage(
+            entries: [
+                TrophyWallRunHistoryEntry(
+                    logicalIdentity: fixture.unrelatedLogicalID,
+                    orderKey: TrophyWallOrderKey(
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 4),
+                        stableIdentity: olderRunID.uuidString.lowercased()
+                    ),
+                    run: olderRun
+                ),
+            ],
+            nextCursor: nil
+        )
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [
+                .page(
+                    TrophyWallRunHistoryPage(
+                        entries: newer.entries,
+                        nextCursor: "stable-page-2"
+                    )
+                ),
+                .page(older),
+            ]
+        )
+
+        await store.refreshCollection(using: repository)
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        XCTAssertEqual(store.cards.map(\.identity), [
+            .run(fixture.runID),
+            .run(olderRunID),
+        ])
+        XCTAssertEqual(repository.requestedPages.map(\.cursor), [nil, "stable-page-2"])
+    }
+
     func testUnavailableCollectionOffersTryAgainAndNeverClaimsEmptyOrSavedTruth() async throws {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: [])
@@ -1604,6 +1713,23 @@ final class TrophyWallDomainTests: XCTestCase {
 
         XCTAssertEqual(store.collectionOutcome, .loaded)
         XCTAssertEqual(repository.requestCount, 1)
+    }
+
+    func testPrincipalTransitionClearsSavedCardsAndFencesAnOlderRefresh() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let repository = GatedTrophyWallRunHistoryRepository()
+
+        async let departingRefresh: Void = store.refreshCollection(using: repository)
+        await repository.entered.wait()
+        store.resetForPrincipalTransition()
+        await repository.release.open()
+        await departingRefresh
+
+        XCTAssertTrue(store.cards.isEmpty)
+        XCTAssertEqual(store.collectionOutcome, .unknown)
+        XCTAssertTrue(store.processingRows.isEmpty)
+        XCTAssertTrue(store.settledTiles.isEmpty)
     }
 
     func testCollectionStatesRenderTheirApprovedGroupAtBothDynamicTypeRoots() async {
@@ -1759,7 +1885,7 @@ final class TrophyWallDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             store.processingRows.map(\.destination),
-            [nil, .run(fixture.runID)]
+            [.localRecovery, .run(fixture.runID)]
         )
         XCTAssertEqual(store.cards, firstCards)
         XCTAssertEqual(store.processingRows, firstRows)
@@ -2079,7 +2205,8 @@ private struct TrophyWallTestFixture {
         canStartNewCapture: Bool = false,
         historyOrderAt: Date? = nil,
         lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z",
-        retentionCleanedAt: String? = nil
+        retentionCleanedAt: String? = nil,
+        deliveryState: String? = nil
     ) throws -> TrophyWallRunHistoryPage {
         let run = try decodedRunDetail(
             runID: runID,
@@ -2091,7 +2218,8 @@ private struct TrophyWallTestFixture {
             retryTruth: retryTruth,
             canStartNewCapture: canStartNewCapture,
             lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
-            retentionCleanedAt: retentionCleanedAt
+            retentionCleanedAt: retentionCleanedAt,
+            deliveryState: deliveryState
         )
         return TrophyWallRunHistoryPage(
             entries: [
@@ -2119,7 +2247,8 @@ private struct TrophyWallTestFixture {
         canStartNewCapture: Bool = false,
         canOpenReview: Bool = false,
         lastMeaningfulUpdateAt: String = "1970-01-01T00:00:05.000Z",
-        retentionCleanedAt: String? = nil
+        retentionCleanedAt: String? = nil,
+        deliveryState: String? = nil
     ) throws -> DurableRun {
         let listingIDJSON = listingID.map { "\"\($0.uuidString.lowercased())\"" } ?? "null"
         let terminalOutcomeJSON = terminalOutcome.map { "\"\($0.rawValue)\"" } ?? "null"
@@ -2132,6 +2261,9 @@ private struct TrophyWallTestFixture {
             "retryable":\(canRetry),"workPreserved":\($0.workPreserved)}
             """
         } ?? "null"
+        let deliveryJSON = deliveryState.map {
+            ",\n          \"delivery\": { \"state\": \"\($0)\" }"
+        } ?? ""
         let json = """
         {
           "id": "\(runID.uuidString.lowercased())",
@@ -2162,7 +2294,7 @@ private struct TrophyWallTestFixture {
             "canCancel": false,
             "canOpenReview": \(canOpenReview),
             "canStartNewCapture": \(canStartNewCapture)
-          },
+          }\(deliveryJSON),
           "lastMeaningfulUpdateAt": "\(lastMeaningfulUpdateAt)",
           "retentionCleanedAt": \(retentionCleanedAtJSON)
         }
