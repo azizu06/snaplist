@@ -248,6 +248,9 @@ src/lib/marketplace/ebay/deletion.ts
 src/lib/marketplace/ebay/errors.ts
 src/lib/marketplace/ebay/http.ts
 src/lib/marketplace/ebay/index.ts
+src/lib/marketplace/ebay/listing-sync-contract.ts
+src/lib/marketplace/ebay/listing-sync-store.ts
+src/lib/marketplace/ebay/listing-sync.ts
 src/lib/marketplace/ebay/map.ts
 src/lib/marketplace/ebay/message-photo-erasure.ts
 src/lib/marketplace/ebay/mobile-oauth-store.ts
@@ -491,6 +494,7 @@ supabase/migrations/20260805170000_hosted_server_api_guard.sql
 supabase/migrations/20260805200000_server_rpc_forwarded_secret.sql
 supabase/migrations/20260805210000_activation_guidance_completion.sql
 supabase/migrations/20260806120000_ebay_photo_access_tokens.sql
+supabase/migrations/20260806140000_ebay_listing_sync_authority.sql
 supabase/migrations/20260806190000_non_guest_item_deletion.sql
 tsconfig.json
 vercel.json

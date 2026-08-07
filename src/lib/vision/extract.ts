@@ -29,12 +29,12 @@ export const MIN_IMAGES = 1;
 export const MAX_IMAGES = 5;
 
 /**
- * Current strong multimodal model (confirmed against OpenAI docs at build time —
- * gpt-5.5 is the latest flagship, supports vision + structured outputs). Overridable
+ * Current default multimodal model (confirmed against OpenAI docs at build time —
+ * gpt-5.6-terra takes text + image input and supports structured outputs). Overridable
  * via `VISION_MODEL` so the provider/model stays swappable (AGENTS.md: env-configurable
  * everything; PRD: "Exact model IDs confirmed against current OpenAI docs at build time").
  */
-export const DEFAULT_VISION_MODEL = "gpt-5.5";
+export const DEFAULT_VISION_MODEL = "gpt-5.6-terra";
 
 /**
  * One image fed to the vision call. Either a URL string (e.g. a signed Storage URL)

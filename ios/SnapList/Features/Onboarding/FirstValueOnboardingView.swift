@@ -306,10 +306,10 @@ struct FirstValueOnboardingView: View {
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(
-                        Array(FirstValueOnboardingCopy.backgroundExampleRows.enumerated()),
-                        id: \.offset
-                    ) { index, row in
-                        workRow(backgroundExampleImages[index], row.item, row.state)
+                        FirstValueOnboardingCopy.backgroundExampleRows,
+                        id: \.self
+                    ) { row in
+                        BackgroundExampleRowView(row: row)
                     }
                 }
             }
@@ -466,26 +466,6 @@ struct FirstValueOnboardingView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var backgroundExampleImages: [String] {
-        ["FirstValueJacket", "FirstValueLamp", "FirstValueSneaker"]
-    }
-
-    /// An illustrative Trophy Wall row. It carries no `ProgressView`, percentage, or any
-    /// other progress affordance: nothing is running while onboarding is on screen, and
-    /// SnapList never fabricates progress.
-    private func workRow(_ image: String, _ title: String, _ status: String) -> some View {
-        HStack(spacing: 10) {
-            itemImage(image, label: title).frame(width: 44, height: 44)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(status).font(.caption).foregroundStyle(SnapListColorToken.textSecondary.color)
-            }
-            Spacer()
-        }
-        .accessibilityElement(children: .combine)
-    }
-
     private func tile(_ symbol: String, _ title: String, _ subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Image(systemName: symbol).foregroundStyle(SnapListColorToken.action.color)
@@ -505,6 +485,40 @@ struct FirstValueOnboardingView: View {
             .background(.white, in: RoundedRectangle(cornerRadius: 18))
             .overlay { RoundedRectangle(cornerRadius: 18).stroke(Color(hex: "#ECEDF0")) }
             .shadow(color: .black.opacity(0.05), radius: 14, y: 5)
+    }
+}
+
+/// An illustrative Trophy Wall row on ONB-05. It carries no `ProgressView`, percentage,
+/// or any other progress affordance: nothing is running while onboarding is on screen,
+/// and SnapList never fabricates progress.
+///
+/// The row is a named type rather than a helper on the screen so that guarantee is
+/// testable. `.accessibilityElement(children: .combine)` folds every descendant into one
+/// element, so a restored spinner never reaches the XCUI tree and no count of
+/// `app.progressIndicators` can see it. SwiftUI derives `body`'s concrete type from the
+/// subtree written here instead, which
+/// `OnboardingFlowTests.testBackgroundExampleRowBodyWritesNoProgressAffordance` reads —
+/// so keep any progress-bearing view out of this body rather than behind a nested type
+/// the rendered type name would hide.
+struct BackgroundExampleRowView: View {
+    let row: BackgroundExampleRow
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(row.imageName)
+                .resizable()
+                .scaledToFit()
+                .accessibilityLabel(row.item)
+                .frame(width: 44, height: 44)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.item).font(.subheadline.weight(.semibold))
+                Text(row.state).font(.caption)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+            }
+            Spacer()
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -636,7 +650,12 @@ private struct AcceptedScoutWebMView: UIViewRepresentable {
     }
 }
 
-private enum WebKitRuntime {
+/// Builds the Scout clip's `WKWebView` without linking WebKit, which would load duplicate
+/// WebCore and WebKit accessibility bundles into every UI-test process (#685).
+///
+/// Internal rather than private so `OnboardingFlowTests` can prove the construction leaves
+/// no unbalanced retain; nothing outside the Scout clip should call it.
+enum WebKitRuntime {
     private static let frameworkPath =
         "/System/Library/Frameworks/WebKit.framework"
 
@@ -672,6 +691,18 @@ private enum WebKitRuntime {
             implementation,
             to: InitializeWebView.self
         )
+        // Ownership, because the balance here is easy to "fix" into a crash.
+        //
+        // `class_createInstance` is `OBJC_RETURNS_RETAINED`, so Swift imports it as a
+        // managed `Any?`: ARC owns that +1 and releases `allocated` when this scope ends.
+        // The `init` family then consumes the same +1 and hands back a +1 of its own.
+        // `takeUnretainedValue()` declines to consume the returned +1, and ARC's release
+        // of `allocated` — a reference the initializer already took — cancels it exactly.
+        //
+        // `takeRetainedValue()` looks more correct and is not: it consumes the returned
+        // +1 as well, leaving ARC's release to over-release and deallocate the view while
+        // the caller still holds it. `testScoutClipWebViewLeavesNoUnbalancedRetain` holds
+        // this balance.
         return initialize(
             allocated,
             selector,
