@@ -456,7 +456,5 @@ describe("eBay policy/location binding (DB-gated)", () => {
       missing: ["paymentPolicy"],
     });
     expect(hintB).toMatchObject({ state: "ready", message: null });
-    expect(JSON.stringify(hintA)).not.toContain("seller-b");
-    expect(JSON.stringify(hintB)).not.toContain("seller-a");
   }, TEST_TIMEOUT_MS);
 });

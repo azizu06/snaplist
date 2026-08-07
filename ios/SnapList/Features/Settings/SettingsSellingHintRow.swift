@@ -16,8 +16,13 @@ struct SettingsSellingHintRow: View {
                 .font(.footnote)
                 .labelStyle(.titleAndIcon)
             if let helpURL = hint.helpURL {
+                // Footnote text is roughly 13pt, so the link needs its own
+                // minimum height to stay tappable for a sighted seller. The
+                // VoiceOver path reaches the same destination through the
+                // action below, which does not depend on the hit area.
                 Link(SettingsSellingHintPolicyAction.label, destination: helpURL)
                     .font(.footnote)
+                    .frame(minHeight: 44, alignment: .leading)
             }
         }
         .accessibilityElement(children: .combine)
