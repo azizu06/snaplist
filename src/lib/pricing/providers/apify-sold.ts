@@ -279,6 +279,22 @@ export function apifySoldConfigured(
   );
 }
 
+/**
+ * Whether ONE adapter instance is actually armed: the env activation gate (or an
+ * explicit per-instance override) plus a usable token. `createApifySoldPricingProvider`
+ * uses this to decide whether to run at all, and the composition root uses the SAME
+ * function to name why the primary sold strategy was skipped — an unconfigured
+ * primary must never be indistinguishable from one that ran and found nothing (#715).
+ */
+export function apifySoldActivated(
+  options: ApifySoldPricingProviderOptions = {},
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  const token = options.token?.trim() ?? env.APIFY_TOKEN?.trim() ?? "";
+  const enabled = options.enabled ?? apifySoldConfigured(env);
+  return enabled && token.length > 0;
+}
+
 function conditionFromId(value: unknown): string | undefined {
   const id = Number(value);
   if (!Number.isInteger(id)) return undefined;
@@ -494,8 +510,7 @@ export function createApifySoldPricingProvider(
   options: ApifySoldPricingProviderOptions = {},
 ): PricingProvider {
   const token = options.token?.trim() ?? process.env.APIFY_TOKEN?.trim() ?? "";
-  const enabled = options.enabled ?? apifySoldConfigured();
-  const active = enabled && token.length > 0;
+  const active = apifySoldActivated(options);
   const actorId = options.actorId?.trim() || APIFY_SOLD_ACTOR_ID;
   const actorBuild =
     options.actorBuild?.trim() ||
