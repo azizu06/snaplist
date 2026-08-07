@@ -259,6 +259,179 @@ final class AssistedExportClientTests: XCTestCase {
         XCTAssertFalse(store.domain.hasHandedOff(to: .facebookMarketplace))
     }
 
+    // The issue's public seam: the mounted pack's effective price no longer
+    // matches the server's, then delivery is asked for. What leaves the app has
+    // to be the listing as it stands now, not the listing as it stood when the
+    // screen was drawn — the seller pastes that text into a marketplace form,
+    // and a price SnapList has already replaced is a wrong number in a real
+    // listing.
+    //
+    // This models a stale client projection at an *unchanged* `review_revision`
+    // — the branch at `AssistedExportStore.swift:347-351`. A seller's own price
+    // override advances `review_revision` and is therefore refused as XPORT-05,
+    // never repriced; that path is covered by
+    // `testNothingIsDeliveredOnceTheListingItselfHasMovedOn`.
+
+    func testDeliveryHandsOverTheServerPriceWhenTheClientProjectionIsStale() async {
+        let service = AssistedExportDeliveryService(price: 145)
+        let store = AssistedExportStore(
+            pack: .fixture(effectivePrice: 145),
+            service: service
+        )
+        await store.load()
+        store.toggle(.mercari)
+
+        // The server's effective price moves under the mounted pack while the
+        // review revision stays put, so the screen's number is now a stale
+        // projection rather than a rejected one.
+        await service.reprice(to: 177.77)
+
+        var delivered: String?
+        await store.deliver(
+            .copiedListingText,
+            for: .mercari,
+            pack: store.domain.pack
+        ) { pack in
+            delivered = pack.listingText(for: .mercari)
+        }
+
+        XCTAssertEqual(
+            delivered,
+            "Denim jacket, relaxed fit, size L\n\nA clean seller description."
+                + "\n\nPrice: $177.77",
+            "The text handed to the device carries the price the server "
+                + "resolved at delivery, not the one the screen was showing."
+        )
+        XCTAssertEqual(store.domain.pack.effectivePrice, 177.77)
+        XCTAssertTrue(store.domain.hasHandedOff(to: .mercari))
+    }
+
+    func testNothingIsDeliveredOnceTheListingItselfHasMovedOn() async {
+        let service = AssistedExportDeliveryService(price: 145)
+        let store = AssistedExportStore(
+            pack: .fixture(),
+            service: service
+        )
+        await store.load()
+        store.toggle(.mercari)
+
+        await service.advanceReviewRevision(
+            to: UUID(uuidString: "58100000-0000-4000-8000-0000000000f7")!
+        )
+
+        var delivered = false
+        await store.deliver(
+            .copiedListingText,
+            for: .mercari,
+            pack: store.domain.pack
+        ) { _ in
+            delivered = true
+        }
+
+        XCTAssertFalse(
+            delivered,
+            "A pack that no longer describes the listing is not handed over "
+                + "at all; the seller is shown XPORT-05 instead."
+        )
+        XCTAssertEqual(store.domain.state, .packOutOfDate)
+        XCTAssertFalse(store.domain.hasHandedOff(to: .mercari))
+        let writes = await service.handoffWrites
+        XCTAssertEqual(writes, 0)
+    }
+
+    func testPreparingAShareSheetRefreshesThePackWithoutWritingASecondReceipt() async {
+        let service = AssistedExportDeliveryService(price: 145)
+        let store = AssistedExportStore(
+            pack: .fixture(effectivePrice: 145),
+            service: service
+        )
+        await store.load()
+        store.toggle(.mercari)
+        await service.reprice(to: 177.77)
+
+        var built: AssistedExportPack?
+        await store.prepareDelivery(pack: store.domain.pack) { pack in
+            built = pack
+        }
+
+        XCTAssertEqual(built?.effectivePrice, 177.77)
+        let writes = await service.handoffWrites
+        XCTAssertEqual(
+            writes,
+            0,
+            "The share sheet writes its own receipt when it is on screen; "
+                + "building its payload must not write a second one."
+        )
+        XCTAssertFalse(store.domain.hasHandedOff(to: .mercari))
+    }
+
+    // AC6 names native share-sheet cancellation, which is a different behavior
+    // from dismissing the confirm sheet. The activity sheet records its handoff
+    // from `onPresented` (`AssistedExportView.swift:172-182`), so a seller who
+    // opens it and then backs out has done exactly one thing: handed the pack to
+    // another app. Cancelling is simply the absence of the later confirm, so the
+    // invariant lives in the post-handoff state — presenting a sheet earns the
+    // right to be *asked*, never the Shared badge.
+    func testCancellingTheNativeShareSheetOffersMarkAsSharedWithoutClaimingShared() async {
+        let service = AssistedExportDeliveryService(price: 145)
+        let store = AssistedExportStore(pack: .fixture(), service: service)
+        await store.load()
+        store.toggle(.mercari)
+
+        // The exact sequence the activity sheet performs: build the payload,
+        // present it, record the handoff. Nothing confirms afterwards.
+        await store.prepareDelivery(pack: store.domain.pack) { _ in }
+        await store.recordHandoff(
+            .sharedAnotherWay,
+            for: .mercari,
+            pack: store.domain.pack
+        )
+
+        XCTAssertTrue(
+            store.domain.offersMarkAsShared(for: .mercari),
+            "A presented share sheet earns the right to be asked."
+        )
+        XCTAssertEqual(
+            store.domain.handoff(for: .mercari),
+            .prepared,
+            "A cancelled share sheet is never a Shared claim."
+        )
+        XCTAssertEqual(store.domain.state, .handedOff(.mercari))
+        XCTAssertNil(store.completedAction)
+    }
+
+    // The share sheet's receipt is written after `prepareDelivery` has already
+    // returned, and `recordHandoff` refuses outright while `isWriting` is true
+    // (`AssistedExportStore.swift:103`). Pin that ordering so a later edit
+    // cannot start dropping the receipt silently.
+    func testTheShareSheetReceiptIsWrittenOnceThePreparedDeliveryReleasesTheLock() async {
+        let service = AssistedExportDeliveryService(price: 145)
+        let store = AssistedExportStore(pack: .fixture(), service: service)
+        await store.load()
+        store.toggle(.mercari)
+
+        await store.prepareDelivery(pack: store.domain.pack) { _ in }
+
+        XCTAssertFalse(store.isWriting)
+        let beforeHandoff = await service.handoffWrites
+        XCTAssertEqual(beforeHandoff, 0)
+
+        await store.recordHandoff(
+            .sharedAnotherWay,
+            for: .mercari,
+            pack: store.domain.pack
+        )
+
+        let writes = await service.handoffWrites
+        XCTAssertEqual(
+            writes,
+            1,
+            "A receipt requested the moment the payload is ready must not be "
+                + "refused by the delivery lock."
+        )
+        XCTAssertTrue(store.domain.hasHandedOff(to: .mercari))
+    }
+
     private func makeSession(
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> URLSession {
@@ -370,6 +543,62 @@ private actor AssistedExportFlakyHandoffService: AssistedExportServing {
             receipts: receipts,
             effectivePrice: pack.effectivePrice,
             reviewRevision: pack.reviewRevision
+        )
+    }
+}
+
+/// A server whose effective price and review revision can move under the
+/// mounted screen, the way a seller's own edit does.
+private actor AssistedExportDeliveryService: AssistedExportServing {
+    private var price: Decimal
+    private var reviewRevision: UUID?
+    private var handedOff = false
+    private var writes = 0
+
+    init(price: Decimal) {
+        self.price = price
+    }
+
+    var handoffWrites: Int { writes }
+
+    func reprice(to newPrice: Decimal) {
+        price = newPrice
+    }
+
+    func advanceReviewRevision(to revision: UUID) {
+        reviewRevision = revision
+    }
+
+    func load(pack: AssistedExportPack) async throws -> AssistedExportServerPack {
+        response(for: pack)
+    }
+
+    func perform(
+        _ action: AssistedExportServerAction,
+        destination: AssistedExportDestination,
+        pack: AssistedExportPack
+    ) async throws -> AssistedExportServerPack {
+        guard action == .handoff else {
+            throw AssistedExportClientError.invalidResponse
+        }
+        writes += 1
+        handedOff = true
+        return response(for: pack)
+    }
+
+    private func response(for pack: AssistedExportPack) -> AssistedExportServerPack {
+        AssistedExportServerPack(
+            receipts: AssistedExportDestination.allCases.map { destination in
+                AssistedExportReceipt(
+                    destination: destination,
+                    handedOffAt: destination == .mercari && handedOff
+                        ? Date()
+                        : nil,
+                    sharedAt: nil
+                )
+            },
+            effectivePrice: price,
+            reviewRevision: reviewRevision ?? pack.reviewRevision
         )
     }
 }

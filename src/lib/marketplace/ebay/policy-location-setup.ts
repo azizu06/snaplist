@@ -88,8 +88,31 @@ type PartKey = keyof typeof PART_LABELS;
 
 const PART_KEYS = Object.keys(PART_LABELS) as PartKey[];
 
+/** The families a binding reports in one state, in the fixed PART_LABELS order. */
+function partsInState(
+  parts: Record<PartKey, { state: string }>,
+  state: string,
+): PartKey[] {
+  return PART_KEYS.filter((key) => parts[key].state === state);
+}
+
 export const EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE =
   "Connect your eBay account before publishing to eBay.";
+
+export const EBAY_POLICY_SETUP_NOT_CHECKED_MESSAGE =
+  "SnapList has not read your eBay shipping, payment, and return policies or "
+  + "your inventory location yet. Check that your eBay account has one of each "
+  + "before you publish.";
+
+/**
+ * Where the seller fixes this on eBay. Business policies live on a per-site
+ * host, so a link is offered only for a marketplace whose page SnapList has
+ * actually verified. Every other marketplace gets the same named families with
+ * no link rather than a guessed URL that could send a seller to a dead page.
+ */
+const POLICY_HELP_URLS: Record<string, string> = {
+  EBAY_US: "https://www.bizpolicy.ebay.com/businesspolicy/manage",
+};
 
 export const EBAY_POLICY_SETUP_UNAVAILABLE_MESSAGE =
   "SnapList could not read your eBay shipping, payment, and return policies. "
@@ -199,6 +222,132 @@ export async function ensureEbayPolicyLocationBinding(input: {
   return setupFromBinding(discovered, marketplaceId);
 }
 
+export type EbayPolicySetupFamily = PartKey;
+
+export type EbayPolicyLocationSettingsHintState =
+  /** A usable binding governs this marketplace and connection. */
+  | "ready"
+  /** The seller's eBay account is missing one or more required families. */
+  | "setupRequired"
+  /** The seller has several usable options; SnapList must not guess. */
+  | "selectionRequired"
+  /**
+   * Nothing publishable is stored for this marketplace and connection yet.
+   * SnapList cannot name a family without reading the seller's eBay account,
+   * and that read belongs to publish, not to a Settings render.
+   */
+  | "notChecked";
+
+export interface EbayPolicyLocationSettingsHint {
+  state: EbayPolicyLocationSettingsHintState;
+  marketplaceId: string;
+  /** Families eBay reported none of. Empty unless `setupRequired`. */
+  missing: EbayPolicySetupFamily[];
+  /** Families with several usable options. Empty unless `selectionRequired`. */
+  ambiguous: EbayPolicySetupFamily[];
+  /**
+   * Seller-facing explanation, or `null` when SnapList has nothing truthful to
+   * say: the stored binding is `ready`, or publish never stored one at all.
+   */
+  message: string | null;
+  /** The eBay page that owns these families, when SnapList has verified one. */
+  helpUrl: string | null;
+}
+
+/**
+ * What Settings may say about the seller's eBay policy setup BEFORE they try to
+ * publish (issue #694).
+ *
+ * This reads only what publish already persisted for this tenant. It never
+ * calls the eBay Account API, because a Settings render is not a publish and
+ * must not spend the seller's eBay rate budget or block on eBay being up. That
+ * is also why an absent, unparseable, foreign-marketplace, or retired-
+ * generation binding reports `notChecked` instead of guessing: publish's
+ * discovery is the only thing that can name a family, and it has not run.
+ *
+ * An absent binding goes further and carries no message. Discovery runs at
+ * publish, so having nothing stored is the normal state of a seller who has
+ * connected eBay and not published yet, and telling them their account needs
+ * attention would be a warning about a problem SnapList has not found.
+ *
+ * Returning `null` for a tenant with no eBay connection is deliberate. The
+ * connect affordance already owns that state, so there is no hint shape a
+ * disconnected seller could be shown by accident.
+ */
+export async function readEbayPolicyLocationSettingsHint(input: {
+  marketplaceId: string;
+  store: Pick<EbayPolicyLocationSetupStore, "readStoredBinding">;
+}): Promise<EbayPolicyLocationSettingsHint | null> {
+  const { marketplaceId } = input;
+  const stored = await input.store.readStoredBinding(marketplaceId);
+  if (!stored) return null;
+
+  const helpUrl = POLICY_HELP_URLS[marketplaceId] ?? null;
+  const empty: Omit<EbayPolicyLocationSettingsHint, "state" | "message"> = {
+    marketplaceId,
+    missing: [],
+    ambiguous: [],
+    helpUrl,
+  };
+
+  if (usableStoredBinding(stored.binding, marketplaceId, stored.connectionGeneration)) {
+    return { ...empty, state: "ready", message: null };
+  }
+
+  // Only publish-time discovery writes a binding, so its absence is not a
+  // fault the seller can act on: it is where every connected seller stands
+  // between finishing eBay OAuth and their first successful publish. Wording
+  // here would put a warning in front of a healthy account, so the state
+  // travels without a message and the client renders no row (issue #694).
+  if (stored.binding == null) {
+    return { ...empty, state: "notChecked", message: null };
+  }
+
+  // The same parse the publish path uses, minus the readiness demand: a binding
+  // that parses and belongs to this marketplace and connection still carries
+  // eBay's own answer about which families exist, even when it cannot publish.
+  const parsed = ebayPolicyLocationBindingSchema.safeParse(stored.binding);
+  if (
+    !parsed.success
+    || parsed.data.marketplaceId !== marketplaceId
+    || parsed.data.connectionGeneration !== stored.connectionGeneration
+  ) {
+    return { ...empty, state: "notChecked", message: EBAY_POLICY_SETUP_NOT_CHECKED_MESSAGE };
+  }
+
+  const ambiguous = partsInState(parsed.data, "selectionRequired");
+  if (ambiguous.length > 0) {
+    return {
+      state: "selectionRequired",
+      marketplaceId,
+      missing: [],
+      ambiguous,
+      message:
+        `Your eBay account has more than one ${labelList(ambiguous)}, and `
+        + "SnapList cannot choose for you. Keep one usable option in eBay "
+        + "before you publish.",
+      helpUrl,
+    };
+  }
+
+  const missing = partsInState(parsed.data, "setupRequired");
+  if (missing.length === 0) {
+    // Every family is bound yet the binding was not usable above, so the only
+    // thing left that can differ is a shape publish would re-discover.
+    return { ...empty, state: "notChecked", message: EBAY_POLICY_SETUP_NOT_CHECKED_MESSAGE };
+  }
+  return {
+    state: "setupRequired",
+    marketplaceId,
+    missing,
+    ambiguous: [],
+    message:
+      `Your eBay account has no ${labelList(missing)}. `
+      + `Add ${missing.length > 1 ? "them" : "it"} in eBay before you publish.`,
+    helpUrl,
+  };
+}
+
 function setupFromBinding(
   binding: EbayPolicyLocationBinding,
   marketplaceId: string,
@@ -206,12 +355,8 @@ function setupFromBinding(
   if (binding.state === "ready") {
     return { state: "ready", marketplaceId, message: null, binding };
   }
-  const missing = PART_KEYS.filter(
-    (key) => binding[key].state === "setupRequired",
-  );
-  const ambiguous = PART_KEYS.filter(
-    (key) => binding[key].state === "selectionRequired",
-  );
+  const missing = partsInState(binding, "setupRequired");
+  const ambiguous = partsInState(binding, "selectionRequired");
   if (ambiguous.length > 0) {
     return {
       state: "selectionRequired",

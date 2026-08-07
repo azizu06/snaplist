@@ -6,6 +6,8 @@ import { listingReviewProjectionSchema } from "@/lib/listing-review";
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import {
   apiErrorEnvelopeSchema,
+  ebayConnectionSettingsSchema,
+  ebayPolicySetupHintSchema,
   guidedCorrectionEnvelopeSchema,
   mobileRunSchema,
   pricingEvidenceEnvelopeSchema,
@@ -403,6 +405,29 @@ describe("SwiftUI mobile HTTP contract", () => {
       ["GuidedCorrectionIntent", guidedCorrectionIntentSchema],
       ["GuidedCorrectionReceipt", guidedCorrectionReceiptSchema],
       ["GuidedCorrectionEnvelope", guidedCorrectionEnvelopeSchema],
+    ];
+
+    for (const [name, schema] of pairs) {
+      const generatedRuntimeSchema = z.toJSONSchema(schema) as Record<
+        string,
+        unknown
+      >;
+      delete generatedRuntimeSchema.$schema;
+
+      expect({
+        [name]: dereferenceContractSchema(contract.components.schemas[name]),
+      }).toEqual({ [name]: dereferenceContractSchema(generatedRuntimeSchema) });
+    }
+  });
+
+  it("keeps #694's eBay policy hint schemas aligned with runtime JSON Schema", () => {
+    // Both schemas were hand-written into the contract and checked only
+    // against the other copy of the same file, so the two OpenAPI documents
+    // could agree with each other while both drifting from what the route
+    // actually returns.
+    const pairs: [string, z.ZodType][] = [
+      ["EbayPolicySetupHint", ebayPolicySetupHintSchema],
+      ["EbayConnectionSettings", ebayConnectionSettingsSchema],
     ];
 
     for (const [name, schema] of pairs) {

@@ -375,7 +375,7 @@
         "deletionTriggers": ["item-deletion", "account-erasure", "verified-ebay-account-deletion-notification", "ebay-api-license-agreement-termination"],
         "maximumRetention": "while the seller retains the published item, and no later than item deletion, account erasure, or a verified eBay account deletion notice; within ten days of eBay API License Agreement termination for every stored identifier",
         "executor": "snaplist-tenant-data-deletion-capability-and-issue-384-account-erasure-capability",
-        "completionProof": "the SnapList-stored publish identifiers are absent for that tenant: listings.ebay_offer_id, listings.ebay_listing_id, and listings.ebay_status. The live eBay listing is an eBay-owned record; SnapList never reports it deleted because it removed its own copy of the identifier",
+        "completionProof": "the SnapList-stored publish identifiers are absent for that tenant: listings.ebay_offer_id, listings.ebay_listing_id, listings.ebay_status, and the post-publish sync copies that carry the same eBay-issued listing identifier, public.ebay_listing_sync_state and public.ebay_listing_sync_conflicts, both of which private.account_erasure_owned_row_count counts so completion cannot be reported while one survives. The live eBay listing is an eBay-owned record; SnapList never reports it deleted because it removed its own copy of the identifier",
         "citations": [
           {
             "url": "https://developer.ebay.com/join/api-license-agreement",
@@ -397,6 +397,32 @@
           }
         ],
         "ownerDecision": "Owner decision, not provider evidence: eBay-issued offer and listing identifiers stored against a seller are classified as Personal Information under the Section 1 definition, because they are received from eBay through the Program and indirectly identify an eBay User. eBay has not been asked to confirm this and the conservative reading is deliberate. If eBay later states these identifiers are not Personal Information, the only cost of this choice is a deleted column nobody was reading."
+      }]
+    },
+    {
+      "id": "ebay-listing-sync-state",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["item-deletion", "account-erasure", "ebay-api-license-agreement-termination"],
+        "maximumRetention": "while the seller retains the published listing this row was written against; no later than item deletion or account-erasure completion; within ten days of eBay API License Agreement termination for every stored eBay-issued identifier",
+        "executor": "snaplist-tenant-data-deletion-capability-and-issue-384-account-erasure-capability",
+        "completionProof": "no public.ebay_listing_sync_state row remains for the tenant. Item deletion removes the listing and the row follows it by the (listing_id, user_id) foreign key to public.listings on delete cascade; account erasure deletes it directly in private.delete_ebay_listing_sync_for_erasure, and private.account_erasure_owned_row_count counts the table so completion cannot be reported while one survives. The eBay listing itself is an eBay-owned record and its deletion is never claimed here",
+        "ownerDecision": "Issue #711 created this table and named it inside the ebay-publish-receipts completionProof. This row states the same disposition at the granularity the matrix uses everywhere else, so the datum has an owner, triggers, a ceiling, an executor, and a proof of its own rather than a clause inside another row's; the two are one disposition described at two levels, not two authorities. verified-ebay-account-deletion-notification is deliberately not listed. The receipts row names that trigger for the identifiers stored on public.listings, but the seam that honours it is owned by issue #17 and is not shipped, so whether it deletes the listing row (which would take this table by cascade) or only clears the identifier columns (which would not) is not yet a fact. Adding the trigger here would promise a deletion path nothing can currently fire."
+      }]
+    },
+    {
+      "id": "ebay-listing-sync-conflicts",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["item-deletion", "account-erasure", "ebay-api-license-agreement-termination"],
+        "maximumRetention": "while the seller retains the published listing this row was written against; no later than item deletion or account-erasure completion; within ten days of eBay API License Agreement termination for every stored eBay-issued identifier",
+        "executor": "snaplist-tenant-data-deletion-capability-and-issue-384-account-erasure-capability",
+        "completionProof": "no public.ebay_listing_sync_conflicts row remains for the tenant. Item deletion removes the listing and the row follows it by the (listing_id, user_id) foreign key to public.listings on delete cascade; account erasure deletes it directly in private.delete_ebay_listing_sync_for_erasure, and private.account_erasure_owned_row_count counts the table so completion cannot be reported while one survives. Resolved conflict rows are history and are removed on the same triggers as open ones",
+        "ownerDecision": "Issue #711 created this table and named it inside the ebay-publish-receipts completionProof. This row states the same disposition at the granularity the matrix uses everywhere else, so the datum has an owner, triggers, a ceiling, an executor, and a proof of its own rather than a clause inside another row's; the two are one disposition described at two levels, not two authorities. verified-ebay-account-deletion-notification is deliberately not listed. The receipts row names that trigger for the identifiers stored on public.listings, but the seam that honours it is owned by issue #17 and is not shipped, so whether it deletes the listing row (which would take this table by cascade) or only clears the identifier columns (which would not) is not yet a fact. Adding the trigger here would promise a deletion path nothing can currently fire."
       }]
     },
     {

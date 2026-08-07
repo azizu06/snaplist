@@ -1,8 +1,47 @@
 import Foundation
 
+/// What the server already knows about the seller's own eBay business policies
+/// and inventory location (issue #694). This is a projection of the binding the
+/// publish path stored, so Settings can warn before publish without the client
+/// asking eBay anything.
+///
+/// `state` and `missing` stay untyped strings on purpose. The server owns the
+/// vocabulary and the seller-facing `message`; a raw-value enum here would turn
+/// a future server state into a decode failure for the whole connection read on
+/// a build that is already in the App Store.
+struct EbayPolicySetupHint: Codable, Equatable, Sendable {
+    let state: String
+    let marketplaceID: String
+    let missing: [String]
+    let ambiguous: [String]
+    let message: String?
+    let helpURL: URL?
+
+    private enum CodingKeys: String, CodingKey {
+        case state
+        case marketplaceID = "marketplaceId"
+        case missing
+        case ambiguous
+        case message
+        case helpURL = "helpUrl"
+    }
+}
+
 struct EbayConnectionStatus: Codable, Equatable, Sendable {
     let connected: Bool
     let ebayUsername: String?
+    /// Absent on the publish preflight, which carries connection truth only.
+    let policySetup: EbayPolicySetupHint?
+
+    init(
+        connected: Bool,
+        ebayUsername: String?,
+        policySetup: EbayPolicySetupHint? = nil
+    ) {
+        self.connected = connected
+        self.ebayUsername = ebayUsername
+        self.policySetup = policySetup
+    }
 }
 
 struct EbayOAuthSession: Codable, Equatable, Sendable {

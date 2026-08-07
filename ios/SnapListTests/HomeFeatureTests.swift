@@ -1338,6 +1338,7 @@ final class TrophyWallDomainTests: XCTestCase {
         for scenario in scenarios {
             let collapsed = TrophyWallProcessingView.presentation(
                 from: store.processingRows,
+                refreshRecovery: .idle,
                 availableHeight: scenario.size.height,
                 isExpanded: false
             )
@@ -1358,6 +1359,7 @@ final class TrophyWallDomainTests: XCTestCase {
             XCTAssertEqual(expansion.announcement, "Expanded")
             let expanded = TrophyWallProcessingView.presentation(
                 from: store.processingRows,
+                refreshRecovery: .idle,
                 availableHeight: scenario.size.height,
                 isExpanded: expansion.isExpanded
             )
@@ -1378,6 +1380,7 @@ final class TrophyWallDomainTests: XCTestCase {
             XCTAssertEqual(collapse.announcement, "Collapsed")
             let recollapsed = TrophyWallProcessingView.presentation(
                 from: store.processingRows,
+                refreshRecovery: .idle,
                 availableHeight: scenario.size.height,
                 isExpanded: collapse.isExpanded
             )
@@ -1508,6 +1511,7 @@ final class TrophyWallDomainTests: XCTestCase {
         let presentation = TrophyWallProcessingView.presentation(
             from: store.processingRows,
             collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
             availableHeight: 844,
             isExpanded: false
         )
@@ -1527,6 +1531,241 @@ final class TrophyWallDomainTests: XCTestCase {
         )
     }
 
+    func testRefusedCollectionRefreshRecoversAutomaticallyBeforeTellingTheSeller() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let savedCards = store.cards
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(URLError(.badServerResponse))]
+        )
+        var observedWaits: [Duration] = []
+
+        await store.recoverCollection(using: repository) { duration in
+            observedWaits.append(duration)
+        }
+
+        XCTAssertEqual(store.collectionOutcome, .unavailable)
+        XCTAssertEqual(store.collectionRefreshRecovery, .exhausted)
+        XCTAssertEqual(store.cards, savedCards)
+        XCTAssertEqual(
+            repository.requestedPages.count,
+            TrophyWallCollectionRecoveryPolicy.maximumAutomaticAttempts,
+            "A refused collection must be retried on the client's own initiative."
+        )
+        XCTAssertEqual(
+            observedWaits,
+            [.milliseconds(500), .milliseconds(1000)],
+            "Automatic attempts must back off rather than hammer the boundary."
+        )
+    }
+
+    func testSingleRefusedCollectionRefreshStaysSilentWhileRecoveryRemains() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(URLError(.badServerResponse))]
+        )
+
+        await store.refreshCollection(using: repository)
+
+        XCTAssertEqual(store.collectionOutcome, .unavailable)
+        XCTAssertEqual(store.collectionRefreshRecovery, .recovering)
+
+        let presentation = TrophyWallProcessingView.presentation(
+            from: store.processingRows,
+            collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
+            availableHeight: 844,
+            isExpanded: false
+        )
+
+        XCTAssertNil(
+            presentation.refreshUnavailableNotice,
+            "One bad answer is not yet a seller-facing failure."
+        )
+    }
+
+    /// The Try again path cancels and restarts the refresh task, so a recovery
+    /// run can begin while an earlier refresh still holds the boundary. That
+    /// overlap is dropped rather than queued, so it issues no request — and a
+    /// run that never reached the boundary may not report the bounded attempts
+    /// as spent, nor tell the seller SnapList gave up.
+    func testDroppedOverlappingRefreshNeverSpendsARecoveryAttempt() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let refusing = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(RunAPIError.unavailable)]
+        )
+
+        await store.refreshCollection(using: refusing)
+        XCTAssertEqual(store.collectionOutcome, .unavailable)
+        XCTAssertEqual(store.collectionRefreshRecovery, .recovering)
+
+        let holding = GatedTrophyWallRunHistoryRepository()
+        async let heldRefresh = store.refreshCollection(using: holding)
+        await holding.entered.wait()
+
+        var observedWaits: [Duration] = []
+        let overlapped = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(RunAPIError.unavailable)]
+        )
+        await store.recoverCollection(using: overlapped) { duration in
+            observedWaits.append(duration)
+        }
+
+        XCTAssertTrue(
+            overlapped.requestedPages.isEmpty,
+            "A dropped overlap reaches no boundary, so it spends no attempt."
+        )
+        XCTAssertTrue(
+            observedWaits.isEmpty,
+            "A dropped overlap must not back off between attempts it never made."
+        )
+        XCTAssertEqual(
+            store.collectionRefreshRecovery,
+            .recovering,
+            "Exhaustion may only be claimed once real attempts have been spent."
+        )
+
+        await holding.release.open()
+        _ = await heldRefresh
+    }
+
+    func testRecoveredCollectionClearsTheRefreshUnavailableNoticeWithoutSellerAction() async {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(URLError(.badServerResponse))]
+        )
+
+        await store.recoverCollection(using: repository) { _ in }
+        XCTAssertEqual(store.collectionRefreshRecovery, .exhausted)
+
+        let recovering = ScriptedTrophyWallRunHistoryRepository(
+            results: [.page(TrophyWallRunHistoryPage(entries: [], nextCursor: nil))]
+        )
+        await store.refreshCollection(using: recovering)
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        XCTAssertEqual(store.collectionRefreshRecovery, .idle)
+        XCTAssertNil(
+            TrophyWallProcessingView.presentation(
+                from: store.processingRows,
+                collectionOutcome: store.collectionOutcome,
+                refreshRecovery: store.collectionRefreshRecovery,
+                availableHeight: 844,
+                isExpanded: false
+            ).refreshUnavailableNotice
+        )
+    }
+
+    func testEveryCollectionOutcomeMapsToExactlyOneTrophyWallPresentation() {
+        let fixture = TrophyWallTestFixture()
+        let rows = fixture.makeStore(cards: fixture.processingInitialCards).processingRows
+        XCTAssertFalse(rows.isEmpty)
+
+        struct Expectation {
+            let outcome: TrophyWallCollectionOutcome
+            let recovery: TrophyWallCollectionRefreshRecovery
+            let offlineNotice: String?
+            let refreshUnavailableNotice: String?
+            let collectionMessageHeading: String?
+        }
+
+        let expectations: [Expectation] = [
+            .init(
+                outcome: .unknown,
+                recovery: .idle,
+                offlineNotice: nil,
+                refreshUnavailableNotice: nil,
+                collectionMessageHeading: nil
+            ),
+            .init(
+                outcome: .loaded,
+                recovery: .idle,
+                offlineNotice: nil,
+                refreshUnavailableNotice: nil,
+                collectionMessageHeading: nil
+            ),
+            .init(
+                outcome: .offline,
+                recovery: .idle,
+                offlineNotice: "You're offline. Showing saved items.",
+                refreshUnavailableNotice: nil,
+                collectionMessageHeading: nil
+            ),
+            .init(
+                outcome: .unavailable,
+                recovery: .exhausted,
+                offlineNotice: nil,
+                refreshUnavailableNotice: "Can't refresh. Showing saved items.",
+                collectionMessageHeading: nil
+            ),
+        ]
+
+        for expectation in expectations {
+            let rowsMode = TrophyWallProcessingView.presentation(
+                from: rows,
+                collectionOutcome: expectation.outcome,
+                refreshRecovery: expectation.recovery,
+                availableHeight: 844,
+                isExpanded: false
+            )
+            XCTAssertEqual(
+                rowsMode.offlineNotice,
+                expectation.offlineNotice,
+                "\(expectation.outcome) offline strip"
+            )
+            XCTAssertEqual(
+                rowsMode.refreshUnavailableNotice,
+                expectation.refreshUnavailableNotice,
+                "\(expectation.outcome) refresh-unavailable strip"
+            )
+            XCTAssertNil(
+                rowsMode.collectionMessage,
+                "\(expectation.outcome) must never replace a populated rows region."
+            )
+            XCTAssertFalse(rowsMode.visibleRows.isEmpty)
+
+            let wall = TrophyWallView.presentation(
+                hasSettledTiles: true,
+                collectionOutcome: expectation.outcome,
+                refreshRecovery: expectation.recovery
+            )
+            XCTAssertEqual(wall.offlineNotice, expectation.offlineNotice)
+            XCTAssertEqual(
+                wall.refreshUnavailableNotice,
+                expectation.refreshUnavailableNotice
+            )
+            XCTAssertTrue(wall.showsGrid)
+
+            let emptyRowsMode = TrophyWallProcessingView.presentation(
+                from: [],
+                collectionOutcome: expectation.outcome,
+                refreshRecovery: expectation.recovery,
+                availableHeight: 844,
+                isExpanded: false
+            )
+            XCTAssertNil(emptyRowsMode.offlineNotice)
+            XCTAssertNil(emptyRowsMode.refreshUnavailableNotice)
+            XCTAssertEqual(
+                emptyRowsMode.collectionMessage?.heading,
+                expectation.collectionMessageHeading
+                    ?? Self.emptyRowsCollectionHeading(for: expectation.outcome)
+            )
+        }
+    }
+
+    private static func emptyRowsCollectionHeading(
+        for outcome: TrophyWallCollectionOutcome
+    ) -> String? {
+        switch outcome {
+        case .unknown: nil
+        case .loaded: "Nothing is processing."
+        case .offline, .unavailable: "Processing unavailable"
+        }
+    }
+
     func testEmptyProcessingStateAppearsOnlyAfterSuccessfulCollectionTruth() async {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore(cards: [])
@@ -1535,6 +1774,7 @@ final class TrophyWallDomainTests: XCTestCase {
         let withheld = TrophyWallProcessingView.presentation(
             from: store.processingRows,
             collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
             availableHeight: 844,
             isExpanded: false
         )
@@ -1554,6 +1794,7 @@ final class TrophyWallDomainTests: XCTestCase {
         let loaded = TrophyWallProcessingView.presentation(
             from: store.processingRows,
             collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
             availableHeight: 844,
             isExpanded: false
         )
@@ -1651,6 +1892,7 @@ final class TrophyWallDomainTests: XCTestCase {
         let unavailable = TrophyWallProcessingView.presentation(
             from: store.processingRows,
             collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
             availableHeight: 844,
             isExpanded: false
         )
@@ -1663,6 +1905,7 @@ final class TrophyWallDomainTests: XCTestCase {
         let offlineWithoutCache = TrophyWallProcessingView.presentation(
             from: store.processingRows,
             collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
             availableHeight: 844,
             isExpanded: false
         )
@@ -1679,6 +1922,7 @@ final class TrophyWallDomainTests: XCTestCase {
         let recovered = TrophyWallProcessingView.presentation(
             from: store.processingRows,
             collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery,
             availableHeight: 844,
             isExpanded: false
         )
@@ -1721,7 +1965,7 @@ final class TrophyWallDomainTests: XCTestCase {
         let store = fixture.makeStore(cards: [])
         let repository = GatedTrophyWallRunHistoryRepository()
 
-        async let inFlight: Void = store.refreshCollection(using: repository)
+        async let inFlight = store.refreshCollection(using: repository)
         await repository.entered.wait()
         await store.refreshCollection(using: repository)
 
@@ -1729,7 +1973,7 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(store.collectionOutcome, .unknown)
 
         await repository.release.open()
-        await inFlight
+        _ = await inFlight
 
         XCTAssertEqual(store.collectionOutcome, .loaded)
         XCTAssertEqual(repository.requestCount, 1)
@@ -1740,11 +1984,11 @@ final class TrophyWallDomainTests: XCTestCase {
         let store = fixture.makeStore(cards: fixture.processingInitialCards)
         let repository = GatedTrophyWallRunHistoryRepository()
 
-        async let departingRefresh: Void = store.refreshCollection(using: repository)
+        async let departingRefresh = store.refreshCollection(using: repository)
         await repository.entered.wait()
         store.resetForPrincipalTransition()
         await repository.release.open()
-        await departingRefresh
+        _ = await departingRefresh
 
         XCTAssertTrue(store.cards.isEmpty)
         XCTAssertEqual(store.collectionOutcome, .unknown)
@@ -1896,6 +2140,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: false,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1907,6 +2152,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: false,
                     showsEmptyView: true,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1918,6 +2164,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: false,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: unavailable
                 )
             ),
@@ -1929,6 +2176,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: false,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: unavailable
                 )
             ),
@@ -1940,6 +2188,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: true,
                     showsEmptyView: false,
                     offlineNotice: offlineNotice,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1951,6 +2200,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: true,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1962,6 +2212,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     showsGrid: true,
                     showsEmptyView: false,
                     offlineNotice: nil,
+                    refreshUnavailableNotice: nil,
                     collectionMessage: nil
                 )
             ),
@@ -1971,7 +2222,8 @@ final class TrophyWallDomainTests: XCTestCase {
             XCTAssertEqual(
                 TrophyWallView.presentation(
                     hasSettledTiles: testCase.hasSettledTiles,
-                    collectionOutcome: testCase.outcome
+                    collectionOutcome: testCase.outcome,
+                    refreshRecovery: .idle
                 ),
                 testCase.expected,
                 testCase.name
@@ -2010,6 +2262,66 @@ final class TrophyWallDomainTests: XCTestCase {
                 "The actual Wall must render its \(renderCase.name) recovery group."
             )
         }
+
+        // The static seam above is satisfied by any caller that supplies the
+        // recovery argument, including a Wall body that never reads it from the
+        // store. Only the rendered Wall proves the notice actually ships.
+        let fixture = TrophyWallTestFixture()
+        let settledStore = fixture.makeStore(
+            cards: [
+                .accepted(
+                    principalScope: fixture.principal,
+                    runID: fixture.runID,
+                    state: .publishedToEbay,
+                    itemName: fixture.matchedItemName,
+                    lastMeaningfulUpdateAt: fixture.acceptedUpdate
+                )
+            ]
+        )
+        let exhausting = ScriptedTrophyWallRunHistoryRepository(
+            results: [.failure(RunAPIError.unavailable)]
+        )
+        await settledStore.recoverCollection(using: exhausting) { _ in }
+        XCTAssertEqual(settledStore.collectionRefreshRecovery, .exhausted)
+        XCTAssertFalse(settledStore.settledTiles.isEmpty)
+
+        let exhaustedWall = TrophyWallView(
+            store: settledStore,
+            openProcessing: {},
+            openAccount: {},
+            onScan: {},
+            onTryAgain: {}
+        )
+        let exhaustedHost = HostedTrophyWallTestWindow(
+            rootView: exhaustedWall,
+            size: CGSize(width: 390, height: 844)
+        )
+        await exhaustedHost.settle()
+        let exhaustedImage = exhaustedHost.captureImage()
+        exhaustedHost.close()
+
+        XCTAssertGreaterThan(
+            exhaustedImage.opaqueDarkPixelCount(
+                in: CGRect(x: 0, y: 100, width: 390, height: 640)
+            ),
+            100,
+            "The actual Wall must still render its saved tiles under the notice."
+        )
+
+        // The rendered tree is what the Wall's own body produced from the store,
+        // so an omitted `refreshRecovery` argument leaves the strip out of it
+        // entirely — which is exactly the defect the static seam could not see.
+        var renderedWall = ""
+        dump(exhaustedWall.body, to: &renderedWall)
+        XCTAssertTrue(
+            renderedWall.contains(
+                TrophyWallProcessingView.refreshUnavailableNoticeIdentifier
+            ),
+            """
+            The Wall must render its refresh-unavailable strip once the store \
+            reports recovery exhausted.
+            """
+        )
     }
 
     func testCollectionMessageContainsItsActionAccessibilityElements() {

@@ -810,6 +810,7 @@ struct TrophyWallView: View {
         let showsGrid: Bool
         let showsEmptyView: Bool
         let offlineNotice: String?
+        let refreshUnavailableNotice: String?
         let collectionMessage: TrophyWallProcessingView.CollectionMessage?
     }
 
@@ -883,9 +884,13 @@ struct TrophyWallView: View {
     /// claim about saved items and stays truthful only while there are saved
     /// items; without them, both reachability failures collapse to the same
     /// recovery group the pushed Processing screen already ships.
+    /// `refreshRecovery` carries no default on purpose. A default let the wall
+    /// itself omit the argument and silently present `.idle`, which made the
+    /// notice unreachable in production while every seam test still passed.
     static func presentation(
         hasSettledTiles: Bool,
-        collectionOutcome: TrophyWallCollectionOutcome
+        collectionOutcome: TrophyWallCollectionOutcome,
+        refreshRecovery: TrophyWallCollectionRefreshRecovery
     ) -> Presentation {
         guard !hasSettledTiles else {
             return Presentation(
@@ -894,6 +899,11 @@ struct TrophyWallView: View {
                 offlineNotice: collectionOutcome == .offline
                     ? TrophyWallProcessingView.offlineNoticeText
                     : nil,
+                refreshUnavailableNotice: TrophyWallProcessingView
+                    .refreshUnavailableNotice(
+                        for: collectionOutcome,
+                        refreshRecovery: refreshRecovery
+                    ),
                 collectionMessage: nil
             )
         }
@@ -905,6 +915,7 @@ struct TrophyWallView: View {
                 showsGrid: false,
                 showsEmptyView: false,
                 offlineNotice: nil,
+                refreshUnavailableNotice: nil,
                 collectionMessage: nil
             )
         case .loaded:
@@ -912,6 +923,7 @@ struct TrophyWallView: View {
                 showsGrid: false,
                 showsEmptyView: true,
                 offlineNotice: nil,
+                refreshUnavailableNotice: nil,
                 collectionMessage: nil
             )
         case .offline, .unavailable:
@@ -919,6 +931,7 @@ struct TrophyWallView: View {
                 showsGrid: false,
                 showsEmptyView: false,
                 offlineNotice: nil,
+                refreshUnavailableNotice: nil,
                 collectionMessage: TrophyWallProcessingView
                     .unavailableCollectionMessage
             )
@@ -929,11 +942,25 @@ struct TrophyWallView: View {
     private var wallBody: some View {
         let presentation = Self.presentation(
             hasSettledTiles: !store.settledTiles.isEmpty,
-            collectionOutcome: store.collectionOutcome
+            collectionOutcome: store.collectionOutcome,
+            refreshRecovery: store.collectionRefreshRecovery
         )
 
         if let offlineNotice = presentation.offlineNotice {
-            TrophyWallOfflineNoticeView(text: offlineNotice)
+            TrophyWallNoticeStripView(
+                text: offlineNotice,
+                identifier: TrophyWallProcessingView.offlineNoticeIdentifier,
+                announcesOnAppear: false
+            )
+        }
+
+        if let refreshUnavailableNotice = presentation.refreshUnavailableNotice {
+            TrophyWallNoticeStripView(
+                text: refreshUnavailableNotice,
+                identifier: TrophyWallProcessingView
+                    .refreshUnavailableNoticeIdentifier,
+                announcesOnAppear: true
+            )
         }
 
         if let collectionMessage = presentation.collectionMessage {
@@ -1061,6 +1088,7 @@ struct TrophyWallProcessingView: View {
         let disclosureLabel: String?
         let disclosureAccessibilityLabel: String?
         let offlineNotice: String?
+        let refreshUnavailableNotice: String?
         let collectionMessage: CollectionMessage?
     }
 
@@ -1090,6 +1118,13 @@ struct TrophyWallProcessingView: View {
     // Trophy Wall and the pushed Processing screen describe the same collection
     // failure, so they share one sentence for it rather than drifting into two.
     static let offlineNoticeText = "You're offline. Showing saved items."
+    static let offlineNoticeIdentifier = "trophy.processing.offline"
+    // A reached-but-broken boundary is not an offline device, so it gets its own
+    // sentence. The seller only sees it once SnapList has stopped retrying, and
+    // it carries no control: there is nothing left for a tap to add.
+    static let refreshUnavailableNoticeText = "Can't refresh. Showing saved items."
+    static let refreshUnavailableNoticeIdentifier =
+        "trophy.processing.refresh-unavailable"
     private static let emptyCollectionMessage = CollectionMessage(
         heading: "Nothing is processing.",
         action: .scan(label: "Scan an item"),
@@ -1110,6 +1145,7 @@ struct TrophyWallProcessingView: View {
 
     let rows: [TrophyWallProcessingRow]
     let collectionOutcome: TrophyWallCollectionOutcome
+    let refreshRecovery: TrophyWallCollectionRefreshRecovery
     let onBack: () -> Void
     let openRoute: (HomeRoute) -> Void
     let onScan: () -> Void
@@ -1118,6 +1154,7 @@ struct TrophyWallProcessingView: View {
     init(
         rows: [TrophyWallProcessingRow],
         collectionOutcome: TrophyWallCollectionOutcome = .unknown,
+        refreshRecovery: TrophyWallCollectionRefreshRecovery = .idle,
         onBack: @escaping () -> Void,
         openRoute: @escaping (HomeRoute) -> Void,
         onScan: @escaping () -> Void,
@@ -1125,6 +1162,7 @@ struct TrophyWallProcessingView: View {
     ) {
         self.rows = rows
         self.collectionOutcome = collectionOutcome
+        self.refreshRecovery = refreshRecovery
         self.onBack = onBack
         self.openRoute = openRoute
         self.onScan = onScan
@@ -1136,6 +1174,7 @@ struct TrophyWallProcessingView: View {
             let presentation = Self.presentation(
                 from: rows,
                 collectionOutcome: collectionOutcome,
+                refreshRecovery: refreshRecovery,
                 availableHeight: proxy.size.height,
                 isExpanded: isExpanded
             )
@@ -1167,7 +1206,20 @@ struct TrophyWallProcessingView: View {
                 .padding(.bottom, 10)
 
                 if let offlineNotice = presentation.offlineNotice {
-                    TrophyWallOfflineNoticeView(text: offlineNotice)
+                    TrophyWallNoticeStripView(
+                        text: offlineNotice,
+                        identifier: Self.offlineNoticeIdentifier,
+                        announcesOnAppear: false
+                    )
+                }
+
+                if let refreshUnavailableNotice =
+                    presentation.refreshUnavailableNotice {
+                    TrophyWallNoticeStripView(
+                        text: refreshUnavailableNotice,
+                        identifier: Self.refreshUnavailableNoticeIdentifier,
+                        announcesOnAppear: true
+                    )
                 }
 
                 if let collectionMessage = presentation.collectionMessage {
@@ -1268,9 +1320,13 @@ struct TrophyWallProcessingView: View {
         return Array(rows.prefix(limit))
     }
 
+    /// `refreshRecovery` carries no default for the same reason it carries none
+    /// on `TrophyWallView.presentation`: an omitted argument must not be able to
+    /// masquerade as a deliberate `.idle`.
     static func presentation(
         from rows: [TrophyWallProcessingRow],
         collectionOutcome: TrophyWallCollectionOutcome = .unknown,
+        refreshRecovery: TrophyWallCollectionRefreshRecovery,
         availableHeight: CGFloat,
         isExpanded: Bool
     ) -> Presentation {
@@ -1280,13 +1336,19 @@ struct TrophyWallProcessingView: View {
                 disclosureLabel: nil,
                 disclosureAccessibilityLabel: nil,
                 offlineNotice: nil,
+                refreshUnavailableNotice: nil,
                 collectionMessage: collectionMessage(for: collectionOutcome)
             )
         }
 
-        // The offline notice is a claim about saved items, so it is only
-        // truthful while there are saved items to show.
+        // Both notices are claims about saved items, so they are only truthful
+        // while there are saved items to show. One collection attempt produces
+        // one outcome, so they can never both be non-nil.
         let offlineNotice = collectionOutcome == .offline ? offlineNoticeText : nil
+        let refreshUnavailableNotice = refreshUnavailableNotice(
+            for: collectionOutcome,
+            refreshRecovery: refreshRecovery
+        )
         let clampedRows = visibleRows(
             from: rows,
             availableHeight: availableHeight
@@ -1298,6 +1360,7 @@ struct TrophyWallProcessingView: View {
                 disclosureLabel: nil,
                 disclosureAccessibilityLabel: nil,
                 offlineNotice: offlineNotice,
+                refreshUnavailableNotice: refreshUnavailableNotice,
                 collectionMessage: nil
             )
         }
@@ -1308,6 +1371,7 @@ struct TrophyWallProcessingView: View {
                 disclosureLabel: "Show less",
                 disclosureAccessibilityLabel: "Show fewer items",
                 offlineNotice: offlineNotice,
+                refreshUnavailableNotice: refreshUnavailableNotice,
                 collectionMessage: nil
             )
         }
@@ -1319,8 +1383,22 @@ struct TrophyWallProcessingView: View {
                 ? "Show 2 more items"
                 : "Show more items",
             offlineNotice: offlineNotice,
+            refreshUnavailableNotice: refreshUnavailableNotice,
             collectionMessage: nil
         )
+    }
+
+    /// A refused refresh only earns a sentence once SnapList has spent its own
+    /// bounded attempts. Before that the seller would be told about a failure
+    /// the client is still fixing, and after a success there is nothing to say.
+    static func refreshUnavailableNotice(
+        for outcome: TrophyWallCollectionOutcome,
+        refreshRecovery: TrophyWallCollectionRefreshRecovery
+    ) -> String? {
+        guard outcome == .unavailable, refreshRecovery == .exhausted else {
+            return nil
+        }
+        return refreshUnavailableNoticeText
     }
 
     private static func collectionMessage(
@@ -1350,8 +1428,15 @@ struct TrophyWallProcessingView: View {
     }
 }
 
-private struct TrophyWallOfflineNoticeView: View {
+/// One passive strip shared by every rows-mode collection notice. It carries no
+/// control and cannot be dismissed: it describes what the client knows, and it
+/// leaves when a later refresh proves something better.
+private struct TrophyWallNoticeStripView: View {
     let text: String
+    let identifier: String
+    /// Announced once when the condition appears. The offline strip predates
+    /// this and stays silent so its approved behavior is unchanged.
+    let announcesOnAppear: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -1378,7 +1463,24 @@ private struct TrophyWallOfflineNoticeView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("trophy.processing.offline")
+        .accessibilityLabel(text)
+        .accessibilityIdentifier(identifier)
+        .onAppear {
+            guard announcesOnAppear else { return }
+            // Low priority so the notice waits its turn instead of cutting off
+            // whatever VoiceOver is already saying. The seller is looking at
+            // saved rows either way; nothing here is worth an interruption.
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: NSAttributedString(
+                    string: text,
+                    attributes: [
+                        .accessibilitySpeechAnnouncementPriority:
+                            UIAccessibilityPriority.low
+                    ]
+                )
+            )
+        }
     }
 }
 

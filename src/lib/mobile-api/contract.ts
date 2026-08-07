@@ -116,6 +116,38 @@ export const ebayConnectionStatusSchema = z
   })
   .strict();
 
+export const ebayPolicySetupFamilySchema = z.enum([
+  "fulfillmentPolicy",
+  "paymentPolicy",
+  "returnPolicy",
+  "inventoryLocation",
+]);
+
+/**
+ * What Settings may say about the seller's eBay business policies before they
+ * try to publish (issue #694). This is a projection of the binding publish
+ * already stored for this tenant, never a fresh eBay Account API read.
+ */
+export const ebayPolicySetupHintSchema = z
+  .object({
+    state: z.enum([
+      "ready",
+      "setupRequired",
+      "selectionRequired",
+      "notChecked",
+    ]),
+    marketplaceId: z.string().min(1).max(64),
+    missing: z.array(ebayPolicySetupFamilySchema),
+    ambiguous: z.array(ebayPolicySetupFamilySchema),
+    message: z.string().min(1).nullable(),
+    helpUrl: z.string().url().nullable(),
+  })
+  .strict();
+
+export const ebayConnectionSettingsSchema = ebayConnectionStatusSchema
+  .extend({ policySetup: ebayPolicySetupHintSchema.nullable() })
+  .strict();
+
 export const ebayPublishPreflightSchema = z
   .object({
     listingId: z.string().uuid(),
@@ -155,7 +187,7 @@ export const ebayPublishPreflightEnvelopeSchema = z
   .strict();
 
 export const ebayConnectionStatusEnvelopeSchema = z
-  .object({ data: ebayConnectionStatusSchema, meta: apiMetaSchema })
+  .object({ data: ebayConnectionSettingsSchema, meta: apiMetaSchema })
   .strict();
 
 export const homeProjectionEnvelopeSchema = z
@@ -325,6 +357,26 @@ export const exportHandoffActionSchema = z
     action: z.enum(["handoff", "shared", "undo"]),
     reviewContentRevision: z.string().uuid(),
     reviewRevision: z.string().uuid(),
+  })
+  .strict();
+
+/**
+ * What the seller is told after deleting an item (#181).
+ *
+ * `retainedRecords` is not a footnote. SnapList deletes what SnapList owns; a
+ * live eBay listing stays live because ending it is the seller's action on
+ * eBay. Naming those records is the difference between an honest receipt and a
+ * claim that SnapList erased something it cannot reach.
+ */
+export const itemDeletionEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        itemId: z.string().uuid(),
+        retainedRecords: z.array(z.string().min(1)),
+      })
+      .strict(),
+    meta: apiMetaSchema,
   })
   .strict();
 

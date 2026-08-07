@@ -460,13 +460,17 @@ struct AssistedExportView: View {
             systemImage: completed ? "checkmark" : "doc.on.doc",
             identifier: "assisted-export.copy.\(destination.rawValue)"
         ) {
-            deviceActions.copy(requestedPack.listingText(for: destination))
             Task {
-                await store.recordHandoff(
+                // The copy itself happens inside `deliver`, on the pack the
+                // server resolved there and then. Copying first and reconciling
+                // afterwards would put a replaced price in the pasteboard.
+                await store.deliver(
                     .copiedListingText,
                     for: destination,
                     pack: requestedPack
-                )
+                ) { currentPack in
+                    deviceActions.copy(currentPack.listingText(for: destination))
+                }
             }
         }
     }
@@ -696,21 +700,29 @@ struct AssistedExportView: View {
     private func prepareShareSheet(
         for destination: AssistedExportDestination
     ) async {
-        let requestedPack = domain.pack
-        do {
+        // Same rule as Copy: the pack is resolved against the server before its
+        // text and photos are handed to another app. The receipt is not written
+        // here — the share sheet records its handoff once it is on screen.
+        var payload: AssistedExportSharePayload?
+        await store.prepareDelivery(pack: domain.pack) { currentPack in
             let images = try await deviceActions.loadPhotos(
-                requestedPack.photoReferences
+                currentPack.photoReferences
             )
-            guard domain.pack == requestedPack,
+            guard domain.pack == currentPack,
                   !domain.isPackOutOfDate else { return }
-            sharePayload = AssistedExportSharePayload(
+            payload = AssistedExportSharePayload(
                 destination: destination,
-                pack: requestedPack,
-                items: [requestedPack.listingText(for: destination)] + images
+                pack: currentPack,
+                items: [currentPack.listingText(for: destination)] + images
             )
-        } catch {
-            store.reportActionFailure()
         }
+        // Mount the sheet only once `prepareDelivery` has released the write
+        // lock. Assigning inside the closure happens while `isWriting` is still
+        // true, and the sheet's `onPresented` receipt is refused in that window
+        // (`AssistedExportStore.swift:103`). Today no suspension point separates
+        // the two, so nothing can render in between — hoisting the assignment
+        // makes that structural instead of an argument about the current code.
+        sharePayload = payload
     }
 
     // MARK: - Motion

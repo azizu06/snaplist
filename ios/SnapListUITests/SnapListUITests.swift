@@ -2,27 +2,7 @@ import CoreFoundation
 import XCTest
 import UIKit
 
-private extension XCUIApplication.State {
-    /// `XCUIApplication.State` has no readable description, so a lifecycle wait
-    /// that fails can only name the state it wanted, never the one it saw.
-    var reportedName: String {
-        switch self {
-        case .unknown: return "unknown"
-        case .notRunning: return "notRunning"
-        case .runningBackgroundSuspended: return "runningBackgroundSuspended"
-        case .runningBackground: return "runningBackground"
-        case .runningForeground: return "runningForeground"
-        @unknown default: return "unrecognized(\(rawValue))"
-        }
-    }
-}
-
 final class SnapListUITests: XCTestCase {
-    /// Bounds a hung Settings handoff. The wait is driven by Settings' observable
-    /// lifecycle state, so this budget only has to exceed the worst contended
-    /// simulator fleet, not a typical transition (#702).
-    private let settingsBackgroundingTimeout: TimeInterval = 30
-
     override func setUpWithError() throws {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
@@ -959,10 +939,8 @@ final class SnapListUITests: XCTestCase {
                 "top bar must stay above the hero at \(typeSize)"
             )
 
-            XCTAssertTrue(
-                UIProcessTerminationBoundary().terminate(app),
-                "SnapList did not terminate after \(typeSize)"
-            )
+            UIProcessTerminationBoundary()
+                .assertRetired(app, "SnapList after \(typeSize)")
         }
     }
 
@@ -1290,9 +1268,11 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion() {
-        XCTAssertTrue(
-            UIProcessTerminationBoundary().terminate(XCUIApplication()),
-            "Photo Review drag requires a fully stopped prior fixture process."
+        // A native drag replays against whichever process owns the screen, so a
+        // surviving prior fixture silently retargets the gesture.
+        UIProcessTerminationBoundary().assertRetired(
+            XCUIApplication(),
+            "The prior fixture process"
         )
         let app = launch(extraArguments: [
             "--photo-review-state=REV-02",
@@ -1866,6 +1846,13 @@ final class SnapListUITests: XCTestCase {
     /// ONB-05 illustrates the Trophy Wall. No item exists during onboarding, so the
     /// screen must be labelled an example and must expose no spinner or other affordance
     /// that would claim work is running.
+    ///
+    /// The indicator counts below only reach affordances that surface as their own
+    /// accessibility elements. Each example row ends in
+    /// `.accessibilityElement(children: .combine)`, so a spinner inside a row is folded
+    /// away and cannot be counted here;
+    /// `OnboardingFlowTests.testBackgroundExampleRowBodyWritesNoProgressAffordance` reads the
+    /// row's rendered type and carries that half of the guarantee.
     func testFirstValueOnboardingONB05IllustratesWithoutClaimingLiveProgress() {
         let app = launchFirstValueOnboarding(resetProgress: true)
         advanceFirstValueOnboarding(to: "ONB-05", in: app)
@@ -1882,10 +1869,17 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(app.progressIndicators.count, 0, app.debugDescription)
     }
 
-    /// A durable capture is restored asynchronously, so a returning seller's staged photo
-    /// is still nil when the shell first renders. Onboarding must wait for that answer
-    /// instead of taking the screen from work the seller already has in flight.
-    func testRestoredCaptureNeverExposesAFirstValueOnboardingControl() {
+    /// A returning seller whose durable capture survives lands on Resume with no
+    /// onboarding control anywhere on screen.
+    ///
+    /// This samples after `resume` exists, which is after restoration resolved and
+    /// `reconcileExistingProgress()` already recorded `supersededByExistingProgress`. It
+    /// therefore proves the settled outcome, not the transient window before restoration
+    /// answers — during that window the shell holds a neutral surface, which
+    /// `OnboardingFlowTests.testFirstValueOnboardingNeverPreemptsAnUnresolvedOrRestoredCapture`
+    /// proves at the pure policy seam. Naming this test after the transient window claimed
+    /// evidence it does not carry.
+    func testRestoredCaptureResumesWithNoFirstValueOnboardingControl() {
         let app = XCUIApplication()
         app.launchArguments = [
             "--restored-capture-fixture",
@@ -2077,8 +2071,16 @@ final class SnapListUITests: XCTestCase {
                 let settingsApp = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
                 settings = settingsApp
                 XCTAssertTrue(
-                    settingsApp.wait(for: .runningForeground, timeout: 3),
-                    "Settings handoff did not foreground the system Settings app"
+                    settingsApp.wait(
+                        for: .runningForeground,
+                        timeout: UIProcessLifecycleBudget.transition
+                    ),
+                    """
+                    Settings handoff did not foreground the system Settings \
+                    app: waited \
+                    \(Int(UIProcessLifecycleBudget.transition))s and still \
+                    observed \(settingsApp.state.reportedName)
+                    """
                 )
                 if requiresCanonicalViewport {
                     XCTAssertEqual(settingsApp.windows.firstMatch.frame.size.width, 393)
@@ -2117,11 +2119,12 @@ final class SnapListUITests: XCTestCase {
                     // the states waited for and the one still observed.
                     XCTAssertTrue(
                         settings.waitUntilSafeToTerminate(
-                            timeout: settingsBackgroundingTimeout
+                            timeout: UIProcessLifecycleBudget.transition
                         ),
                         """
                         Settings did not leave the foreground after \
-                        settings-handoff: waited \(Int(settingsBackgroundingTimeout))s \
+                        settings-handoff: waited \
+                        \(Int(UIProcessLifecycleBudget.transition))s \
                         for runningBackground, runningBackgroundSuspended, or \
                         notRunning and still observed \(settings.state.reportedName)
                         """
@@ -2130,10 +2133,7 @@ final class SnapListUITests: XCTestCase {
                     XCTFail("Settings lifecycle proxy was not retained")
                 }
             }
-            XCTAssertTrue(
-                processTermination.terminate(app),
-                "SnapList did not terminate after \(state)"
-            )
+            processTermination.assertRetired(app, "SnapList after \(state)")
         }
     }
 
