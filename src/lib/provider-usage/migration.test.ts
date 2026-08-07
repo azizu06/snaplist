@@ -99,4 +99,15 @@ describe("pipeline run provider usage migration", () => {
       /grant execute on function public\.pipeline_run_provider_usage_percentiles/i,
     );
   });
+
+  it("brings the cost table under account erasure", () => {
+    // A tenant table erasure neither fences nor counts is one erasure reports
+    // completion over while its rows survive (#384).
+    expect(migration).toMatch(
+      /create trigger zzz_fence_account_erasure_tenant_mutation\s+before insert or update or delete on public\.pipeline_run_provider_usage/i,
+    );
+    expect(migration).toMatch(
+      /create or replace function private\.account_erasure_owned_row_count[\s\S]+from public\.pipeline_run_provider_usage where user_id = p_user_id/i,
+    );
+  });
 });

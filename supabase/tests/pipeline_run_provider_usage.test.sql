@@ -288,9 +288,99 @@ $$;
 
 revoke all on function public.pipeline_run_provider_usage_percentiles(timestamptz, timestamptz)
   from public, anon, authenticated, service_role;
+
+-- Account erasure coverage (#384). A tenant table is only erasable if erasure
+-- both fences it and counts it: the fence stops a late write from resurrecting
+-- rows after erasure starts, and the count is the residue proof erasure reports
+-- completion against. Rows themselves go with the run — the composite foreign
+-- key above cascades from public.pipeline_runs, which advance_account_erasure
+-- already deletes.
+create trigger zzz_fence_account_erasure_tenant_mutation
+  before insert or update or delete on public.pipeline_run_provider_usage
+  for each row execute function private.fence_account_erasure_tenant_mutation();
+
+-- Re-declared in full, as every migration that adds a tenant table does: the
+-- function is one flat union and Postgres has no way to extend it in place.
+create or replace function private.account_erasure_owned_row_count(p_user_id text)
+returns integer
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select coalesce(sum(residue.count), 0)::integer
+  from (
+    select count(*)::integer as count from public.items where user_id = p_user_id
+    union all select count(*)::integer from public.listings where user_id = p_user_id
+    union all select count(*)::integer from public.export_handoffs where user_id = p_user_id
+    union all select count(*)::integer from public.messages where user_id = p_user_id
+    union all select count(*)::integer from public.embeddings where user_id = p_user_id
+    union all select count(*)::integer from public.prediction_logs where user_id = p_user_id
+    union all select count(*)::integer from public.user_settings where user_id = p_user_id
+    union all select count(*)::integer from public.activation_guidance_completions where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_photo_access_tokens where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_connections where user_id = p_user_id
+    union all select count(*)::integer from public.subscriptions where user_id = p_user_id
+    union all select count(*)::integer from public.notifications where user_id = p_user_id
+    union all select count(*)::integer from public.reprice_suggestions where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_message_sync_state where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_unresolved_questions where user_id = p_user_id
+    union all select count(*)::integer from public.message_policy_decisions where user_id = p_user_id
+    union all select count(*)::integer from public.message_attachments where user_id = p_user_id
+    union all select count(*)::integer from public.billing_customers where user_id = p_user_id
+    union all select count(*)::integer from public.billing_checkout_reservations where user_id = p_user_id
+    union all select count(*)::integer from public.ai_item_allowance_periods where user_id = p_user_id
+    union all select count(*)::integer from public.ai_item_credit_reservations where user_id = p_user_id
+    union all select count(*)::integer from public.revenuecat_customer_bindings where user_id = p_user_id
+    union all select count(*)::integer from public.pipeline_runs where user_id = p_user_id
+    union all select count(*)::integer from public.pipeline_run_provider_usage where user_id = p_user_id
+    union all select count(*)::integer from public.pipeline_run_history_order_versions where user_id = p_user_id
+    union all select count(*)::integer from public.pricing_evidence_snapshots where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_oauth_sessions where user_id = p_user_id
+    union all select count(*)::integer from public.included_offer_device_claims where user_id = p_user_id
+    union all select count(*)::integer from public.included_offer_support_overrides where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_messaging_account_generations where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_seller_account_generations where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_provider_dispatch_leases where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_buyer_identity_provenance where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_buyer_identity_observations where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_erased_buyer_generation_tombstones where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_sandbox_fallback_bindings where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_unmappable_connection_quarantines where user_id = p_user_id
+    union all select count(*)::integer from private.ebay_seller_identity_tenants where user_id = p_user_id
+    union all select count(*)::integer from private.pipeline_run_usage_reservations where user_id = p_user_id
+    union all select count(*)::integer from private.pipeline_staging_cleanup_intents where user_id = p_user_id
+    union all select count(*)::integer from private.legacy_pipeline_usage_reservations where user_id = p_user_id
+    union all select count(*)::integer from private.mobile_item_submissions where user_id = p_user_id
+    union all select count(*)::integer from private.mobile_item_submission_voice_handoffs where user_id = p_user_id
+    union all select count(*)::integer from private.mobile_listing_review_saves where user_id = p_user_id
+    union all select count(*)::integer from private.mobile_guided_corrections where user_id = p_user_id
+    union all select count(*)::integer from private.mobile_run_operation_replays where user_id = p_user_id
+    union all select count(*)::integer from private.guided_correction_completion_capabilities where user_id = p_user_id
+    union all select count(*)::integer from private.verified_guest_capabilities where user_id = p_user_id
+    union all select count(*)::integer from private.storekit_ai_item_period_events where user_id = p_user_id
+    union all select count(*)::integer from private.revenuecat_webhook_events where user_id = p_user_id
+    union all select count(*)::integer from private.guest_claim_handoffs where guest_user_id = p_user_id
+    union all select count(*)::integer
+      from private.guest_draft_recoveries
+      where p_user_id in (guest_user_id, claim_idempotency_user_id, claim_target_user_id)
+    union all select count(*)::integer
+      from private.pipeline_storage_cleanup_jobs job
+      where exists (
+        select 1 from unnest(job.photo_paths) path
+        where split_part(path, '/', 1) = p_user_id
+      )
+    union all select count(*)::integer
+      from private.message_photo_object_deletion_queue
+      where split_part(storage_path, '/', 1) = p_user_id
+  ) residue
+$$;
+
+revoke all on function private.account_erasure_owned_row_count(text)
+  from public, anon, authenticated, service_role;
 \endif
 
-select plan(24);
+select plan(26);
 
 -- ---------------------------------------------------------------------------
 -- Table privileges: sellers read their own row, and no runtime role — the
@@ -621,6 +711,35 @@ select is(
    )),
   0,
   'a date range with no completed runs returns nothing rather than a stale figure'
+);
+
+-- ---------------------------------------------------------------------------
+-- Account erasure coverage (#384). A tenant table erasure neither fences nor
+-- counts is a table erasure reports completion over while its rows survive.
+-- ---------------------------------------------------------------------------
+
+select ok(
+  exists (
+    select 1
+    from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'pipeline_run_provider_usage'
+      and t.tgname = 'zzz_fence_account_erasure_tenant_mutation'
+  ),
+  'the cost table is fenced, so no write can land after erasure starts'
+);
+
+select ok(
+  (
+    select pg_get_functiondef(p.oid)
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'private'
+      and p.proname = 'account_erasure_owned_row_count'
+  ) like '%from public.pipeline_run_provider_usage%',
+  'erasure counts the cost table, so leftover rows block completion'
 );
 
 select * from finish();
