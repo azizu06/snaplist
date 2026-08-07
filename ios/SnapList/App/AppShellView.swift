@@ -160,7 +160,9 @@ struct AppShellView: View {
                             return
                         }
                         switch event {
-                        case .startListing, .retryAmbiguousSubmission:
+                        case .startListing,
+                             .createAccount,
+                             .retryAmbiguousSubmission:
                             break
                         case .openVoiceNote,
                              .reviewSubmission,
@@ -278,9 +280,19 @@ struct AppShellView: View {
             switch event {
             case .destinationHandoff(
                 eventID: let eventID,
-                handoff: .pay01
+                handoff: let handoff
             )?:
-                Task { await presentProGate(eventID: eventID) }
+                switch AppShellSubmissionHandoffRoute(
+                    handoff: handoff,
+                    eventID: eventID
+                ) {
+                case .presentProGate(let eventID):
+                    Task { await presentProGate(eventID: eventID) }
+                case .showInPhotoReview:
+                    // Photo Review renders these, and it can only do that while the
+                    // event is still pending, so the shell must not consume it here.
+                    break
+                }
             case .itemSaved(_, let handoff)?:
                 trophyWallStore.ingest(
                     TrophyWallCanonicalAcceptedRun(
@@ -293,7 +305,7 @@ struct AppShellView: View {
                         lastMeaningfulUpdateAt: Date()
                     )
                 )
-            case nil, .submissionRejected?, .destinationHandoff?:
+            case nil, .submissionRejected?:
                 break
             }
         }
@@ -1222,6 +1234,29 @@ enum AppShellPhotoReviewBackTransaction {
     }
 }
 
+/// Where the shell sends each handoff the coordinator can decide. The switch is
+/// exhaustive with no `default` on purpose: the shell used to match `.pay01` and let
+/// every other handoff fall into a `break`, so the seller tapped `Start listing` and
+/// nothing happened at all. A fourth case must break the build instead.
+enum AppShellSubmissionHandoffRoute: Equatable {
+    /// A shell-owned surface the seller cannot reach from inside Photo Review.
+    case presentProGate(eventID: UUID)
+    /// Photo Review already shows this one, so the shell leaves the event standing.
+    case showInPhotoReview
+
+    init(
+        handoff: ItemRunSubmissionDestinationDecision.Handoff,
+        eventID: UUID
+    ) {
+        switch handoff {
+        case .pay01:
+            self = .presentProGate(eventID: eventID)
+        case .pay08, .accountClaim12aThrough12c:
+            self = .showInPhotoReview
+        }
+    }
+}
+
 @MainActor
 enum AppShellProGateTransaction {
     static func present(
@@ -1316,6 +1351,15 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 return
             }
             ambiguousRetryEventID = eventID
+        case .createAccount:
+            await AppShellAccountEntryPointTransaction.perform(
+                session: session,
+                captureFlow: captureFlow,
+                host: host,
+                router: router,
+                setReturnFocus: setReturnFocus
+            )
+            return
         case .reviewConflictedSubmission:
             _ = PhotoReviewSubmissionPrimaryActionConsumer.consume(
                 primaryAction,
@@ -1370,6 +1414,40 @@ enum AppShellPhotoReviewSubmissionTransaction {
             return
         }
         submissionHost.completeClearedIntakePresentation()
+    }
+}
+
+@MainActor
+enum AppShellAccountEntryPointTransaction {
+    /// Photo Review covers the whole shell, so Settings opened from under it would
+    /// never be seen. Leave the way Back leaves — the seller's photos stay committed
+    /// and Scan takes them back — then open the account entry point Settings already
+    /// owns. A rejected commit keeps the seller in Photo Review with the message that
+    /// sent them here, rather than routing them away from photos that never reached
+    /// disk.
+    @discardableResult
+    static func perform(
+        session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
+    ) async -> Bool {
+        let outcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: setReturnFocus
+        )
+        guard case .completed = outcome else {
+            return false
+        }
+        // Back reopens the guided camera. Clear it, or the account entry point lands
+        // under a full-screen cover the seller never asked for.
+        router.presentedFullScreen = nil
+        router.navigate(to: .settings)
+        return true
     }
 }
 

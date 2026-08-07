@@ -1974,6 +1974,65 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertFalse(scenario.photoReviewHost.isCommitting)
     }
 
+    func testAccountHandoffLeavesPhotoReviewForTheAccountEntryPoint() async throws {
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-account-handoff-entry-point",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemRed,
+                    rightColor: .systemBlue
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemYellow,
+                    rightColor: .systemPurple
+                ),
+            ]
+        )
+        defer { scenario.cleanUp() }
+        let intake = SubmissionIntakeFixture(
+            stagedPhotos: scenario.displayedPhotos
+        )
+        let attemptStore = LocalItemRunSubmissionAttemptStore(
+            rootDirectory: scenario.attemptRoot
+        )
+        let keySequence = KeySequence(
+            keys: [UUID(uuidString: "50300000-0000-4000-8000-000000000091")!]
+        )
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: RecordingItemRunSubmitter(
+                    outcomes: [.authenticationRequired]
+                ),
+                attemptStore: attemptStore,
+                draftStore: scenario.draftStore,
+                tokenProvider: CaptureFlowBearerTokenProvider(),
+                readData: intake.read,
+                newIdempotencyKey: { keySequence.next() }
+            )
+        )
+
+        await scenario.perform(submissionHost: submissionHost)
+
+        XCTAssertEqual(submissionHost.retention, .authenticationRequired)
+        XCTAssertNotNil(scenario.photoReviewHost.session)
+
+        await scenario.perform(
+            primaryAction: .createAccount,
+            submissionHost: submissionHost
+        )
+
+        XCTAssertNil(scenario.photoReviewHost.session)
+        XCTAssertNil(scenario.router.presentedFullScreen)
+        XCTAssertEqual(
+            scenario.router.pathBinding(for: .scan).wrappedValue,
+            [.settings]
+        )
+        // The account demand is a stop, not a discard: the photos the seller took
+        // are still on the phone when they come back from making the account.
+        let durablePhotos = try await scenario.draftStore.loadPhotos()
+        XCTAssertEqual(durablePhotos, scenario.expectedDurablePhotos)
+    }
+
     func testConflictSubmissionPresentsReviewAndReviewOnlyRetiresMatchingAdvisory() async throws {
         let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
             name: "snaplist-conflict-submission-review",

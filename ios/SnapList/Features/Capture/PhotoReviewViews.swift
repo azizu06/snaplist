@@ -2361,6 +2361,9 @@ struct PhotoReviewFixtureView: View {
 enum PhotoReviewBoundaryEvent: Equatable {
     case openVoiceNote
     case startListing
+    /// The seller was told an account is needed, and asked for the account entry
+    /// point. Photo Review covers the shell, so only the shell can honor this.
+    case createAccount
     case retryAmbiguousSubmission(eventID: UUID)
     case reviewSubmission(eventID: UUID)
     case reviewConflictedSubmission(eventID: UUID)
