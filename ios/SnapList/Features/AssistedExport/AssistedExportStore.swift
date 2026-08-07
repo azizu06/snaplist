@@ -126,6 +126,91 @@ final class AssistedExportStore {
         }
     }
 
+    /// Hand the prepared pack to the device: the clipboard, the share sheet,
+    /// another app.
+    ///
+    /// The pack is resolved against the server BEFORE a word of it leaves
+    /// SnapList, and the caller is handed the resolved pack rather than the one
+    /// it asked with. That order is the whole point. A seller price edit
+    /// changes what the pack says while the screen keeps showing what it said,
+    /// and delivering first and reconciling afterwards puts the old number in
+    /// the seller's pasteboard and then in a real marketplace listing — the
+    /// refusal arriving a moment later cannot take it back out.
+    ///
+    /// A listing that moved on is not delivered at all: the workspace goes to
+    /// XPORT-05 and the seller is asked to update the pack, which is the same
+    /// answer `record_export_handoff` would give, arrived at before the handoff
+    /// instead of after it.
+    func deliver(
+        _ action: AssistedExportHandoffAction,
+        for destination: AssistedExportDestination,
+        pack requestedPack: AssistedExportPack,
+        using handOver: (AssistedExportPack) async throws -> Void
+    ) async {
+        await deliver(
+            pack: requestedPack,
+            recording: (action: action, destination: destination),
+            using: handOver
+        )
+    }
+
+    /// The same resolve-then-hand-over rule for a delivery whose receipt is
+    /// written elsewhere. The share sheet is the case: its handoff is recorded
+    /// when the sheet is actually on screen, so building its payload must not
+    /// record a second one, but the payload still may not be built from a pack
+    /// the server has already moved past.
+    func prepareDelivery(
+        pack requestedPack: AssistedExportPack,
+        using build: (AssistedExportPack) async throws -> Void
+    ) async {
+        await deliver(pack: requestedPack, recording: nil, using: build)
+    }
+
+    private func deliver(
+        pack requestedPack: AssistedExportPack,
+        recording receipt: (
+            action: AssistedExportHandoffAction,
+            destination: AssistedExportDestination
+        )?,
+        using handOver: (AssistedExportPack) async throws -> Void
+    ) async {
+        guard phase == .ready,
+              domain.pack == requestedPack,
+              !domain.isPackOutOfDate,
+              !isWriting else { return }
+        isWriting = true
+        actionMessage = nil
+        defer { isWriting = false }
+        do {
+            let refreshed = try await service.load(pack: requestedPack)
+            // A stale pack, or one replaced under this request, delivers
+            // nothing. `synchronize` has already moved the domain to the state
+            // that says so.
+            guard synchronize(refreshed, for: requestedPack) else { return }
+            let currentPack = domain.pack
+            try await handOver(currentPack)
+            guard let receipt else { return }
+            guard domain.pack == currentPack, !domain.isPackOutOfDate else {
+                return
+            }
+            let response = try await service.perform(
+                .handoff,
+                destination: receipt.destination,
+                pack: currentPack
+            )
+            guard synchronize(response, for: currentPack),
+                  !domain.isPackOutOfDate else { return }
+            switch receipt.action {
+            case .copiedListingText, .savedPhotos:
+                showCompletion(receipt.action, for: receipt.destination)
+            case .openedDestination, .sharedAnotherWay:
+                break
+            }
+        } catch {
+            actionMessage = AssistedExportCopy.actionFailed
+        }
+    }
+
     func savePhotos(
         for destination: AssistedExportDestination,
         pack expectedPack: AssistedExportPack? = nil,
