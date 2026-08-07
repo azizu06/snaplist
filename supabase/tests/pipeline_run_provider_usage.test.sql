@@ -11,7 +11,7 @@ begin;
 -- local stack may not have applied this branch migration without a reset; there
 -- the same DDL is injected inside this transaction and rolled back at EOF.
 -- Keep the block below identical to the migration it mirrors:
--- supabase/migrations/20260806140000_pipeline_run_provider_usage.sql.
+-- supabase/migrations/20260806200000_pipeline_run_provider_usage.sql.
 select to_regclass('pgtap_ci.require_installed_migrations') is not null
   as require_installed_migration \gset
 \if :require_installed_migration
@@ -319,6 +319,8 @@ as $$
     union all select count(*)::integer from public.user_settings where user_id = p_user_id
     union all select count(*)::integer from public.activation_guidance_completions where user_id = p_user_id
     union all select count(*)::integer from public.ebay_photo_access_tokens where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_listing_sync_state where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_listing_sync_conflicts where user_id = p_user_id
     union all select count(*)::integer from public.ebay_connections where user_id = p_user_id
     union all select count(*)::integer from public.subscriptions where user_id = p_user_id
     union all select count(*)::integer from public.notifications where user_id = p_user_id

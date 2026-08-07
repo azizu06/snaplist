@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  */
 const migration = readFileSync(
   new URL(
-    "../../../supabase/migrations/20260806140000_pipeline_run_provider_usage.sql",
+    "../../../supabase/migrations/20260806200000_pipeline_run_provider_usage.sql",
     import.meta.url,
   ),
   "utf8",

@@ -301,6 +301,8 @@ as $$
     union all select count(*)::integer from public.user_settings where user_id = p_user_id
     union all select count(*)::integer from public.activation_guidance_completions where user_id = p_user_id
     union all select count(*)::integer from public.ebay_photo_access_tokens where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_listing_sync_state where user_id = p_user_id
+    union all select count(*)::integer from public.ebay_listing_sync_conflicts where user_id = p_user_id
     union all select count(*)::integer from public.ebay_connections where user_id = p_user_id
     union all select count(*)::integer from public.subscriptions where user_id = p_user_id
     union all select count(*)::integer from public.notifications where user_id = p_user_id
