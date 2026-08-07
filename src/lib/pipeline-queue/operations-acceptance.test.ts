@@ -167,6 +167,15 @@ class AcceptanceStore implements PipelineWorkerStore {
     return { status: "failed", retryAfterSeconds: null };
   }
 
+  /**
+   * Cost telemetry (#716) is observability, not an operations behavior. It is
+   * accepted and discarded here so this acceptance narrative keeps asserting
+   * what it exists to assert: claim, lease, retry, and completion.
+   */
+  async recordProviderUsage(input: { runId: string; leaseToken: string }) {
+    this.currentLease(input.runId, input.leaseToken);
+  }
+
   async rejectMessage(input: { runId: string; messageId: string }) {
     const run = this.runs.get(input.runId);
     if (!run || run.messageId !== input.messageId) return false;

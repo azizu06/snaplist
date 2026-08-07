@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { GuestRecoveryRegistrationProducer } from "@/lib/guest-recovery/producer";
 import type { PipelineResult } from "@/lib/pipeline";
 import { PIPELINE_OPERATIONS_POLICY } from "@/lib/pipeline-operations/policy";
+import { withProviderUsageRun } from "@/lib/provider-usage";
 import { pipelineQueueEnvelopeSchema } from "./envelope";
 import type { PipelineQueue } from "./queue";
 import type {
@@ -151,23 +152,41 @@ export async function consumePipelineQueue(
     const { context } = acquisition;
     let completed = false;
     try {
-      const result = await dependencies.processor.process({
-        context,
-        onCheckpoint: async (stage, checkpoint) => {
-          const persisted = await dependencies.runs.checkpoint({
-            runId: context.run.id,
-            leaseToken: context.run.lease_token,
-            stage,
-            checkpoint,
-            leaseSeconds: config.visibilityTimeoutSeconds,
-          });
-          await dependencies.queue.defer(
-            message.id,
-            config.visibilityTimeoutSeconds,
-          );
-          return persisted;
-        },
-      });
+      const { value: result, usage } = await withProviderUsageRun(() =>
+        dependencies.processor.process({
+          context,
+          onCheckpoint: async (stage, checkpoint) => {
+            const persisted = await dependencies.runs.checkpoint({
+              runId: context.run.id,
+              leaseToken: context.run.lease_token,
+              stage,
+              checkpoint,
+              leaseSeconds: config.visibilityTimeoutSeconds,
+            });
+            await dependencies.queue.defer(
+              message.id,
+              config.visibilityTimeoutSeconds,
+            );
+            return persisted;
+          },
+        }),
+      );
+      // Cost telemetry (#716), written while the attempt's lease is still live
+      // — completion clears it. Never allowed to fail the attempt: a listing the
+      // seller already paid for cannot be lost to a bookkeeping insert, so the
+      // failure is logged and the run proceeds to completion.
+      try {
+        await dependencies.runs.recordProviderUsage({
+          runId: context.run.id,
+          leaseToken: context.run.lease_token,
+          usage,
+        });
+      } catch (usageError) {
+        console.error(
+          `[pipeline.worker.provider_usage] run ${context.run.id}`,
+          usageError,
+        );
+      }
       const guestRecoveryRegistration = dependencies.guestRecovery
         ? await dependencies.guestRecovery.prepare({
             context,

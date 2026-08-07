@@ -1,4 +1,5 @@
-import type { LanguageModel } from "ai";
+import { wrapLanguageModel, type LanguageModel } from "ai";
+import { usageRecordingMiddleware } from "./usage-recording";
 
 /** A read-only env bag. `process.env` satisfies this, and tests pass plain objects. */
 type EnvLike = Record<string, string | undefined>;
@@ -362,12 +363,18 @@ export async function resolveLanguageModel(
   const modelId = resolveModelId(role, { provider, modelId: opts.modelId, env });
   const apiKey = opts.apiKey ?? resolveApiKey(provider, env);
 
+  // Every model handed out here is wrapped so its token counts reach the active
+  // provider-usage run (#716). The wrap is applied to the RESOLVED model, so the
+  // recorded id is what actually answered — not a role default read back from
+  // this file, which moves whenever the provider or a `*_MODEL` override does.
+  const recordUsage = usageRecordingMiddleware({ role, provider, model: modelId });
+
   if (provider === "google") {
     const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
     const google = createGoogleGenerativeAI(apiKey ? { apiKey } : {});
-    return google(modelId);
+    return wrapLanguageModel({ model: google(modelId), middleware: recordUsage });
   }
   const { createOpenAI } = await import("@ai-sdk/openai");
   const openai = createOpenAI(apiKey ? { apiKey } : {});
-  return openai.chat(modelId);
+  return wrapLanguageModel({ model: openai.chat(modelId), middleware: recordUsage });
 }

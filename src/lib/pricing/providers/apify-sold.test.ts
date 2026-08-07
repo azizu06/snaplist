@@ -51,6 +51,7 @@ import {
   type RunApifySoldActor,
 } from "./apify-sold";
 import type { AuthorityRaceEvent } from "../pricing-authority-test-fixtures";
+import { withProviderUsageRun } from "../../provider-usage";
 
 const SIGNAL: ItemSignal = {
   brand: "Sony",
@@ -1551,5 +1552,72 @@ describe("createApifySoldPricingProvider", () => {
 
     await expect(provider.price(SIGNAL)).resolves.toBeNull();
     expect(runActor).not.toHaveBeenCalled();
+  });
+});
+
+describe("Apify sold-comp usage recording (#716)", () => {
+  it("records the retrieved-result count and the actor's reported charge", async () => {
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      runActor: async () => ({
+        status: "SUCCEEDED",
+        chargedTotalUsd: 0.0247,
+        items: [
+          rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+          rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "180" }),
+          rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "190" }),
+        ],
+      }),
+    });
+
+    const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
+
+    expect(usage.soldComps).toEqual([
+      { strategy: "apify", attempts: 1, results: 3, chargedUsd: 0.0247 },
+    ]);
+  });
+
+  it("records a paid run that returned nothing usable, charge included", async () => {
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      emitDiagnostic: () => undefined,
+      runActor: async () => ({
+        status: "FAILED",
+        chargedTotalUsd: 0.0031,
+        items: [],
+      }),
+    });
+
+    const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
+
+    expect(usage.soldComps).toEqual([
+      { strategy: "apify", attempts: 1, results: 0, chargedUsd: 0.0031 },
+    ]);
+  });
+
+  it("leaves the charge unreported rather than inventing a zero", async () => {
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      cache: sharedTestCache(),
+      runActor: async () => ({
+        status: "SUCCEEDED",
+        items: [
+          rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+          rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "180" }),
+          rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "190" }),
+        ],
+      }),
+    });
+
+    const { usage } = await withProviderUsageRun(() => provider.price(SIGNAL));
+
+    expect(usage.soldComps).toEqual([
+      { strategy: "apify", attempts: 1, results: 3, chargedUsd: null },
+    ]);
   });
 });
