@@ -7,6 +7,8 @@ import {
 } from "./comp-cache";
 import {
   createDefaultPricer as createRawDefaultPricer,
+  createOrderedSoldProvider,
+  SOLD_STRATEGY_SKIPPED_EVENT,
   type CreateDefaultPricerOptions,
 } from "./default-pricer";
 import type {
@@ -18,7 +20,13 @@ import {
   createAuthorityCacheFixture,
   type AuthorityRaceEvent,
 } from "./pricing-authority-test-fixtures";
-import type { ItemSignal } from "./types";
+import type { LogFields } from "../observability";
+import {
+  priceResultSchema,
+  type ItemSignal,
+  type PriceResult,
+  type PricingProvider,
+} from "./types";
 
 const SIGNAL: ItemSignal = {
   brand: "Sony",
@@ -132,6 +140,77 @@ function createAuthorityPricerFixture(
     });
   return { fetchPage, priceForRuntime };
 }
+
+const SOLD_RESULT: PriceResult = {
+  suggested: 180,
+  range: { min: 170, max: 190 },
+  confidence: 0.8,
+  sources: [{ url: "https://www.ebay.com/itm/stub-a", kind: "sold-comp" }],
+  tier: "ebay-sold",
+};
+
+function stubSoldStrategy(
+  canHandle: boolean,
+  result: PriceResult | null,
+): { provider: PricingProvider; price: ReturnType<typeof vi.fn> } {
+  const price = vi.fn(async () => result);
+  return { provider: { tier: "ebay-sold", canHandle: () => canHandle, price }, price };
+}
+
+describe("createOrderedSoldProvider", () => {
+  it("actually invokes a strategy that can handle the signal", async () => {
+    const primary = stubSoldStrategy(true, null);
+    const fallback = stubSoldStrategy(true, SOLD_RESULT);
+
+    const result = await createOrderedSoldProvider([
+      { name: "apify-sold", provider: primary.provider },
+      { name: "ebay-sold-public-page", provider: fallback.provider },
+    ]).price(SIGNAL);
+
+    // The guard against a silently-skipped primary: assert the CALL, not the result.
+    expect(primary.price).toHaveBeenCalledWith(SIGNAL);
+    expect(fallback.price).toHaveBeenCalledWith(SIGNAL);
+    expect(result).toEqual(SOLD_RESULT);
+  });
+
+  it("names an inactive strategy it skipped and why", async () => {
+    const emitDiagnostic = vi.fn();
+    const primary = stubSoldStrategy(false, SOLD_RESULT);
+    const fallback = stubSoldStrategy(true, SOLD_RESULT);
+
+    const result = await createOrderedSoldProvider([
+      {
+        name: "apify-sold",
+        provider: primary.provider,
+        inactiveReason: "unconfigured",
+        emitDiagnostic,
+      },
+      { name: "ebay-sold-public-page", provider: fallback.provider },
+    ]).price(SIGNAL);
+
+    expect(emitDiagnostic).toHaveBeenCalledWith(SOLD_STRATEGY_SKIPPED_EVENT, {
+      strategy: "apify-sold",
+      reason: "unconfigured",
+    });
+    expect(primary.price).not.toHaveBeenCalled();
+    expect(result).toEqual(SOLD_RESULT);
+  });
+
+  it("distinguishes a per-signal decline from an inactive strategy", async () => {
+    const emitDiagnostic = vi.fn();
+    const primary = stubSoldStrategy(false, SOLD_RESULT);
+
+    const result = await createOrderedSoldProvider([
+      { name: "apify-sold", provider: primary.provider, emitDiagnostic },
+    ]).price(SIGNAL);
+
+    expect(emitDiagnostic).toHaveBeenCalledWith(SOLD_STRATEGY_SKIPPED_EVENT, {
+      strategy: "apify-sold",
+      reason: "signal-not-identifiable",
+    });
+    expect(result).toBeNull();
+  });
+});
 
 describe("createDefaultPricer Apify composition", () => {
   beforeEach(() => {
@@ -1111,6 +1190,109 @@ describe("createDefaultPricer Apify composition", () => {
     expect(
       fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
     ).toEqual(["10", "20"]);
+  });
+
+  it("attempts the primary Apify strategy through the env activation gate", async () => {
+    vi.stubEnv("APIFY_SOLD_ENABLED", "true");
+    vi.stubEnv("APIFY_TOKEN", "activated-by-operator");
+    const runActor = vi.fn<RunApifySoldActor>(async () => ({
+      status: "SUCCEEDED",
+      items: apifyItems(),
+    }));
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+    const apifyDiagnostics: { event: string; strategy: unknown }[] = [];
+    // No `enabled`/`token` override: the ONLY thing arming Apify here is the
+    // production activation gate the operator will flip.
+    const price = createDefaultPricer({
+      apifySold: {
+        runActor,
+        cache: sharedApifyCache(),
+        emitDiagnostic: (event, fields) =>
+          apifyDiagnostics.push({ event, strategy: fields.strategy }),
+      },
+      ebaySold: { fetchPage },
+    });
+
+    const result = await price(SIGNAL);
+
+    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(result.tier).toBe("ebay-sold");
+    expect(result.suggested).toBe(180);
+    expect(apifyDiagnostics).not.toContainEqual({
+      event: SOLD_STRATEGY_SKIPPED_EVENT,
+      strategy: "apify-sold",
+    });
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("reports an unconfigured primary Apify strategy instead of skipping it silently", async () => {
+    vi.stubEnv("APIFY_SOLD_ENABLED", "true");
+    vi.stubEnv("APIFY_TOKEN", "");
+    const runActor = vi.fn<RunApifySoldActor>();
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+    const apifyDiagnostics: { event: string; fields: LogFields }[] = [];
+    // The lower tiers are stubbed so a fall-through regression is a visible tier
+    // change here rather than a live web-search/model call.
+    const emptySearchClient = { search: vi.fn(async () => []) };
+    const price = createDefaultPricer({
+      apifySold: {
+        runActor,
+        cache: sharedApifyCache(),
+        emitDiagnostic: (event, fields) => apifyDiagnostics.push({ event, fields }),
+      },
+      ebaySold: { fetchPage },
+      webSearch: { searchClient: emptySearchClient },
+      depreciation: { searchClient: emptySearchClient },
+      llmOnly: {
+        estimatePrice: async () => ({ suggested: 100, min: 50, max: 150 }),
+      },
+    });
+
+    const result = await price(SIGNAL);
+
+    expect(apifyDiagnostics).toContainEqual({
+      event: SOLD_STRATEGY_SKIPPED_EVENT,
+      fields: { strategy: "apify-sold", reason: "unconfigured" },
+    });
+    expect(runActor).not.toHaveBeenCalled();
+    // AC3: the tier is still served, by the next strategy, with a valid result.
+    expect(result.tier).toBe("ebay-sold");
+    expect(priceResultSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("still fails soft to a schema-valid price when every sold strategy is unavailable", async () => {
+    vi.stubEnv("APIFY_SOLD_ENABLED", "");
+    vi.stubEnv("APIFY_TOKEN", "");
+    const runActor = vi.fn<RunApifySoldActor>();
+    const fetchPage = vi.fn<FetchPage>(async () => {
+      throw new Error("eBay sold fetch failed: 403 Forbidden");
+    });
+    const apifyDiagnostics: { event: string; fields: LogFields }[] = [];
+    const emptySearchClient = { search: vi.fn(async () => []) };
+    const price = createDefaultPricer({
+      apifySold: {
+        runActor,
+        cache: sharedApifyCache(),
+        emitDiagnostic: (event, fields) => apifyDiagnostics.push({ event, fields }),
+      },
+      ebaySold: { fetchPage, emitDiagnostic: () => undefined },
+      webSearch: { searchClient: emptySearchClient },
+      depreciation: { searchClient: emptySearchClient },
+      llmOnly: {
+        estimatePrice: async () => ({ suggested: 100, min: 50, max: 150 }),
+      },
+    });
+
+    const result = await price(SIGNAL);
+
+    expect(apifyDiagnostics).toContainEqual({
+      event: SOLD_STRATEGY_SKIPPED_EVENT,
+      fields: { strategy: "apify-sold", reason: "unconfigured" },
+    });
+    expect(runActor).not.toHaveBeenCalled();
+    expect(fetchPage).toHaveBeenCalled();
+    expect(result.tier).toBe("llm-only");
+    expect(priceResultSchema.safeParse(result).success).toBe(true);
   });
 
   it("falls through when Actor retrieval has fewer than two matcher-approved anchors", async () => {

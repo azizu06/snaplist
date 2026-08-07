@@ -12,6 +12,7 @@ import {
   type EbaySoldPricingProviderOptions,
 } from "./providers/ebay-sold";
 import {
+  apifySoldActivated,
   createApifySoldPricingProvider,
   type ApifySoldComp,
   type ApifySoldPricingProviderOptions,
@@ -29,6 +30,7 @@ import {
   createLlmOnlyPricingProvider,
   type LlmOnlyPricingProviderOptions,
 } from "./providers/llm-only";
+import { logEvent, type LogFields } from "../observability";
 
 /**
  * The default real pricer — the PriceRouter composition root over all six PRD
@@ -86,18 +88,54 @@ function withApifySoldFreshness(
   };
 }
 
-/** One sold tier with ordered, fail-soft retrieval strategies. */
-function orderedSoldProvider(
-  providers: readonly PricingProvider[],
+/**
+ * Emitted once per sold-comp strategy the ordered tier declined to even ATTEMPT.
+ * A `canHandle` decline used to be a bare `continue`, so an unconfigured primary
+ * adapter produced a run that was byte-identical to one where it ran and honestly
+ * found nothing (#715). `reason: "unconfigured"` is the operator-actionable case:
+ * the activation flag or the token is missing/misspelled.
+ */
+export const SOLD_STRATEGY_SKIPPED_EVENT = "pricing.sold_comps.strategy_skipped";
+
+/** One named retrieval strategy inside the single `ebay-sold` tier. */
+export interface OrderedSoldStrategy {
+  /** Stable identifier reported by `SOLD_STRATEGY_SKIPPED_EVENT`. */
+  name: string;
+  provider: PricingProvider;
+  /**
+   * Why this strategy can never handle anything in this process — an activation
+   * fact, not a per-signal one. Absent means a decline is signal-specific.
+   */
+  inactiveReason?: string;
+  /** Same sink the strategy's own provider logs to; defaults to `logEvent`. */
+  emitDiagnostic?: (event: string, fields: LogFields) => void;
+}
+
+/**
+ * One sold tier with ordered, fail-soft retrieval strategies. Falling through is
+ * still silent to the SELLER (the tier just declines and the router continues),
+ * but it is no longer silent to the OPERATOR.
+ */
+export function createOrderedSoldProvider(
+  strategies: readonly OrderedSoldStrategy[],
 ): PricingProvider {
   return {
     tier: "ebay-sold",
     canHandle(signal) {
-      return providers.some((provider) => provider.canHandle?.(signal) ?? true);
+      return strategies.some(
+        ({ provider }) => provider.canHandle?.(signal) ?? true,
+      );
     },
     async price(signal) {
-      for (const provider of providers) {
-        if (provider.canHandle && !provider.canHandle(signal)) continue;
+      for (const strategy of strategies) {
+        const { provider } = strategy;
+        if (provider.canHandle && !provider.canHandle(signal)) {
+          (strategy.emitDiagnostic ?? logEvent)(SOLD_STRATEGY_SKIPPED_EVENT, {
+            strategy: strategy.name,
+            reason: strategy.inactiveReason ?? "signal-not-identifiable",
+          });
+          continue;
+        }
         const result = await provider.price(signal);
         if (result) return result;
       }
@@ -127,9 +165,26 @@ export function createDefaultPricer(
   // fetched at most once (the router returns the ISBN result before reaching the
   // standalone tier). Searching by the exact ISBN pins the precise edition, so the
   // comps cluster tightly — exactly what the agreement signal rewards.
-  const soldProvider = orderedSoldProvider([
-    createApifySoldPricingProvider(withApifySoldFreshness(options.apifySold)),
-    createEbaySoldPricingProvider(withSoldFreshness(options.ebaySold)),
+  const apifySold = withApifySoldFreshness(options.apifySold);
+  const publicSold = withSoldFreshness(options.ebaySold);
+  const soldProvider = createOrderedSoldProvider([
+    {
+      name: "apify-sold",
+      provider: createApifySoldPricingProvider(apifySold),
+      // Resolved through the adapter's OWN activation gate, so a skipped primary
+      // is reported as unconfigured by the same rule that disarmed it.
+      ...(apifySoldActivated(apifySold) ? {} : { inactiveReason: "unconfigured" }),
+      ...(apifySold.emitDiagnostic
+        ? { emitDiagnostic: apifySold.emitDiagnostic }
+        : {}),
+    },
+    {
+      name: "ebay-sold-public-page",
+      provider: createEbaySoldPricingProvider(publicSold),
+      ...(publicSold.emitDiagnostic
+        ? { emitDiagnostic: publicSold.emitDiagnostic }
+        : {}),
+    },
   ]);
   const router = new PriceRouter([
     createIsbnPricingProvider({
