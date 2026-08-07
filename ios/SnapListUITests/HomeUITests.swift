@@ -9,60 +9,52 @@ final class HomeUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    func testApprovedSellerStatesRenderTheirDurableTruth() {
-        let expectations = [
-            ("HOME-01", "Finding recent sold comps"),
-            ("HOME-02", "Photograph an item. Get real comps and a listing you control."),
-            ("HOME-03", "Writing your listing"),
-            ("HOME-04", "Recent searches")
-        ]
+    /// HOME-01 is the settled wall and HOME-02 is the empty wall. Those are the
+    /// two approved Trophy Wall states. HOME-03 and HOME-04 were the attention
+    /// feed and the listings search, and both were retired with the
+    /// seller-operations surface rather than restyled.
+    func testApprovedTrophyWallStatesRenderTheirDurableTruth() {
+        let settled = launch("HOME-01")
+        XCTAssertTrue(
+            settled.scrollViews["trophy.wall.grid"].waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            settled.images.element(
+                matching: NSPredicate(
+                    format: "label BEGINSWITH %@", "Vintage Pyrex bowl set"
+                )
+            ).waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(settled.otherElements["trophy.wall.empty"].exists)
+        settled.terminate()
 
-        for (state, expectedText) in expectations {
-            let app = launch(state)
-            XCTAssertTrue(
-                app.staticTexts[expectedText].waitForExistence(timeout: 3),
-                "Missing approved content for \(state)"
-            )
-            app.terminate()
-        }
+        let empty = launch("HOME-02")
+        XCTAssertTrue(empty.staticTexts["No items yet"].waitForExistence(timeout: 3))
+        XCTAssertTrue(empty.buttons["trophy.wall.scan"].exists)
+        XCTAssertFalse(empty.scrollViews["trophy.wall.grid"].exists)
     }
 
-    func testAttentionAndCurrentRunUseTypedFutureRoutes() {
+    /// The seller-Home run row that used to open this screen is gone, so the
+    /// route is entered the way it is still reachable in the product. What Back
+    /// must restore is the wall itself, which is now the one return destination.
+    func testRunDetailUsesSystemBackAndReturnsToTrophyWall() {
         let app = launch("HOME-01")
+        let wall = app.otherElements["trophy.wall"]
+        XCTAssertTrue(wall.waitForExistence(timeout: 3))
 
-        let order = app.buttons["home.attention.20800000-0000-4000-8000-000000000011"]
-        XCTAssertTrue(order.waitForExistence(timeout: 3))
-        order.tap()
-        XCTAssertTrue(app.staticTexts["home.route.order.title"].waitForExistence(timeout: 2))
+        app.openRunDetail()
 
-        app.navigationBars.buttons.firstMatch.tap()
-        let run = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS %@", "Finding recent sold comps")
-        ).firstMatch
-        XCTAssertTrue(run.waitForExistence(timeout: 2))
-        run.tap()
-        XCTAssertTrue(app.staticTexts["Run unavailable"].waitForExistence(timeout: 2))
-    }
-
-    func testRunDetailUsesSystemBackAndReturnsToExactHomeOpener() {
-        let app = launch("HOME-01")
-        let opener = app.buttons["home.run.20800000-0000-4000-8000-000000000020"]
-
-        XCTAssertTrue(opener.waitForExistence(timeout: 3))
-        opener.tap()
-
-        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
         let back = app.buttons["Back"]
         XCTAssertTrue(back.exists)
         back.tap()
 
-        XCTAssertTrue(opener.waitForExistence(timeout: 2))
-        XCTAssertTrue(opener.isHittable)
+        XCTAssertTrue(wall.waitForExistence(timeout: 3))
     }
 
     func testRunDetailShowsFactualUnavailableState() {
         let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=unavailable"])
-        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+        app.openRunDetail()
 
         XCTAssertTrue(app.staticTexts["Run unavailable"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["We couldn’t load this run."].exists)
@@ -102,9 +94,9 @@ final class HomeUITests: XCTestCase {
                 "--dynamic-type=accessibility5",
             ]
         )
-        let opener = app.buttons["home.run.20800000-0000-4000-8000-000000000020"]
-        XCTAssertTrue(opener.waitForExistence(timeout: 3))
-        opener.tap()
+        let wall = app.otherElements["trophy.wall"]
+        XCTAssertTrue(wall.waitForExistence(timeout: 3))
+        app.openRunDetail()
 
         XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
         let scroll = app.scrollViews["run.detail.scroll"]
@@ -146,10 +138,9 @@ final class HomeUITests: XCTestCase {
         back.tap()
         XCTAssertTrue(
             waitForDisappearance(of: app.otherElements["run.detail"]),
-            "System Back must finish dismissing Run Detail before Home is asserted."
+            "System Back must finish dismissing Run Detail before the wall is asserted."
         )
-        XCTAssertTrue(opener.waitForExistence(timeout: 3))
-        XCTAssertTrue(opener.isHittable)
+        XCTAssertTrue(wall.waitForExistence(timeout: 3))
     }
 
     func testCompletedRunOffersReviewCopyOnlyWhenServerAllowsIt() {
@@ -157,7 +148,7 @@ final class HomeUITests: XCTestCase {
             "HOME-01",
             extraArguments: ["--run-detail-fixture=completed"]
         )
-        unavailable.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+        unavailable.openRunDetail()
 
         XCTAssertTrue(unavailable.staticTexts["Run completed"].waitForExistence(timeout: 3))
         XCTAssertTrue(unavailable.staticTexts["Review unavailable"].exists)
@@ -169,7 +160,7 @@ final class HomeUITests: XCTestCase {
             "HOME-01",
             extraArguments: ["--run-detail-fixture=reviewable"]
         )
-        reviewable.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+        reviewable.openRunDetail()
 
         XCTAssertTrue(reviewable.staticTexts["Run completed"].waitForExistence(timeout: 3))
         XCTAssertTrue(reviewable.staticTexts["Ready to review"].exists)
@@ -178,7 +169,7 @@ final class HomeUITests: XCTestCase {
 
     func testRunDetailRefreshIsAccessibleAndReplacesServerTruth() {
         let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=refresh"])
-        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+        app.openRunDetail()
         XCTAssertTrue(app.staticTexts["Researching pricing evidence"].waitForExistence(timeout: 3))
 
         let refresh = app.buttons["Refresh"]
@@ -193,16 +184,14 @@ final class HomeUITests: XCTestCase {
 
     func testExactCustomRunDeepLinkOpensDetailAndBackReturnsHome() {
         let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=loaded"])
-        let opener = app.buttons["home.run.20800000-0000-4000-8000-000000000020"]
-        XCTAssertTrue(opener.waitForExistence(timeout: 3))
+        let wall = app.otherElements["trophy.wall"]
+        XCTAssertTrue(wall.waitForExistence(timeout: 3))
 
-        app.open(
-            URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!
-        )
+        app.openRunDetail()
 
         XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].waitForExistence(timeout: 3))
         app.buttons["Back"].tap()
-        XCTAssertTrue(opener.waitForExistence(timeout: 2))
+        XCTAssertTrue(wall.waitForExistence(timeout: 3))
     }
 
     func testRun02VisualStateUsesTheCanonicalDetailRouteShell() {
@@ -228,38 +217,40 @@ final class HomeUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(refresh.frame.height, 44)
     }
 
-    func testNewSellerStartsTheExistingCaptureFlow() {
+    func testEmptyWallScanActionSelectsTheScanDestination() {
         let app = launch("HOME-02")
-        let firstItem = app.buttons["home.first-item"]
+        let scan = app.buttons["trophy.wall.scan"]
 
-        XCTAssertTrue(firstItem.waitForExistence(timeout: 3))
-        XCTAssertGreaterThanOrEqual(firstItem.frame.height, 44)
-        firstItem.tap()
+        XCTAssertTrue(scan.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(scan.frame.height, 44)
+        scan.tap()
 
-        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
+        let dockScan = app.buttons["dock.scan"]
+        XCTAssertTrue(dockScan.waitForExistence(timeout: 3))
+        XCTAssertTrue(dockScan.isSelected)
     }
 
-    func testFocusedSearchFiltersRealListingModelsAndHidesDockForKeyboard() {
-        let app = launch("HOME-04")
-        let search = app.textFields["home.search.field"]
+    /// One dock, two destinations, on every screen that shows it. The Scan
+    /// camera used to draw its own `scan.tab` / `trophy-wall.tab` control; it now
+    /// renders the same component, so the identifiers below are the only pair
+    /// that exists anywhere in the app.
+    func testDockShowsTheTwoApprovedDestinationsOnBothPrimaryScreens() {
+        let app = launch("HOME-02")
 
-        XCTAssertTrue(search.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["dock.scan"].exists)
+        XCTAssertTrue(app.buttons["dock.trophy-wall"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["dock.scan"].exists)
+        XCTAssertTrue(app.buttons["dock.trophy-wall"].isSelected)
+        XCTAssertFalse(app.buttons["dock.capture"].exists)
+        XCTAssertFalse(app.buttons["scan.tab"].exists)
+        XCTAssertFalse(app.buttons["trophy-wall.tab"].exists)
 
-        search.typeText("camera")
-        XCTAssertTrue(app.staticTexts["1 result for “camera”"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].exists)
-        XCTAssertFalse(app.staticTexts["Bose QC earbuds headset"].exists)
+        app.buttons["dock.scan"].tap()
 
-        app.buttons["Clear search"].tap()
-        app.buttons["home.search.filter.active"].tap()
-        XCTAssertTrue(
-            app.buttons["home.listing.20800000-0000-4000-8000-000000000041"]
-                .waitForExistence(timeout: 2)
-        )
-        XCTAssertTrue(app.buttons["home.listing.20800000-0000-4000-8000-000000000042"].exists)
-        XCTAssertFalse(app.buttons["home.listing.20800000-0000-4000-8000-000000000044"].exists)
+        XCTAssertTrue(app.buttons["dock.scan"].isSelected)
+        XCTAssertTrue(app.buttons["dock.trophy-wall"].exists)
+        XCTAssertFalse(app.buttons["dock.capture"].exists)
+        XCTAssertFalse(app.buttons["scan.tab"].exists)
+        XCTAssertFalse(app.buttons["trophy-wall.tab"].exists)
     }
 
     func testTrophyWallFixtureUsesValidatedWallAndPushedProcessing() {
@@ -289,17 +280,23 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(processing.isHittable)
     }
 
-    func testHomeRemainsReachableAtAccessibilityTypeWithReducedMotion() {
+    func testTrophyWallRemainsReachableAtAccessibilityTypeWithReducedMotion() {
         let app = launch(
             "HOME-02",
             extraArguments: ["--dynamic-type=accessibility3", "--reduced-motion"]
         )
-        let firstItem = app.buttons["home.first-item"]
+        let scan = app.buttons["trophy.wall.scan"]
 
-        XCTAssertTrue(firstItem.waitForExistence(timeout: 3))
-        XCTAssertGreaterThanOrEqual(firstItem.frame.height, 44)
-        XCTAssertTrue(app.buttons["header.activity"].exists)
-        XCTAssertTrue(app.buttons["header.account"].exists)
+        XCTAssertTrue(scan.waitForExistence(timeout: 3))
+        XCTAssertGreaterThanOrEqual(scan.frame.height, 44)
+
+        // The trailing account control survives; the notification bell beside it
+        // did not, and neither did the header that carried it.
+        let account = app.buttons["trophy.wall.account"]
+        XCTAssertTrue(account.exists)
+        XCTAssertGreaterThanOrEqual(account.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(account.frame.height, 44)
+        XCTAssertFalse(app.buttons["header.activity"].exists)
     }
 
     func testProcessingDisclosureExpandsAndCollapsesWithoutRouting() {
@@ -371,27 +368,35 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }
 
-    func testFinalListingRowClearsTheFloatingDockWhenScrolled() {
+    /// The settled fixture is deliberately taller than any supported viewport,
+    /// so the last tile starts below the fold. Without the grid's dock-sized
+    /// bottom padding it would come to rest underneath the floating dock, and
+    /// this assertion would fail rather than pass by fitting on screen.
+    func testFinalWallTileClearsTheFloatingDockWhenScrolled() {
         let app = launch("HOME-01")
-        let scroll = app.scrollViews["home.active"]
-        let finalListing = app.buttons[
-            "home.listing.20800000-0000-4000-8000-000000000041"
-        ]
+        let scroll = app.scrollViews["trophy.wall.grid"]
+        let finalTile = app.images.element(
+            matching: NSPredicate(format: "label BEGINSWITH %@", "Craftsman socket set")
+        )
 
         XCTAssertTrue(scroll.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["dock.capture"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            finalTile.isHittable,
+            "The settled fixture must overflow the viewport for this to prove anything."
+        )
         scrollUntilFullyVisible(
             scroll,
-            element: finalListing,
+            element: finalTile,
             in: app,
             maximumSwipes: 16
         )
 
         let viewport = unobscuredScrollViewport(scroll, in: app)
-        XCTAssertTrue(finalListing.isHittable)
+        XCTAssertTrue(finalTile.isHittable)
         XCTAssertTrue(
-            isFullyVisible(finalListing.frame, within: viewport),
-            "Final listing frame \(finalListing.frame) must fit within the unobscured scroll viewport \(viewport)."
+            isFullyVisible(finalTile.frame, within: viewport),
+            "Final tile frame \(finalTile.frame) must fit within the unobscured scroll viewport \(viewport)."
         )
     }
 
@@ -430,7 +435,7 @@ final class HomeUITests: XCTestCase {
             "HOME-01",
             extraArguments: ["--run-detail-fixture=\(fixture)"]
         )
-        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+        app.openRunDetail()
 
         XCTAssertTrue(app.staticTexts[heading].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts[status].exists)
@@ -490,7 +495,7 @@ final class HomeUITests: XCTestCase {
         in app: XCUIApplication
     ) -> CGRect {
         let scrollViewport = scrollView.frame.intersection(app.windows.firstMatch.frame)
-        let dock = app.buttons["dock.capture"]
+        let dock = app.buttons["dock.scan"]
         let dockTop = dock.exists
             ? dock.frame.midY - (sellerHomeV15DockHeight / 2)
             : scrollViewport.maxY
@@ -511,5 +516,15 @@ final class HomeUITests: XCTestCase {
             && frame.maxX <= viewport.maxX
             && frame.minY >= viewport.minY
             && frame.maxY <= viewport.maxY
+    }
+}
+
+private extension XCUIApplication {
+    /// Run Detail used to be entered by tapping a seller-Home run row. That row
+    /// went with the retired surface, so the tests enter through the route the
+    /// product still exposes. The identifier is the run the detail fixtures
+    /// resolve against.
+    func openRunDetail() {
+        open(URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!)
     }
 }

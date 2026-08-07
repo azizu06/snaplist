@@ -395,15 +395,14 @@ final class ListingReviewUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let runOpener = app.buttons[
-            "home.run.20800000-0000-4000-8000-000000000020"
-        ]
         XCTAssertTrue(
-            runOpener.waitForExistence(timeout: 3),
+            app.otherElements["trophy.wall"].waitForExistence(timeout: 3),
             file: file,
             line: line
         )
-        runOpener.tap()
+        // The seller-Home run row that used to open Run Detail was retired with
+        // the rest of that surface, so the route is entered directly.
+        app.open(URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!)
 
         let reviewOpener = app.buttons["run.review.open"]
         XCTAssertTrue(

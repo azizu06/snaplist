@@ -7,7 +7,6 @@ struct SnapListApp: App {
     @State private var onboardingModel: OnboardingFlowModel
     @State private var firstValueOnboardingModel: FirstValueOnboardingModel
     @State private var captureFlow: CaptureFlowModel
-    @State private(set) var homeStore: HomeStore
     @State private var trophyWallStore: TrophyWallStore
     @State private var runStore: RunDetailStore
     @State private var listingReviewStore: ListingReviewStore
@@ -143,16 +142,6 @@ struct SnapListApp: App {
                 funnelAnalytics: dependencies.funnelAnalytics
             )
         )
-        _homeStore = State(
-            initialValue: HomeStore(
-                repository: HomeRepositoryFactory.make(
-                    configuration: configuration,
-                    apiOrigin: apiOrigin,
-                    tokenProvider: tokenProvider,
-                    session: urlSession
-                )
-            )
-        )
         _runStore = State(
             initialValue: RunDetailStoreFactory.make(
                 configuration: configuration,
@@ -197,7 +186,6 @@ struct SnapListApp: App {
                 onboardingModel: onboardingModel,
                 firstValueOnboardingModel: firstValueOnboardingModel,
                 captureFlow: captureFlow,
-                homeStore: homeStore,
                 trophyWallStore: trophyWallStore,
                 runStore: runStore,
                 listingReviewStore: listingReviewStore,
@@ -213,25 +201,14 @@ struct SnapListApp: App {
                             configuration: configuration
                         )
 #endif
-                    async let captureRestoration = captureFlow.restore()
-                    async let homeLoad: Void = loadLegacyHomeFixtureIfNeeded()
-                    let restoration = await captureRestoration
+                    let restoration = await captureFlow.restore()
                     if restoration == .stagedPhoto {
                         firstValueOnboardingModel.reconcileExistingProgress()
                         onboardingModel
                             .beginPhotoPermissionAfterFirstValueOnboarding()
                     }
                     router.handleCaptureRestoration(restoration)
-                    await homeLoad
                 }
         }
-    }
-
-    @MainActor
-    private func loadLegacyHomeFixtureIfNeeded() async {
-#if DEBUG
-        guard configuration.visualState?.ownerIssue == 208 else { return }
-        await homeStore.load()
-#endif
     }
 }

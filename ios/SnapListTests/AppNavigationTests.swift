@@ -2,36 +2,69 @@ import XCTest
 @testable import SnapList
 
 final class AppNavigationTests: XCTestCase {
-    func testDockCarriesOnlyTheTwoPrimaryDestinationsAndTheCaptureEntry() {
-        XCTAssertEqual(
-            DockDestination.allCases.map(\.title),
-            ["Scan", "Capture", "Trophy Wall"]
-        )
-        XCTAssertFalse(DockDestination.allCases.map(\.title).contains("Runs"))
-        XCTAssertFalse(DockDestination.allCases.map(\.title).contains("You"))
-    }
-
-    func testPrimaryNavigationIsExactlyTheTwoApprovedDestinations() {
+    /// The dock renders `PrimaryTab.allCases` directly, so the approved two
+    /// destinations and the rendered dock are the same list by construction. A
+    /// third affordance would have to add a case, and the exhaustive switch below
+    /// stops compiling when one appears — the assertion is a build failure, not a
+    /// runtime expectation someone can update away.
+    func testDockCarriesExactlyTheTwoApprovedPrimaryDestinations() {
+        XCTAssertEqual(PrimaryTab.allCases.map(\.title), ["Scan", "Trophy Wall"])
         XCTAssertEqual(PrimaryTab.allCases.count, 2)
-        XCTAssertEqual(
-            DockDestination.allCases.compactMap(\.tab),
-            PrimaryTab.allCases
-        )
+
+        for tab in PrimaryTab.allCases {
+            switch tab {
+            case .scan, .trophyWall:
+                continue
+            }
+        }
     }
 
     func testRetiredTabsCannotBeRestoredFromAPersistedName() {
         // A tab that stops rendering but still parses from a persisted string stays
         // routable. The enum is the fail-closed boundary, so the retired names must
-        // not resolve at all.
-        for retired in ["home", "listings", "inbox", "insights"] {
+        // not resolve at all. `capture` is here because it was the third dock
+        // affordance the approved dock removes.
+        for retired in ["home", "listings", "inbox", "insights", "capture"] {
             XCTAssertNil(PrimaryTab(rawValue: retired))
-            XCTAssertNil(DockDestination(rawValue: retired))
         }
 
         // Positive control: the boundary rejects the retired names, not every name.
-        XCTAssertEqual(DockDestination(rawValue: "capture"), .capture)
         XCTAssertEqual(PrimaryTab(rawValue: "scan"), .scan)
         XCTAssertEqual(PrimaryTab(rawValue: "trophy-wall"), .trophyWall)
+    }
+
+    /// Issue #729 removes the seller-operations surface as *types*, not as hidden
+    /// views. An order, buyer conversation, listing, or listings filter has no
+    /// route left to be constructed into, so no view can build one however it is
+    /// composed. A `default` clause here would let a reintroduced case compile
+    /// silently, which is exactly the regression this guards.
+    func testHomeRoutesCarryNoRetiredSellerOperationsDestination() {
+        let routes: [HomeRoute] = [
+            .processing,
+            .localRecovery(Self.logicalIdentity(1)),
+            .run(UUID())
+        ]
+
+        for route in routes {
+            switch route {
+            case .processing, .localRecovery, .run:
+                continue
+            }
+        }
+
+        for route in [AppRoute.settings, .home(.processing), .future(.account)] {
+            switch route {
+            case .settings, .home, .future:
+                continue
+            }
+        }
+
+        for boundary in [FutureBoundary.account, .run, .draft] {
+            switch boundary {
+            case .account, .run, .draft:
+                continue
+            }
+        }
     }
 
     func testLaunchFixturesNamingARetiredTabResolveToASurvivingDestination() {
@@ -56,19 +89,25 @@ final class AppNavigationTests: XCTestCase {
     func testEachPrimaryTabKeepsAnIndependentNavigationPath() {
         let router = AppRouter()
 
-        router.navigate(to: .activity)
+        router.navigate(to: .future(.account))
         router.select(.trophyWall)
         router.navigate(to: .settings)
 
-        XCTAssertEqual(router.pathBinding(for: .scan).wrappedValue, [.activity])
+        XCTAssertEqual(
+            router.pathBinding(for: .scan).wrappedValue,
+            [.future(.account)]
+        )
         XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.settings])
     }
 
+    /// Capture is still a sheet, but the dock no longer opens it. Restoration is
+    /// the surviving entry, and it must not move the seller off the tab they are
+    /// standing on.
     @MainActor
-    func testCaptureIsASheetAndDoesNotReplaceTheSelectedTab() {
+    func testRestoredCaptureIsASheetAndDoesNotReplaceTheSelectedTab() {
         let router = AppRouter(initialTab: .trophyWall)
 
-        router.select(.capture)
+        router.handleCaptureRestoration(.stagedPhoto)
 
         XCTAssertEqual(router.selectedTab, .trophyWall)
         XCTAssertEqual(router.presentedSheet, .capture)

@@ -30,7 +30,6 @@ ios/DesignContracts/V1/mobile-api-v1.openapi.json
 ios/DesignContracts/V1/snaplist-swiftui-mapping-notes.md
 ios/SnapList.xcodeproj/project.pbxproj
 ios/SnapList/App/AppDependenciesEnvironment.swift
-ios/SnapList/App/AppHeader.swift
 ios/SnapList/App/AppShellView.swift
 ios/SnapList/App/FloatingDock.swift
 ios/SnapList/App/SnapListApp.swift
