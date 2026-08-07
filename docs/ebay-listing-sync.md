@@ -23,7 +23,7 @@ carrying both values. It is never resolved by overwriting one side.
 | --- | --- | --- |
 | Draft, never published | SnapList | Seller edits, pipeline output |
 | `ebay_status = 'publishing'` | SnapList | Publish claim; sync refuses to touch it |
-| Published, confirmed | eBay | Confirmed observations and confirmed mutations only |
+| Published, confirmed | eBay | Confirmed observations only |
 
 ## How an observation arrives
 
@@ -143,6 +143,11 @@ survives. `src/lib/account-erasure/fence-coverage.rls.test.ts` enforces this for
 - **Non-USD marketplace pricing.** Persisted prices are compared against a `USD` constant, not a
   per-marketplace currency. A listing published to a non-USD marketplace would diverge on every
   observation. Named in `listing-sync-store.ts` and locked by a test rather than papered over.
+- **Detecting a divergence only the local side moved.** A poll's event id is content-addressed over
+  what eBay reported, and the ingest dedupes on it *before* comparing. A local edit made after
+  publish against unchanged provider state therefore re-polls to an id already applied and is
+  dropped before `compare()` runs; it surfaces on the next observation where eBay's own state moved.
+  This boundary judges what an observation proves, not what the local row has since become.
 - **A scheduler.** Nothing polls on a timer. The read seam exists; deciding when to call it is an
   operator decision that needs cost and rate-limit evidence first.
 - **Notification subscriptions.** No hosted destination, no eBay subscription, no production
