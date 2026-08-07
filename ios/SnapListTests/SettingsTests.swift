@@ -553,3 +553,221 @@ private final class FailingSettingsAnalyticsClient: AnalyticsClient {
     }
     func flush() {}
 }
+
+// MARK: - Selling section eBay policy hint (#694)
+
+extension SettingsTests {
+    private func hint(
+        state: String,
+        message: String?,
+        missing: [String] = [],
+        helpURL: URL? = URL(string: "https://www.bizpolicy.ebay.com/businesspolicy/manage")
+    ) -> EbayPolicySetupHint {
+        EbayPolicySetupHint(
+            state: state,
+            marketplaceID: "EBAY_US",
+            missing: missing,
+            ambiguous: [],
+            message: message,
+            helpURL: helpURL
+        )
+    }
+
+    func testSellingSectionShowsNoHintUntilTheConnectionIsKnown() {
+        let loading = SettingsSellingPresentation(connection: nil, loadPhase: .loading)
+
+        XCTAssertEqual(loading.marketplaceValue, "Checking")
+        XCTAssertNil(loading.hint)
+
+        let failed = SettingsSellingPresentation(connection: nil, loadPhase: .failed)
+
+        XCTAssertEqual(failed.marketplaceValue, "Not available")
+        XCTAssertNil(failed.hint)
+    }
+
+    func testSellingSectionShowsNoHintForASellerWhoIsNotConnected() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: false,
+                ebayUsername: nil,
+                policySetup: nil
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "Not connected")
+        XCTAssertNil(presentation.hint)
+    }
+
+    func testSellingSectionShowsNoHintForAConnectedSellerWhoIsReadyToPublish() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(state: "ready", message: nil)
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertNil(presentation.hint)
+    }
+
+    /// A binding exists only once publish-time discovery has written one, so
+    /// `notChecked` with no message is every seller between finishing eBay
+    /// OAuth and their first publish. Showing them a warning triangle would
+    /// report a problem SnapList has not found (issue #694).
+    func testSellingSectionShowsNoHintForAConnectedSellerWhoHasNeverPublished() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(state: "notChecked", message: nil)
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertNil(presentation.hint)
+    }
+
+    func testSellingSectionNamesTheMissingFamilyBeforePublishIsAttempted() {
+        let message = "Your eBay account has no payment policy. "
+            + "Add it in eBay before you publish."
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(
+                    state: "setupRequired",
+                    message: message,
+                    missing: ["paymentPolicy"]
+                )
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertEqual(presentation.hint?.message, message)
+        XCTAssertEqual(
+            presentation.hint?.helpURL,
+            URL(string: "https://www.bizpolicy.ebay.com/businesspolicy/manage")
+        )
+    }
+
+    func testSellingSectionKeepsTheHintWhenTheServerOffersNoLink() {
+        let message = "SnapList has not read your eBay shipping, payment, and "
+            + "return policies yet. Check that your eBay account has one of "
+            + "each before you publish."
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(state: "notChecked", message: message, helpURL: nil)
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.hint?.message, message)
+        XCTAssertNil(presentation.hint?.helpURL)
+    }
+
+    func testSellingSectionStaysSilentWhenTheServerSendsNoWordingToShow() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(state: "setupRequired", message: nil)
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertNil(presentation.hint)
+    }
+
+    func testSellingSectionStillWarnsOnAStateThisBuildDoesNotKnow() {
+        let message = "Your eBay account needs attention before you publish."
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(
+                    state: "somethingNewerThanThisBuild",
+                    message: message
+                )
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.hint?.message, message)
+    }
+
+    /// The hint row combines its children so VoiceOver reads the warning and
+    /// its link as one sentence. Combining also deletes the `Link` from the
+    /// accessibility tree, so a VoiceOver seller can no longer activate it. The
+    /// row re-exposes the same destination as an action on the combined
+    /// element, which reaches VoiceOver through the actions rotor.
+    ///
+    /// XCUITest cannot observe this: the combined element has no children to
+    /// find, and `XCUIElement.hasFocus` reads UIKit focus rather than VoiceOver
+    /// focus. The seam is the rendered body type, which names the whole static
+    /// subtree including the modifier that attaches the action. That type does
+    /// not vary with the hint's data, so one fixture proves the composition;
+    /// whether the action fires for a hint with no link is the modifier's own
+    /// `if let`, not something this type can show.
+    @MainActor
+    func testPolicyHintOffersTheEbayLinkAsAnActionOnTheCombinedElement() {
+        let row = SettingsSellingHintRow(
+            hint: SettingsSellingPresentation.Hint(
+                message: "Your eBay account has no payment policy.",
+                helpURL: URL(
+                    string: "https://www.bizpolicy.ebay.com/businesspolicy/manage"
+                )
+            )
+        )
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("SettingsSellingHintPolicyAction"),
+            "The combined hint element carries no policy action: \(rendered)"
+        )
+    }
+
+    func testConnectionDecodesAServerAnswerThatCarriesNoPolicySetup() throws {
+        let json = Data(#"{"connected":true,"ebayUsername":"sandbox-seller"}"#.utf8)
+
+        let status = try JSONDecoder().decode(EbayConnectionStatus.self, from: json)
+
+        XCTAssertTrue(status.connected)
+        XCTAssertNil(status.policySetup)
+    }
+
+    func testConnectionDecodesTheStoredPolicyHint() throws {
+        let json = Data(#"""
+        {
+          "connected": true,
+          "ebayUsername": "sandbox-seller",
+          "policySetup": {
+            "state": "setupRequired",
+            "marketplaceId": "EBAY_US",
+            "missing": ["paymentPolicy", "returnPolicy"],
+            "ambiguous": [],
+            "message": "Your eBay account has no payment policy or return policy. Add them in eBay before you publish.",
+            "helpUrl": "https://www.bizpolicy.ebay.com/businesspolicy/manage"
+          }
+        }
+        """#.utf8)
+
+        let status = try JSONDecoder().decode(EbayConnectionStatus.self, from: json)
+
+        XCTAssertEqual(status.policySetup?.state, "setupRequired")
+        XCTAssertEqual(status.policySetup?.missing, ["paymentPolicy", "returnPolicy"])
+        XCTAssertEqual(status.policySetup?.marketplaceID, "EBAY_US")
+        XCTAssertEqual(
+            status.policySetup?.helpURL,
+            URL(string: "https://www.bizpolicy.ebay.com/businesspolicy/manage")
+        )
+    }
+}

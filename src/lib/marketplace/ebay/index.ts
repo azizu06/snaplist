@@ -39,6 +39,7 @@ export {
 export {
   createMobileEbayPublishService,
   MobileEbayListingNotFoundError,
+  type EbayConnectionSettings,
   type MobileEbayPublishGateway,
   type MobileEbayPublishPreflight,
   type MobileEbayPublishStatus,
@@ -53,11 +54,16 @@ export {
 // the same state without duplicating the discovery rules.
 export {
   ensureEbayPolicyLocationBinding,
+  readEbayPolicyLocationSettingsHint,
+  EBAY_POLICY_SETUP_NOT_CHECKED_MESSAGE,
   EBAY_POLICY_SETUP_NOT_CONNECTED_MESSAGE,
   EBAY_POLICY_SETUP_UNAVAILABLE_MESSAGE,
+  type EbayPolicyLocationSettingsHint,
+  type EbayPolicyLocationSettingsHintState,
   type EbayPolicyLocationSetup,
   type EbayPolicyLocationSetupState,
   type EbayPolicyLocationSetupStore,
+  type EbayPolicySetupFamily,
 } from "./policy-location-setup";
 export { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-store";
 // Post-publish provider authority (issue #169). SnapList owns an unpublished

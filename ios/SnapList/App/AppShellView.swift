@@ -622,6 +622,7 @@ struct AppShellView: View {
                 mobileAPIClient: dependencies.mobileAPIClient,
                 subscriptionClient: dependencies.subscriptionClient,
                 analyticsClient: dependencies.analyticsClient,
+                ebayPublishService: dependencies.ebayPublishService,
                 hasLocalData: (captureFlow.intakeSnapshot.map {
                     !$0.photos.isEmpty || $0.voice != nil
                 } ?? false) || settingsCachedData.hasData,

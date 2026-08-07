@@ -10,7 +10,11 @@ struct SettingsView: View {
     private let removeLocalData: () async -> Bool
     private let deletionOutstanding: Bool
     private let analyticsClient: any AnalyticsClient
+    private let ebayPublishService: any EbayPublishFeatureServing
     @State private var hasLocalData: Bool
+    @State private var ebayConnection: EbayConnectionStatus?
+    @State private var ebayConnectionLoadPhase =
+        SettingsSellingPresentation.LoadPhase.loading
     @State private var analyticsConsentState: SettingsAnalyticsConsentState
     @State private var subscriptionStore: SubscriptionStore
     @State private var subscriptionLoadPhase =
@@ -22,6 +26,7 @@ struct SettingsView: View {
         mobileAPIClient: any MobileAPIClient,
         subscriptionClient: any SubscriptionClient,
         analyticsClient: any AnalyticsClient,
+        ebayPublishService: any EbayPublishFeatureServing,
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false
@@ -31,6 +36,7 @@ struct SettingsView: View {
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
         self.analyticsClient = analyticsClient
+        self.ebayPublishService = ebayPublishService
         _hasLocalData = State(initialValue: hasLocalData)
         _analyticsConsentState = State(
             initialValue: SettingsAnalyticsConsentState(
@@ -53,7 +59,14 @@ struct SettingsView: View {
                 }
             }
             Section("Selling") {
-                valueRow("Connected marketplaces", profile.isGuest ? "Not connected" : "eBay", chevron: true)
+                valueRow(
+                    "Connected marketplaces",
+                    sellingPresentation.marketplaceValue,
+                    chevron: true
+                )
+                if let hint = sellingPresentation.hint {
+                    SettingsSellingHintRow(hint: hint)
+                }
                 valueRow("Photos", "Selected photos", chevron: true)
                 valueRow("Notifications", "On", chevron: true)
             }
@@ -149,6 +162,7 @@ struct SettingsView: View {
             Text("Your preference did not change. Try again.")
         }
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
+        .task { await loadEbayConnection() }
         .task {
             guard !profile.isGuest else { return }
             await loadSubscription()
@@ -272,6 +286,29 @@ struct SettingsView: View {
                 analyticsConsentState.dismissError()
             }
         )
+    }
+
+    private var sellingPresentation: SettingsSellingPresentation {
+        SettingsSellingPresentation(
+            connection: ebayConnection,
+            loadPhase: ebayConnectionLoadPhase
+        )
+    }
+
+    /// Settings reads the connection the seller already has. A guest has none,
+    /// so this asks the server nothing rather than spending a request to be
+    /// told 401.
+    private func loadEbayConnection() async {
+        guard !profile.isGuest else {
+            ebayConnectionLoadPhase = .loaded
+            return
+        }
+        do {
+            ebayConnection = try await ebayPublishService.connection()
+            ebayConnectionLoadPhase = .loaded
+        } catch {
+            ebayConnectionLoadPhase = .failed
+        }
     }
 
     private func valueRow(_ label: String, _ value: String, chevron: Bool = false) -> some View {
