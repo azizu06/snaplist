@@ -111,10 +111,27 @@ export interface EbayReviseResult {
 }
 
 /**
+ * One read of a live eBay listing's external state (issue #169).
+ *
+ * Everything is nullable because eBay decides what it reports: an ended offer
+ * may carry no price, and a listing eBay does not recognise reports nothing at
+ * all. A missing field means "eBay did not say", never "unchanged" — the sync
+ * service must be able to tell those apart.
+ */
+export interface EbayListingSnapshot {
+  /** Null when the offer no longer maps to a live listing on eBay's side. */
+  listingId: string | null;
+  /** eBay's listing status verbatim; the sync contract narrows it. */
+  listingStatus: string | null;
+  price: { value: string; currency: string } | null;
+  availableQuantity: number | null;
+}
+
+/**
  * The adapter boundary. Two write capabilities: publish a listing (issue #14)
- * and revise a live listing's price (issue #102), plus one read-only capability
- * (issue #47). Withdraw/etc. are added HERE when their slices land, so callers
- * keep a single seam to mock.
+ * and revise a live listing's price (issue #102), plus two read-only
+ * capabilities (issues #47, #169). Withdraw/etc. are added HERE when their
+ * slices land, so callers keep a single seam to mock.
  */
 export interface EbayAdapter {
   publishListing(
@@ -140,6 +157,20 @@ export interface EbayAdapter {
     marketplaceId: string;
     accountGeneration: string;
   }): Promise<EbayPolicyLocationCandidates>;
+  /**
+   * READ-ONLY (issue #169): what eBay currently reports for one already-
+   * published offer. This is the polling half of post-publish authority — it
+   * observes, it never mutates, and it is the only way a provider-side change
+   * SnapList did not make can become local truth.
+   *
+   * Optional for the same reason as the discovery read above: an adapter that
+   * cannot reach the Inventory API must produce an honest "no observation"
+   * rather than let a caller assume its silence means "unchanged".
+   */
+  getListingSnapshot?(request: {
+    sku: string;
+    offerId: string;
+  }): Promise<EbayListingSnapshot>;
   /**
    * Present only on the exact-tenant, exact-origin Sandbox operator adapter.
    * Normal connected sellers resolve offer values from their RLS-owned

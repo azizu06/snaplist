@@ -103,7 +103,7 @@
       "SnapListUITests/SnapListUITests/testFirstValueOnboardingONB06HasExactlyTwoControls",
       "SnapListUITests/SnapListUITests/testFirstValueOnboardingONB05IllustratesWithoutClaimingLiveProgress",
       "SnapListUITests/SnapListUITests/testFirstValueOnboardingAccessibilityTypeKeepsEveryPrimaryActionReachable",
-      "SnapListUITests/SnapListUITests/testRestoredCaptureNeverExposesAFirstValueOnboardingControl",
+      "SnapListUITests/SnapListUITests/testRestoredCaptureResumesWithNoFirstValueOnboardingControl",
       "SnapListUITests/SnapListUITests/testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets",
       "SnapListUITests/SnapListUITests/testLivePhotoReviewDeletingTheOnlyPhotoReturnsToGuidedScanWithNoPhotos",
       "SnapListUITests/SnapListUITests/testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission",
@@ -119,6 +119,7 @@
       "SnapListUITests/SnapListUITests/testVoiceNoteSheetRejectsSwipeAndCloseRestoresStableReopenTruth",
       "SnapListUITests/UILaunchBoundaryTests/testAlreadyStoppedProcessLaunchesWithoutAnotherTerminateRequest",
       "SnapListUITests/UILaunchBoundaryTests/testLaunchIsIssuedOnlyAfterTheProcessIsObservedNotRunning",
+      "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementIsReportedBeforeTheLaunchIsIssued",
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut",
@@ -127,7 +128,12 @@
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest"
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testTargetOutOfForegroundRetiresEvenWhenTheWitnessNeverResolves",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessCannotConsumeTheBudgetTheTargetNeedsToBeObserved",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testStuckRetirementNamesTheObservedStateAndTheBudgetItWaited"
     ]
   }
 }
