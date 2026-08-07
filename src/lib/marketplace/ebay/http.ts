@@ -1,5 +1,6 @@
 import type {
   EbayAdapter,
+  EbayListingSnapshot,
   EbayPublishFallbackBinding,
   EbayPublishRequest,
   EbayPublishCompletion,
@@ -96,6 +97,55 @@ export class HttpEbayAdapter implements EbayAdapter {
     accountGeneration: string;
   }): Promise<EbayPolicyLocationCandidates> {
     return this.policyLocationDiscovery.readCandidates(input);
+  }
+
+  /**
+   * READ-ONLY (issue #169): `GET /sell/inventory/v1/offer/{offerId}` — what
+   * eBay currently reports for one published offer.
+   *
+   * No dispatch lease is taken. Leases serialize MUTATIONS so two writers cannot
+   * race one listing; a read holds no such claim, and taking one would let
+   * routine polling block a seller's confirmed publish.
+   *
+   * Every field is passed through as reported, including a `listingStatus` this
+   * adapter does not recognise. Narrowing eBay's vocabulary is the sync
+   * contract's job — an adapter that dropped an unknown status here would make
+   * "eBay said something new" indistinguishable from "eBay said nothing".
+   */
+  async getListingSnapshot(request: {
+    sku: string;
+    offerId: string;
+  }): Promise<EbayListingSnapshot> {
+    const env = this.readEnv();
+    const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+    const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
+    const token = await this.tokenProvider.getAccessToken();
+    const offer = await this.call<{
+      listing?: { listingId?: string; listingStatus?: string };
+      pricingSummary?: { price?: { value?: string; currency?: string } };
+      availableQuantity?: number;
+    }>(
+      token,
+      "GET",
+      `${baseUrl}/sell/inventory/v1/offer/${encodeURIComponent(request.offerId)}`,
+      undefined,
+      marketplaceContentLanguage(marketplaceId, env.EBAY_CONTENT_LANGUAGE),
+      marketplaceId,
+    );
+
+    const price = offer?.pricingSummary?.price;
+    return {
+      listingId: offer?.listing?.listingId ?? null,
+      listingStatus: offer?.listing?.listingStatus ?? null,
+      price:
+        price?.value && price?.currency
+          ? { value: price.value, currency: price.currency }
+          : null,
+      availableQuantity:
+        typeof offer?.availableQuantity === "number"
+          ? offer.availableQuantity
+          : null,
+    };
   }
 
   async publishListing(

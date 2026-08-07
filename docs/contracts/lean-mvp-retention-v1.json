@@ -375,7 +375,7 @@
         "deletionTriggers": ["item-deletion", "account-erasure", "verified-ebay-account-deletion-notification", "ebay-api-license-agreement-termination"],
         "maximumRetention": "while the seller retains the published item, and no later than item deletion, account erasure, or a verified eBay account deletion notice; within ten days of eBay API License Agreement termination for every stored identifier",
         "executor": "snaplist-tenant-data-deletion-capability-and-issue-384-account-erasure-capability",
-        "completionProof": "the SnapList-stored publish identifiers are absent for that tenant: listings.ebay_offer_id, listings.ebay_listing_id, and listings.ebay_status. The live eBay listing is an eBay-owned record; SnapList never reports it deleted because it removed its own copy of the identifier",
+        "completionProof": "the SnapList-stored publish identifiers are absent for that tenant: listings.ebay_offer_id, listings.ebay_listing_id, listings.ebay_status, and the post-publish sync copies that carry the same eBay-issued listing identifier, public.ebay_listing_sync_state and public.ebay_listing_sync_conflicts, both of which private.account_erasure_owned_row_count counts so completion cannot be reported while one survives. The live eBay listing is an eBay-owned record; SnapList never reports it deleted because it removed its own copy of the identifier",
         "citations": [
           {
             "url": "https://developer.ebay.com/join/api-license-agreement",
