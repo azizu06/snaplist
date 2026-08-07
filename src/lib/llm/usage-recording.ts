@@ -1,4 +1,5 @@
 import type { LanguageModelMiddleware } from "ai";
+import { logEvent } from "../observability";
 import { recordModelUsage } from "../provider-usage";
 import type { LlmProvider, LlmRole } from "./registry";
 
@@ -7,11 +8,32 @@ import type { LlmProvider, LlmRole } from "./registry";
  *
  * The Vercel AI SDK already returns a `usage` block on every `generateObject`
  * call and we discarded it, so the cost of an AI item run was modeled rather
- * than measured. Recording it HERE — inside `resolveLanguageModel`, wrapped
- * around the model itself — means every call site is covered by construction:
+ * than measured. Reporting it HERE — inside `resolveLanguageModel`, wrapped
+ * around the model itself — means every call site REPORTS by construction:
  * AGENTS.md already requires all model calls to resolve through the registry,
  * and `seller-media-fence.test.ts` enforces that repo-wide. A new call site
  * cannot be added that both obeys that rule and escapes this one.
+ *
+ * Reporting is not recording. A report is only KEPT inside a
+ * `withProviderUsageRun` scope; outside one `recordModelUsage` is a deliberate
+ * no-op (`../provider-usage/collector.ts`). Exactly one production caller opens
+ * that scope — the durable queue worker's attempt in
+ * `../pipeline-queue/worker.ts` — so what gets stored is one worker run's spend.
+ * Two registry-backed production paths run outside any scope and have their
+ * tokens discarded:
+ *
+ *   - `../pipeline/review-regeneration.ts` (`regenerateReviewListing`, reached
+ *     from `../listing-review/save.ts`)
+ *   - `../mobile-api/guided-correction.ts` (the native Sharpen correction,
+ *     reached from `../mobile-api/app.ts`)
+ *
+ * Both run after the run has completed, so they hold no lease and the run is no
+ * longer `running`; `record_pipeline_run_provider_usage` rejects them by
+ * construction. ADR-0008 makes the included guided correction part of the SAME
+ * AI item run on the SAME credit, so a corrected run's row counts the initial
+ * analysis only, and the percentile artifact inherits that boundary. Closing the
+ * gap needs a second write path into a table deliberately revoked from
+ * `service_role`; issue #724 owns that.
  *
  * Only `wrapGenerate` is implemented: nothing in this repository streams (no
  * `streamText`/`streamObject` call site exists), and a stream wrapper written
@@ -54,9 +76,16 @@ export function usageRecordingMiddleware(
           outputTokens: result.usage?.outputTokens?.total,
           reasoningTokens: result.usage?.outputTokens?.reasoning,
         });
-      } catch {
-        // Deliberately silent: the recorder is a counter, and there is no
-        // failure of it worth turning into a failed listing.
+      } catch (error) {
+        // Swallowed, but never silent: the recorder is a counter and no failure
+        // of it is worth turning into a failed listing, yet a counter that stops
+        // counting without saying so makes the cost artifact quietly wrong.
+        logEvent("llm.usage_recording.failed", {
+          role: call.role,
+          provider: call.provider,
+          model: call.model,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       return result;
     },

@@ -1641,7 +1641,17 @@ function createEbaySoldPricingProviderInternal(
     // than at the provider's `price` boundary so a cache hit — which costs
     // nothing — is not counted as a retrieval. eBay does not bill for a page
     // fetch, so no charge is reported.
-    recordSoldCompUsage({ strategy: "ebay-sold", results: combined.length });
+    //
+    // Guarded (#716 AC5): recording failure never fails a run, and the comps are
+    // already resolved by this point — a throwing counter must not strand them.
+    try {
+      recordSoldCompUsage({ strategy: "ebay-sold", results: combined.length });
+    } catch (usageError) {
+      emitDiagnostic("pricing.ebay_sold.usage_recording_failed", {
+        reason:
+          usageError instanceof Error ? usageError.message : String(usageError),
+      });
+    }
     return combined;
   }
 

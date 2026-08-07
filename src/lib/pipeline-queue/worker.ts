@@ -30,11 +30,7 @@ export class PipelineWorkerFailure extends Error {
   readonly safeMessage: string;
   readonly retryable: boolean;
 
-  constructor(input: {
-    code: string;
-    safeMessage: string;
-    retryable: boolean;
-  }) {
+  constructor(input: { code: string; safeMessage: string; retryable: boolean }) {
     super(input.safeMessage);
     this.name = "PipelineWorkerFailure";
     this.code = input.code;
@@ -45,30 +41,18 @@ export class PipelineWorkerFailure extends Error {
 
 const optionsSchema = z
   .object({
-    batchSize: z
-      .number()
-      .int()
-      .min(1)
-      .max(10)
-      .default(PIPELINE_OPERATIONS_POLICY.worker.batchSize),
-    visibilityTimeoutSeconds: z
-      .number()
-      .int()
-      .min(1)
-      .max(3_600)
-      .default(PIPELINE_OPERATIONS_POLICY.worker.visibilityTimeoutSeconds),
-    retryBaseSeconds: z
-      .number()
-      .int()
-      .min(1)
-      .max(3_600)
-      .default(PIPELINE_OPERATIONS_POLICY.worker.retryBaseSeconds),
-    retryMaxSeconds: z
-      .number()
-      .int()
-      .min(1)
-      .max(3_600)
-      .default(PIPELINE_OPERATIONS_POLICY.worker.retryMaxSeconds),
+    batchSize: z.number().int().min(1).max(10).default(
+      PIPELINE_OPERATIONS_POLICY.worker.batchSize,
+    ),
+    visibilityTimeoutSeconds: z.number().int().min(1).max(3_600).default(
+      PIPELINE_OPERATIONS_POLICY.worker.visibilityTimeoutSeconds,
+    ),
+    retryBaseSeconds: z.number().int().min(1).max(3_600).default(
+      PIPELINE_OPERATIONS_POLICY.worker.retryBaseSeconds,
+    ),
+    retryMaxSeconds: z.number().int().min(1).max(3_600).default(
+      PIPELINE_OPERATIONS_POLICY.worker.retryMaxSeconds,
+    ),
   })
   .strict();
 
@@ -98,17 +82,12 @@ function classifyFailure(error: unknown): PipelineWorkerFailure {
   }
   return new PipelineWorkerFailure({
     code: "pipeline_temporarily_unavailable",
-    safeMessage:
-      "SnapList could not finish this listing yet and will retry automatically.",
+    safeMessage: "SnapList could not finish this listing yet and will retry automatically.",
     retryable: true,
   });
 }
 
-function retryDelay(
-  attemptCount: number,
-  base: number,
-  maximum: number,
-): number {
+function retryDelay(attemptCount: number, base: number, maximum: number): number {
   return Math.min(maximum, base * 2 ** Math.max(0, attemptCount - 1));
 }
 

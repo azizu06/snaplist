@@ -1131,11 +1131,26 @@ export function createApifySoldPricingProvider(
       // Recorded before the non-success branch (#716): a paid Actor run that
       // returned nothing still cost money, and a cost record that only counts
       // successes would understate the tier's real price.
-      recordSoldCompUsage({
-        strategy: "apify",
-        results: result.items.length,
-        chargedUsd: result.chargedTotalUsd,
-      });
+      //
+      // Guarded locally rather than left to the enclosing try (#716 AC5): that
+      // catch maps anything thrown here to `recordFailure("request-failed")` and
+      // returns null, so a throwing counter would discard the comps of an Actor
+      // run we already paid for and report the tier as failed. Telemetry never
+      // costs a run its evidence.
+      try {
+        recordSoldCompUsage({
+          strategy: "apify",
+          results: result.items.length,
+          chargedUsd: result.chargedTotalUsd,
+        });
+      } catch (usageError) {
+        emitDiagnostic("pricing.apify_sold.usage_recording_failed", {
+          reason:
+            usageError instanceof Error
+              ? usageError.message
+              : String(usageError),
+        });
+      }
       if (result.status !== "SUCCEEDED") {
         recordFailure(boundedStatus(result.status));
         return null;
