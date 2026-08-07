@@ -7,17 +7,18 @@ import type {
   ApplyProviderTruthInput,
   EbayListingSyncAuthority,
   EbayListingSyncStore,
-  OpenConflictInput,
 } from "./listing-sync";
 
 /**
  * The Supabase side of post-publish eBay authority (issue #169).
  *
- * Reads run under the caller's RLS client. Writes go through guarded SECURITY
- * DEFINER functions that RE-CHECK every fence the service checked, against rows
- * locked in the same transaction. The duplication is deliberate: the service
- * reads without a lock, so its answer is a proposal and only the SQL statement
- * can decide.
+ * Reads run under the caller's RLS client. Writes go through ONE guarded
+ * SECURITY DEFINER function that RE-CHECKS every fence resting on a row another
+ * writer could move, against rows locked in the same transaction — the
+ * migration names the exact set. The duplication is deliberate:
+ * the service reads without a lock, so its answer is a proposal and only the
+ * SQL statement can decide. One function rather than two is deliberate as well
+ * — provider truth and the divergences it proves have to commit together.
  */
 
 /**
@@ -46,6 +47,15 @@ const authorityRowSchema = z.object({
  * The currency persisted prices are denominated in. `prediction_logs` stores a
  * bare numeric and `items.price_override` follows it, so the read side must
  * make the currency claim explicitly — the same constant the publish path uses.
+ *
+ * KNOWN LIMITATION, deliberately not fixed here: this is a constant, not a
+ * lookup from the listing's marketplace. A listing published to a non-USD
+ * marketplace would compare eBay's own currency against "USD" and diverge on
+ * every observation. Non-USD marketplace pricing semantics are an explicit
+ * non-goal of issue #169's contract; the currency-mismatch test in
+ * `listing-sync.test.ts` locks the comparison in and names the same limitation.
+ * Recording it honestly beats a marketplace→currency map nothing else in the
+ * codebase agrees on yet.
  */
 const PRICING_CURRENCY = "USD";
 
@@ -95,6 +105,14 @@ export function createSupabaseEbayListingSyncStore(
       const { data, error } = await supabase.rpc(
         "apply_ebay_listing_provider_truth",
         {
+          p_conflicts: input.conflicts.map((conflict) => ({
+            kind: conflict.kind,
+            field: conflict.field,
+            local_value: conflict.localValue,
+            provider_value: conflict.providerValue,
+            observed_at: conflict.observedAt,
+          })),
+          p_resolved_fields: input.convergedFields,
           p_listing_id: input.listingId,
           p_event_id: input.eventId,
           p_event_source: input.source,
@@ -125,22 +143,6 @@ export function createSupabaseEbayListingSyncStore(
         );
       }
       return data;
-    },
-
-    async openConflict(input: OpenConflictInput): Promise<void> {
-      const { error } = await supabase.rpc("open_ebay_listing_sync_conflict", {
-        p_listing_id: input.listingId,
-        p_kind: input.kind,
-        p_field: input.field,
-        p_ebay_listing_id: input.ebayListingId,
-        p_local_value: input.localValue,
-        p_provider_value: input.providerValue,
-        p_observed_at: input.observedAt,
-        p_expected_review_revision: input.expectedReviewRevision,
-      });
-      if (error) {
-        throw new Error(`Failed to record eBay sync conflict: ${error.message}`);
-      }
     },
   };
 }

@@ -183,6 +183,39 @@ function observationFor(
   };
 }
 
+/**
+ * A reachable stack is not the same as a stack that has this branch's sync
+ * tables. Without this check the suite would skip every tenancy assertion the
+ * moment the surface was missing and still report green — the two-tenant proof
+ * would vanish silently, which is the one thing an isolation suite may not do.
+ *
+ * The two answers mirror the pgTAP `require_installed_migrations` flag exactly:
+ * where CI builds the stack from this branch's migrations an absent surface is
+ * a real defect and raises; a shared local stack that simply does not contain
+ * this branch skips instead of reporting a failure for work it lacks.
+ */
+async function syncSurfaceInstalled(client: SupabaseClient): Promise<boolean> {
+  const probes = await Promise.all(
+    ["ebay_listing_sync_state", "ebay_listing_sync_conflicts"].map(
+      async (table) => {
+        const { error } = await client.from(table).select("listing_id").limit(0);
+        // Only "not in the schema cache" means absent. `service_role` has no
+        // select grant on these tables by design — that is the tenancy this
+        // suite exists to prove — so `42501 permission denied` comes back
+        // instead, and it is itself proof the table is there.
+        return error === null || error.code !== "PGRST205";
+      },
+    ),
+  );
+  const installed = probes.every(Boolean);
+  if (!installed && process.env.SNAPLIST_REQUIRE_DB_STACK === "1") {
+    throw new Error(
+      "SNAPLIST_REQUIRE_DB_STACK=1 requires the eBay listing sync migration",
+    );
+  }
+  return installed;
+}
+
 beforeAll(async () => {
   reachable = await stackReachable({
     url: SUPABASE_URL,
@@ -194,13 +227,16 @@ beforeAll(async () => {
       ["127.0.0.1", "localhost", "::1"].includes(new URL(SUPABASE_URL).hostname),
     ],
   });
+  if (reachable) {
+    admin = createClient(SUPABASE_URL, SECRET_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    reachable = await syncSurfaceInstalled(admin);
+  }
   await whenStackReachable(reachable, async () => {
     lease = await acquireExclusiveTestResource(
       `local-db:ebay-listing-sync:${SUPABASE_URL}`,
     );
-    admin = createClient(SUPABASE_URL, SECRET_KEY!, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
     [userA, userB] = await Promise.all([
       provisionClerkTestUser(SUPABASE_URL, PUBLISHABLE_KEY!, "listing_sync_a"),
       provisionClerkTestUser(SUPABASE_URL, PUBLISHABLE_KEY!, "listing_sync_b"),
@@ -312,6 +348,8 @@ describe("eBay listing sync tenancy", () => {
           providerObservedAt: new Date().toISOString(),
           expectedReviewRevision: listingA.reviewRevision,
           expectedLastEventId: null,
+          conflicts: [],
+          convergedFields: [],
         }),
       ).rejects.toThrow(/Listing not found/);
     },
@@ -339,6 +377,8 @@ describe("eBay listing sync tenancy", () => {
           providerObservedAt: new Date().toISOString(),
           expectedReviewRevision: randomUUID(),
           expectedLastEventId: null,
+          conflicts: [],
+          convergedFields: [],
         }),
       ).rejects.toThrow(/corrected during eBay sync/);
 

@@ -6,9 +6,11 @@
 --   ebay_listing_sync_state     — the confirmed provider truth for one listing.
 --   ebay_listing_sync_conflicts — where local and provider disagree, and why.
 --
--- Reads go through RLS. Writes go through guarded SECURITY DEFINER functions
--- that RE-CHECK every fence inside one statement, because a fence the caller
--- checked can be stale by the time the write lands.
+-- Reads go through RLS. Writes go through ONE guarded SECURITY DEFINER function
+-- that RE-CHECKS the caller's fences inside a single statement, because a fence
+-- the caller checked can be stale by the time the write lands. One function and
+-- not two: provider truth and the divergences it proves must commit together or
+-- a failure between them loses the divergence for good.
 
 create table public.ebay_listing_sync_state (
   listing_id uuid primary key,
@@ -254,13 +256,123 @@ revoke all on function public.read_ebay_listing_sync_authority(uuid)
 grant execute on function public.read_ebay_listing_sync_authority(uuid)
   to authenticated;
 
--- Persist ONE confirmed provider answer. Returns 'applied' or 'superseded';
--- 'superseded' means another writer moved the row between the caller's read and
--- this statement, and the caller must re-read rather than retry blindly.
+-- Record the conflicts one confirmed answer proves, and close the ones it
+-- disproves. Private, and reached only from the guarded write defined below, so
+-- a conflict can never be written without the provider truth that justifies it;
+-- that caller has already re-checked its fences against locked rows. This
+-- function therefore checks authorization not at all — it is not reachable
+-- without it — and takes `p_user_id` from the caller's resolved tenant rather
+-- than trusting an argument from outside.
 --
--- Every fence the service already checked is re-checked HERE, against rows
--- locked in this transaction. That duplication is the point: the service reads
--- without a lock, so only this statement can decide.
+-- Re-opening the same dimension refreshes the open row: a listing that keeps
+-- diverging is one unresolved problem, not a growing pile.
+create function private.record_ebay_listing_sync_conflicts(
+  p_user_id text,
+  p_listing_id uuid,
+  p_ebay_listing_id text,
+  p_review_revision uuid,
+  p_observed_at timestamp with time zone,
+  p_conflicts jsonb,
+  p_resolved_fields text[]
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.ebay_listing_sync_conflicts as open_conflict (
+    user_id,
+    listing_id,
+    kind,
+    field,
+    ebay_listing_id,
+    local_value,
+    provider_value,
+    observed_at,
+    review_revision
+  )
+  select
+    p_user_id,
+    p_listing_id,
+    conflict.kind,
+    conflict.field,
+    p_ebay_listing_id,
+    conflict.local_value,
+    conflict.provider_value,
+    coalesce(conflict.observed_at, p_observed_at),
+    p_review_revision
+  from jsonb_to_recordset(coalesce(p_conflicts, '[]'::jsonb)) as conflict(
+    kind text,
+    field text,
+    local_value text,
+    provider_value text,
+    observed_at timestamp with time zone
+  )
+  on conflict (user_id, listing_id, field) where resolved_at is null
+  do update set
+    -- An OPEN ambiguous acknowledgement is not answered by a later divergence:
+    -- SnapList still does not know whether eBay applied the change it was sent,
+    -- and overwriting the kind would destroy the only record that it was. The
+    -- newer provider evidence attaches to the same unresolved row instead, and
+    -- the attempted local value it was opened with is preserved. Only genuine
+    -- re-convergence closes it, below.
+    kind = case
+      when open_conflict.kind = 'ambiguousAcknowledgement'
+        then open_conflict.kind
+      else excluded.kind
+    end,
+    local_value = case
+      when open_conflict.kind = 'ambiguousAcknowledgement'
+        then open_conflict.local_value
+      else excluded.local_value
+    end,
+    provider_value = excluded.provider_value,
+    observed_at = excluded.observed_at,
+    review_revision = excluded.review_revision;
+
+  -- A conflict that can only ever open is one the seller can never clear. eBay
+  -- agreeing again on a dimension both sides carried a comparable value for IS
+  -- the resolution; the caller sends only those dimensions, never a dimension
+  -- it had no evidence about.
+  update public.ebay_listing_sync_conflicts resolved
+  set resolved_at = statement_timestamp()
+  where resolved.user_id = p_user_id
+    and resolved.listing_id = p_listing_id
+    and resolved.resolved_at is null
+    and resolved.field = any(coalesce(p_resolved_fields, array[]::text[]));
+end;
+$$;
+
+revoke all on function private.record_ebay_listing_sync_conflicts(
+  text, uuid, text, uuid, timestamp with time zone, jsonb, text[]
+) from public, anon, authenticated, service_role;
+
+-- Persist ONE confirmed provider answer AND every conflict it proves. Returns
+-- 'applied' or 'superseded'; 'superseded' means another writer moved the row
+-- between the caller's read and this statement, and the caller must re-read
+-- rather than retry blindly.
+--
+-- Truth and conflicts are ONE function on purpose. Written separately, a
+-- failure between them commits provider truth with its divergence missing —
+-- and because this statement advances `last_event_id`, and a poll's event id is
+-- content-addressed, the retry is dropped as a duplicate and the divergence is
+-- lost permanently. That is silent last-write-wins, which is exactly what the
+-- conflict table exists to prevent. Here they commit together or not at all.
+--
+-- Every fence that depends on a row another writer could have moved is
+-- re-checked HERE, against rows locked in this transaction, and each one fails
+-- closed. That duplication is the point: the service reads without a lock, so
+-- only this statement can decide. Re-checked: publish authority, eBay listing
+-- identity, review revision, account generation, connection generation, the
+-- expected last event, and observation monotonicity.
+--
+-- NOT re-checked: `marketplace_id`. The service compares it, but `listings`
+-- stores no marketplace column, so on a first observation there is no locked
+-- row to compare against and this statement would have nothing to fence with.
+-- A concurrent change is still caught, because any writer that moved the row
+-- also moved `last_event_id`. Saying "every fence" here would have been a claim
+-- the body does not keep.
 create or replace function public.apply_ebay_listing_provider_truth(
   p_listing_id uuid,
   p_event_id text,
@@ -275,7 +387,13 @@ create or replace function public.apply_ebay_listing_provider_truth(
   p_provider_quantity integer,
   p_provider_observed_at timestamp with time zone,
   p_expected_review_revision uuid,
-  p_expected_last_event_id text
+  p_expected_last_event_id text,
+  -- [{kind, field, local_value, provider_value, observed_at}] — the divergences
+  -- this observation proves, rendered for comparison by the service.
+  p_conflicts jsonb,
+  -- Dimensions this observation proves have re-converged: both sides carried a
+  -- comparable value and they agree. Their open conflicts close.
+  p_resolved_fields text[]
 )
 returns text
 language plpgsql
@@ -334,8 +452,11 @@ begin
   into v_account_generation, v_connection_generation
   from public.ebay_connections connection
   where connection.user_id = v_user_id;
-  if coalesce(v_account_generation, p_account_generation)
-    is distinct from p_account_generation then
+  -- No connection row means the seller disconnected or the eBay account was
+  -- deleted while this observation was in flight: there is no generation left
+  -- for the answer to belong to, so it is refused rather than admitted against
+  -- whatever generation the caller happened to send.
+  if v_account_generation is distinct from p_account_generation then
     raise exception using
       errcode = 'PT409',
       message = 'The eBay account changed during sync';
@@ -385,6 +506,16 @@ begin
       updated_at = statement_timestamp()
     where sync.listing_id = p_listing_id
       and sync.user_id = v_user_id;
+
+    perform private.record_ebay_listing_sync_conflicts(
+      v_user_id,
+      p_listing_id,
+      p_ebay_listing_id,
+      v_review_revision,
+      p_provider_observed_at,
+      p_conflicts,
+      p_resolved_fields
+    );
     return 'applied';
   end if;
 
@@ -423,115 +554,27 @@ begin
     p_event_source,
     v_review_revision
   );
+
+  perform private.record_ebay_listing_sync_conflicts(
+    v_user_id,
+    p_listing_id,
+    p_ebay_listing_id,
+    v_review_revision,
+    p_provider_observed_at,
+    p_conflicts,
+    p_resolved_fields
+  );
   return 'applied';
 end;
 $$;
 
 revoke all on function public.apply_ebay_listing_provider_truth(
   uuid, text, text, text, text, uuid, uuid, text, numeric, text, integer,
-  timestamp with time zone, uuid, text
+  timestamp with time zone, uuid, text, jsonb, text[]
 ) from public, anon, service_role;
 grant execute on function public.apply_ebay_listing_provider_truth(
   uuid, text, text, text, text, uuid, uuid, text, numeric, text, integer,
-  timestamp with time zone, uuid, text
-) to authenticated;
-
--- Record ONE divergence. Re-opening the same dimension refreshes the open row:
--- a listing that keeps diverging is one unresolved problem, not a growing pile.
-create or replace function public.open_ebay_listing_sync_conflict(
-  p_listing_id uuid,
-  p_kind text,
-  p_field text,
-  p_ebay_listing_id text,
-  p_local_value text,
-  p_provider_value text,
-  p_observed_at timestamp with time zone,
-  p_expected_review_revision uuid
-)
-returns uuid
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_user_id text := public.clerk_user_id();
-  v_listing public.listings%rowtype;
-  v_review_revision uuid;
-  v_conflict_id uuid;
-begin
-  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
-    or nullif(v_user_id, '') is null then
-    raise exception using errcode = '42501', message = 'Seller authorization is required';
-  end if;
-  if not private.is_server_api_request() then
-    raise exception using errcode = '42501', message = 'Server API authorization is required';
-  end if;
-
-  select listing.* into v_listing
-  from public.listings listing
-  where listing.id = p_listing_id
-    and listing.user_id = v_user_id
-  for update;
-  if not found then
-    raise exception using errcode = 'P0002', message = 'Listing not found';
-  end if;
-  if v_listing.ebay_status is distinct from 'published'
-    or v_listing.ebay_listing_id is distinct from p_ebay_listing_id then
-    raise exception using
-      errcode = 'PT409',
-      message = 'eBay is not authoritative for this listing';
-  end if;
-
-  select item.review_revision into v_review_revision
-  from public.items item
-  where item.id = v_listing.item_id
-    and item.user_id = v_user_id;
-  if v_review_revision is distinct from p_expected_review_revision then
-    raise exception using
-      errcode = 'PT409',
-      message = 'The listing was corrected during eBay sync';
-  end if;
-
-  insert into public.ebay_listing_sync_conflicts (
-    user_id,
-    listing_id,
-    kind,
-    field,
-    ebay_listing_id,
-    local_value,
-    provider_value,
-    observed_at,
-    review_revision
-  ) values (
-    v_user_id,
-    p_listing_id,
-    p_kind,
-    p_field,
-    p_ebay_listing_id,
-    p_local_value,
-    p_provider_value,
-    p_observed_at,
-    v_review_revision
-  )
-  on conflict (user_id, listing_id, field) where resolved_at is null
-  do update set
-    kind = excluded.kind,
-    ebay_listing_id = excluded.ebay_listing_id,
-    local_value = excluded.local_value,
-    provider_value = excluded.provider_value,
-    observed_at = excluded.observed_at,
-    review_revision = excluded.review_revision
-  returning id into v_conflict_id;
-
-  return v_conflict_id;
-end;
-$$;
-
-revoke all on function public.open_ebay_listing_sync_conflict(
-  uuid, text, text, text, text, text, timestamp with time zone, uuid
-) from public, anon, service_role;
-grant execute on function public.open_ebay_listing_sync_conflict(
-  uuid, text, text, text, text, text, timestamp with time zone, uuid
+  timestamp with time zone, uuid, text, jsonb, text[]
 ) to authenticated;
 
 -- Erasure deletes provider-truth copies and conflict history with the tenant.

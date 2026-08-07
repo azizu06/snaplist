@@ -6,10 +6,11 @@ import {
   type EbayListingObservation,
   type EbayListingProviderTruth,
   type EbayListingSyncConflict,
+  type EbayListingSyncConflictField,
   type EbayProviderListingStatus,
   type EbayProviderMoney,
 } from "./listing-sync-contract";
-import { EbayWriteAmbiguousError, type EbayAdapter } from "./types";
+import type { EbayAdapter } from "./types";
 
 /**
  * Post-publish eBay authority (issue #169).
@@ -66,26 +67,33 @@ export interface ApplyProviderTruthInput {
   expectedReviewRevision: string;
   /** The event the decision was made against; the write fails closed if it moved. */
   expectedLastEventId: string | null;
-}
-
-export interface OpenConflictInput extends EbayListingSyncConflict {
-  listingId: string;
-  expectedReviewRevision: string;
+  /**
+   * Every divergence this observation proves, recorded WITH the truth it
+   * disagrees with. Splitting the two across writes would let a failure between
+   * them commit provider truth while the divergence is lost — and the event id
+   * this write advances would make the retry look like a duplicate, so it would
+   * be lost permanently.
+   */
+  conflicts: EbayListingSyncConflict[];
+  /**
+   * Dimensions this observation proves have re-converged: both sides were
+   * comparable and they agree. Any open conflict on one of them is closed by
+   * the same write. Absence means "no evidence", never "they agree".
+   */
+  convergedFields: EbayListingSyncConflictField[];
 }
 
 export interface EbayListingSyncStore {
   /** The local truth for one listing, or null when the listing is not the caller's. */
   readAuthority(listingId: string): Promise<EbayListingSyncAuthority | null>;
   /**
-   * Persist confirmed provider truth behind the tenant fence. `superseded`
-   * means the fence moved between decision and write; the caller must not
-   * retry with the same stale decision.
+   * Persist confirmed provider truth AND its conflicts behind the tenant fence,
+   * atomically. `superseded` means the fence moved between decision and write;
+   * the caller must not retry with the same stale decision.
    */
   applyProviderTruth(
     input: ApplyProviderTruthInput,
   ): Promise<"applied" | "superseded">;
-  /** Record ONE explicit divergence. Re-recording an open conflict is a no-op. */
-  openConflict(input: OpenConflictInput): Promise<void>;
 }
 
 export type EbayListingSyncOutcome =
@@ -95,9 +103,7 @@ export type EbayListingSyncOutcome =
       conflicts: EbayListingSyncConflict[];
     }
   | { state: "ignored"; reason: "duplicateEvent" | "supersededObservation" }
-  | { state: "refused"; reason: EbayListingSyncRefusal }
-  /** eBay's answer did not confirm the outcome; nothing became local truth. */
-  | { state: "ambiguous"; conflicts: EbayListingSyncConflict[] };
+  | { state: "refused"; reason: EbayListingSyncRefusal };
 
 export type EbayListingSyncRefusal =
   /** No confirmed publish result yet — eBay has no authority over this draft. */
@@ -106,8 +112,6 @@ export type EbayListingSyncRefusal =
   | "listingMismatch"
   | "accountGenerationChanged"
   | "connectionGenerationChanged"
-  /** The seller confirmed against a review the item has since moved past. */
-  | "reviewRevisionChanged"
   /** The fence moved between reading local truth and writing provider truth. */
   | "concurrentChange"
   /** The observation is not a valid confirmed provider answer. */
@@ -167,6 +171,9 @@ export async function ingestEbayListingObservation(input: {
     return { state: "ignored", reason: "supersededObservation" };
   }
 
+  // Compared BEFORE the write, so the divergence travels with the truth it
+  // disagrees with and the two cannot land separately.
+  const comparison = compare(authority, observation);
   const applied = await input.store.applyProviderTruth({
     listingId: authority.listingId,
     eventId: observation.eventId,
@@ -182,19 +189,13 @@ export async function ingestEbayListingObservation(input: {
     providerObservedAt: observation.observedAt,
     expectedReviewRevision: authority.reviewRevision,
     expectedLastEventId: authority.lastEventId,
+    conflicts: comparison.conflicts,
+    convergedFields: comparison.convergedFields,
   });
   if (applied === "superseded") {
     return { state: "refused", reason: "concurrentChange" };
   }
-
-  const conflicts = divergences(authority, observation);
-  for (const conflict of conflicts) {
-    await input.store.openConflict({
-      ...conflict,
-      listingId: authority.listingId,
-      expectedReviewRevision: authority.reviewRevision,
-    });
-  }
+  const conflicts = comparison.conflicts;
 
   return {
     state: "applied",
@@ -310,116 +311,6 @@ function providerListingStatus(
   );
 }
 
-/** The one adapter capability a seller-confirmed price change needs. */
-export type EbayListingReviseAdapter = Pick<EbayAdapter, "revisePrice">;
-
-export interface EbayListingPriceConfirmation {
-  /**
-   * The seller's durable confirmation key. It doubles as the provider event id,
-   * so a replayed confirmation is refused by the same dedupe that refuses a
-   * redelivered eBay notification — one rule, not two.
-   */
-  confirmationId: string;
-  expectedReviewRevision: string;
-  price: EbayProviderMoney;
-}
-
-/**
- * Send ONE seller-confirmed price change to eBay and persist only what eBay
- * confirmed (issue #169).
- *
- * There is no autonomous caller and no deployed entry point; that is deliberate
- * (AGENTS.md "launch has no autonomous marketplace actions", ADR-0008 §7). What
- * this function fixes is the accounting: the ONLY write happens after a
- * confirmed acknowledgement, and an ambiguous acknowledgement produces an
- * explicit conflict instead of a hopeful local record. A caller that wrote the
- * requested price first would erase its own evidence — the next observation
- * would compare eBay against the price we merely asked for and find no
- * divergence to report.
- */
-export async function applyConfirmedEbayListingPrice(input: {
-  listingId: string;
-  confirmation: EbayListingPriceConfirmation;
-  adapter: EbayListingReviseAdapter;
-  store: EbayListingSyncStore;
-  now?: () => Date;
-}): Promise<EbayListingSyncOutcome> {
-  const authority = await input.store.readAuthority(input.listingId);
-  if (!publishedAuthority(authority) || !authority.ebayOfferId) {
-    return { state: "refused", reason: "notPublished" };
-  }
-  if (
-    input.confirmation.expectedReviewRevision !== authority.reviewRevision
-  ) {
-    return { state: "refused", reason: "reviewRevisionChanged" };
-  }
-  if (
-    authority.lastEventId
-    && authority.lastEventId === input.confirmation.confirmationId
-  ) {
-    return { state: "ignored", reason: "duplicateEvent" };
-  }
-
-  const observedAt = (input.now?.() ?? new Date()).toISOString();
-  const price = ebayProviderMoneySchema.parse(input.confirmation.price);
-  try {
-    await input.adapter.revisePrice({
-      sku: authority.listingId,
-      offerId: authority.ebayOfferId,
-      price,
-    });
-  } catch (error) {
-    if (!(error instanceof EbayWriteAmbiguousError)) throw error;
-    // eBay answered, but not with an outcome. The attempt is the only fact.
-    const conflict: EbayListingSyncConflict = {
-      kind: "ambiguousAcknowledgement",
-      field: "price",
-      ebayListingId: authority.ebayListingId,
-      localValue: `${price.currency} ${price.value}`,
-      providerValue: null,
-      observedAt,
-    };
-    await input.store.openConflict({
-      ...conflict,
-      listingId: authority.listingId,
-      expectedReviewRevision: authority.reviewRevision,
-    });
-    return { state: "ambiguous", conflicts: [conflict] };
-  }
-
-  const applied = await input.store.applyProviderTruth({
-    listingId: authority.listingId,
-    eventId: input.confirmation.confirmationId,
-    source: "poll",
-    ebayListingId: authority.ebayListingId,
-    marketplaceId: authority.marketplaceId,
-    accountGeneration: authority.accountGeneration,
-    connectionGeneration: authority.connectionGeneration,
-    providerStatus: null,
-    providerPrice: price.value,
-    providerCurrency: price.currency,
-    providerQuantity: null,
-    providerObservedAt: observedAt,
-    expectedReviewRevision: authority.reviewRevision,
-    expectedLastEventId: authority.lastEventId,
-  });
-  if (applied === "superseded") {
-    return { state: "refused", reason: "concurrentChange" };
-  }
-
-  return {
-    state: "applied",
-    providerTruth: {
-      ebayListingId: authority.ebayListingId,
-      status: null,
-      price,
-      quantity: null,
-      observedAt,
-    },
-    conflicts: [],
-  };
-}
-
 /**
  * Whether eBay has authority over this row at all.
  *
@@ -438,19 +329,24 @@ function publishedAuthority(
 }
 
 /**
- * Every way the confirmed provider answer disagrees with what SnapList holds,
- * one dimension at a time.
+ * What the confirmed provider answer proves about each dimension: that it
+ * disagrees with SnapList, that it agrees again, or nothing at all.
  *
- * Silence here always means "no evidence of divergence", never "they agree" —
- * a missing provider price or a local listing with no price yet produces no
- * conflict, because inventing one would send the seller to reconcile a
- * difference nobody observed.
+ * The third answer is why this returns two lists rather than one. A missing
+ * provider price or a local listing with no price yet is NO EVIDENCE: it may
+ * not raise a conflict the seller never observed, and it may not close one
+ * either, because silence is not agreement. Only a dimension both sides carry
+ * a comparable value for gets a verdict.
  */
-function divergences(
+function compare(
   authority: EbayListingSyncAuthority,
   observation: EbayListingObservation,
-): EbayListingSyncConflict[] {
+): {
+  conflicts: EbayListingSyncConflict[];
+  convergedFields: EbayListingSyncConflictField[];
+} {
   const conflicts: EbayListingSyncConflict[] = [];
+  const convergedFields: EbayListingSyncConflictField[] = [];
   const base = {
     kind: "providerDiverged" as const,
     ebayListingId: observation.ebayListingId,
@@ -458,8 +354,11 @@ function divergences(
   };
 
   // SnapList shows a published listing as live. Any other provider state means
-  // the seller is looking at something that is no longer true on eBay.
-  if (observation.status !== "active") {
+  // the seller is looking at something that is no longer true on eBay. eBay
+  // always reports a status, so this dimension always reaches a verdict.
+  if (observation.status === "active") {
+    convergedFields.push("status");
+  } else {
     conflicts.push({
       ...base,
       field: "status",
@@ -485,10 +384,12 @@ function divergences(
         localValue: `${authority.currency} ${local.toFixed(2)}`,
         providerValue: `${provider.currency} ${formatProviderAmount(provider.value)}`,
       });
+    } else {
+      convergedFields.push("price");
     }
   }
 
-  return conflicts;
+  return { conflicts, convergedFields };
 }
 
 /** Two decimal places, so the seller compares like with like. */

@@ -63,9 +63,10 @@ export { createSupabaseEbayPolicyLocationBindingStore } from "./policy-location-
 // Post-publish provider authority (issue #169). SnapList owns an unpublished
 // draft; once a confirmed publish supplies an external identity, only confirmed
 // eBay results become local truth and every disagreement is an explicit
-// conflict. See docs/ebay-listing-sync.md for the polling/webhook boundary.
+// conflict. Ingest only: outbound marketplace mutation is an explicit non-goal
+// of the issue contract. See docs/ebay-listing-sync.md for the polling/webhook
+// boundary.
 export {
-  applyConfirmedEbayListingPrice,
   ingestEbayListingObservation,
   readEbayListingObservation,
   type ApplyProviderTruthInput,
@@ -74,7 +75,6 @@ export {
   type EbayListingSyncOutcome,
   type EbayListingSyncRefusal,
   type EbayListingSyncStore,
-  type OpenConflictInput,
 } from "./listing-sync";
 export {
   ebayListingObservationSchema,

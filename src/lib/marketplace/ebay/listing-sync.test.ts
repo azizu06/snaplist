@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyConfirmedEbayListingPrice,
   ingestEbayListingObservation,
   readEbayListingObservation,
   type EbayListingSyncAuthority,
   type EbayListingSyncStore,
 } from "./listing-sync";
+import type {
+  EbayListingSyncConflict,
+  EbayListingSyncConflictField,
+} from "./listing-sync-contract";
 import { MockEbayAdapter } from "./mock";
-import { EbayApiError, EbayWriteAmbiguousError } from "./types";
 
 /**
  * Post-publish provider authority (issue #169).
@@ -67,24 +69,46 @@ interface RecordedWrite {
   providerPrice: string | null;
   providerObservedAt: string;
   expectedReviewRevision: string;
+  conflicts: EbayListingSyncConflict[];
+  convergedFields: EbayListingSyncConflictField[];
 }
 
+/**
+ * A store that persists the way the database does: ONE write per observation,
+ * carrying provider truth and every conflict derived from it, committing both
+ * or neither.
+ *
+ * That is the whole point of the seam. The event id a retry dedupes on advances
+ * only when the write committed, so a failure cannot leave truth recorded with
+ * its divergence missing and no second chance to record it.
+ */
 function inMemoryStore(
   authority: EbayListingSyncAuthority | null,
   options: { applyResult?: "applied" | "superseded" } = {},
-): {
-  store: EbayListingSyncStore;
-  writes: RecordedWrite[];
-  conflicts: OpenedConflict[];
-} {
+) {
   const writes: RecordedWrite[] = [];
-  const conflicts: OpenedConflict[] = [];
-  return {
+  const conflicts: EbayListingSyncConflict[] = [];
+  let committed = authority;
+  const database = {
     writes,
     conflicts,
+    /**
+     * Set to fail exactly the write that CARRIES a divergence, the way a fence
+     * that moved mid-sync would. With truth and conflicts in one write there is
+     * nothing half-applied to recover from. Were they two writes, this would be
+     * the second one — and the first would already have advanced the event id
+     * the retry dedupes on.
+     */
+    failConflictWriteWith: undefined as Error | undefined,
+    get committed(): EbayListingSyncAuthority | null {
+      return committed;
+    },
     store: {
-      readAuthority: async () => authority,
+      readAuthority: async () => committed,
       applyProviderTruth: async (input) => {
+        if (database.failConflictWriteWith && input.conflicts.length > 0) {
+          throw database.failConflictWriteWith;
+        }
         writes.push({
           listingId: input.listingId,
           eventId: input.eventId,
@@ -92,17 +116,24 @@ function inMemoryStore(
           providerPrice: input.providerPrice,
           providerObservedAt: input.providerObservedAt,
           expectedReviewRevision: input.expectedReviewRevision,
+          conflicts: input.conflicts,
+          convergedFields: input.convergedFields,
         });
-        return options.applyResult ?? "applied";
+        if ((options.applyResult ?? "applied") === "superseded") {
+          return "superseded";
+        }
+        conflicts.push(...input.conflicts);
+        committed = committed && {
+          ...committed,
+          lastEventId: input.eventId,
+          providerObservedAt: input.providerObservedAt,
+        };
+        return "applied";
       },
-      openConflict: async (input) => {
-        conflicts.push(input);
-      },
-    },
+    } satisfies EbayListingSyncStore,
   };
+  return database;
 }
-
-type OpenedConflict = Parameters<EbayListingSyncStore["openConflict"]>[0];
 
 describe("ingestEbayListingObservation", () => {
   it("persists confirmed provider truth for a published listing", async () => {
@@ -133,6 +164,8 @@ describe("ingestEbayListingObservation", () => {
         providerPrice: "42.50",
         providerObservedAt: "2026-08-06T12:00:00.000Z",
         expectedReviewRevision: REVIEW_REVISION,
+        conflicts: [],
+        convergedFields: ["status", "price"],
       },
     ]);
   });
@@ -301,11 +334,14 @@ describe("ingestEbayListingObservation", () => {
     // the seller's notice, and one does not replace the other.
     expect(writes).toHaveLength(1);
     expect(writes[0].providerStatus).toBe("ended");
-    expect(conflicts).toHaveLength(1);
-    expect(conflicts[0]).toMatchObject({
+    // One write carries both, under one listing id and one review revision, so
+    // the conflict cannot land without the truth or the truth without it.
+    expect(writes[0]).toMatchObject({
       listingId: LISTING_ID,
       expectedReviewRevision: REVIEW_REVISION,
+      conflicts: [{ field: "status" }],
     });
+    expect(conflicts).toHaveLength(1);
   });
 
   it("records an explicit conflict when the live eBay price left the seller's price behind", async () => {
@@ -424,179 +460,81 @@ describe("ingestEbayListingObservation", () => {
     // is not evidence of anything worth telling the seller.
     expect(conflicts).toEqual([]);
   });
-});
 
-describe("applyConfirmedEbayListingPrice", () => {
-  const CONFIRMATION = {
-    confirmationId: "CONFIRM-1",
-    expectedReviewRevision: REVIEW_REVISION,
-    price: { value: "39.99", currency: "USD" },
-  };
-  const now = () => new Date("2026-08-06T12:30:00.000Z");
-
-  it("persists only what eBay confirmed", async () => {
-    const { store, writes, conflicts } = inMemoryStore(publishedAuthority());
-    const adapter = new MockEbayAdapter();
-
-    const outcome = await applyConfirmedEbayListingPrice({
-      listingId: LISTING_ID,
-      confirmation: CONFIRMATION,
-      adapter,
-      store,
-      now,
-    });
-
-    expect(adapter.reviseRequests).toEqual([
-      {
-        sku: LISTING_ID,
-        offerId: "OFFER-1",
-        price: { value: "39.99", currency: "USD" },
-      },
-    ]);
-    expect(outcome).toMatchObject({
-      state: "applied",
-      providerTruth: {
-        ebayListingId: "EBAY-366590700178",
-        price: { value: "39.99", currency: "USD" },
-        observedAt: "2026-08-06T12:30:00.000Z",
-      },
-      conflicts: [],
-    });
-    // A confirmed price revision says nothing about the listing's lifecycle, so
-    // it must not overwrite the status the last observation established.
-    expect(writes).toEqual([
-      {
-        listingId: LISTING_ID,
-        eventId: "CONFIRM-1",
-        providerStatus: null,
-        providerPrice: "39.99",
-        providerObservedAt: "2026-08-06T12:30:00.000Z",
-        expectedReviewRevision: REVIEW_REVISION,
-      },
-    ]);
-    expect(conflicts).toEqual([]);
-  });
-
-  // The dangerous case. eBay may have applied the change; SnapList does not
-  // know. Writing the requested price would state as truth something nobody
-  // confirmed, and the next poll would then find no divergence to report.
-  it("persists nothing and opens a conflict when eBay's answer is ambiguous", async () => {
-    const { store, writes, conflicts } = inMemoryStore(publishedAuthority());
-    const adapter = new MockEbayAdapter();
-    adapter.reviseFailWith = new EbayWriteAmbiguousError(
-      "eBay price revision for offer OFFER-1 returned no per-offer confirmation",
-      200,
-      {},
+  // The failure this seam exists to survive. Provider truth and the divergence
+  // it disagrees with used to be two writes: the first advanced the event id a
+  // retry dedupes on, so ANY failure of the second — a fence that moved, a
+  // dropped connection, a crash — silently discarded the divergence forever.
+  // A poll's event id is content-addressed, so the retry looks like the same
+  // event and never gets a second chance. That is last-write-wins wearing a
+  // conflict table.
+  it("does not lose a divergence when the write carrying it fails", async () => {
+    const database = inMemoryStore(publishedAuthority());
+    const ended = observation({ eventId: "EVENT-2", status: "ended" });
+    database.failConflictWriteWith = new Error(
+      "the listing was corrected during sync",
     );
-
-    const outcome = await applyConfirmedEbayListingPrice({
-      listingId: LISTING_ID,
-      confirmation: CONFIRMATION,
-      adapter,
-      store,
-      now,
-    });
-
-    expect(writes).toEqual([]);
-    expect(outcome).toMatchObject({
-      state: "ambiguous",
-      conflicts: [
-        {
-          kind: "ambiguousAcknowledgement",
-          field: "price",
-          ebayListingId: "EBAY-366590700178",
-          localValue: "USD 39.99",
-          providerValue: null,
-          observedAt: "2026-08-06T12:30:00.000Z",
-        },
-      ],
-    });
-    expect(conflicts).toHaveLength(1);
-    expect(conflicts[0]).toMatchObject({
-      listingId: LISTING_ID,
-      expectedReviewRevision: REVIEW_REVISION,
-    });
-  });
-
-  it("rethrows a plainly failed revision instead of inventing a conflict", async () => {
-    const { store, writes, conflicts } = inMemoryStore(publishedAuthority());
-    const adapter = new MockEbayAdapter();
-    adapter.reviseFailWith = new EbayApiError("offer status 400", 400, {});
 
     await expect(
-      applyConfirmedEbayListingPrice({
+      ingestEbayListingObservation({
         listingId: LISTING_ID,
-        confirmation: CONFIRMATION,
-        adapter,
-        store,
-        now,
+        observation: ended,
+        store: database.store,
       }),
-    ).rejects.toThrow(EbayApiError);
-    expect(writes).toEqual([]);
-    expect(conflicts).toEqual([]);
+    ).rejects.toThrow("the listing was corrected during sync");
+
+    // Neither half landed — including the event id, which is what keeps the
+    // retry below from being dropped as a duplicate.
+    expect(database.conflicts).toEqual([]);
+    expect(database.committed?.lastEventId).toBeNull();
+
+    database.failConflictWriteWith = undefined;
+    const retry = await ingestEbayListingObservation({
+      listingId: LISTING_ID,
+      observation: ended,
+      store: database.store,
+    });
+
+    expect(retry.state).toBe("applied");
+    expect(database.conflicts).toMatchObject([
+      { kind: "providerDiverged", field: "status", providerValue: "ended" },
+    ]);
   });
 
-  it("refuses a confirmation the seller gave against an older review", async () => {
+  // A conflict that can only ever open is a conflict the seller can never clear.
+  // When eBay's confirmed answer agrees with SnapList again, that dimension has
+  // re-converged and its open row must close.
+  it("reports a re-converged dimension so its open conflict closes", async () => {
     const { store, writes } = inMemoryStore(publishedAuthority());
-    const adapter = new MockEbayAdapter();
 
-    const outcome = await applyConfirmedEbayListingPrice({
+    await ingestEbayListingObservation({
       listingId: LISTING_ID,
-      confirmation: {
-        ...CONFIRMATION,
-        expectedReviewRevision: "55555555-5555-4555-8555-555555555555",
-      },
-      adapter,
-      store,
-      now,
-    });
-
-    expect(outcome).toEqual({
-      state: "refused",
-      reason: "reviewRevisionChanged",
-    });
-    expect(adapter.reviseRequests).toEqual([]);
-    expect(writes).toEqual([]);
-  });
-
-  it("refuses to mutate a listing eBay has no authority over yet", async () => {
-    const { store } = inMemoryStore(
-      publishedAuthority({ ebayListingId: null, ebayStatus: null }),
-    );
-    const adapter = new MockEbayAdapter();
-
-    const outcome = await applyConfirmedEbayListingPrice({
-      listingId: LISTING_ID,
-      confirmation: CONFIRMATION,
-      adapter,
-      store,
-      now,
-    });
-
-    expect(outcome).toEqual({ state: "refused", reason: "notPublished" });
-    expect(adapter.reviseRequests).toEqual([]);
-  });
-
-  it("does not send a replayed confirmation to eBay a second time", async () => {
-    const { store, writes } = inMemoryStore(
-      publishedAuthority({
-        lastEventId: "CONFIRM-1",
-        providerObservedAt: "2026-08-06T12:30:00.000Z",
+      observation: observation({
+        eventId: "EVENT-2",
+        price: { value: "39.99", currency: "USD" },
       }),
-    );
-    const adapter = new MockEbayAdapter();
-
-    const outcome = await applyConfirmedEbayListingPrice({
-      listingId: LISTING_ID,
-      confirmation: CONFIRMATION,
-      adapter,
       store,
-      now,
     });
 
-    expect(outcome).toEqual({ state: "ignored", reason: "duplicateEvent" });
-    expect(adapter.reviseRequests).toEqual([]);
-    expect(writes).toEqual([]);
+    // Status agrees, price does not: only the agreeing dimension is reported as
+    // resolved, and the disagreeing one is still an open conflict.
+    expect(writes[0].convergedFields).toEqual(["status"]);
+    expect(writes[0].conflicts).toMatchObject([{ field: "price" }]);
+  });
+
+  // Silence is not agreement. eBay reporting no price is no evidence either
+  // way, so an open price conflict must NOT be closed on the strength of it.
+  it("does not resolve a dimension neither side can be compared on", async () => {
+    const { store, writes } = inMemoryStore(publishedAuthority());
+
+    await ingestEbayListingObservation({
+      listingId: LISTING_ID,
+      observation: observation({ eventId: "EVENT-2", price: null }),
+      store,
+    });
+
+    expect(writes[0].convergedFields).toEqual(["status"]);
+    expect(writes[0].conflicts).toEqual([]);
   });
 });
 
