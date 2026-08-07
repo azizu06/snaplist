@@ -703,18 +703,26 @@ struct AssistedExportView: View {
         // Same rule as Copy: the pack is resolved against the server before its
         // text and photos are handed to another app. The receipt is not written
         // here — the share sheet records its handoff once it is on screen.
+        var payload: AssistedExportSharePayload?
         await store.prepareDelivery(pack: domain.pack) { currentPack in
             let images = try await deviceActions.loadPhotos(
                 currentPack.photoReferences
             )
             guard domain.pack == currentPack,
                   !domain.isPackOutOfDate else { return }
-            sharePayload = AssistedExportSharePayload(
+            payload = AssistedExportSharePayload(
                 destination: destination,
                 pack: currentPack,
                 items: [currentPack.listingText(for: destination)] + images
             )
         }
+        // Mount the sheet only once `prepareDelivery` has released the write
+        // lock. Assigning inside the closure happens while `isWriting` is still
+        // true, and the sheet's `onPresented` receipt is refused in that window
+        // (`AssistedExportStore.swift:103`). Today no suspension point separates
+        // the two, so nothing can render in between — hoisting the assignment
+        // makes that structural instead of an argument about the current code.
+        sharePayload = payload
     }
 
     // MARK: - Motion

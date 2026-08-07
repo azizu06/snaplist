@@ -259,13 +259,20 @@ final class AssistedExportClientTests: XCTestCase {
         XCTAssertFalse(store.domain.hasHandedOff(to: .facebookMarketplace))
     }
 
-    // The issue's public seam: change the seller price after a pack is
-    // generated, then ask for delivery. What leaves the app has to be the
-    // listing as it stands now, not the listing as it stood when the screen
-    // was drawn — the seller pastes that text into a marketplace form, and a
-    // price SnapList has already replaced is a wrong number in a real listing.
+    // The issue's public seam: the mounted pack's effective price no longer
+    // matches the server's, then delivery is asked for. What leaves the app has
+    // to be the listing as it stands now, not the listing as it stood when the
+    // screen was drawn — the seller pastes that text into a marketplace form,
+    // and a price SnapList has already replaced is a wrong number in a real
+    // listing.
+    //
+    // This models a stale client projection at an *unchanged* `review_revision`
+    // — the branch at `AssistedExportStore.swift:347-351`. A seller's own price
+    // override advances `review_revision` and is therefore refused as XPORT-05,
+    // never repriced; that path is covered by
+    // `testNothingIsDeliveredOnceTheListingItselfHasMovedOn`.
 
-    func testDeliveryHandsOverTheCurrentPriceAfterTheSellerEditedIt() async {
+    func testDeliveryHandsOverTheServerPriceWhenTheClientProjectionIsStale() async {
         let service = AssistedExportDeliveryService(price: 145)
         let store = AssistedExportStore(
             pack: .fixture(effectivePrice: 145),
@@ -274,8 +281,9 @@ final class AssistedExportClientTests: XCTestCase {
         await store.load()
         store.toggle(.mercari)
 
-        // The seller changes their price from somewhere else — another device,
-        // or the review screen behind this one.
+        // The server's effective price moves under the mounted pack while the
+        // review revision stays put, so the screen's number is now a stale
+        // projection rather than a rejected one.
         await service.reprice(to: 177.77)
 
         var delivered: String?
@@ -355,6 +363,73 @@ final class AssistedExportClientTests: XCTestCase {
                 + "building its payload must not write a second one."
         )
         XCTAssertFalse(store.domain.hasHandedOff(to: .mercari))
+    }
+
+    // AC6 names native share-sheet cancellation, which is a different behavior
+    // from dismissing the confirm sheet. The activity sheet records its handoff
+    // from `onPresented` (`AssistedExportView.swift:172-182`), so a seller who
+    // opens it and then backs out has done exactly one thing: handed the pack to
+    // another app. Cancelling is simply the absence of the later confirm, so the
+    // invariant lives in the post-handoff state — presenting a sheet earns the
+    // right to be *asked*, never the Shared badge.
+    func testCancellingTheNativeShareSheetOffersMarkAsSharedWithoutClaimingShared() async {
+        let service = AssistedExportDeliveryService(price: 145)
+        let store = AssistedExportStore(pack: .fixture(), service: service)
+        await store.load()
+        store.toggle(.mercari)
+
+        // The exact sequence the activity sheet performs: build the payload,
+        // present it, record the handoff. Nothing confirms afterwards.
+        await store.prepareDelivery(pack: store.domain.pack) { _ in }
+        await store.recordHandoff(
+            .sharedAnotherWay,
+            for: .mercari,
+            pack: store.domain.pack
+        )
+
+        XCTAssertTrue(
+            store.domain.offersMarkAsShared(for: .mercari),
+            "A presented share sheet earns the right to be asked."
+        )
+        XCTAssertEqual(
+            store.domain.handoff(for: .mercari),
+            .prepared,
+            "A cancelled share sheet is never a Shared claim."
+        )
+        XCTAssertEqual(store.domain.state, .handedOff(.mercari))
+        XCTAssertNil(store.completedAction)
+    }
+
+    // The share sheet's receipt is written after `prepareDelivery` has already
+    // returned, and `recordHandoff` refuses outright while `isWriting` is true
+    // (`AssistedExportStore.swift:103`). Pin that ordering so a later edit
+    // cannot start dropping the receipt silently.
+    func testTheShareSheetReceiptIsWrittenOnceThePreparedDeliveryReleasesTheLock() async {
+        let service = AssistedExportDeliveryService(price: 145)
+        let store = AssistedExportStore(pack: .fixture(), service: service)
+        await store.load()
+        store.toggle(.mercari)
+
+        await store.prepareDelivery(pack: store.domain.pack) { _ in }
+
+        XCTAssertFalse(store.isWriting)
+        let beforeHandoff = await service.handoffWrites
+        XCTAssertEqual(beforeHandoff, 0)
+
+        await store.recordHandoff(
+            .sharedAnotherWay,
+            for: .mercari,
+            pack: store.domain.pack
+        )
+
+        let writes = await service.handoffWrites
+        XCTAssertEqual(
+            writes,
+            1,
+            "A receipt requested the moment the payload is ready must not be "
+                + "refused by the delivery lock."
+        )
+        XCTAssertTrue(store.domain.hasHandedOff(to: .mercari))
     }
 
     private func makeSession(
