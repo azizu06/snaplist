@@ -9,6 +9,21 @@ import XCTest
 /// gap the first test closes. The other cases prove the Listing Review entry
 /// point and the Prepared/Shared vocabulary in the rendered hierarchy.
 final class AssistedExportUITests: XCTestCase {
+    /// Budget for every wait that happens after a destination row has been
+    /// tapped open. The initial row lookups keep their own budgets: those run
+    /// against a cheap tree and are not at risk.
+    ///
+    /// This encodes the cost of *observing* the app, not the time the app needs
+    /// to act. In the `serial` job on run 31151896079, a query against this
+    /// screen cost 0.18s before the workspace rendered and about 4s after it,
+    /// and `waitForExistence(timeout:)` budgets are wall clock rather than
+    /// sample counts. A 5s budget therefore bought three samples, two of them at
+    /// the same timestamp, and the step before the failing one needed 8.6s of
+    /// wall clock to satisfy its own 5s budget. Nothing in the app is slow:
+    /// `AssistedExportDomain.updatePack(to:)` clears `confirmSheet`
+    /// synchronously on its first line.
+    private let loadedTreeTimeout: TimeInterval = 30
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
@@ -27,7 +42,7 @@ final class AssistedExportUITests: XCTestCase {
         // reachable. Collapsing the two would leave that ambiguous.
         let workspace = marker("assisted-export.workspace.facebook", in: app)
         XCTAssertTrue(
-            workspace.waitForExistence(timeout: 5),
+            workspace.waitForExistence(timeout: loadedTreeTimeout),
             "Tapping the row opens its workspace.\n\(app.debugDescription)"
         )
 
@@ -36,14 +51,14 @@ final class AssistedExportUITests: XCTestCase {
         // component rather than by an outer identifier that never reaches it.
         let open = app.buttons["button.primary.open-facebook-marketplace"]
         XCTAssertTrue(
-            open.waitForExistence(timeout: 5),
+            open.waitForExistence(timeout: loadedTreeTimeout),
             "The workspace offers the open action.\n\(app.debugDescription)"
         )
         open.tap()
 
         let markAsShared = app.buttons["assisted-export.mark-as-shared.facebook"]
         XCTAssertTrue(
-            markAsShared.waitForExistence(timeout: 5),
+            markAsShared.waitForExistence(timeout: loadedTreeTimeout),
             "Mark as shared follows a recorded handoff.\n\(app.debugDescription)"
         )
         markAsShared.tap()
@@ -55,13 +70,13 @@ final class AssistedExportUITests: XCTestCase {
         // would pass every remaining assertion.
         XCTAssertTrue(
             marker("assisted-export.fixture.sheet-was-presented", in: app)
-                .waitForExistence(timeout: 5),
+                .waitForExistence(timeout: loadedTreeTimeout),
             "The confirm sheet must actually reach the screen first."
         )
 
         let sheet = marker("assisted-export.confirm-sheet", in: app)
         XCTAssertTrue(
-            waitForDisappearance(of: sheet),
+            waitForDisappearance(of: sheet, timeout: loadedTreeTimeout),
             "A pack update must take the confirm sheet down, not leave it "
                 + "standing over a pack the seller was never shown."
         )
@@ -85,7 +100,7 @@ final class AssistedExportUITests: XCTestCase {
         // confirmation sheet has been dismissed.
         XCTAssertTrue(
             marker("assisted-export.workspace.facebook", in: app)
-                .waitForExistence(timeout: 5),
+                .waitForExistence(timeout: loadedTreeTimeout),
             "The replacement pack restores the workspace after dismissing its stale sheet."
         )
     }
@@ -97,12 +112,12 @@ final class AssistedExportUITests: XCTestCase {
         row.tap()
 
         let open = app.buttons["button.primary.open-facebook-marketplace"]
-        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        XCTAssertTrue(open.waitForExistence(timeout: loadedTreeTimeout))
         open.tap()
 
         XCTAssertTrue(
             marker("assisted-export.advisory", in: app)
-                .waitForExistence(timeout: 5)
+                .waitForExistence(timeout: loadedTreeTimeout)
         )
         XCTAssertFalse(
             app.buttons["assisted-export.mark-as-shared.facebook"].exists,
@@ -117,7 +132,7 @@ final class AssistedExportUITests: XCTestCase {
         row.tap()
 
         let save = app.buttons["assisted-export.save.facebook"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertTrue(save.waitForExistence(timeout: loadedTreeTimeout))
         let saveCoordinate = save.coordinate(
             withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
         )
@@ -130,7 +145,8 @@ final class AssistedExportUITests: XCTestCase {
                 on: marker(
                     "assisted-export.fixture.handoff-write-count",
                     in: app
-                )
+                ),
+                timeout: loadedTreeTimeout
             ),
             "Saving is complete only after exactly one durable handoff receipt."
         )
@@ -154,14 +170,14 @@ final class AssistedExportUITests: XCTestCase {
         row.tap()
         app.buttons["button.primary.open-facebook-marketplace"].tap()
         let mark = app.buttons["assisted-export.mark-as-shared.facebook"]
-        XCTAssertTrue(mark.waitForExistence(timeout: 5))
+        XCTAssertTrue(mark.waitForExistence(timeout: loadedTreeTimeout))
         mark.tap()
 
         let confirm = app.buttons["button.primary.yes,-mark-as-shared"]
         let cancel = app.buttons["button.secondary.not-yet"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirm.waitForExistence(timeout: loadedTreeTimeout))
         XCTAssertTrue(confirm.isHittable)
-        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        XCTAssertTrue(cancel.waitForExistence(timeout: loadedTreeTimeout))
         XCTAssertTrue(cancel.isHittable)
     }
 
@@ -185,7 +201,7 @@ final class AssistedExportUITests: XCTestCase {
         mercari.tap()
         XCTAssertTrue(
             app.buttons["assisted-export.mark-as-shared.mercari"]
-                .waitForExistence(timeout: 5),
+                .waitForExistence(timeout: loadedTreeTimeout),
             "A durable handoff reveals the explicit seller confirmation."
         )
         XCTAssertTrue(
@@ -238,11 +254,11 @@ final class AssistedExportUITests: XCTestCase {
 
         XCTAssertTrue(
             app.navigationBars["Share to other marketplaces"]
-                .waitForExistence(timeout: 5)
+                .waitForExistence(timeout: loadedTreeTimeout)
         )
         XCTAssertTrue(
             app.buttons["assisted-export.row.facebook"]
-                .waitForExistence(timeout: 5)
+                .waitForExistence(timeout: loadedTreeTimeout)
         )
     }
 
