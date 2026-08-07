@@ -14,7 +14,12 @@ const preparationSchema = z.object({
 /**
  * Every cleanup source the database allows. A claim the executor cannot name is
  * a claim it cannot delete safely, so this list must track the
- * `pipeline_storage_cleanup_source_check` constraint exactly.
+ * `pipeline_storage_cleanup_source_check` constraint exactly — and the drift is
+ * not confined to the job that drifted. `claim_pipeline_storage_cleanup` takes
+ * the lease and spends an attempt before the response is parsed, and the parse
+ * failure escapes `runPipelineMaintenance`, so an unnamed source stalls every
+ * other pending cleanup behind it. `cleanup-source-parity.test.ts` holds the two
+ * copies together against the constraint the database actually enforces.
  */
 export const PIPELINE_CLEANUP_SOURCE_TYPES = [
   "staging",
@@ -22,6 +27,7 @@ export const PIPELINE_CLEANUP_SOURCE_TYPES = [
   "guest_recovery",
   "guest_claim_copy",
   "raw_voice",
+  "item_deletion",
 ] as const;
 
 const cleanupJobSchema = z.object({

@@ -119,6 +119,26 @@ alter table public.ai_item_credit_reservations
   alter column pipeline_run_id drop not null,
   alter column item_id drop not null;
 
+-- `logical_run_key` is the submission's idempotency key, and it is unique per
+-- seller so two live runs cannot claim the same credit. Detaching keeps the row
+-- and therefore keeps the key, which the cascade used to free — so the detach
+-- would otherwise leave a spent key permanently reserved by a run that no longer
+-- exists.
+--
+-- That is reachable by a seller doing nothing wrong: delete an item, then let an
+-- offline outbox replay the same submission whose 200 was never seen.
+-- `stage_pipeline_batch` finds no run, stages a fresh item and run, and the
+-- reserve trigger inserts under the same key — 23505 out of the RPC, at a seller
+-- who still has allowance. Scoping the index to attached rows says what the
+-- constraint actually means: one live run per key. Detached rows still spend
+-- their credit, because consumption counts state, not this key.
+alter table public.ai_item_credit_reservations
+  drop constraint ai_item_credit_reservations_logical_run_key;
+
+create unique index ai_item_credit_reservations_logical_run_key
+  on public.ai_item_credit_reservations (user_id, logical_run_key)
+  where pipeline_run_id is not null;
+
 -- `private.enforce_ai_item_credit_transition` treats the reservation's identity
 -- columns as immutable, which is what stops a caller from moving a spent credit
 -- onto a different run or period. The FK action above is a legitimate fourth
@@ -338,8 +358,14 @@ alter table private.pipeline_storage_cleanup_jobs
 -- row is the completion proof the retention matrix names for
 -- `private-storage-raw-voice`, and removing the row would destroy the proof
 -- while leaving the object in Storage. `released` drops the item and run
--- identity immediately and keeps the row alive purely as the proof carrier until
--- the cleanup capability finishes and the existing 24-hour ceiling sweeps it.
+-- identity immediately, strips the receipt down to the storage path the pending
+-- cleanup still reads, and keeps the row alive purely as the proof carrier.
+--
+-- Nothing prunes a released row on its own: the 24-hour `cleanup_after` ceiling
+-- publishes deletion for the object, not for this row, and the only statements
+-- that delete from this table are account erasure's. So the row is retained
+-- until the account is erased, which is why what it retains has to be nothing
+-- the item-deletion trigger claims.
 alter table private.mobile_item_submission_voice_handoffs
   drop constraint mobile_item_submission_voice_handoffs_state_check;
 
@@ -370,6 +396,91 @@ alter table private.mobile_item_submission_voice_handoffs
 comment on constraint mobile_item_submission_voice_handoffs_check
   on private.mobile_item_submission_voice_handoffs is
   'staged: not yet accepted. accepted: bound to one item and run. released: the item was deleted and only the raw-audio absence proof remains.';
+
+-- `released` has to be terminal, or the new state is a hole rather than a state.
+--
+-- Body reproduced from 20260730120000 with one added branch. The accept path
+-- returned early only for `state = 'accepted'` and otherwise fell through to an
+-- unconditional bind, which the widened CHECK now permits from `released` too.
+-- That is reachable, not theoretical: `private.mobile_item_submissions` cascades
+-- away with the item, so a client replaying the same idempotency key after a
+-- deletion — an offline outbox entry whose 200 was never seen — is no longer
+-- recognised as a replay, while the handoff survives on its own primary key
+-- `(user_id, idempotency_key)`. The bind would then attach raw audio already
+-- queued for deletion, or already proved absent, to a brand new item and run.
+--
+-- The refusal is placed before the receipt comparison deliberately. Release
+-- strips the receipt, so a replay carrying the original would otherwise be
+-- turned away as an idempotency conflict — the right outcome for the wrong
+-- reason, and one that stops reporting the real cause the moment the payload
+-- changes again.
+create or replace function private.accept_mobile_submission_voice_handoff(
+  p_user_id text,
+  p_idempotency_key uuid,
+  p_voice_receipt jsonb,
+  p_item_id uuid,
+  p_run_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_handoff private.mobile_item_submission_voice_handoffs%rowtype;
+begin
+  select handoff.* into v_handoff
+  from private.mobile_item_submission_voice_handoffs handoff
+  where handoff.user_id = p_user_id
+    and handoff.idempotency_key = p_idempotency_key
+  for update;
+
+  if p_voice_receipt is null then
+    if found then
+      raise exception using
+        errcode = '23514',
+        message = 'Mobile item submission idempotency conflict';
+    end if;
+    return null;
+  end if;
+
+  if found and v_handoff.state = 'released' then
+    raise exception using
+      errcode = '23514',
+      message = 'Mobile item submission voice handoff was released';
+  end if;
+
+  if not found or v_handoff.receipt is distinct from p_voice_receipt then
+    raise exception using
+      errcode = '23514',
+      message = 'Mobile item submission idempotency conflict';
+  end if;
+
+  if v_handoff.state = 'accepted' then
+    if v_handoff.item_id is distinct from p_item_id
+      or v_handoff.run_id is distinct from p_run_id then
+      raise exception using
+        errcode = '23514',
+        message = 'Mobile item submission voice handoff conflicts';
+    end if;
+    return v_handoff.receipt;
+  end if;
+
+  update private.mobile_item_submission_voice_handoffs handoff
+  set state = 'accepted',
+      item_id = p_item_id,
+      run_id = p_run_id,
+      accepted_at = statement_timestamp(),
+      updated_at = statement_timestamp()
+  where handoff.user_id = p_user_id
+    and handoff.idempotency_key = p_idempotency_key;
+  return p_voice_receipt;
+end;
+$$;
+
+revoke all on function private.accept_mobile_submission_voice_handoff(
+  text, uuid, jsonb, uuid, uuid
+) from public, anon, authenticated, service_role;
 
 -- Tenancy is derived from `public.clerk_user_id()` and then re-asserted on every
 -- statement, so the definer rights buy access to `private` bookkeeping without
@@ -508,10 +619,30 @@ begin
         v_handoff.storage_path
       );
     end if;
+    -- The row outlives the item, so its payload must not. The retention matrix
+    -- row `seller-voice-transcript` names the transcript, the seller_voice
+    -- provenance, and the language tag as absent by the earliest applicable
+    -- deletion trigger, and `receipt->>'locale'` is that language tag. Keeping
+    -- the whole receipt alive on a row with no terminal disposition would retain
+    -- it indefinitely.
+    --
+    -- The storage path stays because the cleanup still in flight genuinely needs
+    -- it: `prepare_raw_seller_voice_retention` and the account-erasure sweep both
+    -- re-read `receipt->>'storage_path'` to republish removal for a job that
+    -- dead-lettered, and `mobile_item_submission_voice_handoffs_storage_path_key`
+    -- indexes that expression. Nothing else here is proof of anything.
+    --
+    -- `transcription_outcome` is deliberately untouched: account erasure reads it
+    -- to report `hosted-transcription-provider-copy` as a record SnapList cannot
+    -- delete, and clearing it here would turn an honest retained-record
+    -- disclosure into silence.
     update private.mobile_item_submission_voice_handoffs handoff
     set state = 'released',
         item_id = null,
         run_id = null,
+        receipt = jsonb_build_object(
+          'storage_path', handoff.receipt->>'storage_path'
+        ),
         updated_at = statement_timestamp()
     where handoff.user_id = v_handoff.user_id
       and handoff.idempotency_key = v_handoff.idempotency_key;
@@ -557,6 +688,10 @@ revoke all on function public.delete_item(uuid) from public, anon, service_role;
 grant execute on function public.delete_item(uuid) to authenticated;
 
 comment on function public.delete_item(uuid) is
-  'Deletes one seller-owned item and every SnapList-owned row the lean-MVP '
+  'Deletes one seller-owned item and the SnapList-owned rows the lean-MVP '
   'retention matrix binds to the item-deletion trigger, publishing Storage '
-  'removal as durable leased cleanup work.';
+  'removal as durable leased cleanup work. Two things survive by design and '
+  'neither is a deletion claim: the raw seller voice handoff stays as the '
+  'carrier for the absence proof its own retention row names, stripped to the '
+  'storage path that pending cleanup reads, and provider-owned records are '
+  'reported in retained_records rather than removed.';

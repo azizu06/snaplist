@@ -1540,12 +1540,17 @@ export function createMobileApiHandler(
             "Item was not found.",
           );
         }
+        // Deliberately does not say whether anything was removed, because this
+        // branch cannot know. The executor raising and a transport or parse
+        // failure after it committed arrive here identically, and the second
+        // one has already deleted the whole item graph. Telling that seller
+        // nothing was removed is worse than telling them nothing at all.
         dependencies.reportError?.("mobile-api.item-deletion", error);
         return errorResponse(
           requestId,
           500,
           "internal_error",
-          "Deleting this item did not finish. Nothing was removed.",
+          "Deleting this item did not finish. Check the item before trying again.",
         );
       }
     }

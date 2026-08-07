@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  createSupabasePipelineOperationsStore,
-  PIPELINE_CLEANUP_SOURCE_TYPES,
-} from "./store";
+import { createSupabasePipelineOperationsStore } from "./store";
 
 describe("pipeline operations fixed RPC store", () => {
   it("prepares retention, claims cleanup work, records outcomes, and loads health", async () => {
@@ -118,30 +115,29 @@ describe("pipeline operations fixed RPC store", () => {
     ]);
   });
 
-  it("accepts every cleanup source the database can queue", async () => {
-    // Naming raw voice must not un-name the others: a source the executor
-    // cannot parse is cleanup work that stalls at the claim.
-    for (const sourceType of PIPELINE_CLEANUP_SOURCE_TYPES) {
-      const rpc = vi.fn().mockResolvedValue({
-        data: {
-          kind: "claimed",
-          job: {
-            jobId: "11111111-1111-4111-8111-111111111111",
-            leaseToken: "22222222-2222-4222-8222-222222222222",
-            sourceType,
-            photoPaths: ["user/photos/example.jpg"],
-            attemptCount: 1,
-            maxAttempts: 5,
-          },
-        },
-        error: null,
-      });
-      const store = createSupabasePipelineOperationsStore({ rpc });
-      await expect(store.claimStorageCleanup(300)).resolves.toMatchObject({
+  it("refuses a claimed job whose source the executor cannot name", async () => {
+    // The parse failure is not a local one. `claim_pipeline_storage_cleanup`
+    // has already leased the job and spent an attempt by the time this throws,
+    // and the throw escapes `runPipelineMaintenance`, so every other pending
+    // cleanup is blocked behind it. Which sources are nameable is asserted
+    // against the database constraint in `cleanup-source-parity.test.ts`;
+    // iterating the constant here would only assert `z.enum` against itself.
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
         kind: "claimed",
-        job: { sourceType },
-      });
-    }
+        job: {
+          jobId: "11111111-1111-4111-8111-111111111111",
+          leaseToken: "22222222-2222-4222-8222-222222222222",
+          sourceType: "not_a_cleanup_source",
+          photoPaths: ["user/photos/example.jpg"],
+          attemptCount: 1,
+          maxAttempts: 5,
+        },
+      },
+      error: null,
+    });
+    const store = createSupabasePipelineOperationsStore({ rpc });
+    await expect(store.claimStorageCleanup(300)).rejects.toThrow();
   });
 
   it("sweeps the raw seller voice ceiling and records a terminal outcome", async () => {

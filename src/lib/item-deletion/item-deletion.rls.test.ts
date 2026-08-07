@@ -13,6 +13,11 @@ import {
 } from "@/lib/supabase/test-users";
 import { runPipelineAndPersist } from "@/lib/pipeline/persist";
 import { StubPipeline } from "@/lib/pipeline/stub";
+import { createMobileApiHandler } from "@/lib/mobile-api/app";
+import { createSupabaseItemDeletionGateway } from "./gateway";
+import { runPipelineMaintenance } from "@/lib/pipeline-operations/maintenance";
+import { createSupabasePipelineOperationsStore } from "@/lib/pipeline-operations/store";
+import { createStorageCleanupCapability } from "@/lib/pipeline-operations/storage-cleanup";
 import { skipIfStackUnreachable, stackReachable, whenStackReachable } from "@/test/supabase-stack";
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? "http://127.0.0.1:54321";
@@ -21,6 +26,14 @@ const SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const DATABASE_URL = resolveLocalTestDatabaseUrl();
 
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+
+/**
+ * The language tag inside the voice receipt. The retention matrix row
+ * `seller-voice-transcript` names its completion proof as the transcript,
+ * seller_voice provenance, and language tag being absent from tenant data, and
+ * binds it to the earliest applicable deletion trigger — item deletion is one.
+ */
+const VOICE_LANGUAGE_TAG = "uz-UZ";
 
 let reachable = false;
 let database: Client;
@@ -54,17 +67,50 @@ let queueDepthAtStart = 0;
 async function provisionTenant(label: string): Promise<{
   userId: string;
   client: SupabaseClient;
+  token: string;
 }> {
   const userId = `user_test_item_deletion_${label}_${Date.now()}`;
   tenantIds.add(userId);
   const token = await mintUserJwt(userId);
   return {
     userId,
+    token,
     client: createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
       accessToken: async () => token,
       auth: { persistSession: false, autoRefreshToken: false },
     }),
   };
+}
+
+/**
+ * The native transport wired to the real executor.
+ *
+ * `item-deletion.test.ts` proves the route maps each typed error to a status
+ * from a stubbed gateway; what it cannot prove is that the executor's actual
+ * answers ever produce those errors. A refusal arrives as a *successful* RPC
+ * whose jsonb says `blocked`, and "not found" arrives as a raised `P0002` — two
+ * shapes a stub can assert about only by restating them.
+ */
+function transportForSeller(userId: string) {
+  return createMobileApiHandler({
+    async authenticate() {
+      return { kind: "clerk", userId };
+    },
+    worker: {} as never,
+    itemDeletion: createSupabaseItemDeletionGateway((bearerToken) =>
+      createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
+        accessToken: async () => bearerToken,
+        auth: { persistSession: false, autoRefreshToken: false },
+      })),
+    requestId: () => "req_181_transport",
+  });
+}
+
+function deleteRequest(itemId: string, token: string): Request {
+  return new Request(`https://api.test/v1/items/${itemId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${token}` },
+  });
 }
 
 beforeEach((context) => {
@@ -196,13 +242,44 @@ function stageArgs(userId: string, idempotencyKey: string, photoPath: string) {
  */
 async function seedCreditedItem(
   userId: string,
-  options: { settle?: boolean } = {},
+  options: {
+    settle?: boolean;
+    /**
+     * The submission key the run is reserved under. It becomes the
+     * reservation's `logical_run_key`, so a test about key reuse has to choose
+     * it rather than take a fresh one.
+     */
+    idempotencyKey?: string;
+    /**
+     * A paid StoreKit period with room for more than one run, for the cases
+     * that need the seller to still have allowance after this item is gone.
+     * Without it the fixture spends the single included run.
+     */
+    allowance?: number;
+  } = {},
 ): Promise<{ itemId: string; runId: string; photoPath: string }> {
-  await grantIncludedOfferDeviceClaim(admin, userId);
+  if (options.allowance === undefined) {
+    await grantIncludedOfferDeviceClaim(admin, userId);
+  } else {
+    const now = Date.now();
+    const period = await admin.rpc("record_verified_storekit_ai_item_period", {
+      p_allowance: options.allowance,
+      p_event_created_at: new Date(now).toISOString(),
+      p_event_id: crypto.randomUUID(),
+      p_expires_date: new Date(now + 30 * 24 * 60 * 60 * 1_000).toISOString(),
+      p_grace_expires_date: null,
+      p_original_transaction_id: `original-${userId}`,
+      p_period_key: `period-${userId}`,
+      p_period_start: new Date(now - 60 * 60 * 1_000).toISOString(),
+      p_state: "active",
+      p_user_id: userId,
+    });
+    if (period.error) throw new Error(period.error.message);
+  }
   const photoPath = `${userId}/item-deletion-credited.jpg`;
   const staged = await admin.rpc(
     "stage_pipeline_batch",
-    stageArgs(userId, crypto.randomUUID(), photoPath),
+    stageArgs(userId, options.idempotencyKey ?? crypto.randomUUID(), photoPath),
   );
   if (staged.error) throw new Error(staged.error.message);
   const row = (staged.data as Array<{ item_id: string; run_id: string }>)[0];
@@ -268,41 +345,69 @@ async function seedCreditedItem(
   return { itemId: row.item_id, runId: row.run_id, photoPath };
 }
 
-/** The accepted voice note for an item, with its raw audio still present. */
+/**
+ * The accepted voice note for an item, with its raw audio still present.
+ *
+ * The receipt carries the whole seven-key shape
+ * `assert_mobile_submission_voice_receipt` validates, not just the storage path:
+ * `locale` is the seller's language tag, and whether it survives deletion is the
+ * retention question this fixture exists to answer.
+ */
 async function seedVoiceHandoff(
   userId: string,
   item: { itemId: string; runId: string },
 ): Promise<{ cleanupId: string; storagePath: string }> {
   const cleanupId = crypto.randomUUID();
   const storagePath = `${userId}/voice/${cleanupId}.m4a`;
+  // A real object, so the cleanup capability's absence proof reads a bucket
+  // that actually held the path rather than one that never did.
+  const uploaded = await admin.storage.from("photos").upload(storagePath, jpeg, {
+    contentType: "audio/wav",
+    upsert: true,
+  });
+  expect(uploaded.error).toBeNull();
   await database.query(
     `insert into private.mobile_item_submission_voice_handoffs (
        user_id, idempotency_key, request_fingerprint, batch_id, cleanup_id,
        receipt, state, item_id, run_id, accepted_at
      )
      values ($1::text, gen_random_uuid(), $2::text, gen_random_uuid(), $3::uuid,
-             jsonb_build_object('storage_path', $4::text), 'accepted',
+             jsonb_build_object(
+               'version', 1,
+               'storage_path', $4::text,
+               'content_sha256', repeat('d', 64),
+               'byte_length', 2048,
+               'duration_ms', 4200,
+               'locale', $7::text,
+               'media_type', 'audio/wav'
+             ), 'accepted',
              $5::uuid, $6::uuid, statement_timestamp())`,
-    [userId, "b".repeat(64), cleanupId, storagePath, item.itemId, item.runId],
+    [
+      userId,
+      "b".repeat(64),
+      cleanupId,
+      storagePath,
+      item.itemId,
+      item.runId,
+      VOICE_LANGUAGE_TAG,
+    ],
   );
   return { cleanupId, storagePath };
 }
 
-async function voiceHandoff(userId: string): Promise<{
+interface VoiceHandoffRow {
   state: string;
   item_id: string | null;
   run_id: string | null;
+  receipt: Record<string, unknown>;
   raw_audio_cleanup_queued_at: Date | null;
   raw_audio_deleted_at: Date | null;
-} | null> {
-  const { rows } = await database.query<{
-    state: string;
-    item_id: string | null;
-    run_id: string | null;
-    raw_audio_cleanup_queued_at: Date | null;
-    raw_audio_deleted_at: Date | null;
-  }>(
-    `select state, item_id, run_id, raw_audio_cleanup_queued_at, raw_audio_deleted_at
+}
+
+async function voiceHandoff(userId: string): Promise<VoiceHandoffRow | null> {
+  const { rows } = await database.query<VoiceHandoffRow>(
+    `select state, item_id, run_id, receipt, raw_audio_cleanup_queued_at,
+            raw_audio_deleted_at
      from private.mobile_item_submission_voice_handoffs
      where user_id = $1`,
     [userId],
@@ -389,7 +494,12 @@ beforeAll(async () => {
     ],
   });
   await whenStackReachable(reachable, async () => {
-    lease = await acquireExclusiveTestResource("pipeline_jobs");
+    // The exact name the other pgmq suites hold. A lease is only a convention:
+    // a name nobody else spells excludes nobody, and this suite reads and
+    // publishes on the shared queue.
+    lease = await acquireExclusiveTestResource(
+      `local-pgmq:pipeline_jobs:${SUPABASE_URL}`,
+    );
     database = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
     await database.connect();
     // Taken under the queue lease, so nothing else can move it while this suite
@@ -577,12 +687,166 @@ describe("non-guest item deletion against local Supabase", () => {
     // retention matrix names, and that proof is now pending.
     expect(handoff!.raw_audio_cleanup_queued_at).not.toBeNull();
     expect(handoff!.raw_audio_deleted_at).toBeNull();
+
+    // Surviving as a proof carrier is not a licence to keep the payload. The
+    // `seller-voice-transcript` retention row names the language tag as one of
+    // the things that must be absent from tenant data by the earliest deletion
+    // trigger, and `locale` in the receipt is that tag. What the pending cleanup
+    // still needs is the storage path — the ceiling sweep and account erasure
+    // both re-read it to publish removal — and nothing else.
+    expect(Object.keys(handoff!.receipt).sort()).toEqual(["storage_path"]);
+    expect(JSON.stringify(handoff!.receipt)).not.toContain(VOICE_LANGUAGE_TAG);
+    expect(handoff!.receipt.storage_path).toBe(voice.storagePath);
     const queued = await database.query<{ photo_paths: string[] }>(
       `select photo_paths from private.pipeline_storage_cleanup_jobs
        where source_type = 'raw_voice' and source_id = $1`,
       [voice.cleanupId],
     );
     expect(queued.rows[0]?.photo_paths).toEqual([voice.storagePath]);
+  });
+
+  it("frees the submission key the deleted run held so an outbox replay can reuse it", async () => {
+    const seller = await provisionTenant("keyreuse");
+    const idempotencyKey = crypto.randomUUID();
+    const credited = await seedCreditedItem(seller.userId, {
+      idempotencyKey,
+      allowance: 2,
+    });
+
+    const deleted = await seller.client.rpc("delete_item", { p_item_id: credited.itemId });
+    expect(deleted.error).toBeNull();
+    expect(deletionOutcome(deleted.data).status).toBe("deleted");
+
+    // The settled reservation is detached rather than cascaded, and it keeps the
+    // `logical_run_key` it was reserved under — the submission's idempotency
+    // key. Before, the row cascaded away and freed that key. So a client
+    // replaying an offline outbox entry whose 200 it never saw now stages a new
+    // item and run, the reserve trigger inserts a second reservation under the
+    // same key, and a plain unique on (user_id, logical_run_key) raises 23505
+    // out of the RPC — at a seller who still has allowance left and did nothing
+    // wrong. The key is only meaningful while it identifies a live run.
+    const replay = await admin.rpc(
+      "stage_pipeline_batch",
+      stageArgs(
+        seller.userId,
+        idempotencyKey,
+        `${seller.userId}/item-deletion-key-reuse.jpg`,
+      ),
+    );
+    expect(replay.error).toBeNull();
+    const replayed = (replay.data as Array<{ item_id: string; run_id: string }>)[0]!;
+    seededItemIds.add(replayed.item_id);
+    seededRunIds.add(replayed.run_id);
+    expect(replayed.item_id).not.toBe(credited.itemId);
+
+    // Both reservations coexist: the detached settled one still spends its
+    // credit, and the new run holds its own.
+    const { rows } = await database.query<{
+      count: number;
+      detached: number;
+    }>(
+      `select count(*)::integer count,
+              count(*) filter (where pipeline_run_id is null)::integer detached
+       from public.ai_item_credit_reservations
+       where user_id = $1 and logical_run_key = $2`,
+      [seller.userId, idempotencyKey],
+    );
+    expect(rows[0]).toEqual({ count: 2, detached: 1 });
+  });
+
+  it("refuses to re-accept a released voice handoff onto a new item", async () => {
+    const seller = await provisionTenant("rebind");
+    const credited = await seedCreditedItem(seller.userId);
+    const voice = await seedVoiceHandoff(seller.userId, credited);
+    const key = await database.query<{ idempotency_key: string }>(
+      `select idempotency_key
+       from private.mobile_item_submission_voice_handoffs
+       where user_id = $1`,
+      [seller.userId],
+    );
+    const idempotencyKey = key.rows[0]!.idempotency_key;
+
+    const deleted = await seller.client.rpc("delete_item", { p_item_id: credited.itemId });
+    expect(deleted.error).toBeNull();
+    expect(deletionOutcome(deleted.data).status).toBe("deleted");
+
+    // `private.mobile_item_submissions` cascades away with the item, so the
+    // submission is no longer recognised as a replay — but the handoff has its
+    // own primary key and survives. A client retrying an offline outbox entry
+    // whose 200 it never saw therefore reaches the accept path again, and the
+    // state branch used to fall through to an unconditional bind. That would
+    // attach a voice asset already queued for deletion, or already proved
+    // absent, to a brand new item.
+    const released = await voiceHandoff(seller.userId);
+    const rebind = database.query(
+      `select private.accept_mobile_submission_voice_handoff(
+         $1::text, $2::uuid, $3::jsonb, gen_random_uuid(), gen_random_uuid()
+       )`,
+      [seller.userId, idempotencyKey, JSON.stringify(released!.receipt)],
+    );
+    await expect(rebind).rejects.toThrow(
+      /voice handoff was released/i,
+    );
+
+    const after = await voiceHandoff(seller.userId);
+    expect(after!.state).toBe("released");
+    expect(after!.item_id).toBeNull();
+    expect(after!.run_id).toBeNull();
+    expect(after!.receipt.storage_path).toBe(voice.storagePath);
+  });
+
+  it("lets the cleanup executor finish both jobs the deletion published", async () => {
+    const seller = await provisionTenant("executed");
+    const credited = await seedCreditedItem(seller.userId);
+    const voice = await seedVoiceHandoff(seller.userId, credited);
+    // `stage_pipeline_batch` records the path; the object itself is uploaded by
+    // the client. This is the one test that needs the bytes to exist, because
+    // it asserts the executor removed them.
+    expect(
+      (await admin.storage.from("photos").upload(credited.photoPath, jpeg, {
+        contentType: "image/jpeg",
+        upsert: true,
+      })).error,
+    ).toBeNull();
+
+    const deleted = await seller.client.rpc("delete_item", { p_item_id: credited.itemId });
+    expect(deleted.error).toBeNull();
+    expect(deletionOutcome(deleted.data).status).toBe("deleted");
+    expect((await admin.storage.from("photos").download(credited.photoPath)).error)
+      .toBeNull();
+
+    // The whole point of publishing removal as leased work is that a later pass
+    // proves the object absent, so run the executor the worker runs — with the
+    // production storage capability, not a stand-in.
+    await runPipelineMaintenance({
+      store: createSupabasePipelineOperationsStore(admin as never),
+      storage: createStorageCleanupCapability(admin.storage.from("photos")),
+    });
+
+    // `item_deletion` and `raw_voice` are published by the same transaction and
+    // claimed by the same shared executor. A source type the executor cannot
+    // name throws after `claim_pipeline_storage_cleanup` has already taken the
+    // lease, and that throw escapes `runPipelineMaintenance` — so asserting the
+    // raw-voice half completed is what proves the item-deletion half is not a
+    // head-of-line block on every other tenant's pending cleanup.
+    expect((await admin.storage.from("photos").download(credited.photoPath)).error)
+      .not.toBeNull();
+    expect((await admin.storage.from("photos").download(voice.storagePath)).error)
+      .not.toBeNull();
+
+    expect(await storageCleanupJob(credited.itemId)).toBeNull();
+    const rawVoice = await database.query<{ count: number }>(
+      `select count(*)::integer count
+       from private.pipeline_storage_cleanup_jobs
+       where source_type = 'raw_voice' and source_id = $1`,
+      [voice.cleanupId],
+    );
+    expect(rawVoice.rows[0]!.count).toBe(0);
+
+    // The completion proof the retention matrix names for
+    // `private-storage-raw-voice`, which only `complete_pipeline_storage_cleanup`
+    // may write.
+    expect((await voiceHandoff(seller.userId))?.raw_audio_deleted_at).not.toBeNull();
   });
 
   it("refuses while the item's run is still working and says why", async () => {
@@ -798,6 +1062,37 @@ describe("non-guest item deletion against local Supabase", () => {
     // `items`, and deleting the claimed item must leave the terminal outcome and
     // both deadlines exactly where #175 put them.
     expect(await guestRecovery(recoveryId)).toEqual(before);
+  });
+
+  it("translates the executor's own refusal into 409 and its P0002 into 404", async () => {
+    const seller = await provisionTenant("transport");
+    const credited = await seedCreditedItem(seller.userId, { settle: false });
+    const transport = transportForSeller(seller.userId);
+
+    // A refusal is a successful RPC carrying `{"status":"blocked"}`, so a
+    // transport that read only `error` would report 200 and a deletion that
+    // never happened; one that treated it as unexpected would report 500 and
+    // send the seller to support over an item that is merely busy.
+    const blocked = await transport(deleteRequest(credited.itemId, seller.token));
+    expect(blocked.status).toBe(409);
+    const body = (await blocked.json()) as {
+      error: { code: string; details?: { blockedBy?: string[] } };
+    };
+    expect(body.error.code).toBe("conflict");
+    expect(body.error.details?.blockedBy).toEqual(["run-in-progress"]);
+    expect((await tenantResidue(seller.userId)).items).toBe(1);
+
+    // The other shape: `delete_item` raises P0002 for an item outside the
+    // caller's tenant, which reaches the route as a PostgrestError rather than
+    // a parsed outcome.
+    const foreignItem = await seedItem(owner, ownerId, "transport-guarded");
+    const missing = await transport(deleteRequest(foreignItem.itemId, seller.token));
+    expect(missing.status).toBe(404);
+    const stillThere = await database.query<{ count: number }>(
+      "select count(*)::integer count from public.items where id = $1",
+      [foreignItem.itemId],
+    );
+    expect(stillThere.rows[0]!.count).toBe(1);
   });
 
   it("refuses another tenant's item without disclosing whether it exists", async () => {
