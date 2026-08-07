@@ -613,6 +613,24 @@ extension SettingsTests {
         XCTAssertNil(presentation.hint)
     }
 
+    /// A binding exists only once publish-time discovery has written one, so
+    /// `notChecked` with no message is every seller between finishing eBay
+    /// OAuth and their first publish. Showing them a warning triangle would
+    /// report a problem SnapList has not found (issue #694).
+    func testSellingSectionShowsNoHintForAConnectedSellerWhoHasNeverPublished() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: hint(state: "notChecked", message: nil)
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertEqual(presentation.marketplaceValue, "eBay")
+        XCTAssertNil(presentation.hint)
+    }
+
     func testSellingSectionNamesTheMissingFamilyBeforePublishIsAttempted() {
         let message = "Your eBay account has no payment policy. "
             + "Add it in eBay before you publish."

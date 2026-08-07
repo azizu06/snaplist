@@ -1105,7 +1105,11 @@ describe("eBay connection policy setup hint (#694)", () => {
     });
   });
 
-  it("asks a connected seller to check eBay when nothing is stored yet", async () => {
+  it("warns a connected seller about nothing when they have never published", async () => {
+    // Publish-time discovery is what writes a binding, so an empty column is
+    // the state of every seller who has just connected eBay. The endpoint may
+    // report that it has not checked, but not as seller-facing wording: the
+    // client shows a row only when there is a message (issue #694).
     const harness = publishFixtureClient();
     harness.connectionState.current!.policy_location_bindings = {};
     const handler = ebayHandler({
@@ -1117,7 +1121,10 @@ describe("eBay connection policy setup hint (#694)", () => {
     const response = await connectionRequest(handler);
 
     expect(await response.json()).toMatchObject({
-      data: { connected: true, policySetup: { state: "notChecked", missing: [] } },
+      data: {
+        connected: true,
+        policySetup: { state: "notChecked", missing: [], message: null },
+      },
     });
   });
 

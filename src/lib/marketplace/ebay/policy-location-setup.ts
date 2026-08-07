@@ -245,7 +245,10 @@ export interface EbayPolicyLocationSettingsHint {
   missing: EbayPolicySetupFamily[];
   /** Families with several usable options. Empty unless `selectionRequired`. */
   ambiguous: EbayPolicySetupFamily[];
-  /** Seller-facing explanation; `null` only when the state is `ready`. */
+  /**
+   * Seller-facing explanation, or `null` when SnapList has nothing truthful to
+   * say: the stored binding is `ready`, or publish never stored one at all.
+   */
   message: string | null;
   /** The eBay page that owns these families, when SnapList has verified one. */
   helpUrl: string | null;
@@ -261,6 +264,11 @@ export interface EbayPolicyLocationSettingsHint {
  * is also why an absent, unparseable, foreign-marketplace, or retired-
  * generation binding reports `notChecked` instead of guessing: publish's
  * discovery is the only thing that can name a family, and it has not run.
+ *
+ * An absent binding goes further and carries no message. Discovery runs at
+ * publish, so having nothing stored is the normal state of a seller who has
+ * connected eBay and not published yet, and telling them their account needs
+ * attention would be a warning about a problem SnapList has not found.
  *
  * Returning `null` for a tenant with no eBay connection is deliberate. The
  * connect affordance already owns that state, so there is no hint shape a
@@ -284,6 +292,15 @@ export async function readEbayPolicyLocationSettingsHint(input: {
 
   if (usableStoredBinding(stored.binding, marketplaceId, stored.connectionGeneration)) {
     return { ...empty, state: "ready", message: null };
+  }
+
+  // Only publish-time discovery writes a binding, so its absence is not a
+  // fault the seller can act on: it is where every connected seller stands
+  // between finishing eBay OAuth and their first successful publish. Wording
+  // here would put a warning in front of a healthy account, so the state
+  // travels without a message and the client renders no row (issue #694).
+  if (stored.binding == null) {
+    return { ...empty, state: "notChecked", message: null };
   }
 
   // The same parse the publish path uses, minus the readiness demand: a binding

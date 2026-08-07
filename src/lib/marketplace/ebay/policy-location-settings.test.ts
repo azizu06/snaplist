@@ -154,7 +154,28 @@ describe("readEbayPolicyLocationSettingsHint", () => {
   });
 
   it.each([
-    ["absent", undefined],
+    ["nothing is stored for this marketplace", undefined],
+    ["the stored binding is JSON null", null],
+  ])(
+    "says nothing to a connected seller who has never published when %s",
+    async (_label, stored) => {
+      // Bindings come only from publish-time discovery, so this is every
+      // seller between eBay OAuth and their first publish. A message here is
+      // a warning triangle on an account SnapList has found nothing wrong
+      // with, which is the inversion issue #694 exists to prevent.
+      const hint = await readEbayPolicyLocationSettingsHint({
+        marketplaceId: MARKETPLACE,
+        store: storeWith(stored),
+      });
+
+      expect(hint?.state).toBe("notChecked");
+      expect(hint?.message).toBeNull();
+      expect(hint?.missing).toEqual([]);
+      expect(hint?.ambiguous).toEqual([]);
+    },
+  );
+
+  it.each([
     ["unparseable", { state: "ready" }],
     ["for another marketplace", binding({ marketplaceId: "EBAY_GB" })],
   ])(
