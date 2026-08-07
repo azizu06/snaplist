@@ -66,18 +66,20 @@ const ROLE_ENV_VAR: Record<LlmRole, string> = {
 };
 
 /**
- * Provider-specific default model id per role. OpenAI keeps the established
- * `gpt-5.5`; Google defaults to `gemini-2.5-flash` (multimodal — covers vision —
+ * Provider-specific default model id per role. OpenAI uses `gpt-5.6-terra`
+ * (text + image input, structured outputs, and 60% cheaper per token than the
+ * `gpt-5.5` it replaced — see docs/unit-economics); Google defaults to
+ * `gemini-2.5-flash` (multimodal — covers vision —
  * and free-tier friendly). Confirm against live docs before changing (AGENTS.md);
  * every entry is overridable via the role env var above.
  */
 const MODEL_DEFAULTS: Record<LlmProvider, Record<LlmRole, string>> = {
   openai: {
-    vision: "gpt-5.5",
-    listing: "gpt-5.5",
-    export: "gpt-5.5",
-    pricingAgent: "gpt-5.5",
-    judge: "gpt-5.5",
+    vision: "gpt-5.6-terra",
+    listing: "gpt-5.6-terra",
+    export: "gpt-5.6-terra",
+    pricingAgent: "gpt-5.6-terra",
+    judge: "gpt-5.6-terra",
   },
   google: {
     vision: "gemini-2.5-flash",

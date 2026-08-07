@@ -34,7 +34,7 @@ Two forces made this worth fixing now:
    an alias for `google`.
 
 3. **Provider-aware, per-role model ids**, overridable by the existing `<ROLE>_MODEL` env vars (kept
-   for back-compat). OpenAI defaults stay `gpt-5.5`; Gemini defaults to `gemini-2.5-flash`
+   for back-compat). OpenAI defaults are `gpt-5.6-terra`; Gemini defaults to `gemini-2.5-flash`
    (multimodal — covers vision — and free-tier friendly). Confirm ids against live docs before
    changing (AGENTS.md).
 
