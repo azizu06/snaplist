@@ -103,7 +103,7 @@
       "SnapListUITests/SnapListUITests/testFirstValueOnboardingONB06HasExactlyTwoControls",
       "SnapListUITests/SnapListUITests/testFirstValueOnboardingONB05IllustratesWithoutClaimingLiveProgress",
       "SnapListUITests/SnapListUITests/testFirstValueOnboardingAccessibilityTypeKeepsEveryPrimaryActionReachable",
-      "SnapListUITests/SnapListUITests/testRestoredCaptureNeverExposesAFirstValueOnboardingControl",
+      "SnapListUITests/SnapListUITests/testRestoredCaptureResumesWithNoFirstValueOnboardingControl",
       "SnapListUITests/SnapListUITests/testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets",
       "SnapListUITests/SnapListUITests/testLivePhotoReviewDeletingTheOnlyPhotoReturnsToGuidedScanWithNoPhotos",
       "SnapListUITests/SnapListUITests/testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission",

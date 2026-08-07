@@ -760,6 +760,104 @@ final class OnboardingFlowTests: XCTestCase {
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.state),
             ["Writing the listing", "Checking sold prices", "Reading your voice note"]
         )
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.backgroundExampleRows.map(\.imageName),
+            ["FirstValueJacket", "FirstValueLamp", "FirstValueSneaker"],
+            "Each row carries its own asset, so a new row cannot outrun the image list."
+        )
+    }
+
+    /// The XCUI counterpart cannot carry this. Each row ends in
+    /// `.accessibilityElement(children: .combine)`, which folds every descendant into a
+    /// single element, so a restored `ProgressView` never reaches the accessibility tree
+    /// and `app.progressIndicators.count == 0` stays true whether or not the spinner is
+    /// there. SwiftUI derives `body`'s concrete type from the subtree written in it, so
+    /// read that instead.
+    ///
+    /// This reaches exactly one revert: a progress affordance written **directly** in the
+    /// row's own body, which is where the deleted one lived. One reached through a nested
+    /// `View` type or an `AnyView` stays hidden behind that type's name, so this is a
+    /// tripwire on the row, not a proof about the whole screen.
+    ///
+    /// The rendered type does not vary with the row's data — the three rows differ only in
+    /// the strings they carry — so one row proves it for all of them.
+    @MainActor
+    func testBackgroundExampleRowBodyWritesNoProgressAffordance() throws {
+        let row = try XCTUnwrap(FirstValueOnboardingCopy.backgroundExampleRows.first)
+        let renderedType = String(
+            reflecting: type(of: BackgroundExampleRowView(row: row).body)
+        )
+
+        // `ProgressViewStyle` is deliberately absent: every type naming it also names
+        // `ProgressView`, so asserting it separately could never fail on its own.
+        for affordance in ["ProgressView", "Gauge"] {
+            XCTAssertFalse(
+                renderedType.contains(affordance),
+                """
+                An ONB-05 example row writes a \(affordance). Nothing is running while \
+                onboarding is on screen, so the row must claim no progress: \(renderedType)
+                """
+            )
+        }
+    }
+
+    /// The Scout clip allocates its `WKWebView` through the Objective-C runtime, and the
+    /// ownership there balances two references that ARC and the `init` family each think
+    /// they own. An extra retain would not crash — it would strand one `WKWebView` and its
+    /// WebContent process per screen transition, six times over the flow — so assert the
+    /// balance directly: the view must deallocate once the last strong reference drops.
+    ///
+    /// The drop is observed after a bounded run-loop wait rather than synchronously,
+    /// because on iOS a `WKWebView`'s last release lands one main-run-loop turn after the
+    /// local `autoreleasepool` drains — WebKit autoreleases into the pool `CFRunLoop` keeps
+    /// around each iteration, which is the pool *outside* this method. An immediate
+    /// `XCTAssertNil` therefore reports "still alive" for a view whose ownership is
+    /// provably balanced: a plain `WKWebView(frame:configuration:)` fails it exactly as the
+    /// runtime-allocated one does. The wait removes that false failure and nothing else.
+    @MainActor
+    func testScoutClipWebViewLeavesNoUnbalancedRetain() throws {
+        weak var firstObserved: AnyObject?
+        weak var secondObserved: AnyObject?
+
+        try autoreleasepool {
+            guard let first = WebKitRuntime.makeConfiguredWebView(),
+                  let second = WebKitRuntime.makeConfiguredWebView() else {
+                throw XCTSkip("WebKit is unavailable in this runner.")
+            }
+            XCTAssertFalse(first === second)
+            firstObserved = first
+            secondObserved = second
+        }
+
+        assertDeallocates(firstObserved)
+        assertDeallocates(secondObserved)
+    }
+
+    /// Spins the main run loop until `reference` clears, and fails if it never does.
+    ///
+    /// The budget bounds the wait; it is not a timing tolerance to widen when this gets
+    /// noisy. Deallocation is the thing under test, and the two outcomes are not close
+    /// together: a balanced view clears on the first turn, while one held by a single extra
+    /// retain never clears — it exhausts any budget and fails. Raising the number cannot
+    /// turn that failure green, so a red here is always a real unbalanced retain.
+    @MainActor
+    private func assertDeallocates(
+        _ reference: @autoclosure () -> AnyObject?,
+        within budget: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(budget)
+        while reference() != nil, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+
+        XCTAssertNil(
+            reference(),
+            "The Scout clip web view outlived its last strong reference.",
+            file: file,
+            line: line
+        )
     }
 
     @MainActor

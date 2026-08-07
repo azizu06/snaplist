@@ -1846,6 +1846,13 @@ final class SnapListUITests: XCTestCase {
     /// ONB-05 illustrates the Trophy Wall. No item exists during onboarding, so the
     /// screen must be labelled an example and must expose no spinner or other affordance
     /// that would claim work is running.
+    ///
+    /// The indicator counts below only reach affordances that surface as their own
+    /// accessibility elements. Each example row ends in
+    /// `.accessibilityElement(children: .combine)`, so a spinner inside a row is folded
+    /// away and cannot be counted here;
+    /// `OnboardingFlowTests.testBackgroundExampleRowBodyWritesNoProgressAffordance` reads the
+    /// row's rendered type and carries that half of the guarantee.
     func testFirstValueOnboardingONB05IllustratesWithoutClaimingLiveProgress() {
         let app = launchFirstValueOnboarding(resetProgress: true)
         advanceFirstValueOnboarding(to: "ONB-05", in: app)
@@ -1862,10 +1869,17 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(app.progressIndicators.count, 0, app.debugDescription)
     }
 
-    /// A durable capture is restored asynchronously, so a returning seller's staged photo
-    /// is still nil when the shell first renders. Onboarding must wait for that answer
-    /// instead of taking the screen from work the seller already has in flight.
-    func testRestoredCaptureNeverExposesAFirstValueOnboardingControl() {
+    /// A returning seller whose durable capture survives lands on Resume with no
+    /// onboarding control anywhere on screen.
+    ///
+    /// This samples after `resume` exists, which is after restoration resolved and
+    /// `reconcileExistingProgress()` already recorded `supersededByExistingProgress`. It
+    /// therefore proves the settled outcome, not the transient window before restoration
+    /// answers — during that window the shell holds a neutral surface, which
+    /// `OnboardingFlowTests.testFirstValueOnboardingNeverPreemptsAnUnresolvedOrRestoredCapture`
+    /// proves at the pure policy seam. Naming this test after the transient window claimed
+    /// evidence it does not carry.
+    func testRestoredCaptureResumesWithNoFirstValueOnboardingControl() {
         let app = XCUIApplication()
         app.launchArguments = [
             "--restored-capture-fixture",
