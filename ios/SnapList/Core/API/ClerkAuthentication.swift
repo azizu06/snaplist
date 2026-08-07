@@ -147,6 +147,48 @@ struct ClerkBearerTokenProvider: BearerTokenProviding {
     }
 }
 
+struct GuestCapableBearerTokenProvider: BearerTokenProviding {
+    private let clerk: any BearerTokenProviding
+    private let guestCapabilities: any GuestCapabilityBearerStoring
+    private let now: @Sendable () -> Date
+
+    init(
+        clerk: any BearerTokenProviding,
+        guestCapabilities: any GuestCapabilityBearerStoring =
+            KeychainGuestCapabilityBearerStore(),
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.clerk = clerk
+        self.guestCapabilities = guestCapabilities
+        self.now = now
+    }
+
+    func bearerToken() async throws -> String {
+        do {
+            return try await clerk.bearerToken()
+        } catch BearerTokenProviderError.sessionAbsent {
+            // Only an absent session may fall through. Falling back on any other
+            // Clerk failure would put an account holder's request on a guest
+            // identity whenever Clerk merely stumbled.
+            return try guestBearerToken()
+        }
+    }
+
+    /// A guest capability proves an installation, never a verified Clerk subject,
+    /// so it can never satisfy a principal-bound request. Clerk answers alone.
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        try await clerk.principalBoundBearer()
+    }
+
+    private func guestBearerToken() throws -> String {
+        guard let bearer = try? guestCapabilities.load(),
+              bearer.isUsable(at: now()) else {
+            throw BearerTokenProviderError.sessionAbsent
+        }
+        return bearer.token
+    }
+}
+
 private struct LiveClerkSessionTokenProvider: ClerkSessionTokenProviding {
     func sessionToken() async throws -> String? {
         let authentication = try await sessionAuthentication()
@@ -176,13 +218,19 @@ enum ClerkAuthenticationComposition {
     }
 
     /// Configures ClerkKit once from the validated public build value and binds
-    /// every authenticated native caller to the real current Clerk session.
+    /// every authenticated native caller to the real current Clerk session. A
+    /// seller who has no session yet falls back to the App Attest guest
+    /// capability, which is the only credential first value can be earned with.
     @MainActor
     static func make(
         publishableKey: String
     ) -> any BearerTokenProviding {
         Clerk.configure(publishableKey: publishableKey)
-        return ClerkBearerTokenProvider(session: LiveClerkSessionTokenProvider())
+        return GuestCapableBearerTokenProvider(
+            clerk: ClerkBearerTokenProvider(
+                session: LiveClerkSessionTokenProvider()
+            )
+        )
     }
 
     @MainActor
