@@ -82,19 +82,24 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (reachable && admin) {
-    if (uploadedPaths.size > 0) {
-      await admin.storage.from("photos").remove([...uploadedPaths]);
+    try {
+      if (uploadedPaths.size > 0) {
+        await admin.storage.from("photos").remove([...uploadedPaths]);
+      }
+      // Deleting an item publishes durable Storage cleanup work that deliberately
+      // outlives the item row, so this suite has to retire its own queue entries.
+      // Left behind they inflate the queue-depth contracts other suites assert on.
+      // A failure here has to be loud: swallowed, it reappears as an unrelated
+      // suite's queue-depth contract failing.
+      await database.query(
+        `delete from private.pipeline_storage_cleanup_jobs
+         where source_type = 'item_deletion' and photo_paths && $1::text[]`,
+        [[...uploadedPaths]],
+      );
+      await cleanupClerkTestUsers(admin, [owner.id, foreign.id]);
+    } finally {
+      await database.end();
     }
-    // Deleting an item publishes durable Storage cleanup work that deliberately
-    // outlives the item row, so this suite has to retire its own queue entries.
-    // Left behind they inflate the queue-depth contracts other suites assert on.
-    await database.query(
-      `delete from private.pipeline_storage_cleanup_jobs
-       where source_type = 'item_deletion' and photo_paths && $1::text[]`,
-      [[...uploadedPaths]],
-    ).catch(() => undefined);
-    await cleanupClerkTestUsers(admin, [owner.id, foreign.id]);
-    await database.end();
   }
   for (const [key, value] of Object.entries(originalEnvironment)) {
     if (value === undefined) delete process.env[key];

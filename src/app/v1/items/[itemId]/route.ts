@@ -22,9 +22,9 @@ function itemDeletionGateway(): ItemDeletionGateway | undefined {
 /**
  * Delete one non-guest item and everything SnapList owns beneath it (#181).
  *
- * The route decides nothing. `public.delete_item` refuses while a run, publish,
- * or sync is in flight, publishes the Storage objects to the cleanup executor,
- * and reports the provider-owned records it cannot touch.
+ * The route decides nothing. `public.delete_item` refuses while a run or an
+ * eBay publish is in flight, publishes the Storage objects to the cleanup
+ * executor, and reports the provider-owned records it cannot touch.
  */
 export function DELETE(request: Request): Promise<Response> {
   return createMobileApiHandler({
