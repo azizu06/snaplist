@@ -144,6 +144,7 @@ src/app/v1/included-offer/redemptions/[claimId]/route.ts
 src/app/v1/included-offer/redemptions/route.ts
 src/app/v1/items/[itemId]/export-handoffs/route.ts
 src/app/v1/items/[itemId]/pricing/route.ts
+src/app/v1/items/[itemId]/route.ts
 src/app/v1/items/runs/handler.ts
 src/app/v1/items/runs/route.ts
 src/app/v1/listings/[listingId]/ebay/preflight/route.ts
@@ -228,6 +229,8 @@ src/lib/included-offer-fence/service.ts
 src/lib/included-offer-fence/store.ts
 src/lib/included-offer-fence/supabase-store.ts
 src/lib/included-offer-fence/testing.ts
+src/lib/item-deletion/gateway.ts
+src/lib/item-deletion/service.ts
 src/lib/items/condition.ts
 src/lib/listing-review/index.ts
 src/lib/listing-review/read.ts
@@ -493,6 +496,7 @@ supabase/migrations/20260805200000_server_rpc_forwarded_secret.sql
 supabase/migrations/20260805210000_activation_guidance_completion.sql
 supabase/migrations/20260806120000_ebay_photo_access_tokens.sql
 supabase/migrations/20260806140000_ebay_listing_sync_authority.sql
+supabase/migrations/20260806190000_non_guest_item_deletion.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

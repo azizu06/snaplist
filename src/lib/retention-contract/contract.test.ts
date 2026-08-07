@@ -122,11 +122,42 @@ describe("lean-MVP release retention contract", () => {
       "mobile-ebay-oauth-session-state",
       "ebay-connections",
       "ebay-publish-receipts",
+      // #711's post-publish sync copies. They carry the same eBay-issued
+      // listing id as the receipts row and reach the same triggers, but the
+      // matrix is row-level authority: a datum named only inside another row's
+      // completion proof has no owner, ceiling, or executor a reader can find.
+      "ebay-listing-sync-state",
+      "ebay-listing-sync-conflicts",
       "clerk-identity",
       "apple-revenuecat-references",
       "account-erasure-receipt",
       "waitlist-email",
     ]);
+  });
+
+  // Account erasure cannot claim completion while a datum has no disposition,
+  // and #711 landed two tenant tables holding the eBay-issued listing id plus
+  // the seller's recorded price and status divergences against it. Both are
+  // purged by the listing cascade at item deletion and by an explicit erasure
+  // trigger; the matrix has to say so in its own rows, not only inside the
+  // ebay-publish-receipts completion proof.
+  it("binds both eBay sync copies to item deletion and account erasure", () => {
+    for (const id of ["ebay-listing-sync-state", "ebay-listing-sync-conflicts"]) {
+      const disposition = contract.data.find((datum) => datum.id === id)
+        ?.dispositions[0];
+
+      expect(disposition?.treatment).toBe("delete");
+      expect(disposition?.owner).toBe("seller-snaplist-tenant");
+      expect(disposition?.deletionTriggers).toContain("item-deletion");
+      expect(disposition?.deletionTriggers).toContain("account-erasure");
+      // The proof names the mechanism that actually removes the row, so a
+      // migration that re-points the foreign key falsifies the row rather than
+      // quietly outliving it.
+      expect(disposition?.completionProof).toContain("on delete cascade");
+      expect(disposition?.completionProof).toContain(
+        "private.account_erasure_owned_row_count",
+      );
+    }
   });
 
   it("defines the activation guidance completion deletion disposition", () => {

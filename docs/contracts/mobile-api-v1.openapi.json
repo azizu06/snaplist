@@ -69,6 +69,25 @@
         }
       }
     },
+    "/v1/items/{itemId}": {
+      "parameters": [{ "name": "itemId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "delete": {
+        "operationId": "deleteItem",
+        "x-owner-issue": 181,
+        "x-related-owner-issues": [166, 175],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Item graph deleted under RLS and temporary storage published to the cleanup executor. retainedRecords names provider-owned records SnapList cannot delete.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemDeletionEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "405": { "description": "Only DELETE is defined on this path; nothing was deleted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "409": { "description": "A run or an eBay publish is in flight; nothing was deleted. error.details.blockedBy names the reasons.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
     "/v1/items/{itemId}/pricing": {
       "parameters": [{ "name": "itemId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
       "get": {
@@ -365,6 +384,8 @@
       "HomeCurrentRun": { "type": "object", "additionalProperties": false, "required": ["id", "itemTitle", "stageLabel", "reassurance", "progress"], "properties": { "id": { "type": "string", "format": "uuid" }, "itemTitle": { "type": "string", "minLength": 1 }, "stageLabel": { "type": "string", "minLength": 1 }, "reassurance": { "type": "string", "minLength": 1 }, "progress": { "type": ["number", "null"], "minimum": 0, "maximum": 1 } } },
       "HomeFinishItem": { "type": "object", "additionalProperties": false, "required": ["id", "title", "detail"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 } } },
       "HomeListing": { "type": "object", "additionalProperties": false, "required": ["id", "title", "lifecycle", "statusLabel", "detail", "price", "destination"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1 }, "lifecycle": { "type": "string", "enum": ["active", "draft", "sold", "needsAttention", "resolvedConversation"] }, "statusLabel": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "price": { "type": ["string", "null"] }, "destination": { "oneOf": [{ "$ref": "#/components/schemas/HomeDestination" }, { "type": "null" }] } } },
+      "ItemDeletionEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/ItemDeletionReceipt" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "ItemDeletionReceipt": { "type": "object", "additionalProperties": false, "required": ["itemId", "retainedRecords"], "properties": { "itemId": { "type": "string", "format": "uuid" }, "retainedRecords": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Records SnapList does not own and therefore did not delete. A live eBay listing stays live; ending it is the seller's action on eBay." } } },
       "PricingEvidenceEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/PricingEvidenceProjection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "PricingEvidenceProjection": { "type": "object", "additionalProperties": false, "required": ["item", "priceResult", "evidenceLevel", "evidenceAsOf", "evidenceAgeDays", "isStale", "defaultWindow", "comparables", "estimatedFees", "estimatedPayout", "chartBounds"], "properties": { "item": { "$ref": "#/components/schemas/PricingItem" }, "priceResult": { "$ref": "#/components/schemas/PriceResult" }, "evidenceLevel": { "type": "string", "enum": ["strong", "limited"] }, "evidenceAsOf": { "type": "string", "format": "date-time" }, "evidenceAgeDays": { "type": "number", "minimum": 0 }, "isStale": { "type": "boolean" }, "defaultWindow": { "type": "string", "enum": ["60D", "90D"] }, "comparables": { "type": "array", "maxItems": 5, "items": { "$ref": "#/components/schemas/PricingComparable" } }, "estimatedFees": { "type": "number", "minimum": 0 }, "estimatedPayout": { "type": "number", "minimum": 0 }, "chartBounds": { "oneOf": [{ "$ref": "#/components/schemas/PricingChartBounds" }, { "type": "null" }] } } },
       "PricingItem": { "type": "object", "additionalProperties": false, "required": ["id", "title"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1, "maxLength": 500 }, "condition": { "type": "string", "minLength": 1, "maxLength": 120 } } },
