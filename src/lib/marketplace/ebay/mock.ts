@@ -1,6 +1,7 @@
 import type { EbayPolicyLocationCandidates } from "./policy-location-contract";
 import type {
   EbayAdapter,
+  EbayListingSnapshot,
   EbayPublishCompletion,
   EbayPublishRequest,
   EbayPublishResult,
@@ -58,12 +59,43 @@ export class MockEbayAdapter implements EbayAdapter {
     accountGeneration: string;
   }) => Promise<EbayPolicyLocationCandidates>;
 
+  /**
+   * What eBay would report for a published offer (issue #169). Undefined leaves
+   * the adapter with NO read capability, which is the honest offline default:
+   * a mock that answered "nothing changed" would be indistinguishable from
+   * provider confirmation that nothing changed.
+   */
+  listingSnapshot?: EbayListingSnapshot;
+
+  /** When set, the snapshot read rejects with this error instead of answering. */
+  snapshotFailWith?: Error;
+
+  /** Every snapshot read received, in order. */
+  readonly snapshotRequests: Array<{ sku: string; offerId: string }> = [];
+
+  /** Present only when a snapshot (or a failure) is configured. */
+  getListingSnapshot?: (request: {
+    sku: string;
+    offerId: string;
+  }) => Promise<EbayListingSnapshot>;
+
   constructor(options: {
     policyLocationCandidates?: EbayPolicyLocationCandidates;
     discoveryFailWith?: Error;
+    listingSnapshot?: EbayListingSnapshot;
+    snapshotFailWith?: Error;
   } = {}) {
     this.policyLocationCandidates = options.policyLocationCandidates;
     this.discoveryFailWith = options.discoveryFailWith;
+    this.listingSnapshot = options.listingSnapshot;
+    this.snapshotFailWith = options.snapshotFailWith;
+    if (this.listingSnapshot || this.snapshotFailWith) {
+      this.getListingSnapshot = async (request) => {
+        this.snapshotRequests.push(request);
+        if (this.snapshotFailWith) throw this.snapshotFailWith;
+        return this.listingSnapshot!;
+      };
+    }
     if (!this.policyLocationCandidates && !this.discoveryFailWith) return;
     this.discoverPolicyLocationCandidates = async (input) => {
       this.discoveryRequests.push(input);
