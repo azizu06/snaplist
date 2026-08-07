@@ -14,11 +14,15 @@ import { ItemDeletionBlockedError, ItemDeletionNotFoundError } from "@/lib/item-
 
 const ITEM_ID = "18100000-0000-4000-8000-000000000001";
 
-function handlerWith(gateway: Partial<ItemDeletionGateway>) {
+function handlerWith(
+  gateway: Partial<ItemDeletionGateway>,
+  authenticate: () => Promise<{ kind: "clerk"; userId: string }> = async () => ({
+    kind: "clerk",
+    userId: "user_181",
+  }),
+) {
   return createMobileApiHandler({
-    async authenticate() {
-      return { kind: "clerk", userId: "user_181" };
-    },
+    authenticate,
     worker: {} as never,
     itemDeletion: {
       async delete() {
@@ -98,6 +102,31 @@ describe("DELETE /v1/items/{itemId}", () => {
   it("requires a bearer token", async () => {
     const response = await handlerWith({})(del(ITEM_ID, {}));
     expect(response.status).toBe(401);
+  });
+
+  // Carrying an authorization header is not being authenticated. Parsing the id
+  // first answered an expired or forged token with 400, which says the id was
+  // the only thing wrong with the request — and says it to a caller whose
+  // identity the route never established.
+  it("answers an unauthenticated caller 401 even when the item id is malformed", async () => {
+    const response = await handlerWith({}, async () => {
+      throw new Error("token rejected");
+    })(del("not-a-uuid"));
+
+    expect(response.status).toBe(401);
+  });
+
+  it("refuses a non-DELETE method on the item path", async () => {
+    const response = await handlerWith({})(
+      new Request(`https://api.test/v1/items/${ITEM_ID}`, {
+        method: "GET",
+        headers: { authorization: "Bearer token" },
+      }),
+    );
+
+    expect(response.status).toBe(405);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("method_not_allowed");
   });
 
   it("answers 503 when the executor is not configured", async () => {

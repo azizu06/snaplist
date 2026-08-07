@@ -164,20 +164,38 @@ async function seedItem(
   return { itemId: persisted.itemId, photoPath };
 }
 
+/**
+ * The tenant's own rows that item deletion is answerable for.
+ *
+ * The two sync tables arrived with #711 after this branch's merge base. They
+ * are not deleted by `delete_item` directly: both carry
+ * `(listing_id, user_id) references public.listings (id, user_id) on delete
+ * cascade`, so removing the listing takes them. Counting them here is what
+ * turns that into a checked fact rather than a schema reading — a future
+ * migration that drops the cascade would leave the seller's confirmed eBay
+ * state, and the price and status divergences recorded against it, behind an
+ * item that no longer exists.
+ */
 async function tenantResidue(userId: string): Promise<{
   items: number;
   predictionLogs: number;
   listings: number;
+  listingSyncState: number;
+  listingSyncConflicts: number;
 }> {
   const { rows } = await database.query<{
     items: number;
     prediction_logs: number;
     listings: number;
+    listing_sync_state: number;
+    listing_sync_conflicts: number;
   }>(
     `select
        (select count(*)::integer from public.items where user_id = $1) items,
        (select count(*)::integer from public.prediction_logs where user_id = $1) prediction_logs,
-       (select count(*)::integer from public.listings where user_id = $1) listings`,
+       (select count(*)::integer from public.listings where user_id = $1) listings,
+       (select count(*)::integer from public.ebay_listing_sync_state where user_id = $1) listing_sync_state,
+       (select count(*)::integer from public.ebay_listing_sync_conflicts where user_id = $1) listing_sync_conflicts`,
     [userId],
   );
   const row = rows[0]!;
@@ -185,6 +203,8 @@ async function tenantResidue(userId: string): Promise<{
     items: row.items,
     predictionLogs: row.prediction_logs,
     listings: row.listings,
+    listingSyncState: row.listing_sync_state,
+    listingSyncConflicts: row.listing_sync_conflicts,
   };
 }
 
@@ -528,22 +548,19 @@ afterAll(async () => {
       [tenants],
     );
     const names = objects.rows.map((row) => row.name);
+    // Before the objects are removed, and against the names already read rather
+    // than a second look at `storage.objects`. This delete used to run after the
+    // removal and re-query that table, so by then it matched nothing; its other
+    // arm looked the deleted rows up in `public.items`, which the suite's whole
+    // point is to have emptied. Both arms were dead, and every cleanup job this
+    // suite published was left for the next session to inherit.
+    await database.query(
+      `delete from private.pipeline_storage_cleanup_jobs
+       where photo_paths && $1::text[]
+          or source_id = any($2::uuid[])`,
+      [names, [...seededItemIds]],
+    ).catch(() => undefined);
     if (names.length > 0) await admin.storage.from("photos").remove(names);
-    await database.query(
-      `delete from private.pipeline_storage_cleanup_jobs
-       where photo_paths && (
-         select coalesce(array_agg(object.name), array[]::text[])
-         from storage.objects object
-         where split_part(object.name, '/', 1) = any($1::text[])
-       )
-       or source_id in (select id from public.items where user_id = any($1::text[]))`,
-      [tenants],
-    ).catch(() => undefined);
-    await database.query(
-      `delete from private.pipeline_storage_cleanup_jobs
-       where source_type = 'item_deletion' and source_id = any($1::uuid[])`,
-      [[...seededItemIds]],
-    ).catch(() => undefined);
     await database.query(
       "delete from private.mobile_item_submissions where user_id = any($1::text[])",
       [tenants],
@@ -603,7 +620,13 @@ describe("non-guest item deletion against local Supabase", () => {
     ]);
 
     const before = await tenantResidue(ownerId);
-    expect(before).toEqual({ items: 1, predictionLogs: 1, listings: 1 });
+    expect(before).toEqual({
+      items: 1,
+      predictionLogs: 1,
+      listings: 1,
+      listingSyncState: 0,
+      listingSyncConflicts: 0,
+    });
 
     const deleted = await owner.rpc("delete_item", { p_item_id: owned.itemId });
     expect(deleted.error).toBeNull();
@@ -619,6 +642,8 @@ describe("non-guest item deletion against local Supabase", () => {
       items: 0,
       predictionLogs: 0,
       listings: 0,
+      listingSyncState: 0,
+      listingSyncConflicts: 0,
     });
 
     // Storage removal is published as durable leased work, not performed inside
@@ -635,6 +660,8 @@ describe("non-guest item deletion against local Supabase", () => {
       items: 1,
       predictionLogs: 1,
       listings: 1,
+      listingSyncState: 0,
+      listingSyncConflicts: 0,
     });
     const foreignStored = await admin.storage.from("photos").download(untouched.photoPath);
     expect(foreignStored.error).toBeNull();
@@ -907,6 +934,128 @@ describe("non-guest item deletion against local Supabase", () => {
     expect(outcome.status).toBe("deleted");
     expect(outcome.retained_records).toEqual(["ebay-live-listing"]);
     expect((await tenantResidue(seller.userId)).items).toBe(0);
+  });
+
+  /**
+   * AC7's legally-retained-record arm, as the frozen matrix actually defines it.
+   *
+   * `docs/contracts/lean-mvp-retention-v1.json` carries no datum SnapList must
+   * keep by statute — every one of its dispositions is `delete` or
+   * `provider-owned`, and the `ai-item-credits` row records the owner decision
+   * that no multi-year tax retention applies because SnapList holds no per-user
+   * tax record. What it does carry is an obligation running the other way: the
+   * `ebay-publish-receipts` row cites the eBay API License Agreement, which
+   * requires SnapList to delete eBay-issued identifiers promptly while eBay
+   * keeps the record itself. So the record item deletion must not claim to have
+   * deleted is the provider's, and the assertion AC7 can actually make is that
+   * the receipt names it.
+   *
+   * The open offer is the case the live-listing test above misses.
+   * `listings.ebay_offer_id` is kept for retry and withdraw, so a publish that
+   * created an offer and then failed leaves one open on eBay with no listing id
+   * beside it. Before this, that item deleted and reported `retained_records:
+   * []` — a clean bill of health for a seller who still has something to
+   * withdraw, and no handle left to withdraw it with.
+   */
+  it("names an open eBay offer that never became a listing", async () => {
+    const seller = await provisionTenant("offer-only");
+    const credited = await seedCreditedItem(seller.userId);
+    await database.query(
+      `update public.listings
+       set status = 'failed', ebay_status = 'failed',
+           ebay_offer_id = 'OFFER-ONLY-181', ebay_listing_id = null
+       where item_id = $1 and user_id = $2`,
+      [credited.itemId, seller.userId],
+    );
+
+    const deleted = await seller.client.rpc("delete_item", { p_item_id: credited.itemId });
+    expect(deleted.error).toBeNull();
+    const outcome = deletionOutcome(deleted.data);
+
+    expect(outcome.status).toBe("deleted");
+    expect(outcome.retained_records).toEqual(["ebay-unpublished-offer"]);
+    expect((await tenantResidue(seller.userId)).items).toBe(0);
+  });
+
+  it("reports a published listing once, not twice, when it also carries an offer", async () => {
+    const seller = await provisionTenant("offer-and-listing");
+    const credited = await seedCreditedItem(seller.userId);
+    await database.query(
+      `update public.listings
+       set status = 'published', ebay_status = 'published',
+           ebay_offer_id = 'OFFER-BOTH-181', ebay_listing_id = 'EXTERNAL-BOTH-181'
+       where item_id = $1 and user_id = $2`,
+      [credited.itemId, seller.userId],
+    );
+
+    const deleted = await seller.client.rpc("delete_item", { p_item_id: credited.itemId });
+    expect(deleted.error).toBeNull();
+
+    // A published listing already carries its offer. Naming both would report
+    // one provider record twice and imply two things for the seller to act on.
+    expect(deletionOutcome(deleted.data).retained_records).toEqual(["ebay-live-listing"]);
+  });
+
+  /**
+   * #711 made eBay authoritative after publish and landed
+   * `public.ebay_listing_sync_state` and `public.ebay_listing_sync_conflicts` on
+   * main after this branch's merge base. Both hold the eBay-issued listing id
+   * and the seller's price and status divergences against it, and the retention
+   * matrix binds both to the `item-deletion` trigger.
+   *
+   * Neither is named in `delete_item`. They go by the listing cascade, which is
+   * a correct design and an unchecked one — a later migration that re-points
+   * either FK would leave the seller's confirmed provider state behind an item
+   * that no longer exists, and no existing assertion would notice.
+   */
+  it("purges the eBay sync copies the deleted listing carried", async () => {
+    const seller = await provisionTenant("synced");
+    const credited = await seedCreditedItem(seller.userId);
+    const listing = await database.query<{ id: string }>(
+      `update public.listings
+       set status = 'published', ebay_status = 'published',
+           ebay_listing_id = 'EXTERNAL-SYNC-181'
+       where item_id = $1 and user_id = $2
+       returning id`,
+      [credited.itemId, seller.userId],
+    );
+    const listingId = listing.rows[0]!.id;
+
+    await database.query(
+      `insert into public.ebay_listing_sync_state (
+         listing_id, user_id, ebay_listing_id, marketplace_id, account_generation,
+         provider_status, provider_observed_at, last_event_id, last_event_source,
+         review_revision
+       )
+       values ($1, $2, 'EXTERNAL-SYNC-181', 'EBAY_US', gen_random_uuid(),
+               'active', now(), 'evt-sync-181', 'poll', gen_random_uuid())`,
+      [listingId, seller.userId],
+    );
+    await database.query(
+      `insert into public.ebay_listing_sync_conflicts (
+         user_id, listing_id, kind, field, ebay_listing_id,
+         local_value, provider_value, observed_at, review_revision
+       )
+       values ($1, $2, 'providerDiverged', 'price', 'EXTERNAL-SYNC-181',
+               '10.00', '12.00', now(), gen_random_uuid())`,
+      [seller.userId, listingId],
+    );
+
+    const before = await tenantResidue(seller.userId);
+    expect(before.listingSyncState).toBe(1);
+    expect(before.listingSyncConflicts).toBe(1);
+
+    const deleted = await seller.client.rpc("delete_item", { p_item_id: credited.itemId });
+    expect(deleted.error).toBeNull();
+    expect(deletionOutcome(deleted.data).status).toBe("deleted");
+
+    expect(await tenantResidue(seller.userId)).toEqual({
+      items: 0,
+      predictionLogs: 0,
+      listings: 0,
+      listingSyncState: 0,
+      listingSyncConflicts: 0,
+    });
   });
 
   it("leaves the seller no direct delete that skips the executor", async () => {

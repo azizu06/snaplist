@@ -82,6 +82,7 @@
           "400": { "$ref": "#/components/responses/InvalidRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "404": { "$ref": "#/components/responses/NotFound" },
+          "405": { "description": "Only DELETE is defined on this path; nothing was deleted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "409": { "description": "A run or an eBay publish is in flight; nothing was deleted. error.details.blockedBy names the reasons.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "503": { "$ref": "#/components/responses/Unavailable" }
         }

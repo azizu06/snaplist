@@ -582,6 +582,24 @@ begin
     v_retained := array_append(v_retained, 'ebay-live-listing');
   end if;
 
+  -- An offer that never became a published listing is still an eBay-side
+  -- record. `listings.ebay_offer_id` is kept for retry and withdraw, so a
+  -- publish that created the offer and then failed leaves it open on eBay.
+  -- Deleting the item drops SnapList's only handle on that offer, and a
+  -- receipt that named nothing would tell the seller there is nothing left to
+  -- withdraw. Reported only when there is no listing id: a published listing
+  -- already carries its offer, and naming both would report one record twice.
+  if exists (
+    select 1
+    from public.listings listing
+    where listing.item_id = p_item_id
+      and listing.user_id = v_user_id
+      and coalesce(btrim(listing.ebay_offer_id), '') <> ''
+      and coalesce(btrim(listing.ebay_listing_id), '') = ''
+  ) then
+    v_retained := array_append(v_retained, 'ebay-unpublished-offer');
+  end if;
+
   select coalesce(array_agg(distinct photo_path), array[]::text[])
     into v_photo_paths
   from unnest(coalesce(v_item.photos, array[]::text[])) photo_path

@@ -141,8 +141,13 @@ export interface AssistedExportGatewayMutation {
  * not own — is the whole answer.
  */
 export interface ItemDeletionGateway {
+  /**
+   * No `userId`. The bearer is the tenancy check: the gateway builds a client
+   * from it and `delete_item` resolves the caller's identity itself, so a user
+   * id passed alongside would name a check that does not happen here and is
+   * not consulted by the one that does.
+   */
   delete(input: {
-    userId: string;
     bearerToken: string;
     itemId: string;
   }): Promise<ItemDeletionReceipt>;
@@ -1473,6 +1478,22 @@ export function createMobileApiHandler(
           "Authentication is required.",
         );
       }
+      // Authenticate before the id is parsed. A bearer header is not a bearer
+      // token: a caller holding an expired or forged one is unauthenticated,
+      // and answering their malformed id with 400 tells them the id was the
+      // only thing wrong with the request.
+      try {
+        await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+
       const itemId = z.string().uuid().safeParse(itemPath[1]);
       if (!itemId.success) {
         return errorResponse(
@@ -1483,18 +1504,6 @@ export function createMobileApiHandler(
         );
       }
 
-      let principal: MobileApiPrincipal;
-      try {
-        principal = await dependencies.authenticate(token);
-      } catch (error) {
-        dependencies.reportError?.("mobile-api.authenticate", error);
-        return errorResponse(
-          requestId,
-          401,
-          "unauthorized",
-          "Authentication is required.",
-        );
-      }
       const itemDeletion = dependencies.itemDeletion;
       if (!itemDeletion) {
         return errorResponse(
@@ -1507,7 +1516,6 @@ export function createMobileApiHandler(
 
       try {
         const receipt = await itemDeletion.delete({
-          userId: principal.userId,
           bearerToken: token,
           itemId: itemId.data,
         });
