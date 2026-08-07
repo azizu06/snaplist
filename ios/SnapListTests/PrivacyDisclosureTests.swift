@@ -101,6 +101,7 @@ final class PrivacyDisclosureTests: XCTestCase {
         let value = try usageDescription("NSPhotoLibraryAddUsageDescription")
         let lowercased = value.lowercased()
 
+        assertMakesNoOnDeviceOnlyClaim(value, key: "NSPhotoLibraryAddUsageDescription")
         XCTAssertTrue(
             lowercased.contains("save") || lowercased.contains("add"),
             "NSPhotoLibraryAddUsageDescription must describe adding photos."
@@ -148,6 +149,7 @@ final class PrivacyDisclosureTests: XCTestCase {
             [
                 "NSPrivacyCollectedDataTypePhotosorVideos",
                 "NSPrivacyCollectedDataTypeAudioData",
+                "NSPrivacyCollectedDataTypeOtherUserContent",
                 "NSPrivacyCollectedDataTypeEmailAddress",
                 "NSPrivacyCollectedDataTypeUserID",
                 "NSPrivacyCollectedDataTypeDeviceID",

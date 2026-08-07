@@ -40,7 +40,7 @@
 	<key>NSAccentColorName</key>
 	<string>AccentColor</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Take photos of your item so SnapList can identify it, price it, and write your listing. Photos are uploaded and kept with the listing until you delete it.</string>
+	<string>Take photos of your item so SnapList can identify it, price it, and write your listing. Photos are uploaded and kept with the listing.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record a short voice note about your item. SnapList uploads it, turns it into text for your listing, then deletes the recording.</string>
 	<key>NSAppTransportSecurity</key>
@@ -49,7 +49,7 @@
 		<true/>
 	</dict>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Save your prepared listing photos to your library when you choose Save photos. SnapList only adds photos and never reads your library.</string>
+	<string>Save your prepared listing photos to your library when you choose Save photos. SnapList only adds photos and never browses your library.</string>
 	<key>SnapListAPIOrigin</key>
 	<string>$(SNAPLIST_API_ORIGIN)</string>
 	<key>SnapListClerkPublishableKey</key>
