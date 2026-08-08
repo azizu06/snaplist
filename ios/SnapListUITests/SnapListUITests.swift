@@ -56,25 +56,86 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 1))
     }
 
-    func testActivationSkipSuppressesTheCoachMarkAcrossRelaunch() {
-        let app = launch(extraArguments: [
-            "--activation-onboarded-fixture",
-            "--reset-activation-guidance"
-        ])
-
-        let guidance = activationGuidance(in: app)
-        XCTAssertTrue(guidance.waitForExistence(timeout: 2))
-        guidance.swipeDown()
-        XCTAssertFalse(guidance.waitForExistence(timeout: 2))
-
-        app.terminate()
-        app.launchArguments = [
-            "--zero-network-fixtures",
-            "--activation-onboarded-fixture"
+    func testActivationOnlyPerStepGotItDismissesTheCoachMark() {
+        let fixtures: [(name: String, arguments: [String], opensReview: Bool)] = [
+            (
+                name: "ACT-01-normal",
+                arguments: [
+                    "--activation-onboarded-fixture",
+                    "--reset-activation-guidance"
+                ],
+                opensReview: false
+            ),
+            (
+                name: "ACT-01-reduced-motion",
+                arguments: [
+                    "--activation-onboarded-fixture",
+                    "--reset-activation-guidance",
+                    "--reduced-motion"
+                ],
+                opensReview: false
+            ),
+            (
+                name: "ACT-04-normal",
+                arguments: [
+                    "--activation-onboarded-fixture",
+                    "--reset-activation-guidance",
+                    "--visual-state=RUN-02",
+                    "--run-detail-fixture=reviewable",
+                    "--activation-guidance-step=listingReview",
+                    "--listing-review-fixture=loaded"
+                ],
+                opensReview: true
+            ),
+            (
+                name: "ACT-04-reduced-motion",
+                arguments: [
+                    "--activation-onboarded-fixture",
+                    "--reset-activation-guidance",
+                    "--visual-state=RUN-02",
+                    "--run-detail-fixture=reviewable",
+                    "--activation-guidance-step=listingReview",
+                    "--listing-review-fixture=loaded",
+                    "--reduced-motion"
+                ],
+                opensReview: true
+            )
         ]
-        app.launch()
 
-        XCTAssertFalse(activationGuidance(in: app).waitForExistence(timeout: 1))
+        for fixture in fixtures {
+            let app = launch(extraArguments: fixture.arguments)
+            if fixture.opensReview {
+                XCTAssertTrue(app.buttons["run.review.open"].waitForExistence(timeout: 3))
+                app.buttons["run.review.open"].tap()
+            }
+
+            let guidance = activationGuidance(in: app)
+            XCTAssertTrue(guidance.waitForExistence(timeout: 3))
+            XCTAssertEqual(
+                guidance.label,
+                fixture.opensReview
+                    ? "Guidance. Every field here is yours to change."
+                    : "Guidance. One item, up to five photos."
+            )
+            XCTAssertEqual(guidance.buttons.count, 1)
+
+            let gotIt = app.buttons["activation-guidance.got-it"]
+            XCTAssertTrue(gotIt.exists)
+            XCTAssertEqual(gotIt.label, "Got it")
+            XCTAssertGreaterThanOrEqual(gotIt.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(gotIt.frame.height, 44)
+
+            addScreenshot(named: "activation-\(fixture.name).png")
+
+            guidance.swipeDown()
+            XCTAssertTrue(guidance.waitForExistence(timeout: 1))
+
+            gotIt.tap()
+            if !fixture.opensReview {
+                XCTAssertFalse(guidance.waitForExistence(timeout: 2))
+            }
+            app.terminate()
+        }
     }
 
     func testCapturePresentsAndDismissesAnItemDrivenSheet() {

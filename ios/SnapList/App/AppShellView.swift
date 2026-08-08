@@ -751,8 +751,8 @@ struct AppShellView: View {
             ActivationGuidanceCoachMark(
                 coachMark: coachMark,
                 dismiss: dismissActivationGuidance,
-                skip: skipActivationGuidance,
-                isCompleting: isCompletingActivation
+                isCompleting: isCompletingActivation,
+                usesStaticScoutRendering: configuration.usesStaticScoutRendering
             )
             .padding(.horizontal, 18)
             .padding(.bottom, activationBottomInset)
@@ -771,11 +771,6 @@ struct AppShellView: View {
 
     private func dismissActivationGuidance() {
         advanceActivationGuidance(for: .gotIt)
-    }
-
-    private func skipActivationGuidance() {
-        guard shouldPresentActivation else { return }
-        advanceActivationGuidance(for: .skip)
     }
 
     private func advanceActivationGuidance(for action: ActivationGuidanceAction) {

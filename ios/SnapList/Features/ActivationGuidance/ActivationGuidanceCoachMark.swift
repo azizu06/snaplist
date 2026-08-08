@@ -4,8 +4,8 @@ import WebKit
 struct ActivationGuidanceCoachMark: View {
     let coachMark: ActivationCoachMark
     let dismiss: () -> Void
-    let skip: () -> Void
     let isCompleting: Bool
+    let usesStaticScoutRendering: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -23,21 +23,8 @@ struct ActivationGuidanceCoachMark: View {
         .fixedSize(horizontal: false, vertical: false)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Guidance. \(coachMark.copy)")
-        .accessibilityAction(named: "Skip guidance") {
-            skip()
-        }
-        .accessibilityHint(
-            "Swipe down to skip all guidance."
-        )
         .accessibilityIdentifier("activation-guidance")
         .accessibilityAddTraits(.isSummaryElement)
-        .gesture(
-            DragGesture(minimumDistance: 24)
-                .onEnded { value in
-                    guard value.translation.height >= 24 else { return }
-                    skip()
-                }
-        )
     }
 
     private var bubble: some View {
@@ -49,13 +36,18 @@ struct ActivationGuidanceCoachMark: View {
                 .foregroundStyle(coachMark.isDarkSurface ? .white : SnapListColorToken.inkPrimary.color)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Got it", action: dismiss)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(dismissalColor)
-                .frame(
-                    minWidth: SnapListMetrics.minimumTouchTarget,
-                    minHeight: SnapListMetrics.minimumTouchTarget
-                )
+            Button(action: dismiss) {
+                Text("Got it")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(dismissalColor)
+                    // The label owns its target so UIKit exposes the full
+                    // 44-point button frame to accessibility clients.
+                    .frame(
+                        width: SnapListMetrics.minimumTouchTarget,
+                        height: SnapListMetrics.minimumTouchTarget
+                    )
+                    .contentShape(.rect)
+            }
                 .accessibilityLabel("Got it")
                 .accessibilityHint(
                     "Shows the next tip when one remains."
@@ -90,7 +82,10 @@ struct ActivationGuidanceCoachMark: View {
             .fill(tailColor)
             .frame(width: 12, height: 12)
             .rotationEffect(.degrees(45))
-            .offset(y: anchor.tailEdge == .top ? 6 : -6)
+            .offset(
+                x: anchor.tailHorizontalOffset,
+                y: anchor.tailEdge == .top ? 6 : -6
+            )
             .accessibilityHidden(true)
     }
 
@@ -102,18 +97,19 @@ struct ActivationGuidanceCoachMark: View {
 
     @ViewBuilder
     private var scout: some View {
-        switch ActivationGuidanceAssetPolicy.selection(
+        switch ActivationGuidanceAssetPolicy.rendering(
             for: coachMark.state,
-            reduceMotion: reduceMotion
+            reduceMotion: reduceMotion,
+            usesStaticRendering: usesStaticScoutRendering
         ) {
         case .none:
             EmptyView()
-        case .motion(let resourceName):
-            ActivationScoutMotionView(resourceName: resourceName)
+        case .acceptedWebM(let url):
+            ActivationScoutMotionView(url: url)
                 .frame(width: 56, height: 56)
                 .accessibilityHidden(true)
-        case .staticImage(let name):
-            Image(name)
+        case .staticFallbackPNG(let asset):
+            Image(asset)
                 .resizable()
                 .scaledToFit()
                 .frame(width: 56, height: 56)
@@ -135,7 +131,7 @@ struct ActivationGuidanceCoachMark: View {
 }
 
 private struct ActivationScoutMotionView: UIViewRepresentable {
-    let resourceName: String
+    let url: URL
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -150,13 +146,8 @@ private struct ActivationScoutMotionView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
-        guard context.coordinator.loadedResource != resourceName,
-              let url = Bundle.main.url(
-                  forResource: resourceName,
-                  withExtension: "webm",
-                  subdirectory: "ActivationGuidance"
-              ) else { return }
-        context.coordinator.loadedResource = resourceName
+        guard context.coordinator.loadedResource != url else { return }
+        context.coordinator.loadedResource = url
         view.loadHTMLString(
             "<style>html,body,video{margin:0;width:100%;height:100%;background:transparent;object-fit:contain}</style><video autoplay muted loop playsinline src='\(url.lastPathComponent)'></video>",
             baseURL: url.deletingLastPathComponent()
@@ -166,6 +157,6 @@ private struct ActivationScoutMotionView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator {
-        var loadedResource: String?
+        var loadedResource: URL?
     }
 }

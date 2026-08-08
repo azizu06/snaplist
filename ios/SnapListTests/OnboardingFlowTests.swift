@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 @testable import SnapList
 
@@ -160,24 +161,16 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
-    func testActivationGuidanceCanBeSkippedFromEveryPresentingState() {
-        for state in ActivationGuidanceState.allCases where state.coachMark != nil {
-            var progress = ActivationGuidanceProgress(state: state)
-            XCTAssertEqual(progress.advance(for: .skip), .completionRequested)
-            XCTAssertEqual(progress.state, state)
-            XCTAssertTrue(progress.hasAcknowledgedCurrentState)
-            XCTAssertTrue(progress.isCompletionPending)
-        }
-    }
-
-    func testInterruptedCompletionDoesNotReopenAnAcknowledgedACT01() {
+    func testActivationGuidanceDoesNotDismissUntilTheSellerTapsGotItOrActsOnTheSurface() {
         var progress = ActivationGuidanceProgress(state: .act01)
 
-        XCTAssertEqual(progress.advance(for: .skip), .completionRequested)
-        XCTAssertEqual(progress.recordInterruption(), .unchanged)
+        XCTAssertEqual(progress.advance(for: .openedProcessing), .unchanged)
         XCTAssertEqual(progress.state, .act01)
-        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
-        XCTAssertTrue(progress.isCompletionPending)
+        XCTAssertFalse(progress.hasAcknowledgedCurrentState)
+        XCTAssertFalse(progress.isCompletionPending)
+
+        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
+        XCTAssertEqual(progress.state, .act02)
     }
 
     @MainActor
@@ -377,6 +370,94 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
+    func testActivationScoutStaticRenderingSelectsApprovedFallbacks() {
+        let expected: [ActivationGuidanceState: ActivationGuidanceAssetSelection] = [
+            .act01: .staticImage(name: "ActivationScoutACT01"),
+            .act04: .staticImage(name: "ActivationScoutACT04"),
+        ]
+
+        for (state, selection) in expected {
+            XCTAssertEqual(
+                ActivationGuidanceAssetPolicy.selection(
+                    for: state,
+                    reduceMotion: false,
+                    usesStaticRendering: true
+                ),
+                selection
+            )
+            XCTAssertEqual(
+                ActivationGuidanceAssetPolicy.selection(
+                    for: state,
+                    reduceMotion: true,
+                    usesStaticRendering: false
+                ),
+                selection
+            )
+        }
+    }
+
+    func testActivationScoutNormalMotionResolvesApprovedWebMsInTheBundle() throws {
+        let expected: [ActivationGuidanceState: String] = [
+            .act01: "act-01",
+            .act04: "act-04",
+        ]
+
+        for (state, resourceName) in expected {
+            let rendering = ActivationGuidanceAssetPolicy.rendering(
+                for: state,
+                reduceMotion: false,
+                usesStaticRendering: false,
+                bundle: .main
+            )
+            guard case .acceptedWebM(let url) = rendering else {
+                return XCTFail("\(state.rawValue) did not resolve its approved WebM: \(rendering)")
+            }
+            XCTAssertEqual(url.deletingPathExtension().lastPathComponent, resourceName)
+            XCTAssertEqual(url.pathExtension, "webm")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testActivationScoutMissingWebMFallsBackToApprovedStaticAsset() {
+        let testBundle = Bundle(for: OnboardingFlowTests.self)
+
+        for (state, expectedAsset) in [
+            (ActivationGuidanceState.act01, "ActivationScoutACT01"),
+            (.act04, "ActivationScoutACT04"),
+        ] {
+            XCTAssertEqual(
+                ActivationGuidanceAssetPolicy.rendering(
+                    for: state,
+                    reduceMotion: false,
+                    usesStaticRendering: false,
+                    bundle: testBundle
+                ),
+                .staticFallbackPNG(asset: expectedAsset)
+            )
+        }
+    }
+
+    func testActivationScoutStaticFallbacksResolveAtThreeX() {
+        let traitCollection = UITraitCollection(displayScale: 3)
+
+        for state in [ActivationGuidanceState.act01, .act04] {
+            guard case .staticImage(let assetName) = ActivationGuidanceAssetPolicy.selection(
+                for: state,
+                reduceMotion: true,
+                usesStaticRendering: false
+            ) else {
+                return XCTFail("\(state.rawValue) did not select a static Scout fallback.")
+            }
+            let image = UIImage(
+                named: assetName,
+                in: .main,
+                compatibleWith: traitCollection
+            )
+            XCTAssertNotNil(image, "\(state.rawValue) needs a delivered 3x Scout fallback.")
+            XCTAssertEqual(image?.scale, 3, "\(state.rawValue) must resolve its 3x Scout fallback.")
+        }
+    }
+
     // Every approved coach mark docks against the one control its line names.
     // ACT-02B is the only state whose anchor sits above it, so it is the only
     // state with a top tail; its inset is round 1's 96 plus the 12 points the
@@ -384,12 +465,12 @@ final class OnboardingFlowTests: XCTestCase {
     // approved composition put it.
     func testActivationCoachMarkAnchorsEveryApprovedState() {
         let expected: [ActivationCoachMark: ActivationCoachMarkAnchor] = [
-            .act01: .init(tailEdge: .bottom, bottomInset: 112),
-            .act02: .init(tailEdge: .bottom, bottomInset: 24),
-            .act02B: .init(tailEdge: .top, bottomInset: 108),
-            .act03: .init(tailEdge: .bottom, bottomInset: 24),
-            .act04: .init(tailEdge: .bottom, bottomInset: 84),
-            .act06: .init(tailEdge: .bottom, bottomInset: 112),
+            .act01: .init(tailEdge: .bottom, bottomInset: 112, tailHorizontalOffset: 0),
+            .act02: .init(tailEdge: .bottom, bottomInset: 24, tailHorizontalOffset: 0),
+            .act02B: .init(tailEdge: .top, bottomInset: 108, tailHorizontalOffset: 0),
+            .act03: .init(tailEdge: .bottom, bottomInset: 24, tailHorizontalOffset: 0),
+            .act04: .init(tailEdge: .bottom, bottomInset: 84, tailHorizontalOffset: 91),
+            .act06: .init(tailEdge: .bottom, bottomInset: 112, tailHorizontalOffset: 0),
         ]
 
         for (coachMark, anchor) in expected {

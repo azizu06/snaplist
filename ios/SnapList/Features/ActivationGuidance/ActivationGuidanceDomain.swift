@@ -49,7 +49,6 @@ enum ActivationGuidanceState: String, Codable, CaseIterable, Equatable, Hashable
 
 enum ActivationGuidanceAction: Equatable {
     case gotIt
-    case skip
     case capturedFirstPhoto
     case reorderedPhotos
     case openedVoiceNote
@@ -136,6 +135,7 @@ enum ActivationCoachMarkTailEdge: Equatable {
 struct ActivationCoachMarkAnchor: Equatable {
     let tailEdge: ActivationCoachMarkTailEdge
     let bottomInset: CGFloat
+    let tailHorizontalOffset: CGFloat
 }
 
 enum ActivationCoachMarkAnchorPolicy {
@@ -155,18 +155,34 @@ enum ActivationCoachMarkAnchorPolicy {
     ) -> ActivationCoachMarkAnchor {
         switch coachMark {
         case .act01, .act06:
-            return .init(tailEdge: .bottom, bottomInset: 112)
+            return .init(
+                tailEdge: .bottom,
+                bottomInset: 112,
+                tailHorizontalOffset: 0
+            )
         case .act02, .act03:
-            return .init(tailEdge: .bottom, bottomInset: 24)
+            return .init(
+                tailEdge: .bottom,
+                bottomInset: 24,
+                tailHorizontalOffset: 0
+            )
         case .act02B:
             // The bubble body keeps the band it already occupied: the tail no
             // longer consumes its 12 points below the bubble, so the inset
             // absorbs them. The shell pads inside the safe area, so the
             // package's screen-bottom measurements port as this relative
             // correction rather than as their absolute 110.
-            return .init(tailEdge: .top, bottomInset: 108)
+            return .init(
+                tailEdge: .top,
+                bottomInset: 108,
+                tailHorizontalOffset: 0
+            )
         case .act04:
-            return .init(tailEdge: .bottom, bottomInset: 84)
+            return .init(
+                tailEdge: .bottom,
+                bottomInset: 84,
+                tailHorizontalOffset: 91
+            )
         }
     }
 }
@@ -177,10 +193,17 @@ enum ActivationGuidanceAssetSelection: Equatable {
     case motion(resourceName: String)
 }
 
+enum ActivationGuidanceScoutRendering: Equatable {
+    case none
+    case staticFallbackPNG(asset: String)
+    case acceptedWebM(url: URL)
+}
+
 enum ActivationGuidanceAssetPolicy {
     static func selection(
         for state: ActivationGuidanceState,
-        reduceMotion: Bool
+        reduceMotion: Bool,
+        usesStaticRendering: Bool = false
     ) -> ActivationGuidanceAssetSelection {
         let staticName: String?
         let motionName: String?
@@ -204,11 +227,51 @@ enum ActivationGuidanceAssetPolicy {
         }
 
         guard let staticName else { return .none }
-        guard !reduceMotion, let motionName else {
+        guard !reduceMotion, !usesStaticRendering, let motionName else {
             return .staticImage(name: staticName)
         }
         return .motion(resourceName: motionName)
     }
+
+    /// Resolves normal motion before the view constructs WebKit, so a missing
+    /// bundle resource degrades to the approved static Scout instead of blank
+    /// reserved space. UI tests pass `usesStaticRendering` to avoid WebKit's
+    /// iOS 26.5 accessibility-bundle collision.
+    static func rendering(
+        for state: ActivationGuidanceState,
+        reduceMotion: Bool,
+        usesStaticRendering: Bool,
+        bundle: Bundle = .main
+    ) -> ActivationGuidanceScoutRendering {
+        switch selection(
+            for: state,
+            reduceMotion: reduceMotion,
+            usesStaticRendering: usesStaticRendering
+        ) {
+        case .none:
+            return .none
+        case .staticImage(let asset):
+            return .staticFallbackPNG(asset: asset)
+        case .motion(let resourceName):
+            guard let url = bundle.url(
+                forResource: resourceName,
+                withExtension: resourceExtension,
+                subdirectory: resourceSubdirectory
+            ) else {
+                guard case .staticImage(let asset) = selection(
+                    for: state,
+                    reduceMotion: true
+                ) else {
+                    return .none
+                }
+                return .staticFallbackPNG(asset: asset)
+            }
+            return .acceptedWebM(url: url)
+        }
+    }
+
+    static let resourceSubdirectory = "ActivationGuidance"
+    static let resourceExtension = "webm"
 }
 
 enum ActivationAuthenticationState: Equatable {
@@ -366,14 +429,6 @@ struct ActivationGuidanceProgress: Codable, Equatable {
     mutating func advance(
         for action: ActivationGuidanceAction
     ) -> ActivationGuidanceTransition {
-        if action == .skip,
-           state != .act05,
-           state != .act07 {
-            hasAcknowledgedCurrentState = true
-            isCompletionPending = true
-            return .completionRequested
-        }
-
         switch (state, action) {
         case (.act01, .gotIt), (.act01, .capturedFirstPhoto),
              (.act06, .gotIt), (.act06, .capturedFirstPhoto):
