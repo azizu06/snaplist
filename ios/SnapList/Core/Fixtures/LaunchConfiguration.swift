@@ -228,6 +228,13 @@ enum PhotoReviewVisualStateID: String, Equatable {
     }
 }
 
+enum SettingsProofState: String, Equatable {
+    case settingsHub = "SET-01"
+    case deletionConsequences = "DEL-01"
+    case reauthentication = "DEL-02"
+    case deletionConfirmation = "DEL-03"
+}
+
 struct LaunchConfiguration: Equatable {
     static let runDetailFixtureID = UUID(
         uuidString: "20800000-0000-4000-8000-000000000020"
@@ -264,6 +271,7 @@ struct LaunchConfiguration: Equatable {
     var resetListingReviewDraft: Bool
     var assistedExportFixture: AssistedExportFixture?
     var proGateFixture: ProGateFixtureState?
+    var settingsProofState: SettingsProofState?
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -288,7 +296,8 @@ struct LaunchConfiguration: Equatable {
         listingReviewFixture: nil,
         resetListingReviewDraft: false,
         assistedExportFixture: nil,
-        proGateFixture: nil
+        proGateFixture: nil,
+        settingsProofState: nil
     )
 
     static let preview = LaunchConfiguration(
@@ -314,7 +323,8 @@ struct LaunchConfiguration: Equatable {
         listingReviewFixture: nil,
         resetListingReviewDraft: false,
         assistedExportFixture: nil,
-        proGateFixture: nil
+        proGateFixture: nil,
+        settingsProofState: nil
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -441,7 +451,18 @@ struct LaunchConfiguration: Equatable {
                 if configuration.proGateFixture != nil {
                     configuration.usesZeroNetworkFixtures = true
                 }
+            } else if argument.hasPrefix("--settings-proof=") {
+                let value = String(
+                    argument.dropFirst("--settings-proof=".count)
+                )
+                configuration.settingsProofState =
+                    SettingsProofState(rawValue: value)
             }
+        }
+
+        if configuration.settingsProofState != nil {
+            configuration.fixture = .account
+            configuration.usesZeroNetworkFixtures = true
         }
 
         return configuration

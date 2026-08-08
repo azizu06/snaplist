@@ -63,6 +63,63 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(FoundationFixture.account.initialRoute, .settings)
     }
 
+    func testMemberAccountEntryDestinationDefaultsToNil() {
+        let destination = SettingsAccountEntryPolicy.destination(
+            for: .member(method: .apple, email: "seller@example.com")
+        )
+
+        XCTAssertNil(destination)
+    }
+
+    func testGuestAccountEntryUsesTypedAccountRoute() {
+        XCTAssertEqual(
+            SettingsAccountEntryPolicy.destination(for: .guest),
+            .future(.account)
+        )
+    }
+
+    func testSettingsProofStateDefaultsOff() {
+        XCTAssertNil(LaunchConfiguration.standard.settingsProofState)
+        XCTAssertNil(
+            LaunchConfiguration.parse(arguments: []).settingsProofState
+        )
+    }
+
+    func testSettingsProofFixturesAreExactAndDefaultDeny() {
+        let approvedFixtureIDs = [
+            "SET-01",
+            "DEL-01",
+            "DEL-02",
+            "DEL-03",
+        ]
+
+        for fixtureID in approvedFixtureIDs {
+            let configuration = LaunchConfiguration.parse(
+                arguments: ["--settings-proof=\(fixtureID)"]
+            )
+
+            XCTAssertEqual(configuration.settingsProofState?.rawValue, fixtureID)
+            XCTAssertEqual(configuration.fixture, .account)
+            XCTAssertTrue(configuration.usesZeroNetworkFixtures)
+        }
+
+        for unrecognizedArgument in [
+            "--settings-proof",
+            "--settings-proof=SET-00",
+            "--settings-proof=DEL-02f",
+            "--settings-proof=DEL-04",
+            "--settings-proof=SET-01-extra",
+            "--settings-proof=production",
+        ] {
+            let configuration = LaunchConfiguration.parse(
+                arguments: [unrecognizedArgument]
+            )
+
+            XCTAssertNil(configuration.settingsProofState)
+            XCTAssertEqual(configuration, .standard)
+        }
+    }
+
     func testGuestAndMemberLocalRemovalAreSeparateFrozenScreens() {
         var guest = SettingsFlow(identity: .guest, hasLocalData: true)
         var member = SettingsFlow(

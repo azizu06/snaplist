@@ -6,6 +6,8 @@ import SwiftUI
 @MainActor
 struct SettingsView: View {
     private let profile: SettingsProfile
+    private let settingsProofState: SettingsProofState?
+    private let settingsProofSafeExit: (() -> Void)?
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
     private let deletionOutstanding: Bool
@@ -29,9 +31,12 @@ struct SettingsView: View {
         ebayPublishService: any EbayPublishFeatureServing,
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
-        deletionOutstanding: Bool = false
+        deletionOutstanding: Bool = false,
+        settingsProofSafeExit: (() -> Void)? = nil
     ) {
         profile = .current(configuration: configuration)
+        settingsProofState = configuration.settingsProofState
+        self.settingsProofSafeExit = settingsProofSafeExit
         self.mobileAPIClient = mobileAPIClient
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
@@ -49,11 +54,31 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        if let settingsProofState,
+           settingsProofState != .settingsHub,
+           let settingsProofSafeExit {
+            SettingsProofStateView(
+                state: settingsProofState,
+                profile: profile,
+                onSafeExit: settingsProofSafeExit
+            )
+        } else {
+            settingsHub
+        }
+    }
+
+    private var settingsHub: some View {
         List {
             profileCard
             Section("Account") {
-                if profile.isGuest {
-                    Button("Create an account") {}
+                if let accountEntry = SettingsAccountEntryPolicy.destination(
+                    for: profile.identity
+                ) {
+                    NavigationLink(value: accountEntry) {
+                        Text("Create an account")
+                    }
+                    .accessibilityIdentifier("settings.create-account")
+                    .accessibilityHint("Opens the account entry screen")
                 } else {
                     valueRow("Sign-in method", profile.methodLabel)
                 }
@@ -119,7 +144,9 @@ struct SettingsView: View {
                             subscriptionTruth: SettingsDeletionSubscriptionTruth(
                                 state: subscriptionStore.state,
                                 loadPhase: subscriptionLoadPhase
-                            )
+                            ),
+                            proofSafeExit: nil,
+                            reservesFloatingDock: true
                         )
                     } label: {
                         Text("Delete account")
@@ -326,6 +353,41 @@ struct SettingsView: View {
     }
 }
 
+private struct SettingsProofStateView: View {
+    let state: SettingsProofState
+    let profile: SettingsProfile
+    let onSafeExit: () -> Void
+
+    var body: some View {
+        switch state {
+        case .settingsHub:
+            EmptyView()
+        case .deletionConsequences:
+            SettingsDeletionConsequencesView(
+                profile: profile,
+                subscriptionTruth: .unknown,
+                proofSafeExit: onSafeExit,
+                reservesFloatingDock: true
+            )
+        case .reauthentication:
+            SettingsReauthenticationView(
+                profile: profile,
+                subscriptionTruth: .unknown,
+                keepAccount: onSafeExit,
+                isPresented: .constant(true),
+                proofSafeExit: onSafeExit,
+                reservesFloatingDock: true
+            )
+        case .deletionConfirmation:
+            SettingsDeletionConfirmationView(
+                subscriptionTruth: .unknown,
+                keepAccount: onSafeExit,
+                reservesFloatingDock: true
+            )
+        }
+    }
+}
+
 struct SettingsAnalyticsConsentState {
     private(set) var isEnabled: Bool
     private(set) var showsError = false
@@ -403,7 +465,10 @@ private struct SettingsDeletionConsequencesView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
+    let proofSafeExit: (() -> Void)?
+    var reservesFloatingDock = false
     @State private var managesSubscription = false
+    @State private var presentsReauthentication = false
 
     var body: some View {
         SettingsExplanationPage(
@@ -437,24 +502,45 @@ private struct SettingsDeletionConsequencesView: View {
                 secondary: "Keep my account",
                 destructive: true,
                 note: "One more step after this, and it is not the deletion.",
-                primaryAction: {},
-                secondaryAction: { dismiss() },
-                destination: SettingsReauthenticationView(
-                    profile: profile,
-                    subscriptionTruth: subscriptionTruth,
-                    keepAccount: { dismiss() }
-                )
+                primaryAction: { presentsReauthentication = true },
+                secondaryAction: safeExit
+            )
+            .padding(
+                .bottom,
+                reservesFloatingDock
+                    ? SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+                    : 0
+            )
+        }
+        .navigationDestination(isPresented: $presentsReauthentication) {
+            SettingsReauthenticationView(
+                profile: profile,
+                subscriptionTruth: subscriptionTruth,
+                keepAccount: safeExit,
+                isPresented: $presentsReauthentication,
+                proofSafeExit: proofSafeExit,
+                reservesFloatingDock: reservesFloatingDock
             )
         }
         .accessibilityIdentifier("settings.state.del-01")
     }
+
+    private func safeExit() {
+        if let proofSafeExit {
+            proofSafeExit()
+        } else {
+            dismiss()
+        }
+    }
 }
 
 private struct SettingsReauthenticationView: View {
-    @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
     let keepAccount: () -> Void
+    @Binding var isPresented: Bool
+    let proofSafeExit: (() -> Void)?
+    var reservesFloatingDock = false
     @State private var code = ""
     @State private var failed = false
     @State private var confirmed = false
@@ -508,11 +594,18 @@ private struct SettingsReauthenticationView: View {
                 primaryAction: performPrimaryAction,
                 secondaryAction: cancelReauthentication
             )
+            .padding(
+                .bottom,
+                reservesFloatingDock
+                    ? SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+                    : 0
+            )
         }
         .navigationDestination(isPresented: $confirmed) {
             SettingsDeletionConfirmationView(
                 subscriptionTruth: subscriptionTruth,
-                keepAccount: keepAccount
+                keepAccount: keepAccount,
+                reservesFloatingDock: reservesFloatingDock
             )
         }
         .task { await prepareEmailCodeIfNeeded() }
@@ -593,13 +686,18 @@ private struct SettingsReauthenticationView: View {
         AccessibilityNotification.Announcement(
             "Cancelled. Nothing has been deleted."
         ).post()
-        dismiss()
+        if let proofSafeExit {
+            proofSafeExit()
+        } else {
+            isPresented = false
+        }
     }
 }
 
 private struct SettingsDeletionConfirmationView: View {
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
     let keepAccount: () -> Void
+    var reservesFloatingDock = false
 
     var body: some View {
         SettingsExplanationPage(
@@ -615,6 +713,12 @@ private struct SettingsDeletionConfirmationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             SettingsConfirmationOnlyTray(keepAccount: keepAccount)
+                .padding(
+                    .bottom,
+                    reservesFloatingDock
+                        ? SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+                        : 0
+                )
         }
         .accessibilityIdentifier("settings.state.del-03")
     }
@@ -624,17 +728,21 @@ private struct SettingsConfirmationOnlyTray: View {
     let keepAccount: () -> Void
 
     var body: some View {
-        Button("Keep my account", action: keepAccount)
-            .font(.headline)
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .background(
-                SnapListColorToken.action.color,
-                in: RoundedRectangle(cornerRadius: 18)
-            )
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(.bar)
+        Button(action: keepAccount) {
+            Text("Keep my account")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .background(
+            SnapListColorToken.action.color,
+            in: RoundedRectangle(cornerRadius: 18)
+        )
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 }
 
@@ -769,11 +877,15 @@ private struct SettingsActionTray<Destination: View>: View {
                 Button(action: primaryAction) { primaryLabel }
                     .buttonStyle(.plain).disabled(disabled)
             }
-            Button(secondary, action: secondaryAction)
-                .font(.headline).foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(destructive && primary == "Delete account" ? SnapListColorToken.action.color : Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 18))
-                .foregroundStyle(destructive && primary == "Delete account" ? .white : .primary)
+            Button(action: secondaryAction) {
+                Text(secondary)
+                    .font(.headline).foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .background(destructive && primary == "Delete account" ? SnapListColorToken.action.color : Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 18))
+            .foregroundStyle(destructive && primary == "Delete account" ? .white : .primary)
             if let note { Text(note).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center) }
         }
         .padding(.horizontal, 20).padding(.vertical, 12)

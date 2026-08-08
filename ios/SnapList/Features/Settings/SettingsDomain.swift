@@ -21,6 +21,15 @@ enum SettingsGuestBoundaryCopy {
     static let body = "A guest cannot read entitlements and has no account record, so the Subscription group and the account management group are both absent rather than empty. Server held guest data deletes itself within 24 hours of acceptance, which is a guarantee in the retention contract rather than a hope. Removing it sooner, or managing it at all, requires claiming the account first."
 }
 
+enum SettingsAccountEntryPolicy {
+    static func destination(for identity: SettingsIdentity) -> AppRoute? {
+        switch identity {
+        case .guest: .future(.account)
+        case .member: nil
+        }
+    }
+}
+
 struct SettingsFlow: Equatable {
     enum Screen: Equatable {
         case settings

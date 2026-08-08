@@ -25,6 +25,140 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["You"].exists)
     }
 
+    func testSettingsProofFixturesRenderApprovedStatesWithoutDeletionCommit() {
+        let proofs = [
+            (
+                "SET-01",
+                "settings.screen",
+                "",
+                ""
+            ),
+            (
+                "DEL-01",
+                "settings.state.del-01",
+                "Keep my account",
+                "settings.delete-account"
+            ),
+            (
+                "DEL-02",
+                "settings.state.del-02",
+                "Cancel",
+                "settings.delete-account"
+            ),
+            (
+                "DEL-03",
+                "settings.state.del-03",
+                "Keep my account",
+                "settings.delete-account"
+            ),
+        ]
+
+        for (fixtureID, screenIdentifier, safeExitIdentifier, absentControl) in proofs {
+            let app = XCUIApplication()
+            app.launchArguments = ["--settings-proof=\(fixtureID)"]
+            app.launchAfterRetiringPriorInstance()
+
+            XCTAssertTrue(
+                app.descendants(matching: .any)[screenIdentifier]
+                    .waitForExistence(timeout: 3),
+                app.debugDescription
+            )
+            if fixtureID == "SET-01" {
+                XCTAssertTrue(app.staticTexts["Jordan Hale"].exists)
+            }
+
+            guard !safeExitIdentifier.isEmpty else {
+                app.terminate()
+                continue
+            }
+
+            let safeExit = app.buttons[safeExitIdentifier]
+            let scanDock = app.buttons["dock.scan"]
+            let trophyWallDock = app.buttons["dock.trophy-wall"]
+            let window = app.windows.firstMatch
+            XCTAssertTrue(safeExit.exists)
+            XCTAssertFalse(app.buttons[absentControl].exists)
+            XCTAssertTrue(scanDock.exists)
+            XCTAssertTrue(trophyWallDock.exists)
+            XCTAssertTrue(window.exists)
+            let dockTop = min(scanDock.frame.minY, trophyWallDock.frame.minY)
+            let frameReceipt = "safeExit.frame=\(safeExit.frame), scanDock.frame=\(scanDock.frame), trophyWallDock.frame=\(trophyWallDock.frame), window.frame=\(window.frame), dockTop=\(dockTop)"
+            XCTAssertGreaterThanOrEqual(safeExit.frame.width, 44, frameReceipt)
+            XCTAssertGreaterThanOrEqual(safeExit.frame.height, 44, frameReceipt)
+            XCTAssertGreaterThanOrEqual(safeExit.frame.minX, window.frame.minX, frameReceipt)
+            XCTAssertGreaterThanOrEqual(safeExit.frame.minY, window.frame.minY, frameReceipt)
+            XCTAssertLessThanOrEqual(safeExit.frame.maxX, window.frame.maxX, frameReceipt)
+            XCTAssertLessThanOrEqual(safeExit.frame.maxY, window.frame.maxY, frameReceipt)
+            XCTAssertLessThanOrEqual(
+                safeExit.frame.maxY,
+                dockTop,
+                frameReceipt
+            )
+            XCTAssertTrue(safeExit.isHittable)
+            safeExit.tap()
+            let proofScreen = app.descendants(matching: .any)[screenIdentifier]
+            let dismissal = expectation(
+                for: NSPredicate(format: "exists == false"),
+                evaluatedWith: proofScreen
+            )
+            wait(for: [dismissal], timeout: 3)
+            XCTAssertFalse(proofScreen.exists)
+            XCTAssertTrue(trophyWallDock.isSelected)
+            XCTAssertTrue(
+                app.otherElements["trophy.wall"].waitForExistence(timeout: 3),
+                app.debugDescription
+            )
+            XCTAssertFalse(app.buttons[absentControl].exists)
+            app.terminate()
+        }
+    }
+
+    func testSettingsMemberReauthenticationCancelReturnsToDeletionConsequences() {
+        let app = launch(extraArguments: ["--fixture=account"])
+        let settingsScreen = app.descendants(matching: .any)["settings.screen"]
+        XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
+
+        let deleteAccount = app.buttons["settings.delete-account"]
+        for _ in 0..<4 where !deleteAccount.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(deleteAccount.exists, app.debugDescription)
+        XCTAssertTrue(deleteAccount.isHittable, app.debugDescription)
+        deleteAccount.tap()
+
+        let deletionConsequences = app.descendants(matching: .any)["settings.state.del-01"]
+        XCTAssertTrue(deletionConsequences.waitForExistence(timeout: 3), app.debugDescription)
+        app.buttons["Continue to delete my account"].tap()
+
+        let reauthentication = app.descendants(matching: .any)["settings.state.del-02"]
+        XCTAssertTrue(reauthentication.waitForExistence(timeout: 3), app.debugDescription)
+        let cancel = app.buttons["Cancel"]
+        let scanDock = app.buttons["dock.scan"]
+        let trophyWallDock = app.buttons["dock.trophy-wall"]
+        let window = app.windows.firstMatch
+        XCTAssertTrue(cancel.exists, app.debugDescription)
+        XCTAssertTrue(scanDock.exists, app.debugDescription)
+        XCTAssertTrue(trophyWallDock.exists, app.debugDescription)
+        XCTAssertTrue(window.exists, app.debugDescription)
+        let dockTop = min(scanDock.frame.minY, trophyWallDock.frame.minY)
+        let frameReceipt = "cancel.frame=\(cancel.frame), scanDock.frame=\(scanDock.frame), trophyWallDock.frame=\(trophyWallDock.frame), window.frame=\(window.frame), dockTop=\(dockTop)"
+        XCTAssertGreaterThanOrEqual(cancel.frame.width, 44, frameReceipt)
+        XCTAssertGreaterThanOrEqual(cancel.frame.height, 44, frameReceipt)
+        XCTAssertGreaterThanOrEqual(cancel.frame.minX, window.frame.minX, frameReceipt)
+        XCTAssertGreaterThanOrEqual(cancel.frame.minY, window.frame.minY, frameReceipt)
+        XCTAssertLessThanOrEqual(cancel.frame.maxX, window.frame.maxX, frameReceipt)
+        XCTAssertLessThanOrEqual(cancel.frame.maxY, window.frame.maxY, frameReceipt)
+        XCTAssertLessThanOrEqual(cancel.frame.maxY, dockTop, frameReceipt)
+        XCTAssertTrue(cancel.isHittable, frameReceipt)
+        cancel.tap()
+
+        let returnedToConsequences = deletionConsequences.waitForExistence(timeout: 3)
+        XCTAssertTrue(returnedToConsequences, app.debugDescription)
+        XCTAssertFalse(reauthentication.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings.state.del-03"].exists)
+        XCTAssertFalse(app.buttons["Verify"].exists)
+    }
+
     func testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch() {
         let app = launch(extraArguments: [
             "--activation-onboarded-fixture",
