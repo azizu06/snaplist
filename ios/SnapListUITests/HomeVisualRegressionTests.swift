@@ -881,13 +881,17 @@ final class HomeVisualRegressionTests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    func testAllFourApprovedHomeStatesRenderAtCanonicalViewport() {
+    /// HOME-03 and HOME-04 were the attention feed and the listings search. Both
+    /// were retired with the seller-operations surface, so the approved Trophy
+    /// Wall has exactly two visual states left to capture.
+    func testBothApprovedTrophyWallStatesRenderAtCanonicalViewport() {
         let requiresCanonicalViewport = ProcessInfo.processInfo.environment[
             "SNAPLIST_REQUIRE_CANONICAL_VIEWPORT"
         ] == "1"
         let processTermination = UIProcessTerminationBoundary()
+        let boundaries = ["HOME-01": "trophy.wall.grid", "HOME-02": "trophy.wall.empty"]
 
-        for state in ["HOME-01", "HOME-02", "HOME-03", "HOME-04"] {
+        for (state, boundary) in boundaries.sorted(by: { $0.key < $1.key }) {
             let app = XCUIApplication()
             app.launchArguments = [
                 "--visual-state=\(state)",
@@ -898,9 +902,9 @@ final class HomeVisualRegressionTests: XCTestCase {
             app.launchAfterRetiringPriorInstance()
 
             XCTAssertTrue(
-                app.descendants(matching: .any)[state == "HOME-04" ? "home.search.field" : state == "HOME-02" ? "home.empty" : "home.active"]
+                app.descendants(matching: .any)[boundary]
                     .waitForExistence(timeout: 3),
-                "Missing native Home boundary for \(state)"
+                "Missing Trophy Wall boundary for \(state)"
             )
             if requiresCanonicalViewport {
                 XCTAssertEqual(app.windows.firstMatch.frame.size.width, 393)

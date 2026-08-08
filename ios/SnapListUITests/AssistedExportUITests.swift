@@ -235,11 +235,12 @@ final class AssistedExportUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let run = app.buttons[
-            "home.run.20800000-0000-4000-8000-000000000020"
-        ]
-        XCTAssertTrue(run.waitForExistence(timeout: 10))
-        run.tap()
+        XCTAssertTrue(
+            app.otherElements["trophy.wall"].waitForExistence(timeout: 10)
+        )
+        // The seller-Home run row that used to open this screen was retired with
+        // the rest of that surface, so Run Detail is entered through its route.
+        app.open(URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!)
         let review = app.buttons["run.review.open"]
         XCTAssertTrue(review.waitForExistence(timeout: 5))
         review.tap()

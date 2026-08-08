@@ -128,7 +128,6 @@ enum SnapListMetrics {
     static let dockBottomInset: CGFloat = 12
     static let dockHeight: CGFloat = 66
     static let dockRadius: CGFloat = 26
-    static let captureWidth: CGFloat = 52
     static let primaryButtonHeight: CGFloat = 54
     static let primaryButtonRadius: CGFloat = 27
     static let sheetRadius: CGFloat = 26

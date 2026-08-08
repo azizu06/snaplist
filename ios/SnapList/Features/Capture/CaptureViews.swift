@@ -342,8 +342,7 @@ struct ScanCameraView: View {
                 Task { await flow.takePhoto(reservation: captureID) }
             },
             returnFocus: $returnFocus,
-            review: { open(.photoReview, opener: .reviewButton) },
-            openTrophyWall: { open(.trophyWall, opener: .trophyWallTab) }
+            review: { open(.photoReview, opener: .reviewButton) }
         )
     }
 
@@ -360,8 +359,7 @@ struct ScanCameraView: View {
                     return
                 }
                 openURL(settingsURL)
-            },
-            openTrophyWall: { open(.trophyWall, opener: .trophyWallTab) }
+            }
         )
     }
 
@@ -609,7 +607,6 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     let takePhoto: () -> Void
     @Binding var returnFocus: PhotoReviewScanFocus?
     let review: () -> Void
-    let openTrophyWall: () -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -654,11 +651,6 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
 
                 cameraControls
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
-
-                ScanDestinationDock(openTrophyWall: openTrophyWall)
-                    .padding(.top, 5)
-                    .padding(.bottom, 8)
-                    .offset(y: 20)
             }
             .safeAreaPadding(.top, 2)
             .safeAreaPadding(.bottom, 2)
@@ -754,7 +746,6 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
     @Binding var returnFocus: PhotoReviewScanFocus?
     let review: () -> Void
     let openSettings: () -> Void
-    let openTrophyWall: () -> Void
 
     var body: some View {
         ZStack {
@@ -816,9 +807,6 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
                             : .opacity.combined(with: .offset(y: 10))
                     )
                 }
-                ScanDestinationDock(openTrophyWall: openTrophyWall)
-                    .padding(.bottom, 8)
-                    .offset(y: 20)
             }
             .safeAreaPadding(.vertical, 2)
         }
@@ -888,49 +876,6 @@ private struct ScanPhotoThumbnail: View {
     }
 }
 
-private struct ScanDestinationDock: View {
-    let openTrophyWall: () -> Void
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Button(action: {}) {
-                Image(systemName: "camera.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Color(hex: "#3665F3"))
-                    .frame(width: 48, height: 48)
-                    .background(Color(hex: "#EEF3FF"))
-                    .clipShape(.rect(cornerRadius: 16))
-                    .accessibilityHidden(true)
-            }
-            .buttonStyle(.plain)
-            .frame(width: 48, height: 48)
-            .contentShape(.rect)
-            .accessibilityLabel("Scan, tab, selected")
-            .accessibilityAddTraits(.isSelected)
-            .accessibilityIdentifier("scan.tab")
-            .accessibilitySortPriority(30)
-
-            Button(action: openTrophyWall) {
-                Image(systemName: "trophy")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Color(hex: "#4A4D54"))
-                    .frame(width: 48, height: 48)
-                    .accessibilityHidden(true)
-            }
-            .buttonStyle(.plain)
-            .frame(width: 48, height: 48)
-            .contentShape(.rect)
-            .accessibilityLabel("Trophy Wall, tab")
-            .accessibilityIdentifier("trophy-wall.tab")
-            .accessibilitySortPriority(20)
-        }
-        .padding(5)
-        .background(.white)
-        .overlay { Capsule().stroke(Color(hex: "#ECEDF0"), lineWidth: 1) }
-        .clipShape(.capsule)
-    }
-}
-
 #if DEBUG
 struct ScanCameraVisualStateView: View {
     let state: ApprovedVisualStateID
@@ -940,7 +885,17 @@ struct ScanCameraVisualStateView: View {
 
     private var reduceMotion: Bool { forceReducedMotion || systemReduceMotion }
 
+    /// The fixture route renders a camera surface without the app shell, so it
+    /// floats the approved dock itself. Scan is a primary destination, so a
+    /// capture of it that carried no dock would not be the screen the product
+    /// ships. Selection is inert here because the fixture has no router, which
+    /// is what the retired per-camera dock did in this route too.
     var body: some View {
+        surface.floatingDock(selectedTab: .scan, select: { _ in })
+    }
+
+    @ViewBuilder
+    private var surface: some View {
         switch state {
         case .scanCameraUnavailable:
             RecoveryScanCameraSurface(
@@ -954,7 +909,6 @@ struct ScanCameraVisualStateView: View {
                 returnFocus: .constant(nil),
                 review: {},
                 openSettings: {},
-                openTrophyWall: {}
             )
         case .scanCameraDenied:
             RecoveryScanCameraSurface(
@@ -968,7 +922,6 @@ struct ScanCameraVisualStateView: View {
                 returnFocus: .constant(nil),
                 review: {},
                 openSettings: {},
-                openTrophyWall: {}
             )
         default:
             LiveScanCameraSurface(
@@ -988,7 +941,6 @@ struct ScanCameraVisualStateView: View {
                 takePhoto: {},
                 returnFocus: .constant(nil),
                 review: {},
-                openTrophyWall: {}
             )
         }
     }

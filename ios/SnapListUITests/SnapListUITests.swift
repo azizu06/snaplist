@@ -12,7 +12,7 @@ final class SnapListUITests: XCTestCase {
         let app = launch(extraArguments: ["--camera-status=unavailable"])
 
         XCTAssertTrue(app.staticTexts["scan.recovery-title"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.scrollViews["home.active"].exists)
+        XCTAssertFalse(app.otherElements["trophy.wall"].exists)
         XCTAssertTrue(app.buttons["dock.scan"].isSelected)
 
         app.buttons["dock.trophy-wall"].tap()
@@ -78,11 +78,7 @@ final class SnapListUITests: XCTestCase {
     }
 
     func testCapturePresentsAndDismissesAnItemDrivenSheet() {
-        let app = launch()
-
-        XCTAssertTrue(app.staticTexts["Scan"].exists)
-        app.buttons["dock.capture"].tap()
-        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 2))
+        let app = launchCaptureLauncherSheet()
 
         for control in [
             app.buttons["capture.close"],
@@ -104,15 +100,11 @@ final class SnapListUITests: XCTestCase {
 
         app.buttons["capture.close"].tap()
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 1))
-        XCTAssertTrue(app.staticTexts["Scan"].exists)
     }
 
     func testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable() {
-        let app = launch()
+        let app = launchCaptureLauncherSheet()
 
-        app.buttons["dock.trophy-wall"].tap()
-        XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
-        app.buttons["dock.capture"].tap()
         XCTAssertTrue(app.buttons["capture.take-one-item"].waitForExistence(timeout: 2))
         app.buttons["capture.take-one-item"].tap()
 
@@ -643,7 +635,10 @@ final class SnapListUITests: XCTestCase {
         )
         XCTAssertFalse(app.buttons["scan.library"].exists)
         XCTAssertFalse(app.buttons["scan.choose-library"].exists)
-        XCTAssertFalse(app.buttons["trophy-wall.tab"].exists)
+        // Live photo review is not a primary destination, so it carries no dock
+        // at all. This stays an existence check: asking whether a missing
+        // element is selected raises instead of failing the way it reads.
+        XCTAssertFalse(app.buttons["dock.trophy-wall"].exists)
         XCTAssertFalse(app.staticTexts["Listing Review"].exists)
         XCTAssertFalse(app.buttons["Cancel"].exists)
         // Announcement once-per-event remains the direct submission effect-consumer
@@ -744,8 +739,8 @@ final class SnapListUITests: XCTestCase {
             XCTAssertTrue(recoveryLibrary.isEnabled)
         }
 
-        XCTAssertTrue(app.buttons["scan.tab"].isSelected)
-        XCTAssertFalse(app.buttons["trophy-wall.tab"].isSelected)
+        XCTAssertTrue(app.buttons["dock.scan"].isSelected)
+        XCTAssertFalse(app.buttons["dock.trophy-wall"].isSelected)
         XCTAssertFalse(app.staticTexts["Listing Review"].exists)
         XCTAssertFalse(app.buttons["Cancel"].exists)
         // Announcement delivery remains the direct B1 effect-consumer contract.
@@ -970,7 +965,7 @@ final class SnapListUITests: XCTestCase {
         let zero = launch(extraArguments: ["--visual-state=CAM-01"])
 
         for identifier in [
-            "scan.flash", "scan.library", "scan.shutter", "scan.tab", "trophy-wall.tab"
+            "scan.flash", "scan.library", "scan.shutter", "dock.scan", "dock.trophy-wall"
         ] {
             XCTAssertTrue(zero.buttons[identifier].waitForExistence(timeout: 2), identifier)
         }
@@ -993,8 +988,8 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(unavailable.buttons["scan.choose-library"].exists)
         XCTAssertFalse(unavailable.buttons["scan.open-settings"].exists)
         XCTAssertFalse(unavailable.buttons["scan.flash"].exists)
-        XCTAssertTrue(unavailable.buttons["scan.tab"].exists)
-        XCTAssertTrue(unavailable.buttons["trophy-wall.tab"].exists)
+        XCTAssertTrue(unavailable.buttons["dock.scan"].exists)
+        XCTAssertTrue(unavailable.buttons["dock.trophy-wall"].exists)
         unavailable.terminate()
 
         let denied = launch(extraArguments: ["--visual-state=CAM-V2"])
@@ -1528,8 +1523,8 @@ final class SnapListUITests: XCTestCase {
             app.buttons["scan.library"],
             app.buttons["scan.shutter"],
             app.buttons["scan.review"],
-            app.buttons["scan.tab"],
-            app.buttons["trophy-wall.tab"]
+            app.buttons["dock.scan"],
+            app.buttons["dock.trophy-wall"]
         ] {
             XCTAssertTrue(control.waitForExistence(timeout: 2))
             XCTAssertGreaterThanOrEqual(
@@ -1599,9 +1594,8 @@ final class SnapListUITests: XCTestCase {
         app.buttons["dock.trophy-wall"].tap()
         let processing = app.buttons["trophy.wall.processing"]
         let account = app.buttons["trophy.wall.account"]
-        let capture = app.buttons["dock.capture"]
 
-        for control in [processing, account, capture] {
+        for control in [processing, account] {
             XCTAssertTrue(control.exists)
             XCTAssertGreaterThanOrEqual(control.frame.width, 44)
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
@@ -1609,7 +1603,7 @@ final class SnapListUITests: XCTestCase {
 
         XCTAssertEqual(processing.label, "Processing")
         XCTAssertEqual(account.label, "Account, opens Settings")
-        XCTAssertEqual(capture.label, "Capture a new item")
+        XCTAssertFalse(app.buttons["dock.capture"].exists)
 
         processing.tap()
         XCTAssertTrue(app.otherElements["trophy.processing"].waitForExistence(timeout: 2))
@@ -1693,17 +1687,18 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["trophy.wall"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["trophy.wall.processing"].exists)
         XCTAssertTrue(app.buttons["trophy.wall.account"].exists)
-        XCTAssertTrue(app.buttons["dock.capture"].exists)
+        XCTAssertTrue(app.buttons["dock.scan"].exists)
+        XCTAssertTrue(app.buttons["dock.trophy-wall"].exists)
     }
 
     func testFloatingDockRespectsTheBottomSafeArea() {
         let app = launch()
         let window = app.windows.firstMatch
-        let capture = app.buttons["dock.capture"]
+        let trophyWall = app.buttons["dock.trophy-wall"]
 
         XCTAssertTrue(window.exists)
-        XCTAssertTrue(capture.exists)
-        XCTAssertGreaterThan(window.frame.maxY - capture.frame.maxY, 8)
+        XCTAssertTrue(trophyWall.exists)
+        XCTAssertGreaterThan(window.frame.maxY - trophyWall.frame.maxY, 8)
     }
 
     func testApprovedVisualStateLaunchArgumentUsesTypedBoundary() {
@@ -1736,7 +1731,10 @@ final class SnapListUITests: XCTestCase {
 
         app.buttons["button.primary.continue-to-capture"].tap()
         XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Scan"].exists)
+        let scanDock = app.buttons["dock.scan"]
+        XCTAssertTrue(scanDock.exists)
+        XCTAssertTrue(scanDock.isSelected)
+        XCTAssertEqual(scanDock.label, "Scan")
         XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
         XCTAssertTrue(app.buttons["capture.choose-library"].exists)
         XCTAssertFalse(app.staticTexts["Capture entry boundary"].exists)
@@ -2260,6 +2258,31 @@ final class SnapListUITests: XCTestCase {
             app.resetAuthorizationStatus(for: .camera)
         }
         app.launchAfterRetiringPriorInstance()
+        return app
+    }
+
+    /// The dock's third affordance used to open the capture launcher. It was
+    /// removed with the retired seller-operations dock, so the launcher is
+    /// entered here through the onboarding capture boundary the product ships.
+    private func launchCaptureLauncherSheet(
+        extraArguments: [String] = []
+    ) -> XCUIApplication {
+        let app = launchFirstValueOnboarding(
+            resetProgress: true,
+            extraArguments: extraArguments
+        )
+        advanceFirstValueOnboarding(to: "ONB-06", in: app)
+
+        app.buttons["first-value-onboarding.start-scanning"].tap()
+        XCTAssertTrue(
+            app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3)
+        )
+        app.buttons["button.primary.use-camera"].tap()
+        XCTAssertTrue(app.staticTexts["Ready to capture"].waitForExistence(timeout: 3))
+        app.buttons["button.primary.continue-to-capture"].tap()
+        XCTAssertTrue(
+            app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3)
+        )
         return app
     }
 

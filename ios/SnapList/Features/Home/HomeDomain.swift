@@ -1,174 +1,40 @@
 import Foundation
 import Observation
 
-enum HomeSellerState: Hashable, Sendable {
-    case active
-    case newSeller
-}
-
-struct HomeSummary: Hashable, Sendable {
-    let active: Int
-    let drafts: Int
-    let orders: Int?
-}
-
-enum HomeAttentionDestination: Hashable, Sendable {
-    case order(UUID)
-    case conversation(UUID)
-    case publishIssue(UUID)
-    case draft(UUID)
-}
-
-enum HomeAttentionKind: Hashable, Sendable {
-    case shipping
-    case message
-    case offer
-    case warning
-    case pricing
-}
-
-struct HomeAttentionTask: Identifiable, Hashable, Sendable {
-    let id: UUID
-    let itemTitle: String
-    let kind: HomeAttentionKind
-    let status: String
-    let detail: String
-    let actionLabel: String
-    let destination: HomeAttentionDestination
-}
-
-struct HomeCurrentRun: Identifiable, Hashable, Sendable {
-    let id: UUID
-    let itemTitle: String
-    let stageLabel: String
-    let reassurance: String
-    let progress: Double?
-}
-
-struct HomeFinishItem: Identifiable, Hashable, Sendable {
-    let id: UUID
-    let title: String
-    let detail: String
-}
-
-enum HomeListingLifecycle: String, CaseIterable, Hashable, Sendable {
-    case active
-    case draft
-    case sold
-    case needsAttention
-    case resolvedConversation
-}
-
-struct HomeListing: Identifiable, Hashable, Sendable {
-    let id: UUID
-    let title: String
-    let lifecycle: HomeListingLifecycle
-    let statusLabel: String
-    let detail: String
-    let price: String?
-    let destination: HomeAttentionDestination?
-
-    init(
-        id: UUID,
-        title: String,
-        lifecycle: HomeListingLifecycle,
-        statusLabel: String,
-        detail: String,
-        price: String?,
-        destination: HomeAttentionDestination? = nil
-    ) {
-        self.id = id
-        self.title = title
-        self.lifecycle = lifecycle
-        self.statusLabel = statusLabel
-        self.detail = detail
-        self.price = price
-        self.destination = destination
-    }
-
-    var route: HomeRoute {
-        destination?.route ?? .listing(id)
-    }
-}
-
-enum HomeFilter: String, CaseIterable, Identifiable, Hashable, Sendable {
-    case all
-    case active
-    case drafts
-    case sold
-    case needsAttention
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all: "All"
-        case .active: "Active"
-        case .drafts: "Drafts"
-        case .sold: "Sold"
-        case .needsAttention: "Needs attention"
-        }
-    }
-
-    fileprivate func includes(_ listing: HomeListing) -> Bool {
-        switch self {
-        case .all: true
-        case .active: listing.lifecycle == .active
-        case .drafts: listing.lifecycle == .draft
-        case .sold: listing.lifecycle == .sold
-        case .needsAttention: listing.lifecycle == .needsAttention
-        }
-    }
-}
-
-struct HomeModel: Hashable, Sendable {
-    let revision: Int
-    let sellerState: HomeSellerState
-    let unreadNotificationCount: Int
-    let summary: HomeSummary
-    let attention: [HomeAttentionTask]
-    let currentRun: HomeCurrentRun?
-    let readyToFinish: [HomeFinishItem]
-    let listings: [HomeListing]
-    let recentSearches: [String]
-
-    var recentListings: [HomeListing] {
-        Array(listings.prefix(2))
-    }
-
-    init(
-        revision: Int,
-        sellerState: HomeSellerState = .active,
-        unreadNotificationCount: Int,
-        summary: HomeSummary,
-        attention: [HomeAttentionTask],
-        currentRun: HomeCurrentRun?,
-        readyToFinish: [HomeFinishItem],
-        listings: [HomeListing],
-        recentSearches: [String] = []
-    ) {
-        self.revision = revision
-        self.sellerState = sellerState
-        self.unreadNotificationCount = max(0, unreadNotificationCount)
-        self.summary = summary
-        self.attention = attention
-        self.currentRun = currentRun
-        self.readyToFinish = readyToFinish
-        self.listings = listings
-        self.recentSearches = recentSearches
-    }
-
-    func listings(matching query: String, filter: HomeFilter) -> [HomeListing] {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return listings.filter { listing in
-            filter.includes(listing)
-                && (normalizedQuery.isEmpty
-                    || listing.title.localizedCaseInsensitiveContains(normalizedQuery))
-        }
-    }
-}
-
 // MARK: - Trophy Wall domain
+
+/// The approved wall is a two-column, photo-first grid of 4:5 tiles at a
+/// 12-point gutter and a 12-point corner radius. The numbers live here rather
+/// than as literals inside the view so the layout contract can be asserted as a
+/// value instead of measured in pixels through XCUITest, where a passing frame
+/// only proves what the current device happened to lay out.
+enum TrophyWallGridMetrics {
+    static let columnCount = 2
+    static let tileAspectRatio: CGFloat = 4.0 / 5.0
+    static let gutterPoints: CGFloat = 12
+    static let tileCornerRadiusPoints: CGFloat = 12
+    static let bottomPaddingPoints: CGFloat = 132
+}
+
+/// The approved empty wall uses a small optical overlap below Scout so the
+/// visible artwork, rather than the transparent bounds of the asset, owns the
+/// twenty-point gap to the heading.
+enum TrophyWallEmptyMetrics {
+    static let contentSpacing: CGFloat = 20
+    static let scoutHeight: CGFloat = 150
+    static let scoutOpticalBottomInset: CGFloat = -17
+    static let horizontalPadding: CGFloat = 34
+    static let bottomPadding: CGFloat = 104
+}
+
+/// Presentation-only framing for a cleared bundled fixture photo. It does not
+/// alter the run identity or claim a different underlying product.
+enum TrophyWallPhotoCrop: String, Hashable, Sendable {
+    case full
+    case detailLeading
+    case detailTrailing
+    case detailTop
+}
 
 struct TrophyWallPrincipalScope: Hashable, Sendable {
     private let opaqueValue: String
@@ -255,6 +121,8 @@ struct TrophyWallCard: Hashable, Sendable {
     let state: TrophyWallCardState
     fileprivate let itemName: String?
     fileprivate let coverPhotoURL: URL?
+    fileprivate let coverPhotoAssetName: String?
+    fileprivate let coverPhotoCrop: TrophyWallPhotoCrop
     let orderKey: TrophyWallOrderKey
 
     static func pending(
@@ -270,6 +138,8 @@ struct TrophyWallCard: Hashable, Sendable {
             state: .pendingUpload,
             itemName: itemName,
             coverPhotoURL: nil,
+            coverPhotoAssetName: nil,
+            coverPhotoCrop: .full,
             orderKey: TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: logicalIdentity.persistedKey
@@ -283,6 +153,8 @@ struct TrophyWallCard: Hashable, Sendable {
         state: TrophyWallCardState = .accepted,
         itemName: String? = nil,
         coverPhotoURL: URL? = nil,
+        coverPhotoAssetName: String? = nil,
+        coverPhotoCrop: TrophyWallPhotoCrop = .full,
         lastMeaningfulUpdateAt: Date,
         orderKey: TrophyWallOrderKey? = nil
     ) -> TrophyWallCard {
@@ -295,6 +167,8 @@ struct TrophyWallCard: Hashable, Sendable {
             state: state,
             itemName: itemName,
             coverPhotoURL: coverPhotoURL,
+            coverPhotoAssetName: coverPhotoAssetName,
+            coverPhotoCrop: coverPhotoCrop,
             orderKey: orderKey ?? TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: runID.uuidString.lowercased()
@@ -389,6 +263,8 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
     let itemName: String
     let stateLabel: String
     let coverPhotoURL: URL?
+    let coverPhotoAssetName: String?
+    let coverPhotoCrop: TrophyWallPhotoCrop
     let historyOrderAt: Date
 
     init(
@@ -396,17 +272,21 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
         itemName: String,
         stateLabel: String,
         coverPhotoURL: URL? = nil,
+        coverPhotoAssetName: String? = nil,
+        coverPhotoCrop: TrophyWallPhotoCrop = .full,
         historyOrderAt: Date
     ) {
         self.id = id
         self.itemName = itemName
         self.stateLabel = stateLabel
         self.coverPhotoURL = coverPhotoURL
+        self.coverPhotoAssetName = coverPhotoAssetName
+        self.coverPhotoCrop = coverPhotoCrop
         self.historyOrderAt = historyOrderAt
     }
 
     var accessibilityLabel: String {
-        let identity = coverPhotoURL == nil
+        let identity = coverPhotoURL == nil && coverPhotoAssetName == nil
             ? "\(itemName), photo unavailable"
             : itemName
         let relevantDate = historyOrderAt.formatted(
@@ -556,6 +436,8 @@ final class TrophyWallStore {
                 itemName: itemName,
                 stateLabel: stateLabel,
                 coverPhotoURL: card.coverPhotoURL,
+                coverPhotoAssetName: card.coverPhotoAssetName,
+                coverPhotoCrop: card.coverPhotoCrop,
                 historyOrderAt: card.orderKey.lastMeaningfulUpdateAt
             )
         }

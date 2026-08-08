@@ -28,10 +28,16 @@ enum ApprovedVisualStateID: String, CaseIterable, Codable, Identifiable {
     case pricingAllComps = "S1b"
     case pricingSelectedComp = "S2"
     case pricingLimited = "S3"
-    case homeActive = "HOME-01"
-    case homeEmpty = "HOME-02"
-    case homeAttention = "HOME-03"
-    case homeSearch = "HOME-04"
+    // The approved Trophy Wall reuses the two visual-state IDs the capture
+    // tooling already names. HOME-03 and HOME-04 were the attention feed and the
+    // listings search. Both surfaces are gone, but all four IDs are pinned by the
+    // vendored, checksum-locked design manifest, so retiring them from this enum
+    // is a design-authority change rather than a native one. They keep their
+    // original owner and now resolve to the boundary placeholder.
+    case trophyWallSettled = "HOME-01"
+    case trophyWallEmpty = "HOME-02"
+    case retiredSellerHomeAttention = "HOME-03"
+    case retiredSellerHomeSearch = "HOME-04"
     case runList = "RUN-01"
     case runDetail = "RUN-02"
     case runCompact = "RUN-03"
@@ -65,7 +71,9 @@ enum ApprovedVisualStateID: String, CaseIterable, Codable, Identifiable {
         case .scanCameraFirstUse, .scanCameraReturning, .scanCameraPhotos,
              .scanCameraCapped, .scanCameraUnavailable, .scanCameraDenied:
             424
-        case .homeActive, .homeEmpty, .homeAttention, .homeSearch:
+        case .trophyWallSettled, .trophyWallEmpty:
+            729
+        case .retiredSellerHomeAttention, .retiredSellerHomeSearch:
             208
         case .pricingStrong, .pricingAllComps, .pricingSelectedComp, .pricingLimited:
             209
@@ -86,12 +94,11 @@ enum FoundationFixture: String, CaseIterable {
     case trophyProcessing = "trophy-processing"
     case trophyWall = "trophy-wall"
     case account
-    case activity
     case capture
 
     var initialTab: PrimaryTab {
         switch self {
-        case .onboarding, .scan, .activity, .capture: .scan
+        case .onboarding, .scan, .capture: .scan
         case .trophyProcessing, .trophyWall, .account: .trophyWall
         }
     }
@@ -99,7 +106,6 @@ enum FoundationFixture: String, CaseIterable {
     var initialRoute: AppRoute? {
         switch self {
         case .account: .settings
-        case .activity: .activity
         case .onboarding, .scan, .trophyProcessing, .trophyWall, .capture:
             nil
         }
@@ -479,7 +485,7 @@ struct LaunchConfiguration: Equatable {
     }
 
     var initialTab: PrimaryTab {
-        if visualState?.ownerIssue == 208 || visualState == .runDetail {
+        if visualState?.ownerIssue == 729 || visualState == .runDetail {
             return .trophyWall
         }
         return fixture.initialTab

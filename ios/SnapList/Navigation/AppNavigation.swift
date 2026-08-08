@@ -14,82 +14,36 @@ enum PrimaryTab: String, CaseIterable, Identifiable {
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .scan: "camera.viewfinder"
-        case .trophyWall: "list.bullet.rectangle"
-        }
-    }
-}
-
-enum DockDestination: String, CaseIterable, Identifiable {
-    case scan
-    case capture
-    case trophyWall = "trophy-wall"
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .scan: "Scan"
-        case .capture: "Capture"
-        case .trophyWall: "Trophy Wall"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .scan: "camera.viewfinder"
-        case .capture: "camera"
-        case .trophyWall: "list.bullet.rectangle"
-        }
-    }
-
-    var tab: PrimaryTab? {
-        switch self {
-        case .scan: .scan
-        case .capture: nil
-        case .trophyWall: .trophyWall
+    func systemImage(isSelected: Bool) -> String {
+        switch (self, isSelected) {
+        case (.scan, false): "camera"
+        case (.scan, true): "camera.fill"
+        case (.trophyWall, false): "trophy"
+        case (.trophyWall, true): "trophy.fill"
         }
     }
 }
 
 enum FutureBoundary: String, Hashable {
     case account
-    case activity
     case run
     case draft
 }
 
+/// The Trophy Wall stack's destinations. Order, conversation, publish-issue,
+/// draft, listing, listings, and orders were removed with the seller-operations
+/// surface: a destination that no longer exists as a case cannot be constructed
+/// by any view, which is a stronger guarantee than hiding the entry points.
 enum HomeRoute: Hashable {
     case processing
     case localRecovery(TrophyWallLogicalIdentity)
     case run(UUID)
-    case order(UUID)
-    case conversation(UUID)
-    case publishIssue(UUID)
-    case draft(UUID)
-    case listing(UUID)
-    case listings(HomeFilter)
-    case orders
 }
 
 enum AppRoute: Hashable {
     case settings
-    case activity
     case home(HomeRoute)
     case future(FutureBoundary)
-}
-
-extension HomeAttentionDestination {
-    var route: HomeRoute {
-        switch self {
-        case .order(let id): .order(id)
-        case .conversation(let id): .conversation(id)
-        case .publishIssue(let id): .publishIssue(id)
-        case .draft(let id): .draft(id)
-        }
-    }
 }
 
 enum AppSheet: String, Identifiable {
@@ -106,7 +60,6 @@ enum AppFullScreen: String, Identifiable {
 
 enum CaptureBoundaryDestination: Equatable {
     case photoReview
-    case trophyWall
 }
 
 enum CaptureBoundaryOpener: Equatable {
@@ -188,12 +141,8 @@ final class AppRouter {
         )
     }
 
-    func select(_ destination: DockDestination) {
-        if destination == .capture {
-            presentedSheet = .capture
-        } else if let tab = destination.tab {
-            selectedTab = tab
-        }
+    func select(_ tab: PrimaryTab) {
+        selectedTab = tab
     }
 
     func navigate(to route: AppRoute) {
@@ -207,11 +156,7 @@ final class AppRouter {
         photos: [StagedCapturePhoto],
         opener: CaptureBoundaryOpener
     ) {
-        let hasValidPhotoCount = switch destination {
-        case .photoReview: (1...5).contains(photos.count)
-        case .trophyWall: (0...5).contains(photos.count)
-        }
-        guard hasValidPhotoCount else { return }
+        guard (1...5).contains(photos.count) else { return }
         captureBoundaryRequest = CaptureBoundaryRequest(
             destination: destination,
             photos: photos,

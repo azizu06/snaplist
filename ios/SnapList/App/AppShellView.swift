@@ -7,7 +7,6 @@ struct AppShellView: View {
     @Bindable var onboardingModel: OnboardingFlowModel
     @Bindable var firstValueOnboardingModel: FirstValueOnboardingModel
     @Bindable var captureFlow: CaptureFlowModel
-    @Bindable var homeStore: HomeStore
     @Bindable var trophyWallStore: TrophyWallStore
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
@@ -17,7 +16,6 @@ struct AppShellView: View {
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.appDependencies) private var dependencies
-    @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
     @State private var keyboardProbeText = ""
     @State private var pendingCapturePresentation: PendingCapturePresentation?
@@ -100,7 +98,7 @@ struct AppShellView: View {
                         state: visualState,
                         forceReducedMotion: configuration.forceReducedMotion
                     )
-                } else if visualState.ownerIssue == 208 || visualState == .runDetail {
+                } else if visualState.ownerIssue == 729 || visualState == .runDetail {
                     shell
                 } else {
                     VisualStateBoundaryPlaceholder(state: visualState)
@@ -248,26 +246,6 @@ struct AppShellView: View {
                 )
             }
             advanceActivationGuidance(for: .capturedFirstPhoto)
-        }
-        // Home's update loop is suspended from the outermost view. Photo Review replaces
-        // the shell while it is open, so anything attached to the shell stops observing
-        // scene changes exactly when the seller is most likely to background the app.
-        .onChange(of: scenePhase) { _, phase in
-#if DEBUG
-            guard configuration.visualState?.ownerIssue == 208 else { return }
-            switch phase {
-            case .active:
-                homeStore.resumeUpdates()
-                Task { await proGateStore?.refreshPendingVerification() }
-            case .background:
-                homeStore.suspendUpdates()
-                recordActivationInterruptionIfNeeded()
-            case .inactive:
-                break
-            @unknown default:
-                break
-            }
-#endif
         }
         .onChange(
             of: submissionHost.pendingPresentationEvent,
@@ -493,10 +471,10 @@ struct AppShellView: View {
     }
 
     private var shell: some View {
-        TabView(selection: $router.selectedTab) {
+        ZStack {
             ForEach(PrimaryTab.allCases) { tab in
-                NavigationStack(path: router.pathBinding(for: tab)) {
-                    if router.selectedTab == tab {
+                if router.selectedTab == tab {
+                    NavigationStack(path: router.pathBinding(for: tab)) {
                         ZStack(alignment: .top) {
                             primaryFeature(for: tab)
 #if DEBUG
@@ -514,21 +492,13 @@ struct AppShellView: View {
                         }
                     }
                 }
-                .tag(tab)
             }
         }
-        .toolbar(.hidden, for: .tabBar)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if DockVisibilityPolicy.shouldShow(isKeyboardVisible: isKeyboardVisible) {
-                FloatingDock(
-                    selectedTab: router.selectedTab,
-                    select: router.select
-                )
-                .padding(.horizontal, SnapListMetrics.dockSideInset)
-                .padding(.bottom, SnapListMetrics.dockBottomInset)
-                .transition(.opacity)
-            }
-        }
+        .floatingDock(
+            selectedTab: router.selectedTab,
+            isVisible: DockVisibilityPolicy.shouldShow(isKeyboardVisible: isKeyboardVisible),
+            select: router.select
+        )
         .animation(
             reduceMotion ? nil : .easeInOut(duration: 0.16),
             value: isKeyboardVisible
@@ -596,8 +566,6 @@ struct AppShellView: View {
                 onScan: {},
                 onTryAgain: {}
             )
-        } else if configuration.visualState?.ownerIssue == 208 {
-            sellerHomeFeature
         } else {
             trophyWallFeature
         }
@@ -612,17 +580,6 @@ struct AppShellView: View {
             store: trophyWallStore,
             repository: trophyWallHistoryRepository,
             refreshState: $trophyWallCollectionRefreshState
-        )
-    }
-
-    private var sellerHomeFeature: some View {
-        HomeFeatureView(
-            store: homeStore,
-            visualState: configuration.visualState,
-            openActivity: { router.navigate(to: .activity) },
-            openAccount: { router.navigate(to: .settings) },
-            openCapture: { router.select(.capture) },
-            openRoute: { router.navigate(to: .home($0)) }
         )
     }
 
@@ -653,8 +610,6 @@ struct AppShellView: View {
                     )
                 }
             )
-        case .activity:
-            FoundationDestinationView(destination: .activity)
         case .home(let route):
             switch route {
             case .processing:
@@ -708,8 +663,6 @@ struct AppShellView: View {
                         advanceActivationGuidance(for: .editedListing)
                     }
                 )
-            default:
-                HomeRouteBoundaryView(route: route)
             }
         case .future(let boundary):
             FoundationDestinationView(destination: boundary)
@@ -873,6 +826,13 @@ struct AppShellView: View {
         }
     }
 
+    /// Currently uncalled. Its only caller was a `scenePhase` observer whose body
+    /// was gated on the retired seller-Home fixture, so neither this nor the
+    /// pro-gate verification refresh beside it could run in production or in any
+    /// other fixture. Removing that observer with the surface it belonged to
+    /// changes no observable behavior; rewiring scene-phase work is an activation
+    /// and pro-gate decision, not a Trophy Wall one, so the logic is kept intact
+    /// for the issue that owns it.
     private func recordActivationInterruptionIfNeeded() {
         guard shouldPresentActivation,
               activationProgress.recordInterruption() == .advanced else { return }
@@ -1828,7 +1788,6 @@ private struct TrophyWallProcessingDestinationView: View {
             evaluator: dependencies.framingEvaluator,
             intake: dependencies.nativeIntake
         ),
-        homeStore: HomeStore(repository: HomeFixtureRepository(model: HomeFixtures.active)),
         trophyWallStore: trophyWallStore,
         runStore: RunDetailStore(
             service: UnavailableRunService(),

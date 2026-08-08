@@ -4,7 +4,6 @@ import XCTest
 final class AccessibilityFoundationTests: XCTestCase {
     func testFoundationTouchTargetsAreAtLeastFortyFourPoints() {
         XCTAssertGreaterThanOrEqual(SnapListMetrics.minimumTouchTarget, 44)
-        XCTAssertGreaterThanOrEqual(SnapListMetrics.captureWidth, 44)
         XCTAssertGreaterThanOrEqual(SnapListMetrics.primaryButtonHeight, 44)
     }
 

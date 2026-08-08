@@ -23,7 +23,6 @@ struct FoundationDestinationView: View {
     private var title: String {
         switch destination {
         case .account: "Account"
-        case .activity: "Activity"
         case .run: "Run"
         case .draft: "Draft"
         }
