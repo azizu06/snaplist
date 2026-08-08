@@ -43,7 +43,16 @@ struct AppShellView: View {
 
     var body: some View {
         Group {
-            if let proGateFixture = configuration.proGateFixture {
+            if let ebayPublishFixture = configuration.ebayPublishFixture {
+#if DEBUG
+                EbayPublishFixtureHostView(
+                    fixture: ebayPublishFixture,
+                    forceReducedMotion: configuration.forceReducedMotion
+                )
+#else
+                shell
+#endif
+            } else if let proGateFixture = configuration.proGateFixture {
 #if DEBUG
                 ProGateFixtureHostView(fixture: proGateFixture)
 #else

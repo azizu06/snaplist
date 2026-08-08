@@ -675,10 +675,12 @@ struct ListingReviewView: View {
             ListingReviewCorrectionBoundaryView()
         case .ebayPublish:
             if let snapshot = store.snapshot,
-               store.draft != nil,
+               let draft = store.draft,
                !store.isDirty {
                 EbayPublishJourneyHost(
                     listingID: snapshot.binding.listingID,
+                    listingTitle: draft.title,
+                    coverPhotoURL: snapshot.photos.first?.url,
                     dependencies: dependencies,
                     forceReducedMotion: forceReducedMotion,
                     backToListing: { self.destination = nil },

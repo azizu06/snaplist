@@ -71,6 +71,7 @@ ios/SnapList/Features/Capture/VoiceNoteDomain.swift
 ios/SnapList/Features/Capture/VoiceNoteView.swift
 ios/SnapList/Features/EbayPublish/EbayPublishClient.swift
 ios/SnapList/Features/EbayPublish/EbayPublishDelivery.swift
+ios/SnapList/Features/EbayPublish/EbayPublishFixtureView.swift
 ios/SnapList/Features/EbayPublish/EbayPublishFlow.swift
 ios/SnapList/Features/EbayPublish/EbayPublishView.swift
 ios/SnapList/Features/EbayPublish/GuestClaimClient.swift

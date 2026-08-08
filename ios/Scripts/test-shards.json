@@ -21,6 +21,8 @@
       "SnapListTests"
     ],
     "ui-1": [
+      "SnapListUITests/EbayPublishUITests/testApprovedV5FixturesProjectAllFourSellerVisibleStates",
+      "SnapListUITests/EbayPublishUITests/testApprovedV5ResultStatesKeepTraversalAndActionsReachableAtAccessibility3",
       "SnapListUITests/SnapListUITests/testPhotoReviewHardwareKeyboardControlLeftMovesSelectedSecondPhotoToCoverWithReducedMotion",
       "SnapListUITests/HomeUITests/testApprovedTrophyWallStatesRenderTheirDurableTruth",
       "SnapListUITests/HomeUITests/testCompletedRunOffersReviewCopyOnlyWhenServerAllowsIt",
