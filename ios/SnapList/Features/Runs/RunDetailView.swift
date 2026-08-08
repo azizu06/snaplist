@@ -13,12 +13,12 @@ struct RunDetailView: View {
     var activationListingReviewOpened: () -> Void = {}
     var activationListingReviewDismissed: () -> Void = {}
     var activationListingReviewInteraction: () -> Void = {}
-    @State private var presentsListingReview = false
-    @State private var isOpeningReview = false
-    @State private var reviewOpenFailed = false
+    @State private var listingReviewPresentation =
+        ListingReviewPresentationHost()
     @AccessibilityFocusState private var reviewOpenerFocused: Bool
 
     var body: some View {
+        @Bindable var listingReviewPresentation = listingReviewPresentation
         ScrollView {
             VStack(alignment: .leading, spacing: SnapListMetrics.screenGutter) {
                 switch store.state {
@@ -69,12 +69,12 @@ struct RunDetailView: View {
         .onAppear {
             activationProcessingOpened()
         }
-        .onChange(of: presentsListingReview) { _, isPresented in
+        .onChange(of: listingReviewPresentation.isPresented) { _, isPresented in
             if !isPresented {
                 activationListingReviewDismissed()
             }
         }
-        .navigationDestination(isPresented: $presentsListingReview) {
+        .navigationDestination(isPresented: $listingReviewPresentation.isPresented) {
             ListingReviewView(
                 store: listingReviewStore,
                 correctionAvailable: correctionAvailable,
@@ -114,11 +114,11 @@ struct RunDetailView: View {
                     Task { await openListingReview(review) }
                 } label: {
                     HStack(spacing: 8) {
-                        if isOpeningReview {
+                        if listingReviewPresentation.isOpening {
                             ProgressView()
                                 .accessibilityHidden(true)
                         }
-                        Text(isOpeningReview ? "Opening…" : "Review")
+                        Text(listingReviewPresentation.isOpening ? "Opening…" : "Review")
                             .snapListTypography(.rowTitle)
                     }
                     .frame(minHeight: SnapListMetrics.minimumTouchTarget)
@@ -130,13 +130,13 @@ struct RunDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(SnapListColorToken.action.color)
-                .disabled(isOpeningReview)
+                .disabled(listingReviewPresentation.isOpening)
                 .accessibilityLabel("Review \(run.item?.title ?? "listing")")
                 .accessibilityFocused($reviewOpenerFocused)
                 .accessibilityIdentifier("run.review.open")
             }
 
-            if reviewOpenFailed {
+            if listingReviewPresentation.openFailed {
                 Text(ListingReviewCopy.openFailed)
                     .snapListTypography(.body)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
@@ -180,25 +180,18 @@ struct RunDetailView: View {
     private func openListingReview(
         _ review: ListingReviewResult
     ) async {
-        guard !isOpeningReview else { return }
-        isOpeningReview = true
-        reviewOpenFailed = false
-        let opened = await listingReviewStore.open(review)
-        isOpeningReview = false
+        let opened = await listingReviewPresentation.open(
+            review,
+            expecting: review.binding,
+            using: listingReviewStore
+        )
         if opened {
-            presentsListingReview = true
             activationListingReviewOpened()
-        } else {
-            reviewOpenFailed = true
-            ListingReviewAnnouncement.post(
-                ListingReviewCopy.openFailed,
-                assertive: true
-            )
         }
     }
 
     private func dismissListingReview() {
-        presentsListingReview = false
+        listingReviewPresentation.dismiss()
         reviewOpenerFocused = true
     }
 }

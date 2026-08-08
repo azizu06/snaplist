@@ -147,6 +147,9 @@ struct ListingReviewView: View {
         // as `listing-review`.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("listing-review")
+        .accessibilityValue(
+            store.snapshot?.binding.accessibilityIdentifier ?? ""
+        )
         .overlay(alignment: .topLeading) {
 #if DEBUG
             // A simulator with the system setting off leaves

@@ -40,6 +40,15 @@ struct ListingReviewBinding: Codable, Equatable, Sendable {
     }
 }
 
+extension ListingReviewBinding {
+    /// Public UI identity intentionally includes only the canonical run and
+    /// listing UUIDs. Revision values and any persisted draft state stay out
+    /// of the accessibility tree.
+    var accessibilityIdentifier: String {
+        "listing-review.binding.run.\(runID.uuidString.lowercased()).listing.\(listingID.uuidString.lowercased())"
+    }
+}
+
 struct ListingReviewPhoto: Codable, Equatable, Sendable {
     let ordinal: Int
     let url: URL

@@ -559,12 +559,32 @@ struct AppShellView: View {
     private var homeFeature: some View {
 #if DEBUG
         if configuration.fixture == .trophyProcessing {
-            TrophyWallProcessingView(
-                rows: TrophyWallProcessingLaunchFixture.rows,
+            ProcessingListingReviewSurface(
+                store: TrophyWallProcessingLaunchFixture.store,
                 onBack: {},
                 openRoute: { router.navigate(to: .home($0)) },
-                onScan: {},
-                onTryAgain: {}
+                onScan: {
+                    router.reset(tab: .scan)
+                    router.selectedTab = .scan
+                },
+                goToTrophyWall: {
+                    router.reset(tab: .trophyWall)
+                    router.selectedTab = .trophyWall
+                },
+                onTryAgain: {},
+                runStore: runStore,
+                listingReviewStore: listingReviewStore,
+                correctionAvailable: configuration.listingReviewCorrectionAvailable,
+                forceReducedMotion: configuration.forceReducedMotion,
+                activationListingReviewOpened: {
+                    activationListingReviewPresented = true
+                },
+                activationListingReviewDismissed: {
+                    activationListingReviewPresented = false
+                },
+                activationListingReviewInteraction: {
+                    advanceActivationGuidance(for: .editedListing)
+                }
             )
         } else {
             trophyWallFeature
@@ -621,6 +641,20 @@ struct AppShellView: View {
                 TrophyWallProcessingDestinationView(
                     store: trophyWallStore,
                     repository: trophyWallHistoryRepository,
+                    runStore: runStore,
+                    listingReviewStore: listingReviewStore,
+                    correctionAvailable:
+                        configuration.listingReviewCorrectionAvailable,
+                    forceReducedMotion: configuration.forceReducedMotion,
+                    activationListingReviewOpened: {
+                        activationListingReviewPresented = true
+                    },
+                    activationListingReviewDismissed: {
+                        activationListingReviewPresented = false
+                    },
+                    activationListingReviewInteraction: {
+                        advanceActivationGuidance(for: .editedListing)
+                    },
                     openRoute: { destination in
                         if case .localRecovery(let logicalIdentity) = destination {
                             router.openLocalRecovery(
@@ -635,6 +669,10 @@ struct AppShellView: View {
                     onScan: {
                         router.reset(tab: .scan)
                         router.selectedTab = .scan
+                    },
+                    goToTrophyWall: {
+                        router.reset(tab: .trophyWall)
+                        router.selectedTab = .trophyWall
                     }
                 )
             case .localRecovery:
@@ -1094,8 +1132,7 @@ private enum TrophyWallProcessingLaunchFixture {
         opaqueValue: "trophy-processing-fixture"
     )
 
-    static var rows: [TrophyWallProcessingRow] {
-        TrophyWallStore(
+    static let store = TrophyWallStore(
             principalScope: principal,
             repository: Repository(
                 cards: [
@@ -1104,49 +1141,55 @@ private enum TrophyWallProcessingLaunchFixture {
                         runID: UUID(
                             uuidString: "37500000-0000-4000-8000-000000000003"
                         )!,
+                        state: .readyToReview,
                         itemName: "Vintage Pyrex bowl set",
-                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 30)
-                    ),
-                    .pending(
-                        principalScope: principal,
-                        logicalIdentity: TrophyWallLogicalIdentity(
-                            idempotencyKey: UUID(
-                                uuidString: "37500000-0000-4000-8000-000000000002"
-                            )!
-                        ),
-                        itemName: "Nintendo Game Boy",
-                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 10)
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 50)
                     ),
                     .accepted(
                         principalScope: principal,
                         runID: UUID(
                             uuidString: "37500000-0000-4000-8000-000000000004"
                         )!,
+                        state: .needsRetryLocked(
+                            detail: "The last attempt did not finish."
+                        ),
                         itemName: "Canon AE-1 film camera",
-                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 9)
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 40)
                     ),
                     .accepted(
                         principalScope: principal,
                         runID: UUID(
                             uuidString: "37500000-0000-4000-8000-000000000005"
                         )!,
-                        itemName: "Hidden accepted row",
-                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 8)
-                    ),
-                    .pending(
-                        principalScope: principal,
-                        logicalIdentity: TrophyWallLogicalIdentity(
-                            idempotencyKey: UUID(
-                                uuidString: "37500000-0000-4000-8000-000000000006"
-                            )!
+                        state: .needsNewCapture(
+                            detail: "Add a new photo to try again."
                         ),
-                        itemName: "Hidden pending row",
-                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 7)
+                        itemName: "Nintendo Game Boy",
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 30)
+                    ),
+                    .accepted(
+                        principalScope: principal,
+                        runID: UUID(
+                            uuidString: "37500000-0000-4000-8000-000000000006"
+                        )!,
+                        state: .retrying,
+                        itemName: "Sony Walkman",
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 20)
+                    ),
+                    .accepted(
+                        principalScope: principal,
+                        runID: UUID(
+                            uuidString: "37500000-0000-4000-8000-000000000007"
+                        )!,
+                        state: .notListed(
+                            detail: "This item could not be processed."
+                        ),
+                        itemName: "Polaroid camera",
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 10)
                     ),
                 ]
             )
-        ).processingRows
-    }
+        )
 
     private struct Repository: TrophyWallRepository {
         let cards: [TrophyWallCard]
@@ -1746,22 +1789,98 @@ private struct TrophyWallProcessingDestinationView: View {
 
     @Bindable var store: TrophyWallStore
     let repository: any TrophyWallRunHistoryRepository
+    @Bindable var runStore: RunDetailStore
+    @Bindable var listingReviewStore: ListingReviewStore
+    let correctionAvailable: Bool
+    let forceReducedMotion: Bool
+    let activationListingReviewOpened: () -> Void
+    let activationListingReviewDismissed: () -> Void
+    let activationListingReviewInteraction: () -> Void
     let openRoute: (HomeRoute) -> Void
     let onScan: () -> Void
+    let goToTrophyWall: () -> Void
 
     var body: some View {
+        ProcessingListingReviewSurface(
+            store: store,
+            onBack: { dismiss() },
+            openRoute: openRoute,
+            onScan: onScan,
+            goToTrophyWall: goToTrophyWall,
+            onTryAgain: {
+                Task { await store.recoverCollection(using: repository) }
+            },
+            runStore: runStore,
+            listingReviewStore: listingReviewStore,
+            correctionAvailable: correctionAvailable,
+            forceReducedMotion: forceReducedMotion,
+            activationListingReviewOpened: activationListingReviewOpened,
+            activationListingReviewDismissed: activationListingReviewDismissed,
+            activationListingReviewInteraction: activationListingReviewInteraction
+        )
+        .navigationBarBackButtonHidden(true)
+    }
+}
+
+@MainActor
+private struct ProcessingListingReviewSurface: View {
+    @Bindable var store: TrophyWallStore
+    let onBack: () -> Void
+    let openRoute: (HomeRoute) -> Void
+    let onScan: () -> Void
+    let goToTrophyWall: () -> Void
+    let onTryAgain: () -> Void
+    @Bindable var runStore: RunDetailStore
+    @Bindable var listingReviewStore: ListingReviewStore
+    let correctionAvailable: Bool
+    let forceReducedMotion: Bool
+    let activationListingReviewOpened: () -> Void
+    let activationListingReviewDismissed: () -> Void
+    let activationListingReviewInteraction: () -> Void
+    @State private var listingReviewPresentation =
+        ListingReviewPresentationHost()
+
+    var body: some View {
+        @Bindable var listingReviewPresentation = listingReviewPresentation
         TrophyWallProcessingView(
             rows: store.processingRows,
             collectionOutcome: store.collectionOutcome,
             refreshRecovery: store.collectionRefreshRecovery,
-            onBack: { dismiss() },
+            onBack: onBack,
             openRoute: openRoute,
+            onAction: { action in
+                let executor = ProcessingActionExecutor(
+                    runStore: runStore,
+                    listingReviewStore: listingReviewStore,
+                    listingReviewPresentation: listingReviewPresentation,
+                    applyRetryResult: { store.applyRetryResult($0) },
+                    selectScan: onScan
+                )
+                Task {
+                    if await executor.execute(action) == .presentedReview {
+                        activationListingReviewOpened()
+                    }
+                }
+            },
             onScan: onScan,
-            onTryAgain: {
-                Task { await store.recoverCollection(using: repository) }
-            }
+            onTryAgain: onTryAgain
         )
-        .navigationBarBackButtonHidden(true)
+        .navigationDestination(isPresented: $listingReviewPresentation.isPresented) {
+            ListingReviewView(
+                store: listingReviewStore,
+                correctionAvailable: correctionAvailable,
+                forceReducedMotion: forceReducedMotion,
+                dismissReview: { listingReviewPresentation.dismiss() },
+                goToTrophyWall: goToTrophyWall,
+                startNewItem: onScan,
+                activationInteraction: activationListingReviewInteraction
+            )
+        }
+        .onChange(of: listingReviewPresentation.isPresented) { _, isPresented in
+            if !isPresented {
+                activationListingReviewDismissed()
+            }
+        }
     }
 }
 

@@ -77,9 +77,12 @@ enum TrophyWallCardState: Hashable, Sendable {
     case workingGenerating
     case workingPricing
     case workingPersisting
+    case retrying
     case readyToReview
     case readyToReviewLocked
     case needsRetryLocked(detail: String)
+    case needsNewCapture(detail: String)
+    case notListed(detail: String)
     case publishedToEbay
     case exportPrepared
 }
@@ -177,11 +180,18 @@ struct TrophyWallCard: Hashable, Sendable {
     }
 }
 
+enum TrophyWallProcessingAction: Hashable {
+    case review(runID: UUID)
+    case retry(runID: UUID)
+    case scan(runID: UUID)
+}
+
 struct TrophyWallProcessingRow: Identifiable, Hashable {
     let id: TrophyWallCardIdentity
     let itemName: String
     let stateLabel: String
     let destination: HomeRoute?
+    let action: TrophyWallProcessingAction?
     let accessibilityLabel: String
     let accessibilityIdentifier: String
 
@@ -196,6 +206,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
         switch card.state {
         case .pendingUpload:
             stateLabel = "Pending upload"
+            action = nil
             guard case .local(let logicalIdentity) = card.identity else {
                 return nil
             }
@@ -212,45 +223,67 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
              .workingGenerating,
              .workingPricing,
              .workingPersisting,
+             .retrying,
              .readyToReview,
              .readyToReviewLocked,
              .needsRetryLocked,
+             .needsNewCapture,
+             .notListed,
              .publishedToEbay,
              .exportPrepared:
-            if case .run(let runID) = card.identity {
-                destination = .run(runID)
-                accessibilityIdentifier =
-                    "trophy.processing.row.run.\(runID.uuidString.lowercased())"
-            } else {
+            guard case .run(let runID) = card.identity else {
                 return nil
             }
+            destination = .run(runID)
+            accessibilityIdentifier =
+                "trophy.processing.row.run.\(runID.uuidString.lowercased())"
 
             switch card.state {
             case .accepted:
                 stateLabel = "Accepted"
+                action = nil
                 accessibilityLabel = "\(itemName), accepted."
             case .workingIdentifying:
                 stateLabel = "Identifying"
+                action = nil
                 accessibilityLabel = "\(itemName), working, identifying."
             case .workingGenerating:
                 stateLabel = "Writing listing"
+                action = nil
                 accessibilityLabel = "\(itemName), working, writing listing."
             case .workingPricing:
                 stateLabel = "Pricing"
+                action = nil
                 accessibilityLabel = "\(itemName), working, pricing."
             case .workingPersisting:
                 stateLabel = "Saving"
+                action = nil
                 accessibilityLabel = "\(itemName), working, saving."
+            case .retrying:
+                stateLabel = "Retrying"
+                action = nil
+                accessibilityLabel = "\(itemName), retrying."
             case .readyToReview:
                 stateLabel = "Ready to review"
+                action = .review(runID: runID)
                 accessibilityLabel = "\(itemName), ready to review."
             case .readyToReviewLocked:
                 stateLabel = "Ready to review"
+                action = nil
                 accessibilityLabel =
                     "\(itemName), ready to review. Review is not available yet."
             case .needsRetryLocked(let detail):
                 stateLabel = "Needs retry · \(detail)"
+                action = .retry(runID: runID)
                 accessibilityLabel = "\(itemName), needs retry. \(detail)"
+            case .needsNewCapture(let detail):
+                stateLabel = "Needs retry · \(detail)"
+                action = .scan(runID: runID)
+                accessibilityLabel = "\(itemName), needs retry. \(detail)"
+            case .notListed(let detail):
+                stateLabel = detail
+                action = nil
+                accessibilityLabel = "\(itemName), not listed. \(detail)"
             case .pendingUpload, .publishedToEbay, .exportPrepared:
                 return nil
             }
@@ -799,6 +832,35 @@ final class TrophyWallStore {
         )
     }
 
+    /// Projects only a retry response the server accepted for the already
+    /// visible exact retryable run. It never refreshes the collection, creates
+    /// a handoff, or reorders the wall.
+    @discardableResult
+    func applyRetryResult(_ run: DurableRun) -> Bool {
+        guard run.schemaVersion == 1,
+              let state = Self.retryProjectionState(for: run),
+              let index = cards.firstIndex(where: { $0.identity == .run(run.id) }),
+              case .needsRetryLocked = cards[index].state,
+              case .run(let runID) = cards[index].identity,
+              runID == run.id else {
+            return false
+        }
+
+        let card = cards[index]
+        cards[index] = .accepted(
+            principalScope: card.principalScope,
+            runID: runID,
+            state: state,
+            itemName: card.itemName,
+            coverPhotoURL: card.coverPhotoURL,
+            coverPhotoAssetName: card.coverPhotoAssetName,
+            coverPhotoCrop: card.coverPhotoCrop,
+            lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
+            orderKey: card.orderKey
+        )
+        return true
+    }
+
     private static func isExplicitRetryCleanup(_ runDetail: DurableRun) -> Bool {
         guard runDetail.status == .failed,
               runDetail.terminalOutcome == .failed,
@@ -813,6 +875,27 @@ final class TrophyWallStore {
             && !runDetail.legalActions.canOpenReview
     }
 
+    private static func retryProjectionState(
+        for runDetail: DurableRun
+    ) -> TrophyWallCardState? {
+        switch (runDetail.status, runDetail.stage) {
+        case (.queued, .queued):
+            .accepted
+        case (.retrying, .queued):
+            .retrying
+        case (.retrying, .identifying):
+            .workingIdentifying
+        case (.retrying, .generating):
+            .workingGenerating
+        case (.retrying, .pricing):
+            .workingPricing
+        case (.retrying, .persisting):
+            .workingPersisting
+        default:
+            nil
+        }
+    }
+
     private static func cardState(for runDetail: DurableRun) -> TrophyWallCardState? {
         if runDetail.delivery?.state == .publishedToEbay {
             return .publishedToEbay
@@ -820,9 +903,14 @@ final class TrophyWallStore {
         if runDetail.delivery?.state == .exportPrepared {
             return .exportPrepared
         }
+        if isExplicitRetryCleanup(runDetail) {
+            return nil
+        }
         switch (runDetail.status, runDetail.stage) {
         case (.queued, .queued):
             return .accepted
+        case (.retrying, .queued):
+            return .retrying
         case (.running, .identifying), (.retrying, .identifying):
             return .workingIdentifying
         case (.running, .generating), (.retrying, .generating):
@@ -850,6 +938,17 @@ final class TrophyWallStore {
                 && !runDetail.legalActions.canOpenReview:
             guard let safeFailure = runDetail.safeFailure else { return nil }
             return .needsRetryLocked(detail: safeFailure.detail)
+        case (.failed, _)
+            where runDetail.terminalOutcome == .failed
+                && runDetail.safeFailure?.retryable == false
+                && !runDetail.legalActions.canRetry
+                && !runDetail.legalActions.canCancel
+                && !runDetail.legalActions.canOpenReview:
+            guard let safeFailure = runDetail.safeFailure else { return nil }
+            if runDetail.legalActions.canStartNewCapture {
+                return .needsNewCapture(detail: safeFailure.detail)
+            }
+            return .notListed(detail: safeFailure.detail)
         default:
             return nil
         }
