@@ -6,9 +6,8 @@ import UniformTypeIdentifiers
 import ImageIO
 #endif
 
-enum PhotoReviewV14VisualContract {
-    static let heroMinimumHeight: CGFloat = 196
-    static let heroMaximumHeight: CGFloat = 420
+enum PhotoReviewV5VisualContract {
+    static let heroHeight: CGFloat = 300
     static let headerMinimumHeight: CGFloat = 56
     static let backTargetSize: CGFloat = 44
     static let countFillHex = SnapListColorToken.quietFill.rawValue
@@ -19,44 +18,6 @@ enum PhotoReviewV14VisualContract {
     static let coverVerticalPadding: CGFloat = 1
     static let coverHorizontalPadding: CGFloat = 7
     static let coverHasOutline = false
-}
-
-enum PhotoReviewV14AdaptiveLayout {
-    private static let actionRowHeight: CGFloat = 55
-    private static let maximumCapEntryAllowance: CGFloat = 4
-
-    /// The native middle-column proofs leave approximately 224 points
-    /// for padding, the thumbnail strip, its margins, and the Voice note row.
-    /// Accessibility text increases that fixed share to approximately 274 points.
-    /// The approved REV-04 action row consumes another 55 points of the native
-    /// middle-column share at the canonical 390 x 844 package canvas.
-    /// The hero receives the remaining finite viewport height, matching CSS
-    /// `flex: 1 1 auto` without turning the 420-point cap into a fixed height.
-    static func heroHeight(
-        availableMiddleHeight: CGFloat,
-        dynamicTypeSize: DynamicTypeSize,
-        presentsActions: Bool = false
-    ) -> CGFloat {
-        var fixedContentHeight: CGFloat =
-            dynamicTypeSize.isAccessibilitySize ? 274 : 224
-        if presentsActions {
-            fixedContentHeight += actionRowHeight
-        }
-        let flexibleHeight = availableMiddleHeight - fixedContentHeight
-        // The exact 402 x 874 native viewport reports four fewer flexible
-        // points than the package canvas at the max-height boundary. Entering
-        // the cap within that measured allowance preserves the CSS max while
-        // leaving every sub-cap adaptive and action-open anchor unchanged.
-        if flexibleHeight
-            >= PhotoReviewV14VisualContract.heroMaximumHeight
-                - maximumCapEntryAllowance {
-            return PhotoReviewV14VisualContract.heroMaximumHeight
-        }
-        return max(
-            flexibleHeight,
-            PhotoReviewV14VisualContract.heroMinimumHeight
-        )
-    }
 }
 
 enum PhotoReviewLayoutLandmark: Hashable {
@@ -3226,12 +3187,7 @@ struct PhotoReviewView: View {
                 .photoReviewLayoutLandmark(.header)
 
             GeometryReader { viewport in
-                let heroHeight =
-                    PhotoReviewV14AdaptiveLayout.heroHeight(
-                        availableMiddleHeight: viewport.size.height,
-                        dynamicTypeSize: dynamicTypeSize,
-                        presentsActions: store.actionsPhotoID != nil
-                    )
+                let heroHeight = PhotoReviewV5VisualContract.heroHeight
                 ScrollView {
                     VStack(spacing: 16) {
                         if let visibleMessage = submissionPresentation.visibleMessage {
@@ -3269,10 +3225,9 @@ struct PhotoReviewView: View {
                     .padding(.horizontal, SnapListMetrics.screenGutter)
                     .padding(.top, 16)
                     .padding(.bottom, 8)
-                    // The v1.4 hero is the only flexible child. Giving the content
-                    // the real scroll viewport lets it absorb available height until
-                    // its declared 420pt cap, while compact screens fall back to the
-                    // 196pt floor and remain scrollable.
+                    // Live Photo Review v5 fixes the hero at 300pt. The scroll viewport
+                    // keeps the remaining review content reachable on compact screens
+                    // and at larger Dynamic Type sizes.
                     .frame(minHeight: viewport.size.height, alignment: .top)
                 }
                 // The screen identity stays on the scrolling region itself, so the
@@ -3528,7 +3483,7 @@ struct PhotoReviewView: View {
             }
             .frame(
                 minHeight:
-                    PhotoReviewV14VisualContract.headerMinimumHeight
+                    PhotoReviewV5VisualContract.headerMinimumHeight
             )
             .background(SnapListColorToken.canvas.color)
             .overlay(alignment: .bottom) {
@@ -3549,9 +3504,9 @@ struct PhotoReviewView: View {
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .frame(
                         width:
-                            PhotoReviewV14VisualContract.backTargetSize,
+                            PhotoReviewV5VisualContract.backTargetSize,
                         height:
-                            PhotoReviewV14VisualContract.backTargetSize
+                            PhotoReviewV5VisualContract.backTargetSize
                     )
                     .contentShape(Rectangle())
                     .accessibilityHidden(true)
@@ -3593,7 +3548,7 @@ struct PhotoReviewView: View {
                 SnapListColorToken.quietFill.color,
                 in: RoundedRectangle(
                     cornerRadius:
-                        PhotoReviewV14VisualContract.countRadius
+                        PhotoReviewV5VisualContract.countRadius
                 )
             )
             .fixedSize()
@@ -3750,7 +3705,7 @@ struct PhotoReviewView: View {
             store: store
         )
         return VStack(
-            spacing: PhotoReviewV14VisualContract.coverColumnGap
+            spacing: PhotoReviewV5VisualContract.coverColumnGap
         ) {
             Button {
                 store.selectPhotoForActions(id: photo.id)
@@ -3836,17 +3791,17 @@ struct PhotoReviewView: View {
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .padding(
                         .vertical,
-                        PhotoReviewV14VisualContract.coverVerticalPadding
+                        PhotoReviewV5VisualContract.coverVerticalPadding
                     )
                     .padding(
                         .horizontal,
-                        PhotoReviewV14VisualContract.coverHorizontalPadding
+                        PhotoReviewV5VisualContract.coverHorizontalPadding
                     )
                     .background(
                         SnapListColorToken.quietFill.color,
                         in: RoundedRectangle(
                             cornerRadius:
-                                PhotoReviewV14VisualContract.coverRadius
+                                PhotoReviewV5VisualContract.coverRadius
                         )
                     )
                     .fixedSize()
@@ -4050,9 +4005,8 @@ struct PhotoReviewView: View {
         }
     }
 
-    // The exact live-source v2.1 package controls this row and the sheet interior.
-    // #490 may later consolidate renderer ownership; this issue makes only the smallest
-    // authority correction needed to open #469's recorder.
+    // Live Photo Review v5 owns this collapsed row. Voice Note v8 owns only the
+    // recorder sheet it opens, preserving the typed boundary below.
     private func voiceRow(
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
@@ -4119,7 +4073,7 @@ struct PhotoReviewView: View {
 
     private var voiceNoteRowAccessibilityLabel: String {
         guard let note = voiceNoteStore?.savedNote else {
-            return VoiceNotePresentation.emptyRowAccessibilityLabel
+            return "Voice note, \(VoiceNotePresentation.emptyRowHelper), collapsed"
         }
         return "Voice note, \(VoiceNotePresentation.elapsedText(note.duration)), collapsed"
     }
