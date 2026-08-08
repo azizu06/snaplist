@@ -35,13 +35,18 @@ struct ActivationGuidanceCoachMark: View {
                 .foregroundStyle(coachMark.isDarkSurface ? .white : SnapListColorToken.inkPrimary.color)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Got it", action: dismiss)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(dismissalColor)
-                .frame(
-                    minWidth: SnapListMetrics.minimumTouchTarget,
-                    minHeight: SnapListMetrics.minimumTouchTarget
-                )
+            Button(action: dismiss) {
+                Text("Got it")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(dismissalColor)
+                    // The label owns its target so UIKit exposes the full
+                    // 44-point button frame to accessibility clients.
+                    .frame(
+                        width: SnapListMetrics.minimumTouchTarget,
+                        height: SnapListMetrics.minimumTouchTarget
+                    )
+                    .contentShape(.rect)
+            }
                 .accessibilityLabel("Got it")
                 .accessibilityHint(
                     "Shows the next tip when one remains."
