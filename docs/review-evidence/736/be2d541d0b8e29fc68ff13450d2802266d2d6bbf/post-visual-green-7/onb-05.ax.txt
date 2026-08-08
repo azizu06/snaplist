@@ -1,0 +1,7 @@
+XcodeBuildMCP semantic AX receipt
+State: ONB-05
+Launch arguments: --first-value-onboarding-state=ONB-05 --reduced-motion
+Semantic state node: other, identifier first-value-onboarding.state.ONB-05
+Scroll view: identifier first-value-onboarding.scroll
+Reachable actions: Back (first-value-onboarding.back); Skip (first-value-onboarding.skip); Continue (first-value-onboarding.continue)
+Snapshot count: 37 elements; 3 likely targets; 1 scroll area.

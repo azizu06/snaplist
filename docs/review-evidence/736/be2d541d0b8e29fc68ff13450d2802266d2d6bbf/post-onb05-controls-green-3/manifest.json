@@ -1,0 +1,17 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "B2C86230-4403-497C-9419-33B5347FFAB7",
+        "deviceName" : "iPhone 17 Pro",
+        "exportedFileName" : "7AE31664-7848-470A-BDA1-5DF7EDAC3D12.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "ONB-05-CONTROLS-402x874_0_3400C5C8-578A-4DE8-B268-8B0CBF6485B5.png",
+        "timestamp" : 1786183674.356
+      }
+    ],
+    "testIdentifier" : "SnapListUITests/testFirstValueOnboardingONB05HasApprovedRowsWithoutExtraCaption()",
+    "testIdentifierURL" : "test://com.apple.xcode/SnapList/SnapListUITests/SnapListUITests/testFirstValueOnboardingONB05HasApprovedRowsWithoutExtraCaption"
+  }
+]

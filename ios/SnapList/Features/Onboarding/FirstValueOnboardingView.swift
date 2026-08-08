@@ -7,34 +7,44 @@ struct FirstValueOnboardingView: View {
     let usesStaticScoutRendering: Bool
     /// Receives the completion contract #566 consumes, never a bare "done".
     let didFinish: (FirstValueOnboardingOutcome) -> Void
+    /// Delegates the existing-account handoff to the shell's already-typed route.
+    let openExistingAccount: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @State private var presentsSignIn = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AccessibilityFocusState private var headingIsFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
-                VStack(spacing: 18) {
-                    title
-                        .accessibilityFocused($headingIsFocused)
-                    screenContent
+                VStack(spacing: 0) {
+                    VStack(spacing: 18) {
+                        title
+                            .accessibilityFocused($headingIsFocused)
+                        screenContent
+                    }
+                    .frame(maxWidth: 420)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
+
+                    if usesFlowingIncludedFooter {
+                        footer
+                    }
                 }
-                .frame(maxWidth: 420)
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
             }
             .scrollIndicators(.hidden)
-            footer
+            .accessibilityIdentifier("first-value-onboarding.scroll")
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !usesFlowingIncludedFooter {
+                    footer
+                }
+            }
         }
         .background(SnapListColorToken.canvas.color.ignoresSafeArea())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("first-value-onboarding.state.\(model.screen.identifier)")
-        .sheet(isPresented: $presentsSignIn) {
-            ReturningSignInSheet { presentsSignIn = false }
-        }
         .onAppear { headingIsFocused = true }
         .onChange(of: model.screen) { _, _ in headingIsFocused = true }
     }
@@ -43,9 +53,15 @@ struct FirstValueOnboardingView: View {
         systemReduceMotion || forceReducedMotion
     }
 
+    /// At Accessibility Dynamic Type, ONB-06's longer listing content must scroll
+    /// before its actions rather than share the viewport with a sticky footer.
+    private var usesFlowingIncludedFooter: Bool {
+        model.screen == .onb06 && dynamicTypeSize.isAccessibilitySize
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
-            if model.screen != .onb01 && model.screen != .onb06 {
+            if model.screen != .onb01 {
                 Button(action: model.goBack) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 17, weight: .semibold))
@@ -70,10 +86,13 @@ struct FirstValueOnboardingView: View {
             .accessibilityValue("Step \(model.screen.rawValue) of 6")
 
             if model.screen != .onb06 {
-                Button("Skip") { finish(using: model.skip) }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .frame(minWidth: 44, minHeight: 44)
+                Button { finish(using: model.skip) } label: {
+                    Text("Skip")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(SnapListColorToken.action.color)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
                     .accessibilityIdentifier("first-value-onboarding.skip")
             }
         }
@@ -297,59 +316,22 @@ struct FirstValueOnboardingView: View {
 
     private var backgroundScreen: some View {
         VStack(spacing: 12) {
-            card {
-                VStack(alignment: .leading, spacing: 12) {
-                    // ONB-05 illustrates the Trophy Wall; no item exists yet, so the
-                    // screen says so and shows no spinner or other live-work claim.
-                    Text(FirstValueOnboardingCopy.backgroundExampleCaption)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(
-                        FirstValueOnboardingCopy.backgroundExampleRows,
-                        id: \.self
-                    ) { row in
-                        BackgroundExampleRowView(row: row)
-                    }
+            VStack(spacing: 8) {
+                ForEach(FirstValueOnboardingCopy.backgroundExampleRows, id: \.self) { row in
+                    BackgroundExampleRowView(row: row, reduceMotion: reduceMotion)
                 }
             }
             HStack(spacing: 10) {
                 tile("camera.fill", "Scan the next one", "No waiting")
                 tile("trophy.fill", "Trophy Wall", "Finished listings")
             }
-            ScoutLine(
-                screen: .onb05,
-                reduceMotion: reduceMotion,
-                usesStaticRendering: usesStaticScoutRendering
-            ) {
-                Text("Scout keeps working in the background.")
-            }
         }
     }
 
     private var includedScreen: some View {
-        VStack(spacing: 12) {
-            card {
-                VStack(spacing: 10) {
-                    ZStack(alignment: .topLeading) {
-                        itemImage("FirstValueJacket", label: "The finished listing for the denim jacket")
-                            .frame(maxWidth: .infinity).frame(height: 178).clipped()
-                        Text("Included").font(.caption.weight(.bold)).foregroundStyle(.white)
-                            .padding(.horizontal, 11).padding(.vertical, 6)
-                            .background(SnapListColorToken.action.color, in: Capsule())
-                            .padding(10)
-                    }
-                    Text("Medium wash denim trucker jacket, size M")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack {
-                        Text("Ready to review").font(.caption)
-                            .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        Spacer()
-                        Text("$58").font(.body.bold())
-                    }
-                }
-            }
+        VStack(spacing: 26) {
+            includedListingPreview
+                .padding(.horizontal, -8)
             ScoutLine(
                 screen: .onb06,
                 reduceMotion: reduceMotion,
@@ -358,6 +340,60 @@ struct FirstValueOnboardingView: View {
                 Text("No account needed, and you edit every field before anything leaves the app.")
             }
         }
+    }
+
+    private var includedListingPreview: some View {
+        VStack(spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                ZStack(alignment: .topLeading) {
+                    Image("FirstValueJacket")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 254)
+                        .clipped()
+                    Text("Included")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(SnapListColorToken.action.color, in: Capsule())
+                        .padding(11)
+                }
+                .accessibilityHidden(true)
+
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 254)
+                    .contentShape(Rectangle())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("The finished listing for the denim jacket")
+                    .accessibilityIdentifier("first-value-onboarding.included-photo-preview")
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 254)
+            .clipped()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Medium wash denim trucker jacket, size M")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Text("Ready to review")
+                        .font(.caption)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    Spacer()
+                    Text("$58").font(.body.bold())
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 15)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .frame(height: 67, alignment: .top)
+        }
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: Color.black.opacity(0.18), radius: 16, y: 10)
     }
 
     private var footer: some View {
@@ -374,7 +410,7 @@ struct FirstValueOnboardingView: View {
                 : "first-value-onboarding.continue")
 
             if model.screen == .onb06 {
-                Button("I already have an account") { presentsSignIn = true }
+                Button("I already have an account", action: openExistingAccount)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(SnapListColorToken.action.color)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -488,20 +524,20 @@ struct FirstValueOnboardingView: View {
     }
 }
 
-/// An illustrative Trophy Wall row on ONB-05. It carries no `ProgressView`, percentage,
-/// or any other progress affordance: nothing is running while onboarding is on screen,
-/// and SnapList never fabricates progress.
+/// An approved ONB-05 work-example row. Its status dot is a visual status treatment,
+/// never a `ProgressView`, percentage, or claim about a live pipeline run.
 ///
-/// The row is a named type rather than a helper on the screen so that guarantee is
-/// testable. `.accessibilityElement(children: .combine)` folds every descendant into one
-/// element, so a restored spinner never reaches the XCUI tree and no count of
-/// `app.progressIndicators` can see it. SwiftUI derives `body`'s concrete type from the
-/// subtree written here instead, which
-/// `OnboardingFlowTests.testBackgroundExampleRowBodyWritesNoProgressAffordance` reads —
-/// so keep any progress-bearing view out of this body rather than behind a nested type
-/// the rendered type name would hide.
+/// The named type keeps the no-progress-affordance seam direct. Its combined accessibility
+/// element exposes each item and status once, while hiding the decorative status dot.
 struct BackgroundExampleRowView: View {
     let row: BackgroundExampleRow
+    let reduceMotion: Bool
+    @State private var emphasizesStatus = false
+
+    init(row: BackgroundExampleRow, reduceMotion: Bool = false) {
+        self.row = row
+        self.reduceMotion = reduceMotion
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -513,12 +549,35 @@ struct BackgroundExampleRowView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.item).font(.subheadline.weight(.semibold))
-                Text(row.state).font(.caption)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(SnapListColorToken.action.color)
+                        .frame(width: 7, height: 7)
+                        .opacity(reduceMotion || emphasizesStatus ? 1 : 0.55)
+                        .animation(
+                            reduceMotion
+                                ? nil
+                                : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                            value: emphasizesStatus
+                        )
+                        .accessibilityHidden(true)
+                    Text(row.state).font(.caption)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                }
             }
             Spacer()
         }
+        .padding(14)
+        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(hex: "#ECEDF0"), lineWidth: 1)
+        }
         .accessibilityElement(children: .combine)
+        .onAppear {
+            guard !reduceMotion else { return }
+            emphasizesStatus = true
+        }
     }
 }
 

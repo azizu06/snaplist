@@ -138,7 +138,8 @@ enum FirstValueScoutRendering: Equatable {
 enum FirstValueOnboardingOutcome: String, Codable, Equatable, CaseIterable {
     /// The seller reached ONB-06 and chose `Start scanning`.
     case completed
-    /// The seller used `Skip` before ONB-06.
+    /// A compatibility value written by an earlier onboarding revision. New Skip actions
+    /// advance to ONB-06, so every newly completed flow records `.completed` instead.
     case skipped
     /// The six screens were never shown because the seller already had progress on
     /// this device — a restored durable capture, or persisted onboarding progress past
@@ -197,7 +198,7 @@ final class FirstValueOnboardingModel {
 
     func skip() {
         guard screen != .onb06, outcome == nil else { return }
-        complete(with: .skipped)
+        screen = .onb06
     }
 
     /// Records that onboarding was superseded by work the seller already has on this
@@ -330,11 +331,6 @@ struct BackgroundExampleRow: Hashable {
 }
 
 enum FirstValueOnboardingCopy {
-    /// ONB-05 shows what the Trophy Wall looks like while items finish. No item exists
-    /// during onboarding, so the screen is labelled as an illustration and carries no
-    /// spinner, percentage, or other affordance that would claim work is happening now.
-    static let backgroundExampleCaption = "An example — nothing is running yet"
-
     static let backgroundExampleRows: [BackgroundExampleRow] = [
         .init(
             imageName: "FirstValueJacket",

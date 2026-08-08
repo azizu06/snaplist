@@ -1,0 +1,8 @@
+XcodeBuildMCP semantic AX receipt
+State: ONB-06 at accessibility5
+Launch arguments: --first-value-onboarding-state=ONB-06 --dynamic-type=accessibility5 --reduced-motion
+Semantic state node: other, identifier first-value-onboarding.state.ONB-06
+Scroll view: identifier first-value-onboarding.scroll
+Initial snapshot: 21 elements; Back reachable; Start scanning and I already have an account intentionally in scroll content flow.
+After two bounded upward swipes on first-value-onboarding.scroll: Back (first-value-onboarding.back), Start scanning (first-value-onboarding.start-scanning), and I already have an account (first-value-onboarding.sign-in) were all exposed as tap targets.
+Final snapshot count: 21 elements; 3 likely targets; 2 scroll areas.

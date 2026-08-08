@@ -37,6 +37,7 @@ struct AppShellView: View {
     @State private var isCompletingActivation = false
     @State private var activationProgress = ActivationGuidanceProgress()
     @State private var activationListingReviewPresented = false
+    @State private var hasHandedOffFirstValueOnboardingToExistingAccount = false
     private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
     private let activationGuestCompletionStore =
         UserDefaultsActivationGuidanceGuestCompletionStore()
@@ -73,12 +74,18 @@ struct AppShellView: View {
                 SnapListColorToken.canvas.color
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
+            } else if hasHandedOffFirstValueOnboardingToExistingAccount {
+                shell
             } else if shouldShowFirstValueOnboarding {
                 FirstValueOnboardingView(
                     model: firstValueOnboardingModel,
                     forceReducedMotion: configuration.forceReducedMotion,
                     usesStaticScoutRendering: configuration.usesStaticScoutRendering,
-                    didFinish: handleFirstValueOnboardingCompletion
+                    didFinish: handleFirstValueOnboardingCompletion,
+                    openExistingAccount: {
+                        router.navigate(to: .future(.account))
+                        hasHandedOffFirstValueOnboardingToExistingAccount = true
+                    }
                 )
             } else if shouldBypassRetiredLegacyIntro {
                 Color.clear
@@ -729,6 +736,7 @@ struct AppShellView: View {
             switch FutureDestinationPresentation.resolve(boundary) {
             case .accountEntry:
                 AccountEntryView()
+                    .accessibilityIdentifier("account-entry")
             case .placeholder(let destination):
                 FoundationDestinationView(destination: destination)
             }
