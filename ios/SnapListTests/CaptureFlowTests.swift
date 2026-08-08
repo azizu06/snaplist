@@ -2029,7 +2029,7 @@ final class CaptureFlowTests: XCTestCase {
         await scenario.perform(submissionHost: submissionHost)
 
         guard case .destinationHandoff(
-            eventID: _,
+            eventID: let eventID,
             handoff: .pay08
         )? = submissionHost.pendingPresentationEvent else {
             return XCTFail("Expected the typed receipt handoff.")
@@ -2037,6 +2037,21 @@ final class CaptureFlowTests: XCTestCase {
         let presentation = PhotoReviewSubmissionPresentation(
             host: submissionHost
         )
+
+        guard scenario.photoReviewHost.beginCommit() else {
+            return XCTFail("Expected to reserve the Photo Review commit lock.")
+        }
+        await scenario.perform(
+            primaryAction: presentation.primaryActionEvent,
+            submissionHost: submissionHost
+        )
+        let payloadsWhileCommitOwned = await submitter.payloads
+        XCTAssertEqual(payloadsWhileCommitOwned.count, 1)
+        XCTAssertEqual(
+            submissionHost.pendingPresentationEvent,
+            .destinationHandoff(eventID: eventID, handoff: .pay08)
+        )
+        scenario.photoReviewHost.endCommit()
 
         await scenario.perform(
             primaryAction: presentation.primaryActionEvent,

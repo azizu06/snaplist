@@ -1341,15 +1341,21 @@ enum AppShellPhotoReviewSubmissionTransaction {
         submissionHost: ItemRunSubmissionHost,
         setReturnFocus: (PhotoReviewScanFocus) -> Void
     ) async {
+        let receiptMismatchRetryEventID: UUID?
         let ambiguousRetryEventID: UUID?
         switch primaryAction {
         case .startListing:
+            receiptMismatchRetryEventID = nil
             ambiguousRetryEventID = nil
         case .retryReceiptMismatch(let eventID):
-            guard submissionHost.consumeDestinationHandoff(eventID: eventID)
-                    == .pay08 else {
+            guard case .destinationHandoff(
+                eventID: let pendingEventID,
+                handoff: .pay08
+            )? = submissionHost.pendingPresentationEvent,
+                  pendingEventID == eventID else {
                 return
             }
+            receiptMismatchRetryEventID = eventID
             ambiguousRetryEventID = nil
         case .retryAmbiguousSubmission(let eventID):
             guard submissionHost.canRetryAmbiguousSubmission(
@@ -1357,6 +1363,7 @@ enum AppShellPhotoReviewSubmissionTransaction {
             ) else {
                 return
             }
+            receiptMismatchRetryEventID = nil
             ambiguousRetryEventID = eventID
         case .createAccount(let eventID):
             guard case .destinationHandoff(
@@ -1396,6 +1403,13 @@ enum AppShellPhotoReviewSubmissionTransaction {
         }
         defer { host.endCommit() }
 
+        if let receiptMismatchRetryEventID {
+            guard submissionHost.consumeDestinationHandoff(
+                eventID: receiptMismatchRetryEventID
+            ) == .pay08 else {
+                return
+            }
+        }
         if let ambiguousRetryEventID {
             guard submissionHost.retryAmbiguousSubmission(
                 eventID: ambiguousRetryEventID

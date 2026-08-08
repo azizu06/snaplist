@@ -1418,8 +1418,10 @@ final class ItemRunSubmissionCoordinator {
             )
         } catch let error as BearerTokenProviderError {
             switch error {
-            case .sessionAbsent, .principalBindingUnavailable:
+            case .sessionAbsent:
                 return .credentialAbsent
+            case .principalBindingUnavailable:
+                return .temporarilyUnavailable
             }
         } catch {
             return .temporarilyUnavailable

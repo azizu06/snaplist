@@ -468,7 +468,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertTrue(payloads.isEmpty)
     }
 
-    func testUnavailablePrincipalBindingStillAsksForAnAccount() async {
+    func testUnavailablePrincipalBindingIsRetryableNotAnAccountDemand() async {
         let intake = SubmissionIntakeFixture(
             photoCount: 2,
             seed: "unavailable-principal-binding"
@@ -487,7 +487,7 @@ final class ItemRunSubmissionTests: XCTestCase {
 
         let outcome = await coordinator.submit(photos: intake.photos)
 
-        XCTAssertEqual(outcome, .retained(.authenticationRequired))
+        XCTAssertEqual(outcome, .retained(.submissionUnavailable))
         let payloads = await submitter.payloads
         XCTAssertTrue(payloads.isEmpty)
     }
