@@ -640,6 +640,7 @@ struct ListingReviewView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
+        .padding(.bottom, SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset)
         .background(SnapListColorToken.canvas.color)
         .overlay(alignment: .top) {
             Divider()

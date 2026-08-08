@@ -1,0 +1,31 @@
+Attributes: Application, 0x105272f80, pid: 24390, label: 'SnapList'
+Element subtree:
+ →Application, 0x105272f80, pid: 24390, label: 'SnapList'
+    Window (Main), 0x1052730c0, {{0.0, 0.0}, {402.0, 874.0}}
+      Other, 0x105273200, {{0.0, 0.0}, {402.0, 874.0}}
+        Other, 0x105273340, {{0.0, 0.0}, {402.0, 874.0}}
+          Other, 0x105273480, {{0.0, 0.0}, {402.0, 874.0}}
+            Other, 0x1052735c0, {{0.0, 0.0}, {402.0, 874.0}}
+              Other, 0x105273700, {{0.0, 0.0}, {402.0, 874.0}}, identifier: 'onboarding.state.ONB-07'
+                Button, 0x105273840, {{10.0, 62.0}, {44.0, 44.0}}, identifier: 'onboarding.back', label: 'Back'
+                ScrollView, 0x105273980, {{0.0, 106.0}, {402.0, 768.0}}
+                  Other, 0x105273ac0, {{0.0, 106.0}, {402.0, 511.3}}
+                    Image, 0x105273c00, {{27.0, 117.0}, {82.0, 72.0}}, label: 'Scout, the SnapList camera guide'
+                    StaticText, 0x105273d40, {{133.0, 145.2}, {228.0, 15.7}}, label: 'One clear photo is all I need to start.'
+                    StaticText, 0x105273e80, {{34.2, 218.0}, {333.7, 33.7}}, label: 'Let's photograph your item'
+                    StaticText, 0x115008000, {{24.8, 263.7}, {352.3, 71.7}}, label: 'SnapList uses your camera to take clear photos of your item. Your photos stay on this device until you choose to run them — we never post or share anything without you.'
+                    StaticText, 0x115008140, {{64.0, 357.7}, {272.3, 31.3}}, identifier: 'onboarding.primer.camera', label: 'Camera — take photos from different angles right here.'
+                    StaticText, 0x115008280, {{64.0, 409.5}, {294.0, 15.7}}, identifier: 'onboarding.primer.photo-library', label: 'Photo library — or pick photos you already took.'
+                Button, 0x1150083c0, {{20.0, 695.7}, {362.0, 54.0}}, identifier: 'button.primary.use-camera', label: 'Use camera'
+                  Image, 0x115008500, {{141.3, 715.0}, {19.7, 15.7}}, identifier: 'camera', label: 'Camera'
+                  StaticText, 0x115008640, {{171.0, 713.0}, {91.7, 19.3}}, label: 'Use camera'
+                Button, 0x115008780, {{19.5, 757.2}, {363.0, 51.0}}, identifier: 'onboarding.choose-library', label: 'Choose from library'
+                Image, 0x1150088c0, {{64.7, 818.7}, {8.0, 11.7}}, identifier: 'lock', label: 'Lock'
+                StaticText, 0x115008a00, {{64.7, 817.7}, {274.5, 14.3}}, label: 'Nothing is uploaded until you choose to run it'
+Path to element:
+ →Application, 0x105272f80, pid: 24390, label: 'SnapList'
+Query chain:
+ →Find: Target Application 'dev.snaplist.ios'
+  Output: {
+    Application, 0x115008b40, pid: 24390, label: 'SnapList'
+  }
