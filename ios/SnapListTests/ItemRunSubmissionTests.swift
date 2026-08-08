@@ -321,6 +321,177 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(discardCount, 0)
     }
 
+    func testTheAccountHandoffTellsTheSellerAnAccountIsNeeded() async {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 2,
+            seed: "account-claim-presentation"
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                submitter: RecordingItemRunSubmitter(
+                    outcomes: [.authenticationRequired]
+                ),
+                draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+                keys: [Self.firstKey]
+            )
+        )
+
+        await host.startListing(photos: intake.photos)
+
+        guard case .destinationHandoff(
+            eventID: let eventID,
+            handoff: .accountClaim12aThrough12c
+        )? = host.pendingPresentationEvent else {
+            return XCTFail("Expected the typed account handoff.")
+        }
+        let presentation = PhotoReviewSubmissionPresentation(host: host)
+        let message = """
+            You need a SnapList account to send this item. Your item is still \
+            saved on this phone.
+            """
+        XCTAssertNotEqual(presentation, .idle)
+        XCTAssertEqual(presentation.visibleMessage, message)
+        XCTAssertEqual(presentation.accessibilityAnnouncement, message)
+        XCTAssertEqual(presentation.primaryActionLabel, "Create an account")
+        XCTAssertEqual(
+            presentation.primaryActionEvent,
+            .createAccount(eventID: eventID)
+        )
+        XCTAssertEqual(
+            presentation.announcementEvent,
+            .submissionRejected(eventID: eventID)
+        )
+        XCTAssertFalse(presentation.mutationControlsLocked)
+        XCTAssertTrue(presentation.rendersSubmittedMedia)
+    }
+
+    func testTheReceiptHandoffTellsTheSellerConfirmationWasUnavailable() async {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 3,
+            seed: "receipt-mismatch-presentation"
+        )
+        var spoiled = intake.expectedReceiptPhotos
+        spoiled[1] = .init(
+            ordinal: 1,
+            contentSha256: String(repeating: "f", count: 64),
+            byteLength: spoiled[1].byteLength,
+            mediaType: spoiled[1].mediaType
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                submitter: RecordingItemRunSubmitter(
+                    outcomes: [.created(Self.receipt(photos: spoiled))]
+                ),
+                draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+                keys: [Self.firstKey]
+            )
+        )
+
+        await host.startListing(photos: intake.photos)
+
+        guard case .destinationHandoff(
+            eventID: let eventID,
+            handoff: .pay08
+        )? = host.pendingPresentationEvent else {
+            return XCTFail("Expected the typed receipt handoff.")
+        }
+        let presentation = PhotoReviewSubmissionPresentation(host: host)
+        let message =
+            "We couldn't confirm this went through. Your item is still saved on this phone."
+        XCTAssertNotEqual(presentation, .idle)
+        XCTAssertNotEqual(
+            presentation,
+            PhotoReviewSubmissionPresentation(handoff: .pay01, eventID: eventID)
+        )
+        XCTAssertEqual(presentation.visibleMessage, message)
+        XCTAssertEqual(presentation.accessibilityAnnouncement, message)
+        XCTAssertEqual(presentation.primaryActionLabel, "Try again")
+        XCTAssertEqual(
+            presentation.primaryActionEvent,
+            .retryReceiptMismatch(eventID: eventID)
+        )
+        XCTAssertEqual(
+            presentation.announcementEvent,
+            .submissionRejected(eventID: eventID)
+        )
+        XCTAssertFalse(presentation.mutationControlsLocked)
+        XCTAssertTrue(presentation.rendersSubmittedMedia)
+    }
+
+    func testEveryHandoffHasAShellRoute() {
+        let eventID = UUID()
+
+        XCTAssertEqual(
+            AppShellSubmissionHandoffRoute(handoff: .pay01, eventID: eventID),
+            .presentProGate(eventID: eventID)
+        )
+        XCTAssertEqual(
+            AppShellSubmissionHandoffRoute(handoff: .pay08, eventID: eventID),
+            .showInPhotoReview
+        )
+        XCTAssertEqual(
+            AppShellSubmissionHandoffRoute(
+                handoff: .accountClaim12aThrough12c,
+                eventID: eventID
+            ),
+            .showInPhotoReview
+        )
+    }
+
+    func testATransientBearerFailureIsRetryableRatherThanAnAccountDemand() async {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 2,
+            seed: "transient-bearer-failure"
+        )
+        let submitter = RecordingItemRunSubmitter(outcomes: [])
+        let coordinator = makeCoordinator(
+            intake: intake,
+            attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+            submitter: submitter,
+            draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+            keys: [Self.firstKey],
+            tokenProvider: TestBearerTokenProvider {
+                throw URLError(.timedOut)
+            }
+        )
+
+        let outcome = await coordinator.submit(photos: intake.photos)
+
+        // A phone that lost the network has not told us anything about the seller's
+        // account, so demanding one would be a guess dressed up as a fact.
+        XCTAssertEqual(outcome, .retained(.submissionUnavailable))
+        let payloads = await submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+    }
+
+    func testUnavailablePrincipalBindingIsRetryableNotAnAccountDemand() async {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 2,
+            seed: "unavailable-principal-binding"
+        )
+        let submitter = RecordingItemRunSubmitter(outcomes: [])
+        let coordinator = makeCoordinator(
+            intake: intake,
+            attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+            submitter: submitter,
+            draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+            keys: [Self.firstKey],
+            tokenProvider: TestBearerTokenProvider {
+                throw BearerTokenProviderError.principalBindingUnavailable
+            }
+        )
+
+        let outcome = await coordinator.submit(photos: intake.photos)
+
+        XCTAssertEqual(outcome, .retained(.submissionUnavailable))
+        let payloads = await submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+    }
+
     // MARK: Persisted attempt identity
 
     func testPersistsOneKeyAndTheOrderedSnapshotBeforeAnyNetworkActivity() async {

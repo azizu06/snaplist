@@ -707,17 +707,12 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 rendersSubmittedMedia: true
             )
         } else if case .destinationHandoff(
-            eventID: _,
-            handoff: .pay01
+            eventID: let eventID,
+            handoff: let handoff
         )? = host.pendingPresentationEvent {
             self = PhotoReviewSubmissionPresentation(
-                primaryActionLabel: "Start listing",
-                primaryActionEvent: .startListing,
-                mutationControlsLocked: true,
-                announcementEvent: nil,
-                accessibilityAnnouncement: nil,
-                visibleMessage: nil,
-                rendersSubmittedMedia: true
+                handoff: handoff,
+                eventID: eventID
             )
         } else if case .submissionRejected(
             eventID: let eventID,
@@ -741,6 +736,61 @@ struct PhotoReviewSubmissionPresentation: Equatable {
             )
         } else {
             self = .idle
+        }
+    }
+
+    /// Every handoff the coordinator can decide gets a visible outcome here. The
+    /// switch is exhaustive with no `default` on purpose: a fourth `Handoff` case has
+    /// to break the build rather than fall through to `.idle`, which is how the
+    /// account and receipt handoffs became dead ends behind a `.pay01` pattern filter.
+    init(
+        handoff: ItemRunSubmissionDestinationDecision.Handoff,
+        eventID: UUID
+    ) {
+        switch handoff {
+        case .pay01:
+            // The Pro sheet is the visible outcome and the shell owns presenting it,
+            // so Photo Review only holds its controls while it comes up.
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Start listing",
+                primaryActionEvent: .startListing,
+                mutationControlsLocked: true,
+                announcementEvent: nil,
+                accessibilityAnnouncement: nil,
+                visibleMessage: nil,
+                rendersSubmittedMedia: true
+            )
+        case .pay08:
+            // A receipt that doesn't describe what was sent cannot confirm whether
+            // this attempt landed. Reuse the established ambiguity wording while
+            // keeping the receipt-specific retry route typed to this handoff.
+            let family = PhotoReviewSubmissionRejectionFamily.ambiguity
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: family.primaryActionLabel,
+                primaryActionEvent: .retryReceiptMismatch(eventID: eventID),
+                mutationControlsLocked: false,
+                announcementEvent: .submissionRejected(eventID: eventID),
+                accessibilityAnnouncement: family.accessibilityAnnouncement,
+                visibleMessage: family.message,
+                rendersSubmittedMedia: true
+            )
+        case .accountClaim12aThrough12c:
+            // The seller keeps their photos either way, so say that before asking for
+            // the account. The label is the route: the shell opens Settings, where
+            // account creation lives.
+            let message = """
+                You need a SnapList account to send this item. Your item is still \
+                saved on this phone.
+                """
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Create an account",
+                primaryActionEvent: .createAccount(eventID: eventID),
+                mutationControlsLocked: false,
+                announcementEvent: .submissionRejected(eventID: eventID),
+                accessibilityAnnouncement: message,
+                visibleMessage: message,
+                rendersSubmittedMedia: true
+            )
         }
     }
 
@@ -814,7 +864,11 @@ enum PhotoReviewSubmissionPrimaryActionConsumer {
             return submissionHost.reviewRejectedSubmission(eventID: eventID)
         case .reviewConflictedSubmission(let eventID):
             return submissionHost.reviewConflictedSubmission(eventID: eventID)
-        case .openVoiceNote, .startListing, .retryAmbiguousSubmission:
+        case .openVoiceNote,
+             .startListing,
+             .createAccount,
+             .retryReceiptMismatch,
+             .retryAmbiguousSubmission:
             return false
         }
     }
@@ -887,7 +941,13 @@ final class ItemRunSubmissionCoordinator {
     private enum BearerAcquisition {
         case captured(CapturedBearer)
         case principalMismatch
-        case unavailable
+        /// There is no usable credential: no session, or a session that cannot be
+        /// bound to a principal. Only this says anything about the seller's account.
+        case credentialAbsent
+        /// The credential could not be reached this time — no network, a timeout, a
+        /// keychain that would not open. A phone with no signal has told us nothing
+        /// about whether the seller has an account, so this must stay retryable.
+        case temporarilyUnavailable
     }
 
     fileprivate struct AmbiguousRetry {
@@ -1070,8 +1130,10 @@ final class ItemRunSubmissionCoordinator {
             capturedBearer = bearer
         case .principalMismatch:
             return .retained(.submissionUnavailable)
-        case .unavailable:
+        case .credentialAbsent:
             return .retained(.authenticationRequired)
+        case .temporarilyUnavailable:
+            return .retained(.submissionUnavailable)
         }
         guard !Task.isCancelled, isCurrent() else {
             return .retained(.submissionUnavailable)
@@ -1278,8 +1340,10 @@ final class ItemRunSubmissionCoordinator {
             capturedBearer = bearer
         case .principalMismatch:
             return .retained(.submissionUnavailable)
-        case .unavailable:
+        case .credentialAbsent:
             return .retained(.authenticationRequired)
+        case .temporarilyUnavailable:
+            return .retained(.submissionUnavailable)
         }
         guard !Task.isCancelled, isCurrent() else {
             return .retained(.submissionUnavailable)
@@ -1352,8 +1416,15 @@ final class ItemRunSubmissionCoordinator {
                     token: try await tokenProvider.bearerToken()
                 )
             )
+        } catch let error as BearerTokenProviderError {
+            switch error {
+            case .sessionAbsent:
+                return .credentialAbsent
+            case .principalBindingUnavailable:
+                return .temporarilyUnavailable
+            }
         } catch {
-            return .unavailable
+            return .temporarilyUnavailable
         }
     }
 
