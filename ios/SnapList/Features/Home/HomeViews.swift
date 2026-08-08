@@ -198,10 +198,7 @@ struct TrophyWallView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(
-                    .bottom,
-                    SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset + 48
-                )
+                .padding(.bottom, TrophyWallGridMetrics.bottomPaddingPoints)
             }
             .scrollIndicators(.hidden)
             .accessibilityIdentifier("trophy.wall.grid")
@@ -213,21 +210,11 @@ private struct TrophyWallSettledTileView: View {
     let tile: TrophyWallSettledTile
 
     var body: some View {
-        ZStack {
-            SnapListColorToken.quietFill.color
-            if let coverPhotoURL = tile.coverPhotoURL {
-                AsyncImage(url: coverPhotoURL) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    fallback
-                }
-            } else {
-                fallback
+        SnapListColorToken.quietFill.color
+            .aspectRatio(TrophyWallGridMetrics.tileAspectRatio, contentMode: .fit)
+            .overlay {
+                photo
             }
-        }
-        .aspectRatio(TrophyWallGridMetrics.tileAspectRatio, contentMode: .fit)
         .clipShape(
             .rect(cornerRadius: TrophyWallGridMetrics.tileCornerRadiusPoints)
         )
@@ -242,6 +229,33 @@ private struct TrophyWallSettledTileView: View {
         .accessibilityAddTraits(.isImage)
     }
 
+    @ViewBuilder
+    private var photo: some View {
+        GeometryReader { proxy in
+            if let coverPhotoAssetName = tile.coverPhotoAssetName {
+                Image(coverPhotoAssetName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .scaleEffect(tile.coverPhotoCrop.scale, anchor: tile.coverPhotoCrop.anchor)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+            } else if let coverPhotoURL = tile.coverPhotoURL {
+                AsyncImage(url: coverPhotoURL) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                } placeholder: {
+                    fallback
+                }
+            } else {
+                fallback
+            }
+        }
+    }
+
     private var fallback: some View {
         Text(tile.itemName)
             .snapListTypography(.status)
@@ -252,15 +266,34 @@ private struct TrophyWallSettledTileView: View {
     }
 }
 
+private extension TrophyWallPhotoCrop {
+    var scale: CGFloat {
+        switch self {
+        case .full: 1
+        case .detailLeading, .detailTrailing, .detailTop: 1.32
+        }
+    }
+
+    var anchor: UnitPoint {
+        switch self {
+        case .full: .center
+        case .detailLeading: .leading
+        case .detailTrailing: .trailing
+        case .detailTop: .top
+        }
+    }
+}
+
 private struct TrophyWallEmptyView: View {
     let onScan: () -> Void
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: TrophyWallEmptyMetrics.contentSpacing) {
             Image("ScoutUncertain")
                 .resizable()
                 .scaledToFit()
-                .frame(height: 150)
+                .frame(height: TrophyWallEmptyMetrics.scoutHeight)
+                .padding(.bottom, TrophyWallEmptyMetrics.scoutOpticalBottomInset)
                 .accessibilityLabel("Scout, the SnapList camera helper")
 
             Text("No items yet")
@@ -282,8 +315,8 @@ private struct TrophyWallEmptyView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("trophy.wall.scan")
         }
-        .padding(.horizontal, 34)
-        .padding(.bottom, 104)
+        .padding(.horizontal, TrophyWallEmptyMetrics.horizontalPadding)
+        .padding(.bottom, TrophyWallEmptyMetrics.bottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Same plain-stack binding as `trophy.wall`: without this the identifier
         // propagates down and overwrites `trophy.wall.scan` on the button above.

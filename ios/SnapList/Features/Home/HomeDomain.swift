@@ -13,6 +13,27 @@ enum TrophyWallGridMetrics {
     static let tileAspectRatio: CGFloat = 4.0 / 5.0
     static let gutterPoints: CGFloat = 12
     static let tileCornerRadiusPoints: CGFloat = 12
+    static let bottomPaddingPoints: CGFloat = 132
+}
+
+/// The approved empty wall uses a small optical overlap below Scout so the
+/// visible artwork, rather than the transparent bounds of the asset, owns the
+/// twenty-point gap to the heading.
+enum TrophyWallEmptyMetrics {
+    static let contentSpacing: CGFloat = 20
+    static let scoutHeight: CGFloat = 150
+    static let scoutOpticalBottomInset: CGFloat = -17
+    static let horizontalPadding: CGFloat = 34
+    static let bottomPadding: CGFloat = 104
+}
+
+/// Presentation-only framing for a cleared bundled fixture photo. It does not
+/// alter the run identity or claim a different underlying product.
+enum TrophyWallPhotoCrop: String, Hashable, Sendable {
+    case full
+    case detailLeading
+    case detailTrailing
+    case detailTop
 }
 
 struct TrophyWallPrincipalScope: Hashable, Sendable {
@@ -100,6 +121,8 @@ struct TrophyWallCard: Hashable, Sendable {
     let state: TrophyWallCardState
     fileprivate let itemName: String?
     fileprivate let coverPhotoURL: URL?
+    fileprivate let coverPhotoAssetName: String?
+    fileprivate let coverPhotoCrop: TrophyWallPhotoCrop
     let orderKey: TrophyWallOrderKey
 
     static func pending(
@@ -115,6 +138,8 @@ struct TrophyWallCard: Hashable, Sendable {
             state: .pendingUpload,
             itemName: itemName,
             coverPhotoURL: nil,
+            coverPhotoAssetName: nil,
+            coverPhotoCrop: .full,
             orderKey: TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: logicalIdentity.persistedKey
@@ -128,6 +153,8 @@ struct TrophyWallCard: Hashable, Sendable {
         state: TrophyWallCardState = .accepted,
         itemName: String? = nil,
         coverPhotoURL: URL? = nil,
+        coverPhotoAssetName: String? = nil,
+        coverPhotoCrop: TrophyWallPhotoCrop = .full,
         lastMeaningfulUpdateAt: Date,
         orderKey: TrophyWallOrderKey? = nil
     ) -> TrophyWallCard {
@@ -140,6 +167,8 @@ struct TrophyWallCard: Hashable, Sendable {
             state: state,
             itemName: itemName,
             coverPhotoURL: coverPhotoURL,
+            coverPhotoAssetName: coverPhotoAssetName,
+            coverPhotoCrop: coverPhotoCrop,
             orderKey: orderKey ?? TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: runID.uuidString.lowercased()
@@ -234,6 +263,8 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
     let itemName: String
     let stateLabel: String
     let coverPhotoURL: URL?
+    let coverPhotoAssetName: String?
+    let coverPhotoCrop: TrophyWallPhotoCrop
     let historyOrderAt: Date
 
     init(
@@ -241,17 +272,21 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
         itemName: String,
         stateLabel: String,
         coverPhotoURL: URL? = nil,
+        coverPhotoAssetName: String? = nil,
+        coverPhotoCrop: TrophyWallPhotoCrop = .full,
         historyOrderAt: Date
     ) {
         self.id = id
         self.itemName = itemName
         self.stateLabel = stateLabel
         self.coverPhotoURL = coverPhotoURL
+        self.coverPhotoAssetName = coverPhotoAssetName
+        self.coverPhotoCrop = coverPhotoCrop
         self.historyOrderAt = historyOrderAt
     }
 
     var accessibilityLabel: String {
-        let identity = coverPhotoURL == nil
+        let identity = coverPhotoURL == nil && coverPhotoAssetName == nil
             ? "\(itemName), photo unavailable"
             : itemName
         let relevantDate = historyOrderAt.formatted(
@@ -401,6 +436,8 @@ final class TrophyWallStore {
                 itemName: itemName,
                 stateLabel: stateLabel,
                 coverPhotoURL: card.coverPhotoURL,
+                coverPhotoAssetName: card.coverPhotoAssetName,
+                coverPhotoCrop: card.coverPhotoCrop,
                 historyOrderAt: card.orderKey.lastMeaningfulUpdateAt
             )
         }

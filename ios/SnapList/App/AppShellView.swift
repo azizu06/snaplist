@@ -471,10 +471,10 @@ struct AppShellView: View {
     }
 
     private var shell: some View {
-        TabView(selection: $router.selectedTab) {
+        ZStack {
             ForEach(PrimaryTab.allCases) { tab in
-                NavigationStack(path: router.pathBinding(for: tab)) {
-                    if router.selectedTab == tab {
+                if router.selectedTab == tab {
+                    NavigationStack(path: router.pathBinding(for: tab)) {
                         ZStack(alignment: .top) {
                             primaryFeature(for: tab)
 #if DEBUG
@@ -492,10 +492,8 @@ struct AppShellView: View {
                         }
                     }
                 }
-                .tag(tab)
             }
         }
-        .toolbar(.hidden, for: .tabBar)
         .floatingDock(
             selectedTab: router.selectedTab,
             isVisible: DockVisibilityPolicy.shouldShow(isKeyboardVisible: isKeyboardVisible),

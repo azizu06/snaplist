@@ -434,6 +434,25 @@ final class ListingReviewUITests: XCTestCase {
             file: file,
             line: line
         )
+        let done = app.buttons["listing-review.done"]
+        var remainingSwipes = 2
+        while row.frame.maxY > done.frame.minY && remainingSwipes > 0 {
+            app.swipeUp()
+            remainingSwipes -= 1
+        }
+        XCTAssertLessThanOrEqual(
+            row.frame.maxY,
+            done.frame.minY,
+            "The title row must be fully above the persistent Done footer.",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            row.isHittable,
+            "The visible title row must remain hittable before opening its editor.",
+            file: file,
+            line: line
+        )
         row.tap()
 
         let editor = app.textViews["listing-review.editor.title"]

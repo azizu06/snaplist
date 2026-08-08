@@ -72,6 +72,7 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertEqual(TrophyWallGridMetrics.tileAspectRatio, 4.0 / 5.0)
         XCTAssertEqual(TrophyWallGridMetrics.gutterPoints, 12)
         XCTAssertEqual(TrophyWallGridMetrics.tileCornerRadiusPoints, 12)
+        XCTAssertEqual(TrophyWallGridMetrics.bottomPaddingPoints, 132)
 
         let columns = TrophyWallView.gridColumns
         XCTAssertEqual(columns.count, TrophyWallGridMetrics.columnCount)
@@ -81,6 +82,28 @@ final class TrophyWallDomainTests: XCTestCase {
                 repeating: CGFloat?.some(TrophyWallGridMetrics.gutterPoints),
                 count: TrophyWallGridMetrics.columnCount
             )
+        )
+    }
+
+    func testApprovedEmptyWallKeepsTheLiveV32OpticalSpacing() {
+        XCTAssertEqual(TrophyWallEmptyMetrics.contentSpacing, 20)
+        XCTAssertEqual(TrophyWallEmptyMetrics.scoutHeight, 150)
+        XCTAssertEqual(TrophyWallEmptyMetrics.scoutOpticalBottomInset, -17)
+        XCTAssertEqual(TrophyWallEmptyMetrics.horizontalPadding, 34)
+        XCTAssertEqual(TrophyWallEmptyMetrics.bottomPadding, 104)
+    }
+
+    func testApprovedSettledFixtureUsesSixDistinctClearedPhotoCompositions() {
+        let photos = TrophyWallStoreFactory.fixturePhotoCompositions
+
+        XCTAssertEqual(photos.count, 6)
+        XCTAssertEqual(
+            Set(photos.map { "\($0.assetName):\($0.crop.rawValue)" }).count,
+            6
+        )
+        XCTAssertEqual(
+            Set(photos.map(\.assetName)),
+            ["FirstValueSneaker", "FirstValueJacket", "FirstValueLamp"]
         )
     }
 
@@ -672,6 +695,26 @@ final class TrophyWallDomainTests: XCTestCase {
             tile.accessibilityLabel,
             "Vintage denim jacket, photo unavailable, Export prepared, "
                 + "\(relevantDate). Completed item in your collection."
+        )
+    }
+
+    func testSettledTileWithBundledFixturePhotoDoesNotClaimPhotoUnavailable() {
+        let historyOrderAt = Date(timeIntervalSince1970: 1_753_015_200)
+        let tile = TrophyWallSettledTile(
+            id: .run(UUID()),
+            itemName: "White leather sneaker",
+            stateLabel: "Published to eBay",
+            coverPhotoAssetName: "FirstValueSneaker",
+            historyOrderAt: historyOrderAt
+        )
+        let relevantDate = historyOrderAt.formatted(
+            .dateTime.month(.wide).day()
+        )
+
+        XCTAssertEqual(
+            tile.accessibilityLabel,
+            "White leather sneaker, Published to eBay, \(relevantDate). "
+                + "Completed item in your collection."
         )
     }
 

@@ -1,37 +1,54 @@
-# Seller Home visual fidelity
+# Trophy Wall visual fidelity
 
-The approved source is the frozen implementation package whose SHA-256 is
-`13ea5cfc237a98d188452b66abde94fb24b44e2e539ee63f42eb232120672415`.
-All four native states were captured on the isolated iPhone 15 Pro simulator at
-the canonical 393 x 852 logical viewport with Reduced Motion enabled, then
-compared using `ios/Scripts/visual-diff.sh`.
+The owner-approved Trophy Wall contract is the v3.2 canvas:
 
-| State | Normalized pixel error | Reviewed outcome |
-| --- | ---: | --- |
-| HOME-01 | 0.079756 | Approved information order, counts, attention priority, current durable stage, reassurance, and dock are preserved. |
-| HOME-02 | 0.110930 | Approved first-item copy, capture CTA, and three-step explanation are preserved. |
-| HOME-03 | 0.117479 | Approved six-item attention order, unread count, current durable stage, and dock are preserved. |
-| HOME-04 | 0.072987 | Approved focused search, filters, recents, keyboard presentation, and hidden dock are preserved. |
+https://claude.ai/design/p/897124b5-5da4-447e-9dab-26706c006653?via=share&file=Trophy+Wall+%2B+Processing+-+Hi-Fi+Candidate+v3.2.dc.html
 
-Justified native deltas:
+The shipping surface has two approved states.
 
-- The simulator renders the real iOS 26 status region, Dynamic Island, safe
-  areas, and software keyboard instead of the prototype's drawn system chrome.
-- SF Symbols stand in for the prototype's remote Unsplash thumbnails and avatar.
-  Temporary review photography is intentionally absent from shipping assets.
-- Active Home states include a native 44-point search control so the approved
-  HOME-04 listing search and filters are reachable outside visual fixtures.
-- HOME-01 and HOME-03 use a native indeterminate progress indicator alongside
-  the truthful durable stage. The golden's determinate bar is not retained
-  because `home_in_progress.forbidden` explicitly prohibits a percentage derived
-  from stage alone; the server now emits `progress: null` until measured progress
-  exists.
-- SwiftUI text metrics, native control focus, and accessibility touch targets
-  introduce small line-wrap and spacing differences while preserving hierarchy.
+## HOME-01 settled
 
-The canonical actuals, references, side-by-sides, and 50 percent overlays were
-generated under `/private/tmp/snaplist-issue208-visual/` for review evidence and
-are intentionally not bundled into the application.
+- The persistent header contains the `Trophy Wall` title, clock control, and
+  account control.
+- The wall is a two-column photo grid. Tiles use a 4:5 aspect ratio, a 12 point
+  gutter, and 12 point corners.
+- The reviewed fixture uses six distinct cleared photo compositions on six
+  distinct run identities. Crop metadata changes presentation only and does not
+  claim six different underlying products.
+- The last tile remains reachable above the floating dock.
 
-The 2026-07-17 re-audit recapture passed the same canonical four-state simulator
-test in `/private/tmp/SnapList-208-Audit-Home-UI-Visual-20260717.xcresult`.
+## HOME-02 empty
+
+- The same persistent header remains visible.
+- The approved empty state uses the Scout camera artwork, `No items yet`, and
+  the `Scan an item` action at the v3.2 optical position.
+- The action selects the Scan destination through the public app router.
+
+## Shared chrome and assets
+
+- One compact floating dock contains exactly Scan and Trophy Wall. Each
+  destination uses its selected or unselected icon inside one rounded dock
+  background.
+- The live canvas's Adobe product subjects remain proof-only. Shipping evidence
+  uses the cleared bundled product photos and does not copy proof-only media.
+
+## Retired surfaces
+
+The older Seller Home attention dashboard, search, filters, recents, orders,
+conversations, publish issues, drafts, and listing-management states are
+retired. Historical HOME-03 and HOME-04 captures do not describe the current
+product and are not reachable from Trophy Wall.
+
+Processing, including PROC-07D, is owned by its separate focused contract. This
+document does not define or approve Processing behavior.
+
+## Reviewed evidence
+
+- `docs/review-evidence/729/after-HOME-01.png`
+  SHA-256 `b62307f5c88f7124447df8e9eb7033cc1450d1a0db4a249c3dd8cc808d6cf68e`
+- `docs/review-evidence/729/after-HOME-02.png`
+  SHA-256 `e5a3909a31d027feee9565d2f4b1d6fee7c21e258218edc954f4ddaf82355a7e`
+
+Independent visual review accepted the persistent header, grid geometry,
+cleared crop compositions, empty-state placement, action, and single compact
+dock against the live v3.2 crops.

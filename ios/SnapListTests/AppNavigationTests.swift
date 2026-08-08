@@ -19,6 +19,23 @@ final class AppNavigationTests: XCTestCase {
         }
     }
 
+    /// Live Trophy Wall v3.2 replaces the wide labeled bar with one compact,
+    /// icon-only control. These values are the approved rendered contract, not
+    /// incidental frames sampled from one simulator.
+    func testDockUsesTheApprovedCompactIconContract() {
+        XCTAssertEqual(FloatingDockMetrics.destinationWidth, 52)
+        XCTAssertEqual(FloatingDockMetrics.destinationHeight, 44)
+        XCTAssertEqual(FloatingDockMetrics.destinationSpacing, 6)
+        XCTAssertEqual(FloatingDockMetrics.contentPadding, 6)
+        XCTAssertEqual(FloatingDockMetrics.cornerRadius, 22)
+        XCTAssertEqual(FloatingDockMetrics.bottomInset, 24)
+
+        XCTAssertEqual(PrimaryTab.scan.systemImage(isSelected: false), "camera")
+        XCTAssertEqual(PrimaryTab.scan.systemImage(isSelected: true), "camera.fill")
+        XCTAssertEqual(PrimaryTab.trophyWall.systemImage(isSelected: false), "trophy")
+        XCTAssertEqual(PrimaryTab.trophyWall.systemImage(isSelected: true), "trophy.fill")
+    }
+
     func testRetiredTabsCannotBeRestoredFromAPersistedName() {
         // A tab that stops rendering but still parses from a persisted string stays
         // routable. The enum is the fail-closed boundary, so the retired names must
@@ -137,27 +154,6 @@ final class AppNavigationTests: XCTestCase {
                 destination: .photoReview,
                 photos: photos,
                 opener: .reviewButton
-            )
-        )
-        XCTAssertNil(router.presentedFullScreen)
-    }
-
-    @MainActor
-    func testTrophyWallBoundaryPreservesAnEmptyIntakeAndTabOpenerContext() {
-        let router = AppRouter(initialFullScreen: .guidedCamera)
-
-        router.openCaptureBoundary(
-            destination: .trophyWall,
-            photos: [],
-            opener: .trophyWallTab
-        )
-
-        XCTAssertEqual(
-            router.captureBoundaryRequest,
-            CaptureBoundaryRequest(
-                destination: .trophyWall,
-                photos: [],
-                opener: .trophyWallTab
             )
         )
         XCTAssertNil(router.presentedFullScreen)

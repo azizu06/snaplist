@@ -14,10 +14,12 @@ enum PrimaryTab: String, CaseIterable, Identifiable {
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .scan: "camera.viewfinder"
-        case .trophyWall: "list.bullet.rectangle"
+    func systemImage(isSelected: Bool) -> String {
+        switch (self, isSelected) {
+        case (.scan, false): "camera"
+        case (.scan, true): "camera.fill"
+        case (.trophyWall, false): "trophy"
+        case (.trophyWall, true): "trophy.fill"
         }
     }
 }
@@ -58,7 +60,6 @@ enum AppFullScreen: String, Identifiable {
 
 enum CaptureBoundaryDestination: Equatable {
     case photoReview
-    case trophyWall
 }
 
 enum CaptureBoundaryOpener: Equatable {
@@ -155,11 +156,7 @@ final class AppRouter {
         photos: [StagedCapturePhoto],
         opener: CaptureBoundaryOpener
     ) {
-        let hasValidPhotoCount = switch destination {
-        case .photoReview: (1...5).contains(photos.count)
-        case .trophyWall: (0...5).contains(photos.count)
-        }
-        guard hasValidPhotoCount else { return }
+        guard (1...5).contains(photos.count) else { return }
         captureBoundaryRequest = CaptureBoundaryRequest(
             destination: destination,
             photos: photos,

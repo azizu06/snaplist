@@ -65,6 +65,24 @@ private struct TrophyWallInitialRepository: TrophyWallRepository {
 
 @MainActor
 enum TrophyWallStoreFactory {
+#if DEBUG
+    /// The live canvas's Adobe Stock subjects are proof-only. HOME-01 therefore
+    /// uses six distinct full/detail compositions of the three cleared bundled
+    /// seller-product photos; crop is presentation metadata on six distinct runs.
+    static let fixturePhotoCompositions: [(
+        itemName: String,
+        assetName: String,
+        crop: TrophyWallPhotoCrop
+    )] = [
+        ("White leather sneaker", "FirstValueSneaker", .full),
+        ("Vintage denim jacket", "FirstValueJacket", .full),
+        ("White desk lamp", "FirstValueLamp", .full),
+        ("White leather sneaker, second pair", "FirstValueSneaker", .detailTrailing),
+        ("Vintage denim jacket, second item", "FirstValueJacket", .detailLeading),
+        ("White desk lamp, second item", "FirstValueLamp", .detailTop),
+    ]
+#endif
+
     static func make(
         configuration: LaunchConfiguration,
         principalScope: TrophyWallPrincipalScope
@@ -97,99 +115,22 @@ enum TrophyWallStoreFactory {
     private static func fixtureCards(
         principalScope: TrophyWallPrincipalScope
     ) -> [TrophyWallCard] {
-        [
+        fixturePhotoCompositions.enumerated().map { index, photo in
             .accepted(
                 principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000021")!,
-                state: .publishedToEbay,
-                itemName: "Vintage Pyrex bowl set",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 40)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000022")!,
-                state: .exportPrepared,
-                itemName: "Canon AE-1 film camera",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 38)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000023")!,
-                state: .workingPricing,
-                itemName: "Nintendo Game Boy",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 36)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000024")!,
-                state: .publishedToEbay,
-                itemName: "Sony WH-1000XM4 headphones",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 34)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000025")!,
-                state: .exportPrepared,
-                itemName: "Catan board game",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 32)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000026")!,
-                state: .publishedToEbay,
-                itemName: "Levi's 501 denim jacket",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 30)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000027")!,
-                state: .exportPrepared,
-                itemName: "KitchenAid stand mixer",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 28)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000028")!,
-                state: .publishedToEbay,
-                itemName: "Nikon 50mm f/1.8 lens",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 26)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-000000000029")!,
-                state: .exportPrepared,
-                itemName: "Le Creuset dutch oven",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 24)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-00000000002a")!,
-                state: .publishedToEbay,
-                itemName: "Technics SL-1200 turntable",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 22)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-00000000002b")!,
-                state: .exportPrepared,
-                itemName: "Patagonia fleece pullover",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 20)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-00000000002c")!,
-                state: .publishedToEbay,
-                itemName: "Herman Miller desk chair",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 18)
-            ),
-            .accepted(
-                principalScope: principalScope,
-                runID: UUID(uuidString: "37500000-0000-4000-8000-00000000002d")!,
-                state: .exportPrepared,
-                itemName: "Craftsman socket set",
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 16)
-            ),
-        ]
+                runID: UUID(
+                    uuidString: String(
+                        format: "37500000-0000-4000-8000-%012d",
+                        21 + index
+                    )
+                )!,
+                state: index.isMultiple(of: 2) ? .publishedToEbay : .exportPrepared,
+                itemName: photo.itemName,
+                coverPhotoAssetName: photo.assetName,
+                coverPhotoCrop: photo.crop,
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 40 - Double(index * 2))
+            )
+        }
     }
 #endif
 }

@@ -1731,7 +1731,10 @@ final class SnapListUITests: XCTestCase {
 
         app.buttons["button.primary.continue-to-capture"].tap()
         XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Scan"].exists)
+        let scanDock = app.buttons["dock.scan"]
+        XCTAssertTrue(scanDock.exists)
+        XCTAssertTrue(scanDock.isSelected)
+        XCTAssertEqual(scanDock.label, "Scan")
         XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
         XCTAssertTrue(app.buttons["capture.choose-library"].exists)
         XCTAssertFalse(app.staticTexts["Capture entry boundary"].exists)

@@ -1,5 +1,14 @@
 import SwiftUI
 
+enum FloatingDockMetrics {
+    static let destinationWidth: CGFloat = 52
+    static let destinationHeight: CGFloat = 44
+    static let destinationSpacing: CGFloat = 6
+    static let contentPadding: CGFloat = 6
+    static let cornerRadius: CGFloat = 22
+    static let bottomInset: CGFloat = 24
+}
+
 /// The one approved dock: exactly the two primary destinations, rendered the
 /// same way on every screen that shows it. It iterates `PrimaryTab` rather than
 /// a parallel dock enum so a destination cannot exist in one list and not the
@@ -9,20 +18,21 @@ struct FloatingDock: View {
     let select: (PrimaryTab) -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: FloatingDockMetrics.destinationSpacing) {
             ForEach(PrimaryTab.allCases) { tab in
                 tabButton(tab)
             }
         }
-        .frame(height: SnapListMetrics.dockHeight)
-        .padding(.horizontal, 8)
-        .background(.ultraThinMaterial)
-        .clipShape(.rect(cornerRadius: SnapListMetrics.dockRadius))
+        .padding(FloatingDockMetrics.contentPadding)
+        .background {
+            RoundedRectangle(cornerRadius: FloatingDockMetrics.cornerRadius)
+                .fill(SnapListColorToken.canvas.color)
+                .shadow(color: .black.opacity(0.12), radius: 22, y: 8)
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: SnapListMetrics.dockRadius)
+            RoundedRectangle(cornerRadius: FloatingDockMetrics.cornerRadius)
                 .stroke(SnapListColorToken.inkPrimary.color.opacity(0.08), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.14), radius: 14, y: 8)
     }
 
     private func tabButton(_ tab: PrimaryTab) -> some View {
@@ -31,21 +41,23 @@ struct FloatingDock: View {
         return Button {
             select(tab)
         } label: {
-            VStack(spacing: 3) {
-                Image(systemName: tab.systemImage)
-                    .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
-                Text(tab.title)
-                    .snapListTypography(.metadata)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                    .lineLimit(1)
-            }
+            Image(systemName: tab.systemImage(isSelected: isSelected))
+                .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
             .foregroundStyle(
                 isSelected
                     ? SnapListColorToken.action.color
                     : SnapListColorToken.textTertiary.color
             )
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+            .frame(
+                width: FloatingDockMetrics.destinationWidth,
+                height: FloatingDockMetrics.destinationHeight
+            )
+            .background(
+                isSelected
+                    ? SnapListColorToken.actionTint.color
+                    : Color.clear
+            )
+            .clipShape(.rect(cornerRadius: 16))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -68,8 +80,7 @@ extension View {
         safeAreaInset(edge: .bottom, spacing: 0) {
             if isVisible {
                 FloatingDock(selectedTab: selectedTab, select: select)
-                    .padding(.horizontal, SnapListMetrics.dockSideInset)
-                    .padding(.bottom, SnapListMetrics.dockBottomInset)
+                    .padding(.bottom, FloatingDockMetrics.bottomInset)
                     .transition(.opacity)
             }
         }
