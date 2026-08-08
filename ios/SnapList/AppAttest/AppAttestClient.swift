@@ -52,7 +52,6 @@ struct GuestCapabilityBearer: Codable, Equatable, Sendable {
 protocol GuestCapabilityBearerStoring: Sendable {
     func load() throws -> GuestCapabilityBearer?
     func save(_ bearer: GuestCapabilityBearer) throws
-    func remove() throws
 }
 
 struct VerifiedAppAttestTruth: Equatable, Sendable {
@@ -323,13 +322,6 @@ struct KeychainGuestCapabilityBearerStore: GuestCapabilityBearerStoring {
         }
     }
 
-    func remove() throws {
-        let status = SecItemDelete(baseQuery as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError(status: status)
-        }
-    }
-
     private var baseQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -545,10 +537,11 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
               let expiresAt = date(issued.expiresAt) else {
             throw AppAttestServerClientError.invalidResponse
         }
-        let token = issued.bearerToken.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
-        guard !token.isEmpty else {
+        let token = issued.bearerToken
+        guard token.range(
+            of: #"^guestcap_[A-Za-z0-9_-]{43}$"#,
+            options: .regularExpression
+        ) != nil else {
             throw AppAttestServerClientError.invalidResponse
         }
         return GuestCapabilityBearer(expiresAt: expiresAt, token: token)
@@ -759,11 +752,15 @@ actor AppAttestClient {
             )
             // Every verified assertion funnels through here, so this is the one
             // place the earned capability can be taken into durable custody. A
-            // failure to persist must not fail the assertion itself: the caller
-            // already has its proof, and the next assertion re-earns the bearer.
+            // verified response without durable custody would leave the signed-out
+            // seller unable to authorize the later submission.
             if case .verified(let verified) = truth,
                let capability = verified.guestCapability {
-                try? guestCapabilityStore.save(capability)
+                do {
+                    try guestCapabilityStore.save(capability)
+                } catch {
+                    return .truth(.invalid(.keyPersistenceFailed))
+                }
             }
             return .truth(truth)
         } catch AppAttestServerClientError.keyNotAttested {

@@ -357,9 +357,10 @@ final class AppAttestClientTests: XCTestCase {
     // MARK: Issue #727 — the guest capability issued with a verified assertion
 
     func testVerifiedAssertionRetainsTheServerIssuedGuestCapability() async throws {
+        let token = "guestcap_\(String(repeating: "A", count: 43))"
         AppAttestURLProtocolStub.responses = [
             .init(
-                body: #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"guestcap_opaque","expiresAt":"2026-07-28T15:30:00.000Z","refreshAfter":"2026-07-28T15:25:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
+                body: #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"\#(token)","expiresAt":"2026-07-28T15:30:00.000Z","refreshAfter":"2026-07-28T15:25:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
                 status: 200
             ),
         ]
@@ -378,7 +379,7 @@ final class AppAttestClientTests: XCTestCase {
                 environment: .production,
                 guestCapability: GuestCapabilityBearer(
                     expiresAt: Date(timeIntervalSince1970: 1_785_252_600),
-                    token: "guestcap_opaque"
+                    token: token
                 ),
                 keyID: "native-fixed-key-id",
                 kind: .assertion
@@ -395,6 +396,7 @@ final class AppAttestClientTests: XCTestCase {
             #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"   ","expiresAt":"2026-07-28T15:30:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
             #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"guestcap_opaque","expiresAt":"the end of the week"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
             #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":7,"expiresAt":"2026-07-28T15:30:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
+            #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"guestcap_opaque","expiresAt":"2026-07-28T15:30:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
         ]
 
         for body in bodies {
@@ -468,6 +470,39 @@ final class AppAttestClientTests: XCTestCase {
         _ = await client.assert(requestBody: Data(#"{"operation":"proof"}"#.utf8))
 
         XCTAssertEqual(bearerStore.saved, [bearer])
+    }
+
+    func testVerifiedAssertionReportsGuestCapabilityPersistenceFailure() async {
+        let bearer = GuestCapabilityBearer(
+            expiresAt: Date(timeIntervalSince1970: 1_785_252_600),
+            token: "guestcap_opaque"
+        )
+        let bearerStore = GuestCapabilityBearerStoreStub()
+        bearerStore.saveError = GuestCapabilityBearerStoreStubError.saveFailed
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            guestCapabilityStore: bearerStore,
+            keyStore: AppAttestKeyStoreStub(
+                key: .init(id: "native-fixed-key-id", state: .verified)
+            ),
+            server: AppAttestServerStub(
+                assertionTruth: .verified(.init(
+                    counter: 1,
+                    environment: .production,
+                    guestCapability: bearer,
+                    keyID: "native-fixed-key-id",
+                    kind: .assertion
+                ))
+            ),
+            service: AppAttestServiceStub(isSupported: true)
+        )
+
+        let truth = await client.assert(
+            requestBody: Data(#"{"operation":"proof"}"#.utf8)
+        )
+
+        XCTAssertEqual(truth, .invalid(.keyPersistenceFailed))
     }
 
     func testRejectedAssertionPersistsNoGuestCapability() async {
@@ -662,17 +697,20 @@ private final class GuestCapabilityBearerStoreStub: GuestCapabilityBearerStoring
     @unchecked Sendable {
     private(set) var saved: [GuestCapabilityBearer] = []
     var bearer: GuestCapabilityBearer?
+    var saveError: Error?
 
     func load() throws -> GuestCapabilityBearer? { bearer }
 
     func save(_ bearer: GuestCapabilityBearer) throws {
+        if let saveError { throw saveError }
         self.bearer = bearer
         saved.append(bearer)
     }
 
-    func remove() throws {
-        bearer = nil
-    }
+}
+
+private enum GuestCapabilityBearerStoreStubError: Error {
+    case saveFailed
 }
 
 private actor AppAttestServerStub: AppAttestServerClient {

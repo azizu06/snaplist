@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 import XCTest
 @testable import SnapList
 
@@ -123,7 +124,7 @@ final class GuestCapabilityBearerTests: XCTestCase {
 
     func testAStoredGuestCapabilitySurvivesRelaunch() throws {
         let store = KeychainGuestCapabilityBearerStore()
-        addTeardownBlock { try? store.remove() }
+        addTeardownBlock { Self.purgeGuestCapabilityKeychain() }
         let bearer = Self.bearer(expiringIn: 3_600)
 
         try store.save(bearer)
@@ -132,16 +133,6 @@ final class GuestCapabilityBearerTests: XCTestCase {
         let reloaded = try KeychainGuestCapabilityBearerStore().load()
 
         XCTAssertEqual(reloaded, bearer)
-    }
-
-    func testRemovingAGuestCapabilityLeavesNothingBehind() throws {
-        let store = KeychainGuestCapabilityBearerStore()
-        addTeardownBlock { try? store.remove() }
-
-        try store.save(Self.bearer(expiringIn: 3_600))
-        try store.remove()
-
-        XCTAssertNil(try KeychainGuestCapabilityBearerStore().load())
     }
 
     // MARK: The request the signed-out seller actually sends
@@ -263,6 +254,14 @@ final class GuestCapabilityBearerTests: XCTestCase {
         }
     }
 
+    private static func purgeGuestCapabilityKeychain() {
+        SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: "guest-capability-bearer",
+            kSecAttrService as String: "dev.snaplist.ios.guest-capability",
+        ] as CFDictionary)
+    }
+
     @MainActor
     private func waitForPendingItemSavedEvent(
         on host: ItemRunSubmissionHost
@@ -318,9 +317,6 @@ private final class GuestCapabilityStoreDouble: GuestCapabilityBearerStoring,
         self.bearer = bearer
     }
 
-    func remove() throws {
-        bearer = nil
-    }
 }
 
 private final class ObservedRequest: @unchecked Sendable {
