@@ -608,7 +608,12 @@ struct AppShellView: View {
                         },
                         removeCachedItems: { settingsCachedData.removeAll() }
                     )
-                }
+                },
+                settingsProofSafeExit: configuration.settingsProofState == nil
+                    ? nil
+                    : {
+                        router.reset(tab: .trophyWall)
+                    }
             )
         case .home(let route):
             switch route {
