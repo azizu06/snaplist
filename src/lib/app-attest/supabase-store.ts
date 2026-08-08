@@ -91,15 +91,21 @@ export function createSupabaseAppAttestStore(client: RpcClient): AppAttestStore 
       const row = Array.isArray(data) ? data[0] : null;
       if (!row || typeof row !== "object") return null;
       const value = row as Record<string, unknown>;
+      const hasValidOptionalMetadata =
+        (value.bundle_version === null && value.validation_category === null) ||
+        (typeof value.bundle_version === "string" &&
+          value.bundle_version.length > 0 &&
+          typeof value.validation_category === "number" &&
+          value.validation_category >= 1 &&
+          value.validation_category <= 6);
       if (
         typeof value.app_id !== "string" ||
         typeof value.assertion_counter !== "number" ||
         typeof value.attested_at !== "string" ||
-        typeof value.bundle_version !== "string" ||
+        !hasValidOptionalMetadata ||
         (value.environment !== "development" && value.environment !== "production") ||
         typeof value.key_id !== "string" ||
-        typeof value.public_key_pem !== "string" ||
-        typeof value.validation_category !== "number"
+        typeof value.public_key_pem !== "string"
       ) {
         throw new Error("Invalid App Attest private key result");
       }

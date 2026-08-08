@@ -6,6 +6,7 @@ import { createAppAttestService, type AppAttestEnvironment } from "@/lib/app-att
 import { createSupabaseAppAttestStore } from "@/lib/app-attest/supabase-store";
 import { createVerifiedGuestCapabilityService } from "@/lib/guest-capability/service";
 import { createSupabaseVerifiedGuestCapabilityStore } from "@/lib/guest-capability/supabase-store";
+import { logServerError } from "@/lib/api/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -60,6 +61,8 @@ export async function POST(request: Request): Promise<Response> {
         appId: configured.appId,
         challengeTtlMs: configured.ttlMs,
         environment: configured.environment,
+        reportVerificationError: (phase, error) =>
+          logServerError(`app-attest.verify-${phase}`, error),
         store: createSupabaseAppAttestStore(client),
         verifier: createAppleAppAttestVerifier({}),
       }),

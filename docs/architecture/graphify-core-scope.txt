@@ -502,6 +502,8 @@ supabase/migrations/20260806120000_ebay_photo_access_tokens.sql
 supabase/migrations/20260806140000_ebay_listing_sync_authority.sql
 supabase/migrations/20260806190000_non_guest_item_deletion.sql
 supabase/migrations/20260806200000_pipeline_run_provider_usage.sql
+supabase/migrations/20260808131433_app_attest_optional_metadata.sql
+supabase/migrations/20260808131803_app_attest_optional_metadata_pair_integrity.sql
 tsconfig.json
 vercel.json
 vitest.config.ts
