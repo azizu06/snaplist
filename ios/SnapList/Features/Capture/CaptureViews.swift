@@ -324,11 +324,12 @@ struct ScanCameraView: View {
         LiveScanCameraSurface(
             thumbnailURLs: flow.stagedPhotos.map { Optional($0.thumbnailURL) },
             isShutterEnabled: flow.canTakePhoto,
-            isLibraryEnabled: !flow.isAddingPhotos,
+            isLibraryEnabled: flow.canOpenLibrary,
             isFlashAvailable: flow.isFlashAvailable,
             flashMode: flow.flashMode,
             reduceMotion: reduceMotion,
             motionStateIdentifier: nil,
+            fixturePreviewDescription: nil,
             preview: {
                 CameraPreviewView(
                     session: flow.previewSession,
@@ -364,6 +365,7 @@ struct ScanCameraView: View {
     }
 
     private func libraryPicker(labelStyle: ScanLibraryLabelStyle) -> some View {
+        let isLibraryEnabled = flow.canOpenLibrary
         let mountedControl: ScanLibraryFocusConsumer.MountedLibraryControl =
             switch labelStyle {
             case .icon:
@@ -380,7 +382,7 @@ struct ScanCameraView: View {
         ) {
             ScanLibraryLabel(style: labelStyle)
         }
-        .disabled(flow.isAddingPhotos)
+        .disabled(!isLibraryEnabled)
         .accessibilityLabel(labelStyle == .icon ? "Library" : "Choose from library")
         .accessibilityIdentifier(
             labelStyle == .icon ? "scan.library" : "scan.choose-library"
@@ -601,6 +603,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     let flashMode: CaptureFlashMode
     let reduceMotion: Bool
     let motionStateIdentifier: String?
+    let fixturePreviewDescription: String?
     @ViewBuilder let preview: () -> Preview
     @ViewBuilder let libraryControl: () -> LibraryControl
     let toggleFlash: () -> Void
@@ -623,6 +626,15 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Reduced motion active")
                     .accessibilityIdentifier(motionStateIdentifier)
+            }
+
+            if let fixturePreviewDescription {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(fixturePreviewDescription)
+                    .accessibilityIdentifier("scan.fixture-preview")
+                    .accessibilitySortPriority(10)
             }
 
             ResponsiveFramingCorners()
@@ -877,6 +889,20 @@ private struct ScanPhotoThumbnail: View {
 }
 
 #if DEBUG
+/// A stable visual stand-in for the simulator-only camera route. It intentionally
+/// has no subject or image content so it cannot be mistaken for device camera output.
+private struct ScanCameraFixturePreview: View {
+    var body: some View {
+        LinearGradient(
+            colors: [Color(hex: "#2B2E33"), Color(hex: "#16181C")],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+}
+
 struct ScanCameraVisualStateView: View {
     let state: ApprovedVisualStateID
     let forceReducedMotion: Bool
@@ -927,12 +953,13 @@ struct ScanCameraVisualStateView: View {
             LiveScanCameraSurface(
                 thumbnailURLs: Array(repeating: nil, count: fixturePhotoCount),
                 isShutterEnabled: fixturePhotoCount < 5,
-                isLibraryEnabled: true,
+                isLibraryEnabled: fixturePhotoCount < 5,
                 isFlashAvailable: true,
                 flashMode: .off,
                 reduceMotion: reduceMotion,
                 motionStateIdentifier: reduceMotion ? "scan.motion-reduced" : nil,
-                preview: { FixtureItemScene(subjectScale: 1.15) },
+                fixturePreviewDescription: "Simulator camera fixture. No live camera feed.",
+                preview: { ScanCameraFixturePreview() },
                 libraryControl: {
                     Button(action: {}) { ScanLibraryLabel(style: .icon) }
                         .buttonStyle(.plain)

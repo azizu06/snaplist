@@ -7307,6 +7307,20 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertFalse(model.canTakePhoto)
     }
 
+    func testScanLibraryCapacityIsDisabledAtFivePhotos() async {
+        let model = makeModel()
+
+        let addedCount = await model.stageLibraryPhotos((1...5).map { Data([$0]) })
+
+        XCTAssertEqual(addedCount, 5)
+        XCTAssertEqual(model.stagedPhotos.count, 5)
+        XCTAssertFalse(model.canOpenLibrary)
+        XCTAssertNil(
+            model.reserveLibraryIntake(),
+            "The library picker must not reserve capacity once all five photo slots are staged."
+        )
+    }
+
     func testLibraryPickerStagesEachPayloadBeforeLoadingTheNextAndKeepsPartialProgress() async {
         let tracker = LibraryPayloadLifetimeTracker()
         let store = LifetimeTrackingCaptureStore(tracker: tracker)

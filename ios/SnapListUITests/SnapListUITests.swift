@@ -996,7 +996,19 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(capped.staticTexts["scan.photo-count"].label, "5 of 5")
         XCTAssertTrue(capped.buttons["scan.review"].exists)
         XCTAssertFalse(capped.buttons["scan.shutter"].isEnabled)
-        XCTAssertTrue(capped.buttons["scan.library"].isEnabled)
+        XCTAssertFalse(capped.buttons["scan.library"].isEnabled)
+        XCTAssertEqual(capped.buttons["scan.library"].label, "Library")
+    }
+
+    func testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed() {
+        let app = launch(extraArguments: ["--visual-state=CAM-01", "--reduced-motion"])
+        let fixturePreview = app.otherElements["scan.fixture-preview"]
+
+        XCTAssertTrue(fixturePreview.waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            fixturePreview.label,
+            "Simulator camera fixture. No live camera feed."
+        )
     }
 
     func testApprovedScanCameraRecoveryStatesUseExactCopyAndHonestActions() {

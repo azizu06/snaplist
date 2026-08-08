@@ -91,6 +91,7 @@
       "SnapListUITests/ListingReviewUITests/testDirtyBackAndRelaunchRestoreDraftBeforeOneGuardedDoneSave",
       "SnapListUITests/SnapListUITests/testApprovedScanCameraRecoveryStatesUseExactCopyAndHonestActions",
       "SnapListUITests/SnapListUITests/testApprovedScanCameraZeroAndFivePhotoStatesExposeTheFrozenControls",
+      "SnapListUITests/SnapListUITests/testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed",
       "SnapListUITests/SnapListUITests/testApprovedVisualStateLaunchArgumentUsesTypedBoundary",
       "SnapListUITests/SnapListUITests/testCameraDeniedAndRestrictedUseLibraryRecovery",
       "SnapListUITests/SnapListUITests/testCaptureGuidanceRespectsLandscapeSafeAreas",
