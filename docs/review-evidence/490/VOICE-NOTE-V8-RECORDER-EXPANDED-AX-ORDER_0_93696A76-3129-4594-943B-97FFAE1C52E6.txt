@@ -1,0 +1,17 @@
+photo-review.back
+photo-review.count
+photo-review.screen
+photo-review.start-listing
+photo-review.drag-observation
+chevron.left
+photo-review.hero
+photo-review.voice
+mic.fill
+chevron.up
+photo-review.thumbnail.1
+photo-review.add
+voice-note.title
+voice-note.close
+voice-note.helper
+voice-note.record
+plus

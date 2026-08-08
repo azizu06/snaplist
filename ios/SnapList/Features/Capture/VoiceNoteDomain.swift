@@ -69,8 +69,6 @@ enum VoiceNotePresentation {
     static let compactSheetControlLayoutTarget: CGFloat = 46
     static let emptyRowHelper = "Add details the photos might miss"
     static let sheetContext = "Add details the photos might miss."
-    static let emptyRowAccessibilityLabel =
-        "Voice note, optional, collapsed"
     static let recordingAccessibilityOrder:
         [VoiceNoteRecordingAccessibilityElement] = [
             .cancel,

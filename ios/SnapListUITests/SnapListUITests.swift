@@ -283,9 +283,12 @@ final class SnapListUITests: XCTestCase {
         let startListing = app.buttons["photo-review.start-listing"]
         XCTAssertTrue(voice.waitForExistence(timeout: 2))
         XCTAssertTrue(startListing.exists)
-        // The exact live-source Voice Note v2.1 package controls the visible helper
-        // and the optional collapsed semantics.
-        XCTAssertEqual(voice.label, "Voice note, optional, collapsed")
+        // Live Photo Review v5 owns the collapsed row; Voice Note v8 starts only
+        // after the typed opener resolves to its recorder sheet.
+        XCTAssertEqual(
+            voice.label,
+            "Voice note, Add details the photos might miss, collapsed"
+        )
         XCTAssertEqual(startListing.label, "Start listing")
         XCTAssertTrue(startListing.isEnabled)
         XCTAssertGreaterThanOrEqual(voice.frame.height, 44)
@@ -319,6 +322,18 @@ final class SnapListUITests: XCTestCase {
             44,
             "Voice note Close must expose the approved 44-point target height."
         )
+        addScreenshot(named: "VOICE-NOTE-V8-RECORDER-EXPANDED-402x874.png")
+        let accessibilityOrder = app
+            .descendants(matching: .any)
+            .allElementsBoundByAccessibilityElement
+            .map(\.identifier)
+            .filter { !$0.isEmpty }
+        let accessibilityAttachment = XCTAttachment(
+            string: accessibilityOrder.joined(separator: "\n")
+        )
+        accessibilityAttachment.name = "VOICE-NOTE-V8-RECORDER-EXPANDED-AX-ORDER.txt"
+        accessibilityAttachment.lifetime = .keepAlways
+        add(accessibilityAttachment)
         close.tap()
         XCTAssertTrue(voice.waitForExistence(timeout: 2))
 
@@ -498,7 +513,10 @@ final class SnapListUITests: XCTestCase {
         interrupted.buttons["voice-note.close"].tap()
         let emptyRow = interrupted.buttons["photo-review.voice"]
         XCTAssertTrue(emptyRow.waitForExistence(timeout: 2))
-        XCTAssertEqual(emptyRow.label, "Voice note, optional, collapsed")
+        XCTAssertEqual(
+            emptyRow.label,
+            "Voice note, Add details the photos might miss, collapsed"
+        )
         emptyRow.tap()
         XCTAssertTrue(
             interrupted.buttons["voice-note.record"]
@@ -1019,7 +1037,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(recoveryLibrary.label, "Choose from library")
     }
 
-    func testPhotoReviewREV02UsesCanonicalAdaptiveHeroAt402x874() {
+    func testPhotoReviewREV02UsesLive300PointHeroAt402x874() {
         let app = launch(extraArguments: ["--photo-review-state=REV-02"])
         let window = app.windows.firstMatch
         let hero = app.buttons["photo-review.hero"]
@@ -1030,10 +1048,27 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(hero.waitForExistence(timeout: 3))
         XCTAssertEqual(
             hero.frame.height,
-            420,
+            300,
             accuracy: 1,
-            "Photo Review v1.4 caps the shared-v7 adaptive hero at 420 points."
+            "Live Photo Review v5 fixes the hero at 300 points."
         )
+    }
+
+    func testPhotoReviewREV02OwnsCollapsedVoiceRowAndStartListingShell() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-02"])
+        let screen = app.scrollViews["photo-review.screen"]
+        let collapsedVoiceRow = app.buttons["photo-review.voice"]
+        let startListing = app.buttons["photo-review.start-listing"]
+
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        XCTAssertTrue(collapsedVoiceRow.exists)
+        XCTAssertEqual(
+            collapsedVoiceRow.label,
+            "Voice note, Add details the photos might miss, collapsed",
+            "Photo Review v5 owns the collapsed Voice note row and its live helper."
+        )
+        XCTAssertTrue(startListing.exists)
+        addScreenshot(named: "PHOTO-REVIEW-V5-REV-02-COLLAPSED-402x874.png")
     }
 
     func testPhotoReviewREV01RendersOneSelectedCoverPhotoWithProgressiveActions() {
@@ -1222,7 +1257,10 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(back.frame.width, 44)
         XCTAssertGreaterThanOrEqual(back.frame.height, 44)
         XCTAssertTrue(voice.exists)
-        XCTAssertEqual(voice.label, "Voice note, optional, collapsed")
+        XCTAssertEqual(
+            voice.label,
+            "Voice note, Add details the photos might miss, collapsed"
+        )
         XCTAssertTrue(startListing.exists)
         XCTAssertEqual(startListing.label, "Start listing")
 

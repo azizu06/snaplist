@@ -456,10 +456,6 @@ final class VoiceNoteTests: XCTestCase {
             "Add details the photos might miss."
         )
         XCTAssertEqual(
-            VoiceNotePresentation.emptyRowAccessibilityLabel,
-            "Voice note, optional, collapsed"
-        )
-        XCTAssertEqual(
             VoiceNotePresentation.recordingAccessibilityLabel(elapsed: 7.8),
             "Recording, 7 seconds of 15"
         )
