@@ -1,8 +1,18 @@
 import SwiftUI
 
+enum EbayResultThumbnailSource {
+    case authoritative(URL)
+    case neutral
+#if DEBUG
+    case approvedFixtureAsset(String)
+#endif
+}
+
 @MainActor
 struct EbayPublishJourneyHost: View {
     let listingID: UUID
+    let listingTitle: String
+    let coverPhotoURL: URL?
     let dependencies: AppDependencies
     let forceReducedMotion: Bool
     let backToListing: () -> Void
@@ -15,6 +25,8 @@ struct EbayPublishJourneyHost: View {
 
     init(
         listingID: UUID,
+        listingTitle: String,
+        coverPhotoURL: URL?,
         dependencies: AppDependencies,
         forceReducedMotion: Bool,
         backToListing: @escaping () -> Void,
@@ -22,6 +34,8 @@ struct EbayPublishJourneyHost: View {
         startNewItem: @escaping () -> Void
     ) {
         self.listingID = listingID
+        self.listingTitle = listingTitle
+        self.coverPhotoURL = coverPhotoURL
         self.dependencies = dependencies
         self.forceReducedMotion = forceReducedMotion
         self.backToListing = backToListing
@@ -56,6 +70,10 @@ struct EbayPublishJourneyHost: View {
                 EbayPublishView(
                     store: flowStore,
                     forceReducedMotion: forceReducedMotion,
+                    listingTitle: listingTitle,
+                    resultThumbnailSource: coverPhotoURL.map {
+                        .authoritative($0)
+                    } ?? .neutral,
                     backToListing: backToListing,
                     goToTrophyWall: goToTrophyWall
                 )
@@ -88,6 +106,8 @@ struct EbayPublishJourneyHost: View {
 struct EbayPublishView: View {
     @Bindable var store: EbayPublishFlowStore
     let forceReducedMotion: Bool
+    let listingTitle: String
+    let resultThumbnailSource: EbayResultThumbnailSource
     let backToListing: () -> Void
     let goToTrophyWall: () -> Void
 
@@ -173,9 +193,19 @@ struct EbayPublishView: View {
     private func connection(_ state: EbayConnectionViewState) -> some View {
         let copy = EbayConnectionCopy(state: state)
         return EbayCenteredActionScreen(
+            headingFocusTarget: EbayPublishHeadingFocusTarget(
+                screen: .connection(state)
+            ),
             headline: copy.headline,
             detail: copy.body,
-            systemImage: state == .connected ? "checkmark.circle.fill" : "link",
+            statements: state == .notConnected ? [
+                "SnapList prepares the listing. You confirm before anything posts.",
+                "You sign in on eBay’s own page. SnapList never sees your eBay password.",
+                "You can remove this connection at any time.",
+            ] : [],
+            systemImage: state == .notConnected
+                ? nil
+                : state == .connected ? "checkmark.circle.fill" : "link",
             primary: copy.primary,
             secondary: copy.secondary,
             forceReducedMotion: reduceMotion,
@@ -193,7 +223,6 @@ struct EbayPublishView: View {
                 }
             }
         )
-        .accessibilityIdentifier("ebay-publish.connection.\(copy.identifier)")
     }
 
     private func confirmation(
@@ -210,11 +239,14 @@ struct EbayPublishView: View {
                     .accessibilityIdentifier("ebay-publish.confirmation.banner")
                 }
 
-                Text(confirmationHeading(state))
-                .snapListTypography(.displayTitle)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("ebay-publish.confirmation.heading")
+                EbayPublishFocusedHeading(
+                    text: confirmationHeading(state),
+                    target: EbayPublishHeadingFocusTarget(
+                        screen: .confirmation(state)
+                    )
+                )
+                    .snapListTypography(.displayTitle)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
 
                 if let preflight = store.preflight {
                     destinationCard(preflight)
@@ -261,23 +293,72 @@ struct EbayPublishView: View {
             .background(SnapListColorToken.canvas.color)
             .overlay(alignment: .top) { Divider() }
         }
-        .accessibilityIdentifier("ebay-publish.confirmation")
     }
 
     private func destinationCard(
         _ preflight: EbayPublishPreflight
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("GOES TO")
-                .snapListTypography(.metadata)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-            Text(
-                "\(EbayPublishPresentation.marketplace(preflight.marketplace)), as \(accountName)"
-            )
-            .snapListTypography(.rowTitle)
-            .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 12) {
+            confirmationThumbnail
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("GOES TO")
+                    .snapListTypography(.metadata)
+                    .foregroundStyle(SnapListColorToken.textTertiary.color)
+                Text(
+                    "\(EbayPublishPresentation.marketplace(preflight.marketplace)), as \(accountName)"
+                )
+                .snapListTypography(.rowTitle)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
         }
         .ebayCard()
+    }
+
+    @ViewBuilder
+    private var confirmationThumbnail: some View {
+        switch resultThumbnailSource {
+        case .authoritative(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .accessibilityLabel("Listing photo for \(listingTitle)")
+                        .accessibilityIdentifier(
+                            "ebay-publish.confirmation.listing-thumbnail"
+                        )
+                case .empty, .failure:
+                    neutralConfirmationThumbnail
+                @unknown default:
+                    neutralConfirmationThumbnail
+                }
+            }
+        case .neutral:
+            neutralConfirmationThumbnail
+#if DEBUG
+        case .approvedFixtureAsset(let name):
+            Image(name)
+                .resizable()
+                .scaledToFill()
+                .accessibilityLabel("Listing photo for \(listingTitle)")
+                .accessibilityIdentifier(
+                    "ebay-publish.confirmation.listing-thumbnail"
+                )
+#endif
+        }
+    }
+
+    private var neutralConfirmationThumbnail: some View {
+        ZStack {
+            SnapListColorToken.quietFill.color
+            Image(systemName: "photo")
+                .foregroundStyle(SnapListColorToken.textTertiary.color)
+        }
+        .accessibilityHidden(true)
     }
 
     private func fieldsCard(_ preflight: EbayPublishPreflight) -> some View {
@@ -352,20 +433,27 @@ struct EbayPublishView: View {
 
     private func result(_ state: EbayResultViewState) -> some View {
         let copy = EbayResultCopy(state: state)
-        return EbayCenteredActionScreen(
+        return EbayResultActionScreen(
+            headingFocusTarget: EbayPublishHeadingFocusTarget(
+                screen: .result(state)
+            ),
+            listingTitle: listingTitle,
+            thumbnailSource: resultThumbnailSource,
+            status: copy.chip,
+            statusColor: state == .outcomeNotYetKnown
+                ? SnapListColorToken.caution.color
+                : state == .published || state == .publishing
+                    ? SnapListColorToken.action.color
+                    : SnapListColorToken.textTertiary.color,
             headline: copy.headline,
             detail: copy.body,
-            chip: copy.chip,
-            chipVariant: copy.chipVariant,
-            systemImage: state == .published ? "checkmark.circle.fill" : "shippingbox",
+            note: copy.note,
             primary: copy.primary,
             secondary: copy.secondary,
             forceReducedMotion: reduceMotion,
             primaryAction: {
                 switch state {
                 case .unavailable: Task { await store.retryPublish() }
-                case .outcomeNotYetKnown:
-                    Task { await store.reconcileAmbiguousPublish() }
                 case .ebaySideChanged: Task { await store.checkConnection() }
                 default: goToTrophyWall()
                 }
@@ -379,7 +467,6 @@ struct EbayPublishView: View {
                 }
             }
         )
-        .accessibilityIdentifier("ebay-publish.result.\(copy.identifier)")
     }
 
     private var account: some View {
@@ -835,10 +922,103 @@ private struct EbayConnectionCopy {
     }
 }
 
+struct EbayPublishHeadingFocusTarget: Hashable {
+    let identifier: String
+    let isLiveRegion: Bool
+    private let transitionIdentity: String
+
+    init(screen: EbayPublishScreen) {
+        switch screen {
+        case .connection(let state):
+            let copy = EbayConnectionCopy(state: state)
+            identifier = "ebay-publish.connection.\(copy.identifier)"
+            isLiveRegion = false
+            transitionIdentity = "connection.\(copy.identifier)"
+        case .confirmation(let state):
+            identifier = "ebay-publish.confirmation"
+            isLiveRegion = false
+            transitionIdentity = "confirmation.\(Self.identity(for: state))"
+        case .result(let state):
+            let copy = EbayResultCopy(state: state)
+            identifier = "ebay-publish.result.\(copy.identifier)"
+            isLiveRegion = true
+            transitionIdentity = "result.\(copy.identifier)"
+        case .account:
+            identifier = "ebay-publish.account"
+            isLiveRegion = false
+            transitionIdentity = "account"
+        }
+    }
+
+    private static func identity(
+        for state: EbayConfirmationViewState
+    ) -> String {
+        switch state {
+        case .ready: "ready"
+        case .listingChanged: "listing-changed"
+        case .refreshFailed: "refresh-failed"
+        case .missingFields: "missing-fields"
+        case .connectionLost: "connection-lost"
+        case .accountChanged: "account-changed"
+        }
+    }
+}
+
+struct EbayPublishFocusedHeading: View {
+    let text: String
+    let target: EbayPublishHeadingFocusTarget
+
+    var body: some View {
+        Text(text)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier(target.identifier)
+            .modifier(EbayPublishHeadingAccessibilityFocus(target: target))
+    }
+}
+
+struct EbayPublishHeadingFocusBehavior {
+    let target: EbayPublishHeadingFocusTarget
+
+    var accessibilityTraits: AccessibilityTraits {
+        target.isLiveRegion ? .updatesFrequently : []
+    }
+
+    @MainActor
+    func requestFocus(_ setFocused: (Bool) -> Void) async {
+        await Task.yield()
+        setFocused(true)
+    }
+}
+
+struct EbayPublishHeadingAccessibilityFocus: ViewModifier {
+    let target: EbayPublishHeadingFocusTarget
+    @AccessibilityFocusState private var isFocused: Bool
+
+    private var behavior: EbayPublishHeadingFocusBehavior {
+        EbayPublishHeadingFocusBehavior(target: target)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityAddTraits(behavior.accessibilityTraits)
+            .accessibilityFocused($isFocused)
+            .onAppear(perform: focusHeading)
+            .onChange(of: target) { _, _ in focusHeading() }
+    }
+
+    private func focusHeading() {
+        let behavior = behavior
+        Task { @MainActor in
+            await behavior.requestFocus { isFocused = $0 }
+        }
+    }
+}
+
 struct EbayResultCopy {
     let headline: String
     let chip: String
     let body: String
+    let note: String?
     let primary: String?
     let secondary: String?
     let identifier: String
@@ -847,52 +1027,56 @@ struct EbayResultCopy {
     init(state: EbayResultViewState) {
         switch state {
         case .publishing:
-            (headline, chip, body, primary, secondary, identifier, chipVariant) = (
+            (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "Posting to eBay.", "Posting",
                 "This usually takes a few seconds. You can leave this screen and it will keep going.",
-                nil, "Go to Trophy Wall", "publishing", .info
+                nil, nil, "Go to Trophy Wall", "publishing", .info
             )
         case .published:
-            (headline, chip, body, primary, secondary, identifier, chipVariant) = (
+            (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "Your listing is live on eBay.", "Live on eBay",
                 "Buyers can find it now. eBay handles the listing from here.",
+                "Changes made on eBay will not come back to SnapList.",
                 "Go to Trophy Wall", "View on eBay", "published", .info
             )
         case .unavailable:
-            (headline, chip, body, primary, secondary, identifier, chipVariant) = (
+            (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "eBay is not responding.", "Not posted",
                 "Your listing was not posted. It is saved and ready to send when eBay is back.",
-                "Try again", "Go to Trophy Wall", "unavailable", .neutral
+                nil, "Try again", "Go to Trophy Wall", "unavailable", .neutral
             )
         case .sellerFixableRefusal(let message):
-            (headline, chip, body, primary, secondary, identifier, chipVariant) = (
+            (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "This listing was not posted.", "Not posted",
                 message,
-                "Go to Trophy Wall", nil, "seller-fixable-refusal", .neutral
+                nil, "Go to Trophy Wall", nil, "seller-fixable-refusal", .neutral
             )
         case .outcomeNotYetKnown:
-            (headline, chip, body, primary, secondary, identifier, chipVariant) = (
+            (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "SnapList does not know yet whether eBay accepted this listing.",
                 "Checking with eBay",
-                "The connection dropped at the wrong moment. Check again to reuse the saved publish attempt without creating another listing.",
-                "Check again", "Go to Trophy Wall", "outcome-unknown", .caution
+                "The connection dropped at the wrong moment. SnapList will find out and update your Trophy Wall.",
+                "There is nothing for you to do, and nothing will be posted twice.",
+                "Go to Trophy Wall", nil, "outcome-unknown", .caution
             )
         case .ebaySideChanged:
-            (headline, chip, body, primary, secondary, identifier, chipVariant) = (
+            (headline, chip, body, note, primary, secondary, identifier, chipVariant) = (
                 "Your eBay connection changed.", "Not posted",
                 "Nothing was sent to eBay. Your listing is exactly as you left it.",
-                "Check eBay connection", "Go to Trophy Wall", "ebay-side-changed", .neutral
+                nil, "Check eBay connection", "Go to Trophy Wall", "ebay-side-changed", .neutral
             )
         }
     }
 }
 
 private struct EbayCenteredActionScreen: View {
+    let headingFocusTarget: EbayPublishHeadingFocusTarget
     let headline: String
     let detail: String
+    var statements: [String] = []
     var chip: String?
     var chipVariant: SnapListChipVariant = .neutral
-    let systemImage: String
+    let systemImage: String?
     let primary: String?
     let secondary: String?
     let forceReducedMotion: Bool
@@ -903,23 +1087,55 @@ private struct EbayCenteredActionScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Spacer(minLength: 16)
-                Image(systemName: systemImage)
-                    .font(.system(size: 36, weight: .semibold))
-                    .foregroundStyle(SnapListColorToken.action.color)
-                    .accessibilityHidden(true)
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 36, weight: .semibold))
+                        .foregroundStyle(SnapListColorToken.action.color)
+                        .accessibilityHidden(true)
+                }
                 if let chip {
                     SnapListChip(chip, variant: chipVariant)
                 }
-                Text(headline)
+                EbayPublishFocusedHeading(
+                    text: headline,
+                    target: headingFocusTarget
+                )
                     .snapListTypography(.displayTitle)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("ebay-publish.heading")
                 Text(detail)
                     .snapListTypography(.body)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     .fixedSize(horizontal: false, vertical: true)
+                if !statements.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(Array(statements.enumerated()), id: \.offset) {
+                            index, statement in
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(
+                                        SnapListColorToken.action.color
+                                    )
+                                    .accessibilityHidden(true)
+                                Text(statement)
+                                    .snapListTypography(.status)
+                                    .foregroundStyle(
+                                        SnapListColorToken.textSecondary.color
+                                    )
+                                    .fixedSize(
+                                        horizontal: false,
+                                        vertical: true
+                                    )
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 12)
+                            if index < statements.count - 1 {
+                                Divider()
+                            }
+                        }
+                    }
+                    .ebayCard()
+                }
                 Spacer(minLength: 16)
             }
             .frame(maxWidth: .infinity, minHeight: 440, alignment: .leading)
@@ -945,6 +1161,146 @@ private struct EbayCenteredActionScreen: View {
             .padding(.vertical, 10)
             .background(SnapListColorToken.canvas.color)
             .overlay(alignment: .top) { Divider() }
+        }
+    }
+}
+
+private struct EbayResultActionScreen: View {
+    let headingFocusTarget: EbayPublishHeadingFocusTarget
+    let listingTitle: String
+    let thumbnailSource: EbayResultThumbnailSource
+    let status: String
+    let statusColor: Color
+    let headline: String
+    let detail: String
+    let note: String?
+    let primary: String?
+    let secondary: String?
+    let forceReducedMotion: Bool
+    let primaryAction: () -> Void
+    let secondaryAction: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Spacer(minLength: 16)
+                EbayPublishFocusedHeading(
+                    text: headline,
+                    target: headingFocusTarget
+                )
+                    .snapListTypography(.displayTitle)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilitySortPriority(70)
+
+                HStack(spacing: 12) {
+                    thumbnail
+                        .frame(width: 54, height: 54)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(listingTitle)
+                            .snapListTypography(.rowTitle)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilitySortPriority(60)
+                        HStack(spacing: 7) {
+                            Circle()
+                                .fill(statusColor)
+                                .frame(width: 7, height: 7)
+                                .accessibilityHidden(true)
+                            Text(status)
+                                .snapListTypography(.status)
+                                .foregroundStyle(
+                                    SnapListColorToken.textSecondary.color
+                                )
+                                .accessibilitySortPriority(50)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .ebayCard()
+
+                Text(detail)
+                    .snapListTypography(.body)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilitySortPriority(40)
+                if let note {
+                    Text(note)
+                        .snapListTypography(.status)
+                        .foregroundStyle(
+                            SnapListColorToken.textSecondary.color
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(SnapListColorToken.quietFill.color)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .accessibilityIdentifier("ebay-publish.result.note")
+                        .accessibilitySortPriority(30)
+                }
+                Spacer(minLength: 16)
+            }
+            .frame(maxWidth: .infinity, minHeight: 440, alignment: .leading)
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 8) {
+                if let primary {
+                    SnapListPrimaryButton(
+                        title: primary,
+                        forceReducedMotion: forceReducedMotion,
+                        action: primaryAction
+                    )
+                    .accessibilitySortPriority(20)
+                }
+                if let secondary {
+                    SnapListSecondaryButton(
+                        title: secondary,
+                        action: secondaryAction
+                    )
+                    .accessibilitySortPriority(10)
+                }
+            }
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.vertical, 10)
+            .background(SnapListColorToken.canvas.color)
+            .overlay(alignment: .top) { Divider() }
+        }
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        switch thumbnailSource {
+        case .authoritative(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .empty, .failure:
+                    neutralThumbnail
+                @unknown default:
+                    neutralThumbnail
+                }
+            }
+        case .neutral:
+            neutralThumbnail
+#if DEBUG
+        case .approvedFixtureAsset(let name):
+            Image(name)
+                .resizable()
+                .scaledToFill()
+#endif
+        }
+    }
+
+    private var neutralThumbnail: some View {
+        ZStack {
+            SnapListColorToken.quietFill.color
+            Image(systemName: "photo")
+                .foregroundStyle(SnapListColorToken.textTertiary.color)
         }
     }
 }

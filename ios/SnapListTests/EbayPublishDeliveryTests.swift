@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import XCTest
 @testable import SnapList
 
@@ -7,6 +8,124 @@ final class EbayPublishDeliveryTests: XCTestCase {
     override func tearDown() {
         EbayPublishURLProtocolStub.handler = nil
         super.tearDown()
+    }
+
+    func testUnknownOutcomeCopyOffersOnlyTheApprovedTrophyWallRecovery() {
+        let copy = EbayResultCopy(state: .outcomeNotYetKnown)
+
+        XCTAssertEqual(
+            copy.headline,
+            "SnapList does not know yet whether eBay accepted this listing."
+        )
+        XCTAssertEqual(copy.chip, "Checking with eBay")
+        XCTAssertEqual(
+            copy.body,
+            "The connection dropped at the wrong moment. SnapList will find out and update your Trophy Wall."
+        )
+        XCTAssertEqual(
+            copy.note,
+            "There is nothing for you to do, and nothing will be posted twice."
+        )
+        XCTAssertEqual(copy.primary, "Go to Trophy Wall")
+        XCTAssertNil(copy.secondary)
+
+        let sellerVisibleCopy = [
+            copy.headline,
+            copy.chip,
+            copy.body,
+            copy.note,
+            copy.primary,
+            copy.secondary,
+        ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+        XCTAssertFalse(sellerVisibleCopy.contains("published"))
+        XCTAssertFalse(sellerVisibleCopy.contains("shared"))
+        XCTAssertFalse(sellerVisibleCopy.contains("check again"))
+        XCTAssertFalse(sellerVisibleCopy.contains("try again"))
+        XCTAssertFalse(sellerVisibleCopy.contains("retry"))
+    }
+
+    /// `XCUIElement.hasFocus` is UIKit focus, not VoiceOver focus. Exercise the
+    /// rendered SwiftUI seam instead: every approved seller-visible transition
+    /// resolves to the real heading identifier, and that heading's body names
+    /// the modifier which owns its accessibility-focus binding. Result headings
+    /// additionally carry live-update semantics; no announcement text is
+    /// synthesized by this contract.
+    func testSellerVisibleScreenTransitionsBindTheirRealHeadingFocusTargets() async {
+        struct Fixture {
+            let screen: EbayPublishScreen
+            let heading: String
+            let identifier: String
+            let isLiveRegion: Bool
+        }
+
+        let fixtures = [
+            Fixture(
+                screen: .connection(.notConnected),
+                heading: "Connect your eBay account.",
+                identifier: "ebay-publish.connection.not-connected",
+                isLiveRegion: false
+            ),
+            Fixture(
+                screen: .confirmation(.ready),
+                heading: "Post this to eBay?",
+                identifier: "ebay-publish.confirmation",
+                isLiveRegion: false
+            ),
+            Fixture(
+                screen: .result(.published),
+                heading: "Your listing is live on eBay.",
+                identifier: "ebay-publish.result.published",
+                isLiveRegion: true
+            ),
+            Fixture(
+                screen: .result(.outcomeNotYetKnown),
+                heading: "SnapList does not know yet whether eBay accepted this listing.",
+                identifier: "ebay-publish.result.outcome-unknown",
+                isLiveRegion: true
+            ),
+        ]
+        let liveUpdateTrait = AccessibilityTraits.updatesFrequently
+
+        for fixture in fixtures {
+            let target = EbayPublishHeadingFocusTarget(screen: fixture.screen)
+            let behavior = EbayPublishHeadingFocusBehavior(target: target)
+
+            XCTAssertEqual(target.identifier, fixture.identifier)
+            XCTAssertEqual(target.isLiveRegion, fixture.isLiveRegion)
+            XCTAssertEqual(
+                behavior.accessibilityTraits.contains(liveUpdateTrait),
+                fixture.isLiveRegion
+            )
+            XCTAssertTrue(
+                behavior.accessibilityTraits
+                    .subtracting(liveUpdateTrait)
+                    .isEmpty
+            )
+
+            var focusRequests: [Bool] = []
+            await behavior.requestFocus { isFocused in
+                focusRequests.append(isFocused)
+            }
+            XCTAssertEqual(
+                focusRequests,
+                [true],
+                "The transition did not apply true through its focus setter for \(fixture.identifier)"
+            )
+
+            let heading = EbayPublishFocusedHeading(
+                text: fixture.heading,
+                target: target
+            )
+            let rendered = String(reflecting: type(of: heading.body))
+
+            XCTAssertTrue(
+                rendered.contains("EbayPublishHeadingAccessibilityFocus"),
+                "The real heading does not own the focus binding for \(fixture.identifier): \(rendered)"
+            )
+        }
     }
 
     func testProductionFlowRelaunchReplaysAmbiguousPublishAndConvergesOnce()

@@ -168,6 +168,18 @@ enum ProGateFixtureState: String, Equatable {
     case pay10 = "PAY-10"
 }
 
+/// The four owner-approved eBay v5 seller-visible projections (issue #742).
+///
+/// Parsing lives outside a DEBUG block so `LaunchConfiguration` has one shape
+/// in every build configuration. Only DEBUG parsing and the DEBUG fixture host
+/// can ever populate this value.
+enum EbayPublishFixtureState: String, Equatable {
+    case notConnected = "not-connected"
+    case confirmation
+    case published
+    case outcomeUnknown = "outcome-unknown"
+}
+
 struct SubmissionAcknowledgmentNotificationName: Equatable {
     static let prefix = "dev.snaplist.ios.test.submission-ack."
 
@@ -272,6 +284,7 @@ struct LaunchConfiguration: Equatable {
     var assistedExportFixture: AssistedExportFixture?
     var proGateFixture: ProGateFixtureState?
     var settingsProofState: SettingsProofState?
+    var ebayPublishFixture: EbayPublishFixtureState?
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -297,7 +310,8 @@ struct LaunchConfiguration: Equatable {
         resetListingReviewDraft: false,
         assistedExportFixture: nil,
         proGateFixture: nil,
-        settingsProofState: nil
+        settingsProofState: nil,
+        ebayPublishFixture: nil
     )
 
     static let preview = LaunchConfiguration(
@@ -324,7 +338,8 @@ struct LaunchConfiguration: Equatable {
         resetListingReviewDraft: false,
         assistedExportFixture: nil,
         proGateFixture: nil,
-        settingsProofState: nil
+        settingsProofState: nil,
+        ebayPublishFixture: nil
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -457,6 +472,15 @@ struct LaunchConfiguration: Equatable {
                 )
                 configuration.settingsProofState =
                     SettingsProofState(rawValue: value)
+            } else if argument.hasPrefix("--ebay-publish-fixture=") {
+                let value = String(
+                    argument.dropFirst("--ebay-publish-fixture=".count)
+                )
+                configuration.ebayPublishFixture =
+                    EbayPublishFixtureState(rawValue: value)
+                if configuration.ebayPublishFixture != nil {
+                    configuration.usesZeroNetworkFixtures = true
+                }
             }
         }
 
@@ -482,6 +506,9 @@ struct LaunchConfiguration: Equatable {
             return false
         }
         if proGateFixture != nil {
+            return false
+        }
+        if ebayPublishFixture != nil {
             return false
         }
         if let visualState {
