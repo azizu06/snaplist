@@ -4,7 +4,6 @@ import WebKit
 struct ActivationGuidanceCoachMark: View {
     let coachMark: ActivationCoachMark
     let dismiss: () -> Void
-    let skip: () -> Void
     let isCompleting: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -23,21 +22,8 @@ struct ActivationGuidanceCoachMark: View {
         .fixedSize(horizontal: false, vertical: false)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Guidance. \(coachMark.copy)")
-        .accessibilityAction(named: "Skip guidance") {
-            skip()
-        }
-        .accessibilityHint(
-            "Swipe down to skip all guidance."
-        )
         .accessibilityIdentifier("activation-guidance")
         .accessibilityAddTraits(.isSummaryElement)
-        .gesture(
-            DragGesture(minimumDistance: 24)
-                .onEnded { value in
-                    guard value.translation.height >= 24 else { return }
-                    skip()
-                }
-        )
     }
 
     private var bubble: some View {
@@ -90,7 +76,10 @@ struct ActivationGuidanceCoachMark: View {
             .fill(tailColor)
             .frame(width: 12, height: 12)
             .rotationEffect(.degrees(45))
-            .offset(y: anchor.tailEdge == .top ? 6 : -6)
+            .offset(
+                x: anchor.tailHorizontalOffset,
+                y: anchor.tailEdge == .top ? 6 : -6
+            )
             .accessibilityHidden(true)
     }
 

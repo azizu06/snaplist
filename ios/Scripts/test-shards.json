@@ -39,7 +39,7 @@
       "SnapListUITests/ListingReviewUITests/testZeroAndFiveEvidenceStayTruthfulAndSoldDetailReturnsToInvoker",
       "SnapListUITests/SnapListUITests/testAcceptedSubmissionRendersSavedWithoutSubmittedMediaThenReturnsToReadyScan",
       "SnapListUITests/SnapListUITests/testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch",
-      "SnapListUITests/SnapListUITests/testActivationSkipSuppressesTheCoachMarkAcrossRelaunch",
+      "SnapListUITests/SnapListUITests/testActivationOnlyPerStepGotItDismissesTheCoachMark",
       "SnapListUITests/SnapListUITests/testActualOnboardingCaptureEntryPresentsACT01BeforeCameraOrLibrary",
       "SnapListUITests/SnapListUITests/testAccessibilityDynamicTypeKeepsFoundationControlsReachable",
       "SnapListUITests/SnapListUITests/testAllElevenIssue206GoldenStatesRenderAtCanonicalViewport",

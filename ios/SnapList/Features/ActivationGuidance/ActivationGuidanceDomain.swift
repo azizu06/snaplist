@@ -49,7 +49,6 @@ enum ActivationGuidanceState: String, Codable, CaseIterable, Equatable, Hashable
 
 enum ActivationGuidanceAction: Equatable {
     case gotIt
-    case skip
     case capturedFirstPhoto
     case reorderedPhotos
     case openedVoiceNote
@@ -136,6 +135,7 @@ enum ActivationCoachMarkTailEdge: Equatable {
 struct ActivationCoachMarkAnchor: Equatable {
     let tailEdge: ActivationCoachMarkTailEdge
     let bottomInset: CGFloat
+    let tailHorizontalOffset: CGFloat
 }
 
 enum ActivationCoachMarkAnchorPolicy {
@@ -155,18 +155,34 @@ enum ActivationCoachMarkAnchorPolicy {
     ) -> ActivationCoachMarkAnchor {
         switch coachMark {
         case .act01, .act06:
-            return .init(tailEdge: .bottom, bottomInset: 112)
+            return .init(
+                tailEdge: .bottom,
+                bottomInset: 112,
+                tailHorizontalOffset: 0
+            )
         case .act02, .act03:
-            return .init(tailEdge: .bottom, bottomInset: 24)
+            return .init(
+                tailEdge: .bottom,
+                bottomInset: 24,
+                tailHorizontalOffset: 0
+            )
         case .act02B:
             // The bubble body keeps the band it already occupied: the tail no
             // longer consumes its 12 points below the bubble, so the inset
             // absorbs them. The shell pads inside the safe area, so the
             // package's screen-bottom measurements port as this relative
             // correction rather than as their absolute 110.
-            return .init(tailEdge: .top, bottomInset: 108)
+            return .init(
+                tailEdge: .top,
+                bottomInset: 108,
+                tailHorizontalOffset: 0
+            )
         case .act04:
-            return .init(tailEdge: .bottom, bottomInset: 84)
+            return .init(
+                tailEdge: .bottom,
+                bottomInset: 84,
+                tailHorizontalOffset: 91
+            )
         }
     }
 }
@@ -366,14 +382,6 @@ struct ActivationGuidanceProgress: Codable, Equatable {
     mutating func advance(
         for action: ActivationGuidanceAction
     ) -> ActivationGuidanceTransition {
-        if action == .skip,
-           state != .act05,
-           state != .act07 {
-            hasAcknowledgedCurrentState = true
-            isCompletionPending = true
-            return .completionRequested
-        }
-
         switch (state, action) {
         case (.act01, .gotIt), (.act01, .capturedFirstPhoto),
              (.act06, .gotIt), (.act06, .capturedFirstPhoto):

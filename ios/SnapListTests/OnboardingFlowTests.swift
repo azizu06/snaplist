@@ -160,24 +160,16 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
-    func testActivationGuidanceCanBeSkippedFromEveryPresentingState() {
-        for state in ActivationGuidanceState.allCases where state.coachMark != nil {
-            var progress = ActivationGuidanceProgress(state: state)
-            XCTAssertEqual(progress.advance(for: .skip), .completionRequested)
-            XCTAssertEqual(progress.state, state)
-            XCTAssertTrue(progress.hasAcknowledgedCurrentState)
-            XCTAssertTrue(progress.isCompletionPending)
-        }
-    }
-
-    func testInterruptedCompletionDoesNotReopenAnAcknowledgedACT01() {
+    func testActivationGuidanceDoesNotDismissUntilTheSellerTapsGotItOrActsOnTheSurface() {
         var progress = ActivationGuidanceProgress(state: .act01)
 
-        XCTAssertEqual(progress.advance(for: .skip), .completionRequested)
-        XCTAssertEqual(progress.recordInterruption(), .unchanged)
+        XCTAssertEqual(progress.advance(for: .openedProcessing), .unchanged)
         XCTAssertEqual(progress.state, .act01)
-        XCTAssertTrue(progress.hasAcknowledgedCurrentState)
-        XCTAssertTrue(progress.isCompletionPending)
+        XCTAssertFalse(progress.hasAcknowledgedCurrentState)
+        XCTAssertFalse(progress.isCompletionPending)
+
+        XCTAssertEqual(progress.advance(for: .gotIt), .advanced)
+        XCTAssertEqual(progress.state, .act02)
     }
 
     @MainActor
@@ -384,12 +376,12 @@ final class OnboardingFlowTests: XCTestCase {
     // approved composition put it.
     func testActivationCoachMarkAnchorsEveryApprovedState() {
         let expected: [ActivationCoachMark: ActivationCoachMarkAnchor] = [
-            .act01: .init(tailEdge: .bottom, bottomInset: 112),
-            .act02: .init(tailEdge: .bottom, bottomInset: 24),
-            .act02B: .init(tailEdge: .top, bottomInset: 108),
-            .act03: .init(tailEdge: .bottom, bottomInset: 24),
-            .act04: .init(tailEdge: .bottom, bottomInset: 84),
-            .act06: .init(tailEdge: .bottom, bottomInset: 112),
+            .act01: .init(tailEdge: .bottom, bottomInset: 112, tailHorizontalOffset: 0),
+            .act02: .init(tailEdge: .bottom, bottomInset: 24, tailHorizontalOffset: 0),
+            .act02B: .init(tailEdge: .top, bottomInset: 108, tailHorizontalOffset: 0),
+            .act03: .init(tailEdge: .bottom, bottomInset: 24, tailHorizontalOffset: 0),
+            .act04: .init(tailEdge: .bottom, bottomInset: 84, tailHorizontalOffset: 91),
+            .act06: .init(tailEdge: .bottom, bottomInset: 112, tailHorizontalOffset: 0),
         ]
 
         for (coachMark, anchor) in expected {
