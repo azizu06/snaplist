@@ -25,6 +25,59 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["You"].exists)
     }
 
+    func testSettingsProofFixturesRenderApprovedStatesWithoutDeletionCommit() {
+        let proofs = [
+            (
+                "SET-01",
+                "settings.screen",
+                "",
+                ""
+            ),
+            (
+                "DEL-01",
+                "settings.state.del-01",
+                "Keep my account",
+                "settings.delete-account"
+            ),
+            (
+                "DEL-02",
+                "settings.state.del-02",
+                "Cancel",
+                "settings.delete-account"
+            ),
+            (
+                "DEL-03",
+                "settings.state.del-03",
+                "Keep my account",
+                "settings.delete-account"
+            ),
+        ]
+
+        for (fixtureID, screenIdentifier, safeExit, absentControl) in proofs {
+            let app = XCUIApplication()
+            app.launchArguments = ["--settings-proof=\(fixtureID)"]
+            app.launchAfterRetiringPriorInstance()
+
+            XCTAssertTrue(
+                app.descendants(matching: .any)[screenIdentifier]
+                    .waitForExistence(timeout: 3),
+                app.debugDescription
+            )
+            if fixtureID == "SET-01" {
+                XCTAssertTrue(app.staticTexts["Jordan Hale"].exists)
+            }
+
+            guard !safeExit.isEmpty else {
+                app.terminate()
+                continue
+            }
+
+            XCTAssertTrue(app.buttons[safeExit].exists)
+            XCTAssertFalse(app.buttons[absentControl].exists)
+            app.terminate()
+        }
+    }
+
     func testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch() {
         let app = launch(extraArguments: [
             "--activation-onboarded-fixture",

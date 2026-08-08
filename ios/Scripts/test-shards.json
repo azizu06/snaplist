@@ -69,6 +69,7 @@
       "SnapListUITests/SnapListUITests/testRestoredDraftResumesBeforeTheFreshLauncherCanOverwriteIt",
       "SnapListUITests/SnapListUITests/testScanCameraFlashControlMatchesTheApprovedFortyEightPointCircle",
       "SnapListUITests/SnapListUITests/testScanLibraryUsesExactLiveAndRecoveryLabels",
+      "SnapListUITests/SnapListUITests/testSettingsProofFixturesRenderApprovedStatesWithoutDeletionCommit",
       "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachCAP01",
       "SnapListUITests/SnapListUITests/testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave"
     ],

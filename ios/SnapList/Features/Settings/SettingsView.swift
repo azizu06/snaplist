@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 struct SettingsView: View {
     private let profile: SettingsProfile
+    private let settingsProofState: SettingsProofState?
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
     private let deletionOutstanding: Bool
@@ -32,6 +33,7 @@ struct SettingsView: View {
         deletionOutstanding: Bool = false
     ) {
         profile = .current(configuration: configuration)
+        settingsProofState = configuration.settingsProofState
         self.mobileAPIClient = mobileAPIClient
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
@@ -49,11 +51,28 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        if let settingsProofState, settingsProofState != .settingsHub {
+            SettingsProofStateView(
+                state: settingsProofState,
+                profile: profile
+            )
+        } else {
+            settingsHub
+        }
+    }
+
+    private var settingsHub: some View {
         List {
             profileCard
             Section("Account") {
-                if profile.isGuest {
-                    Button("Create an account") {}
+                if let accountEntry = SettingsAccountEntryPolicy.destination(
+                    for: profile.identity
+                ) {
+                    NavigationLink(value: accountEntry) {
+                        Text("Create an account")
+                    }
+                    .accessibilityIdentifier("settings.create-account")
+                    .accessibilityHint("Opens the account entry screen")
                 } else {
                     valueRow("Sign-in method", profile.methodLabel)
                 }
@@ -323,6 +342,35 @@ struct SettingsView: View {
 
     private func navigationRow(_ label: String) -> some View {
         HStack { Text(label); Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
+    }
+}
+
+private struct SettingsProofStateView: View {
+    @Environment(\.dismiss) private var dismiss
+    let state: SettingsProofState
+    let profile: SettingsProfile
+
+    var body: some View {
+        switch state {
+        case .settingsHub:
+            EmptyView()
+        case .deletionConsequences:
+            SettingsDeletionConsequencesView(
+                profile: profile,
+                subscriptionTruth: .unknown
+            )
+        case .reauthentication:
+            SettingsReauthenticationView(
+                profile: profile,
+                subscriptionTruth: .unknown,
+                keepAccount: { dismiss() }
+            )
+        case .deletionConfirmation:
+            SettingsDeletionConfirmationView(
+                subscriptionTruth: .unknown,
+                keepAccount: { dismiss() }
+            )
+        }
     }
 }
 
