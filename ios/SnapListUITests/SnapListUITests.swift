@@ -74,6 +74,15 @@ final class SnapListUITests: XCTestCase {
 
             XCTAssertTrue(app.buttons[safeExit].exists)
             XCTAssertFalse(app.buttons[absentControl].exists)
+            app.buttons[safeExit].tap()
+            let proofScreen = app.descendants(matching: .any)[screenIdentifier]
+            let dismissal = expectation(
+                for: NSPredicate(format: "exists == false"),
+                evaluatedWith: proofScreen
+            )
+            wait(for: [dismissal], timeout: 3)
+            XCTAssertFalse(proofScreen.exists)
+            XCTAssertFalse(app.buttons[absentControl].exists)
             app.terminate()
         }
     }
