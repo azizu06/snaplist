@@ -355,7 +355,10 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(presentation.visibleMessage, message)
         XCTAssertEqual(presentation.accessibilityAnnouncement, message)
         XCTAssertEqual(presentation.primaryActionLabel, "Create an account")
-        XCTAssertEqual(presentation.primaryActionEvent, .createAccount)
+        XCTAssertEqual(
+            presentation.primaryActionEvent,
+            .createAccount(eventID: eventID)
+        )
         XCTAssertEqual(
             presentation.announcementEvent,
             .submissionRejected(eventID: eventID)
@@ -364,7 +367,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertTrue(presentation.rendersSubmittedMedia)
     }
 
-    func testTheReceiptHandoffTellsTheSellerTheItemDidNotGoThrough() async {
+    func testTheReceiptHandoffTellsTheSellerConfirmationWasUnavailable() async {
         let intake = SubmissionIntakeFixture(
             photoCount: 3,
             seed: "receipt-mismatch-presentation"
@@ -398,7 +401,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         }
         let presentation = PhotoReviewSubmissionPresentation(host: host)
         let message =
-            "This didn't go through. Your item is still saved on this phone."
+            "We couldn't confirm this went through. Your item is still saved on this phone."
         XCTAssertNotEqual(presentation, .idle)
         XCTAssertNotEqual(
             presentation,
@@ -407,7 +410,10 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(presentation.visibleMessage, message)
         XCTAssertEqual(presentation.accessibilityAnnouncement, message)
         XCTAssertEqual(presentation.primaryActionLabel, "Try again")
-        XCTAssertEqual(presentation.primaryActionEvent, .startListing)
+        XCTAssertEqual(
+            presentation.primaryActionEvent,
+            .retryReceiptMismatch(eventID: eventID)
+        )
         XCTAssertEqual(
             presentation.announcementEvent,
             .submissionRejected(eventID: eventID)
@@ -462,10 +468,10 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertTrue(payloads.isEmpty)
     }
 
-    func testAnAbsentSessionStillAsksForAnAccount() async {
+    func testUnavailablePrincipalBindingStillAsksForAnAccount() async {
         let intake = SubmissionIntakeFixture(
             photoCount: 2,
-            seed: "absent-session-bearer"
+            seed: "unavailable-principal-binding"
         )
         let submitter = RecordingItemRunSubmitter(outcomes: [])
         let coordinator = makeCoordinator(
@@ -475,7 +481,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             draftStore: RecordingCaptureDraftStore(photos: intake.photos),
             keys: [Self.firstKey],
             tokenProvider: TestBearerTokenProvider {
-                throw BearerTokenProviderError.sessionAbsent
+                throw BearerTokenProviderError.principalBindingUnavailable
             }
         )
 

@@ -2363,7 +2363,8 @@ enum PhotoReviewBoundaryEvent: Equatable {
     case startListing
     /// The seller was told an account is needed, and asked for the account entry
     /// point. Photo Review covers the shell, so only the shell can honor this.
-    case createAccount
+    case createAccount(eventID: UUID)
+    case retryReceiptMismatch(eventID: UUID)
     case retryAmbiguousSubmission(eventID: UUID)
     case reviewSubmission(eventID: UUID)
     case reviewConflictedSubmission(eventID: UUID)

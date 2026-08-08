@@ -1974,6 +1974,87 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertFalse(scenario.photoReviewHost.isCommitting)
     }
 
+    func testReceiptHandoffTryAgainConsumesTheHandoffAndRetries() async throws {
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-receipt-handoff-retry",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemRed,
+                    rightColor: .systemBlue
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemYellow,
+                    rightColor: .systemPurple
+                ),
+            ]
+        )
+        defer { scenario.cleanUp() }
+        let intake = SubmissionIntakeFixture(
+            stagedPhotos: scenario.displayedPhotos
+        )
+        var spoiledPhotos = intake.expectedReceiptPhotos
+        spoiledPhotos[1] = .init(
+            ordinal: 1,
+            contentSha256: String(repeating: "f", count: 64),
+            byteLength: spoiledPhotos[1].byteLength,
+            mediaType: spoiledPhotos[1].mediaType
+        )
+        let spoiledReceipt = MobileItemSubmissionEnvelope.DataPayload(
+            itemId: UUID(),
+            runId: UUID(),
+            status: "queued",
+            stage: "queued",
+            photoIdentity: .init(
+                kind: "content_sha256_set_v1",
+                fingerprint: String(repeating: "a", count: 64)
+            ),
+            photos: spoiledPhotos
+        )
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.created(spoiledReceipt), .rejected]
+        )
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: LocalItemRunSubmissionAttemptStore(
+                    rootDirectory: scenario.attemptRoot
+                ),
+                draftStore: scenario.draftStore,
+                tokenProvider: CaptureFlowBearerTokenProvider(),
+                readData: intake.read,
+                newIdempotencyKey: { UUID() }
+            )
+        )
+
+        await scenario.perform(submissionHost: submissionHost)
+
+        guard case .destinationHandoff(
+            eventID: _,
+            handoff: .pay08
+        )? = submissionHost.pendingPresentationEvent else {
+            return XCTFail("Expected the typed receipt handoff.")
+        }
+        let presentation = PhotoReviewSubmissionPresentation(
+            host: submissionHost
+        )
+
+        await scenario.perform(
+            primaryAction: presentation.primaryActionEvent,
+            submissionHost: submissionHost
+        )
+
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 2)
+        XCTAssertEqual(submissionHost.retention, .rejected)
+        guard case .submissionRejected(
+            eventID: _,
+            retention: .rejected
+        )? = submissionHost.pendingPresentationEvent else {
+            return XCTFail("Expected the retry result, not the stale handoff.")
+        }
+        try await scenario.assertPreserved()
+    }
+
     func testAccountHandoffLeavesPhotoReviewForTheAccountEntryPoint() async throws {
         let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
             name: "snaplist-account-handoff-entry-point",
@@ -2016,8 +2097,11 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(submissionHost.retention, .authenticationRequired)
         XCTAssertNotNil(scenario.photoReviewHost.session)
 
+        let presentation = PhotoReviewSubmissionPresentation(
+            host: submissionHost
+        )
         await scenario.perform(
-            primaryAction: .createAccount,
+            primaryAction: presentation.primaryActionEvent,
             submissionHost: submissionHost
         )
 
@@ -2027,6 +2111,7 @@ final class CaptureFlowTests: XCTestCase {
             scenario.router.pathBinding(for: .scan).wrappedValue,
             [.settings]
         )
+        XCTAssertNil(submissionHost.pendingPresentationEvent)
         // The account demand is a stop, not a discard: the photos the seller took
         // are still on the phone when they come back from making the account.
         let durablePhotos = try await scenario.draftStore.loadPhotos()

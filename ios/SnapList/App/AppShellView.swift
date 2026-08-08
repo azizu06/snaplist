@@ -162,6 +162,7 @@ struct AppShellView: View {
                         switch event {
                         case .startListing,
                              .createAccount,
+                             .retryReceiptMismatch,
                              .retryAmbiguousSubmission:
                             break
                         case .openVoiceNote,
@@ -1344,6 +1345,12 @@ enum AppShellPhotoReviewSubmissionTransaction {
         switch primaryAction {
         case .startListing:
             ambiguousRetryEventID = nil
+        case .retryReceiptMismatch(let eventID):
+            guard submissionHost.consumeDestinationHandoff(eventID: eventID)
+                    == .pay08 else {
+                return
+            }
+            ambiguousRetryEventID = nil
         case .retryAmbiguousSubmission(let eventID):
             guard submissionHost.canRetryAmbiguousSubmission(
                 eventID: eventID
@@ -1351,14 +1358,24 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 return
             }
             ambiguousRetryEventID = eventID
-        case .createAccount:
-            await AppShellAccountEntryPointTransaction.perform(
+        case .createAccount(let eventID):
+            guard case .destinationHandoff(
+                eventID: let pendingEventID,
+                handoff: .accountClaim12aThrough12c
+            )? = submissionHost.pendingPresentationEvent,
+                  pendingEventID == eventID else {
+                return
+            }
+            guard await AppShellAccountEntryPointTransaction.perform(
                 session: session,
                 captureFlow: captureFlow,
                 host: host,
                 router: router,
                 setReturnFocus: setReturnFocus
-            )
+            ) else {
+                return
+            }
+            _ = submissionHost.consumeDestinationHandoff(eventID: eventID)
             return
         case .reviewConflictedSubmission:
             _ = PhotoReviewSubmissionPrimaryActionConsumer.consume(

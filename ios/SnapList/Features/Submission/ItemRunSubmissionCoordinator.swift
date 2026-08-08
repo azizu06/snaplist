@@ -761,14 +761,13 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 rendersSubmittedMedia: true
             )
         case .pay08:
-            // A receipt that doesn't describe what was sent means this attempt didn't
-            // land, whatever the status code said. That is the same thing the seller
-            // needs to hear as any other retryable stop, so it reuses that wording
-            // rather than inventing a second phrase for one condition.
-            let family = PhotoReviewSubmissionRejectionFamily.tryAgain
+            // A receipt that doesn't describe what was sent cannot confirm whether
+            // this attempt landed. Reuse the established ambiguity wording while
+            // keeping the receipt-specific retry route typed to this handoff.
+            let family = PhotoReviewSubmissionRejectionFamily.ambiguity
             self = PhotoReviewSubmissionPresentation(
                 primaryActionLabel: family.primaryActionLabel,
-                primaryActionEvent: family.primaryActionEvent(eventID: eventID),
+                primaryActionEvent: .retryReceiptMismatch(eventID: eventID),
                 mutationControlsLocked: false,
                 announcementEvent: .submissionRejected(eventID: eventID),
                 accessibilityAnnouncement: family.accessibilityAnnouncement,
@@ -785,7 +784,7 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 """
             self = PhotoReviewSubmissionPresentation(
                 primaryActionLabel: "Create an account",
-                primaryActionEvent: .createAccount,
+                primaryActionEvent: .createAccount(eventID: eventID),
                 mutationControlsLocked: false,
                 announcementEvent: .submissionRejected(eventID: eventID),
                 accessibilityAnnouncement: message,
@@ -868,6 +867,7 @@ enum PhotoReviewSubmissionPrimaryActionConsumer {
         case .openVoiceNote,
              .startListing,
              .createAccount,
+             .retryReceiptMismatch,
              .retryAmbiguousSubmission:
             return false
         }
