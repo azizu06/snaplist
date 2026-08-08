@@ -2149,6 +2149,95 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(library.label, "Choose from library")
     }
 
+    func testAllowanceUsesAvailableHeightWithoutDeadRegionAndScales() {
+        for arguments in [
+            ["--reset-onboarding-progress"],
+            [
+                "--reset-onboarding-progress",
+                "--dynamic-type=accessibility3",
+                "--reduced-motion",
+            ],
+        ] {
+            let app = launchOnboarding(
+                state: "ONB-06",
+                cameraStatus: "denied",
+                extraArguments: arguments
+            )
+            let window = app.windows.firstMatch
+            let marketplaces = app.buttons["onboarding.marketplaces"]
+            let continueButton = app.buttons["button.primary.continue"]
+
+            XCTAssertTrue(
+                marketplaces.waitForExistence(timeout: 3),
+                app.debugDescription
+            )
+            XCTAssertTrue(
+                continueButton.waitForExistence(timeout: 3),
+                app.debugDescription
+            )
+            XCTAssertTrue(continueButton.isHittable)
+            XCTAssertGreaterThanOrEqual(continueButton.frame.height, 44)
+            XCTAssertLessThanOrEqual(continueButton.frame.maxY, window.frame.maxY)
+
+            if !arguments.contains("--dynamic-type=accessibility3") {
+                XCTAssertTrue(marketplaces.isHittable)
+                XCTAssertLessThanOrEqual(
+                    continueButton.frame.minY - marketplaces.frame.maxY,
+                    window.frame.height * 0.20,
+                    "ONB-06 strands a large dead region above Continue."
+                )
+                let attachment = XCTAttachment(
+                    screenshot: XCUIScreen.main.screenshot()
+                )
+                attachment.name = "issue-730-ONB-06.png"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+
+            app.terminate()
+        }
+    }
+
+    func testPhotoPrimerRowsPublishOneAddressableAccessibilityElementEach() {
+        let app = launchOnboarding(state: "ONB-07", cameraStatus: "denied")
+        let rows = [
+            (
+                identifier: "onboarding.primer.camera",
+                label: "Camera — take photos from different angles right here."
+            ),
+            (
+                identifier: "onboarding.primer.photo-library",
+                label: "Photo library — or pick photos you already took."
+            )
+        ]
+
+        for row in rows {
+            let matchingLabels = app.descendants(matching: .any).matching(
+                NSPredicate(format: "label == %@", row.label)
+            )
+            XCTAssertEqual(
+                matchingLabels.count,
+                1,
+                "Expected one accessibility announcement for \(row.label)\n\(app.debugDescription)"
+            )
+
+            let addressableRow = app.descendants(matching: .any)[row.identifier]
+            XCTAssertTrue(addressableRow.exists, app.debugDescription)
+            XCTAssertEqual(addressableRow.label, row.label)
+        }
+
+        let attachment = XCTAttachment(
+            screenshot: XCUIScreen.main.screenshot()
+        )
+        attachment.name = "issue-730-ONB-07.png"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let axTree = XCTAttachment(string: app.debugDescription)
+        axTree.name = "issue-730-ONB-07-accessibility-tree.txt"
+        axTree.lifetime = .keepAlways
+        add(axTree)
+    }
+
     func testAllElevenIssue206GoldenStatesRenderAtCanonicalViewport() {
         let requiresCanonicalViewport = ProcessInfo.processInfo.environment[
             "SNAPLIST_REQUIRE_CANONICAL_VIEWPORT"

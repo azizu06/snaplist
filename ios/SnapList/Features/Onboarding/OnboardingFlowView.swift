@@ -184,70 +184,72 @@ struct OnboardingFlowView: View {
             OnboardingBackButton(action: model.goBack)
                 .padding(.horizontal, 10)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(OnboardingCopy.allowanceTitle)
-                        .snapListTypography(.displayTitle)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .frame(maxWidth: .infinity)
-                        .multilineTextAlignment(.center)
-                        .accessibilityAddTraits(.isHeader)
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(OnboardingCopy.allowanceTitle)
+                            .snapListTypography(.displayTitle)
+                            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                            .frame(maxWidth: .infinity)
+                            .multilineTextAlignment(.center)
+                            .accessibilityAddTraits(.isHeader)
 
-                    Text(OnboardingCopy.allowanceSupport)
-                        .snapListTypography(.body)
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(OnboardingCopy.allowanceSupport)
+                            .snapListTypography(.body)
+                            .foregroundStyle(SnapListColorToken.textSecondary.color)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 10)
+
+                        VStack(spacing: 0) {
+                            AllowanceDisclosureRow(
+                                index: 0,
+                                title: "One complete AI run",
+                                detail: OnboardingCopy.completeRunBody,
+                                expandedIndex: $expandedAllowance
+                            )
+                            Divider().foregroundStyle(SnapListColorToken.divider.color)
+                            AllowanceDisclosureRow(
+                                index: 1,
+                                title: "One guided fix included",
+                                detail: OnboardingCopy.guidedFixBody,
+                                expandedIndex: $expandedAllowance
+                            )
+                            Divider().foregroundStyle(SnapListColorToken.divider.color)
+                            AllowanceDisclosureRow(
+                                index: 2,
+                                title: "Yours for 24 hours",
+                                detail: OnboardingCopy.recoveryBody,
+                                expandedIndex: $expandedAllowance
+                            )
+                        }
+                        .background(.white)
+                        .clipShape(.rect(cornerRadius: 16))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
+                        }
+                        .padding(.top, 24)
+
+                        Button {
+                            model.presentMarketplaceExplanation()
+                        } label: {
+                            Label("Where can I list?", systemImage: "info.circle")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(SnapListColorToken.action.color)
+                        .accessibilityIdentifier("onboarding.marketplaces")
+                        .accessibilityFocused($focusedControl, equals: .marketplaces)
                         .padding(.top, 10)
-
-                    VStack(spacing: 0) {
-                        AllowanceDisclosureRow(
-                            index: 0,
-                            title: "One complete AI run",
-                            detail: OnboardingCopy.completeRunBody,
-                            expandedIndex: $expandedAllowance
-                        )
-                        Divider().foregroundStyle(SnapListColorToken.divider.color)
-                        AllowanceDisclosureRow(
-                            index: 1,
-                            title: "One guided fix included",
-                            detail: OnboardingCopy.guidedFixBody,
-                            expandedIndex: $expandedAllowance
-                        )
-                        Divider().foregroundStyle(SnapListColorToken.divider.color)
-                        AllowanceDisclosureRow(
-                            index: 2,
-                            title: "Yours for 24 hours",
-                            detail: OnboardingCopy.recoveryBody,
-                            expandedIndex: $expandedAllowance
-                        )
                     }
-                    .background(.white)
-                    .clipShape(.rect(cornerRadius: 16))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
-                    }
-                    .padding(.top, 24)
-
-                    Button {
-                        model.presentMarketplaceExplanation()
-                    } label: {
-                        Label("Where can I list?", systemImage: "info.circle")
-                            .font(.system(size: 15, weight: .medium))
-                            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(SnapListColorToken.action.color)
-                    .accessibilityIdentifier("onboarding.marketplaces")
-                    .accessibilityFocused($focusedControl, equals: .marketplaces)
-                    .padding(.top, 10)
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                    .padding(.vertical, 16)
+                    .frame(minHeight: geometry.size.height, alignment: .center)
                 }
-                .padding(.horizontal, SnapListMetrics.screenGutter)
-                .padding(.top, 2)
-                .padding(.bottom, 112)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             OnboardingBottomTray {
@@ -674,8 +676,8 @@ private struct PrimerCapabilityRow: View {
                 .snapListTypography(.status)
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("onboarding.primer.\(title.accessibilitySlug)")
         }
-        .accessibilityElement(children: .combine)
     }
 }
 

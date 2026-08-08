@@ -1,6 +1,8 @@
 import XCTest
 
 final class ListingReviewUITests: XCTestCase {
+    private let loadedTreeTimeout: TimeInterval = 30
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
@@ -290,6 +292,67 @@ final class ListingReviewUITests: XCTestCase {
             "LREV-long-text-accessibility5-reduced-motion.png"
         longTextScreenshot.lifetime = .keepAlways
         add(longTextScreenshot)
+    }
+
+    func testPrimaryActionsReserveTheFloatingDockAtDefaultAndAccessibilitySizes() {
+        for extraArguments in [
+            [String](),
+            ["--dynamic-type=accessibility5", "--reduced-motion"],
+        ] {
+            let app = launch(
+                resetDraft: true,
+                extraArguments: extraArguments
+            )
+            app.open(
+                URL(
+                    string:
+                        "snaplist://runs/20800000-0000-4000-8000-000000000020"
+                )!
+            )
+            let reviewOpener = app.buttons["run.review.open"]
+            XCTAssertTrue(
+                reviewOpener.waitForExistence(timeout: loadedTreeTimeout)
+            )
+            reviewOpener.tap()
+            XCTAssertTrue(
+                app.otherElements["listing-review"]
+                    .waitForExistence(timeout: loadedTreeTimeout)
+            )
+
+            let secondary = app.buttons["listing-review.secondary"]
+            let done = app.buttons["listing-review.done"]
+            let scan = app.buttons["dock.scan"]
+            let trophyWall = app.buttons["dock.trophy-wall"]
+
+            for element in [secondary, done, scan, trophyWall] {
+                XCTAssertTrue(
+                    element.waitForExistence(timeout: loadedTreeTimeout),
+                    "Missing \(element.identifier) from the loaded tree."
+                )
+            }
+
+            let dockTop = min(scan.frame.minY, trophyWall.frame.minY)
+            for action in [secondary, done] {
+                XCTAssertTrue(action.isHittable, action.identifier)
+                XCTAssertLessThanOrEqual(
+                    action.frame.maxY,
+                    dockTop,
+                    "\(action.identifier) overlaps the floating dock."
+                )
+            }
+
+            if extraArguments.isEmpty {
+                let attachment = XCTAttachment(
+                    screenshot: XCUIScreen.main.screenshot()
+                )
+                attachment.name = "issue-730-listing-review.png"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+
+            UIProcessTerminationBoundary()
+                .assertRetired(app, "The Listing Review dock-reservation fixture")
+        }
     }
 
     func testEditorsStageConditionSpecificAndPriceWithoutLosingInvoker() {
