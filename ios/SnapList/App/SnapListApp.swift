@@ -13,6 +13,8 @@ struct SnapListApp: App {
     @State private var submissionHost: ItemRunSubmissionHost
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
+    private let guestCapabilityComposition:
+        AppAttestGuestCapabilityComposition?
     private let trophyWallHistoryRepository: any TrophyWallRunHistoryRepository
 
     init() {
@@ -35,14 +37,24 @@ struct SnapListApp: App {
         } catch {
             fatalError("Invalid SnapList native configuration: \(error)")
         }
+        let baseTokenProvider = ClerkAuthenticationComposition.make(
+            publishableKey: nativeConfiguration.clerkPublishableKey
+        )
+        let configuration = LaunchConfiguration.parse(
+            arguments: ProcessInfo.processInfo.arguments
+        )
+        let guestCapabilityComposition = configuration.usesZeroNetworkFixtures
+            ? nil
+            : AppAttestGuestCapabilityComposition.makeLive(
+                apiOrigin: nativeConfiguration.apiOrigin,
+                baseTokenProvider: baseTokenProvider
+            )
         self.init(
-            configuration: LaunchConfiguration.parse(
-                arguments: ProcessInfo.processInfo.arguments
-            ),
-            tokenProvider: ClerkAuthenticationComposition.make(
-                publishableKey: nativeConfiguration.clerkPublishableKey
-            ),
-            apiOrigin: nativeConfiguration.apiOrigin
+            configuration: configuration,
+            tokenProvider: guestCapabilityComposition?.tokenProvider
+                ?? baseTokenProvider,
+            apiOrigin: nativeConfiguration.apiOrigin,
+            guestCapabilityComposition: guestCapabilityComposition
         )
     }
 
@@ -59,9 +71,12 @@ struct SnapListApp: App {
         configuration: LaunchConfiguration,
         tokenProvider: any BearerTokenProviding,
         apiOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
-        urlSession: URLSession = .shared
+        urlSession: URLSession = .shared,
+        guestCapabilityComposition:
+            AppAttestGuestCapabilityComposition? = nil
     ) {
         self.configuration = configuration
+        self.guestCapabilityComposition = guestCapabilityComposition
         self.dependencies = AppDependencies.make(
             configuration: configuration,
             apiOrigin: apiOrigin,
@@ -195,6 +210,7 @@ struct SnapListApp: App {
             )
                 .environment(\.appDependencies, dependencies)
                 .task {
+                    guestCapabilityComposition?.beginLaunchEnrollment()
 #if DEBUG
                     await dependencies
                         .seedRestoredCaptureFixtureIfNeeded(

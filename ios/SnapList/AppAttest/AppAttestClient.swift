@@ -345,6 +345,7 @@ protocol AppAttestServerClient: Sendable {
     ) async throws -> AppAttestTruth
     func verifyAssertion(
         challengeID: UUID,
+        clientData: Data,
         keyID: String,
         assertionObject: Data,
         requestBody: Data
@@ -437,6 +438,7 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
 
     func verifyAssertion(
         challengeID: UUID,
+        clientData: Data,
         keyID: String,
         assertionObject: Data,
         requestBody: Data
@@ -444,6 +446,7 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
         struct Payload: Encodable {
             let assertionObject: String
             let challengeId: UUID
+            let clientData: String
             let keyId: String
             let operation = "assertion"
             let requestBody: String
@@ -451,6 +454,7 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
         return try await verify(Payload(
             assertionObject: assertionObject.base64EncodedString(),
             challengeId: challengeID,
+            clientData: clientData.base64EncodedString(),
             keyId: keyID,
             requestBody: requestBody.base64EncodedString()
         ))
@@ -746,6 +750,7 @@ actor AppAttestClient {
             )
             let truth = try await server.verifyAssertion(
                 challengeID: challenge.id,
+                clientData: clientData,
                 keyID: keyID,
                 assertionObject: object,
                 requestBody: requestBody
@@ -808,6 +813,257 @@ actor AppAttestClient {
             keyId: keyID,
             requestHash: Data(SHA256.hash(data: requestBody)).base64URLEncodedString()
         ))
+    }
+}
+
+enum AppAttestGuestCapabilityEnrollmentOutcome: Equatable, Sendable {
+    case ready
+    case unavailable(AppAttestUnavailableReason)
+    case invalid(AppAttestInvalidReason)
+}
+
+/**
+ Closes the App Attest enrollment loop for a signed-out installation.
+
+ `attestInstallation()` verifies a newly generated key, but an attestation does
+ not earn a guest capability. The server issues that capability only after a
+ fresh verified assertion, so a first launch must perform both steps. A restored
+ key already completes its assertion inside `attestInstallation()` and does not
+ need a second one here.
+ */
+actor AppAttestGuestCapabilityEnrollment {
+    private static let enrollmentRequestBody =
+        Data(#"{"operation":"guest-capability.enroll"}"#.utf8)
+
+    private let client: AppAttestClient
+    private var inFlight:
+        Task<AppAttestGuestCapabilityEnrollmentOutcome, Never>?
+
+    init(client: AppAttestClient) {
+        self.client = client
+    }
+
+    func enrollIfNeeded() async -> AppAttestGuestCapabilityEnrollmentOutcome {
+        if let inFlight {
+            return await inFlight.value
+        }
+        let client = client
+        let enrollment = Task {
+            await Self.enroll(client: client)
+        }
+        inFlight = enrollment
+        let outcome = await enrollment.value
+        inFlight = nil
+        return outcome
+    }
+
+    private static func enroll(
+        client: AppAttestClient
+    ) async -> AppAttestGuestCapabilityEnrollmentOutcome {
+        let truth = await client.attestInstallation()
+        switch truth {
+        case .verified(let verified) where verified.kind == .assertion:
+            return Self.outcome(for: verified)
+        case .verified(let verified) where verified.kind == .attestation:
+            return Self.outcome(
+                for: await client.assert(
+                    requestBody: Self.enrollmentRequestBody
+                )
+            )
+        case .unavailable(let reason):
+            return .unavailable(reason)
+        case .invalid(let reason):
+            return .invalid(reason)
+        case .verified:
+            return .invalid(.serverRejected)
+        }
+    }
+
+    private static func outcome(
+        for truth: AppAttestTruth
+    ) -> AppAttestGuestCapabilityEnrollmentOutcome {
+        switch truth {
+        case .verified(let verified):
+            return outcome(for: verified)
+        case .unavailable(let reason):
+            return .unavailable(reason)
+        case .invalid(let reason):
+            return .invalid(reason)
+        }
+    }
+
+    private static func outcome(
+        for verified: VerifiedAppAttestTruth
+    ) -> AppAttestGuestCapabilityEnrollmentOutcome {
+        guard verified.kind == .assertion,
+              verified.guestCapability != nil else {
+            return .invalid(.serverRejected)
+        }
+        return .ready
+    }
+}
+
+/**
+ Keeps a guest bearer usable for the submission it is about to authorize.
+
+ The wrapped provider resolves Clerk first. A Clerk token returns untouched and
+ never consults guest custody. A signed-out installation without a bearer, or a
+ resolved guest bearer inside the server's five-minute refresh window, earns a
+ fresh verified assertion. If renewal does not produce another submission-safe
+ bearer, the request fails closed.
+ */
+struct GuestCapabilityRenewingBearerTokenProvider: BearerTokenProviding {
+    private static let minimumRemainingLifetime: TimeInterval = 5 * 60
+
+    private let base: any BearerTokenProviding
+    private let guestCapabilities: any GuestCapabilityBearerStoring
+    private let now: @Sendable () -> Date
+    private let renewGuestCapability:
+        @Sendable () async -> AppAttestGuestCapabilityEnrollmentOutcome
+
+    init(
+        base: any BearerTokenProviding,
+        guestCapabilities: any GuestCapabilityBearerStoring,
+        renewGuestCapability: @escaping @Sendable () async
+            -> AppAttestGuestCapabilityEnrollmentOutcome,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.base = base
+        self.guestCapabilities = guestCapabilities
+        self.renewGuestCapability = renewGuestCapability
+        self.now = now
+    }
+
+    func bearerToken() async throws -> String {
+        do {
+            let resolved = try await base.bearerToken()
+            guard Self.isGuestCapability(resolved) else {
+                return resolved
+            }
+            if let bearer = storedBearer(matching: resolved),
+               bearer.expiresAt.timeIntervalSince(now())
+                > Self.minimumRemainingLifetime {
+                return resolved
+            }
+        } catch BearerTokenProviderError.sessionAbsent {
+            // The signed-out path gets one chance to earn the missing bearer.
+            // Any other Clerk error remains an account error and propagates.
+        }
+
+        guard await renewGuestCapability() == .ready else {
+            throw BearerTokenProviderError.sessionAbsent
+        }
+
+        let renewed = try await base.bearerToken()
+        guard Self.isGuestCapability(renewed) else {
+            return renewed
+        }
+        guard let renewedBearer = storedBearer(matching: renewed),
+              renewedBearer.expiresAt.timeIntervalSince(now())
+                > Self.minimumRemainingLifetime else {
+            throw BearerTokenProviderError.sessionAbsent
+        }
+        return renewed
+    }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        try await base.principalBoundBearer()
+    }
+
+    private func storedBearer(matching token: String) -> GuestCapabilityBearer? {
+        guard let bearer = try? guestCapabilities.load(),
+              bearer.token == token else {
+            return nil
+        }
+        return bearer
+    }
+
+    private static func isGuestCapability(_ token: String) -> Bool {
+        token.hasPrefix("guestcap_")
+    }
+}
+
+/** Launch-owned App Attest work and the bearer provider it refreshes. */
+struct AppAttestGuestCapabilityComposition: Sendable {
+    private static let appID = "35YFS8XJRQ.dev.snaplist.ios"
+
+    let tokenProvider: any BearerTokenProviding
+
+    private let launchEnrollment: @Sendable () async -> Void
+
+    init(
+        baseTokenProvider: any BearerTokenProviding,
+        guestCapabilities: any GuestCapabilityBearerStoring,
+        enrollGuestCapability: @escaping @Sendable () async
+            -> AppAttestGuestCapabilityEnrollmentOutcome,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        launchEnrollment = {
+            do {
+                _ = try await baseTokenProvider.principalBoundBearer()
+                return
+            } catch BearerTokenProviderError.sessionAbsent {
+                // Only a confirmed signed-out installation may do guest work.
+            } catch {
+                // Clerk trouble is not evidence of a signed-out installation.
+                // Preserve account precedence instead of downgrading to guest.
+                return
+            }
+
+            do {
+                if let bearer = try guestCapabilities.load(),
+                   bearer.isUsable(at: now()) {
+                    return
+                }
+            } catch {
+                // An unreadable Keychain is not proof that no capability exists.
+                // Stay fail-closed instead of rotating unknown live authority.
+                return
+            }
+            _ = await enrollGuestCapability()
+        }
+        tokenProvider = GuestCapabilityRenewingBearerTokenProvider(
+            base: baseTokenProvider,
+            guestCapabilities: guestCapabilities,
+            renewGuestCapability: enrollGuestCapability,
+            now: now
+        )
+    }
+
+    static func makeLive(
+        apiOrigin: URL,
+        baseTokenProvider: any BearerTokenProviding,
+        session: URLSession = .shared
+    ) -> Self {
+        let guestCapabilities = KeychainGuestCapabilityBearerStore()
+        let enrollment = AppAttestGuestCapabilityEnrollment(
+            client: AppAttestClient(
+                appID: appID,
+                environment: .production,
+                guestCapabilityStore: guestCapabilities,
+                server: URLSessionAppAttestServerClient(
+                    apiOrigin: apiOrigin,
+                    session: session
+                )
+            )
+        )
+        return Self(
+            baseTokenProvider: baseTokenProvider,
+            guestCapabilities: guestCapabilities,
+            enrollGuestCapability: {
+                await enrollment.enrollIfNeeded()
+            }
+        )
+    }
+
+    /// Starts before the seller can submit, without making Apple or network
+    /// availability a gate on rendering the existing signed-out experience.
+    @discardableResult
+    func beginLaunchEnrollment() -> Task<Void, Never> {
+        let launchEnrollment = launchEnrollment
+        return Task {
+            await launchEnrollment()
+        }
     }
 }
 
