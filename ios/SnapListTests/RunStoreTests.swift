@@ -47,6 +47,372 @@ final class RunStoreTests: XCTestCase {
         XCTAssertEqual(store.state, .unavailable)
     }
 
+    func testProcessingReviewRequiresExactServerRunAndBinding() async throws {
+        let requestedRunID = UUID(
+            uuidString: "31700000-0000-4000-8000-000000000030"
+        )!
+        let itemID = UUID(
+            uuidString: "31700000-0000-4000-8000-000000000031"
+        )!
+        let listingID = UUID(
+            uuidString: "31700000-0000-4000-8000-000000000032"
+        )!
+        let exactReview = try Self.makeReview(
+            runID: requestedRunID,
+            itemID: itemID,
+            listingID: listingID
+        )
+        let exactRun = Self.makeRun(
+            id: requestedRunID,
+            itemID: itemID,
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            listingID: listingID,
+            review: exactReview
+        )
+        let cases: [(name: String, run: DurableRun, expected: ListingReviewResult?)] = [
+            ("accepts the exact binding", exactRun, exactReview),
+            (
+                "rejects a returned run mismatch",
+                Self.makeRun(
+                    id: UUID(
+                        uuidString: "31700000-0000-4000-8000-000000000033"
+                    )!,
+                    itemID: itemID,
+                    status: .succeeded,
+                    stage: .completed,
+                    canOpenReview: true,
+                    listingID: listingID,
+                    review: exactReview
+                ),
+                nil
+            ),
+            (
+                "rejects an unauthorized review",
+                Self.makeRun(
+                    id: requestedRunID,
+                    itemID: itemID,
+                    status: .succeeded,
+                    stage: .completed,
+                    listingID: listingID,
+                    review: exactReview
+                ),
+                nil
+            ),
+            (
+                "rejects a missing review binding",
+                Self.makeRun(
+                    id: requestedRunID,
+                    itemID: itemID,
+                    status: .succeeded,
+                    stage: .completed,
+                    canOpenReview: true,
+                    listingID: listingID
+                ),
+                nil
+            ),
+            (
+                "rejects a review run mismatch",
+                Self.makeRun(
+                    id: requestedRunID,
+                    itemID: itemID,
+                    status: .succeeded,
+                    stage: .completed,
+                    canOpenReview: true,
+                    listingID: listingID,
+                    review: try Self.makeReview(
+                        runID: UUID(
+                            uuidString: "31700000-0000-4000-8000-000000000034"
+                        )!,
+                        itemID: itemID,
+                        listingID: listingID
+                    )
+                ),
+                nil
+            ),
+            (
+                "rejects a review item mismatch",
+                Self.makeRun(
+                    id: requestedRunID,
+                    itemID: itemID,
+                    status: .succeeded,
+                    stage: .completed,
+                    canOpenReview: true,
+                    listingID: listingID,
+                    review: try Self.makeReview(
+                        runID: requestedRunID,
+                        itemID: UUID(
+                            uuidString: "31700000-0000-4000-8000-000000000035"
+                        )!,
+                        listingID: listingID
+                    )
+                ),
+                nil
+            ),
+            (
+                "rejects a missing run listing",
+                Self.makeRun(
+                    id: requestedRunID,
+                    itemID: itemID,
+                    status: .succeeded,
+                    stage: .completed,
+                    canOpenReview: true,
+                    review: exactReview
+                ),
+                nil
+            ),
+            (
+                "rejects a review listing mismatch",
+                Self.makeRun(
+                    id: requestedRunID,
+                    itemID: itemID,
+                    status: .succeeded,
+                    stage: .completed,
+                    canOpenReview: true,
+                    listingID: listingID,
+                    review: try Self.makeReview(
+                        runID: requestedRunID,
+                        itemID: itemID,
+                        listingID: UUID(
+                            uuidString: "31700000-0000-4000-8000-000000000036"
+                        )!
+                    )
+                ),
+                nil
+            ),
+        ]
+
+        for testCase in cases {
+            let service = RecordingRunService(results: [.success(testCase.run)])
+            let store = RunDetailStore(
+                service: service,
+                tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
+            )
+
+            let review = await store.processingReview(for: requestedRunID)
+
+            XCTAssertEqual(review, testCase.expected, testCase.name)
+            XCTAssertEqual(store.state, .idle, testCase.name)
+            let requests = await service.requests
+            XCTAssertEqual(
+                requests,
+                [.init(runID: requestedRunID, bearerToken: "fresh-token")],
+                testCase.name
+            )
+        }
+    }
+
+    func testProcessingRetryProjectsOnlyExactServerAcceptedTruth() async throws {
+        let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000040")!
+        let unrelatedRunID = UUID(
+            uuidString: "31700000-0000-4000-8000-000000000041"
+        )!
+        let retryableFailure = try Self.makeRetryableFailure()
+        let original = Self.makeRun(
+            id: runID,
+            status: .failed,
+            stage: .completed,
+            safeFailure: retryableFailure
+        )
+        let retrying = Self.makeRun(
+            id: runID,
+            status: .retrying,
+            stage: .queued
+        )
+        let queued = Self.makeRun(
+            id: runID,
+            status: .queued,
+            stage: .queued
+        )
+        let wrongID = Self.makeRun(
+            id: UUID(uuidString: "31700000-0000-4000-8000-000000000042")!,
+            status: .retrying,
+            stage: .queued
+        )
+        let illegalState = Self.makeRun(
+            id: runID,
+            status: .running,
+            stage: .generating
+        )
+
+        struct TestCase {
+            let name: String
+            let responses: [Result<DurableRun, Error>]
+            let expectedStateLabel: String?
+        }
+
+        let cases: [TestCase] = [
+            TestCase(
+                name: "accepts queued server truth",
+                responses: [.success(queued)],
+                expectedStateLabel: "Accepted"
+            ),
+            TestCase(
+                name: "accepts retrying server truth",
+                responses: [.success(retrying)],
+                expectedStateLabel: "Retrying"
+            ),
+            TestCase(
+                name: "rejects another run",
+                responses: [.success(wrongID)],
+                expectedStateLabel: nil
+            ),
+            TestCase(
+                name: "rejects an illegal response state",
+                responses: [.success(illegalState)],
+                expectedStateLabel: nil
+            ),
+            TestCase(
+                name: "rejects a server refusal",
+                responses: [.failure(RunAPIError.authenticationRequired)],
+                expectedStateLabel: nil
+            ),
+            TestCase(
+                name: "rejects a network failure",
+                responses: [.failure(RunAPIError.unavailable)],
+                expectedStateLabel: nil
+            ),
+            TestCase(
+                name: "rejects a decode failure",
+                responses: [.failure(RunAPIError.invalidResponse)],
+                expectedStateLabel: nil
+            ),
+            TestCase(
+                name: "retains its key after a refusal before retrying",
+                responses: [.failure(RunAPIError.unavailable), .success(retrying)],
+                expectedStateLabel: "Retrying"
+            ),
+        ]
+
+        for testCase in cases {
+            let service = RetryRunService(
+                initial: original,
+                retryResults: testCase.responses
+            )
+            let store = RunDetailStore(
+                service: service,
+                tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
+            )
+            let principal = TrophyWallPrincipalScope(
+                opaqueValue: "processing-retry-\(testCase.name)"
+            )
+            let wall = TrophyWallStore(
+                principalScope: principal,
+                repository: ProcessingRetryRepository(
+                    cards: [
+                        .accepted(
+                            principalScope: principal,
+                            runID: unrelatedRunID,
+                            state: .readyToReview,
+                            itemName: "Unrelated item",
+                            lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 20)
+                        ),
+                        .accepted(
+                            principalScope: principal,
+                            runID: runID,
+                            state: .needsRetryLocked(
+                                detail: retryableFailure.detail
+                            ),
+                            itemName: "Canon AE-1 film camera",
+                            lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 10)
+                        ),
+                    ]
+                )
+            )
+            let originalCards = wall.cards
+            let originalRows = wall.processingRows
+
+            var retried = await store.processingRetry(for: runID)
+            if testCase.responses.count == 2 {
+                XCTAssertNil(retried, testCase.name)
+                XCTAssertEqual(wall.cards, originalCards, testCase.name)
+                XCTAssertEqual(wall.processingRows, originalRows, testCase.name)
+                retried = await store.processingRetry(for: runID)
+            }
+
+            let didProject = retried.map(wall.applyRetryResult) ?? false
+            XCTAssertEqual(didProject, testCase.expectedStateLabel != nil, testCase.name)
+            XCTAssertEqual(store.state, .idle, testCase.name)
+
+            let requests = await service.retryRequests
+            XCTAssertEqual(requests.count, testCase.responses.count, testCase.name)
+            XCTAssertEqual(
+                requests.map(\.runID),
+                Array(repeating: runID, count: testCase.responses.count),
+                testCase.name
+            )
+            XCTAssertTrue(
+                requests.allSatisfy { $0.bearerToken == "fresh-token" },
+                testCase.name
+            )
+            XCTAssertEqual(
+                Set(requests.map(\.idempotencyKey)).count,
+                1,
+                testCase.name
+            )
+
+            guard let expectedStateLabel = testCase.expectedStateLabel else {
+                XCTAssertEqual(wall.cards, originalCards, testCase.name)
+                XCTAssertEqual(wall.processingRows, originalRows, testCase.name)
+                continue
+            }
+
+            XCTAssertEqual(
+                wall.cards.map(\.identity),
+                originalCards.map(\.identity),
+                testCase.name
+            )
+            XCTAssertEqual(
+                wall.cards.map(\.orderKey),
+                originalCards.map(\.orderKey),
+                testCase.name
+            )
+            XCTAssertEqual(
+                wall.processingRows.first { $0.id == .run(runID) }?.stateLabel,
+                expectedStateLabel,
+                testCase.name
+            )
+            XCTAssertEqual(
+                wall.processingRows.first { $0.id == .run(runID) }?.destination,
+                .run(runID),
+                testCase.name
+            )
+            XCTAssertNil(
+                wall.processingRows.first { $0.id == .run(runID) }?.action,
+                testCase.name
+            )
+            XCTAssertEqual(
+                wall.processingRows.first { $0.id == .run(unrelatedRunID) },
+                originalRows.first { $0.id == .run(unrelatedRunID) },
+                testCase.name
+            )
+        }
+
+        let inFlightService = LateRetryRunService(
+            failed: original,
+            opened: original,
+            retryResult: .success(retrying)
+        )
+        let inFlightStore = RunDetailStore(
+            service: inFlightService,
+            tokenProvider: RunStoreBearerTokenProvider { "fresh-token" }
+        )
+        let firstRetry = Task {
+            await inFlightStore.processingRetry(for: runID)
+        }
+        await inFlightService.waitForRetryRequest()
+
+        let duplicateRetry = await inFlightStore.processingRetry(for: runID)
+        let inFlightRequests = await inFlightService.retryRequests
+        XCTAssertNil(duplicateRetry)
+        XCTAssertEqual(inFlightRequests, [runID])
+
+        await inFlightService.resumeRetryRequest()
+        let firstRetryResult = await firstRetry.value
+        XCTAssertEqual(firstRetryResult, retrying)
+    }
+
     func testRefreshUsesAnotherFreshBearerAndReplacesOnlyServerTruth() async {
         let initial = Self.makeRun()
         let refreshed = Self.makeRun(
@@ -408,6 +774,9 @@ final class RunStoreTests: XCTestCase {
 
     private static func makeRun(
         id: UUID = UUID(uuidString: "31700000-0000-4000-8000-000000000010")!,
+        itemID: UUID = UUID(
+            uuidString: "31700000-0000-4000-8000-000000000011"
+        )!,
         status: DurableRunStatus = .running,
         stage: DurableRunStage = .generating,
         safeFailure: RunSafeFailure? = nil,
@@ -417,7 +786,7 @@ final class RunStoreTests: XCTestCase {
     ) -> DurableRun {
         DurableRun(
             id: id,
-            itemID: UUID(uuidString: "31700000-0000-4000-8000-000000000011")!,
+            itemID: itemID,
             listingID: listingID,
             status: status,
             stage: stage,
@@ -453,7 +822,17 @@ final class RunStoreTests: XCTestCase {
         )
     }
 
-    private static func makeReview() throws -> ListingReviewResult {
+    private static func makeReview(
+        runID: UUID = UUID(
+            uuidString: "31700000-0000-4000-8000-000000000010"
+        )!,
+        itemID: UUID = UUID(
+            uuidString: "31700000-0000-4000-8000-000000000011"
+        )!,
+        listingID: UUID = UUID(
+            uuidString: "63860000-0000-4000-8000-000000000002"
+        )!
+    ) throws -> ListingReviewResult {
         try JSONDecoder().decode(
             ListingReviewResult.self,
             from: Data(
@@ -461,9 +840,9 @@ final class RunStoreTests: XCTestCase {
                 {
                   "schemaVersion":1,
                   "binding":{
-                    "runId":"31700000-0000-4000-8000-000000000010",
-                    "itemId":"31700000-0000-4000-8000-000000000011",
-                    "listingId":"63860000-0000-4000-8000-000000000002",
+                    "runId":"\(runID.uuidString.lowercased())",
+                    "itemId":"\(itemID.uuidString.lowercased())",
+                    "listingId":"\(listingID.uuidString.lowercased())",
                     "reviewContentRevision":"63860000-0000-4000-8000-000000000003",
                     "reviewRevision":"63860000-0000-4000-8000-000000000004"
                   },
@@ -490,6 +869,16 @@ final class RunStoreTests: XCTestCase {
                 """.utf8
             )
         )
+    }
+}
+
+private struct ProcessingRetryRepository: TrophyWallRepository {
+    let cards: [TrophyWallCard]
+
+    func initialCards(
+        for principalScope: TrophyWallPrincipalScope
+    ) -> [TrophyWallCard] {
+        cards
     }
 }
 

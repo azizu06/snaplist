@@ -58,9 +58,14 @@ enum ListingReviewStoreFactory {
             if configuration.resetListingReviewDraft {
                 try? FileManager.default.removeItem(at: root)
             }
+            let fixture = configuration.listingReviewFixture ?? .loaded
+            let review = configuration.fixture == .trophyProcessing
+                ? ListingReviewLaunchFixture.processingReview()
+                : fixture.review
             return ListingReviewStore(
                 service: ListingReviewFixtureService(
-                    fixture: configuration.listingReviewFixture ?? .loaded
+                    fixture: fixture,
+                    review: review
                 ),
                 persistence: LocalListingReviewDraftPersistence(
                     rootDirectory: root
@@ -134,16 +139,17 @@ private struct ListingReviewFixtureBearerTokenProvider:
 
 private actor ListingReviewFixtureService: ListingReviewServing {
     let fixture: ListingReviewFixture
+    let review: ListingReviewResult
 
-    init(fixture: ListingReviewFixture) {
+    init(fixture: ListingReviewFixture, review: ListingReviewResult) {
         self.fixture = fixture
+        self.review = review
     }
 
     func fetchReview(
         runID: UUID,
         bearerToken: String
     ) throws -> ListingReviewResult {
-        let review = fixture.review
         guard review.binding.runID == runID else {
             throw ListingReviewClientError.invalidResponse
         }
@@ -170,7 +176,7 @@ private actor ListingReviewFixtureService: ListingReviewServing {
         case .conflict:
             throw ListingReviewClientError.conflict
         default:
-            let binding = fixture.review.binding
+            let binding = review.binding
             guard binding.runID == runID,
                   binding.reviewRevision == expectedReviewRevision else {
                 throw ListingReviewClientError.invalidResponse
@@ -187,7 +193,14 @@ enum ListingReviewLaunchFixture {
 
     static func review(
         matchCount: Int = 3,
-        usesLongText: Bool = false
+        usesLongText: Bool = false,
+        runID: UUID = Self.runID,
+        itemID: UUID = UUID(
+            uuidString: "20800000-0000-4000-8000-000000000021"
+        )!,
+        listingID: UUID = UUID(
+            uuidString: "20800000-0000-4000-8000-000000000022"
+        )!
     ) -> ListingReviewResult {
         let title = usesLongText
             ? "Canon AE-1 Program 35mm film camera with 50mm lens and original strap"
@@ -241,8 +254,8 @@ enum ListingReviewLaunchFixture {
             "schemaVersion": 1,
             "binding": [
                 "runId": runID.uuidString.lowercased(),
-                "itemId": "20800000-0000-4000-8000-000000000021",
-                "listingId": "20800000-0000-4000-8000-000000000022",
+                "itemId": itemID.uuidString.lowercased(),
+                "listingId": listingID.uuidString.lowercased(),
                 "reviewContentRevision":
                     "20800000-0000-4000-8000-000000000025",
                 "reviewRevision":
@@ -296,6 +309,20 @@ enum ListingReviewLaunchFixture {
                 "Invalid Listing Review launch fixture: \(error)"
             )
         }
+    }
+
+    static func processingReview() -> ListingReviewResult {
+        review(
+            runID: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000003"
+            )!,
+            itemID: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000009"
+            )!,
+            listingID: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000008"
+            )!
+        )
     }
 
     static func receipt(

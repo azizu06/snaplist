@@ -315,10 +315,10 @@ final class HomeUITests: XCTestCase {
 
         let rowIdentifiers = [
             "trophy.processing.row.run.37500000-0000-4000-8000-000000000003",
-            "trophy.processing.row.local.37500000-0000-4000-8000-000000000002",
             "trophy.processing.row.run.37500000-0000-4000-8000-000000000004",
             "trophy.processing.row.run.37500000-0000-4000-8000-000000000005",
-            "trophy.processing.row.local.37500000-0000-4000-8000-000000000006",
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000006",
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000007",
         ]
         let rows = rowIdentifiers.map {
             app.descendants(matching: .any)[$0]
@@ -369,6 +369,226 @@ final class HomeUITests: XCTestCase {
         XCTAssertEqual(
             app.buttons["trophy.processing.disclosure"].value as? String,
             "Collapsed"
+        )
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+    }
+
+    func testProcessingV32ActionsAndTerminalTruthExposeIndependentAccessibility() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let reviewRunID = "37500000-0000-4000-8000-000000000003"
+        let retryRunID = "37500000-0000-4000-8000-000000000004"
+        let scanRunID = "37500000-0000-4000-8000-000000000005"
+        let retryingRunID = "37500000-0000-4000-8000-000000000006"
+        let staticFailureRunID = "37500000-0000-4000-8000-000000000007"
+
+        let reviewAction = app.buttons[
+            "trophy.processing.action.review.\(reviewRunID)"
+        ]
+        XCTAssertTrue(reviewAction.waitForExistence(timeout: 3))
+        guard reviewAction.exists else { return }
+
+        let reviewRow = app.buttons["trophy.processing.row.run.\(reviewRunID)"]
+        let retryRow = app.buttons["trophy.processing.row.run.\(retryRunID)"]
+        let scanRow = app.buttons["trophy.processing.row.run.\(scanRunID)"]
+        XCTAssertTrue(reviewRow.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            reviewRow.label,
+            "Vintage Pyrex bowl set, ready to review."
+        )
+        XCTAssertEqual(
+            retryRow.label,
+            "Canon AE-1 film camera, needs retry. The last attempt did not finish."
+        )
+        XCTAssertEqual(
+            scanRow.label,
+            "Nintendo Game Boy, needs retry. Add a new photo to try again."
+        )
+
+        let retryAction = app.buttons[
+            "trophy.processing.action.retry.\(retryRunID)"
+        ]
+        let scanAction = app.buttons[
+            "trophy.processing.action.scan.\(scanRunID)"
+        ]
+        XCTAssertEqual(reviewAction.label, "Review Vintage Pyrex bowl set")
+        XCTAssertEqual(retryAction.label, "Retry Canon AE-1 film camera")
+        XCTAssertEqual(scanAction.label, "Scan a new photo for Nintendo Game Boy")
+        for action in [reviewAction, retryAction, scanAction] {
+            XCTAssertTrue(action.isHittable)
+            XCTAssertGreaterThanOrEqual(action.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(action.frame.height, 44)
+        }
+
+        let actionScreenshot = XCTAttachment(
+            screenshot: XCUIScreen.main.screenshot()
+        )
+        actionScreenshot.name = "PROC-V32-actions"
+        actionScreenshot.lifetime = .keepAlways
+        add(actionScreenshot)
+        let actionsAccessibility = XCTAttachment(string: app.debugDescription)
+        actionsAccessibility.name = "PROC-V32-actions-AX"
+        actionsAccessibility.lifetime = .keepAlways
+        add(actionsAccessibility)
+
+        reviewAction.tap()
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+
+        let disclosure = app.buttons["trophy.processing.disclosure"]
+        XCTAssertTrue(disclosure.isHittable)
+        disclosure.tap()
+
+        let retryingRow = app.buttons[
+            "trophy.processing.row.run.\(retryingRunID)"
+        ]
+        let staticFailureRow = app.buttons[
+            "trophy.processing.row.run.\(staticFailureRunID)"
+        ]
+        XCTAssertTrue(retryingRow.waitForExistence(timeout: 3))
+        XCTAssertEqual(retryingRow.label, "Sony Walkman, retrying.")
+        XCTAssertTrue(staticFailureRow.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            staticFailureRow.label,
+            "Polaroid camera, not listed. This item could not be processed."
+        )
+        XCTAssertFalse(
+            app.buttons["trophy.processing.action.retry.\(retryingRunID)"].exists
+        )
+        XCTAssertFalse(
+            app.buttons[
+                "trophy.processing.action.scan.\(staticFailureRunID)"
+            ].exists
+        )
+
+        let processingRows = app.scrollViews.firstMatch
+        scrollUntilFullyVisible(
+            processingRows,
+            element: staticFailureRow,
+            in: app,
+            maximumSwipes: 4
+        )
+        let terminalScreenshot = XCTAttachment(
+            screenshot: XCUIScreen.main.screenshot()
+        )
+        terminalScreenshot.name = "PROC-V32-terminal-recovery"
+        terminalScreenshot.lifetime = .keepAlways
+        add(terminalScreenshot)
+        let terminalAccessibility = XCTAttachment(string: app.debugDescription)
+        terminalAccessibility.name = "PROC-V32-terminal-recovery-AX"
+        terminalAccessibility.lifetime = .keepAlways
+        add(terminalAccessibility)
+    }
+
+    func testProcessingScanActionSelectsScanWithoutChangingItsRunRoute() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let runID = "37500000-0000-4000-8000-000000000005"
+        let row = app.buttons["trophy.processing.row.run.\(runID)"]
+        let scan = app.buttons["trophy.processing.action.scan.\(runID)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        XCTAssertTrue(scan.waitForExistence(timeout: 3))
+
+        scan.tap()
+
+        let scanDock = app.buttons["dock.scan"]
+        XCTAssertTrue(scanDock.waitForExistence(timeout: 3))
+        XCTAssertTrue(scanDock.isSelected)
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+    }
+
+    func testProcessingReviewActionOpensExactSameRunListingReview() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--run-detail-fixture=reviewable",
+            "--listing-review-fixture=loaded",
+            "--reset-listing-review-draft",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let runID = "37500000-0000-4000-8000-000000000003"
+        let listingID = "37500000-0000-4000-8000-000000000008"
+        let review = app.buttons[
+            "trophy.processing.action.review.\(runID)"
+        ]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+
+        review.tap()
+
+        XCTAssertTrue(
+            app.otherElements["listing-review"].waitForExistence(timeout: 3)
+        )
+        let listingReview = app.otherElements["listing-review"]
+        XCTAssertEqual(
+            listingReview.value as? String,
+            "listing-review.binding.run.\(runID).listing.\(listingID)"
+        )
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+    }
+
+    func testProcessingRetryActionProjectsOnlyServerAcceptedRetryTruth() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let retryRunID = "37500000-0000-4000-8000-000000000004"
+        let retryRow = app.buttons["trophy.processing.row.run.\(retryRunID)"]
+        let retry = app.buttons["trophy.processing.action.retry.\(retryRunID)"]
+        let reviewRow = app.buttons[
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000003"
+        ]
+        let scanRow = app.buttons[
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000005"
+        ]
+        XCTAssertTrue(retryRow.waitForExistence(timeout: 3))
+        XCTAssertTrue(retry.waitForExistence(timeout: 3))
+        XCTAssertTrue(reviewRow.waitForExistence(timeout: 3))
+        XCTAssertTrue(scanRow.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            retryRow.label,
+            "Canon AE-1 film camera, needs retry. The last attempt did not finish."
+        )
+
+        retry.tap()
+
+        let projectsRetryingTruth = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "label == %@",
+                "Canon AE-1 film camera, retrying."
+            ),
+            object: retryRow
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [projectsRetryingTruth], timeout: 3),
+            .completed
+        )
+        XCTAssertTrue(retryRow.exists)
+        XCTAssertFalse(retry.exists)
+        XCTAssertEqual(
+            reviewRow.label,
+            "Vintage Pyrex bowl set, ready to review."
+        )
+        XCTAssertEqual(
+            scanRow.label,
+            "Nintendo Game Boy, needs retry. Add a new photo to try again."
         )
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }

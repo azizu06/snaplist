@@ -401,8 +401,110 @@ final class TrophyWallDomainTests: XCTestCase {
         try assertLockedCanonicalProjection(.readyToReview)
     }
 
+    func testReadyProcessingRowOffersReviewWithoutChangingExactRunDestination() {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                state: .readyToReview,
+                lastMeaningfulUpdateAt: fixture.runDetailUpdate,
+                itemName: fixture.matchedItemName
+            )
+        )
+
+        let row = store.processingRows.last
+        XCTAssertEqual(row?.destination, .run(fixture.runID))
+        XCTAssertEqual(row?.action, .review(runID: fixture.runID))
+    }
+
     func testStoreProjectsFailedRunWithoutRetryClientAsLockedNeedsRetryCard() throws {
         try assertLockedCanonicalProjection(.needsRetry)
+    }
+
+    func testRetryableFailureProcessingRowOffersRetryWithoutChangingExactRunDestination() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+
+        store.ingest(
+            historyPage: try fixture.historyPage(
+                status: .failed,
+                stage: .pricing,
+                terminalOutcome: .failed,
+                retryTruth: (canRetry: true, workPreserved: true)
+            ),
+            principalScope: fixture.principal
+        )
+
+        let row = store.processingRows.last
+        XCTAssertEqual(row?.destination, .run(fixture.runID))
+        XCTAssertEqual(row?.action, .retry(runID: fixture.runID))
+    }
+
+    func testRetryingQueuedRunRemainsVisibleWithoutAnotherAction() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+
+        store.ingest(
+            historyPage: try fixture.historyPage(
+                status: .retrying,
+                stage: .queued,
+                terminalOutcome: nil
+            ),
+            principalScope: fixture.principal
+        )
+
+        let row = store.processingRows.last
+        XCTAssertEqual(row?.stateLabel, "Retrying")
+        XCTAssertEqual(row?.accessibilityLabel, "\(fixture.matchedItemName), retrying.")
+        XCTAssertEqual(row?.destination, .run(fixture.runID))
+        XCTAssertNil(row?.action)
+    }
+
+    func testNonretryableFailureProjectsOnlyServerAuthorizedRecovery() throws {
+        let fixture = TrophyWallTestFixture()
+        let scanStore = fixture.makeStore()
+        scanStore.ingest(
+            historyPage: try fixture.historyPage(
+                status: .failed,
+                stage: .pricing,
+                terminalOutcome: .failed,
+                retryTruth: (canRetry: false, workPreserved: true),
+                canStartNewCapture: true
+            ),
+            principalScope: fixture.principal
+        )
+
+        let scanRow = scanStore.processingRows.last
+        XCTAssertEqual(scanRow?.destination, .run(fixture.runID))
+        XCTAssertEqual(scanRow?.action, .scan(runID: fixture.runID))
+        XCTAssertEqual(
+            scanRow?.accessibilityLabel,
+            "\(fixture.matchedItemName), needs retry. Upload didn't finish."
+        )
+
+        let staticStore = fixture.makeStore()
+        staticStore.ingest(
+            historyPage: try fixture.historyPage(
+                status: .failed,
+                stage: .pricing,
+                terminalOutcome: .failed,
+                retryTruth: (canRetry: false, workPreserved: true)
+            ),
+            principalScope: fixture.principal
+        )
+
+        let staticRow = staticStore.processingRows.last
+        XCTAssertEqual(staticRow?.destination, .run(fixture.runID))
+        XCTAssertNil(staticRow?.action)
+        XCTAssertEqual(staticRow?.stateLabel, "Upload didn't finish.")
+        XCTAssertEqual(
+            staticRow?.accessibilityLabel,
+            "\(fixture.matchedItemName), not listed. Upload didn't finish."
+        )
     }
 
     func testStoreTombstonesNewerRetryCleanupAgainstOlderRetryableReplay() throws {
@@ -673,6 +775,35 @@ final class TrophyWallDomainTests: XCTestCase {
                     id: .run(fixture.runID),
                     itemName: fixture.matchedItemName,
                     stateLabel: "Export prepared",
+                    historyOrderAt: fixture.runDetailUpdate
+                ),
+            ]
+        )
+    }
+
+    func testStoreKeepsSettledDeliveryWhenFailedRunIsRetentionCleaned() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+        let historyPage = try fixture.historyPage(
+            listingID: fixture.listingID,
+            status: .failed,
+            stage: .pricing,
+            terminalOutcome: .failed,
+            retryTruth: (canRetry: false, workPreserved: false),
+            retentionCleanedAt: "1970-01-01T00:00:06.000Z",
+            deliveryState: "published_to_ebay"
+        )
+
+        store.ingest(historyPage: historyPage, principalScope: fixture.principal)
+
+        XCTAssertEqual(store.processingRows.map(\.id), [.local(fixture.unrelatedLogicalID)])
+        XCTAssertEqual(
+            store.settledTiles,
+            [
+                TrophyWallSettledTile(
+                    id: .run(fixture.runID),
+                    itemName: fixture.matchedItemName,
+                    stateLabel: "Published to eBay",
                     historyOrderAt: fixture.runDetailUpdate
                 ),
             ]
@@ -1983,15 +2114,6 @@ final class TrophyWallDomainTests: XCTestCase {
                 "\(fixture.matchedItemName), needs retry. Upload didn't finish."
             inconsistentCases = [
                 (
-                    "nonretryable failure",
-                    try fixture.historyPage(
-                        status: .failed,
-                        stage: .pricing,
-                        terminalOutcome: .failed,
-                        retryTruth: (canRetry: false, workPreserved: true)
-                    )
-                ),
-                (
                     "work not preserved",
                     try fixture.historyPage(
                         status: .failed,
@@ -2180,6 +2302,7 @@ private final class TrophyWallProcessingTestHost {
                     collectionOutcome: collectionOutcome,
                     onBack: {},
                     openRoute: openRoute,
+                    onAction: { _ in },
                     onScan: {},
                     onTryAgain: {}
                 )

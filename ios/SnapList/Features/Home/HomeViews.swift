@@ -393,6 +393,7 @@ struct TrophyWallProcessingView: View {
     let refreshRecovery: TrophyWallCollectionRefreshRecovery
     let onBack: () -> Void
     let openRoute: (HomeRoute) -> Void
+    let onAction: (TrophyWallProcessingAction) -> Void
     let onScan: () -> Void
     let onTryAgain: () -> Void
 
@@ -402,6 +403,7 @@ struct TrophyWallProcessingView: View {
         refreshRecovery: TrophyWallCollectionRefreshRecovery = .idle,
         onBack: @escaping () -> Void,
         openRoute: @escaping (HomeRoute) -> Void,
+        onAction: @escaping (TrophyWallProcessingAction) -> Void,
         onScan: @escaping () -> Void,
         onTryAgain: @escaping () -> Void
     ) {
@@ -410,6 +412,7 @@ struct TrophyWallProcessingView: View {
         self.refreshRecovery = refreshRecovery
         self.onBack = onBack
         self.openRoute = openRoute
+        self.onAction = onAction
         self.onScan = onScan
         self.onTryAgain = onTryAgain
     }
@@ -481,7 +484,8 @@ struct TrophyWallProcessingView: View {
                             ForEach(presentation.visibleRows) { row in
                                 TrophyWallProcessingRowView(
                                     row: row,
-                                    openRoute: openRoute
+                                    openRoute: openRoute,
+                                    onAction: onAction
                                 )
 
                                 if row.id != presentation.visibleRows.last?.id {
@@ -803,25 +807,57 @@ struct TrophyWallCollectionMessageView: View {
 private struct TrophyWallProcessingRowView: View {
     let row: TrophyWallProcessingRow
     let openRoute: (HomeRoute) -> Void
+    let onAction: (TrophyWallProcessingAction) -> Void
 
     var body: some View {
-        Group {
-            if let destination = row.destination {
-                Button {
-                    openRoute(destination)
-                } label: {
+        HStack(spacing: 0) {
+            Group {
+                if let destination = row.destination {
+                    Button {
+                        openRoute(destination)
+                    } label: {
+                        content
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(row.accessibilityLabel)
+                    .accessibilityIdentifier(row.accessibilityIdentifier)
+                } else {
                     content
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(row.accessibilityLabel)
+                        .accessibilityIdentifier(row.accessibilityIdentifier)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let action = row.action {
+                Button {
+                    onAction(action)
+                } label: {
+                    Text(action.label)
+                        .snapListTypography(.status)
+                        .foregroundStyle(action.foregroundColor)
+                        .frame(minWidth: SnapListMetrics.minimumTouchTarget)
+                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                        .padding(.horizontal, 10)
+                        .background(action.backgroundColor)
+                        .clipShape(.rect(cornerRadius: 12))
+                        .overlay {
+                            if action.showsBorder {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(
+                                        SnapListColorToken.hairline.color,
+                                        lineWidth: 1
+                                    )
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(row.accessibilityLabel)
-            } else {
-                content
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(row.accessibilityLabel)
+                .accessibilityLabel(action.accessibilityLabel(for: row.itemName))
+                .accessibilityIdentifier(action.accessibilityIdentifier)
+                .padding(.trailing, 14)
             }
         }
-        .accessibilityIdentifier(row.accessibilityIdentifier)
     }
 
     private var content: some View {
@@ -838,14 +874,16 @@ private struct TrophyWallProcessingRowView: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(row.stateLabel)
-                    .snapListTypography(.status)
-                    .foregroundStyle(
-                        row.destination == nil
-                            ? SnapListColorToken.textSecondary.color
-                            : SnapListColorToken.inkPrimary.color
-                    )
-                    .lineLimit(1)
+                if row.action == nil {
+                    Text(row.stateLabel)
+                        .snapListTypography(.status)
+                        .foregroundStyle(
+                            row.destination == nil
+                                ? SnapListColorToken.textSecondary.color
+                                : SnapListColorToken.inkPrimary.color
+                        )
+                        .lineLimit(1)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -853,5 +891,66 @@ private struct TrophyWallProcessingRowView: View {
         .padding(.vertical, 11)
         .frame(minHeight: 66)
         .contentShape(.rect)
+    }
+}
+
+private extension TrophyWallProcessingAction {
+    var label: String {
+        switch self {
+        case .review:
+            "Review"
+        case .retry:
+            "Retry"
+        case .scan:
+            "Scan"
+        }
+    }
+
+    var accessibilityIdentifier: String {
+        switch self {
+        case .review(let runID):
+            "trophy.processing.action.review.\(runID.uuidString.lowercased())"
+        case .retry(let runID):
+            "trophy.processing.action.retry.\(runID.uuidString.lowercased())"
+        case .scan(let runID):
+            "trophy.processing.action.scan.\(runID.uuidString.lowercased())"
+        }
+    }
+
+    func accessibilityLabel(for itemName: String) -> String {
+        switch self {
+        case .review:
+            "Review \(itemName)"
+        case .retry:
+            "Retry \(itemName)"
+        case .scan:
+            "Scan a new photo for \(itemName)"
+        }
+    }
+
+    var backgroundColor: Color {
+        switch self {
+        case .review, .retry:
+            SnapListColorToken.actionTint.color
+        case .scan:
+            SnapListColorToken.canvas.color
+        }
+    }
+
+    var foregroundColor: Color {
+        switch self {
+        case .review, .retry:
+            SnapListColorToken.actionDeep.color
+        case .scan:
+            SnapListColorToken.inkPrimary.color
+        }
+    }
+
+    var showsBorder: Bool {
+        if case .scan = self {
+            true
+        } else {
+            false
+        }
     }
 }

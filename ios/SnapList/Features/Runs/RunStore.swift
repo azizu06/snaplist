@@ -26,6 +26,7 @@ final class RunDetailStore {
     private var requestGeneration = 0
     private var emittedListingReadyRunIDs: Set<UUID> = []
     private var retryIdempotencyKeys: [UUID: UUID] = [:]
+    private var processingRetryRunIDs: Set<UUID> = []
 
     init(
         service: any RunServing,
@@ -57,6 +58,60 @@ final class RunDetailStore {
         await startFetch(runID: requestedRunID)
     }
 
+    /// Resolves only the server-authorized review binding for a Processing
+    /// action. Unlike `load`, this deliberately does not change the Run Detail
+    /// presentation state: Processing must not navigate through `.run(runID)`
+    /// just to determine whether it can open Listing Review.
+    func processingReview(for runID: UUID) async -> ListingReviewResult? {
+        do {
+            let token = try await tokenProvider.bearerToken()
+            let run = try await service.fetchRun(id: runID, bearerToken: token)
+            guard run.id == runID,
+                  run.legalActions.canOpenReview,
+                  let review = run.review,
+                  review.binding.runID == runID,
+                  review.binding.itemID == run.itemID,
+                  let listingID = run.listingID,
+                  review.binding.listingID == listingID else {
+                return nil
+            }
+            return review
+        } catch {
+            return nil
+        }
+    }
+
+    /// Retries one Processing run without opening or changing Run Detail.
+    /// The response is deliberately returned rather than stored: only the
+    /// Trophy Wall's existing exact card may decide whether it can project the
+    /// server-authorized state.
+    func processingRetry(for runID: UUID) async -> DurableRun? {
+        guard processingRetryRunIDs.insert(runID).inserted else {
+            return nil
+        }
+        defer { processingRetryRunIDs.remove(runID) }
+
+        let key = retryIdempotencyKeys[runID] ?? UUID()
+        retryIdempotencyKeys[runID] = key
+        do {
+            let token = try await tokenProvider.bearerToken()
+            let retried = try await service.retryRun(
+                id: runID,
+                idempotencyKey: key,
+                bearerToken: token
+            )
+            guard retried.id == runID,
+                  retried.schemaVersion == 1,
+                  Self.isCanonicalProcessingRetry(retried) else {
+                return nil
+            }
+            retryIdempotencyKeys[runID] = nil
+            return retried
+        } catch {
+            return nil
+        }
+    }
+
     func retry() async {
         guard !isRetrying,
               case .loaded(let run) = state,
@@ -84,6 +139,20 @@ final class RunDetailStore {
             guard generation == requestGeneration,
                   requestedRunID == run.id else { return }
             state = .loaded(run)
+        }
+    }
+
+    private static func isCanonicalProcessingRetry(_ run: DurableRun) -> Bool {
+        switch (run.status, run.stage) {
+        case (.queued, .queued),
+             (.retrying, .queued),
+             (.retrying, .identifying),
+             (.retrying, .generating),
+             (.retrying, .pricing),
+             (.retrying, .persisting):
+            true
+        default:
+            false
         }
     }
 
@@ -186,29 +255,41 @@ enum RunDetailStoreFactory {
     ) -> RunDetailStore {
 #if DEBUG
         if configuration.usesZeroNetworkFixtures {
-            let service: any RunServing = switch configuration.runDetailFixture {
+            let service: any RunServing
+            switch configuration.runDetailFixture {
             case .loaded:
-                FixtureRunService(runs: [.loadedDetail])
+                service = FixtureRunService(runs: [.loadedDetail])
             case .refresh:
-                FixtureRunService(runs: [.loadedDetail, .refreshedDetail])
-            case .failed:
-                FixtureRunService(runs: [.failedDetail])
-            case .canceled:
-                FixtureRunService(runs: [.canceledDetail])
-            case .completed:
-                FixtureRunService(runs: [.completedDetail])
-            case .reviewable:
-                FixtureRunService(
-                    runs: [
-                        .reviewableDetail(
-                            review:
-                                (configuration.listingReviewFixture ?? .loaded)
-                                    .review
-                        )
-                    ]
+                service = FixtureRunService(
+                    runs: [.loadedDetail, .refreshedDetail]
                 )
-            case .unavailable, .none:
-                UnavailableRunService()
+            case .failed:
+                service = FixtureRunService(runs: [.failedDetail])
+            case .canceled:
+                service = FixtureRunService(runs: [.canceledDetail])
+            case .completed:
+                service = FixtureRunService(runs: [.completedDetail])
+            case .reviewable:
+                let review = configuration.fixture == .trophyProcessing
+                    ? ListingReviewLaunchFixture.processingReview()
+                    : (configuration.listingReviewFixture ?? .loaded).review
+                let run = configuration.fixture == .trophyProcessing
+                    ? DurableRun.processingReviewableDetail(review: review)
+                    : DurableRun.reviewableDetail(review: review)
+                service = FixtureRunService(
+                    runs: [run]
+                )
+            case .unavailable:
+                service = UnavailableRunService()
+            case .none:
+                if configuration.fixture == .trophyProcessing {
+                    service = FixtureRunService(
+                        runs: [.processingRetryFailureDetail],
+                        retryResults: [.success(.processingRetryAccepted)]
+                    )
+                } else {
+                    service = UnavailableRunService()
+                }
             }
             return RunDetailStore(
                 service: service,
@@ -236,9 +317,14 @@ private struct FixtureRunBearerTokenProvider: BearerTokenProviding {
 
 private actor FixtureRunService: RunServing {
     private var runs: [DurableRun]
+    private var retryResults: [Result<DurableRun, Error>]
 
-    init(runs: [DurableRun]) {
+    init(
+        runs: [DurableRun],
+        retryResults: [Result<DurableRun, Error>] = []
+    ) {
         self.runs = runs
+        self.retryResults = retryResults
     }
 
     func fetchRun(id: UUID, bearerToken: String) async throws -> DurableRun {
@@ -248,6 +334,18 @@ private actor FixtureRunService: RunServing {
             runs.removeFirst()
         }
         return run
+    }
+
+    func retryRun(
+        id: UUID,
+        idempotencyKey: UUID,
+        bearerToken: String
+    ) async throws -> DurableRun {
+        guard runs.contains(where: { $0.id == id }),
+              !retryResults.isEmpty else {
+            throw RunAPIError.unavailable
+        }
+        return try retryResults.removeFirst().get()
     }
 }
 
@@ -272,7 +370,57 @@ private extension DurableRun {
         )
     }
 
+    static func processingReviewableDetail(
+        review: ListingReviewResult
+    ) -> DurableRun {
+        fixture(
+            id: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000003"
+            )!,
+            itemID: UUID(
+                uuidString: "37500000-0000-4000-8000-000000000009"
+            )!,
+            itemName: "Vintage Pyrex bowl set",
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            review: review
+        )
+    }
+
+    static let processingRetryFailureDetail = fixture(
+        id: UUID(
+            uuidString: "37500000-0000-4000-8000-000000000004"
+        )!,
+        itemID: UUID(
+            uuidString: "37500000-0000-4000-8000-000000000010"
+        )!,
+        itemName: "Canon AE-1 film camera",
+        status: .failed,
+        stage: .completed,
+        safeFailure: .processingRetryFixture
+    )
+
+    static let processingRetryAccepted = fixture(
+        id: UUID(
+            uuidString: "37500000-0000-4000-8000-000000000004"
+        )!,
+        itemID: UUID(
+            uuidString: "37500000-0000-4000-8000-000000000010"
+        )!,
+        itemName: "Canon AE-1 film camera",
+        status: .retrying,
+        stage: .queued
+    )
+
     static func fixture(
+        id: UUID = UUID(
+            uuidString: "20800000-0000-4000-8000-000000000020"
+        )!,
+        itemID: UUID = UUID(
+            uuidString: "20800000-0000-4000-8000-000000000021"
+        )!,
+        itemName: String = "Canon AE-1 film camera",
         status: DurableRunStatus,
         stage: DurableRunStage,
         safeFailure: RunSafeFailure? = nil,
@@ -280,8 +428,8 @@ private extension DurableRun {
         review: ListingReviewResult? = nil
     ) -> DurableRun {
         DurableRun(
-            id: UUID(uuidString: "20800000-0000-4000-8000-000000000020")!,
-            itemID: UUID(uuidString: "20800000-0000-4000-8000-000000000021")!,
+            id: id,
+            itemID: itemID,
             listingID: review?.binding.listingID,
             status: status,
             stage: stage,
@@ -298,7 +446,7 @@ private extension DurableRun {
                 completedAt: nil,
                 retentionCleanedAt: nil
             ),
-            item: RunItemTruth(title: "Canon AE-1 film camera", photoCount: 3),
+            item: RunItemTruth(title: itemName, photoCount: 3),
             requiredInput: nil,
             terminalOutcome: nil,
             safeFailure: safeFailure,
@@ -317,6 +465,20 @@ private extension DurableRun {
 }
 
 private extension RunSafeFailure {
+    static let processingRetryFixture: RunSafeFailure = {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "reason": "This run couldn’t finish",
+                "detail": "The last attempt did not finish.",
+                "retryable": true,
+                "workPreserved": true,
+            ])
+            return try JSONDecoder().decode(RunSafeFailure.self, from: data)
+        } catch {
+            preconditionFailure("Invalid processing retry fixture: \(error)")
+        }
+    }()
+
     static let maximumLengthFixture: RunSafeFailure = {
         let ending = "All retry guidance is shown."
         let repeatedGuidance = String(
