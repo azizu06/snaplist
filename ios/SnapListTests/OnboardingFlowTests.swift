@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 @testable import SnapList
 
@@ -367,6 +368,94 @@ final class OnboardingFlowTests: XCTestCase {
             expected[.act06],
             .staticImage(name: "ActivationScoutACT06")
         )
+    }
+
+    func testActivationScoutStaticRenderingSelectsApprovedFallbacks() {
+        let expected: [ActivationGuidanceState: ActivationGuidanceAssetSelection] = [
+            .act01: .staticImage(name: "ActivationScoutACT01"),
+            .act04: .staticImage(name: "ActivationScoutACT04"),
+        ]
+
+        for (state, selection) in expected {
+            XCTAssertEqual(
+                ActivationGuidanceAssetPolicy.selection(
+                    for: state,
+                    reduceMotion: false,
+                    usesStaticRendering: true
+                ),
+                selection
+            )
+            XCTAssertEqual(
+                ActivationGuidanceAssetPolicy.selection(
+                    for: state,
+                    reduceMotion: true,
+                    usesStaticRendering: false
+                ),
+                selection
+            )
+        }
+    }
+
+    func testActivationScoutNormalMotionResolvesApprovedWebMsInTheBundle() throws {
+        let expected: [ActivationGuidanceState: String] = [
+            .act01: "act-01",
+            .act04: "act-04",
+        ]
+
+        for (state, resourceName) in expected {
+            let rendering = ActivationGuidanceAssetPolicy.rendering(
+                for: state,
+                reduceMotion: false,
+                usesStaticRendering: false,
+                bundle: .main
+            )
+            guard case .acceptedWebM(let url) = rendering else {
+                return XCTFail("\(state.rawValue) did not resolve its approved WebM: \(rendering)")
+            }
+            XCTAssertEqual(url.deletingPathExtension().lastPathComponent, resourceName)
+            XCTAssertEqual(url.pathExtension, "webm")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testActivationScoutMissingWebMFallsBackToApprovedStaticAsset() {
+        let testBundle = Bundle(for: OnboardingFlowTests.self)
+
+        for (state, expectedAsset) in [
+            (ActivationGuidanceState.act01, "ActivationScoutACT01"),
+            (.act04, "ActivationScoutACT04"),
+        ] {
+            XCTAssertEqual(
+                ActivationGuidanceAssetPolicy.rendering(
+                    for: state,
+                    reduceMotion: false,
+                    usesStaticRendering: false,
+                    bundle: testBundle
+                ),
+                .staticFallbackPNG(asset: expectedAsset)
+            )
+        }
+    }
+
+    func testActivationScoutStaticFallbacksResolveAtThreeX() {
+        let traitCollection = UITraitCollection(displayScale: 3)
+
+        for state in [ActivationGuidanceState.act01, .act04] {
+            guard case .staticImage(let assetName) = ActivationGuidanceAssetPolicy.selection(
+                for: state,
+                reduceMotion: true,
+                usesStaticRendering: false
+            ) else {
+                return XCTFail("\(state.rawValue) did not select a static Scout fallback.")
+            }
+            let image = UIImage(
+                named: assetName,
+                in: .main,
+                compatibleWith: traitCollection
+            )
+            XCTAssertNotNil(image, "\(state.rawValue) needs a delivered 3x Scout fallback.")
+            XCTAssertEqual(image?.scale, 3, "\(state.rawValue) must resolve its 3x Scout fallback.")
+        }
     }
 
     // Every approved coach mark docks against the one control its line names.

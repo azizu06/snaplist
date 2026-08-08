@@ -193,10 +193,17 @@ enum ActivationGuidanceAssetSelection: Equatable {
     case motion(resourceName: String)
 }
 
+enum ActivationGuidanceScoutRendering: Equatable {
+    case none
+    case staticFallbackPNG(asset: String)
+    case acceptedWebM(url: URL)
+}
+
 enum ActivationGuidanceAssetPolicy {
     static func selection(
         for state: ActivationGuidanceState,
-        reduceMotion: Bool
+        reduceMotion: Bool,
+        usesStaticRendering: Bool = false
     ) -> ActivationGuidanceAssetSelection {
         let staticName: String?
         let motionName: String?
@@ -220,11 +227,51 @@ enum ActivationGuidanceAssetPolicy {
         }
 
         guard let staticName else { return .none }
-        guard !reduceMotion, let motionName else {
+        guard !reduceMotion, !usesStaticRendering, let motionName else {
             return .staticImage(name: staticName)
         }
         return .motion(resourceName: motionName)
     }
+
+    /// Resolves normal motion before the view constructs WebKit, so a missing
+    /// bundle resource degrades to the approved static Scout instead of blank
+    /// reserved space. UI tests pass `usesStaticRendering` to avoid WebKit's
+    /// iOS 26.5 accessibility-bundle collision.
+    static func rendering(
+        for state: ActivationGuidanceState,
+        reduceMotion: Bool,
+        usesStaticRendering: Bool,
+        bundle: Bundle = .main
+    ) -> ActivationGuidanceScoutRendering {
+        switch selection(
+            for: state,
+            reduceMotion: reduceMotion,
+            usesStaticRendering: usesStaticRendering
+        ) {
+        case .none:
+            return .none
+        case .staticImage(let asset):
+            return .staticFallbackPNG(asset: asset)
+        case .motion(let resourceName):
+            guard let url = bundle.url(
+                forResource: resourceName,
+                withExtension: resourceExtension,
+                subdirectory: resourceSubdirectory
+            ) else {
+                guard case .staticImage(let asset) = selection(
+                    for: state,
+                    reduceMotion: true
+                ) else {
+                    return .none
+                }
+                return .staticFallbackPNG(asset: asset)
+            }
+            return .acceptedWebM(url: url)
+        }
+    }
+
+    static let resourceSubdirectory = "ActivationGuidance"
+    static let resourceExtension = "webm"
 }
 
 enum ActivationAuthenticationState: Equatable {

@@ -751,7 +751,8 @@ struct AppShellView: View {
             ActivationGuidanceCoachMark(
                 coachMark: coachMark,
                 dismiss: dismissActivationGuidance,
-                isCompleting: isCompletingActivation
+                isCompleting: isCompletingActivation,
+                usesStaticScoutRendering: configuration.usesStaticScoutRendering
             )
             .padding(.horizontal, 18)
             .padding(.bottom, activationBottomInset)
