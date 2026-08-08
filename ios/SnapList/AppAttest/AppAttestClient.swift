@@ -31,6 +31,29 @@ struct AppAttestStoredKey: Codable, Equatable, Sendable {
     let state: AppAttestKeyVerificationState
 }
 
+/**
+ Issue #727. The server-issued capability a verified assertion earns, which is
+ the only credential a signed-out seller has.
+
+ It is opaque here: SnapList carries it and watches its expiry, and never reads
+ what is inside it. Only `expiresAt` is client business, because a spent bearer
+ must not be offered to a request that would then fail as unauthenticated.
+ */
+struct GuestCapabilityBearer: Codable, Equatable, Sendable {
+    let expiresAt: Date
+    let token: String
+
+    func isUsable(at instant: Date) -> Bool { instant < expiresAt }
+}
+
+/// Durable custody of the current guest capability. Separate from the App Attest
+/// key store because the key proves the installation while this authorizes one
+/// signed-out seller's requests, and they expire on entirely different clocks.
+protocol GuestCapabilityBearerStoring: Sendable {
+    func load() throws -> GuestCapabilityBearer?
+    func save(_ bearer: GuestCapabilityBearer) throws
+}
+
 struct VerifiedAppAttestTruth: Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         case attestation
@@ -39,8 +62,24 @@ struct VerifiedAppAttestTruth: Equatable, Sendable {
 
     let counter: UInt32
     let environment: AppAttestEnvironment
+    /// Present exactly for `.assertion`; an attestation never earns one.
+    let guestCapability: GuestCapabilityBearer?
     let keyID: String
     let kind: Kind
+
+    init(
+        counter: UInt32,
+        environment: AppAttestEnvironment,
+        guestCapability: GuestCapabilityBearer? = nil,
+        keyID: String,
+        kind: Kind
+    ) {
+        self.counter = counter
+        self.environment = environment
+        self.guestCapability = guestCapability
+        self.keyID = keyID
+        self.kind = kind
+    }
 }
 
 enum AppAttestTruth: Equatable, Sendable {
@@ -238,6 +277,65 @@ struct KeychainAppAttestKeyIDStore: AppAttestKeyIDStoring {
     }
 }
 
+struct KeychainGuestCapabilityBearerStore: GuestCapabilityBearerStoring {
+    private let account = "guest-capability-bearer"
+    private let service = "dev.snaplist.ios.guest-capability"
+
+    func load() throws -> GuestCapabilityBearer? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw KeychainError(status: status)
+        }
+        guard let bearer = try? JSONDecoder().decode(
+            GuestCapabilityBearer.self,
+            from: data
+        ) else {
+            throw KeychainError(status: errSecDecode)
+        }
+        return bearer
+    }
+
+    func save(_ bearer: GuestCapabilityBearer) throws {
+        guard !bearer.token.isEmpty,
+              let data = try? JSONEncoder().encode(bearer) else {
+            throw KeychainError(status: errSecParam)
+        }
+        let attributes = [kSecValueData as String: data]
+        let updateStatus = SecItemUpdate(
+            baseQuery as CFDictionary,
+            attributes as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainError(status: updateStatus)
+        }
+        var insert = baseQuery
+        insert[kSecValueData as String] = data
+        let insertStatus = SecItemAdd(insert as CFDictionary, nil)
+        guard insertStatus == errSecSuccess else {
+            throw KeychainError(status: insertStatus)
+        }
+    }
+
+    private var baseQuery: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrService as String: service,
+        ]
+    }
+
+    private struct KeychainError: Error {
+        let status: OSStatus
+    }
+}
+
 protocol AppAttestServerClient: Sendable {
     func issueChallenge(kind: AppAttestChallenge.Kind, keyID: String?) async throws -> AppAttestChallenge
     func verifyAttestation(
@@ -259,10 +357,18 @@ private struct AppAttestStatusEnvelope: Decodable {
     let data: StatusData
 }
 
+private struct AppAttestGuestCapabilityData: Decodable {
+    let bearerToken: String
+    let expiresAt: String
+    // `refreshAfter` also travels on the wire. SnapList does not refresh a
+    // capability yet, so decoding it would only invite a stale consumer.
+}
+
 private struct AppAttestTruthData: Decodable {
     let code: String?
     let counter: UInt32?
     let environment: String?
+    let guestCapability: AppAttestGuestCapabilityData?
     let keyId: String?
     let kind: String?
     let status: String
@@ -376,7 +482,16 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
             } else {
                 throw AppAttestServerClientError.invalidResponse
             }
-            return .verified(.init(counter: counter, environment: environment, keyID: keyID, kind: kind))
+            return .verified(.init(
+                counter: counter,
+                environment: environment,
+                guestCapability: try Self.guestCapability(
+                    envelope.data.guestCapability,
+                    for: kind
+                ),
+                keyID: keyID,
+                kind: kind
+            ))
         default:
             throw AppAttestServerClientError.invalidResponse
         }
@@ -409,6 +524,29 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
         }
     }
 
+    /// The server issues a capability with every verified assertion. One that is
+    /// missing or unreadable is not a seller without a credential; it is a
+    /// response this client cannot honour, and accepting it silently would leave
+    /// a signed-out seller holding nothing at submission time.
+    private static func guestCapability(
+        _ issued: AppAttestGuestCapabilityData?,
+        for kind: VerifiedAppAttestTruth.Kind
+    ) throws -> GuestCapabilityBearer? {
+        guard kind == .assertion else { return nil }
+        guard let issued,
+              let expiresAt = date(issued.expiresAt) else {
+            throw AppAttestServerClientError.invalidResponse
+        }
+        let token = issued.bearerToken
+        guard token.range(
+            of: #"^guestcap_[A-Za-z0-9_-]{43}$"#,
+            options: .regularExpression
+        ) != nil else {
+            throw AppAttestServerClientError.invalidResponse
+        }
+        return GuestCapabilityBearer(expiresAt: expiresAt, token: token)
+    }
+
     private static func date(_ value: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -423,6 +561,7 @@ actor AppAttestClient {
 
     private let appID: String
     private let environment: AppAttestEnvironment
+    private let guestCapabilityStore: any GuestCapabilityBearerStoring
     private let keyStore: any AppAttestKeyIDStoring
     private let server: any AppAttestServerClient
     private let service: any AppAttestServicing
@@ -436,12 +575,15 @@ actor AppAttestClient {
     init(
         appID: String,
         environment: AppAttestEnvironment,
+        guestCapabilityStore: any GuestCapabilityBearerStoring =
+            KeychainGuestCapabilityBearerStore(),
         keyStore: any AppAttestKeyIDStoring = KeychainAppAttestKeyIDStore(),
         server: any AppAttestServerClient,
         service: any AppAttestServicing = DeviceCheckAppAttestService()
     ) {
         self.appID = appID
         self.environment = environment
+        self.guestCapabilityStore = guestCapabilityStore
         self.keyStore = keyStore
         self.server = server
         self.service = service
@@ -602,12 +744,25 @@ actor AppAttestClient {
                 keyID,
                 clientDataHash: Data(SHA256.hash(data: clientData))
             )
-            return .truth(try await server.verifyAssertion(
+            let truth = try await server.verifyAssertion(
                 challengeID: challenge.id,
                 keyID: keyID,
                 assertionObject: object,
                 requestBody: requestBody
-            ))
+            )
+            // Every verified assertion funnels through here, so this is the one
+            // place the earned capability can be taken into durable custody. A
+            // verified response without durable custody would leave the signed-out
+            // seller unable to authorize the later submission.
+            if case .verified(let verified) = truth,
+               let capability = verified.guestCapability {
+                do {
+                    try guestCapabilityStore.save(capability)
+                } catch {
+                    return .truth(.invalid(.keyPersistenceFailed))
+                }
+            }
+            return .truth(truth)
         } catch AppAttestServerClientError.keyNotAttested {
             return .keyNotAttested
         } catch AppAttestServiceError.staleKey {

@@ -354,6 +354,175 @@ final class AppAttestClientTests: XCTestCase {
         XCTAssertEqual(truth, .invalid(.serverRejected))
     }
 
+    // MARK: Issue #727 — the guest capability issued with a verified assertion
+
+    func testVerifiedAssertionRetainsTheServerIssuedGuestCapability() async throws {
+        let token = "guestcap_\(String(repeating: "A", count: 43))"
+        AppAttestURLProtocolStub.responses = [
+            .init(
+                body: #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"\#(token)","expiresAt":"2026-07-28T15:30:00.000Z","refreshAfter":"2026-07-28T15:25:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
+                status: 200
+            ),
+        ]
+
+        let truth = try await makeURLSessionServerClient().verifyAssertion(
+            challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000331")!,
+            keyID: "native-fixed-key-id",
+            assertionObject: Data("fixed-assertion".utf8),
+            requestBody: Data(#"{"operation":"proof"}"#.utf8)
+        )
+
+        XCTAssertEqual(
+            truth,
+            .verified(.init(
+                counter: 7,
+                environment: .production,
+                guestCapability: GuestCapabilityBearer(
+                    expiresAt: Date(timeIntervalSince1970: 1_785_252_600),
+                    token: token
+                ),
+                keyID: "native-fixed-key-id",
+                kind: .assertion
+            ))
+        )
+    }
+
+    func testVerifiedAssertionWithoutAUsableGuestCapabilityFailsTheDecode() async {
+        let bodies = [
+            // The server issues a capability with every verified assertion. A response
+            // missing one is not a seller without a credential; it is a response this
+            // client cannot read, and a silent success would strand Start listing.
+            #"{"data":{"counter":7,"environment":"production","keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
+            #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"   ","expiresAt":"2026-07-28T15:30:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
+            #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"guestcap_opaque","expiresAt":"the end of the week"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
+            #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":7,"expiresAt":"2026-07-28T15:30:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
+            #"{"data":{"counter":7,"environment":"production","guestCapability":{"bearerToken":"guestcap_opaque","expiresAt":"2026-07-28T15:30:00.000Z"},"keyId":"native-fixed-key-id","kind":"assertion","status":"verified"}}"#,
+        ]
+
+        for body in bodies {
+            AppAttestURLProtocolStub.responses = [.init(body: body, status: 200)]
+            do {
+                _ = try await makeURLSessionServerClient().verifyAssertion(
+                    challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000331")!,
+                    keyID: "native-fixed-key-id",
+                    assertionObject: Data("fixed-assertion".utf8),
+                    requestBody: Data(#"{"operation":"proof"}"#.utf8)
+                )
+                XCTFail("Expected an invalid response for \(body)")
+            } catch AppAttestServerClientError.invalidResponse {
+                continue
+            } catch {
+                XCTFail("Expected an invalid response for \(body), got \(error)")
+            }
+        }
+    }
+
+    func testVerifiedAttestationDecodesWithoutAGuestCapability() async throws {
+        AppAttestURLProtocolStub.responses = [
+            .init(
+                body: #"{"data":{"counter":0,"environment":"production","keyId":"native-fixed-key-id","kind":"attestation","status":"verified"}}"#,
+                status: 200
+            ),
+        ]
+
+        let truth = try await makeURLSessionServerClient().verifyAttestation(
+            challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000332")!,
+            keyID: "native-fixed-key-id",
+            attestationObject: Data("fixed-attestation".utf8)
+        )
+
+        XCTAssertEqual(
+            truth,
+            .verified(.init(
+                counter: 0,
+                environment: .production,
+                keyID: "native-fixed-key-id",
+                kind: .attestation
+            ))
+        )
+    }
+
+    func testVerifiedAssertionPersistsTheGuestCapabilityForLaterSubmission() async {
+        let bearer = GuestCapabilityBearer(
+            expiresAt: Date(timeIntervalSince1970: 1_785_252_600),
+            token: "guestcap_opaque"
+        )
+        let bearerStore = GuestCapabilityBearerStoreStub()
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            guestCapabilityStore: bearerStore,
+            keyStore: AppAttestKeyStoreStub(
+                key: .init(id: "native-fixed-key-id", state: .verified)
+            ),
+            server: AppAttestServerStub(
+                assertionTruth: .verified(.init(
+                    counter: 1,
+                    environment: .production,
+                    guestCapability: bearer,
+                    keyID: "native-fixed-key-id",
+                    kind: .assertion
+                ))
+            ),
+            service: AppAttestServiceStub(isSupported: true)
+        )
+
+        _ = await client.assert(requestBody: Data(#"{"operation":"proof"}"#.utf8))
+
+        XCTAssertEqual(bearerStore.saved, [bearer])
+    }
+
+    func testVerifiedAssertionReportsGuestCapabilityPersistenceFailure() async {
+        let bearer = GuestCapabilityBearer(
+            expiresAt: Date(timeIntervalSince1970: 1_785_252_600),
+            token: "guestcap_opaque"
+        )
+        let bearerStore = GuestCapabilityBearerStoreStub()
+        bearerStore.saveError = GuestCapabilityBearerStoreStubError.saveFailed
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            guestCapabilityStore: bearerStore,
+            keyStore: AppAttestKeyStoreStub(
+                key: .init(id: "native-fixed-key-id", state: .verified)
+            ),
+            server: AppAttestServerStub(
+                assertionTruth: .verified(.init(
+                    counter: 1,
+                    environment: .production,
+                    guestCapability: bearer,
+                    keyID: "native-fixed-key-id",
+                    kind: .assertion
+                ))
+            ),
+            service: AppAttestServiceStub(isSupported: true)
+        )
+
+        let truth = await client.assert(
+            requestBody: Data(#"{"operation":"proof"}"#.utf8)
+        )
+
+        XCTAssertEqual(truth, .invalid(.keyPersistenceFailed))
+    }
+
+    func testRejectedAssertionPersistsNoGuestCapability() async {
+        let bearerStore = GuestCapabilityBearerStoreStub()
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            guestCapabilityStore: bearerStore,
+            keyStore: AppAttestKeyStoreStub(
+                key: .init(id: "native-fixed-key-id", state: .verified)
+            ),
+            server: AppAttestServerStub(assertionTruth: .invalid(.serverRejected)),
+            service: AppAttestServiceStub(isSupported: true)
+        )
+
+        _ = await client.assert(requestBody: Data(#"{"operation":"proof"}"#.utf8))
+
+        XCTAssertEqual(bearerStore.saved, [])
+    }
+
     // MARK: Issue #524 — proof for the included-offer redemption endpoints
 
     func testRedemptionProofLeavesTheChallengeForTheRedemptionEndpoint() async throws {
@@ -522,6 +691,26 @@ private final class AppAttestKeyStoreStub: AppAttestKeyIDStoring, @unchecked Sen
         key = nil
         removeCallCount += 1
     }
+}
+
+private final class GuestCapabilityBearerStoreStub: GuestCapabilityBearerStoring,
+    @unchecked Sendable {
+    private(set) var saved: [GuestCapabilityBearer] = []
+    var bearer: GuestCapabilityBearer?
+    var saveError: Error?
+
+    func load() throws -> GuestCapabilityBearer? { bearer }
+
+    func save(_ bearer: GuestCapabilityBearer) throws {
+        if let saveError { throw saveError }
+        self.bearer = bearer
+        saved.append(bearer)
+    }
+
+}
+
+private enum GuestCapabilityBearerStoreStubError: Error {
+    case saveFailed
 }
 
 private actor AppAttestServerStub: AppAttestServerClient {
