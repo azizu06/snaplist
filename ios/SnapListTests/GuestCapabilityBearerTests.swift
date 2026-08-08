@@ -120,6 +120,135 @@ final class GuestCapabilityBearerTests: XCTestCase {
         }
     }
 
+    // MARK: Issue #733 — submission-safe renewal
+
+    func testAShortLivedGuestCapabilityIsRenewedBeforeSubmission() async throws {
+        let refreshedToken = "guestcap_\(String(repeating: "B", count: 43))"
+        let store = GuestCapabilityStoreDouble(
+            bearer: Self.bearer(expiringIn: 299)
+        )
+        let renewal = GuestCapabilityRenewalDouble(outcomes: [.ready]) { _ in
+            try? store.save(GuestCapabilityBearer(
+                expiresAt: Self.instant.addingTimeInterval(3_600),
+                token: refreshedToken
+            ))
+        }
+        let provider = makeSignedOutRenewingProvider(
+            store: store,
+            renewal: renewal
+        )
+
+        let token = try await provider.bearerToken()
+
+        XCTAssertEqual(token, refreshedToken)
+        let renewalCallCount = await renewal.callCount
+        XCTAssertEqual(renewalCallCount, 1)
+    }
+
+    func testUnavailableEnrollmentFailsClosedThenALaterLaunchRetries() async throws {
+        let refreshedToken = "guestcap_\(String(repeating: "C", count: 43))"
+        let store = GuestCapabilityStoreDouble(bearer: nil)
+        let renewal = GuestCapabilityRenewalDouble(
+            outcomes: [.unavailable(.serverUnavailable), .ready]
+        ) { callIndex in
+            guard callIndex == 1 else { return }
+            try? store.save(GuestCapabilityBearer(
+                expiresAt: Self.instant.addingTimeInterval(3_600),
+                token: refreshedToken
+            ))
+        }
+        func makeProvider() -> GuestCapabilityRenewingBearerTokenProvider {
+            makeSignedOutRenewingProvider(
+                store: store,
+                renewal: renewal
+            )
+        }
+
+        await assertSessionAbsent(from: makeProvider())
+        let token = try await makeProvider().bearerToken()
+
+        XCTAssertEqual(token, refreshedToken)
+        let renewalCallCount = await renewal.callCount
+        XCTAssertEqual(renewalCallCount, 2)
+    }
+
+    func testLaunchKeepsAUsableGuestBearerWithoutRenewingIt() async throws {
+        let instant = Date()
+        let store = GuestCapabilityStoreDouble(
+            bearer: GuestCapabilityBearer(
+                expiresAt: instant.addingTimeInterval(3_600),
+                token: Self.guestToken
+            )
+        )
+        let renewal = GuestCapabilityRenewalDouble(outcomes: [.ready]) { _ in }
+        let composition = makeLaunchComposition(
+            clerk: ClerkProviderDouble(
+                error: BearerTokenProviderError.sessionAbsent
+            ),
+            enrollment: renewal,
+            instant: instant,
+            store: store
+        )
+
+        await composition.beginLaunchEnrollment().value
+        let launchRenewalCount = await renewal.callCount
+        XCTAssertEqual(launchRenewalCount, 0)
+
+        let token = try await composition.tokenProvider.bearerToken()
+        XCTAssertEqual(token, Self.guestToken)
+    }
+
+    func testLaunchSkipsEnrollmentForALivePrincipalBoundClerkSession() async throws {
+        let instant = Date()
+        let enrollment = GuestCapabilityRenewalDouble(outcomes: [.ready]) { _ in }
+        let store = GuestCapabilityStoreDouble(bearer: nil)
+        let composition = makeLaunchComposition(
+            clerk: ClerkProviderDouble(
+                token: "fresh-opaque-clerk-token",
+                principalSubject: "user_live_clerk"
+            ),
+            enrollment: enrollment,
+            instant: instant,
+            store: store
+        )
+
+        await composition.beginLaunchEnrollment().value
+        let launchEnrollmentCount = await enrollment.callCount
+        XCTAssertEqual(launchEnrollmentCount, 0)
+
+        let token = try await composition.tokenProvider.bearerToken()
+
+        XCTAssertEqual(token, "fresh-opaque-clerk-token")
+        XCTAssertEqual(store.loadCount, 0)
+    }
+
+    func testLaunchDoesNotDowngradeAClerkFailureToGuestEnrollment() async {
+        struct ClerkOutage: Error {}
+        let instant = Date()
+        let enrollment = GuestCapabilityRenewalDouble(outcomes: [.ready]) { _ in }
+        let store = GuestCapabilityStoreDouble(bearer: nil)
+        let composition = makeLaunchComposition(
+            clerk: ClerkProviderDouble(error: ClerkOutage()),
+            enrollment: enrollment,
+            instant: instant,
+            store: store
+        )
+
+        await composition.beginLaunchEnrollment().value
+
+        let launchEnrollmentCount = await enrollment.callCount
+        XCTAssertEqual(launchEnrollmentCount, 0)
+        XCTAssertEqual(store.loadCount, 0)
+        do {
+            let token = try await composition.tokenProvider.bearerToken()
+            XCTFail("Expected Clerk outage, got \(token)")
+        } catch is ClerkOutage {
+            XCTAssertEqual(store.loadCount, 0)
+        } catch {
+            XCTFail("Expected Clerk outage, got \(error)")
+        }
+    }
+
     // MARK: Durable custody
 
     func testAStoredGuestCapabilitySurvivesRelaunch() throws {
@@ -239,8 +368,45 @@ final class GuestCapabilityBearerTests: XCTestCase {
 
     // MARK: Helpers
 
+    private func makeSignedOutRenewingProvider(
+        store: GuestCapabilityStoreDouble,
+        renewal: GuestCapabilityRenewalDouble
+    ) -> GuestCapabilityRenewingBearerTokenProvider {
+        GuestCapabilityRenewingBearerTokenProvider(
+            base: GuestCapableBearerTokenProvider(
+                clerk: ClerkProviderDouble(
+                    error: BearerTokenProviderError.sessionAbsent
+                ),
+                guestCapabilities: store,
+                now: { Self.instant }
+            ),
+            guestCapabilities: store,
+            renewGuestCapability: { await renewal.renew() },
+            now: { Self.instant }
+        )
+    }
+
+    private func makeLaunchComposition(
+        clerk: any BearerTokenProviding,
+        enrollment: GuestCapabilityRenewalDouble,
+        instant: Date,
+        store: GuestCapabilityStoreDouble
+    ) -> AppAttestGuestCapabilityComposition {
+        let base = GuestCapableBearerTokenProvider(
+            clerk: clerk,
+            guestCapabilities: store,
+            now: { instant }
+        )
+        return AppAttestGuestCapabilityComposition(
+            baseTokenProvider: base,
+            guestCapabilities: store,
+            enrollGuestCapability: { await enrollment.renew() },
+            now: { instant }
+        )
+    }
+
     private func assertSessionAbsent(
-        from provider: GuestCapableBearerTokenProvider,
+        from provider: any BearerTokenProviding,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
@@ -278,10 +444,16 @@ final class GuestCapabilityBearerTests: XCTestCase {
 
 private final class ClerkProviderDouble: BearerTokenProviding, @unchecked Sendable {
     private let token: String?
+    private let principalSubject: String?
     private let error: Error?
 
-    init(token: String? = nil, error: Error? = nil) {
+    init(
+        token: String? = nil,
+        principalSubject: String? = nil,
+        error: Error? = nil
+    ) {
         self.token = token
+        self.principalSubject = principalSubject
         self.error = error
     }
 
@@ -295,6 +467,16 @@ private final class ClerkProviderDouble: BearerTokenProviding, @unchecked Sendab
 
     func principalBoundBearer() async throws -> PrincipalBoundBearer {
         if let error { throw error }
+        if let token,
+           let principalSubject,
+           let scopeProof = ItemRunSubmissionPrincipalScopeProof(
+               verifiedClerkSubject: principalSubject
+           ) {
+            return PrincipalBoundBearer(
+                bearerToken: token,
+                scopeProof: scopeProof
+            )
+        }
         throw BearerTokenProviderError.principalBindingUnavailable
     }
 }
@@ -317,6 +499,30 @@ private final class GuestCapabilityStoreDouble: GuestCapabilityBearerStoring,
         self.bearer = bearer
     }
 
+}
+
+private actor GuestCapabilityRenewalDouble {
+    private(set) var callCount = 0
+    private let onRenew: @Sendable (Int) -> Void
+    private var outcomes: [AppAttestGuestCapabilityEnrollmentOutcome]
+
+    init(
+        outcomes: [AppAttestGuestCapabilityEnrollmentOutcome],
+        onRenew: @escaping @Sendable (Int) -> Void
+    ) {
+        self.onRenew = onRenew
+        self.outcomes = outcomes
+    }
+
+    func renew() -> AppAttestGuestCapabilityEnrollmentOutcome {
+        let callIndex = callCount
+        callCount += 1
+        onRenew(callIndex)
+        guard !outcomes.isEmpty else {
+            return .unavailable(.serverUnavailable)
+        }
+        return outcomes.removeFirst()
+    }
 }
 
 private final class ObservedRequest: @unchecked Sendable {

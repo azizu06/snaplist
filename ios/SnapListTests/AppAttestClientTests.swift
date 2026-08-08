@@ -346,12 +346,145 @@ final class AppAttestClientTests: XCTestCase {
 
         let truth = try await server.verifyAssertion(
             challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000331")!,
+            clientData: Data(#"{"operation":"proof-client-data"}"#.utf8),
             keyID: "native-fixed-key-id",
             assertionObject: Data("fixed-assertion".utf8),
             requestBody: Data(#"{"operation":"proof"}"#.utf8)
         )
 
         XCTAssertEqual(truth, .invalid(.serverRejected))
+    }
+
+    func testAssertionRequestCarriesTheExactClientDataBytesSignedByAppAttest() async throws {
+        AppAttestURLProtocolStub.lastRequestBody = nil
+        AppAttestURLProtocolStub.responses = [
+            .init(
+                body: #"{"data":{"code":"invalid_evidence","kind":"assertion","status":"invalid"}}"#,
+                status: 401
+            ),
+        ]
+        let clientData = Data(#"{"exact":"signature-bound bytes"}"#.utf8)
+
+        _ = try await makeURLSessionServerClient().verifyAssertion(
+            challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000331")!,
+            clientData: clientData,
+            keyID: "native-fixed-key-id",
+            assertionObject: Data("fixed-assertion".utf8),
+            requestBody: Data(#"{"operation":"proof"}"#.utf8)
+        )
+
+        let body = try XCTUnwrap(AppAttestURLProtocolStub.lastRequestBody)
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        XCTAssertEqual(payload["clientData"] as? String, clientData.base64EncodedString())
+    }
+
+    // MARK: Issue #733 — launch enrollment earns the guest capability
+
+    func testFirstLaunchAttestsThenAssertsToEarnGuestCapability() async {
+        let bearer = GuestCapabilityBearer(
+            expiresAt: Date(timeIntervalSince1970: 1_785_252_600),
+            token: "guestcap_\(String(repeating: "A", count: 43))"
+        )
+        let fixture = makeEnrollmentFixture(bearer: bearer)
+
+        let outcome = await fixture.enrollment.enrollIfNeeded()
+
+        XCTAssertEqual(outcome, .ready)
+        XCTAssertEqual(fixture.service.generateKeyCallCount, 1)
+        XCTAssertEqual(fixture.bearerStore.saved, [bearer])
+        let assertionVerificationCallCount =
+            await fixture.server.assertionVerificationCallCount
+        XCTAssertEqual(assertionVerificationCallCount, 1)
+    }
+
+    func testLaunchAndSubmissionShareOneInFlightEnrollmentAttempt() async {
+        let bearer = GuestCapabilityBearer(
+            expiresAt: Date(timeIntervalSince1970: 1_785_252_600),
+            token: "guestcap_\(String(repeating: "B", count: 43))"
+        )
+        let challengeGate = AppAttestChallengeGate()
+        let fixture = makeEnrollmentFixture(
+            bearer: bearer,
+            challengeGate: challengeGate
+        )
+
+        let launch = Task { await fixture.enrollment.enrollIfNeeded() }
+        await challengeGate.waitUntilStarted()
+        let submission = Task { await fixture.enrollment.enrollIfNeeded() }
+        for _ in 0..<100 { await Task.yield() }
+        await challengeGate.open()
+        let outcomes = await (launch.value, submission.value)
+
+        XCTAssertEqual(outcomes.0, .ready)
+        XCTAssertEqual(outcomes.1, .ready)
+        let challengeCallCount = await fixture.server.challengeCallCount
+        let assertionVerificationCallCount =
+            await fixture.server.assertionVerificationCallCount
+        XCTAssertEqual(challengeCallCount, 2)
+        XCTAssertEqual(assertionVerificationCallCount, 1)
+    }
+
+    func testFailedEnrollmentClearsInFlightSoALaterLaunchRetriesFreshWork() async {
+        let bearer = GuestCapabilityBearer(
+            expiresAt: Date(timeIntervalSince1970: 1_785_252_600),
+            token: "guestcap_\(String(repeating: "C", count: 43))"
+        )
+        let fixture = makeEnrollmentFixture(bearer: bearer)
+        fixture.bearerStore.saveError =
+            GuestCapabilityBearerStoreStubError.saveFailed
+
+        let failed = await fixture.enrollment.enrollIfNeeded()
+        fixture.bearerStore.saveError = nil
+        let retried = await fixture.enrollment.enrollIfNeeded()
+
+        XCTAssertEqual(failed, .invalid(.keyPersistenceFailed))
+        XCTAssertEqual(retried, .ready)
+        XCTAssertEqual(fixture.bearerStore.saved, [bearer])
+        let challengeCallCount = await fixture.server.challengeCallCount
+        let assertionVerificationCallCount =
+            await fixture.server.assertionVerificationCallCount
+        XCTAssertEqual(challengeCallCount, 3)
+        XCTAssertEqual(assertionVerificationCallCount, 2)
+    }
+
+    private func makeEnrollmentFixture(
+        bearer: GuestCapabilityBearer,
+        challengeGate: AppAttestChallengeGate? = nil
+    ) -> (
+        enrollment: AppAttestGuestCapabilityEnrollment,
+        server: AppAttestServerStub,
+        bearerStore: GuestCapabilityBearerStoreStub,
+        service: AppAttestServiceStub
+    ) {
+        let bearerStore = GuestCapabilityBearerStoreStub()
+        let server = AppAttestServerStub(
+            assertionTruth: .verified(.init(
+                counter: 1,
+                environment: .production,
+                guestCapability: bearer,
+                keyID: "native-fixed-key-id",
+                kind: .assertion
+            )),
+            challengeGate: challengeGate
+        )
+        let service = AppAttestServiceStub(isSupported: true)
+        return (
+            AppAttestGuestCapabilityEnrollment(
+                client: AppAttestClient(
+                    appID: "TEAMID1234.dev.snaplist.ios",
+                    environment: .production,
+                    guestCapabilityStore: bearerStore,
+                    keyStore: AppAttestKeyStoreStub(),
+                    server: server,
+                    service: service
+                )
+            ),
+            server,
+            bearerStore,
+            service
+        )
     }
 
     // MARK: Issue #727 — the guest capability issued with a verified assertion
@@ -367,6 +500,7 @@ final class AppAttestClientTests: XCTestCase {
 
         let truth = try await makeURLSessionServerClient().verifyAssertion(
             challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000331")!,
+            clientData: Data(#"{"operation":"proof-client-data"}"#.utf8),
             keyID: "native-fixed-key-id",
             assertionObject: Data("fixed-assertion".utf8),
             requestBody: Data(#"{"operation":"proof"}"#.utf8)
@@ -404,6 +538,7 @@ final class AppAttestClientTests: XCTestCase {
             do {
                 _ = try await makeURLSessionServerClient().verifyAssertion(
                     challengeID: UUID(uuidString: "00000000-0000-4000-8000-000000000331")!,
+                    clientData: Data(#"{"operation":"proof-client-data"}"#.utf8),
                     keyID: "native-fixed-key-id",
                     assertionObject: Data("fixed-assertion".utf8),
                     requestBody: Data(#"{"operation":"proof"}"#.utf8)
@@ -609,11 +744,13 @@ private final class AppAttestURLProtocolStub: URLProtocol, @unchecked Sendable {
     }
 
     nonisolated(unsafe) static var responses: [StubResponse] = []
+    nonisolated(unsafe) static var lastRequestBody: Data?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        Self.lastRequestBody = Self.bodyData(of: request)
         guard !Self.responses.isEmpty else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
@@ -631,6 +768,21 @@ private final class AppAttestURLProtocolStub: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+
+    private static func bodyData(of request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            guard read > 0 else { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
 }
 
 private final class AppAttestServiceStub: AppAttestServicing, @unchecked Sendable {
@@ -720,6 +872,7 @@ private actor AppAttestServerStub: AppAttestServerClient {
     private let assertionChallenge: Data
     private let assertionTruth: AppAttestTruth
     private let attestationChallenge: Data
+    private let challengeGate: AppAttestChallengeGate?
 
     init(
         assertionChallenge: Data = Data("assertion-challenge".utf8),
@@ -729,15 +882,18 @@ private actor AppAttestServerStub: AppAttestServerClient {
             keyID: "native-fixed-key-id",
             kind: .assertion
         )),
-        attestationChallenge: Data = Data("attestation-challenge".utf8)
+        attestationChallenge: Data = Data("attestation-challenge".utf8),
+        challengeGate: AppAttestChallengeGate? = nil
     ) {
         self.assertionChallenge = assertionChallenge
         self.assertionTruth = assertionTruth
         self.attestationChallenge = attestationChallenge
+        self.challengeGate = challengeGate
     }
 
     func issueChallenge(kind: AppAttestChallenge.Kind, keyID: String?) async throws -> AppAttestChallenge {
         challengeCallCount += 1
+        await challengeGate?.waitIfClosed()
         return AppAttestChallenge(
             bytes: kind == .attestation ? attestationChallenge : assertionChallenge,
             expiresAt: Date(timeIntervalSince1970: 1_800_000_300),
@@ -756,6 +912,7 @@ private actor AppAttestServerStub: AppAttestServerClient {
 
     func verifyAssertion(
         challengeID: UUID,
+        clientData: Data,
         keyID: String,
         assertionObject: Data,
         requestBody: Data
@@ -763,5 +920,35 @@ private actor AppAttestServerStub: AppAttestServerClient {
         assertionVerificationCallCount += 1
         assertionRequestBody = requestBody
         return assertionTruth
+    }
+}
+
+private actor AppAttestChallengeGate {
+    private var isOpen = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func waitIfClosed() async {
+        guard !isOpen else { return }
+        let startWaiters = startWaiters
+        self.startWaiters.removeAll()
+        startWaiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func waitUntilStarted() async {
+        guard waiters.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let waiters = waiters
+        self.waiters.removeAll()
+        waiters.forEach { $0.resume() }
     }
 }
