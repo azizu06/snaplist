@@ -1,4 +1,26 @@
+import ClerkKit
+import ClerkKitUI
 import SwiftUI
+
+enum FutureDestinationPresentation: Equatable {
+    case accountEntry
+    case placeholder(FutureBoundary)
+
+    static func resolve(_ destination: FutureBoundary) -> Self {
+        switch destination {
+        case .account: .accountEntry
+        case .run, .draft: .placeholder(destination)
+        }
+    }
+}
+
+@MainActor
+struct AccountEntryView: View {
+    var body: some View {
+        AuthView(mode: .signInOrUp, isDismissible: true)
+            .environment(Clerk.shared)
+    }
+}
 
 struct FoundationDestinationView: View {
     let destination: FutureBoundary

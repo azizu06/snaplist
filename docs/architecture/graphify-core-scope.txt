@@ -76,6 +76,7 @@ ios/SnapList/Features/EbayPublish/EbayPublishFlow.swift
 ios/SnapList/Features/EbayPublish/EbayPublishView.swift
 ios/SnapList/Features/EbayPublish/GuestClaimClient.swift
 ios/SnapList/Features/EbayPublish/GuestClaimDomain.swift
+ios/SnapList/Features/EbayPublish/GuestClaimFixtureView.swift
 ios/SnapList/Features/FoundationDestinationView.swift
 ios/SnapList/Features/GuestRecovery/GuestRecoveryAuthority.swift
 ios/SnapList/Features/Home/HomeDomain.swift

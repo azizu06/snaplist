@@ -89,6 +89,14 @@ struct UnavailableGuestClaimService: GuestClaimServing {
     ) async throws -> GuestClaimOutcome {
         throw GuestClaimServiceError.unavailable
     }
+
+    func claim(
+        authority: GuestClaimAuthority,
+        idempotencyKey: UUID,
+        authenticatedBy bearer: PrincipalBoundBearer
+    ) async throws -> GuestClaimOutcome {
+        throw GuestClaimServiceError.unavailable
+    }
 }
 
 struct UnavailableGuestAccountAuthenticator: GuestAccountAuthenticating {
@@ -97,6 +105,37 @@ struct UnavailableGuestAccountAuthenticator: GuestAccountAuthenticating {
     }
     func verify(code: String) async throws {
         throw GuestClaimServiceError.unavailable
+    }
+}
+
+struct ClerkAccountEntrySessionSource: AccountEntrySessionSourcing {
+    private let tokenProvider: any BearerTokenProviding
+
+    init(tokenProvider: any BearerTokenProviding) {
+        self.tokenProvider = tokenProvider
+    }
+
+    func snapshot() async -> AccountEntrySessionSnapshot {
+        await MainActor.run {
+            AccountEntrySessionSnapshot(
+                isActive: Clerk.shared.session?.status == .active,
+                userID: Clerk.shared.user?.id
+            )
+        }
+    }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        try await tokenProvider.principalBoundBearer()
+    }
+}
+
+struct UnavailableAccountEntrySessionSource: AccountEntrySessionSourcing {
+    func snapshot() async -> AccountEntrySessionSnapshot {
+        AccountEntrySessionSnapshot(isActive: false, userID: nil)
+    }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        throw BearerTokenProviderError.sessionAbsent
     }
 }
 
@@ -152,6 +191,18 @@ struct GuestClaimAPIClient: GuestClaimServing {
         authority: GuestClaimAuthority,
         idempotencyKey: UUID
     ) async throws -> GuestClaimOutcome {
+        try await claim(
+            authority: authority,
+            idempotencyKey: idempotencyKey,
+            authenticatedBy: try await tokenProvider.principalBoundBearer()
+        )
+    }
+
+    func claim(
+        authority: GuestClaimAuthority,
+        idempotencyKey: UUID,
+        authenticatedBy bearer: PrincipalBoundBearer
+    ) async throws -> GuestClaimOutcome {
         guard let handoff = try await handoffStore.handoff(
             recoveryID: authority.recoveryID
         ), handoff.isUsable(for: authority) else {
@@ -163,7 +214,7 @@ struct GuestClaimAPIClient: GuestClaimServing {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(
-            "Bearer \(try await tokenProvider.bearerToken())",
+            "Bearer \(bearer.bearerToken)",
             forHTTPHeaderField: "Authorization"
         )
         request.setValue(
@@ -180,7 +231,10 @@ struct GuestClaimAPIClient: GuestClaimServing {
             (data, response) = try await session.data(for: request)
         } catch {
             do {
-                if let resolved = try await resolveClaim(authority: authority) {
+                if let resolved = try await resolveClaim(
+                    authority: authority,
+                    authenticatedBy: bearer
+                ) {
                     return resolved
                 }
             } catch GuestClaimServiceError.proofUnavailable {
@@ -251,8 +305,19 @@ struct GuestClaimAPIClient: GuestClaimServing {
     func resolveClaim(
         authority: GuestClaimAuthority
     ) async throws -> GuestClaimOutcome? {
+        try await resolveClaim(
+            authority: authority,
+            authenticatedBy: try await tokenProvider.principalBoundBearer()
+        )
+    }
+
+    func resolveClaim(
+        authority: GuestClaimAuthority,
+        authenticatedBy bearer: PrincipalBoundBearer
+    ) async throws -> GuestClaimOutcome? {
         guard let listing = try await resolveClaimedListing(
-            authority: authority
+            authority: authority,
+            authenticatedBy: bearer
         ) else {
             return nil
         }
@@ -341,7 +406,8 @@ struct GuestClaimAPIClient: GuestClaimServing {
     }
 
     private func resolveClaimedListing(
-        authority: GuestClaimAuthority
+        authority: GuestClaimAuthority,
+        authenticatedBy bearer: PrincipalBoundBearer
     ) async throws -> ClaimedGuestListing? {
         let runID = authority.runID.uuidString.lowercased()
         var request = URLRequest(
@@ -352,7 +418,7 @@ struct GuestClaimAPIClient: GuestClaimServing {
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(
-            "Bearer \(try await tokenProvider.bearerToken())",
+            "Bearer \(bearer.bearerToken)",
             forHTTPHeaderField: "Authorization"
         )
         let (data, response) = try await session.data(for: request)

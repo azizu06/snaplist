@@ -43,7 +43,16 @@ struct AppShellView: View {
 
     var body: some View {
         Group {
-            if let ebayPublishFixture = configuration.ebayPublishFixture {
+            if let guestClaimFixture = configuration.guestClaimFixture {
+#if DEBUG
+                GuestClaimFixtureHostView(
+                    fixture: guestClaimFixture,
+                    forceReducedMotion: configuration.forceReducedMotion
+                )
+#else
+                shell
+#endif
+            } else if let ebayPublishFixture = configuration.ebayPublishFixture {
 #if DEBUG
                 EbayPublishFixtureHostView(
                     fixture: ebayPublishFixture,
@@ -717,7 +726,12 @@ struct AppShellView: View {
                 )
             }
         case .future(let boundary):
-            FoundationDestinationView(destination: boundary)
+            switch FutureDestinationPresentation.resolve(boundary) {
+            case .accountEntry:
+                AccountEntryView()
+            case .placeholder(let destination):
+                FoundationDestinationView(destination: destination)
+            }
         }
     }
 

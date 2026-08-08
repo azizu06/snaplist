@@ -180,6 +180,13 @@ enum EbayPublishFixtureState: String, Equatable {
     case outcomeUnknown = "outcome-unknown"
 }
 
+enum GuestClaimFixtureState: String, Equatable {
+    case cancel
+    case success
+    case claimFailure = "claim-failure"
+    case retry
+}
+
 struct SubmissionAcknowledgmentNotificationName: Equatable {
     static let prefix = "dev.snaplist.ios.test.submission-ack."
 
@@ -285,6 +292,7 @@ struct LaunchConfiguration: Equatable {
     var proGateFixture: ProGateFixtureState?
     var settingsProofState: SettingsProofState?
     var ebayPublishFixture: EbayPublishFixtureState?
+    var guestClaimFixture: GuestClaimFixtureState?
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -311,7 +319,8 @@ struct LaunchConfiguration: Equatable {
         assistedExportFixture: nil,
         proGateFixture: nil,
         settingsProofState: nil,
-        ebayPublishFixture: nil
+        ebayPublishFixture: nil,
+        guestClaimFixture: nil
     )
 
     static let preview = LaunchConfiguration(
@@ -339,7 +348,8 @@ struct LaunchConfiguration: Equatable {
         assistedExportFixture: nil,
         proGateFixture: nil,
         settingsProofState: nil,
-        ebayPublishFixture: nil
+        ebayPublishFixture: nil,
+        guestClaimFixture: nil
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -479,6 +489,15 @@ struct LaunchConfiguration: Equatable {
                 configuration.ebayPublishFixture =
                     EbayPublishFixtureState(rawValue: value)
                 if configuration.ebayPublishFixture != nil {
+                    configuration.usesZeroNetworkFixtures = true
+                }
+            } else if argument.hasPrefix("--guest-claim-fixture=") {
+                let value = String(
+                    argument.dropFirst("--guest-claim-fixture=".count)
+                )
+                configuration.guestClaimFixture =
+                    GuestClaimFixtureState(rawValue: value)
+                if configuration.guestClaimFixture != nil {
                     configuration.usesZeroNetworkFixtures = true
                 }
             }
