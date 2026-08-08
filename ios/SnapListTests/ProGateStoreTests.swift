@@ -11,6 +11,21 @@ final class ProGateStoreTests: XCTestCase {
         billingPeriod: .init(value: 1, unit: .month)
     )
 
+    func testProGateV3UsesApprovedCopyMaterialAndFixedDetent() {
+        XCTAssertEqual(
+            ProGateCopy.reassuranceTitle,
+            "What happens if you don’t subscribe"
+        )
+        XCTAssertEqual(
+            SnapListColorToken.proGateReassuranceDivider.rawValue,
+            "#E6E7EA"
+        )
+        XCTAssertEqual(
+            ProGateSheet.presentationDetentHeight,
+            522
+        )
+    }
+
     func testNotEntitledServerTruthLoadsTheLocalizedOffer() async {
         let api = ProGateMobileAPIStub(
             entitlements: [.includedUsed],
