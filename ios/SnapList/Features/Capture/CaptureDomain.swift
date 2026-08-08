@@ -1205,6 +1205,7 @@ final class CaptureFlowModel {
     var isCapturingPhoto: Bool { activeCaptureID != nil }
     var isAddingPhotos: Bool { activeIntakeID != nil }
     var canOpenBoundary: Bool { !isAddingPhotos && (0...5).contains(stagedPhotos.count) }
+    var canOpenLibrary: Bool { !isAddingPhotos && stagedPhotos.count < 5 }
     var canTakePhoto: Bool {
         phase == .camera
             && stagedPhotos.count < 5
@@ -1546,7 +1547,7 @@ final class CaptureFlowModel {
     }
 
     func reserveLibraryIntake() -> UUID? {
-        guard !isAddingPhotos,
+        guard canOpenLibrary,
               captureIntakeActivationForReservation() else {
             return nil
         }
