@@ -11,7 +11,7 @@ enum ProGateCopy {
         "SnapList sets the monthly amount. Yours appears in Settings once your subscription starts."
     static let keepsWork =
         "Your drafts and listings stay yours if you cancel"
-    static let reassuranceTitle = "What happens if you don't subscribe"
+    static let reassuranceTitle = "What happens if you don’t subscribe"
     static let reassuranceSaved =
         "This item stays saved with its photos, their order, and your voice note. You can subscribe later and pick it back up."
     static let reassuranceUnused =
@@ -46,6 +46,8 @@ struct ProGateListingSummary {
 
 @MainActor
 struct ProGateSheet: View {
+    static let presentationDetentHeight: CGFloat = 522
+
     @Bindable var store: ProGateStore
     let listingSummary: ProGateListingSummary?
     let startListing: () -> Void
@@ -101,7 +103,7 @@ struct ProGateSheet: View {
             }
         }
         .background(SnapListColorToken.canvas.color)
-        .presentationDetents([.height(522)])
+        .presentationDetents([.height(Self.presentationDetentHeight)])
         .presentationContentInteraction(.scrolls)
         .presentationCornerRadius(SnapListMetrics.sheetRadius)
         .presentationDragIndicator(store.isDismissible ? .visible : .hidden)
@@ -187,7 +189,9 @@ struct ProGateSheet: View {
             VStack(spacing: 0) {
                 Text(ProGateCopy.reassuranceSaved)
                     .padding(.vertical, 12)
-                Divider().foregroundStyle(Color(hex: "#E6E7EA"))
+                Divider().foregroundStyle(
+                    SnapListColorToken.proGateReassuranceDivider.color
+                )
                 Text(ProGateCopy.reassuranceUnused)
                     .padding(.vertical, 12)
             }

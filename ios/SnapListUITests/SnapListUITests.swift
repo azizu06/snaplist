@@ -1679,6 +1679,10 @@ final class SnapListUITests: XCTestCase {
             app.staticTexts["pro-gate.what-pro-does"].label,
             "What Pro does"
         )
+        XCTAssertTrue(
+            app.staticTexts["What happens if you don’t subscribe"].exists
+        )
+        XCTAssertTrue(app.staticTexts["$9.99 / month"].exists)
 
         for control in [
             app.buttons["pro-gate.primary"],
@@ -1689,6 +1693,7 @@ final class SnapListUITests: XCTestCase {
             XCTAssertTrue(control.isHittable, control.identifier)
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
         }
+        addScreenshot(named: "pro-gate-default")
     }
 
     func testProGateAccessibilityTypeScalesAndKeepsActionsInTheSheetScroll() {
@@ -1711,10 +1716,16 @@ final class SnapListUITests: XCTestCase {
         for _ in 0..<5 where !primary.isHittable {
             app.swipeUp()
         }
-        XCTAssertTrue(primary.isHittable)
-        XCTAssertGreaterThanOrEqual(primary.frame.height, 44)
-        XCTAssertTrue(app.buttons["pro-gate.restore-purchase"].isHittable)
-        XCTAssertTrue(app.buttons["pro-gate.not-now"].isHittable)
+        XCTAssertTrue(app.staticTexts["$9.99 / month"].exists)
+        for control in [
+            primary,
+            app.buttons["pro-gate.restore-purchase"],
+            app.buttons["pro-gate.not-now"],
+        ] {
+            XCTAssertTrue(control.isHittable, control.identifier)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+        addScreenshot(named: "pro-gate-accessibility3")
     }
 
     func testProGatePurchasePendingHasNoDismissOrRestoreAction() {
