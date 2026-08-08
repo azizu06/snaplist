@@ -23,6 +23,7 @@ function isCanonicalBase64(value: string): boolean {
 
 const keyId = z.string().max(512).refine(isCanonicalBase64);
 const evidenceObject = z.string().max(128_000).refine(isCanonicalBase64);
+const clientData = z.string().max(8_192).refine(isCanonicalBase64);
 const requestBody = z.string().max(1_400_000).refine(isCanonicalBase64);
 
 const challengeRequest = z
@@ -54,6 +55,7 @@ const assertionRequest = z
   .object({
     assertionObject: evidenceObject,
     challengeId: z.string().uuid(),
+    clientData: clientData.optional(),
     keyId,
     operation: z.literal("assertion"),
     requestBody,
@@ -120,6 +122,9 @@ export function createAppAttestHttpHandler(
       const data = await service.verifyAssertion({
         assertionObject: parsed.data.assertionObject,
         challengeId: parsed.data.challengeId,
+        clientData: parsed.data.clientData
+          ? Buffer.from(parsed.data.clientData, "base64")
+          : undefined,
         keyId: parsed.data.keyId,
         requestBody: Buffer.from(parsed.data.requestBody, "base64"),
       });

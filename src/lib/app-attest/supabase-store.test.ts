@@ -92,4 +92,82 @@ describe("Supabase App Attest store", () => {
       "commit_app_attest_assertion",
     ]);
   });
+
+  it("preserves honestly absent optional metadata through attestation and assertion persistence", async () => {
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({ data: true, error: null })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            app_id: "TEAMID1234.dev.snaplist.ios",
+            assertion_counter: 0,
+            attested_at: "2026-08-08T13:10:00.000Z",
+            bundle_version: null,
+            environment: "production",
+            key_id: "extensionless-key",
+            public_key_pem: "-----BEGIN PUBLIC KEY-----extensionless",
+            receipt: "\\x72656365697074",
+            validation_category: null,
+          },
+        ],
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: true, error: null });
+    const store = createSupabaseAppAttestStore({ rpc });
+    const now = new Date("2026-08-08T13:10:00.000Z");
+
+    await expect(
+      store.commitAttestation({
+        evidence: {
+          appId: "TEAMID1234.dev.snaplist.ios",
+          bundleVersion: null,
+          counter: 0,
+          environment: "production",
+          keyId: "extensionless-key",
+          publicKey: "-----BEGIN PUBLIC KEY-----extensionless",
+          receipt: Buffer.from("receipt").toString("base64"),
+          validationCategory: null,
+        },
+        now,
+      }),
+    ).resolves.toBe(true);
+    await expect(store.readAttestedKey("extensionless-key")).resolves.toMatchObject({
+      bundleVersion: null,
+      keyId: "extensionless-key",
+      validationCategory: null,
+    });
+    await expect(
+      store.commitAssertion({
+        evidence: {
+          appId: "TEAMID1234.dev.snaplist.ios",
+          bundleVersion: null,
+          counter: 1,
+          environment: "production",
+          keyId: "extensionless-key",
+          requestHash: "request-hash",
+          validationCategory: null,
+        },
+        now,
+      }),
+    ).resolves.toBe(true);
+
+    expect(rpc.mock.calls).toEqual([
+      [
+        "commit_app_attest_attestation",
+        expect.objectContaining({
+          p_bundle_version: null,
+          p_validation_category: null,
+        }),
+      ],
+      ["read_app_attest_key", { p_key_id: "extensionless-key" }],
+      [
+        "commit_app_attest_assertion",
+        expect.objectContaining({
+          p_bundle_version: null,
+          p_validation_category: null,
+        }),
+      ],
+    ]);
+  });
 });

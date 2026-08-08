@@ -14,23 +14,23 @@ export interface IssuedAppAttestChallenge {
 
 export interface VerifiedAttestationEvidence {
   appId: string;
-  bundleVersion: string;
+  bundleVersion: string | null;
   counter: 0;
   environment: AppAttestEnvironment;
   keyId: string;
   publicKey: string;
   receipt: string;
-  validationCategory: number;
+  validationCategory: number | null;
 }
 
 export interface VerifiedAssertionEvidence {
   appId: string;
-  bundleVersion: string;
+  bundleVersion: string | null;
   counter: number;
   environment: AppAttestEnvironment;
   keyId: string;
   requestHash: string;
-  validationCategory: number;
+  validationCategory: number | null;
 }
 
 export interface AppAttestCryptographicVerifier {
@@ -45,8 +45,8 @@ export interface AppAttestCryptographicVerifier {
   verifyAssertion(input: {
     appId: string;
     assertionObject: string;
-    attestedBundleVersion: string;
-    attestedValidationCategory: number;
+    attestedBundleVersion: string | null;
+    attestedValidationCategory: number | null;
     challenge: Uint8Array;
     clientData: Uint8Array;
     environment: AppAttestEnvironment;
@@ -215,6 +215,10 @@ export function createAppAttestService(options: {
   challengeTtlMs: number;
   clock?: () => Date;
   environment: AppAttestEnvironment;
+  reportVerificationError?: (
+    phase: "assertion" | "attestation",
+    error: unknown,
+  ) => void;
   store: AppAttestStore;
   verifier: AppAttestCryptographicVerifier;
 }) {
@@ -301,7 +305,8 @@ export function createAppAttestService(options: {
           keyId: input.keyId,
           now,
         });
-      } catch {
+      } catch (error) {
+        options.reportVerificationError?.("attestation", error);
         return {
           code: "invalid_evidence",
           kind: "attestation",
@@ -349,6 +354,7 @@ export function createAppAttestService(options: {
     async verifyAssertion(input: {
       assertionObject: string;
       challengeId: string;
+      clientData?: Uint8Array;
       keyId: string;
       requestBody: Uint8Array;
     }): Promise<AppAttestVerificationResult> {
@@ -395,17 +401,20 @@ export function createAppAttestService(options: {
           attestedBundleVersion: key.bundleVersion,
           attestedValidationCategory: key.validationCategory,
           challenge: challenge.challenge,
-          clientData: clientData({
-            challenge: challenge.challenge,
-            keyId: input.keyId,
-            requestHash,
-          }),
+          clientData:
+            input.clientData ??
+            clientData({
+              challenge: challenge.challenge,
+              keyId: input.keyId,
+              requestHash,
+            }),
           environment: options.environment,
           keyId: input.keyId,
           now,
           publicKey: key.publicKey,
         });
-      } catch {
+      } catch (error) {
+        options.reportVerificationError?.("assertion", error);
         return {
           code: "invalid_evidence",
           kind: "assertion",

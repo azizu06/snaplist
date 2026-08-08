@@ -151,7 +151,7 @@ function certificateNonce(leafDer: Buffer): Buffer {
   return unwrapDer(explicit, 0x04);
 }
 
-function parseAuthenticatorData(authData: Buffer) {
+export function parseAppAttestAuthenticatorData(authData: Buffer) {
   if (authData.byteLength < 164) {
     throw new Error("Invalid App Attest authenticator data");
   }
@@ -167,30 +167,47 @@ function parseAuthenticatorData(authData: Buffer) {
   const credentialStart = 55;
   const credentialEnd = credentialStart + credentialLength;
   const coseEnd = credentialEnd + 77;
-  if (authData.byteLength <= coseEnd) {
+  if (authData.byteLength < coseEnd) {
     throw new Error("Invalid App Attest encoded key");
   }
 
   const coseKey = decode(authData.subarray(credentialEnd, coseEnd));
-  const extensions = decode(authData.subarray(coseEnd));
-  if (!coseKey || typeof coseKey !== "object" || !extensions || typeof extensions !== "object") {
+  if (!coseKey || typeof coseKey !== "object") {
     throw new Error("Invalid App Attest authenticator CBOR");
   }
-  const extensionMap = extensions as Record<string, unknown>;
-  const validationCategoryBytes = requireBuffer(
-    extensionMap.apple_validation_category_01,
-    "validation category",
-  );
-  if (validationCategoryBytes.byteLength !== 4) {
-    throw new Error("Invalid App Attest validation category");
+
+  const hasExtensionFlag = (flags & 0x80) !== 0;
+  const hasExtensionBytes = authData.byteLength > coseEnd;
+  // Apple's published extension-bearing validation fixture leaves ED clear,
+  // so trailing Apple metadata is authoritative even without that WebAuthn
+  // hint. ED set without any bytes is malformed in either representation.
+  if (hasExtensionFlag && !hasExtensionBytes) {
+    throw new Error("Invalid App Attest extension framing");
   }
-  const bundleVersion = extensionMap.apple_bundle_version_01;
-  if (typeof bundleVersion !== "string" || bundleVersion.length === 0) {
-    throw new Error("Invalid App Attest bundle version");
-  }
-  const validationCategory = validationCategoryBytes.readUInt32LE();
-  if (validationCategory < 1 || validationCategory > 6) {
-    throw new Error("Untrusted App Attest validation category");
+
+  let bundleVersion: string | null = null;
+  let validationCategory: number | null = null;
+  if (hasExtensionBytes) {
+    const extensions = decode(authData.subarray(coseEnd));
+    if (!extensions || typeof extensions !== "object") {
+      throw new Error("Invalid App Attest authenticator CBOR");
+    }
+    const extensionMap = extensions as Record<string, unknown>;
+    const validationCategoryBytes = requireBuffer(
+      extensionMap.apple_validation_category_01,
+      "validation category",
+    );
+    if (validationCategoryBytes.byteLength !== 4) {
+      throw new Error("Invalid App Attest validation category");
+    }
+    bundleVersion = extensionMap.apple_bundle_version_01 as string;
+    if (typeof bundleVersion !== "string" || bundleVersion.length === 0) {
+      throw new Error("Invalid App Attest bundle version");
+    }
+    validationCategory = validationCategoryBytes.readUInt32LE();
+    if (validationCategory < 1 || validationCategory > 6) {
+      throw new Error("Untrusted App Attest validation category");
+    }
   }
 
   return {
@@ -245,16 +262,21 @@ function decodeAssertion(value: string): {
 
 function parseAssertionAuthenticatorData(
   authenticatorData: Buffer,
-  fallback: { bundleVersion: string; validationCategory: number },
+  fallback: {
+    bundleVersion: string | null;
+    validationCategory: number | null;
+  },
 ) {
   if (authenticatorData.byteLength < 37) {
     throw new Error("Invalid App Attest assertion authenticator data");
   }
   if (authenticatorData.byteLength === 37) {
     if (
-      fallback.bundleVersion.length === 0 ||
-      fallback.validationCategory < 1 ||
-      fallback.validationCategory > 6
+      (fallback.bundleVersion === null) !==
+        (fallback.validationCategory === null) ||
+      (fallback.bundleVersion !== null && fallback.bundleVersion.length === 0) ||
+      (fallback.validationCategory !== null &&
+        (fallback.validationCategory < 1 || fallback.validationCategory > 6))
     ) {
       throw new Error("Invalid attested App Attest metadata");
     }
@@ -337,7 +359,7 @@ export function createAppleAppAttestVerifier(options: {
         now: input.now,
         rootPem: options.appleRootCertificatePem ?? APPLE_APP_ATTEST_ROOT_CA_PEM,
       });
-      const authenticator = parseAuthenticatorData(attestation.authData);
+      const authenticator = parseAppAttestAuthenticatorData(attestation.authData);
       const nonce = sha256(
         Buffer.concat([attestation.authData, Buffer.from(input.clientDataHash)]),
       );
@@ -410,11 +432,13 @@ export function createAppleAppAttestVerifier(options: {
         throw new Error("Invalid App Attest assertion counter");
       }
 
-      const signedData = Buffer.concat([
-        assertion.authenticatorData,
-        sha256(Buffer.from(input.clientData)),
-      ]);
-      if (!verifySignature("sha256", signedData, input.publicKey, assertion.signature)) {
+      const nonce = sha256(
+        Buffer.concat([
+          assertion.authenticatorData,
+          sha256(Buffer.from(input.clientData)),
+        ]),
+      );
+      if (!verifySignature("sha256", nonce, input.publicKey, assertion.signature)) {
         throw new Error("Invalid App Attest assertion signature");
       }
 

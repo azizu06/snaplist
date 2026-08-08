@@ -132,6 +132,38 @@ describe("App Attest HTTP truth boundary", () => {
     expect(JSON.stringify(body)).not.toMatch(/internalJwt|privateKey|serviceRole/i);
   });
 
+  it("passes the exact client data bytes supplied by the installation to assertion verification", async () => {
+    const service = {
+      issueChallenge: vi.fn(),
+      verifyAssertion: vi.fn().mockResolvedValue(verifiedAssertion),
+      verifyAttestation: vi.fn(),
+    };
+    const handle = createAppAttestHttpHandler(service as never);
+    const clientData = Buffer.from(
+      '{\n"appId":"TEAMID1234.dev.snaplist.ios","challenge":"fixed"}',
+      "utf8",
+    );
+
+    const response = await handle(
+      new Request("https://snaplist.dev/api/app-attest", {
+        body: JSON.stringify({
+          assertionObject: Buffer.from("fixed-assertion").toString("base64"),
+          challengeId: "00000000-0000-4000-8000-000000000331",
+          clientData: clientData.toString("base64"),
+          keyId: Buffer.alloc(32, 0x33).toString("base64"),
+          operation: "assertion",
+          requestBody: Buffer.from("refresh-request").toString("base64"),
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(service.verifyAssertion).toHaveBeenCalledWith(
+      expect.objectContaining({ clientData }),
+    );
+  });
+
   it("returns a replacement bearer from a distinct fresh assertion after the first response is lost", async () => {
     const service = {
       issueChallenge: vi.fn(),

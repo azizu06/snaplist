@@ -6,6 +6,7 @@ import { InMemoryAppAttestStore, createAppAttestService } from "./service";
 interface AssertionFixture {
   appId: string;
   assertionObject: string;
+  legacyAssertionObject: string;
   challenge: string;
   environment: "production";
   expected: {
@@ -88,5 +89,53 @@ describe("App Attest assertion service", () => {
       status: "invalid",
     });
     expect(store.snapshot()).toEqual(committedState);
+  });
+
+  it("continues a signed extensionless assertion from an extensionless attested key", async () => {
+    const now = new Date("2026-07-20T20:00:00.000Z");
+    const store = new InMemoryAppAttestStore();
+    await store.commitAttestation({
+      evidence: {
+        appId: assertion.appId,
+        bundleVersion: null,
+        counter: 0,
+        environment: assertion.environment,
+        keyId: assertion.keyId,
+        publicKey: assertion.publicKey,
+        receipt: "fixed-receipt",
+        validationCategory: null,
+      },
+      now,
+    });
+    const service = createAppAttestService({
+      appId: assertion.appId,
+      challengeBytes: () => Buffer.from(assertion.challenge, "base64url"),
+      challengeId: () => "extensionless-assertion-challenge-331",
+      challengeTtlMs: 5 * 60 * 1000,
+      clock: () => now,
+      environment: assertion.environment,
+      store,
+      verifier: createAppleAppAttestVerifier({
+        appleRootCertificatePem: appleFixture.appleRootCertificatePem,
+      }),
+    });
+    const challenge = await service.issueChallenge({
+      keyId: assertion.keyId,
+      kind: "assertion",
+    });
+
+    await expect(
+      service.verifyAssertion({
+        assertionObject: assertion.legacyAssertionObject,
+        challengeId: challenge.challengeId,
+        keyId: assertion.keyId,
+        requestBody: Buffer.from(assertion.requestBody, "base64"),
+      }),
+    ).resolves.toMatchObject({
+      bundleVersion: null,
+      counter: assertion.expected.counter,
+      status: "verified",
+      validationCategory: null,
+    });
   });
 });
