@@ -24,14 +24,16 @@ final class AppNavigationTests: XCTestCase {
     /// incidental frames sampled from one simulator.
     func testDockUsesTheApprovedCompactIconContract() {
         XCTAssertEqual(FloatingDockMetrics.destinationWidth, 52)
-        XCTAssertEqual(FloatingDockMetrics.destinationHeight, 44)
+        XCTAssertEqual(FloatingDockMetrics.destinationHeight(for: .scan), 52)
+        XCTAssertEqual(FloatingDockMetrics.destinationHeight(for: .trophyWall), 44)
         XCTAssertEqual(FloatingDockMetrics.destinationSpacing, 6)
         XCTAssertEqual(FloatingDockMetrics.contentPadding, 6)
         XCTAssertEqual(FloatingDockMetrics.cornerRadius, 22)
-        XCTAssertEqual(FloatingDockMetrics.bottomInset, 24)
+        XCTAssertEqual(FloatingDockMetrics.bottomInset(for: .scan), 0)
+        XCTAssertEqual(FloatingDockMetrics.bottomInset(for: .trophyWall), 24)
 
         XCTAssertEqual(PrimaryTab.scan.systemImage(isSelected: false), "camera")
-        XCTAssertEqual(PrimaryTab.scan.systemImage(isSelected: true), "camera.fill")
+        XCTAssertEqual(PrimaryTab.scan.systemImage(isSelected: true), "camera")
         XCTAssertEqual(PrimaryTab.trophyWall.systemImage(isSelected: false), "trophy")
         XCTAssertEqual(PrimaryTab.trophyWall.systemImage(isSelected: true), "trophy.fill")
     }

@@ -473,8 +473,8 @@ private struct ScanLibraryLabel: View {
         Group {
             switch style {
             case .icon:
-                Image(systemName: "photo.on.rectangle")
-                    .font(.system(size: 18, weight: .semibold))
+                Image(systemName: "photo")
+                    .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(.white)
                     .frame(width: 48, height: 48)
                     .background(Color(hex: "#14161A").opacity(0.66))
@@ -543,6 +543,7 @@ private struct ScanReviewButton: View {
             .frame(minHeight: 48)
             .background(Color(hex: "#3665F3"))
             .clipShape(.capsule)
+            .shadow(color: Color(hex: "#3665F3").opacity(0.28), radius: 12, y: 6)
             .accessibilityLabel(
                 photoCount == 1
                     ? "Review 1 photo"
@@ -653,7 +654,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
 
                 if !thumbnailURLs.isEmpty {
                     photoProgress
-                        .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 22 : 12)
+                        .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 38 : 28)
                         .transition(
                             reduceMotion
                                 ? .identity
@@ -665,7 +666,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
             }
             .safeAreaPadding(.top, 2)
-            .safeAreaPadding(.bottom, 2)
+            .safeAreaPadding(.bottom, 30)
         }
         .background(Color(hex: "#0B0C0E").ignoresSafeArea())
         .animation(
@@ -676,10 +677,10 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
 
     private var flashButton: some View {
         Button(action: toggleFlash) {
-            Image(systemName: flashMode == .on ? "bolt.fill" : "bolt.slash.fill")
+            Image(systemName: flashMode == .on ? "bolt.fill" : "bolt.slash")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 48, height: 48)
+                .frame(width: 44, height: 44)
                 .background(Color(hex: "#14161A").opacity(0.66))
                 .overlay { Circle().stroke(.white.opacity(0.12), lineWidth: 1) }
                 .clipShape(.circle)
@@ -729,7 +730,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             }
             .buttonStyle(.plain)
             .disabled(!isShutterEnabled)
-            .opacity(isShutterEnabled ? 1 : 0.38)
+            .opacity(isShutterEnabled ? 1 : 0.5)
             .accessibilityLabel(
                 ScanShutterAccessibility(
                     durablePhotoCount: thumbnailURLs.count
@@ -834,7 +835,7 @@ private struct ScanPhotoProgressRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            HStack(spacing: 6) {
+            HStack(spacing: 11) {
                 ForEach(Array(thumbnailURLs.enumerated()), id: \.offset) { index, url in
                     ScanPhotoThumbnail(url: url, index: index, count: thumbnailURLs.count)
                 }
@@ -843,8 +844,8 @@ private struct ScanPhotoProgressRow: View {
             Text("\(thumbnailURLs.count) of 5")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
-                .padding(.horizontal, 11)
-                .frame(minHeight: 34)
+                .padding(.horizontal, 15)
+                .frame(minWidth: 60, minHeight: 34)
                 .background(Color(hex: "#14161A").opacity(0.66))
                 .clipShape(.capsule)
                 .accessibilityIdentifier("scan.photo-count")
@@ -865,26 +866,40 @@ private struct ScanPhotoThumbnail: View {
                 LocalCaptureImage(url: url, maximumPixelSize: 160)
                     .scaledToFill()
             } else {
-                LinearGradient(
-                    colors: fixtureColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                ScanPhotoPlaceholder()
             }
         }
         .frame(width: 34, height: 43)
         .clipShape(.rect(cornerRadius: 6))
         .overlay { RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.9), lineWidth: 1) }
+        .shadow(color: .black.opacity(0.28), radius: 4, y: 3)
         .accessibilityIdentifier("scan.photo-\(index + 1)")
         .accessibilityLabel("Photo \(index + 1) of \(count)")
         .accessibilitySortPriority(70)
     }
 
-    private var fixtureColors: [Color] {
-        let palettes: [[Color]] = [
-            [.orange, .brown], [.blue, .cyan], [.purple, .pink], [.green, .mint], [.yellow, .orange]
-        ]
-        return palettes[index % palettes.count]
+}
+
+private struct ScanPhotoPlaceholder: View {
+    var body: some View {
+        Canvas { context, size in
+            context.fill(
+                Path(CGRect(origin: .zero, size: size)),
+                with: .color(Color(hex: "#E3E5E8"))
+            )
+
+            for offset in stride(from: -size.height, through: size.width, by: 11) {
+                var stripe = Path()
+                stripe.move(to: CGPoint(x: offset, y: size.height))
+                stripe.addLine(to: CGPoint(x: offset + size.height, y: 0))
+                context.stroke(
+                    stripe,
+                    with: .color(Color(hex: "#CCD0D5").opacity(0.72)),
+                    lineWidth: 5
+                )
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -893,13 +908,9 @@ private struct ScanPhotoThumbnail: View {
 /// has no subject or image content so it cannot be mistaken for device camera output.
 private struct ScanCameraFixturePreview: View {
     var body: some View {
-        LinearGradient(
-            colors: [Color(hex: "#2B2E33"), Color(hex: "#16181C")],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
-        .accessibilityHidden(true)
+        Color(hex: "#282B31")
+            .ignoresSafeArea()
+            .accessibilityHidden(true)
     }
 }
 
@@ -1089,8 +1100,8 @@ private struct ResponsiveFramingCorners: View {
         GeometryReader { proxy in
             let isCompactHeight = proxy.size.height <= 700
             let horizontalInset: CGFloat = proxy.size.width <= 375 ? 28 : 34
-            let topInset: CGFloat = isCompactHeight ? 112 : 132
-            let bottomInset: CGFloat = isCompactHeight ? 264 : 288
+            let topInset: CGFloat = isCompactHeight ? 112 : 140
+            let bottomInset: CGFloat = isCompactHeight ? 264 : 300
             FramingCorners(length: isCompactHeight ? 24 : 30)
                 .frame(
                     width: max(180, proxy.size.width - (horizontalInset * 2)),

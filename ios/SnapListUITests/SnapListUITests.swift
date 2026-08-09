@@ -1195,6 +1195,31 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(capped.buttons["scan.library"].label, "Library")
     }
 
+    func testScanCameraCAM04MatchesLiveRenderedGeometryAt402x874() {
+        let app = launch(extraArguments: ["--visual-state=CAM-04"])
+        let window = app.windows.firstMatch
+        let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
+        let secondPhoto = app.descendants(matching: .any)["scan.photo-2"]
+        let library = app.buttons["scan.library"]
+        let shutter = app.buttons["scan.shutter"]
+        let dockScan = app.buttons["dock.scan"]
+
+        XCTAssertTrue(window.waitForExistence(timeout: 3))
+        XCTAssertEqual(window.frame.size.width, 402, accuracy: 0.5)
+        XCTAssertEqual(window.frame.size.height, 874, accuracy: 0.5)
+
+        for element in [firstPhoto, secondPhoto, library, shutter, dockScan] {
+            XCTAssertTrue(element.waitForExistence(timeout: 3), element.identifier)
+        }
+
+        XCTAssertEqual(firstPhoto.frame.size.width, 35, accuracy: 0.5)
+        XCTAssertEqual(firstPhoto.frame.size.height, 44, accuracy: 0.5)
+        XCTAssertEqual(secondPhoto.frame.minX - firstPhoto.frame.maxX, 10, accuracy: 0.5)
+        XCTAssertEqual(library.frame.minY - firstPhoto.frame.maxY, 45, accuracy: 2)
+        XCTAssertEqual(dockScan.frame.minY - shutter.frame.maxY, 40, accuracy: 2)
+        XCTAssertEqual(dockScan.frame.height, 52, accuracy: 0.5)
+    }
+
     func testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed() {
         let app = launch(extraArguments: ["--visual-state=CAM-01", "--reduced-motion"])
         let fixturePreview = app.otherElements["scan.fixture-preview"]
@@ -1789,11 +1814,9 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
-    // Scan Camera v2 (outer SHA-256 62d8f0c97c97ac68fdf0072444429a02ccadea1335bf7436f60b5ffa414bc49c)
-    // pairs Flash and Library as matched 48x48 frosted circles. The superseded v1 package
-    // stated both 44x44 and 48x48, which is how the smaller value shipped. Pin the size so a
-    // later package or refactor cannot quietly take the 44pt accessibility floor again.
-    func testScanCameraFlashControlMatchesTheApprovedFortyEightPointCircle() {
+    // The flash's visible chrome is intentionally quieter than the library control, but its
+    // interactive frame stays 48x48 so the visual refinement cannot shrink the tap target.
+    func testScanCameraFlashRetainsTheFortyEightPointTapTarget() {
         let app = launch(extraArguments: ["--visual-state=CAM-03"])
         let flash = app.buttons["scan.flash"]
 
