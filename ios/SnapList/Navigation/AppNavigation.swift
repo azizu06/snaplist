@@ -16,8 +16,7 @@ enum PrimaryTab: String, CaseIterable, Identifiable {
 
     func systemImage(isSelected: Bool) -> String {
         switch (self, isSelected) {
-        case (.scan, false): "camera"
-        case (.scan, true): "camera.fill"
+        case (.scan, _): "camera"
         case (.trophyWall, false): "trophy"
         case (.trophyWall, true): "trophy.fill"
         }

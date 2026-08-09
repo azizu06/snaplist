@@ -2,11 +2,17 @@ import SwiftUI
 
 enum FloatingDockMetrics {
     static let destinationWidth: CGFloat = 52
-    static let destinationHeight: CGFloat = 44
     static let destinationSpacing: CGFloat = 6
     static let contentPadding: CGFloat = 6
     static let cornerRadius: CGFloat = 22
-    static let bottomInset: CGFloat = 24
+
+    static func destinationHeight(for selectedTab: PrimaryTab) -> CGFloat {
+        selectedTab == .scan ? 52 : 44
+    }
+
+    static func bottomInset(for selectedTab: PrimaryTab) -> CGFloat {
+        selectedTab == .scan ? 0 : 24
+    }
 }
 
 /// The one approved dock: exactly the two primary destinations, rendered the
@@ -50,7 +56,7 @@ struct FloatingDock: View {
             )
             .frame(
                 width: FloatingDockMetrics.destinationWidth,
-                height: FloatingDockMetrics.destinationHeight
+                height: FloatingDockMetrics.destinationHeight(for: selectedTab)
             )
             .background(
                 isSelected
@@ -80,7 +86,7 @@ extension View {
         safeAreaInset(edge: .bottom, spacing: 0) {
             if isVisible {
                 FloatingDock(selectedTab: selectedTab, select: select)
-                    .padding(.bottom, FloatingDockMetrics.bottomInset)
+                    .padding(.bottom, FloatingDockMetrics.bottomInset(for: selectedTab))
                     .transition(.opacity)
             }
         }
