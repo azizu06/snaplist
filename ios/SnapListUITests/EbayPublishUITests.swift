@@ -188,6 +188,115 @@ final class EbayPublishUITests: XCTestCase {
         attachEvidence(for: "outcome-unknown-accessibility3", app: unknown)
     }
 
+    func testAccountClaimCancelPreservesTheExactSavedListingWithoutClaiming() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--guest-claim-fixture=cancel",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--reduced-motion",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let listing = marker("guest-claim.listing", in: app)
+        XCTAssertTrue(
+            listing.waitForExistence(timeout: 10),
+            "The exact saved listing must remain visible at account entry.\n\(app.debugDescription)"
+        )
+        XCTAssertTrue(listing.label.contains("Saved seller title"))
+        XCTAssertTrue(listing.label.contains("$63.25"))
+        let entry = app.buttons["Sign in or create account"]
+        XCTAssertTrue(entry.exists)
+        XCTAssertTrue(entry.isHittable)
+        XCTAssertGreaterThanOrEqual(entry.frame.height, 44)
+
+        entry.tap()
+        let fixtureEntry = marker(
+            "guest-claim.account-entry-fixture",
+            in: app
+        )
+        XCTAssertTrue(
+            fixtureEntry.waitForExistence(timeout: 5),
+            "The secret-free fixture must cross the supported account-entry boundary."
+        )
+        app.buttons["Close"].tap()
+
+        XCTAssertTrue(listing.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Sign in or create account"].exists)
+        XCTAssertFalse(marker("guest-claim.claimed", in: app).exists)
+        XCTAssertFalse(app.staticTexts["Copying your photos into your account"].exists)
+    }
+
+    func testAccountClaimSuccessFailureAndRetryStayDeterministicAndAccessible() {
+        let success = launchGuestClaimFixture("success")
+        XCTAssertTrue(
+            success.staticTexts["This item is in your account"]
+                .waitForExistence(timeout: 10)
+        )
+        assertHittableButton(
+            "button.primary.back-to-my-item",
+            in: success
+        )
+
+        let failure = launchGuestClaimFixture(
+            "claim-failure",
+            extraArguments: ["--dynamic-type=accessibility3"]
+        )
+        XCTAssertTrue(
+            failure.staticTexts["SnapList stopped the copy"]
+                .waitForExistence(timeout: 10)
+        )
+        assertHittableButton(
+            "button.primary.start-the-copy-again",
+            in: failure
+        )
+        XCTAssertTrue(failure.buttons["Back to my draft"].exists)
+        assertHierarchyOrder(
+            [
+                "label: 'SnapList stopped the copy'",
+                "identifier: 'button.primary.start-the-copy-again'",
+                "label: 'Back to my draft'",
+            ],
+            in: failure.debugDescription,
+            file: #filePath,
+            line: #line
+        )
+
+        let retry = launchGuestClaimFixture(
+            "retry",
+            extraArguments: ["--dynamic-type=accessibility3"]
+        )
+        let retryButton = retry.buttons[
+            "button.primary.start-the-copy-again"
+        ]
+        XCTAssertTrue(retryButton.waitForExistence(timeout: 10))
+        retryButton.tap()
+        XCTAssertTrue(
+            retry.staticTexts["This item is in your account"]
+                .waitForExistence(timeout: 10)
+        )
+        XCTAssertEqual(
+            retry.staticTexts.matching(
+                NSPredicate(format: "label == %@", "This item is in your account")
+            ).count,
+            1
+        )
+    }
+
+    private func launchGuestClaimFixture(
+        _ fixture: String,
+        extraArguments: [String] = []
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--guest-claim-fixture=\(fixture)",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+        ] + extraArguments
+        app.launchAfterRetiringPriorInstance()
+        return app
+    }
+
     private func launch(
         fixture: String,
         extraArguments: [String]

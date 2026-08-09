@@ -4,6 +4,486 @@ import XCTest
 
 @MainActor
 final class GuestClaimTests: XCTestCase {
+    func testAccountEntryDismissalOnlyContinuesAfterARealSessionTransition() {
+        let inactive = AccountEntrySessionSnapshot(
+            isActive: false,
+            userID: nil
+        )
+        let active = AccountEntrySessionSnapshot(
+            isActive: true,
+            userID: "user_account_entry"
+        )
+
+        XCTAssertEqual(
+            AccountEntryPresentationTransition.signal(
+                baseline: active,
+                current: active
+            ),
+            .dismissed
+        )
+        XCTAssertEqual(
+            AccountEntryPresentationTransition.signal(
+                baseline: inactive,
+                current: active
+            ),
+            .authenticationChanged
+        )
+    }
+
+    func testAccountEntrySessionResolverFailsClosedUntilSameSessionPrincipalIsQualified() async throws {
+        let userID = "user_account_entry"
+        let matchingProof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: userID
+            )
+        )
+        let mismatchedProof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "user_other"
+            )
+        )
+        let cases: [(AccountEntrySessionSignal, GuestClaimAccountSessionSource)] = [
+            (
+                .dismissed,
+                GuestClaimAccountSessionSource(
+                    snapshot: .init(isActive: true, userID: userID),
+                    result: .success(
+                        PrincipalBoundBearer(
+                            bearerToken: "clerk_live",
+                            scopeProof: matchingProof
+                        )
+                    )
+                )
+            ),
+            (
+                .authenticationChanged,
+                GuestClaimAccountSessionSource(
+                    snapshot: .init(isActive: false, userID: userID),
+                    result: .success(
+                        PrincipalBoundBearer(
+                            bearerToken: "clerk_live",
+                            scopeProof: matchingProof
+                        )
+                    )
+                )
+            ),
+            (
+                .authenticationChanged,
+                GuestClaimAccountSessionSource(
+                    snapshot: .init(isActive: true, userID: nil),
+                    result: .success(
+                        PrincipalBoundBearer(
+                            bearerToken: "clerk_live",
+                            scopeProof: matchingProof
+                        )
+                    )
+                )
+            ),
+            (
+                .authenticationChanged,
+                GuestClaimAccountSessionSource(
+                    snapshot: .init(isActive: true, userID: userID),
+                    result: .failure(.principalBindingUnavailable)
+                )
+            ),
+            (
+                .authenticationChanged,
+                GuestClaimAccountSessionSource(
+                    snapshot: .init(isActive: true, userID: userID),
+                    result: .success(
+                        PrincipalBoundBearer(
+                            bearerToken: "clerk_other",
+                            scopeProof: mismatchedProof
+                        )
+                    )
+                )
+            ),
+        ]
+
+        for (signal, source) in cases {
+            let handler = GuestClaimQualifiedSessionRecorder()
+            let resolver = AccountEntrySessionResolver(
+                source: source,
+                handler: handler
+            )
+
+            let resolution = await resolver.resolve(signal)
+            let count = await handler.count
+            XCTAssertEqual(resolution, .preserved)
+            XCTAssertEqual(count, 0)
+        }
+    }
+
+    func testAccountEntrySessionResolverContinuesOneQualifiedSameSessionPrincipalOnce() async throws {
+        let userID = "user_account_entry"
+        let proof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: userID
+            )
+        )
+        let source = GuestClaimAccountSessionSource(
+            snapshot: .init(isActive: true, userID: userID),
+            result: .success(
+                PrincipalBoundBearer(
+                    bearerToken: "clerk_live",
+                    scopeProof: proof
+                )
+            )
+        )
+        let handler = GuestClaimQualifiedSessionRecorder()
+        let resolver = AccountEntrySessionResolver(
+            source: source,
+            handler: handler
+        )
+
+        let first = await resolver.resolve(.authenticationChanged)
+        let second = await resolver.resolve(.authenticationChanged)
+        XCTAssertEqual(first, .continued)
+        XCTAssertEqual(second, .alreadyContinued)
+        let sessions = await handler.sessions
+        XCTAssertEqual(sessions.map(\.userID), [userID])
+        XCTAssertEqual(sessions.map(\.bearer.bearerToken), ["clerk_live"])
+    }
+
+    func testAccountEntrySessionResolverQualifiesAnAlreadyActiveCurrentSession() async throws {
+        let userID = "user_already_active"
+        let proof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: userID
+            )
+        )
+        let source = GuestClaimAccountSessionSource(
+            snapshot: .init(isActive: true, userID: userID),
+            result: .success(
+                PrincipalBoundBearer(
+                    bearerToken: "clerk_already_active",
+                    scopeProof: proof
+                )
+            )
+        )
+        let handler = GuestClaimQualifiedSessionRecorder()
+        let resolver = AccountEntrySessionResolver(
+            source: source,
+            handler: handler
+        )
+
+        let resolution = await resolver.resolveCurrentSession()
+
+        XCTAssertEqual(resolution, .continued)
+        let sessions = await handler.sessions
+        XCTAssertEqual(sessions.map(\.userID), [userID])
+        XCTAssertEqual(
+            sessions.map(\.bearer.bearerToken),
+            ["clerk_already_active"]
+        )
+    }
+
+    func testGuestClaimListingProjectionFailsClosedForEveryAuthorityAndDraftMismatch() throws {
+        let fixture = GuestClaimProjectionFixture()
+        let invalidInputs: [(GuestClaimAuthority, GuestRecoveryCredential, ListingReviewDraft, Bool, Date)] = [
+            (fixture.authority(itemID: UUID()), fixture.credential(), fixture.draft(), false, fixture.now),
+            (fixture.authority(runID: UUID()), fixture.credential(), fixture.draft(), false, fixture.now),
+            (fixture.authority(draftID: UUID()), fixture.credential(), fixture.draft(), false, fixture.now),
+            (fixture.authority(reviewRevision: UUID()), fixture.credential(), fixture.draft(), false, fixture.now),
+            (fixture.authority(photoIdentity: .init(kind: "sha256", fingerprint: "other")), fixture.credential(), fixture.draft(), false, fixture.now),
+            (fixture.authority(), fixture.credential(recoveryID: UUID()), fixture.draft(), false, fixture.now),
+            (fixture.authority(), fixture.credential(recoveryToken: "recovery_v1.other"), fixture.draft(), false, fixture.now),
+            (fixture.authority(), fixture.credential(omitsExpiry: true), fixture.draft(), false, fixture.now),
+            (fixture.authority(), fixture.credential(expiresAt: fixture.now), fixture.draft(), false, fixture.now),
+            (fixture.authority(), fixture.credential(), fixture.draft(), true, fixture.now),
+            (fixture.authority(), fixture.credential(), fixture.draft(title: "  "), false, fixture.now),
+            (fixture.authority(), fixture.credential(), fixture.draft(price: Decimal(string: "0")!), false, fixture.now),
+        ]
+
+        for (authority, credential, draft, isDirty, now) in invalidInputs {
+            XCTAssertNil(
+                GuestClaimListingProjection.project(
+                    snapshot: fixture.snapshot,
+                    draft: draft,
+                    isDirty: isDirty,
+                    authority: authority,
+                    credential: credential,
+                    now: now
+                )
+            )
+        }
+    }
+
+    func testGuestClaimListingProjectionUsesSavedTitleSellerPriceFirstPhotoAndExactExpiry() throws {
+        let fixture = GuestClaimProjectionFixture()
+        let expiry = fixture.now.addingTimeInterval(3_600)
+
+        let projection = try XCTUnwrap(
+            GuestClaimListingProjection.project(
+                snapshot: fixture.snapshot,
+                draft: fixture.draft(
+                    title: "Saved seller title",
+                    price: Decimal(string: "63.25")!
+                ),
+                isDirty: false,
+                authority: fixture.authority(),
+                credential: fixture.credential(expiresAt: expiry),
+                now: fixture.now
+            )
+        )
+
+        XCTAssertEqual(projection.title, "Saved seller title")
+        XCTAssertEqual(projection.effectivePrice, Decimal(string: "63.25"))
+        XCTAssertEqual(
+            projection.thumbnail,
+            .authoritative(URL(string: "https://example.com/photos/1.jpg")!)
+        )
+        XCTAssertEqual(projection.expiresAt, expiry)
+    }
+
+    func testGuestClaimEntryResolverLoadsOnlyTheExactAuthorityBoundProjection() async throws {
+        let fixture = GuestClaimProjectionFixture()
+        let authority = fixture.authority()
+        let credential = fixture.credential(
+            expiresAt: fixture.now.addingTimeInterval(3_600)
+        )
+        let resolver = GuestClaimEntryResolver(
+            authorityStore: GuestClaimAuthorityRecorder(
+                authority: authority
+            ),
+            credentialStore: GuestRecoveryCredentialRecorder(
+                credential: credential
+            ),
+            now: { fixture.now }
+        )
+
+        let resolution = await resolver.resolve(
+            listingID: authority.draftID,
+            snapshot: fixture.snapshot,
+            draft: fixture.draft(
+                title: "Saved seller title",
+                price: Decimal(string: "63.25")!
+            ),
+            isDirty: false
+        )
+
+        XCTAssertEqual(
+            resolution,
+            .claim(
+                authority: authority,
+                projection: GuestClaimListingProjection(
+                    title: "Saved seller title",
+                    effectivePrice: Decimal(string: "63.25")!,
+                    thumbnail: .authoritative(
+                        URL(string: "https://example.com/photos/1.jpg")!
+                    ),
+                    expiresAt: credential.expiresAt!
+                )
+            )
+        )
+    }
+
+    func testSupportedAccountEntryCancelPreservesExactClaimWithoutStartingMutation() async throws {
+        let authorityStore = GuestClaimAuthorityRecorder()
+        let credentialStore = GuestRecoveryCredentialRecorder()
+        let service = GuestClaimRecordingService(outcome: .claimed(Self.handoff))
+        let store = GuestClaimStore(
+            authority: Self.authority,
+            authenticator: GuestClaimRecordingAuthenticator(),
+            service: service,
+            attemptStore: MemoryGuestClaimAttemptStore(),
+            authorityStore: authorityStore,
+            credentialStore: credentialStore
+        )
+
+        await store.beginSupportedAuthentication()
+        XCTAssertEqual(store.state, .authenticating)
+        store.cancelSupportedAuthentication()
+
+        let prepareCount = await service.prepareCount
+        let claimCount = await service.claimCount
+        let authorityPurgeCount = await authorityStore.purgeCount
+        let credentialPurgeCount = await credentialStore.purgeCount
+        XCTAssertEqual(store.state, .gate)
+        XCTAssertEqual(prepareCount, 1)
+        XCTAssertEqual(claimCount, 0)
+        XCTAssertEqual(authorityPurgeCount, 0)
+        XCTAssertEqual(credentialPurgeCount, 0)
+    }
+
+    func testQualifiedSupportedAccountSessionClaimsExactAuthorityOnce() async throws {
+        let service = GuestClaimRecordingService(outcome: .claimed(Self.handoff))
+        let store = GuestClaimStore(
+            authority: Self.authority,
+            authenticator: GuestClaimRecordingAuthenticator(),
+            service: service,
+            attemptStore: MemoryGuestClaimAttemptStore()
+        )
+        let userID = "user_supported_account"
+        let proof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: userID
+            )
+        )
+        let bearer = PrincipalBoundBearer(
+            bearerToken: "clerk_supported",
+            scopeProof: proof
+        )
+        let session = AccountEntryQualifiedSession(
+            userID: userID,
+            bearer: bearer,
+            refreshBearer: { bearer }
+        )
+
+        await store.beginSupportedAuthentication()
+        await store.qualifiedSession(session)
+        await store.qualifiedSession(session)
+
+        let claims = await service.claims
+        XCTAssertEqual(store.state, .claimed(Self.handoff))
+        XCTAssertEqual(claims.count, 1)
+        XCTAssertEqual(claims.first?.authority, Self.authority)
+        XCTAssertEqual(
+            claims.first?.authenticatedBy.bearerToken,
+            "clerk_supported"
+        )
+        XCTAssertEqual(claims.first?.authenticatedBy.scopeProof, proof)
+    }
+
+    func testRetryRefreshesQualifiedBearerOnlyForTheSamePrincipal() async throws {
+        let userID = "user_retry_refresh"
+        let proof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: userID
+            )
+        )
+        let otherProof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "user_switched_account"
+            )
+        )
+        let cases: [(PrincipalBoundBearer, [String])] = [
+            (
+                PrincipalBoundBearer(
+                    bearerToken: "clerk_fresh_same_principal",
+                    scopeProof: proof
+                ),
+                ["clerk_expired", "clerk_fresh_same_principal"]
+            ),
+            (
+                PrincipalBoundBearer(
+                    bearerToken: "clerk_other_principal",
+                    scopeProof: otherProof
+                ),
+                ["clerk_expired"]
+            ),
+        ]
+
+        for (refreshedBearer, expectedTokens) in cases {
+            let refresher = GuestClaimBearerRefresher(
+                bearer: refreshedBearer
+            )
+            let service = GuestClaimRefreshRetryService(
+                outcome: .claimed(Self.handoff)
+            )
+            let store = GuestClaimStore(
+                authority: Self.authority,
+                authenticator: GuestClaimRecordingAuthenticator(),
+                service: service,
+                attemptStore: MemoryGuestClaimAttemptStore()
+            )
+            await store.beginSupportedAuthentication()
+            await store.qualifiedSession(
+                AccountEntryQualifiedSession(
+                    userID: userID,
+                    bearer: PrincipalBoundBearer(
+                        bearerToken: "clerk_expired",
+                        scopeProof: proof
+                    ),
+                    refreshBearer: { try await refresher.refresh() }
+                )
+            )
+            XCTAssertEqual(store.state, .copyFailed)
+
+            await store.retryClaim()
+
+            let tokens = await service.bearerTokens
+            let refreshCount = await refresher.callCount
+            XCTAssertEqual(tokens, expectedTokens)
+            XCTAssertEqual(refreshCount, 1)
+            XCTAssertEqual(
+                store.state,
+                expectedTokens.count == 2
+                    ? .claimed(Self.handoff)
+                    : .copyFailed
+            )
+        }
+    }
+
+    func testAllowanceDenialCanReopenOnlyTheSupportedAccountEntry() async throws {
+        let store = GuestClaimStore(
+            authority: Self.authority,
+            authenticator: GuestClaimRecordingAuthenticator(),
+            service: GuestClaimFailingService(error: .allowanceSpent),
+            attemptStore: MemoryGuestClaimAttemptStore()
+        )
+        let userID = "user_spent_allowance"
+        let proof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: userID
+            )
+        )
+
+        await store.beginSupportedAuthentication()
+        let bearer = PrincipalBoundBearer(
+            bearerToken: "clerk_spent_allowance",
+            scopeProof: proof
+        )
+        await store.qualifiedSession(
+            AccountEntryQualifiedSession(
+                userID: userID,
+                bearer: bearer,
+                refreshBearer: { bearer }
+            )
+        )
+        XCTAssertEqual(store.state, .allowanceSpent)
+
+        await store.beginSupportedAuthentication()
+
+        XCTAssertEqual(store.state, .authenticating)
+    }
+
+    func testAllowanceDenialRequiresAnotherAccountAndCancelRestoresTheDenial() async throws {
+        let store = GuestClaimStore(
+            authority: Self.authority,
+            authenticator: GuestClaimRecordingAuthenticator(),
+            service: GuestClaimFailingService(error: .allowanceSpent),
+            attemptStore: MemoryGuestClaimAttemptStore()
+        )
+        let userID = "user_spent_allowance"
+        let proof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: userID
+            )
+        )
+        let bearer = PrincipalBoundBearer(
+            bearerToken: "clerk_spent_allowance",
+            scopeProof: proof
+        )
+
+        await store.beginSupportedAuthentication()
+        await store.qualifiedSession(
+            AccountEntryQualifiedSession(
+                userID: userID,
+                bearer: bearer,
+                refreshBearer: { bearer }
+            )
+        )
+        XCTAssertEqual(store.state, .allowanceSpent)
+
+        let policy = await store.beginSupportedAuthentication()
+
+        XCTAssertEqual(policy, .requireDifferentPrincipal)
+        XCTAssertEqual(store.state, .authenticating)
+        store.cancelSupportedAuthentication()
+        XCTAssertEqual(store.state, .allowanceSpent)
+    }
+
     override func tearDown() {
         GuestClaimURLProtocolStub.handler = nil
         super.tearDown()
@@ -303,6 +783,102 @@ final class GuestClaimTests: XCTestCase {
                 token: "guesthandoff_v1.lost-response-377",
                 recoveryID: authority.recoveryID
             )
+        )
+    }
+
+    func testClaimAndReconciliationRequirePrincipalBoundBearerBeforeRequestConstruction()
+        async throws {
+        let authority = Self.authority
+        let retainedHandoffs = GuestClaimHandoffRecorder()
+        retainedHandoffs.save(
+            GuestClaimHandoff(
+                token: "guesthandoff_v1.principal-required-743",
+                expiresAt: Date(timeIntervalSince1970: 4_089_168_000),
+                recoveryID: authority.recoveryID,
+                photoIdentity: authority.photoIdentity
+            )
+        )
+        let requests = GuestClaimRequestRecorder()
+        let session = makeSession { request in
+            requests.record(
+                path: request.url?.path ?? "",
+                handoff: request.value(
+                    forHTTPHeaderField: "X-SnapList-Guest-Handoff"
+                ),
+                authorization: request.value(
+                    forHTTPHeaderField: "Authorization"
+                )
+            )
+            return Self.response(
+                status: 200,
+                json: """
+                {
+                  "data": {
+                    "outcome": "claimed",
+                    "itemId": "\(Self.handoff.itemID.uuidString.lowercased())",
+                    "runId": "\(Self.handoff.runID.uuidString.lowercased())",
+                    "draftId": "\(Self.handoff.draftID.uuidString.lowercased())"
+                  },
+                  "meta": { "requestId": "req-principal-743" }
+                }
+                """
+            )
+        }
+        let client = GuestClaimAPIClient(
+            baseURL: URL(string: "https://snaplist.dev")!,
+            proofProvider: GuestClaimProofProvider(),
+            tokenProvider: GuestClaimGuestOnlyBearerProvider(),
+            handoffStore: retainedHandoffs,
+            session: session
+        )
+
+        do {
+            _ = try await client.claim(
+                authority: authority,
+                idempotencyKey: UUID(
+                    uuidString: "74300000-0000-4000-8000-000000000001"
+                )!
+            )
+            XCTFail("A guest bearer must not authorize account claim")
+        } catch {
+            XCTAssertEqual(
+                error as? BearerTokenProviderError,
+                .principalBindingUnavailable
+            )
+        }
+
+        let userID = "user_exact_principal_743"
+        let scopeProof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: userID
+            )
+        )
+        let outcome = try await client.claim(
+            authority: authority,
+            idempotencyKey: UUID(
+                uuidString: "74300000-0000-4000-8000-000000000002"
+            )!,
+            authenticatedBy: PrincipalBoundBearer(
+                bearerToken: "clerk_exact_principal_743",
+                scopeProof: scopeProof
+            )
+        )
+        XCTAssertEqual(outcome, .claimed(Self.handoff))
+
+        do {
+            _ = try await client.resolveClaim(authority: authority)
+            XCTFail("A guest bearer must not authorize claim reconciliation")
+        } catch {
+            XCTAssertEqual(
+                error as? BearerTokenProviderError,
+                .principalBindingUnavailable
+            )
+        }
+
+        XCTAssertEqual(requests.paths, ["/v1/guest/claims"])
+        XCTAssertEqual(
+            requests.authorizations,
+            ["Bearer clerk_exact_principal_743"]
         )
     }
 
@@ -685,15 +1261,22 @@ private final class GuestClaimRequestRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var recordedPaths: [String] = []
     private var recordedClaimHandoffs: [String] = []
+    private var recordedAuthorizations: [String] = []
 
     var paths: [String] { lock.withLock { recordedPaths } }
     var claimHandoffs: [String] { lock.withLock { recordedClaimHandoffs } }
+    var authorizations: [String] { lock.withLock { recordedAuthorizations } }
     var claimCount: Int { lock.withLock { recordedClaimHandoffs.count } }
 
-    func record(path: String, handoff: String?) {
+    func record(
+        path: String,
+        handoff: String?,
+        authorization: String? = nil
+    ) {
         lock.withLock {
             recordedPaths.append(path)
             if let handoff { recordedClaimHandoffs.append(handoff) }
+            if let authorization { recordedAuthorizations.append(authorization) }
         }
     }
 }
@@ -714,6 +1297,119 @@ private struct GuestClaimProofProvider: AppAttestProofProviding {
 
 private struct GuestClaimBearerProvider: BearerTokenProviding {
     func bearerToken() async throws -> String { "account-token-377" }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        let userID = "user_guest_claim_377"
+        guard let scopeProof = ItemRunSubmissionPrincipalScopeProof(
+            verifiedClerkSubject: userID
+        ) else {
+            throw BearerTokenProviderError.principalBindingUnavailable
+        }
+        return PrincipalBoundBearer(
+            bearerToken: "account-token-377",
+            scopeProof: scopeProof
+        )
+    }
+}
+
+private struct GuestClaimGuestOnlyBearerProvider: BearerTokenProviding {
+    func bearerToken() async throws -> String { "guestcap_v1.must-not-authorize" }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        throw BearerTokenProviderError.principalBindingUnavailable
+    }
+}
+
+private struct GuestClaimProjectionFixture {
+    let snapshot = ListingReviewLaunchFixture.review()
+    let now = Date(timeIntervalSince1970: 1_786_000_000)
+    let recoveryID = UUID(
+        uuidString: "74300000-0000-4000-8000-000000000001"
+    )!
+    let recoveryToken = "recovery_v1.fixture"
+    let photoIdentity = GuestPhotoIdentity(
+        kind: "sha256",
+        fingerprint: String(repeating: "a", count: 64)
+    )
+
+    func authority(
+        itemID: UUID? = nil,
+        runID: UUID? = nil,
+        draftID: UUID? = nil,
+        reviewRevision: UUID? = nil,
+        photoIdentity: GuestPhotoIdentity? = nil
+    ) -> GuestClaimAuthority {
+        GuestClaimAuthority(
+            recoveryID: recoveryID,
+            recoveryToken: recoveryToken,
+            itemID: itemID ?? snapshot.binding.itemID,
+            runID: runID ?? snapshot.binding.runID,
+            draftID: draftID ?? snapshot.binding.listingID,
+            reviewRevision: reviewRevision ?? snapshot.binding.reviewRevision,
+            photoIdentity: photoIdentity ?? self.photoIdentity
+        )
+    }
+
+    func credential(
+        recoveryID: UUID? = nil,
+        recoveryToken: String? = nil,
+        expiresAt: Date? = nil,
+        omitsExpiry: Bool = false
+    ) -> GuestRecoveryCredential {
+        GuestRecoveryCredential(
+            recoveryID: recoveryID ?? self.recoveryID,
+            recoveryToken: recoveryToken ?? self.recoveryToken,
+            recoveryTokenHash: GuestClaimListingProjection.tokenHash(
+                recoveryToken ?? self.recoveryToken
+            ),
+            itemID: snapshot.binding.itemID,
+            runID: snapshot.binding.runID,
+            photoIdentity: photoIdentity,
+            expiresAt: omitsExpiry
+                ? nil
+                : expiresAt ?? now.addingTimeInterval(3_600)
+        )
+    }
+
+    func draft(
+        title: String? = nil,
+        price: Decimal? = nil
+    ) -> ListingReviewDraft {
+        var draft = ListingReviewDraft(snapshot: snapshot)
+        if let title { draft.title = title }
+        draft.sellerPriceOverride = price
+        return draft
+    }
+}
+
+private struct GuestClaimAccountSessionSource: AccountEntrySessionSourcing {
+    let snapshotValue: AccountEntrySessionSnapshot
+    let result: Result<PrincipalBoundBearer, BearerTokenProviderError>
+
+    init(
+        snapshot: AccountEntrySessionSnapshot,
+        result: Result<PrincipalBoundBearer, BearerTokenProviderError>
+    ) {
+        snapshotValue = snapshot
+        self.result = result
+    }
+
+    func snapshot() async -> AccountEntrySessionSnapshot { snapshotValue }
+
+    func principalBoundBearer() async throws -> PrincipalBoundBearer {
+        try result.get()
+    }
+}
+
+private actor GuestClaimQualifiedSessionRecorder:
+    AccountEntryQualifiedSessionHandling {
+    private(set) var sessions: [AccountEntryQualifiedSession] = []
+
+    var count: Int { sessions.count }
+
+    func handle(_ session: AccountEntryQualifiedSession) {
+        sessions.append(session)
+    }
 }
 
 private final class GuestClaimURLProtocolStub: URLProtocol, @unchecked Sendable {
@@ -749,6 +1445,7 @@ private actor GuestClaimRecordingService: GuestClaimServing {
     struct Claim: Sendable {
         let authority: GuestClaimAuthority
         let idempotencyKey: UUID
+        let authenticatedBy: PrincipalBoundBearer
     }
 
     private(set) var claims: [Claim] = []
@@ -769,7 +1466,78 @@ private actor GuestClaimRecordingService: GuestClaimServing {
         authority: GuestClaimAuthority,
         idempotencyKey: UUID
     ) async throws -> GuestClaimOutcome {
-        claims.append(Claim(authority: authority, idempotencyKey: idempotencyKey))
+        let userID = "user_legacy_guest_claim_test"
+        guard let scopeProof = ItemRunSubmissionPrincipalScopeProof(
+            verifiedClerkSubject: userID
+        ) else {
+            throw GuestClaimServiceError.unavailable
+        }
+        return try await claim(
+            authority: authority,
+            idempotencyKey: idempotencyKey,
+            authenticatedBy: PrincipalBoundBearer(
+                bearerToken: "legacy-test-bearer",
+                scopeProof: scopeProof
+            )
+        )
+    }
+
+    func claim(
+        authority: GuestClaimAuthority,
+        idempotencyKey: UUID,
+        authenticatedBy bearer: PrincipalBoundBearer
+    ) async throws -> GuestClaimOutcome {
+        claims.append(
+            Claim(
+                authority: authority,
+                idempotencyKey: idempotencyKey,
+                authenticatedBy: bearer
+            )
+        )
+        return outcome
+    }
+}
+
+private actor GuestClaimBearerRefresher {
+    private let bearer: PrincipalBoundBearer
+    private(set) var callCount = 0
+
+    init(bearer: PrincipalBoundBearer) {
+        self.bearer = bearer
+    }
+
+    func refresh() -> PrincipalBoundBearer {
+        callCount += 1
+        return bearer
+    }
+}
+
+private actor GuestClaimRefreshRetryService: GuestClaimServing {
+    private let outcome: GuestClaimOutcome
+    private(set) var bearerTokens: [String] = []
+
+    init(outcome: GuestClaimOutcome) {
+        self.outcome = outcome
+    }
+
+    func prepareHandoff(authority: GuestClaimAuthority) async throws {}
+
+    func claim(
+        authority: GuestClaimAuthority,
+        idempotencyKey: UUID
+    ) async throws -> GuestClaimOutcome {
+        throw GuestClaimServiceError.unavailable
+    }
+
+    func claim(
+        authority: GuestClaimAuthority,
+        idempotencyKey: UUID,
+        authenticatedBy bearer: PrincipalBoundBearer
+    ) async throws -> GuestClaimOutcome {
+        bearerTokens.append(bearer.bearerToken)
+        guard bearerTokens.count > 1 else {
+            throw GuestClaimServiceError.unavailable
+        }
         return outcome
     }
 }
@@ -846,8 +1614,16 @@ private actor LostThenResolvedGuestClaimService: GuestClaimServing {
 
 private actor GuestClaimAuthorityRecorder: GuestClaimAuthorityStoring {
     private(set) var purgeCount = 0
+    private let storedAuthority: GuestClaimAuthority?
 
-    func authority(listingID: UUID) -> GuestClaimAuthority? { nil }
+    init(authority: GuestClaimAuthority? = nil) {
+        storedAuthority = authority
+    }
+
+    func authority(listingID: UUID) -> GuestClaimAuthority? {
+        guard storedAuthority?.draftID == listingID else { return nil }
+        return storedAuthority
+    }
 
     func save(_ authority: GuestClaimAuthority, listingID: UUID) {}
 
@@ -859,9 +1635,14 @@ private actor GuestClaimAuthorityRecorder: GuestClaimAuthorityStoring {
 private actor GuestRecoveryCredentialRecorder: GuestRecoveryCredentialStoring {
     private(set) var purgeCount = 0
     private var purgeFailures: Int
+    private let storedCredential: GuestRecoveryCredential?
 
-    init(purgeFailures: Int = 0) {
+    init(
+        purgeFailures: Int = 0,
+        credential: GuestRecoveryCredential? = nil
+    ) {
         self.purgeFailures = purgeFailures
+        storedCredential = credential
     }
 
     func mintCredential() throws -> GuestRecoverySubmissionIdentity {
@@ -877,8 +1658,14 @@ private actor GuestRecoveryCredentialRecorder: GuestRecoveryCredentialStoring {
         photoIdentity: GuestPhotoIdentity
     ) {}
 
-    func credential(runID: UUID) -> GuestRecoveryCredential? { nil }
-    func credential(recoveryID: UUID) -> GuestRecoveryCredential? { nil }
+    func credential(runID: UUID) -> GuestRecoveryCredential? {
+        guard storedCredential?.runID == runID else { return nil }
+        return storedCredential
+    }
+    func credential(recoveryID: UUID) -> GuestRecoveryCredential? {
+        guard storedCredential?.recoveryID == recoveryID else { return nil }
+        return storedCredential
+    }
     func setExpiry(recoveryID: UUID, expiresAt: Date) {}
 
     func purge(recoveryID: UUID) throws {

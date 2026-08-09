@@ -563,6 +563,7 @@ struct AppDependencies {
     let ebayPublishService: any EbayPublishFeatureServing
     let guestClaimService: any GuestClaimServing
     let guestAccountAuthenticator: any GuestAccountAuthenticating
+    let accountEntrySessionSource: any AccountEntrySessionSourcing
     let guestClaimAuthorityStore: any GuestClaimAuthorityStoring
     let ebayOAuthCallbackURL: URL
 
@@ -633,6 +634,8 @@ struct AppDependencies {
                 guestClaimService: UnavailableGuestClaimService(),
                 guestAccountAuthenticator:
                     UnavailableGuestAccountAuthenticator(),
+                accountEntrySessionSource:
+                    UnavailableAccountEntrySessionSource(),
                 guestClaimAuthorityStore: NoopGuestClaimAuthorityStore(),
                 ebayOAuthCallbackURL: URL(
                     string: "https://snaplist.dev/mobile/ebay/oauth"
@@ -691,6 +694,9 @@ struct AppDependencies {
                 session: session
             ),
             guestAccountAuthenticator: ClerkGuestAccountAuthenticator(),
+            accountEntrySessionSource: ClerkAccountEntrySessionSource(
+                tokenProvider: tokenProvider
+            ),
             guestClaimAuthorityStore: KeychainGuestClaimAuthorityStore(),
             ebayOAuthCallbackURL: origin.appending(
                 path: "/mobile/ebay/oauth"

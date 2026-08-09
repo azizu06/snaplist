@@ -8,11 +8,21 @@ enum EbayResultThumbnailSource {
 #endif
 }
 
+enum GuestClaimAccountEntryPresentation {
+    case supported
+#if DEBUG
+    case fixture
+#endif
+}
+
 @MainActor
 struct EbayPublishJourneyHost: View {
     let listingID: UUID
     let listingTitle: String
     let coverPhotoURL: URL?
+    let listingSnapshot: ListingReviewResult
+    let listingDraft: ListingReviewDraft
+    let listingIsDirty: Bool
     let dependencies: AppDependencies
     let forceReducedMotion: Bool
     let backToListing: () -> Void
@@ -21,12 +31,17 @@ struct EbayPublishJourneyHost: View {
 
     @State private var flowStore: EbayPublishFlowStore
     @State private var claimStore: GuestClaimStore?
+    @State private var claimProjection: GuestClaimListingProjection?
+    @State private var claimEntryRejected = false
     @State private var authorityResolved = false
 
     init(
         listingID: UUID,
         listingTitle: String,
         coverPhotoURL: URL?,
+        listingSnapshot: ListingReviewResult,
+        listingDraft: ListingReviewDraft,
+        listingIsDirty: Bool,
         dependencies: AppDependencies,
         forceReducedMotion: Bool,
         backToListing: @escaping () -> Void,
@@ -36,6 +51,9 @@ struct EbayPublishJourneyHost: View {
         self.listingID = listingID
         self.listingTitle = listingTitle
         self.coverPhotoURL = coverPhotoURL
+        self.listingSnapshot = listingSnapshot
+        self.listingDraft = listingDraft
+        self.listingIsDirty = listingIsDirty
         self.dependencies = dependencies
         self.forceReducedMotion = forceReducedMotion
         self.backToListing = backToListing
@@ -58,12 +76,17 @@ struct EbayPublishJourneyHost: View {
             if !authorityResolved {
                 ProgressView("Checking your saved listing…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let claimStore {
+            } else if claimEntryRejected {
+                GuestClaimEntryRejectedView(backToListing: backToListing)
+            } else if let claimStore, let claimProjection {
                 GuestClaimView(
                     store: claimStore,
+                    sessionSource: dependencies.accountEntrySessionSource,
+                    listingProjection: claimProjection,
+                    accountEntryPresentation: .supported,
                     forceReducedMotion: forceReducedMotion,
                     backToDraft: backToListing,
-                    continueToItem: { _ in self.claimStore = nil },
+                    continueToItem: { _ in backToListing() },
                     startNewItem: startNewItem
                 )
             } else {
@@ -82,11 +105,22 @@ struct EbayPublishJourneyHost: View {
         .task(id: listingID) {
             guard !authorityResolved else { return }
             defer { authorityResolved = true }
-            guard let authority = try? await dependencies
-                .guestClaimAuthorityStore.authority(listingID: listingID),
-                  authority.draftID == listingID else {
+            let resolution = await GuestClaimEntryResolver(
+                authorityStore: dependencies.guestClaimAuthorityStore,
+                credentialStore: KeychainGuestRecoveryCredentialStore()
+            ).resolve(
+                listingID: listingID,
+                snapshot: listingSnapshot,
+                draft: listingDraft,
+                isDirty: listingIsDirty
+            )
+            guard case .claim(let authority, let projection) = resolution else {
+                if resolution == .rejectedAuthority {
+                    claimEntryRejected = true
+                }
                 return
             }
+            claimProjection = projection
             let store = GuestClaimStore(
                 authority: authority,
                 authenticator: dependencies.guestAccountAuthenticator,
@@ -535,6 +569,9 @@ struct EbayPublishView: View {
 @MainActor
 struct GuestClaimView: View {
     @Bindable var store: GuestClaimStore
+    let sessionSource: any AccountEntrySessionSourcing
+    let listingProjection: GuestClaimListingProjection
+    let accountEntryPresentation: GuestClaimAccountEntryPresentation
     let forceReducedMotion: Bool
     let backToDraft: () -> Void
     let continueToItem: (ClaimedGuestListing) -> Void
@@ -543,6 +580,8 @@ struct GuestClaimView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var email = ""
     @State private var code = ""
+    @State private var accountEntryBaseline: AccountEntrySessionSnapshot?
+    @State private var presentsAccountEntry = false
 
     var body: some View {
         ScrollView {
@@ -574,6 +613,19 @@ struct GuestClaimView: View {
                 }
             }
         }
+        .sheet(
+            isPresented: $presentsAccountEntry,
+            onDismiss: resolveSupportedAuthenticationDismissal
+        ) {
+            switch accountEntryPresentation {
+            case .supported:
+                AccountEntryView()
+#if DEBUG
+            case .fixture:
+                GuestClaimFixtureAccountEntryView()
+#endif
+            }
+        }
         .accessibilityIdentifier("guest-claim")
     }
 
@@ -581,6 +633,7 @@ struct GuestClaimView: View {
     private var stateContent: some View {
         switch store.state {
         case .gate:
+            GuestClaimListingCard(projection: listingProjection)
             claimMessage(
                 headline: "Save this listing to your account",
                 statements: [
@@ -589,14 +642,17 @@ struct GuestClaimView: View {
                 footnote: "Saved for 24 hours, then deleted. Claiming keeps it in your account beyond 24 hours."
             )
             SnapListPrimaryButton(
-                title: "Continue with email",
+                title: "Sign in or create account",
                 forceReducedMotion: reduceMotion,
-                            action: { Task { await store.showEmailEntry() } }
+                action: beginSupportedAuthentication
             )
             SnapListSecondaryButton(
                 title: "Not now",
                 action: backToDraft
             )
+        case .authenticating:
+            ProgressView("Opening secure account entry…")
+                .frame(maxWidth: .infinity, alignment: .center)
         case .email:
             claimMessage(
                 headline: "Continue with email",
@@ -758,6 +814,60 @@ struct GuestClaimView: View {
         systemReduceMotion || forceReducedMotion
     }
 
+    private func resolveSupportedAuthenticationDismissal() {
+        let source = sessionSource
+        let handler = GuestClaimQualifiedSessionHandler(store: store)
+        let baseline = accountEntryBaseline
+        accountEntryBaseline = nil
+        Task {
+            let current = await source.snapshot()
+            let signal = AccountEntryPresentationTransition.signal(
+                baseline: baseline,
+                current: current
+            )
+            let resolver = AccountEntrySessionResolver(
+                source: source,
+                handler: handler
+            )
+            let resolution = await resolver.resolve(
+                signal,
+                snapshot: current
+            )
+            if resolution == .preserved {
+                await MainActor.run {
+                    store.cancelSupportedAuthentication()
+                }
+            }
+        }
+    }
+
+    private func beginSupportedAuthentication() {
+        let source = sessionSource
+        let handler = GuestClaimQualifiedSessionHandler(store: store)
+        Task {
+            let baseline = await source.snapshot()
+            accountEntryBaseline = baseline
+            guard let policy = await store.beginSupportedAuthentication(),
+                  store.state == .authenticating else {
+                return
+            }
+            if policy == .requireDifferentPrincipal {
+                presentsAccountEntry = true
+                return
+            }
+            let resolver = AccountEntrySessionResolver(
+                source: source,
+                handler: handler
+            )
+            let resolution = await resolver.resolveCurrentSession(
+                snapshot: baseline
+            )
+            if resolution != .continued {
+                presentsAccountEntry = true
+            }
+        }
+    }
+
     private var navigationTitle: String {
         switch store.state {
         case .email: "Continue with email"
@@ -851,13 +961,114 @@ struct GuestClaimView: View {
             SnapListPrimaryButton(
                 title: "Use a different account",
                 forceReducedMotion: reduceMotion,
-                action: { Task { await store.showEmailEntry() } }
+                action: beginSupportedAuthentication
             )
             SnapListSecondaryButton(
                 title: "Back to my draft",
                 action: backToDraft
             )
         }
+    }
+}
+
+private struct GuestClaimEntryRejectedView: View {
+    let backToListing: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Refresh your listing before continuing")
+                .snapListTypography(.displayTitle)
+                .accessibilityAddTraits(.isHeader)
+            Text(
+                "SnapList could not match this saved listing to the exact guest draft on this phone. Nothing was claimed."
+            )
+            .snapListTypography(.body)
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            SnapListPrimaryButton(
+                title: "Back to my listing",
+                forceReducedMotion: true,
+                action: backToListing
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(SnapListMetrics.screenGutter)
+        .background(SnapListColorToken.canvas.color)
+        .accessibilityIdentifier("guest-claim.entry-rejected")
+    }
+}
+
+private struct GuestClaimListingCard: View {
+    let projection: GuestClaimListingProjection
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            thumbnail
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(projection.title)
+                    .snapListTypography(.rowTitle)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(EbayPublishCurrency.string(projection.effectivePrice))
+                    .snapListTypography(.status)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                Text("Saved until \(projection.expiresAt.formatted(date: .abbreviated, time: .shortened))")
+                    .snapListTypography(.metadata)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(SnapListColorToken.quietFill.color)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("guest-claim.listing")
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        switch projection.thumbnail {
+        case .authoritative(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty, .failure:
+                    neutralThumbnail
+                @unknown default:
+                    neutralThumbnail
+                }
+            }
+        case .neutral:
+            neutralThumbnail
+        }
+    }
+
+    private var neutralThumbnail: some View {
+        ZStack {
+            SnapListColorToken.canvas.color
+            Image(systemName: "photo")
+                .foregroundStyle(SnapListColorToken.textTertiary.color)
+        }
+    }
+}
+
+private actor GuestClaimQualifiedSessionHandler:
+    AccountEntryQualifiedSessionHandling {
+    private let action: @MainActor @Sendable (
+        AccountEntryQualifiedSession
+    ) async -> Void
+
+    init(store: GuestClaimStore) {
+        action = { session in
+            await store.qualifiedSession(session)
+        }
+    }
+
+    func handle(_ session: AccountEntryQualifiedSession) async {
+        await action(session)
     }
 }
 

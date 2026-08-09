@@ -84,6 +84,21 @@ final class AppNavigationTests: XCTestCase {
         }
     }
 
+    func testOnlyAccountFutureBoundaryResolvesToSharedAccountEntry() {
+        XCTAssertEqual(
+            FutureDestinationPresentation.resolve(.account),
+            .accountEntry
+        )
+        XCTAssertEqual(
+            FutureDestinationPresentation.resolve(.run),
+            .placeholder(.run)
+        )
+        XCTAssertEqual(
+            FutureDestinationPresentation.resolve(.draft),
+            .placeholder(.draft)
+        )
+    }
+
     func testLaunchFixturesNamingARetiredTabResolveToASurvivingDestination() {
         for retired in ["home", "listings", "inbox", "insights"] {
             let configuration = LaunchConfiguration.parse(
