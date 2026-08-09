@@ -77,13 +77,6 @@ struct AppShellView: View {
                     .accessibilityHidden(true)
             } else if hasHandedOffFirstValueOnboardingToExistingAccount {
                 shell
-                    .task {
-                        guard !hasOpenedFirstValueOnboardingAccountRoute else { return }
-                        await Task.yield()
-                        guard !hasOpenedFirstValueOnboardingAccountRoute else { return }
-                        hasOpenedFirstValueOnboardingAccountRoute = true
-                        router.navigate(to: .future(.account))
-                    }
             } else if shouldShowFirstValueOnboarding {
                 FirstValueOnboardingView(
                     model: firstValueOnboardingModel,
@@ -522,6 +515,7 @@ struct AppShellView: View {
                         .navigationDestination(for: AppRoute.self) { route in
                             destination(for: route)
                         }
+                        .onAppear(perform: openFirstValueOnboardingAccountRouteIfNeeded)
                     }
                 }
             }
@@ -562,6 +556,15 @@ struct AppShellView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
         }
+    }
+
+    private func openFirstValueOnboardingAccountRouteIfNeeded() {
+        guard hasHandedOffFirstValueOnboardingToExistingAccount,
+              !hasOpenedFirstValueOnboardingAccountRoute else {
+            return
+        }
+        hasOpenedFirstValueOnboardingAccountRoute = true
+        router.navigate(to: .future(.account))
     }
 
     @ViewBuilder
