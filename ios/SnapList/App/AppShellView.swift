@@ -38,6 +38,7 @@ struct AppShellView: View {
     @State private var activationProgress = ActivationGuidanceProgress()
     @State private var activationListingReviewPresented = false
     @State private var hasHandedOffFirstValueOnboardingToExistingAccount = false
+    @State private var hasOpenedFirstValueOnboardingAccountRoute = false
     private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
     private let activationGuestCompletionStore =
         UserDefaultsActivationGuidanceGuestCompletionStore()
@@ -76,6 +77,13 @@ struct AppShellView: View {
                     .accessibilityHidden(true)
             } else if hasHandedOffFirstValueOnboardingToExistingAccount {
                 shell
+                    .task {
+                        guard !hasOpenedFirstValueOnboardingAccountRoute else { return }
+                        await Task.yield()
+                        guard !hasOpenedFirstValueOnboardingAccountRoute else { return }
+                        hasOpenedFirstValueOnboardingAccountRoute = true
+                        router.navigate(to: .future(.account))
+                    }
             } else if shouldShowFirstValueOnboarding {
                 FirstValueOnboardingView(
                     model: firstValueOnboardingModel,
@@ -83,7 +91,6 @@ struct AppShellView: View {
                     usesStaticScoutRendering: configuration.usesStaticScoutRendering,
                     didFinish: handleFirstValueOnboardingCompletion,
                     openExistingAccount: {
-                        router.navigate(to: .future(.account))
                         hasHandedOffFirstValueOnboardingToExistingAccount = true
                     }
                 )
