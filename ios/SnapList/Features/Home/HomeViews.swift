@@ -46,7 +46,7 @@ struct TrophyWallView: View {
 
                 Button(action: openProcessing) {
                     Image(systemName: "clock")
-                        .font(.system(size: 21, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .frame(
                             width: SnapListMetrics.minimumTouchTarget,
                             height: SnapListMetrics.minimumTouchTarget
@@ -75,8 +75,8 @@ struct TrophyWallView: View {
                 .accessibilityLabel("Account, opens Settings")
                 .accessibilityIdentifier("trophy.wall.account")
             }
-            .padding(.leading, 18)
-            .padding(.trailing, 14)
+            .padding(.leading, 19)
+            .padding(.trailing, 16)
             .padding(.bottom, 12)
 
             wallBody
