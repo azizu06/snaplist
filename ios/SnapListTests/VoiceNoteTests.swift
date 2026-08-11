@@ -5,6 +5,60 @@ import XCTest
 
 @MainActor
 final class VoiceNoteTests: XCTestCase {
+    func testRecordingMeterDrivesVisiblyDistinctRollingWaveformGeometry() async {
+        let audio = VoiceNoteAudioClientStub(permission: .allowed)
+        let store = VoiceNoteStore(
+            audio: audio,
+            files: VoiceNoteFileStoreStub()
+        )
+        await store.startRecording()
+
+        audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+            elapsed: 0.1,
+            averagePower: -160
+        )
+        store.refreshRecording()
+        guard case .recording(_, let quietLevel) = store.phase else {
+            return XCTFail("Recording meter must publish a quiet level.")
+        }
+        let quietSamples = VoiceNoteWaveformGeometry
+            .appendingLiveMeterSample(
+                quietLevel,
+                to: VoiceNoteWaveformGeometry.emptyLiveMeterSamples
+            )
+        let silence = VoiceNoteWaveformGeometry.liveMeterBarHeights(
+            samples: quietSamples
+        )
+
+        var speechSamples = quietSamples
+        for sampleIndex in 1...VoiceNoteWaveformGeometry.liveBarCount {
+            audio.recordingSnapshot = VoiceNoteRecordingSnapshot(
+                elapsed: Double(sampleIndex + 1) / 10,
+                averagePower: -12
+            )
+            store.refreshRecording()
+            guard case .recording(_, let speechLevel) = store.phase else {
+                return XCTFail("Recording meter must publish a speech level.")
+            }
+            speechSamples = VoiceNoteWaveformGeometry
+                .appendingLiveMeterSample(
+                    speechLevel,
+                    to: speechSamples
+                )
+        }
+        let speech = VoiceNoteWaveformGeometry.liveMeterBarHeights(
+            samples: speechSamples
+        )
+
+        XCTAssertEqual(silence.count, 27)
+        XCTAssertEqual(silence, Array(repeating: 4, count: 27))
+        XCTAssertGreaterThan(
+            speech.min() ?? 0,
+            24,
+            "Speech must produce an unmistakably taller live waveform than silence."
+        )
+    }
+
     func testRecorderCompletionEventTransitionsAtHardLimitWithoutPostStopPolling() async {
         let audio = VoiceNoteAudioClientStub(permission: .allowed)
         let files = VoiceNoteFileStoreStub()

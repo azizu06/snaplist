@@ -1,6 +1,47 @@
 import SwiftUI
 import UIKit
 
+enum VoiceNoteWaveformGeometry {
+    static let liveBarCount = 27
+    static let quietBarHeight: CGFloat = 4
+
+    static var emptyLiveMeterSamples: [Double] {
+        Array(repeating: 0, count: liveBarCount)
+    }
+
+    static func appendingLiveMeterSample(
+        _ level: Double,
+        to samples: [Double]
+    ) -> [Double] {
+        let retained = samples.suffix(liveBarCount - 1)
+        let missingQuietSamples = max(
+            liveBarCount - retained.count - 1,
+            0
+        )
+        return Array(repeating: 0, count: missingQuietSamples)
+            + retained
+            + [min(max(level, 0), 1)]
+    }
+
+    static func liveMeterBarHeights(
+        samples: [Double]
+    ) -> [CGFloat] {
+        normalizedLiveMeterSamples(samples).map { sample in
+            quietBarHeight + (28 * CGFloat(sample))
+        }
+    }
+
+    private static func normalizedLiveMeterSamples(
+        _ samples: [Double]
+    ) -> [Double] {
+        let retained = samples.suffix(liveBarCount)
+        return Array(
+            repeating: 0,
+            count: max(liveBarCount - retained.count, 0)
+        ) + retained.map { min(max($0, 0), 1) }
+    }
+}
+
 @MainActor
 struct VoiceNoteSheet: View {
     @Bindable var store: VoiceNoteStore
@@ -238,7 +279,9 @@ struct VoiceNoteSheet: View {
                     level: level,
                     isLive: true,
                     reduceMotion: reduceMotion,
-                    isHeldTake: isHeldTake
+                    isHeldTake: isHeldTake,
+                    usesLiveMeterSamples:
+                        !usesStaticRecordingFixture && !isHeldTake
                 )
                 .frame(maxWidth: .infinity, minHeight: 52)
 
@@ -320,7 +363,8 @@ struct VoiceNoteSheet: View {
                     level: 0.72,
                     isLive: false,
                     reduceMotion: true,
-                    isHeldTake: false
+                    isHeldTake: false,
+                    usesLiveMeterSamples: false
                 )
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .accessibilityHidden(
@@ -486,6 +530,10 @@ private struct VoiceNoteWaveform: View {
     let isLive: Bool
     let reduceMotion: Bool
     let isHeldTake: Bool
+    let usesLiveMeterSamples: Bool
+
+    @State private var liveMeterSamples =
+        VoiceNoteWaveformGeometry.emptyLiveMeterSamples
 
     private let livePattern: [Double] = [
         0.72, 0.86, 0.92, 0.80, 0.74, 0.66,
@@ -508,22 +556,27 @@ private struct VoiceNoteWaveform: View {
                 VoiceNoteHeldTakeWaveform()
             } else {
                 Canvas { context, size in
-                    let pattern = isLive ? livePattern : savedPattern
+                    let barHeights: [CGFloat]
+                    if usesLiveMeterSamples {
+                        barHeights = VoiceNoteWaveformGeometry
+                            .liveMeterBarHeights(samples: liveMeterSamples)
+                    } else {
+                        let pattern = isLive ? livePattern : savedPattern
+                        barHeights = pattern.map {
+                            barHeight(value: $0, isLive: isLive)
+                        }
+                    }
                     let color = isLive
                         ? SnapListColorToken.inkPrimary.color
                         : Color(hex: "#B5B7BC")
                     let barWidth: CGFloat = 4
                     let centerY = size.height / 2
-                    let step = pattern.count > 1
+                    let step = barHeights.count > 1
                         ? (size.width - barWidth)
-                            / CGFloat(pattern.count - 1)
+                            / CGFloat(barHeights.count - 1)
                         : 0
 
-                    for (index, value) in pattern.enumerated() {
-                        let height = barHeight(
-                            value: value,
-                            isLive: isLive
-                        )
+                    for (index, height) in barHeights.enumerated() {
                         let rect = CGRect(
                             x: CGFloat(index) * step,
                             y: centerY - (height / 2),
@@ -543,8 +596,18 @@ private struct VoiceNoteWaveform: View {
         }
         .animation(
             reduceMotion ? nil : .linear(duration: 0.1),
-            value: level
+            value: liveMeterSamples
         )
+        .onChange(of: level, initial: true) { _, newLevel in
+            guard usesLiveMeterSamples else {
+                return
+            }
+            liveMeterSamples = VoiceNoteWaveformGeometry
+                .appendingLiveMeterSample(
+                    newLevel,
+                    to: liveMeterSamples
+                )
+        }
         .accessibilityHidden(true)
         .allowsHitTesting(false)
     }
