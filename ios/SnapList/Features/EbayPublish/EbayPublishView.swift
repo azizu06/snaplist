@@ -353,12 +353,16 @@ struct EbayPublishView: View {
                         forceReducedMotion: reduceMotion
                     ) { Task { await store.connect() } }
                 } else {
-                    SnapListPrimaryButton(
-                        title: state == .accountChanged
-                            ? "Post to eBay as \(accountName)"
-                            : "Post to eBay",
-                        forceReducedMotion: reduceMotion
-                    ) { Task { await store.confirmPublish() } }
+                    if state == .ready {
+                        EbayConfirmationPrimaryButton(
+                            title: "Post to eBay"
+                        ) { Task { await store.confirmPublish() } }
+                    } else {
+                        SnapListPrimaryButton(
+                            title: "Post to eBay as \(accountName)",
+                            forceReducedMotion: reduceMotion
+                        ) { Task { await store.confirmPublish() } }
+                    }
                 }
                 SnapListSecondaryButton(
                     title: "Back to my listing",
@@ -1462,6 +1466,26 @@ private struct EbayConnectPrimaryButton: View {
         .background(Color(hex: "#4C63ED"))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("button.primary.continue-to-ebay")
+    }
+}
+
+private struct EbayConfirmationPrimaryButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .snapListTypography(.rowTitle)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 52)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .background(Color(hex: "#4C63ED"))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .accessibilityIdentifier("button.primary.post-to-ebay")
     }
 }
 
