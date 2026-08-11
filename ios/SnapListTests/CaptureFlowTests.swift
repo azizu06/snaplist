@@ -5121,12 +5121,30 @@ final class CaptureFlowTests: XCTestCase {
                 session: session
             )
         )
-        XCTAssertNotNil((preview.view as? UIImageView)?.image)
+        let previewView = try XCTUnwrap(preview.view as? UIImageView)
+        XCTAssertNotNil(previewView.image)
+        XCTAssertEqual(
+            previewView.bounds.size,
+            CGSize(width: 64, height: 64),
+            "The lifted item must keep the approved 64pt strip geometry."
+        )
+        XCTAssertEqual(previewView.alpha, 1)
+        XCTAssertEqual(preview.parameters.backgroundColor, UIColor.clear)
+        XCTAssertTrue(
+            try XCTUnwrap(preview.parameters.shadowPath).isEmpty,
+            "The lifted thumbnail must not gain a detached card shadow."
+        )
         XCTAssertTrue(preview.target.container === sourceView)
         XCTAssertEqual(
             preview.target.center.x,
             sourceFrame.midX + sourceView.bounds.minX,
             accuracy: 0.001
+        )
+        XCTAssertEqual(
+            preview.target.center.y,
+            sourceFrame.minY + 32 + sourceView.bounds.minY,
+            accuracy: 0.001,
+            "The lift must originate at the 64pt image center, not the taller Cover column center."
         )
 
         source.dragInteraction(
@@ -5283,8 +5301,9 @@ final class CaptureFlowTests: XCTestCase {
             )
             XCTAssertEqual(
                 preview.target.center.y,
-                frame.midY + sourceView.bounds.minY,
-                accuracy: 0.001
+                frame.minY + 32 + sourceView.bounds.minY,
+                accuracy: 0.001,
+                "The preview must stay centered on the 64pt thumbnail within a taller source column."
             )
             XCTAssertEqual(
                 preview.target.center.x - sourceView.bounds.minX,
@@ -5293,7 +5312,7 @@ final class CaptureFlowTests: XCTestCase {
             )
             XCTAssertEqual(
                 preview.target.center.y - sourceView.bounds.minY,
-                frame.midY,
+                frame.minY + 32,
                 accuracy: 0.001
             )
 
