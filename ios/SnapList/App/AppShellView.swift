@@ -16,6 +16,7 @@ struct AppShellView: View {
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.appDependencies) private var dependencies
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
     @State private var keyboardProbeText = ""
     @State private var isDeleteAccountFlowPresented = false
@@ -265,6 +266,14 @@ struct AppShellView: View {
                 )
             }
             advanceActivationGuidance(for: .capturedFirstPhoto)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            Task {
+                await AppShellProGateTransaction.scenePhaseChanged(
+                    phase,
+                    store: proGateStore
+                )
+            }
         }
         .onChange(
             of: submissionHost.pendingPresentationEvent,
@@ -927,13 +936,8 @@ struct AppShellView: View {
         }
     }
 
-    /// Currently uncalled. Its only caller was a `scenePhase` observer whose body
-    /// was gated on the retired seller-Home fixture, so neither this nor the
-    /// pro-gate verification refresh beside it could run in production or in any
-    /// other fixture. Removing that observer with the surface it belonged to
-    /// changes no observable behavior; rewiring scene-phase work is an activation
-    /// and pro-gate decision, not a Trophy Wall one, so the logic is kept intact
-    /// for the issue that owns it.
+    /// Currently uncalled. Its only caller belonged to the retired seller-Home
+    /// fixture. Rewiring activation interruption is owned outside Pro Gate recovery.
     private func recordActivationInterruptionIfNeeded() {
         guard shouldPresentActivation,
               activationProgress.recordInterruption() == .advanced else { return }
@@ -1326,6 +1330,14 @@ enum AppShellSubmissionHandoffRoute: Equatable {
 
 @MainActor
 enum AppShellProGateTransaction {
+    static func scenePhaseChanged(
+        _ phase: ScenePhase,
+        store: ProGateStore?
+    ) async {
+        guard phase == .active else { return }
+        await store?.refreshPendingVerification()
+    }
+
     static func present(
         eventID: UUID,
         store: ProGateStore,
