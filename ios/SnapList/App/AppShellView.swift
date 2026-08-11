@@ -1,6 +1,39 @@
 import SwiftUI
 import UIKit
 
+struct AppShellChromeContext: Equatable {
+    let isKeyboardVisible: Bool
+    let isDeleteAccountFlowPresented: Bool
+    let isListingReviewPresented: Bool
+    let isGuestClaimPresented: Bool
+    let fallbackActivationSurface: ActivationGuidanceSurface?
+}
+
+struct AppShellChromeProjection: Equatable {
+    let showsDock: Bool
+    let activationSurface: ActivationGuidanceSurface?
+}
+
+enum AppShellChromePolicy {
+    static func project(
+        _ context: AppShellChromeContext
+    ) -> AppShellChromeProjection {
+        AppShellChromeProjection(
+            showsDock: DockVisibilityPolicy.shouldShow(
+                isKeyboardVisible: context.isKeyboardVisible
+            )
+                && !context.isDeleteAccountFlowPresented
+                && !context.isListingReviewPresented
+                && !context.isGuestClaimPresented,
+            activationSurface: context.isListingReviewPresented
+                ? .listingReview
+                : context.isGuestClaimPresented
+                    ? nil
+                    : context.fallbackActivationSurface
+        )
+    }
+}
+
 @MainActor
 struct AppShellView: View {
     @Bindable var router: AppRouter
@@ -39,6 +72,7 @@ struct AppShellView: View {
     @State private var isCompletingActivation = false
     @State private var activationProgress = ActivationGuidanceProgress()
     @State private var activationListingReviewPresented = false
+    @State private var activationGuestClaimPresented = false
     private let activationProgressStore = UserDefaultsActivationGuidanceProgressStore()
     private let activationGuestCompletionStore =
         UserDefaultsActivationGuidanceGuestCompletionStore()
@@ -524,11 +558,7 @@ struct AppShellView: View {
         }
         .floatingDock(
             selectedTab: router.selectedTab,
-            isVisible: DockVisibilityPolicy.shouldShow(
-                isKeyboardVisible: isKeyboardVisible
-            )
-                && !isDeleteAccountFlowPresented
-                && !activationListingReviewPresented,
+            isVisible: shellChromeProjection.showsDock,
             select: router.select
         )
         .animation(
@@ -634,6 +664,9 @@ struct AppShellView: View {
                 activationListingReviewDismissed: {
                     activationListingReviewPresented = false
                 },
+                activationGuestClaimPresentationChanged: {
+                    activationGuestClaimPresented = $0
+                },
                 activationListingReviewInteraction: {
                     advanceActivationGuidance(for: .editedListing)
                 }
@@ -707,6 +740,9 @@ struct AppShellView: View {
                     },
                     activationListingReviewDismissed: {
                         activationListingReviewPresented = false
+                    },
+                    activationGuestClaimPresentationChanged: {
+                        activationGuestClaimPresented = $0
                     },
                     activationListingReviewInteraction: {
                         advanceActivationGuidance(for: .editedListing)
@@ -829,10 +865,23 @@ struct AppShellView: View {
         }
     }
 
+    private var shellChromeProjection: AppShellChromeProjection {
+        AppShellChromePolicy.project(
+            AppShellChromeContext(
+                isKeyboardVisible: isKeyboardVisible,
+                isDeleteAccountFlowPresented: isDeleteAccountFlowPresented,
+                isListingReviewPresented: activationListingReviewPresented,
+                isGuestClaimPresented: activationGuestClaimPresented,
+                fallbackActivationSurface: activationFallbackSurface
+            )
+        )
+    }
+
     private var activationSurface: ActivationGuidanceSurface? {
-        if activationListingReviewPresented {
-            return .listingReview
-        }
+        shellChromeProjection.activationSurface
+    }
+
+    private var activationFallbackSurface: ActivationGuidanceSurface? {
         if photoReviewHost.session != nil {
             return .photoReview
         }
@@ -1871,6 +1920,7 @@ private struct TrophyWallProcessingDestinationView: View {
     let forceReducedMotion: Bool
     let activationListingReviewOpened: () -> Void
     let activationListingReviewDismissed: () -> Void
+    let activationGuestClaimPresentationChanged: (Bool) -> Void
     let activationListingReviewInteraction: () -> Void
     let openRoute: (HomeRoute) -> Void
     let onScan: () -> Void
@@ -1892,6 +1942,8 @@ private struct TrophyWallProcessingDestinationView: View {
             forceReducedMotion: forceReducedMotion,
             activationListingReviewOpened: activationListingReviewOpened,
             activationListingReviewDismissed: activationListingReviewDismissed,
+            activationGuestClaimPresentationChanged:
+                activationGuestClaimPresentationChanged,
             activationListingReviewInteraction: activationListingReviewInteraction
         )
         .navigationBarBackButtonHidden(true)
@@ -1900,6 +1952,8 @@ private struct TrophyWallProcessingDestinationView: View {
 
 @MainActor
 private struct ProcessingListingReviewSurface: View {
+    @Environment(\.appDependencies) private var dependencies
+
     @Bindable var store: TrophyWallStore
     let onBack: () -> Void
     let openRoute: (HomeRoute) -> Void
@@ -1912,7 +1966,10 @@ private struct ProcessingListingReviewSurface: View {
     let forceReducedMotion: Bool
     let activationListingReviewOpened: () -> Void
     let activationListingReviewDismissed: () -> Void
+    let activationGuestClaimPresentationChanged: (Bool) -> Void
     let activationListingReviewInteraction: () -> Void
+    @State private var guestClaimPresentation =
+        ProcessingGuestClaimPresentationHost()
     @State private var listingReviewPresentation =
         ListingReviewPresentationHost()
 
@@ -1928,19 +1985,56 @@ private struct ProcessingListingReviewSurface: View {
                 let executor = ProcessingActionExecutor(
                     runStore: runStore,
                     listingReviewStore: listingReviewStore,
+                    guestClaimPresentation: guestClaimPresentation,
                     listingReviewPresentation: listingReviewPresentation,
                     applyRetryResult: { store.applyRetryResult($0) },
                     selectScan: onScan
                 )
                 Task {
-                    if await executor.execute(action) == .presentedReview {
+                    switch await executor.execute(action) {
+                    case .presentedGuestClaim:
+                        activationGuestClaimPresentationChanged(true)
+                    case .presentedReview:
                         activationListingReviewOpened()
+                    default:
+                        break
                     }
                 }
             },
             onScan: onScan,
             onTryAgain: onTryAgain
         )
+        .navigationDestination(
+            isPresented: Binding(
+                get: { guestClaimPresentation.isPresented },
+                set: { isPresented in
+                    if !isPresented {
+                        guestClaimPresentation.dismiss()
+                        activationGuestClaimPresentationChanged(false)
+                    }
+                }
+            )
+        ) {
+            if let context = guestClaimPresentation.context {
+                ProcessingGuestClaimSurface(
+                    context: context,
+                    dependencies: dependencies,
+                    forceReducedMotion: forceReducedMotion,
+                    backToProcessing: {
+                        guestClaimPresentation.dismiss()
+                        activationGuestClaimPresentationChanged(false)
+                    },
+                    continueToListingReview: { listing in
+                        Task { await openClaimedListing(listing) }
+                    },
+                    startNewItem: {
+                        guestClaimPresentation.dismiss()
+                        activationGuestClaimPresentationChanged(false)
+                        onScan()
+                    }
+                )
+            }
+        }
         .navigationDestination(isPresented: $listingReviewPresentation.isPresented) {
             ListingReviewView(
                 store: listingReviewStore,
@@ -1956,6 +2050,79 @@ private struct ProcessingListingReviewSurface: View {
             if !isPresented {
                 activationListingReviewDismissed()
             }
+        }
+    }
+
+    private func openClaimedListing(
+        _ listing: ClaimedGuestListing
+    ) async {
+        guard let context = guestClaimPresentation.takeClaimed(listing) else {
+            return
+        }
+        guard await listingReviewPresentation.open(
+                context.review,
+                expecting: context.review.binding,
+                using: listingReviewStore
+              ) else {
+            activationGuestClaimPresentationChanged(false)
+            return
+        }
+        activationListingReviewOpened()
+        activationGuestClaimPresentationChanged(false)
+    }
+}
+
+@MainActor
+private struct ProcessingGuestClaimSurface: View {
+    let context: ProcessingGuestClaimContext
+    let dependencies: AppDependencies
+    let forceReducedMotion: Bool
+    let backToProcessing: () -> Void
+    let continueToListingReview: (ClaimedGuestListing) -> Void
+    let startNewItem: () -> Void
+
+    @State private var store: GuestClaimStore
+
+    init(
+        context: ProcessingGuestClaimContext,
+        dependencies: AppDependencies,
+        forceReducedMotion: Bool,
+        backToProcessing: @escaping () -> Void,
+        continueToListingReview: @escaping (ClaimedGuestListing) -> Void,
+        startNewItem: @escaping () -> Void
+    ) {
+        self.context = context
+        self.dependencies = dependencies
+        self.forceReducedMotion = forceReducedMotion
+        self.backToProcessing = backToProcessing
+        self.continueToListingReview = continueToListingReview
+        self.startNewItem = startNewItem
+        _store = State(
+            initialValue: GuestClaimStore(
+                authority: context.authority,
+                authenticator: dependencies.guestAccountAuthenticator,
+                service: dependencies.guestClaimService,
+                authorityStore: dependencies.guestClaimAuthorityStore,
+                credentialStore: KeychainGuestRecoveryCredentialStore(),
+                funnelAnalytics: dependencies.funnelAnalytics,
+                authenticatedUserID: ClerkAuthenticationComposition.currentUserID
+            )
+        )
+    }
+
+    var body: some View {
+        GuestClaimView(
+            store: store,
+            sessionSource: dependencies.accountEntrySessionSource,
+            listingProjection: context.projection,
+            accountEntryPresentation: .supported,
+            forceReducedMotion: forceReducedMotion,
+            backToDraft: backToProcessing,
+            continueToItem: continueToListingReview,
+            startNewItem: startNewItem
+        )
+        .task(id: context.authority.recoveryID) {
+            await store.resumeClaim()
         }
     }
 }
