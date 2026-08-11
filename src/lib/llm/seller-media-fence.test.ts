@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { generateTestPkcs8PrivateKeyPem } from "../guest-capability/signer.testing";
 import {
   LLM_ROLES,
   SELLER_MEDIA_ROLES,
@@ -156,8 +157,10 @@ describe("parseEnv", () => {
   const base = {
     NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
     NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon",
-    SUPABASE_SECRET_KEY: "sb_secret",
+    SUPABASE_SECRET_KEY: "sb_secret_test",
     SUPABASE_SERVICE_ROLE_KEY: "service",
+    SUPABASE_GUEST_JWT_KEY_ID: "guest-es256-test",
+    SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM: generateTestPkcs8PrivateKeyPem(),
     SERVER_RPC_SECRET: "dOD9IRVTwgq/GTVsIoNQ29nsUWHdqgRjpgdYQN7Yy0QUqS7yFBsMq6fknzT+jiTI",
     REVENUECAT_SECRET_API_KEY: "sk_revenuecat",
     REVENUECAT_PROJECT_ID: "proj",

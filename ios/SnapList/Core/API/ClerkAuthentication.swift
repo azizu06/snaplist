@@ -134,9 +134,11 @@ struct ClerkBearerTokenProvider: BearerTokenProviding {
     let session: any ClerkSessionTokenProviding
 
     func bearerToken() async throws -> String {
-        guard let token = Self.usable(
-            try await session.sessionToken()
-        ) else {
+        let authentication = try await session.sessionAuthentication()
+        guard let token = Self.usable(authentication.token) else {
+            if authentication.scopeProof != nil {
+                throw BearerTokenProviderError.principalBindingUnavailable
+            }
             throw BearerTokenProviderError.sessionAbsent
         }
         return token

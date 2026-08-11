@@ -1,3 +1,4 @@
+import { createPrivateKey } from "node:crypto";
 import { z } from "zod";
 import {
   SELLER_MEDIA_ROLES,
@@ -13,6 +14,29 @@ import { isPublicHttpsOrigin } from "./public-origin";
 
 const LOCAL_SERVER_RPC_SECRET =
   "snaplist-local-server-rpc-secret-do-not-use-in-hosted";
+const VERIFIED_GUEST_OPERATION_KEY_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+const PKCS8_PRIVATE_KEY_HEADER = "-----BEGIN PRIVATE KEY-----";
+const PKCS8_PRIVATE_KEY_FOOTER = "-----END PRIVATE KEY-----";
+
+function isImportableEs256PrivateKey(value: string): boolean {
+  const privateKeyPem = value.replaceAll("\\n", "\n").trim();
+  if (
+    !privateKeyPem.startsWith(PKCS8_PRIVATE_KEY_HEADER)
+    || !privateKeyPem.endsWith(PKCS8_PRIVATE_KEY_FOOTER)
+  ) {
+    return false;
+  }
+
+  try {
+    const privateKey = createPrivateKey(privateKeyPem);
+    return (
+      privateKey.asymmetricKeyType === "ec"
+      && privateKey.asymmetricKeyDetails?.namedCurve === "prime256v1"
+    );
+  } catch {
+    return false;
+  }
+}
 
 // `openssl rand -base64 48` produces 48 random bytes encoded as 64 unpadded
 // Base64 characters. Syntax cannot prove randomness or provenance, so that
@@ -409,8 +433,50 @@ function deploymentConfigIssues(raw: Record<string, unknown>): string[] {
     );
   }
 
+  const supabaseSecretKey = env.SUPABASE_SECRET_KEY?.trim();
+  if (!supabaseSecretKey) {
+    issues.push(
+      "  - SUPABASE_SECRET_KEY: SUPABASE_SECRET_KEY is required outside local development so account erasure and verified-guest authentication can complete.",
+    );
+  } else if (!supabaseSecretKey.startsWith("sb_secret_")) {
+    issues.push(
+      "  - SUPABASE_SECRET_KEY: Verified-guest authentication requires a current Supabase secret key.",
+    );
+  }
+
+  const guestOperationSignerRequired = [
+    "SUPABASE_GUEST_JWT_KEY_ID",
+    "SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM",
+  ] as const;
+  const guestOperationSignerIssues = guestOperationSignerRequired
+    .filter((name) => !env[name]?.trim())
+    .map(
+      (name) =>
+        `  - ${name}: ${name} is required outside local development so verified guests can authenticate item submission.`,
+    );
+  issues.push(...guestOperationSignerIssues);
+
+  const guestOperationKeyId = env.SUPABASE_GUEST_JWT_KEY_ID;
+  if (
+    guestOperationKeyId
+    && !VERIFIED_GUEST_OPERATION_KEY_ID_PATTERN.test(guestOperationKeyId)
+  ) {
+    issues.push(
+      "  - SUPABASE_GUEST_JWT_KEY_ID: SUPABASE_GUEST_JWT_KEY_ID must be a valid signing key id containing at most 128 letters, digits, dots, underscores, or hyphens.",
+    );
+  }
+
+  const guestOperationPrivateKey = env.SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM;
+  if (
+    guestOperationPrivateKey?.trim()
+    && !isImportableEs256PrivateKey(guestOperationPrivateKey)
+  ) {
+    issues.push(
+      "  - SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM: SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM must be an importable ES256 private key in PKCS#8 PEM format.",
+    );
+  }
+
   const erasureRequired = [
-    "SUPABASE_SECRET_KEY",
     "REVENUECAT_SECRET_API_KEY",
     "REVENUECAT_PROJECT_ID",
   ] as const;

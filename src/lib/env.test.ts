@@ -1,8 +1,13 @@
 import { describe, it, expect } from "vitest";
+import { generateTestPkcs8PrivateKeyPem } from "./guest-capability/signer.testing";
 import { parseEnv } from "./env";
 
 const DEPLOYED_SERVER_RPC_SECRET =
   "dd0Gf7bUC6iOCfyI1cXgM7pPDSpyDGd9zM6rhFgDFk6r2sW7d2VKB/EkB2WRUM/p";
+const DEPLOYED_GUEST_OPERATION_SIGNER = {
+  SUPABASE_GUEST_JWT_KEY_ID: "guest-es256-test",
+  SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM: generateTestPkcs8PrivateKeyPem(),
+};
 
 const valid = {
   OPENAI_API_KEY: "sk-test",
@@ -10,6 +15,29 @@ const valid = {
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-test",
   SERVER_RPC_SECRET: "server-rpc-secret-with-at-least-32-characters",
 };
+
+function verifiedGuestSignerDeployment(
+  overrides: Record<string, string> = {},
+): Record<string, string> {
+  return {
+    ...valid,
+    ...DEPLOYED_GUEST_OPERATION_SIGNER,
+    SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
+    NODE_ENV: "production",
+    LLM_PROVIDER: "openai",
+    EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+    APPLE_TEAM_ID: "A1B2C3D4E5",
+    APP_ATTEST_APP_ID: "A1B2C3D4E5.dev.snaplist.ios",
+    APP_ATTEST_TEAM_ID: "A1B2C3D4E5",
+    APP_ATTEST_BUNDLE_ID: "dev.snaplist.ios",
+    SUPABASE_SECRET_KEY: "sb_secret_test",
+    REVENUECAT_SECRET_API_KEY: "sk_revenuecat_test",
+    REVENUECAT_PROJECT_ID: "proj_test",
+    SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
+    CLERK_AUTHORIZED_PARTIES: "https://app.snaplist.example",
+    ...overrides,
+  };
+}
 
 describe("parseEnv", () => {
   it("accepts a minimal valid env and applies defaults", () => {
@@ -60,6 +88,7 @@ describe("parseEnv", () => {
   it("requires the production eBay API origin when mobile production is enabled", () => {
     const deployed = {
       ...valid,
+      ...DEPLOYED_GUEST_OPERATION_SIGNER,
       SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
@@ -90,6 +119,7 @@ describe("parseEnv", () => {
   it("requires non-placeholder App Attest identities for every deployed consumer", () => {
     const deployed = {
       ...valid,
+      ...DEPLOYED_GUEST_OPERATION_SIGNER,
       SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
@@ -139,6 +169,7 @@ describe("parseEnv", () => {
   it("requires the account-erasure Supabase and RevenueCat configuration in deployments", () => {
     const deployed = {
       ...valid,
+      ...DEPLOYED_GUEST_OPERATION_SIGNER,
       SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
@@ -170,9 +201,52 @@ describe("parseEnv", () => {
     expect(env.REVENUECAT_PROJECT_ID).toBe("proj_test");
   });
 
+  it("requires the complete verified-guest operation signer configuration in Production", () => {
+    const deployed = verifiedGuestSignerDeployment();
+
+    for (const missing of [
+      "SUPABASE_GUEST_JWT_KEY_ID",
+      "SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM",
+    ] as const) {
+      const incomplete: Record<string, string> = { ...deployed };
+      delete incomplete[missing];
+      expect(() => parseEnv(incomplete)).toThrowError(new RegExp(missing));
+    }
+
+    expect(() =>
+      parseEnv({ ...deployed, SUPABASE_SECRET_KEY: "legacy-service-role-key" }),
+    ).toThrowError(/SUPABASE_SECRET_KEY.*current Supabase secret key/);
+    expect(() =>
+      parseEnv({
+        ...deployed,
+        SUPABASE_GUEST_JWT_KEY_ID: "guest signer with spaces",
+      }),
+    ).toThrowError(/SUPABASE_GUEST_JWT_KEY_ID.*valid signing key id/);
+    expect(() => parseEnv(deployed)).not.toThrow();
+  });
+
+  it.each([
+    [
+      "malformed",
+      "-----BEGIN PRIVATE KEY-----\ntest-only\n-----END PRIVATE KEY-----",
+    ],
+    ["non-ES256", generateTestPkcs8PrivateKeyPem("P-384")],
+  ])("rejects a %s verified-guest private key in Production", (_kind, privateKeyPem) => {
+    expect(() =>
+      parseEnv(
+        verifiedGuestSignerDeployment({
+          SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM: privateKeyPem,
+        }),
+      ),
+    ).toThrowError(
+      /SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM.*importable ES256 private key/,
+    );
+  });
+
   it("rejects missing, non-public, or malformed Clerk authorized parties in deployments", () => {
     const deployed = {
       ...valid,
+      ...DEPLOYED_GUEST_OPERATION_SIGNER,
       SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
@@ -218,6 +292,7 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({
         ...valid,
+        ...DEPLOYED_GUEST_OPERATION_SIGNER,
         SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
         NODE_ENV: "production",
         LLM_PROVIDER: "openai",
@@ -239,6 +314,7 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({
         ...valid,
+        ...DEPLOYED_GUEST_OPERATION_SIGNER,
         SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
         NODE_ENV: "production",
         LLM_PROVIDER: "openai",
@@ -265,6 +341,7 @@ describe("parseEnv", () => {
     expect(() =>
       parseEnv({
         ...valid,
+        ...DEPLOYED_GUEST_OPERATION_SIGNER,
         NODE_ENV: "production",
         LLM_PROVIDER: "openai",
         EBAY_BASE_URL: "https://api.sandbox.ebay.com",
@@ -331,6 +408,7 @@ describe("parseEnv", () => {
   it("requires an openssl-generated server RPC secret in deployed environments", () => {
     const deployed = {
       ...valid,
+      ...DEPLOYED_GUEST_OPERATION_SIGNER,
       SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",
@@ -380,6 +458,7 @@ describe("parseEnv", () => {
   it("requires a public HTTPS eBay photo origin in deployed environments", () => {
     const deployed = {
       ...valid,
+      ...DEPLOYED_GUEST_OPERATION_SIGNER,
       SERVER_RPC_SECRET: DEPLOYED_SERVER_RPC_SECRET,
       NODE_ENV: "production",
       LLM_PROVIDER: "openai",

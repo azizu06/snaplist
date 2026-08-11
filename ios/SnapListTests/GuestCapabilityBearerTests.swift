@@ -623,7 +623,7 @@ final class GuestCapabilityBearerTests: XCTestCase {
                 meta: ResponseMeta(requestId: "req_test")
             )
         )
-        let observed = ObservedRequest()
+        let observed = ObservedRequests()
         ItemRunSubmissionURLProtocolStub.handler = { request in
             observed.record(request)
             return (
@@ -673,7 +673,7 @@ final class GuestCapabilityBearerTests: XCTestCase {
                 """
                 Start listing never published an accepted run — \
                 retention \(String(describing: host.retention)), \
-                reached network: \(observed.request != nil)
+                reached network: \(observed.latestRequest != nil)
                 """
             )
             return
@@ -681,7 +681,7 @@ final class GuestCapabilityBearerTests: XCTestCase {
         host.acknowledgePresentation(eventID: eventID)
         await submission.value
 
-        let request = try XCTUnwrap(observed.request)
+        let request = try XCTUnwrap(observed.latestRequest)
         // The token is a fixture literal, not a credential, so the header is
         // compared whole. A prefix check would pass for any token of that shape.
         XCTAssertEqual(
@@ -692,6 +692,101 @@ final class GuestCapabilityBearerTests: XCTestCase {
         // recovery credential is minted on this path.
         let mintCount = await recoveryStore.mintCount
         XCTAssertEqual(mintCount, 1)
+    }
+
+    @MainActor
+    func testOneScopedGuestStartListingMakesOnePOSTWhenAuthenticationIsRejected()
+        async throws {
+        let keyID = "app-attest-one-post-key-758"
+        let keyStore = AppAttestKeyStoreDouble(
+            key: AppAttestStoredKey(id: keyID, state: .verified)
+        )
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "guest-one-post-submission-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: applicationSupport)
+        }
+        let native = try await makeAppAttestScopedNativeIntake(
+            applicationSupport: applicationSupport,
+            keyStore: keyStore
+        )
+        let observed = ObservedRequests()
+        ItemRunSubmissionURLProtocolStub.handler = { request in
+            observed.record(request)
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(
+                    #"{"error":{"code":"unauthorized","message":"Authentication is required.","requestId":"req_758"}}"#.utf8
+                )
+            )
+        }
+        addTeardownBlock { ItemRunSubmissionURLProtocolStub.handler = nil }
+        let delegate = ItemRunSubmissionTaskDelegateObserver()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ItemRunSubmissionURLProtocolStub.self]
+        let session = URLSession(
+            configuration: configuration,
+            delegate: delegate,
+            delegateQueue: nil
+        )
+        let idempotencyKey = UUID(
+            uuidString: "75800000-0000-4000-8000-000000000004"
+        )!
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: ItemRunSubmissionClient(
+                    baseURL: URL(string: "https://api.snaplist.dev")!,
+                    session: session,
+                    boundary: { "snaplist-boundary" }
+                ),
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: GuestCapableBearerTokenProvider(
+                    clerk: ClerkProviderDouble(
+                        error: BearerTokenProviderError.sessionAbsent
+                    ),
+                    guestCapabilities: GuestCapabilityStoreDouble(
+                        bearer: Self.bearer(
+                            expiringIn: 3_600,
+                            appAttestKeyID: keyID
+                        )
+                    ),
+                    appAttestKeys: keyStore,
+                    now: { Self.instant }
+                ),
+                guestRecoveryCredentials: GuestRecoveryCredentialStoreDouble(),
+                newIdempotencyKey: { idempotencyKey }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+
+        await host.startListing(photos: native.snapshot.photos)
+
+        let requests = observed.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.compactMap(\.httpMethod), ["POST"])
+        XCTAssertEqual(
+            requests.compactMap {
+                $0.value(forHTTPHeaderField: "Idempotency-Key")
+            },
+            [idempotencyKey.uuidString.lowercased()]
+        )
+        XCTAssertEqual(delegate.authenticationChallengeCount, 0)
+        XCTAssertEqual(delegate.bodyStreamRenewalCount, 0)
+        XCTAssertEqual(host.retention, .authenticationRequired)
     }
 
     // MARK: Helpers
@@ -1048,11 +1143,63 @@ private actor GuestCapabilityAssertionServerDouble: AppAttestServerClient {
     }
 }
 
-private final class ObservedRequest: @unchecked Sendable {
-    private(set) var request: URLRequest?
+private final class ObservedRequests: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRequests: [URLRequest] = []
 
-    func record(_ request: URLRequest) {
-        self.request = request
+    var latestRequest: URLRequest? {
+        lock.withLock { storedRequests.last }
+    }
+
+    var requests: [URLRequest] {
+        lock.withLock { storedRequests }
+    }
+
+    @discardableResult
+    func record(_ request: URLRequest) -> Int {
+        lock.withLock {
+            storedRequests.append(request)
+            return storedRequests.count
+        }
+    }
+}
+
+private final class ItemRunSubmissionTaskDelegateObserver: NSObject,
+    URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var authenticationChallenges = 0
+    private var bodyStreamRenewals = 0
+
+    var authenticationChallengeCount: Int {
+        lock.withLock { authenticationChallenges }
+    }
+
+    var bodyStreamRenewalCount: Int {
+        lock.withLock { bodyStreamRenewals }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (
+            URLSession.AuthChallengeDisposition,
+            URLCredential?
+        ) -> Void
+    ) {
+        lock.withLock { authenticationChallenges += 1 }
+        completionHandler(.performDefaultHandling, nil)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        needNewBodyStream completionHandler: @escaping (InputStream?) -> Void
+    ) {
+        lock.withLock { bodyStreamRenewals += 1 }
+        completionHandler(
+            task.originalRequest?.httpBody.map(InputStream.init(data:))
+        )
     }
 }
 
