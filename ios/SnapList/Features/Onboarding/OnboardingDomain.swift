@@ -53,7 +53,7 @@ enum FirstValueOnboardingScreen: Int, CaseIterable, Codable, Equatable {
     var scout: FirstValueScoutPresentation {
         switch self {
         case .onb01:
-            .init(clip: "048-seedance-welcome-wave-safe-margin", fallback: "FirstValueScoutONB01", size: 116, leadingPull: -10)
+            .init(clip: "048-seedance-welcome-wave-safe-margin", fallback: "FirstValueScoutONB01", size: 104, leadingPull: -3)
         case .onb02:
             .init(clip: "007-seedance-magnifier-inspection", fallback: "FirstValueScoutONB02", size: 126, leadingPull: -14)
         case .onb03:
@@ -74,36 +74,43 @@ enum FirstValueOnboardingScreen: Int, CaseIterable, Codable, Equatable {
         return .acceptedWebM(resource: scout.clip)
     }
 
-    /// Resolves what the Scout view actually renders, with the accepted clip already
-    /// looked up in the bundle.
+    /// Resolves what the Scout view actually renders, with the accepted source clip
+    /// and its alpha-preserving runtime derivative already looked up in the bundle.
     ///
     /// The lookup lives here rather than inside the WebKit-backed view so a test can
-    /// prove the normal-motion path selects this screen's accepted clip *and* finds its
-    /// resource, without loading WebKit into the process. `usesStaticRendering` is the
-    /// UI-test seam: iOS 26.5 automation injects WebCore/WebKit accessibility bundles the
-    /// moment a WKWebView is created and crashes later tests in the same shard, so the
-    /// runner opts out of WebKit while Debug and Release builds keep the accepted WebM.
-    /// A clip that cannot be resolved degrades to its own static fallback rather than
-    /// rendering nothing.
+    /// prove the normal-motion path preserves this screen's accepted WebM as provenance
+    /// and finds the paired native-playback resource. `usesStaticRendering` is the
+    /// UI-test seam. Reduced Motion and that seam both resolve the PNG before a player
+    /// view can be constructed. Missing media degrades to the screen's own fallback.
     func scoutRendering(
         reduceMotion: Bool,
         usesStaticRendering: Bool = false,
         bundle: Bundle = .main
     ) -> FirstValueScoutRendering {
         guard !usesStaticRendering,
+              !reduceMotion,
               case .acceptedWebM(let resource) = scoutMedia(reduceMotion: reduceMotion),
-              let url = bundle.url(
-                forResource: resource,
-                withExtension: Self.scoutResourceExtension,
-                subdirectory: Self.scoutResourceSubdirectory
+              let sourceURL = bundle.url(
+                  forResource: resource,
+                  withExtension: Self.scoutSourceResourceExtension,
+                  subdirectory: Self.scoutResourceSubdirectory
+              ),
+              let runtimeURL = bundle.url(
+                  forResource: resource,
+                  withExtension: Self.scoutRuntimeResourceExtension,
+                  subdirectory: Self.scoutResourceSubdirectory
               ) else {
             return .staticFallbackPNG(asset: scout.fallback)
         }
-        return .acceptedWebM(url: url)
+        return .acceptedRuntimeDerivative(
+            sourceURL: sourceURL,
+            url: runtimeURL
+        )
     }
 
     static let scoutResourceSubdirectory = "FirstValueOnboarding"
-    static let scoutResourceExtension = "webm"
+    static let scoutSourceResourceExtension = "webm"
+    static let scoutRuntimeResourceExtension = "mov"
 }
 
 struct FirstValueScoutPresentation: Equatable {
@@ -119,7 +126,7 @@ enum FirstValueScoutMedia: Equatable {
 }
 
 enum FirstValueScoutRendering: Equatable {
-    case acceptedWebM(url: URL)
+    case acceptedRuntimeDerivative(sourceURL: URL, url: URL)
     case staticFallbackPNG(asset: String)
 }
 
@@ -138,7 +145,8 @@ enum FirstValueScoutRendering: Equatable {
 enum FirstValueOnboardingOutcome: String, Codable, Equatable, CaseIterable {
     /// The seller reached ONB-06 and chose `Start scanning`.
     case completed
-    /// The seller used `Skip` before ONB-06.
+    /// A compatibility value written by an earlier onboarding revision. New Skip actions
+    /// advance to ONB-06, so every newly completed flow records `.completed` instead.
     case skipped
     /// The six screens were never shown because the seller already had progress on
     /// this device — a restored durable capture, or persisted onboarding progress past
@@ -197,7 +205,7 @@ final class FirstValueOnboardingModel {
 
     func skip() {
         guard screen != .onb06, outcome == nil else { return }
-        complete(with: .skipped)
+        screen = .onb06
     }
 
     /// Records that onboarding was superseded by work the seller already has on this
@@ -330,11 +338,6 @@ struct BackgroundExampleRow: Hashable {
 }
 
 enum FirstValueOnboardingCopy {
-    /// ONB-05 shows what the Trophy Wall looks like while items finish. No item exists
-    /// during onboarding, so the screen is labelled as an illustration and carries no
-    /// spinner, percentage, or other affordance that would claim work is happening now.
-    static let backgroundExampleCaption = "An example — nothing is running yet"
-
     static let backgroundExampleRows: [BackgroundExampleRow] = [
         .init(
             imageName: "FirstValueJacket",

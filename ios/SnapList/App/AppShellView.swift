@@ -75,12 +75,7 @@ struct AppShellView: View {
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
             } else if shouldShowFirstValueOnboarding {
-                FirstValueOnboardingView(
-                    model: firstValueOnboardingModel,
-                    forceReducedMotion: configuration.forceReducedMotion,
-                    usesStaticScoutRendering: configuration.usesStaticScoutRendering,
-                    didFinish: handleFirstValueOnboardingCompletion
-                )
+                firstValueOnboardingHost
             } else if shouldBypassRetiredLegacyIntro {
                 Color.clear
                     .accessibilityHidden(true)
@@ -558,6 +553,26 @@ struct AppShellView: View {
         }
     }
 
+    /// Keeps the typed navigation stack mounted before the seller chooses the
+    /// existing-account boundary. The route is appended synchronously to this live
+    /// stack, so the handoff needs no conditional-shell state or lifecycle scheduling.
+    private var firstValueOnboardingHost: some View {
+        NavigationStack(path: router.pathBinding(for: router.selectedTab)) {
+            FirstValueOnboardingView(
+                model: firstValueOnboardingModel,
+                forceReducedMotion: configuration.forceReducedMotion,
+                usesStaticScoutRendering: configuration.usesStaticScoutRendering,
+                didFinish: handleFirstValueOnboardingCompletion,
+                openExistingAccount: {
+                    router.navigate(to: .future(.account))
+                }
+            )
+            .navigationDestination(for: AppRoute.self) { route in
+                destination(for: route)
+            }
+        }
+    }
+
     @ViewBuilder
     private func primaryFeature(for tab: PrimaryTab) -> some View {
         switch tab {
@@ -741,6 +756,7 @@ struct AppShellView: View {
             switch FutureDestinationPresentation.resolve(boundary) {
             case .accountEntry:
                 AccountEntryView()
+                    .accessibilityIdentifier("account-entry")
             case .placeholder(let destination):
                 FoundationDestinationView(destination: destination)
             }

@@ -616,15 +616,15 @@ final class OnboardingFlowTests: XCTestCase {
         )
     }
 
-    /// The completion contract #566 consumes: every terminal outcome survives relaunch
-    /// as itself, not as a bare "done".
+    /// Every terminal onboarding outcome survives relaunch as itself, not as a bare
+    /// "done". Skip is not terminal: it lands on ONB-06 until the seller chooses
+    /// Start scanning.
     @MainActor
     func testEveryOnboardingOutcomeReachesTheDurableCompletionSeam() throws {
         let terminalPaths: [(FirstValueOnboardingOutcome, (FirstValueOnboardingModel) -> Void)] = [
             (.completed, { model in
                 for _ in FirstValueOnboardingScreen.allCases { model.continueForward() }
             }),
-            (.skipped, { model in model.skip() }),
             (.supersededByExistingProgress, { model in model.reconcileExistingProgress() }),
         ]
 
@@ -699,14 +699,15 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testFirstValueOnboardingSkipMarksCompleteAndEmitsSkipSignal() {
+    func testFirstValueOnboardingSkipAdvancesToIncludedScreenWithoutCompleting() {
         let store = InMemoryFirstValueOnboardingCompletionStore()
         let model = FirstValueOnboardingModel(completionStore: store)
 
         model.skip()
 
-        XCTAssertEqual(store.outcome, .skipped)
-        XCTAssertEqual(model.outcome, .skipped)
+        XCTAssertEqual(model.screen, .onb06)
+        XCTAssertNil(store.outcome)
+        XCTAssertNil(model.outcome)
     }
 
     @MainActor
@@ -741,7 +742,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(
             FirstValueOnboardingScreen.allCases.map(\.scout),
             [
-                .init(clip: "048-seedance-welcome-wave-safe-margin", fallback: "FirstValueScoutONB01", size: 116, leadingPull: -10),
+                .init(clip: "048-seedance-welcome-wave-safe-margin", fallback: "FirstValueScoutONB01", size: 104, leadingPull: -3),
                 .init(clip: "007-seedance-magnifier-inspection", fallback: "FirstValueScoutONB02", size: 126, leadingPull: -14),
                 .init(clip: "032-seedance-barcode-scan", fallback: "FirstValueScoutONB03", size: 123, leadingPull: -12),
                 .init(clip: "040-seedance-recovery-safe-cue", fallback: "FirstValueScoutONB04", size: 147, leadingPull: -10),
@@ -770,26 +771,41 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     /// Normal motion is the shipping path, so it needs a seam a test can execute. This
-    /// asserts the accepted clip is both selected *and* present in the bundle, without
-    /// constructing the WebKit-backed view.
-    func testNormalMotionResolvesEachScreensAcceptedWebMInTheBundle() throws {
+    /// asserts the accepted WebM remains bundled as provenance and the paired native
+    /// playback derivative is present, without constructing an AVPlayer.
+    func testNormalMotionResolvesEachScreensAcceptedRuntimeDerivative() throws {
         // These tests are hosted by SnapList.app, so `.main` is the app bundle that
         // actually carries the accepted clips — the same lookup the view performs.
         let bundle = Bundle.main
         for screen in FirstValueOnboardingScreen.allCases {
             let rendering = screen.scoutRendering(reduceMotion: false, bundle: bundle)
-            guard case .acceptedWebM(let url) = rendering else {
-                XCTFail("ONB-0\(screen.rawValue) did not select its accepted WebM: \(rendering)")
+            guard case .acceptedRuntimeDerivative(let sourceURL, let url) = rendering else {
+                XCTFail("ONB-0\(screen.rawValue) did not select its accepted runtime derivative: \(rendering)")
                 continue
             }
+            XCTAssertEqual(
+                sourceURL.deletingPathExtension().lastPathComponent,
+                screen.scout.clip
+            )
+            XCTAssertEqual(
+                sourceURL.pathExtension,
+                FirstValueOnboardingScreen.scoutSourceResourceExtension
+            )
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: sourceURL.path),
+                "ONB-0\(screen.rawValue) lost its accepted WebM provenance."
+            )
             XCTAssertEqual(
                 url.deletingPathExtension().lastPathComponent,
                 screen.scout.clip
             )
-            XCTAssertEqual(url.pathExtension, FirstValueOnboardingScreen.scoutResourceExtension)
+            XCTAssertEqual(
+                url.pathExtension,
+                FirstValueOnboardingScreen.scoutRuntimeResourceExtension
+            )
             XCTAssertTrue(
                 FileManager.default.fileExists(atPath: url.path),
-                "ONB-0\(screen.rawValue) resolved a clip URL that is not in the bundle."
+                "ONB-0\(screen.rawValue) resolved a derivative URL that is not in the bundle."
             )
         }
     }
@@ -824,14 +840,9 @@ final class OnboardingFlowTests: XCTestCase {
         }
     }
 
-    /// ONB-05 shows what the Trophy Wall looks like while items finish, but no item
-    /// exists during onboarding. The screen must say so and must not carry a progress
-    /// affordance that claims work is happening now.
-    func testBackgroundExampleIsLabelledAnIllustrationNotLiveWork() {
-        XCTAssertEqual(
-            FirstValueOnboardingCopy.backgroundExampleCaption,
-            "An example — nothing is running yet"
-        )
+    /// ONB-05 shows the approved three-row work example. The package owns those rows
+    /// and does not add explanatory caption copy.
+    func testBackgroundExampleKeepsTheApprovedThreeRowsWithoutExtraCaptionCopy() {
         XCTAssertEqual(FirstValueOnboardingCopy.backgroundExampleRows.count, 3)
         XCTAssertEqual(
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.item),
@@ -845,99 +856,6 @@ final class OnboardingFlowTests: XCTestCase {
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.imageName),
             ["FirstValueJacket", "FirstValueLamp", "FirstValueSneaker"],
             "Each row carries its own asset, so a new row cannot outrun the image list."
-        )
-    }
-
-    /// The XCUI counterpart cannot carry this. Each row ends in
-    /// `.accessibilityElement(children: .combine)`, which folds every descendant into a
-    /// single element, so a restored `ProgressView` never reaches the accessibility tree
-    /// and `app.progressIndicators.count == 0` stays true whether or not the spinner is
-    /// there. SwiftUI derives `body`'s concrete type from the subtree written in it, so
-    /// read that instead.
-    ///
-    /// This reaches exactly one revert: a progress affordance written **directly** in the
-    /// row's own body, which is where the deleted one lived. One reached through a nested
-    /// `View` type or an `AnyView` stays hidden behind that type's name, so this is a
-    /// tripwire on the row, not a proof about the whole screen.
-    ///
-    /// The rendered type does not vary with the row's data — the three rows differ only in
-    /// the strings they carry — so one row proves it for all of them.
-    @MainActor
-    func testBackgroundExampleRowBodyWritesNoProgressAffordance() throws {
-        let row = try XCTUnwrap(FirstValueOnboardingCopy.backgroundExampleRows.first)
-        let renderedType = String(
-            reflecting: type(of: BackgroundExampleRowView(row: row).body)
-        )
-
-        // `ProgressViewStyle` is deliberately absent: every type naming it also names
-        // `ProgressView`, so asserting it separately could never fail on its own.
-        for affordance in ["ProgressView", "Gauge"] {
-            XCTAssertFalse(
-                renderedType.contains(affordance),
-                """
-                An ONB-05 example row writes a \(affordance). Nothing is running while \
-                onboarding is on screen, so the row must claim no progress: \(renderedType)
-                """
-            )
-        }
-    }
-
-    /// The Scout clip allocates its `WKWebView` through the Objective-C runtime, and the
-    /// ownership there balances two references that ARC and the `init` family each think
-    /// they own. An extra retain would not crash — it would strand one `WKWebView` and its
-    /// WebContent process per screen transition, six times over the flow — so assert the
-    /// balance directly: the view must deallocate once the last strong reference drops.
-    ///
-    /// The drop is observed after a bounded run-loop wait rather than synchronously,
-    /// because on iOS a `WKWebView`'s last release lands one main-run-loop turn after the
-    /// local `autoreleasepool` drains — WebKit autoreleases into the pool `CFRunLoop` keeps
-    /// around each iteration, which is the pool *outside* this method. An immediate
-    /// `XCTAssertNil` therefore reports "still alive" for a view whose ownership is
-    /// provably balanced: a plain `WKWebView(frame:configuration:)` fails it exactly as the
-    /// runtime-allocated one does. The wait removes that false failure and nothing else.
-    @MainActor
-    func testScoutClipWebViewLeavesNoUnbalancedRetain() throws {
-        weak var firstObserved: AnyObject?
-        weak var secondObserved: AnyObject?
-
-        try autoreleasepool {
-            guard let first = WebKitRuntime.makeConfiguredWebView(),
-                  let second = WebKitRuntime.makeConfiguredWebView() else {
-                throw XCTSkip("WebKit is unavailable in this runner.")
-            }
-            XCTAssertFalse(first === second)
-            firstObserved = first
-            secondObserved = second
-        }
-
-        assertDeallocates(firstObserved)
-        assertDeallocates(secondObserved)
-    }
-
-    /// Spins the main run loop until `reference` clears, and fails if it never does.
-    ///
-    /// The budget bounds the wait; it is not a timing tolerance to widen when this gets
-    /// noisy. Deallocation is the thing under test, and the two outcomes are not close
-    /// together: a balanced view clears on the first turn, while one held by a single extra
-    /// retain never clears — it exhausts any budget and fails. Raising the number cannot
-    /// turn that failure green, so a red here is always a real unbalanced retain.
-    @MainActor
-    private func assertDeallocates(
-        _ reference: @autoclosure () -> AnyObject?,
-        within budget: TimeInterval = 5,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        let deadline = Date().addingTimeInterval(budget)
-        while reference() != nil, Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
-        }
-
-        XCTAssertNil(
-            reference(),
-            "The Scout clip web view outlived its last strong reference.",
-            file: file,
-            line: line
         )
     }
 
