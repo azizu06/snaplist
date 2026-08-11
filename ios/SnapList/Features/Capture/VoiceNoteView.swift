@@ -416,7 +416,7 @@ struct VoiceNoteSheet: View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
                 .accessibilityHidden(true)
-            Text("Voice note couldn’t be saved. Try again.")
+            Text("Voice note couldn't be saved. Try again.")
                 .snapListTypography(.rowTitle)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
             SnapListSecondaryButton(title: "Try again") {

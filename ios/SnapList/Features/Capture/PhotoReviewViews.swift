@@ -14,7 +14,8 @@ enum PhotoReviewV5VisualContract {
     static let thumbnailRadius: CGFloat = 12
     static let thumbnailGap: CGFloat = 10
     static let thumbnailStripTopPadding: CGFloat = 16
-    static let thumbnailStripBottomPadding: CGFloat = 28
+    static let actionRowHeight: CGFloat = 44
+    static let actionRowGap: CGFloat = 8
     static let voiceRowHeight: CGFloat = 56
     static let voiceRowTopPadding: CGFloat = 16
     static let voiceRowRadius: CGFloat = 14
@@ -3457,11 +3458,6 @@ struct PhotoReviewView: View {
                                         PhotoReviewV5VisualContract
                                             .thumbnailStripTopPadding
                                     )
-                                    .padding(
-                                        .bottom,
-                                        PhotoReviewV5VisualContract
-                                            .thumbnailStripBottomPadding
-                                    )
 
                                 if let recovery = intake?.recovery {
                                     Text(recovery.message)
@@ -3473,7 +3469,17 @@ struct PhotoReviewView: View {
 
                                 if store.actionsPhotoID != nil {
                                     actionRow
+                                        .frame(
+                                            width: contentWidth,
+                                            height: PhotoReviewV5VisualContract
+                                                .actionRowHeight
+                                        )
                                         .photoReviewLayoutLandmark(.actionRow)
+                                        .padding(
+                                            .top,
+                                            PhotoReviewV5VisualContract
+                                                .voiceRowTopPadding
+                                        )
                                 }
 
                                 if let openBoundary {
@@ -4305,12 +4311,19 @@ struct PhotoReviewView: View {
 
     @ViewBuilder
     private var actionRow: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: PhotoReviewV5VisualContract.actionRowGap) {
             if let photoID = store.actionsPhotoID {
-                Button("Replace") {
+                Button {
                     presentPicker(.replace(photoID: photoID))
+                } label: {
+                    Text("Replace")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: PhotoReviewV5VisualContract.actionRowHeight,
+                    maxHeight: PhotoReviewV5VisualContract.actionRowHeight
+                )
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Replace this photo")
                 .accessibilityIdentifier("photo-review.replace")
@@ -4320,8 +4333,15 @@ struct PhotoReviewView: View {
                 )
             }
 
-            Button("Delete", role: .destructive, action: performDelete)
-                .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
+            Button(role: .destructive, action: performDelete) {
+                Text("Delete")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: PhotoReviewV5VisualContract.actionRowHeight,
+                    maxHeight: PhotoReviewV5VisualContract.actionRowHeight
+                )
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Delete this photo")
                 .accessibilityIdentifier("photo-review.delete")
@@ -4453,7 +4473,7 @@ struct PhotoReviewView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, PhotoReviewV5VisualContract.footerVerticalPadding)
-        .padding(.bottom, 8)
+        .padding(.bottom, PhotoReviewV5VisualContract.footerVerticalPadding)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(SnapListColorToken.divider.color)
@@ -4518,7 +4538,7 @@ struct PhotoReviewView: View {
                 photoCount: store.photos.count,
                 isPickerActive: store.activePickerRequest != nil
             )
-                || isCommitting
+                || (isCommitting && !allowsPrimaryActionDuringCommit)
         )
         .accessibilityIdentifier("photo-review.start-listing")
         .accessibilityFocused($focusedStartListing)
@@ -4527,6 +4547,17 @@ struct PhotoReviewView: View {
             button.buttonStyle(PhotoReviewStartListingButtonStyle())
         } else {
             button.buttonStyle(PhotoReviewSecondaryActionButtonStyle())
+        }
+    }
+
+    private var allowsPrimaryActionDuringCommit: Bool {
+        switch submissionPresentation.primaryActionEvent {
+        case .cancelSubmission, .completeSavedSubmission:
+            true
+        case .openVoiceNote, .startListing, .createAccount,
+             .retryReceiptMismatch, .retryAmbiguousSubmission,
+             .reviewSubmission, .reviewConflictedSubmission:
+            false
         }
     }
 
