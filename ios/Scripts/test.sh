@@ -34,15 +34,16 @@ if (( ${+SNAPLIST_IOS_ONLY_TESTING} )); then
 fi
 
 if (( ${+SNAPLIST_IOS_SHARD} )); then
-  case $SNAPLIST_IOS_SHARD in
-    unit | ui-1 | ui-2) ;;
-    *)
-      print -u2 -r -- "SNAPLIST_IOS_SHARD must be unit, ui-1, or ui-2."
-      exit 64
-      ;;
-  esac
-
   "$snaplist_shard_validator" "$snaplist_shard_inventory"
+
+  if ! ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    exit inventory.fetch("shards").key?(ARGV.fetch(1)) ? 0 : 1
+  ' "$snaplist_shard_inventory" "$SNAPLIST_IOS_SHARD"; then
+    print -u2 -r -- "SNAPLIST_IOS_SHARD is not declared in the shard inventory."
+    exit 64
+  fi
+
   snaplist_shard_selectors=(
     "${(@f)$(ruby -rjson -e '
       inventory = JSON.parse(File.read(ARGV.fetch(0)))

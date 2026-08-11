@@ -29,6 +29,8 @@ job_typo_workflow_file=${temporary_directory}/job-typo-ios.yml
 job_run_scoped_workflow_file=${temporary_directory}/job-run-scoped-ios.yml
 omitted_shard_inventory_file=${temporary_directory}/omitted-test-shards.json
 duplicated_shard_inventory_file=${temporary_directory}/duplicated-test-shards.json
+empty_shard_inventory_file=${temporary_directory}/empty-test-shards.json
+stale_timing_inventory_file=${temporary_directory}/stale-timing-test-shards.json
 nested_test_repository=${temporary_directory}/nested-test-repository
 
 mkdir -p "$fake_bin" "$target_repository"
@@ -99,10 +101,13 @@ assert_default_runs_the_full_suite() {
 }
 
 assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
-  ruby -ryaml -e '
+  ruby -rjson -ryaml -e '
     workflow = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+    inventory = JSON.parse(File.read(ARGV.fetch(1)))
     jobs = workflow.fetch("jobs")
     workflow_environment = workflow.fetch("env")
+    expected_shards = ["unit"] +
+      (1..inventory.fetch("ui_shard_count")).map { |index| "ui-#{index}" }
 
     abort "Xcode toolchain must be pinned" unless
       workflow_environment.fetch("DEVELOPER_DIR") ==
@@ -132,9 +137,9 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       shard_job.fetch("runs-on") == "macos-26"
     abort "all shard failures must remain visible" unless
       shard_job.fetch("strategy").fetch("fail-fast") == false
-    abort "automatic suite must define exactly three deterministic shards" unless
+    abort "automatic suite must match the manifest-declared deterministic shards" unless
       shard_job.fetch("strategy").fetch("matrix").fetch("shard") ==
-        ["unit", "ui-1", "ui-2"]
+        expected_shards
 
     checkout_step = shard_job.fetch("steps").find do |step|
       step["uses"] == "actions/checkout@v4"
@@ -217,7 +222,7 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       focused_job.fetch("if") == "github.event_name == '\''workflow_dispatch'\''"
     abort "focused dispatch budget must remain 60 minutes" unless
       focused_job.fetch("timeout-minutes") == 60
-  ' "$workflow_file"
+  ' "$workflow_file" "$shard_inventory_file"
 }
 
 assert_focused_selector_uses_the_target_repository() {
@@ -278,6 +283,60 @@ assert_shard_inventory_fails_closed_on_omission_and_duplication() {
   ! "$shard_inventory_validator" "$duplicated_shard_inventory_file" 2>/dev/null
 }
 
+assert_shard_inventory_fails_closed_on_empty_declared_shard() {
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    ui_selectors = inventory.fetch("shards")
+      .select { |name, _selectors| name.start_with?("ui-") }
+      .values
+      .flatten
+    inventory.fetch("shards")["ui-1"] = ui_selectors
+    inventory.fetch("shards")["ui-2"] = []
+    inventory.fetch("shards")["ui-3"] = []
+    inventory.fetch("baseline").fetch("selector_observed_seconds").transform_values! { 0 }
+    inventory.fetch("baseline")["selector_seconds_total"] = 0
+    inventory.fetch("baseline")["balanced_ui_shard_observed_seconds"] = {
+      "ui-1" => 0,
+      "ui-2" => 0,
+      "ui-3" => 0
+    }
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$empty_shard_inventory_file"
+
+  ! "$shard_inventory_validator" "$empty_shard_inventory_file" 2>/dev/null
+}
+
+assert_shard_inventory_fails_closed_on_stale_timing_evidence() {
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    inventory.fetch("baseline")["ui_test_count"] -= 1
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$stale_timing_inventory_file"
+
+  if "$shard_inventory_validator" "$stale_timing_inventory_file" 2>/dev/null; then
+    return 1
+  fi
+
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    inventory.fetch("baseline")["selector_seconds_total"] += 1
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$stale_timing_inventory_file"
+
+  if "$shard_inventory_validator" "$stale_timing_inventory_file" 2>/dev/null; then
+    return 1
+  fi
+
+  ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    inventory.fetch("baseline")
+      .fetch("balanced_ui_shard_observed_seconds")["ui-1"] += 1
+    File.write(ARGV.fetch(1), JSON.pretty_generate(inventory))
+  ' "$shard_inventory_file" "$stale_timing_inventory_file"
+
+  ! "$shard_inventory_validator" "$stale_timing_inventory_file" 2>/dev/null
+}
+
 assert_nested_ui_test_file_cannot_be_silently_omitted() {
   local validation_error_file=${temporary_directory}/nested-test-validation-error
 
@@ -318,9 +377,17 @@ EOF
 
 assert_declared_shard_selectors_reach_xcodebuild_once() {
   local shard
+  local -a declared_shards
   local expected_arguments_file=${temporary_directory}/expected-xcodebuild-arguments
+  declared_shards=(
+    "${(@f)$(ruby -rjson -e '
+      inventory = JSON.parse(File.read(ARGV.fetch(0)))
+      puts ["unit"] +
+        (1..inventory.fetch("ui_shard_count")).map { |index| "ui-#{index}" }
+    ' "$shard_inventory_file")}"
+  )
 
-  for shard in unit ui-1 ui-2; do
+  for shard in "${declared_shards[@]}"; do
     : > "$arguments_file"
     : > "$expected_arguments_file"
 
@@ -343,25 +410,29 @@ assert_declared_shard_selectors_reach_xcodebuild_once() {
 }
 
 assert_invalid_or_conflicting_shard_selection_fails_before_xcodebuild() {
+  local exit_status
+  local invalid_shard
+  invalid_shard=$(ruby -rjson -e '
+    inventory = JSON.parse(File.read(ARGV.fetch(0)))
+    puts "ui-#{inventory.fetch("ui_shard_count") + 1}"
+  ' "$shard_inventory_file")
+
   : > "$arguments_file"
-  if run_test_script unset "" "" "ui-3"; then
+  run_test_script unset "" "" "$invalid_shard"
+  exit_status=$?
+
+  if [[ $exit_status -ne 64 || -s $arguments_file ]]; then
     return 1
   fi
 
-  if [[ -s $arguments_file ]]; then
-    return 1
-  fi
-
   : > "$arguments_file"
-  if run_test_script set \
+  run_test_script set \
     "SnapListTests/CaptureFlowTests/testShutterAccessibleNameOnlyAnnouncesTheLimitAtFiveDurablePhotos" \
     "" \
     "unit"
-  then
-    return 1
-  fi
+  exit_status=$?
 
-  [[ ! -s $arguments_file ]]
+  [[ $exit_status -eq 64 && ! -s $arguments_file ]]
 }
 
 assert_manual_dispatch_cannot_cancel_automatic_runs() {
@@ -572,6 +643,8 @@ for contract_case in \
   assert_focused_selector_uses_the_target_repository \
   assert_malformed_selectors_fail_before_xcodebuild \
   assert_shard_inventory_fails_closed_on_omission_and_duplication \
+  assert_shard_inventory_fails_closed_on_empty_declared_shard \
+  assert_shard_inventory_fails_closed_on_stale_timing_evidence \
   assert_nested_ui_test_file_cannot_be_silently_omitted \
   assert_declared_shard_selectors_reach_xcodebuild_once \
   assert_invalid_or_conflicting_shard_selection_fails_before_xcodebuild \
