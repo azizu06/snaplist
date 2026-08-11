@@ -2003,6 +2003,8 @@ final class ItemRunSubmissionTests: XCTestCase {
         case .rejected: .rejected
         case .authenticationRequired: .authenticationRequired
         case .conflict: .conflict
+        case .offline: .offline
+        case .cancelled: .cancelled
         case .ambiguous, .created, .replayed: .ambiguous
         }
     }

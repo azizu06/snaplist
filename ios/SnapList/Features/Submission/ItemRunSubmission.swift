@@ -257,6 +257,12 @@ struct AcceptedItemRunHandoff: Equatable, Sendable {
 
 /// What one transport attempt resolved to. Every case except the two receipts leaves
 /// the seller's intake untouched.
+enum ItemRunSubmissionAmbiguityReason: Equatable, Sendable {
+    case offline
+    case cancelled
+    case unknown
+}
+
 enum ItemRunSubmissionTransportOutcome: Equatable, Sendable {
     /// `202` — the item, reservation, run, and queue message committed on this attempt.
     case created(MobileItemSubmissionEnvelope.DataPayload)
@@ -274,11 +280,15 @@ enum ItemRunSubmissionTransportOutcome: Equatable, Sendable {
     case rateLimited(reason: String?)
     /// Offline, cancelled, `503`, or any other unknown outcome. The submission may or
     /// may not have committed, so the exact bytes and key have to be retried as-is.
+    case offline
+    case cancelled
     case ambiguous
 }
 
 /// Why a submission left the seller's intake in place.
 enum ItemRunSubmissionRetention: Equatable, Sendable {
+    case offline
+    case cancelled
     case ambiguous
     case conflict
     case creditDenied(reason: String?)

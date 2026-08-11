@@ -785,23 +785,47 @@ extension AppDependencies {
             }
         }
 
-        let renderer = UIGraphicsImageRenderer(
-            size: CGSize(width: 16, height: 16)
-        )
-        let photoData = renderer.jpegData(
-            withCompressionQuality: 0.9
-        ) { context in
-            UIColor.systemTeal.setFill()
-            context.fill(
-                CGRect(x: 0, y: 0, width: 16, height: 16)
+        let usesVoiceDesignFixture = ProcessInfo.processInfo.arguments
+            .contains { $0.hasPrefix("--voice-note-") }
+        let fixtureColors: [(background: UIColor, subject: UIColor)] = [
+            (
+                UIColor(red: 0.91, green: 0.90, blue: 0.88, alpha: 1),
+                UIColor(red: 0.76, green: 0.74, blue: 0.70, alpha: 1)
+            ),
+            (
+                UIColor(red: 0.84, green: 0.82, blue: 0.78, alpha: 1),
+                UIColor(red: 0.58, green: 0.55, blue: 0.50, alpha: 1)
+            ),
+            (
+                UIColor(red: 0.45, green: 0.56, blue: 0.64, alpha: 1),
+                UIColor(red: 0.23, green: 0.31, blue: 0.37, alpha: 1)
             )
+        ]
+        let fixturePhotoCount = usesVoiceDesignFixture ? 3 : 1
+        let photoData = (0..<fixturePhotoCount).map { index in
+            let renderer = UIGraphicsImageRenderer(
+                size: CGSize(width: 16, height: 16)
+            )
+            let colors = fixtureColors[index]
+            return renderer.jpegData(
+                withCompressionQuality: 0.9
+            ) { context in
+                colors.background.setFill()
+                context.fill(
+                    CGRect(x: 0, y: 0, width: 16, height: 16)
+                )
+                colors.subject.setFill()
+                context.fill(
+                    CGRect(x: 4, y: 3, width: 8, height: 10)
+                )
+            }
         }
         let result = await nativeIntake.performReturningSnapshot(
-            .addPhotos([
-                NativeIntake.PhotoInput {
-                    photoData
+            .addPhotos(
+                photoData.map { data in
+                    NativeIntake.PhotoInput { data }
                 }
-            ]),
+            ),
             expectedActivationID:
                 initialSnapshot.version.activationID
         )

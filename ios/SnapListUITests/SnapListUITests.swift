@@ -720,6 +720,86 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(interruptedCopy.exists)
     }
 
+    func testVoiceNoteRecordingCancelAndSaveBothDismissToExactRowTruth() {
+        let canceled = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        let cancel = canceled.buttons["voice-note.cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 2))
+        cancel.tap()
+        let emptyRow = canceled.buttons["photo-review.voice"]
+        XCTAssertTrue(emptyRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            emptyRow.label,
+            "Voice note, Add details the photos might miss, collapsed"
+        )
+        canceled.terminate()
+
+        let saved = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        let save = saved.buttons["voice-note.save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2))
+        save.tap()
+        let savedRow = saved.buttons["photo-review.voice"]
+        XCTAssertTrue(savedRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(savedRow.label, "Voice note, 0:07, collapsed")
+    }
+
+    func testSubmissionVisualFixturesExposeWorkingCancelRetryAndDoneActions() {
+        let saving = XCUIApplication()
+        saving.launchArguments = [
+            "--photo-review-state=REV-02",
+            "--submission-visual-state=SUB-01",
+            "--zero-network-fixtures",
+        ]
+        saving.launchAfterRetiringPriorInstance()
+
+        let savingAction = saving.buttons["photo-review.start-listing"]
+        XCTAssertTrue(savingAction.waitForExistence(timeout: 3))
+        XCTAssertEqual(savingAction.label, "Cancel")
+        savingAction.tap()
+
+        let cancelledMessage = saving.staticTexts[
+            "photo-review.submission-message"
+        ]
+        XCTAssertTrue(cancelledMessage.waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            cancelledMessage.label,
+            "Not sent yet. Your item is saved on this phone."
+        )
+        XCTAssertEqual(savingAction.label, "Start listing")
+
+        savingAction.tap()
+        let retrySaving = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                savingAction.label == "Cancel"
+            },
+            object: savingAction
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [retrySaving], timeout: 2),
+            .completed
+        )
+        saving.terminate()
+
+        let accepted = XCUIApplication()
+        accepted.launchArguments = [
+            "--photo-review-state=REV-02",
+            "--submission-visual-state=SUB-05",
+            "--zero-network-fixtures",
+        ]
+        accepted.launchAfterRetiringPriorInstance()
+
+        let done = accepted.buttons["photo-review.start-listing"]
+        XCTAssertTrue(done.waitForExistence(timeout: 3))
+        XCTAssertEqual(done.label, "Done")
+        done.tap()
+        XCTAssertEqual(done.label, "Start listing")
+    }
+
     func testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -751,9 +831,9 @@ final class SnapListUITests: XCTestCase {
 
         let saving = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                startListing.label == "Saving your item"
-                    && !startListing.isEnabled
-                    && !addPhoto.isEnabled
+                startListing.label == "Cancel"
+                    && startListing.isEnabled
+                    && !addPhoto.isHittable
             },
             object: startListing
         )
@@ -2688,7 +2768,8 @@ final class SnapListUITests: XCTestCase {
     }
 
     private func launchVoiceNoteFixture(
-        _ fixtureArgument: String
+        _ fixtureArgument: String,
+        expectedControl: String = "voice-note.close"
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -2709,7 +2790,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(voice.waitForExistence(timeout: 3))
         voice.tap()
         XCTAssertTrue(
-            app.buttons["voice-note.close"].waitForExistence(timeout: 2)
+            app.buttons[expectedControl].waitForExistence(timeout: 2)
         )
         return app
     }

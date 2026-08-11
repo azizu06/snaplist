@@ -157,6 +157,15 @@ enum SubmissionFixture: String, Equatable {
     case rateLimited = "rate-limited"
 }
 
+enum PhotoReviewSubmissionVisualStateID: String, Equatable {
+    case saving = "SUB-01"
+    case cancelled = "SUB-01-cancelled"
+    case offline = "SUB-02"
+    case unknown = "SUB-03"
+    case conflict = "SUB-04"
+    case accepted = "SUB-05"
+}
+
 enum ProGateFixtureState: String, Equatable {
     case pay01 = "PAY-01"
     case pay03 = "PAY-03"
@@ -283,6 +292,7 @@ struct LaunchConfiguration: Equatable {
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
     var submissionFixture: SubmissionFixture?
+    var submissionVisualState: PhotoReviewSubmissionVisualStateID?
     var submissionAcknowledgmentNotification:
         SubmissionAcknowledgmentNotificationName?
     var runDetailFixture: RunDetailFixture?
@@ -312,6 +322,7 @@ struct LaunchConfiguration: Equatable {
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
+        submissionVisualState: nil,
         submissionAcknowledgmentNotification: nil,
         runDetailFixture: nil,
         listingReviewFixture: nil,
@@ -341,6 +352,7 @@ struct LaunchConfiguration: Equatable {
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
         submissionFixture: nil,
+        submissionVisualState: nil,
         submissionAcknowledgmentNotification: nil,
         runDetailFixture: .loaded,
         listingReviewFixture: nil,
@@ -394,6 +406,17 @@ struct LaunchConfiguration: Equatable {
                 configuration.submissionFixture = SubmissionFixture(rawValue: value)
 #if DEBUG
                 if configuration.submissionFixture != nil {
+                    configuration.usesZeroNetworkFixtures = true
+                }
+#endif
+            } else if argument.hasPrefix("--submission-visual-state=") {
+                let value = String(
+                    argument.dropFirst("--submission-visual-state=".count)
+                )
+                configuration.submissionVisualState =
+                    PhotoReviewSubmissionVisualStateID(rawValue: value)
+#if DEBUG
+                if configuration.submissionVisualState != nil {
                     configuration.usesZeroNetworkFixtures = true
                 }
 #endif

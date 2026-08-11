@@ -15,6 +15,8 @@ enum ItemRunSubmissionPresentationEvent: Equatable, Sendable {
 
 enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
     enum PhotoReview: Equatable, Sendable {
+        case sub01Cancelled
+        case sub02
         case sub03
         case sub04
         case sub06
@@ -32,6 +34,10 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
 
     init(retention: ItemRunSubmissionRetention) {
         switch retention {
+        case .cancelled:
+            self = .photoReview(.sub01Cancelled)
+        case .offline:
+            self = .photoReview(.sub02)
         case .ambiguous:
             self = .photoReview(.sub03)
         case .conflict:
@@ -62,6 +68,8 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
 }
 
 enum PhotoReviewSubmissionRejectionFamily: Equatable {
+    case cancelled
+    case offline
     case ambiguity
     case conflict
     case tryAgain
@@ -69,6 +77,10 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
 
     init?(retention: ItemRunSubmissionRetention) {
         switch ItemRunSubmissionDestinationDecision(retention: retention) {
+        case .photoReview(.sub01Cancelled):
+            self = .cancelled
+        case .photoReview(.sub02):
+            self = .offline
         case .photoReview(.sub03):
             self = .ambiguity
         case .photoReview(.sub04):
@@ -84,15 +96,21 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
 
     var primaryActionLabel: String {
         switch self {
-        case .ambiguity, .tryAgain:
+        case .offline, .ambiguity, .tryAgain:
             "Try again"
-        case .conflict, .review:
+        case .cancelled, .conflict:
+            "Start listing"
+        case .review:
             "Review"
         }
     }
 
     var message: String {
         switch self {
+        case .cancelled:
+            "Not sent yet. Your item is saved on this phone."
+        case .offline:
+            "You're offline. Your item is saved on this phone."
         case .ambiguity:
             "We couldn't confirm this went through. Your item is still saved on this phone."
         case .conflict:
@@ -108,14 +126,32 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         switch self {
         case .conflict:
             "Something changed since your last try."
-        case .ambiguity, .tryAgain, .review:
+        case .cancelled, .offline, .ambiguity, .tryAgain, .review:
             message
+        }
+    }
+
+    var statusKind: PhotoReviewSubmissionPresentation.StatusKind {
+        switch self {
+        case .offline:
+            .offline
+        case .cancelled, .ambiguity, .conflict, .tryAgain, .review:
+            .warning
+        }
+    }
+
+    var actionStyle: PhotoReviewSubmissionPresentation.ActionStyle {
+        switch self {
+        case .cancelled, .conflict:
+            .filled
+        case .offline, .ambiguity, .tryAgain, .review:
+            .outlined
         }
     }
 
     func primaryActionEvent(eventID: UUID) -> PhotoReviewBoundaryEvent {
         switch self {
-        case .ambiguity:
+        case .cancelled, .offline, .ambiguity:
             .retryAmbiguousSubmission(eventID: eventID)
         case .conflict:
             .reviewConflictedSubmission(eventID: eventID)
@@ -492,7 +528,14 @@ final class ItemRunSubmissionHost {
             }
         case .ambiguous(let retry):
             pendingAmbiguousRetry = retry
-            publish(retention: .ambiguous)
+            switch retry.reason {
+            case .cancelled:
+                publish(retention: .cancelled)
+            case .offline:
+                publish(retention: .offline)
+            case .unknown:
+                publish(retention: .ambiguous)
+            }
         case .retained(let retention):
             pendingAmbiguousRetry = nil
             publish(retention: retention)
@@ -544,11 +587,31 @@ final class ItemRunSubmissionHost {
         guard !isSubmitting,
               case .submissionRejected(
                   eventID: let pendingEventID,
-                  retention: .ambiguous
-              )? = pendingPresentationEvent else {
+                  retention: let retention
+              )? = pendingPresentationEvent,
+              pendingEventID == eventID else {
             return false
         }
-        return pendingEventID == eventID
+        switch retention {
+        case .ambiguous, .offline, .cancelled:
+            return true
+        case .conflict, .creditDenied, .rateLimited, .rejected,
+             .authenticationRequired, .receiptMismatch, .intakeUnavailable,
+             .attemptNotPersisted, .submissionUnavailable:
+            return false
+        }
+    }
+
+    @discardableResult
+    func cancelSubmission() -> Bool {
+        guard isSubmitting, preparationTask != nil else {
+            return false
+        }
+        // Cancelling stops the local wait only. The transport resolves this as an
+        // uncertain outcome, preserving the exact durable bytes and idempotency key
+        // for the next Start listing tap.
+        preparationTask?.cancel()
+        return true
     }
 
     @discardableResult
@@ -639,6 +702,18 @@ final class ItemRunSubmissionHost {
 /// Keep this value type-driven: transport reason strings are server diagnostics,
 /// never presentation authority.
 struct PhotoReviewSubmissionPresentation: Equatable {
+    enum StatusKind: Equatable {
+        case saving
+        case offline
+        case warning
+        case success
+    }
+
+    enum ActionStyle: Equatable {
+        case filled
+        case outlined
+    }
+
     enum AnnouncementEvent: Equatable {
         case saving
         case itemSaved(eventID: UUID)
@@ -652,6 +727,8 @@ struct PhotoReviewSubmissionPresentation: Equatable {
     let accessibilityAnnouncement: String?
     let visibleMessage: String?
     let rendersSubmittedMedia: Bool
+    let statusKind: StatusKind?
+    let actionStyle: ActionStyle
 
     static let idle = PhotoReviewSubmissionPresentation(
         primaryActionLabel: "Start listing",
@@ -660,8 +737,74 @@ struct PhotoReviewSubmissionPresentation: Equatable {
         announcementEvent: nil,
         accessibilityAnnouncement: nil,
         visibleMessage: nil,
-        rendersSubmittedMedia: true
+        rendersSubmittedMedia: true,
+        statusKind: nil,
+        actionStyle: .filled
     )
+
+#if DEBUG
+    static func visualState(
+        _ state: PhotoReviewSubmissionVisualStateID
+    ) -> PhotoReviewSubmissionPresentation {
+        let eventID = UUID(
+            uuidString: "75500000-0000-4000-8000-000000000001"
+        )!
+        switch state {
+        case .saving:
+            return PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Cancel",
+                primaryActionEvent: .cancelSubmission,
+                mutationControlsLocked: true,
+                announcementEvent: .saving,
+                accessibilityAnnouncement: "Saving your item.",
+                visibleMessage: "Saving your item",
+                rendersSubmittedMedia: true,
+                statusKind: .saving,
+                actionStyle: .outlined
+            )
+        case .cancelled:
+            return rejectionFixture(
+                .cancelled,
+                eventID: eventID
+            )
+        case .offline:
+            return rejectionFixture(.offline, eventID: eventID)
+        case .unknown:
+            return rejectionFixture(.ambiguity, eventID: eventID)
+        case .conflict:
+            return rejectionFixture(.conflict, eventID: eventID)
+        case .accepted:
+            return PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Done",
+                primaryActionEvent: .completeSavedSubmission(eventID: eventID),
+                mutationControlsLocked: true,
+                announcementEvent: .itemSaved(eventID: eventID),
+                accessibilityAnnouncement: "Item saved.",
+                visibleMessage: "Item saved",
+                rendersSubmittedMedia: true,
+                statusKind: .success,
+                actionStyle: .outlined
+            )
+        }
+    }
+
+    private static func rejectionFixture(
+        _ family: PhotoReviewSubmissionRejectionFamily,
+        eventID: UUID
+    ) -> PhotoReviewSubmissionPresentation {
+        PhotoReviewSubmissionPresentation(
+            primaryActionLabel: family.primaryActionLabel,
+            primaryActionEvent: family.primaryActionEvent(eventID: eventID),
+            mutationControlsLocked: false,
+            announcementEvent: .submissionRejected(eventID: eventID),
+            accessibilityAnnouncement: family.accessibilityAnnouncement,
+            visibleMessage: family.message,
+            rendersSubmittedMedia: true,
+            statusKind: family.statusKind,
+            actionStyle: family.actionStyle
+        )
+    }
+#endif
 
     private init(
         primaryActionLabel: String,
@@ -670,7 +813,9 @@ struct PhotoReviewSubmissionPresentation: Equatable {
         announcementEvent: AnnouncementEvent?,
         accessibilityAnnouncement: String?,
         visibleMessage: String?,
-        rendersSubmittedMedia: Bool
+        rendersSubmittedMedia: Bool,
+        statusKind: StatusKind? = nil,
+        actionStyle: ActionStyle = .filled
     ) {
         self.primaryActionLabel = primaryActionLabel
         self.primaryActionEvent = primaryActionEvent
@@ -679,6 +824,8 @@ struct PhotoReviewSubmissionPresentation: Equatable {
         self.accessibilityAnnouncement = accessibilityAnnouncement
         self.visibleMessage = visibleMessage
         self.rendersSubmittedMedia = rendersSubmittedMedia
+        self.statusKind = statusKind
+        self.actionStyle = actionStyle
     }
 
     @MainActor
@@ -688,23 +835,27 @@ struct PhotoReviewSubmissionPresentation: Equatable {
     ) {
         if case .itemSaved(let eventID, _)? = host.pendingPresentationEvent {
             self = PhotoReviewSubmissionPresentation(
-                primaryActionLabel: "Item saved",
-                primaryActionEvent: .startListing,
+                primaryActionLabel: "Done",
+                primaryActionEvent: .completeSavedSubmission(eventID: eventID),
                 mutationControlsLocked: true,
                 announcementEvent: .itemSaved(eventID: eventID),
                 accessibilityAnnouncement: "Item saved.",
-                visibleMessage: nil,
-                rendersSubmittedMedia: false
+                visibleMessage: "Item saved",
+                rendersSubmittedMedia: true,
+                statusKind: .success,
+                actionStyle: .outlined
             )
         } else if host.isSubmitting {
             self = PhotoReviewSubmissionPresentation(
-                primaryActionLabel: "Saving your item",
-                primaryActionEvent: .startListing,
+                primaryActionLabel: "Cancel",
+                primaryActionEvent: .cancelSubmission,
                 mutationControlsLocked: true,
                 announcementEvent: .saving,
                 accessibilityAnnouncement: "Saving your item.",
-                visibleMessage: nil,
-                rendersSubmittedMedia: true
+                visibleMessage: "Saving your item",
+                rendersSubmittedMedia: true,
+                statusKind: .saving,
+                actionStyle: .outlined
             )
         } else if case .destinationHandoff(
             eventID: let eventID,
@@ -728,7 +879,9 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 announcementEvent: .submissionRejected(eventID: eventID),
                 accessibilityAnnouncement: family.accessibilityAnnouncement,
                 visibleMessage: family.message,
-                rendersSubmittedMedia: true
+                rendersSubmittedMedia: true,
+                statusKind: family.statusKind,
+                actionStyle: family.actionStyle
             )
         } else if let proGateIntakeAdvisory {
             self = PhotoReviewSubmissionPresentation(
@@ -846,9 +999,9 @@ struct PhotoReviewSubmissionEffectConsumer {
         }
 
         postAnnouncement(announcement)
-        if case .itemSaved(let eventID)? = presentation.announcementEvent {
-            acknowledgePresentation(eventID)
-        }
+        // Acceptance stays visible until the seller taps Done. Announcing the state
+        // is not consent to leave Photo Review or clear its matched local intake.
+        _ = acknowledgePresentation
     }
 }
 
@@ -860,6 +1013,11 @@ enum PhotoReviewSubmissionPrimaryActionConsumer {
         submissionHost: ItemRunSubmissionHost
     ) -> Bool {
         switch event {
+        case .cancelSubmission:
+            return submissionHost.cancelSubmission()
+        case .completeSavedSubmission(let eventID):
+            submissionHost.acknowledgePresentation(eventID: eventID)
+            return true
         case .reviewSubmission(let eventID):
             return submissionHost.reviewRejectedSubmission(eventID: eventID)
         case .reviewConflictedSubmission(let eventID):
@@ -954,6 +1112,7 @@ final class ItemRunSubmissionCoordinator {
         fileprivate let context: CapturedContext
         fileprivate let submittedPhotos: [StagedCapturePhoto]
         fileprivate let payload: ItemRunSubmissionPayload
+        fileprivate let reason: ItemRunSubmissionAmbiguityReason
     }
 
     fileprivate struct Submission {
@@ -1533,12 +1692,31 @@ final class ItemRunSubmissionCoordinator {
             return .retained(.conflict)
         case .rateLimited(let reason):
             return .retained(.rateLimited(reason: reason))
+        case .cancelled:
+            return .ambiguous(
+                AmbiguousRetry(
+                    context: context,
+                    submittedPhotos: submittedPhotos,
+                    payload: payload,
+                    reason: .cancelled
+                )
+            )
+        case .offline:
+            return .ambiguous(
+                AmbiguousRetry(
+                    context: context,
+                    submittedPhotos: submittedPhotos,
+                    payload: payload,
+                    reason: .offline
+                )
+            )
         case .ambiguous:
             return .ambiguous(
                 AmbiguousRetry(
                     context: context,
                     submittedPhotos: submittedPhotos,
-                    payload: payload
+                    payload: payload,
+                    reason: .unknown
                 )
             )
         }

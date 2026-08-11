@@ -96,7 +96,10 @@ struct AppShellView: View {
 #if DEBUG
                 PhotoReviewFixtureView(
                     state: photoReviewState,
-                    forceReducedMotion: configuration.forceReducedMotion
+                    forceReducedMotion: configuration.forceReducedMotion,
+                    submissionPresentation: configuration.submissionVisualState
+                        .map(PhotoReviewSubmissionPresentation.visualState)
+                        ?? .idle
                 )
 #else
                 shell
@@ -182,6 +185,8 @@ struct AppShellView: View {
                              .retryAmbiguousSubmission:
                             break
                         case .openVoiceNote,
+                             .cancelSubmission,
+                             .completeSavedSubmission,
                              .reviewSubmission,
                              .reviewConflictedSubmission:
                             return
@@ -1416,7 +1421,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 submissionHost: submissionHost
             )
             return
-        case .openVoiceNote, .reviewSubmission:
+        case .openVoiceNote, .cancelSubmission,
+             .completeSavedSubmission, .reviewSubmission:
             return
         }
 

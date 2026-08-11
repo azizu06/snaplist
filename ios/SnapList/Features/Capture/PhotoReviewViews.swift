@@ -7,17 +7,73 @@ import ImageIO
 #endif
 
 enum PhotoReviewV5VisualContract {
+    static let contentGutter: CGFloat = 18
     static let heroHeight: CGFloat = 300
+    static let heroRadius: CGFloat = 16
+    static let thumbnailSize: CGFloat = 64
+    static let thumbnailRadius: CGFloat = 12
+    static let thumbnailGap: CGFloat = 10
+    static let thumbnailStripTopPadding: CGFloat = 16
+    static let thumbnailStripBottomPadding: CGFloat = 28
+    static let voiceRowHeight: CGFloat = 56
+    static let voiceRowTopPadding: CGFloat = 16
+    static let voiceRowRadius: CGFloat = 14
+    static let footerVerticalPadding: CGFloat = 12
+    static let primaryActionHeight: CGFloat = 52
+    static let primaryActionRadius: CGFloat = 15
     static let headerMinimumHeight: CGFloat = 56
     static let backTargetSize: CGFloat = 44
     static let countFillHex = SnapListColorToken.quietFill.rawValue
     static let countRadius: CGFloat = 8
-    static let coverFillHex = SnapListColorToken.quietFill.rawValue
+    static let coverFillHex = SnapListColorToken.canvas.rawValue
     static let coverColumnGap: CGFloat = 6
     static let coverRadius: CGFloat = 5
     static let coverVerticalPadding: CGFloat = 1
     static let coverHorizontalPadding: CGFloat = 7
-    static let coverHasOutline = false
+    static let coverHasOutline = true
+}
+
+private struct PhotoReviewStartListingButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                SnapListColorToken.action.color.opacity(isEnabled ? 1 : 0.45)
+            )
+            .clipShape(
+                .rect(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.primaryActionRadius
+                )
+            )
+            .opacity(configuration.isPressed ? 0.88 : 1)
+    }
+}
+
+private struct PhotoReviewSecondaryActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(SnapListColorToken.canvas.color)
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: PhotoReviewV5VisualContract.primaryActionRadius
+                )
+                .stroke(
+                    SnapListColorToken.divider.color,
+                    lineWidth: 1
+                )
+            }
+            .clipShape(
+                .rect(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.primaryActionRadius
+                )
+            )
+            .opacity(isEnabled ? (configuration.isPressed ? 0.72 : 1) : 0.45)
+    }
 }
 
 enum PhotoReviewLayoutLandmark: Hashable {
@@ -27,6 +83,7 @@ enum PhotoReviewLayoutLandmark: Hashable {
     case countPill
     case hero
     case thumbnailStrip
+    case thumbnail(Int)
     case addPhoto
     case coverPill
     case actionRow
@@ -2123,11 +2180,14 @@ private extension PhotoReviewPickerRequest {
 @MainActor
 struct PhotoReviewFixtureView: View {
     @State private var store: PhotoReviewStore
-    private let submissionPresentation: PhotoReviewSubmissionPresentation
+    @State private var voiceNoteStore: VoiceNoteStore?
+    @State private var observedLayout = PhotoReviewLayoutObservation(frames: [:])
+    @State private var submissionPresentation: PhotoReviewSubmissionPresentation
     private let forceReducedMotion: Bool
     private let saveFailure: PhotoReviewSaveFailure?
     private let onLayoutObservation: ((PhotoReviewLayoutObservation) -> Void)?
     private let projectsFixtureOrder: Bool
+    private let projectsLayoutProbe: Bool
 
     init(
         state: PhotoReviewVisualStateID,
@@ -2147,12 +2207,18 @@ struct PhotoReviewFixtureView: View {
             }
         }
         _store = State(initialValue: store)
+        _voiceNoteStore = State(
+            initialValue: Self.makeVoiceNoteFixtureStore()
+        )
         self.forceReducedMotion = forceReducedMotion
         saveFailure = state.saveFailure
-        self.submissionPresentation = submissionPresentation
+        _submissionPresentation = State(initialValue: submissionPresentation)
         self.onLayoutObservation = onLayoutObservation
         projectsFixtureOrder = ProcessInfo.processInfo.arguments.contains(
             "--photo-review-fixture-order-probe"
+        )
+        projectsLayoutProbe = ProcessInfo.processInfo.arguments.contains(
+            "--photo-review-layout-probe"
         )
     }
 
@@ -2167,8 +2233,10 @@ struct PhotoReviewFixtureView: View {
             saveFailure: saveFailure,
             retrySave: {},
             discardPhotos: {},
-            openBoundary: { _ in },
-            onLayoutObservation: onLayoutObservation
+            openBoundary: handleFixtureBoundary,
+            voiceNoteStore: voiceNoteStore,
+            presentsVoiceNoteOnAppear: voiceNoteStore != nil,
+            onLayoutObservation: recordLayoutObservation
         )
         .overlay(alignment: .topLeading) {
             if projectsFixtureOrder {
@@ -2182,7 +2250,67 @@ struct PhotoReviewFixtureView: View {
                     )
                     .accessibilityIdentifier("photo-review.fixture-order")
             }
+            if projectsLayoutProbe {
+                Text("Photo Review visible layout")
+                    .font(.system(size: 1))
+                    .foregroundStyle(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel(layoutProbeLabel)
+                    .accessibilityIdentifier("photo-review.layout-probe")
+            }
         }
+    }
+
+    private func handleFixtureBoundary(_ event: PhotoReviewBoundaryEvent) {
+        switch event {
+        case .cancelSubmission:
+            submissionPresentation = .visualState(.cancelled)
+        case .completeSavedSubmission:
+            submissionPresentation = .idle
+        case .startListing, .retryAmbiguousSubmission,
+             .retryReceiptMismatch:
+            submissionPresentation = .visualState(.saving)
+        case .reviewConflictedSubmission, .reviewSubmission:
+            submissionPresentation = .idle
+        case .openVoiceNote, .createAccount:
+            break
+        }
+    }
+
+    private func recordLayoutObservation(
+        _ observation: PhotoReviewLayoutObservation
+    ) {
+        if observedLayout != observation {
+            observedLayout = observation
+        }
+        onLayoutObservation?(observation)
+    }
+
+    private var layoutProbeLabel: String {
+        let frames = [
+            ("hero", PhotoReviewLayoutLandmark.hero),
+            ("strip", .thumbnailStrip),
+            ("thumbnail1", .thumbnail(0)),
+            ("thumbnail2", .thumbnail(1)),
+            ("thumbnail3", .thumbnail(2)),
+            ("add", .addPhoto),
+            ("voice", .voiceNote),
+            ("start", .startListing)
+        ]
+        .map { name, landmark in
+            let frame = observedLayout.frame(for: landmark)
+            return String(
+                format: "%@=%.1f,%.1f,%.1f,%.1f",
+                name,
+                frame.minX,
+                frame.minY,
+                frame.width,
+                frame.height
+            )
+        }
+        .joined(separator: ";")
+        return "Photo Review visible frames;\(frames)"
     }
 
     static func photos(
@@ -2312,6 +2440,55 @@ struct PhotoReviewFixtureView: View {
             ] as CFDictionary
         ) != nil
     }
+
+    private static func makeVoiceNoteFixtureStore() -> VoiceNoteStore? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains(where: { $0.hasPrefix("--voice-note-") }) else {
+            return nil
+        }
+
+        let hasSavedNote = arguments.contains(
+            "--voice-note-saved-playing-fixture"
+        ) || arguments.contains("--voice-note-save-failed-fixture")
+        let savedNote = hasSavedNote
+            ? VoiceNoteAsset(
+                url: URL(
+                    fileURLWithPath: "/tmp/snaplist-voice-note-ui-fixture.wav"
+                ),
+                duration: 12
+            )
+            : nil
+        let store = VoiceNoteStore(
+            savedNote: savedNote,
+            audio: AVFoundationVoiceNoteAudioClient(),
+            files: VoiceNoteLocalFileStore(
+                rootDirectory: FileManager.default.temporaryDirectory
+                    .appendingPathComponent(
+                        "SnapList/VoiceNoteFixture",
+                        isDirectory: true
+                    )
+            ),
+            authority: nil
+        )
+
+        if arguments.contains("--voice-note-take-ready-fixture") {
+            store.applyLaunchFixturePhase(.takeReady(duration: 15))
+        } else if arguments.contains("--voice-note-recording-fixture") {
+            store.applyLaunchFixturePhase(.recording(elapsed: 7, level: 0.72))
+        } else if arguments.contains("--voice-note-saved-playing-fixture") {
+            store.applyLaunchFixturePhase(.saved(isPlaying: true))
+        } else if arguments.contains("--voice-note-interrupted-fixture") {
+            store.applyLaunchFixturePhase(.interrupted)
+        } else if arguments.contains("--voice-note-access-denied-fixture") {
+            store.applyLaunchFixturePhase(.accessOff(permission: .denied))
+        } else if arguments.contains("--voice-note-access-restricted-fixture") {
+            store.applyLaunchFixturePhase(.accessOff(permission: .restricted))
+        } else if arguments.contains("--voice-note-save-failed-fixture") {
+            store.applyLaunchFixturePhase(.saveFailed)
+        }
+
+        return store
+    }
 }
 #endif
 
@@ -2322,6 +2499,8 @@ struct PhotoReviewFixtureView: View {
 enum PhotoReviewBoundaryEvent: Equatable {
     case openVoiceNote
     case startListing
+    case cancelSubmission
+    case completeSavedSubmission(eventID: UUID)
     /// The seller was told an account is needed, and asked for the account entry
     /// point. Photo Review covers the shell, so only the shell can honor this.
     case createAccount(eventID: UUID)
@@ -2393,9 +2572,12 @@ final class PhotoReviewLiveSession {
         }
 #if DEBUG
         let launchArguments = ProcessInfo.processInfo.arguments
-        let fixtureSavedNote = launchArguments.contains(
+        let hasFixtureSavedNote = launchArguments.contains(
             "--voice-note-saved-playing-fixture"
+        ) || launchArguments.contains(
+            "--voice-note-save-failed-fixture"
         )
+        let fixtureSavedNote = hasFixtureSavedNote
             ? VoiceNoteAsset(
                 url: URL(
                     fileURLWithPath:
@@ -2456,7 +2638,13 @@ final class PhotoReviewLiveSession {
             "--voice-note-take-ready-fixture"
         ) {
             voiceNoteStore.applyLaunchFixturePhase(
-                .takeReady(duration: 7)
+                .takeReady(duration: 15)
+            )
+        } else if launchArguments.contains(
+            "--voice-note-recording-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(
+                .recording(elapsed: 7, level: 0.72)
             )
         } else if launchArguments.contains(
             "--voice-note-saved-playing-fixture"
@@ -2468,10 +2656,34 @@ final class PhotoReviewLiveSession {
             "--voice-note-interrupted-fixture"
         ) {
             voiceNoteStore.applyLaunchFixturePhase(.interrupted)
+        } else if launchArguments.contains(
+            "--voice-note-access-denied-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(
+                .accessOff(permission: .denied)
+            )
+        } else if launchArguments.contains(
+            "--voice-note-access-restricted-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(
+                .accessOff(permission: .restricted)
+            )
+        } else if launchArguments.contains(
+            "--voice-note-save-failed-fixture"
+        ) {
+            voiceNoteStore.applyLaunchFixturePhase(.saveFailed)
+        }
+#endif
+        let photoStore = PhotoReviewStore(photos: request.photos)
+#if DEBUG
+        if launchArguments.contains(where: { $0.hasPrefix("--voice-note-") }),
+           request.photos.indices.contains(1) {
+            photoStore.selectPhotoForActions(id: request.photos[1].id)
+            photoStore.dismissActions()
         }
 #endif
         return PhotoReviewLiveSession(
-            store: PhotoReviewStore(photos: request.photos),
+            store: photoStore,
             voiceNoteStore: voiceNoteStore,
             intakeActivationID: intakeActivationID
         )
@@ -2978,6 +3190,9 @@ struct PhotoReviewView: View {
         ((StagedCapturePhoto.ID, Int) async -> PhotoReviewReorderResult?)? = nil
     var openBoundary: ((PhotoReviewBoundaryEvent) -> Void)? = nil
     var voiceNoteStore: VoiceNoteStore? = nil
+    /// DEBUG fixtures can launch directly into an app-owned Voice Note state.
+    /// Production leaves this false and presents only after the seller taps the row.
+    var presentsVoiceNoteOnAppear = false
     /// Absent in fixtures, which stage no durable session and so cannot apply a picker
     /// result. The picker still opens; nothing lands.
     var intake: PhotoReviewIntake? = nil
@@ -3087,14 +3302,13 @@ struct PhotoReviewView: View {
                 reviewContent
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .containerRelativeFrame(.horizontal)
         .background {
             SnapListColorToken.groupingFill.color
                 .contentShape(.rect)
                 .onTapGesture(perform: dismissActionsOutside)
         }
-        .disabled(
-            isCommitting || submissionPresentation.mutationControlsLocked
-        )
         .onChange(
             of: submissionPresentation,
             initial: true
@@ -3168,81 +3382,142 @@ struct PhotoReviewView: View {
             .allowsHitTesting(false)
 #endif
         }
-        .sheet(
-            isPresented: $isVoiceNotePresented,
-            onDismiss: restoreVoiceNoteOpenerFocus
-        ) {
-            if let voiceNoteStore {
-                VoiceNoteSheet(
-                    store: voiceNoteStore,
-                    forceReducedMotion: reduceMotion
-                )
+        .overlay {
+            if isVoiceNotePresented, let voiceNoteStore {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.32)
+                        .contentShape(.rect)
+                        .onTapGesture {}
+                        .accessibilityHidden(true)
+
+                    VoiceNoteSheet(
+                        store: voiceNoteStore,
+                        forceReducedMotion: reduceMotion,
+                        dismissPresentation: dismissVoiceNotePresentation
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .transition(.move(edge: .bottom))
+                .zIndex(10)
+            }
+        }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.24),
+            value: isVoiceNotePresented
+        )
+        .onAppear {
+            if presentsVoiceNoteOnAppear, voiceNoteStore != nil {
+                isVoiceNotePresented = true
             }
         }
     }
 
     private var reviewContent: some View {
-        VStack(spacing: 0) {
-            topBar
-                .photoReviewLayoutLandmark(.header)
+        GeometryReader { screen in
+            let screenWidth = screen.size.width
+            let contentWidth = max(
+                0,
+                screenWidth
+                    - (2 * PhotoReviewV5VisualContract.contentGutter)
+            )
+            VStack(spacing: 0) {
+                topBar
+                    .photoReviewLayoutLandmark(.header)
+                    .allowsHitTesting(
+                        !(isCommitting
+                            || submissionPresentation.mutationControlsLocked)
+                    )
 
-            GeometryReader { viewport in
-                let heroHeight = PhotoReviewV5VisualContract.heroHeight
-                ScrollView {
-                    VStack(spacing: 16) {
-                        if let visibleMessage = submissionPresentation.visibleMessage {
-                            Text(visibleMessage)
-                                .snapListTypography(.body)
-                                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .accessibilityIdentifier(
-                                    "photo-review.submission-message"
-                                )
+                GeometryReader { viewport in
+                    let heroHeight = PhotoReviewV5VisualContract.heroHeight
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            if submissionPresentation.rendersSubmittedMedia {
+                                HStack(spacing: 0) {
+                                    Spacer(minLength: 0)
+                                    hero(
+                                        width: contentWidth,
+                                        height: heroHeight
+                                    )
+                                    Spacer(minLength: 0)
+                                }
+                                HStack(spacing: 0) {
+                                    Spacer(minLength: 0)
+                                    thumbnailStrip
+                                        .frame(
+                                            width: contentWidth,
+                                            alignment: .leading
+                                        )
+                                    Spacer(minLength: 0)
+                                }
+                                    .padding(
+                                        .top,
+                                        PhotoReviewV5VisualContract
+                                            .thumbnailStripTopPadding
+                                    )
+                                    .padding(
+                                        .bottom,
+                                        PhotoReviewV5VisualContract
+                                            .thumbnailStripBottomPadding
+                                    )
+
+                                if let recovery = intake?.recovery {
+                                    Text(recovery.message)
+                                        .snapListTypography(.metadata)
+                                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .accessibilityIdentifier("photo-review.intake-recovery")
+                                }
+
+                                if store.actionsPhotoID != nil {
+                                    actionRow
+                                        .photoReviewLayoutLandmark(.actionRow)
+                                }
+
+                                if let openBoundary {
+                                    HStack(spacing: 0) {
+                                        Spacer(minLength: 0)
+                                        voiceRow(openBoundary)
+                                            .frame(width: contentWidth)
+                                            .photoReviewLayoutLandmark(.voiceNote)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(
+                                        .top,
+                                        PhotoReviewV5VisualContract
+                                            .voiceRowTopPadding
+                                    )
+                                }
+                            }
                         }
-                        if submissionPresentation.rendersSubmittedMedia {
-                            hero(height: heroHeight)
-                            thumbnailStrip
-
-                            if let recovery = intake?.recovery {
-                                Text(recovery.message)
-                                    .snapListTypography(.metadata)
-                                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .accessibilityIdentifier("photo-review.intake-recovery")
-                            }
-
-                            if store.actionsPhotoID != nil {
-                                actionRow
-                                    .photoReviewLayoutLandmark(.actionRow)
-                            }
-
-                            if let openBoundary {
-                                voiceRow(openBoundary)
-                                    .photoReviewLayoutLandmark(.voiceNote)
-                            }
-                        }
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
+                        // Live Photo Review v5 fixes the hero at 300pt. The scroll viewport
+                        // keeps the remaining review content reachable on compact screens
+                        // and at larger Dynamic Type sizes.
+                        .frame(minHeight: viewport.size.height, alignment: .top)
                     }
-                    .padding(.horizontal, SnapListMetrics.screenGutter)
-                    .padding(.top, 16)
-                    .padding(.bottom, 8)
-                    // Live Photo Review v5 fixes the hero at 300pt. The scroll viewport
-                    // keeps the remaining review content reachable on compact screens
-                    // and at larger Dynamic Type sizes.
-                    .frame(minHeight: viewport.size.height, alignment: .top)
+                    // The screen identity stays on the scrolling region itself, so the
+                    // sticky action below is genuinely outside the scrollable content.
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("photo-review.screen")
+                    .allowsHitTesting(
+                        !(isCommitting
+                            || submissionPresentation.mutationControlsLocked)
+                    )
                 }
-                // The screen identity stays on the scrolling region itself, so the
-                // sticky action below is genuinely outside the scrollable content.
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("photo-review.screen")
-            }
 
-            if let openBoundary {
-                startListingControl(openBoundary)
-                    .photoReviewLayoutLandmark(.startListing)
-                    .padding(.horizontal, SnapListMetrics.screenGutter)
-                    .padding(.vertical, 12)
-                    .photoReviewLayoutLandmark(.footer)
+                if let openBoundary {
+                    submissionFooter(
+                        openBoundary,
+                        contentWidth: contentWidth
+                    )
+                        .photoReviewLayoutLandmark(.footer)
+                }
             }
+            .frame(width: screenWidth, height: screen.size.height)
         }
         .onPreferenceChange(
             PhotoReviewLayoutPreferenceKey.self
@@ -3558,7 +3833,7 @@ struct PhotoReviewView: View {
     }
 
     @ViewBuilder
-    private func hero(height: CGFloat) -> some View {
+    private func hero(width: CGFloat, height: CGFloat) -> some View {
         if let selectedPhoto,
            let selectedIndex = store.photos.firstIndex(where: { $0.id == selectedPhoto.id }) {
             Button {
@@ -3570,15 +3845,31 @@ struct PhotoReviewView: View {
                 )
                 .scaledToFill()
                 .frame(
-                    maxWidth: .infinity,
-                    minHeight: height,
-                    maxHeight: height
+                    width: width,
+                    height: height
                 )
                 .clipped()
-                .clipShape(.rect(cornerRadius: 18))
+                .clipShape(
+                    .rect(
+                        cornerRadius:
+                            PhotoReviewV5VisualContract.heroRadius
+                    )
+                )
+                .overlay {
+                    RoundedRectangle(
+                        cornerRadius:
+                            PhotoReviewV5VisualContract.heroRadius
+                    )
+                    .stroke(
+                        SnapListColorToken.hairline.color,
+                        lineWidth: 1
+                    )
+                    .accessibilityHidden(true)
+                }
                 .accessibilityHidden(true)
             }
             .buttonStyle(.plain)
+            .frame(width: width, height: height)
             .accessibilityLabel(
                 photoAccessibilityLabel(
                     index: selectedIndex,
@@ -3594,7 +3885,10 @@ struct PhotoReviewView: View {
     private var thumbnailStrip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(
+                    alignment: .top,
+                    spacing: PhotoReviewV5VisualContract.thumbnailGap
+                ) {
                     ForEach(Array(store.photos.enumerated()), id: \.element.id) { index, photo in
                         thumbnail(photo, index: index)
                             .id(photo.id)
@@ -3615,7 +3909,6 @@ struct PhotoReviewView: View {
                     }
                     addButton
                 }
-                .padding(.vertical, 3)
                 // Keeping both native attachments inside the horizontal
                 // content makes its nearest scroll ancestor the strip host,
                 // even when Photo Review is nested in the screen scroll view.
@@ -3716,11 +4009,22 @@ struct PhotoReviewView: View {
                     maximumPixelSize: 180
                 )
                 .scaledToFill()
-                .frame(width: 76, height: 76)
+                .frame(
+                    width: PhotoReviewV5VisualContract.thumbnailSize,
+                    height: PhotoReviewV5VisualContract.thumbnailSize
+                )
                 .clipped()
-                .clipShape(.rect(cornerRadius: 12))
+                .clipShape(
+                    .rect(
+                        cornerRadius:
+                            PhotoReviewV5VisualContract.thumbnailRadius
+                    )
+                )
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(
+                        cornerRadius:
+                            PhotoReviewV5VisualContract.thumbnailRadius
+                    )
                         .stroke(
                             isSelected ? SnapListColorToken.action.color : .clear,
                             lineWidth: 3
@@ -3729,6 +4033,7 @@ struct PhotoReviewView: View {
                 .accessibilityHidden(true)
             }
             .buttonStyle(.plain)
+            .photoReviewLayoutLandmark(.thumbnail(index))
             .accessibilityLabel(
                 photoAccessibilityLabel(
                     index: index,
@@ -3798,12 +4103,22 @@ struct PhotoReviewView: View {
                         PhotoReviewV5VisualContract.coverHorizontalPadding
                     )
                     .background(
-                        SnapListColorToken.quietFill.color,
+                        SnapListColorToken.canvas.color,
                         in: RoundedRectangle(
                             cornerRadius:
                                 PhotoReviewV5VisualContract.coverRadius
                         )
                     )
+                    .overlay {
+                        RoundedRectangle(
+                            cornerRadius:
+                                PhotoReviewV5VisualContract.coverRadius
+                        )
+                        .stroke(
+                            SnapListColorToken.hairline.color,
+                            lineWidth: 1
+                        )
+                    }
                     .fixedSize()
                     .accessibilityHidden(true)
                     .photoReviewLayoutLandmark(.coverPill)
@@ -3940,15 +4255,23 @@ struct PhotoReviewView: View {
             }
             .foregroundStyle(SnapListColorToken.textSecondary.color)
             .frame(
-                width: 76,
-                height: 76
+                width: PhotoReviewV5VisualContract.thumbnailSize,
+                height: PhotoReviewV5VisualContract.thumbnailSize
             )
             .background(SnapListColorToken.canvas.color)
-            .clipShape(.rect(cornerRadius: 12))
+            .clipShape(
+                .rect(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.thumbnailRadius
+                )
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.thumbnailRadius
+                )
                     .stroke(
-                        SnapListColorToken.textSecondary.color.opacity(0.55),
+                        SnapListColorToken.textTertiary.color,
                         style: StrokeStyle(lineWidth: 1.5, dash: [5])
                     )
             }
@@ -4013,15 +4336,16 @@ struct PhotoReviewView: View {
         Button {
             openBoundary(.openVoiceNote)
             if voiceNoteStore != nil {
-                isVoiceNotePresented = true
+                presentVoiceNotePresentation()
             }
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                Image(systemName: "mic")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .frame(width: 32, height: 32)
-                    .background(SnapListColorToken.groupingFill.color)
-                    .clipShape(.circle)
+                    .background(SnapListColorToken.quietFill.color)
+                    .clipShape(.rect(cornerRadius: 9))
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -4043,15 +4367,24 @@ struct PhotoReviewView: View {
                     .foregroundStyle(SnapListColorToken.textTertiary.color)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .frame(
                 maxWidth: .infinity,
-                minHeight: 54
+                minHeight: PhotoReviewV5VisualContract.voiceRowHeight,
+                maxHeight: PhotoReviewV5VisualContract.voiceRowHeight
             )
             .background(SnapListColorToken.canvas.color)
-            .clipShape(.rect(cornerRadius: 14))
+            .clipShape(
+                .rect(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.voiceRowRadius
+                )
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(
+                    cornerRadius:
+                        PhotoReviewV5VisualContract.voiceRowRadius
+                )
                     .stroke(
                         SnapListColorToken.hairline.color,
                         lineWidth: 1
@@ -4083,27 +4416,118 @@ struct PhotoReviewView: View {
         focusedVoiceNoteOpener = true
     }
 
+    private func presentVoiceNotePresentation() {
+        isVoiceNotePresented = true
+    }
+
+    private func dismissVoiceNotePresentation() {
+        isVoiceNotePresented = false
+        restoreVoiceNoteOpenerFocus()
+    }
+
+    private func submissionFooter(
+        _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void,
+        contentWidth: CGFloat
+    ) -> some View {
+        VStack(spacing: 10) {
+            if let message = submissionPresentation.visibleMessage,
+               let statusKind = submissionPresentation.statusKind {
+                HStack(alignment: .top, spacing: 10) {
+                    submissionStatusIcon(statusKind)
+                        .frame(width: 22, height: 22)
+
+                    Text(message)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(width: contentWidth)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("photo-review.submission-message")
+            }
+
+            startListingControl(openBoundary)
+                .frame(width: contentWidth)
+                .photoReviewLayoutLandmark(.startListing)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, PhotoReviewV5VisualContract.footerVerticalPadding)
+        .padding(.bottom, 8)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(SnapListColorToken.divider.color)
+                .frame(height: 1)
+        }
+        .background(SnapListColorToken.canvas.color)
+    }
+
+    @ViewBuilder
+    private func submissionStatusIcon(
+        _ kind: PhotoReviewSubmissionPresentation.StatusKind
+    ) -> some View {
+        switch kind {
+        case .saving:
+            ProgressView()
+                .controlSize(.small)
+                .tint(SnapListColorToken.textTertiary.color)
+                .accessibilityHidden(true)
+        case .offline:
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .accessibilityHidden(true)
+        case .warning:
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .accessibilityHidden(true)
+        case .success:
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
     private func startListingControl(
         _ openBoundary: @escaping (PhotoReviewBoundaryEvent) -> Void
     ) -> some View {
-        Button {
+        let button = Button {
             openBoundary(submissionPresentation.primaryActionEvent)
         } label: {
             Text(submissionPresentation.primaryActionLabel)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(
+                    submissionPresentation.actionStyle == .filled
+                        ? SnapListColorToken.canvas.color
+                        : SnapListColorToken.inkPrimary.color
+                )
                 .frame(
                     maxWidth: .infinity,
-                    minHeight: SnapListMetrics.minimumTouchTarget
+                    minHeight:
+                        PhotoReviewV5VisualContract.primaryActionHeight,
+                    maxHeight:
+                        PhotoReviewV5VisualContract.primaryActionHeight
                 )
+                .contentShape(.rect)
         }
-        .buttonStyle(.borderedProminent)
         .disabled(
             !PhotoReviewStartListingPolicy.isEnabled(
                 photoCount: store.photos.count,
                 isPickerActive: store.activePickerRequest != nil
             )
+                || isCommitting
         )
         .accessibilityIdentifier("photo-review.start-listing")
         .accessibilityFocused($focusedStartListing)
+
+        if submissionPresentation.actionStyle == .filled {
+            button.buttonStyle(PhotoReviewStartListingButtonStyle())
+        } else {
+            button.buttonStyle(PhotoReviewSecondaryActionButtonStyle())
+        }
     }
 
     private var pickerIsPresented: Binding<Bool> {
