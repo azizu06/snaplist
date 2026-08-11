@@ -161,11 +161,22 @@ struct EbayPublishView: View {
             }
         }
         .background(SnapListColorToken.canvas.color)
-        .navigationTitle(navigationTitle)
+        .navigationTitle(usesApprovedConnectVisuals ? "" : navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            if showsBackButton {
+            if showsBackButton && usesApprovedConnectVisuals {
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarLeading) {
+                        approvedConnectBackButton
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .topBarLeading) {
+                        approvedConnectBackButton
+                    }
+                }
+            } else if showsBackButton {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: backToListing) {
                         Label("Back", systemImage: "chevron.left")
@@ -176,6 +187,13 @@ struct EbayPublishView: View {
                     )
                     .accessibilityLabel("Back to my listing")
                     .accessibilityIdentifier("ebay-publish.back")
+                }
+            }
+            if usesApprovedConnectVisuals {
+                ToolbarItem(placement: .principal) {
+                    Text("Connect eBay")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
                 }
             }
         }
@@ -216,6 +234,30 @@ struct EbayPublishView: View {
         }
     }
 
+    private var usesApprovedConnectVisuals: Bool {
+        if case .connection(.notConnected) = store.screen {
+            true
+        } else {
+            false
+        }
+    }
+
+    private var approvedConnectBackButton: some View {
+        Button(action: backToListing) {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+        }
+        .buttonStyle(.plain)
+        .frame(
+            minWidth: SnapListMetrics.minimumTouchTarget,
+            minHeight: SnapListMetrics.minimumTouchTarget
+        )
+        .offset(x: -8)
+        .accessibilityLabel("Back to my listing")
+        .accessibilityIdentifier("ebay-publish.back")
+    }
+
     private var reduceMotion: Bool {
         systemReduceMotion || forceReducedMotion
     }
@@ -243,6 +285,7 @@ struct EbayPublishView: View {
             primary: copy.primary,
             secondary: copy.secondary,
             forceReducedMotion: reduceMotion,
+            usesApprovedConnectVisuals: state == .notConnected,
             primaryAction: {
                 switch state {
                 case .connected: store.reviewBeforePosting()
@@ -1291,13 +1334,20 @@ private struct EbayCenteredActionScreen: View {
     let primary: String?
     let secondary: String?
     let forceReducedMotion: Bool
+    var usesApprovedConnectVisuals = false
     let primaryAction: () -> Void
     let secondaryAction: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Spacer(minLength: 16)
+                if usesApprovedConnectVisuals {
+                    Color.clear
+                        .frame(height: 164)
+                        .accessibilityHidden(true)
+                } else {
+                    Spacer(minLength: 16)
+                }
                 if let systemImage {
                     Image(systemName: systemImage)
                         .font(.system(size: 36, weight: .semibold))
@@ -1323,11 +1373,19 @@ private struct EbayCenteredActionScreen: View {
                         ForEach(Array(statements.enumerated()), id: \.offset) {
                             index, statement in
                             HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(
-                                        SnapListColorToken.action.color
-                                    )
-                                    .accessibilityHidden(true)
+                                if usesApprovedConnectVisuals {
+                                    Circle()
+                                        .fill(Color(hex: "#4C63ED"))
+                                        .frame(width: 5, height: 5)
+                                        .padding(.top, 6)
+                                        .accessibilityHidden(true)
+                                } else {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(
+                                            SnapListColorToken.action.color
+                                        )
+                                        .accessibilityHidden(true)
+                                }
                                 Text(statement)
                                     .snapListTypography(.status)
                                     .foregroundStyle(
@@ -1339,7 +1397,10 @@ private struct EbayCenteredActionScreen: View {
                                     )
                                 Spacer(minLength: 0)
                             }
-                            .padding(.vertical, 12)
+                            .padding(
+                                .vertical,
+                                usesApprovedConnectVisuals ? 10 : 12
+                            )
                             if index < statements.count - 1 {
                                 Divider()
                             }
@@ -1355,11 +1416,18 @@ private struct EbayCenteredActionScreen: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
                 if let primary {
-                    SnapListPrimaryButton(
-                        title: primary,
-                        forceReducedMotion: forceReducedMotion,
-                        action: primaryAction
-                    )
+                    if usesApprovedConnectVisuals {
+                        EbayConnectPrimaryButton(
+                            title: primary,
+                            action: primaryAction
+                        )
+                    } else {
+                        SnapListPrimaryButton(
+                            title: primary,
+                            forceReducedMotion: forceReducedMotion,
+                            action: primaryAction
+                        )
+                    }
                 }
                 if let secondary {
                     SnapListSecondaryButton(
@@ -1369,10 +1437,31 @@ private struct EbayCenteredActionScreen: View {
                 }
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.vertical, 10)
+            .padding(.top, usesApprovedConnectVisuals ? 8 : 10)
+            .padding(.bottom, usesApprovedConnectVisuals ? 0 : 10)
             .background(SnapListColorToken.canvas.color)
             .overlay(alignment: .top) { Divider() }
         }
+    }
+}
+
+private struct EbayConnectPrimaryButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .snapListTypography(.rowTitle)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 52)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .background(Color(hex: "#4C63ED"))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .accessibilityIdentifier("button.primary.continue-to-ebay")
     }
 }
 
