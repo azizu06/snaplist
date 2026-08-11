@@ -38,6 +38,93 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(PrimaryTab.trophyWall.systemImage(isSelected: true), "trophy.fill")
     }
 
+    func testGuestClaimReviewFlowOwnsGlobalChromeUntilCanonicalListingReview() {
+        let cases: [(
+            name: String,
+            context: AppShellChromeContext,
+            expected: AppShellChromeProjection
+        )] = [
+            (
+                "processing",
+                AppShellChromeContext(
+                    isKeyboardVisible: false,
+                    isDeleteAccountFlowPresented: false,
+                    isListingReviewPresented: false,
+                    isGuestClaimPresented: false,
+                    fallbackActivationSurface: .trophyWall
+                ),
+                AppShellChromeProjection(
+                    showsDock: true,
+                    activationSurface: .trophyWall
+                )
+            ),
+            (
+                "guest claim",
+                AppShellChromeContext(
+                    isKeyboardVisible: false,
+                    isDeleteAccountFlowPresented: false,
+                    isListingReviewPresented: false,
+                    isGuestClaimPresented: true,
+                    fallbackActivationSurface: .trophyWall
+                ),
+                AppShellChromeProjection(
+                    showsDock: false,
+                    activationSurface: nil
+                )
+            ),
+            (
+                "claim canceled",
+                AppShellChromeContext(
+                    isKeyboardVisible: false,
+                    isDeleteAccountFlowPresented: false,
+                    isListingReviewPresented: false,
+                    isGuestClaimPresented: false,
+                    fallbackActivationSurface: .trophyWall
+                ),
+                AppShellChromeProjection(
+                    showsDock: true,
+                    activationSurface: .trophyWall
+                )
+            ),
+            (
+                "canonical listing review",
+                AppShellChromeContext(
+                    isKeyboardVisible: false,
+                    isDeleteAccountFlowPresented: false,
+                    isListingReviewPresented: true,
+                    isGuestClaimPresented: false,
+                    fallbackActivationSurface: .trophyWall
+                ),
+                AppShellChromeProjection(
+                    showsDock: false,
+                    activationSurface: .listingReview
+                )
+            ),
+            (
+                "listing review dismissed",
+                AppShellChromeContext(
+                    isKeyboardVisible: false,
+                    isDeleteAccountFlowPresented: false,
+                    isListingReviewPresented: false,
+                    isGuestClaimPresented: false,
+                    fallbackActivationSurface: .trophyWall
+                ),
+                AppShellChromeProjection(
+                    showsDock: true,
+                    activationSurface: .trophyWall
+                )
+            ),
+        ]
+
+        for testCase in cases {
+            XCTAssertEqual(
+                AppShellChromePolicy.project(testCase.context),
+                testCase.expected,
+                testCase.name
+            )
+        }
+    }
+
     func testRetiredTabsCannotBeRestoredFromAPersistedName() {
         // A tab that stops rendering but still parses from a persisted string stays
         // routable. The enum is the fail-closed boundary, so the retired names must

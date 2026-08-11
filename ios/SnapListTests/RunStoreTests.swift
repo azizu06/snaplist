@@ -203,6 +203,314 @@ final class RunStoreTests: XCTestCase {
         }
     }
 
+    func testReadySignedOutGuestReviewActionPresentsClaimBeforeListingReview()
+        async throws {
+        let review = try Self.makeReview()
+        let run = Self.makeRun(
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            listingID: review.binding.listingID,
+            review: review
+        )
+        let recoveryToken = "raw-token-only-in-keychain"
+        let credential = GuestRecoveryCredential(
+            recoveryID: UUID(
+                uuidString: "77000000-0000-4000-8000-000000000001"
+            )!,
+            recoveryToken: recoveryToken,
+            recoveryTokenHash: GuestClaimListingProjection.tokenHash(
+                recoveryToken
+            ),
+            itemID: review.binding.itemID,
+            runID: review.binding.runID,
+            photoIdentity: GuestPhotoIdentity(
+                kind: "content_sha256_set_v1",
+                fingerprint: String(repeating: "7", count: 64)
+            )
+        )
+        let credentials = RunStoreGuestRecoveryCredentials(
+            credential: credential
+        )
+        let authorities = RunStoreGuestClaimAuthorities()
+        let tokenProvider = RunStoreBearerTokenProvider {
+            "guestcap_\(String(repeating: "G", count: 43))"
+        }
+        let runStore = RunDetailStore(
+            service: RecordingRunService(results: [.success(run)]),
+            tokenProvider: tokenProvider,
+            guestRecoveryCredentials: credentials,
+            guestClaimAuthorities: authorities,
+            now: {
+                ISO8601DateFormatter.snapListDate(
+                    from: "2026-08-04T13:00:00.000Z"
+                )!
+            }
+        )
+        let listingReviewStore = ListingReviewStore(
+            service: ListingReviewAPIClient(
+                baseURL: URL(string: "https://snaplist.test")!
+            ),
+            persistence: MemoryListingReviewDraftPersistence(),
+            tokenProvider: tokenProvider
+        )
+        let guestClaimPresentation = ProcessingGuestClaimPresentationHost()
+        let listingReviewPresentation = ListingReviewPresentationHost()
+        let executor = ProcessingActionExecutor(
+            runStore: runStore,
+            listingReviewStore: listingReviewStore,
+            guestClaimPresentation: guestClaimPresentation,
+            listingReviewPresentation: listingReviewPresentation,
+            applyRetryResult: { _ in false },
+            selectScan: {}
+        )
+
+        let outcome = await executor.execute(.review(runID: run.id))
+        let savedAuthority = await authorities.savedAuthority(
+            listingID: review.binding.listingID
+        )
+        let expiry = await credentials.recordedExpiry(
+            recoveryID: credential.recoveryID
+        )
+        let expectedAuthority = GuestClaimAuthority(
+            recoveryID: credential.recoveryID,
+            recoveryToken: credential.recoveryToken,
+            itemID: review.binding.itemID,
+            runID: review.binding.runID,
+            draftID: review.binding.listingID,
+            reviewRevision: review.binding.reviewRevision,
+            photoIdentity: credential.photoIdentity!
+        )
+        let enteredGuestClaimBeforeReview =
+            outcome != .selectedScan
+                && outcome != .presentedReview
+                && outcome != .projectedRetry
+                && outcome != .rejected
+                && !listingReviewPresentation.isPresented
+                && listingReviewStore.phase == .idle
+                && savedAuthority == expectedAuthority
+                && expiry
+                    == ISO8601DateFormatter.snapListDate(
+                        from: run.timestamps.completedAt!
+                    )!.addingTimeInterval(24 * 60 * 60)
+
+        XCTAssertTrue(
+            enteredGuestClaimBeforeReview,
+            "PROC-04A Review must present Guest Claim for the exact guest tuple before opening Listing Review."
+        )
+    }
+
+    func testProcessingGuestClaimPresentationConsumesOnlyMatchingTupleOnce()
+        throws {
+        let review = try Self.makeReview()
+        let authority = GuestClaimAuthority(
+            recoveryID: UUID(
+                uuidString: "77000000-0000-4000-8000-000000000010"
+            )!,
+            recoveryToken: "recovery_v1.presentation",
+            itemID: review.binding.itemID,
+            runID: review.binding.runID,
+            draftID: review.binding.listingID,
+            reviewRevision: review.binding.reviewRevision,
+            photoIdentity: GuestPhotoIdentity(
+                kind: "content_sha256_set_v1",
+                fingerprint: String(repeating: "8", count: 64)
+            )
+        )
+        let context = ProcessingGuestClaimContext(
+            authority: authority,
+            projection: GuestClaimListingProjection(
+                title: review.listing.title,
+                effectivePrice: review.pricing.suggestedPrice,
+                thumbnail: .neutral,
+                expiresAt: Date(timeIntervalSince1970: 1_800_000_000)
+            ),
+            review: review
+        )
+        let exact = ClaimedGuestListing(
+            itemID: authority.itemID,
+            runID: authority.runID,
+            draftID: authority.draftID
+        )
+        let mismatches: [(String, ClaimedGuestListing)] = [
+            (
+                "item",
+                ClaimedGuestListing(
+                    itemID: UUID(),
+                    runID: exact.runID,
+                    draftID: exact.draftID
+                )
+            ),
+            (
+                "run",
+                ClaimedGuestListing(
+                    itemID: exact.itemID,
+                    runID: UUID(),
+                    draftID: exact.draftID
+                )
+            ),
+            (
+                "draft",
+                ClaimedGuestListing(
+                    itemID: exact.itemID,
+                    runID: exact.runID,
+                    draftID: UUID()
+                )
+            ),
+        ]
+        let host = ProcessingGuestClaimPresentationHost()
+        XCTAssertTrue(host.present(context))
+
+        for (name, mismatch) in mismatches {
+            XCTAssertNil(host.takeClaimed(mismatch), name)
+            XCTAssertEqual(host.context, context, name)
+        }
+
+        XCTAssertEqual(host.takeClaimed(exact), context)
+        XCTAssertFalse(host.isPresented)
+        XCTAssertNil(host.takeClaimed(exact), "replay")
+    }
+
+    func testGuestProcessingReviewRouteRehydratesOnlyExactUnexpiredRecoveryAuthority()
+        async throws {
+        let review = try Self.makeReview()
+        let run = Self.makeRun(
+            status: .succeeded,
+            stage: .completed,
+            canOpenReview: true,
+            listingID: review.binding.listingID,
+            review: review
+        )
+        let recoveryID = UUID(
+            uuidString: "77000000-0000-4000-8000-000000000020"
+        )!
+        let recoveryToken = "recovery_v1.route"
+        let photoIdentity = GuestPhotoIdentity(
+            kind: "content_sha256_set_v1",
+            fingerprint: String(repeating: "9", count: 64)
+        )
+        let credential: (UUID?, UUID?) -> GuestRecoveryCredential = {
+            itemID, runID in
+            GuestRecoveryCredential(
+                recoveryID: recoveryID,
+                recoveryToken: recoveryToken,
+                recoveryTokenHash: GuestClaimListingProjection.tokenHash(
+                    recoveryToken
+                ),
+                itemID: itemID,
+                runID: runID,
+                photoIdentity: photoIdentity
+            )
+        }
+        let unexpiredNow = ISO8601DateFormatter.snapListDate(
+            from: "2026-08-04T13:00:00.000Z"
+        )!
+        let invalidCases: [(String, GuestRecoveryCredential, Date, Bool)] = [
+            (
+                "missing",
+                credential(review.binding.itemID, nil),
+                unexpiredNow,
+                false
+            ),
+            (
+                "item mismatch",
+                credential(UUID(), review.binding.runID),
+                unexpiredNow,
+                false
+            ),
+            (
+                "run mismatch",
+                credential(review.binding.itemID, UUID()),
+                unexpiredNow,
+                false
+            ),
+            (
+                "expired",
+                credential(review.binding.itemID, review.binding.runID),
+                ISO8601DateFormatter.snapListDate(
+                    from: "2026-08-06T13:00:00.000Z"
+                )!,
+                true
+            ),
+        ]
+
+        for (name, invalidCredential, now, expectsPurge) in invalidCases {
+            let credentials = RunStoreGuestRecoveryCredentials(
+                credential: invalidCredential
+            )
+            let authorities = RunStoreGuestClaimAuthorities()
+            let store = RunDetailStore(
+                service: RecordingRunService(results: [.success(run)]),
+                tokenProvider: RunStoreBearerTokenProvider {
+                    "guestcap_\(String(repeating: "G", count: 43))"
+                },
+                guestRecoveryCredentials: credentials,
+                guestClaimAuthorities: authorities,
+                now: { now }
+            )
+
+            let invalidRoute = await store.processingReviewRoute(
+                for: run.id
+            )
+            XCTAssertNil(invalidRoute, name)
+            let credentialPurges = await credentials.purgedRecoveryIDs()
+            let authorityPurges = await authorities.purgedRecoveryIDs()
+            XCTAssertEqual(
+                credentialPurges == [recoveryID],
+                expectsPurge,
+                name
+            )
+            XCTAssertEqual(
+                authorityPurges == [recoveryID],
+                expectsPurge || name == "item mismatch",
+                name
+            )
+        }
+
+        let exactCredential = credential(
+            review.binding.itemID,
+            review.binding.runID
+        )
+        let credentials = RunStoreGuestRecoveryCredentials(
+            credential: exactCredential
+        )
+        let authorities = RunStoreGuestClaimAuthorities()
+        let services = [
+            RecordingRunService(results: [.success(run)]),
+            RecordingRunService(results: [.success(run)]),
+        ]
+        var routes: [ProcessingReviewRoute] = []
+        for service in services {
+            let relaunchedStore = RunDetailStore(
+                service: service,
+                tokenProvider: RunStoreBearerTokenProvider {
+                    "guestcap_\(String(repeating: "G", count: 43))"
+                },
+                guestRecoveryCredentials: credentials,
+                guestClaimAuthorities: authorities,
+                now: { unexpiredNow }
+            )
+            let resolved = await relaunchedStore.processingReviewRoute(
+                for: run.id
+            )
+            let route = try XCTUnwrap(resolved)
+            routes.append(route)
+            let requests = await service.requests
+            XCTAssertEqual(
+                requests,
+                [
+                    .init(
+                        runID: run.id,
+                        bearerToken: "guestcap_\(String(repeating: "G", count: 43))"
+                    ),
+                ]
+            )
+        }
+
+        XCTAssertEqual(routes.count, 2)
+        XCTAssertEqual(routes[0], routes[1])
+    }
+
     func testProcessingRetryProjectsOnlyExactServerAcceptedTruth() async throws {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000040")!
         let unrelatedRunID = UUID(

@@ -63,6 +63,23 @@ final class RunDetailStore {
     /// presentation state: Processing must not navigate through `.run(runID)`
     /// just to determine whether it can open Listing Review.
     func processingReview(for runID: UUID) async -> ListingReviewResult? {
+        guard let route = await processingReviewRoute(for: runID) else {
+            return nil
+        }
+        switch route {
+        case .guestClaim(let context):
+            return context.review
+        case .listingReview(let review):
+            return review
+        }
+    }
+
+    /// Selects the exact Processing Review route without adopting Run Detail.
+    /// A signed-out guest must preserve the durable recovery tuple and claim it
+    /// before the principal-bound Listing Review store is allowed to open.
+    func processingReviewRoute(
+        for runID: UUID
+    ) async -> ProcessingReviewRoute? {
         do {
             let token = try await tokenProvider.bearerToken()
             let run = try await service.fetchRun(id: runID, bearerToken: token)
@@ -75,7 +92,66 @@ final class RunDetailStore {
                   review.binding.listingID == listingID else {
                 return nil
             }
-            return review
+            guard token.hasPrefix("guestcap_") else {
+                return .listingReview(review)
+            }
+            guard run.status == .succeeded,
+                  run.stage == .completed,
+                  let completedAt = run.timestamps.completedAt,
+                  let completed = Self.date(from: completedAt),
+                  let credential = try await guestRecoveryCredentials
+                    .credential(runID: runID) else {
+                return nil
+            }
+            let expiresAt = completed.addingTimeInterval(24 * 60 * 60)
+            guard expiresAt > now() else {
+                try await guestClaimAuthorities.purge(
+                    recoveryID: credential.recoveryID
+                )
+                try await guestRecoveryCredentials.purge(
+                    recoveryID: credential.recoveryID
+                )
+                return nil
+            }
+            guard let authority = GuestClaimAuthorityAssembler.assemble(
+                credential: credential,
+                binding: review.binding
+            ) else {
+                try await guestClaimAuthorities.purge(
+                    recoveryID: credential.recoveryID
+                )
+                return nil
+            }
+            var expiringCredential = credential
+            expiringCredential.expiresAt = expiresAt
+            guard let projection = GuestClaimListingProjection.project(
+                snapshot: review,
+                draft: ListingReviewDraft(snapshot: review),
+                isDirty: false,
+                authority: authority,
+                credential: expiringCredential,
+                now: now()
+            ) else {
+                try await guestClaimAuthorities.purge(
+                    recoveryID: credential.recoveryID
+                )
+                return nil
+            }
+            try await guestRecoveryCredentials.setExpiry(
+                recoveryID: credential.recoveryID,
+                expiresAt: expiresAt
+            )
+            try await guestClaimAuthorities.save(
+                authority,
+                listingID: listingID
+            )
+            return .guestClaim(
+                ProcessingGuestClaimContext(
+                    authority: authority,
+                    projection: projection,
+                    review: review
+                )
+            )
         } catch {
             return nil
         }
