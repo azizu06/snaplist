@@ -18,6 +18,7 @@ struct AppShellView: View {
     @Environment(\.appDependencies) private var dependencies
     @State private var isKeyboardVisible = false
     @State private var keyboardProbeText = ""
+    @State private var isDeleteAccountFlowPresented = false
     @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
@@ -519,7 +520,9 @@ struct AppShellView: View {
         }
         .floatingDock(
             selectedTab: router.selectedTab,
-            isVisible: DockVisibilityPolicy.shouldShow(isKeyboardVisible: isKeyboardVisible),
+            isVisible: DockVisibilityPolicy.shouldShow(
+                isKeyboardVisible: isKeyboardVisible
+            ) && !isDeleteAccountFlowPresented,
             select: router.select
         )
         .animation(
@@ -655,8 +658,12 @@ struct AppShellView: View {
                 settingsProofSafeExit: configuration.settingsProofState == nil
                     ? nil
                     : {
+                        isDeleteAccountFlowPresented = false
                         router.reset(tab: .trophyWall)
-                    }
+                    },
+                deletionFlowPresentationChanged: {
+                    isDeleteAccountFlowPresented = $0
+                }
             )
         case .home(let route):
             switch route {

@@ -8,6 +8,7 @@ struct SettingsView: View {
     private let profile: SettingsProfile
     private let settingsProofState: SettingsProofState?
     private let settingsProofSafeExit: (() -> Void)?
+    private let deletionFlowPresentationChanged: (Bool) -> Void
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
     private let deletionOutstanding: Bool
@@ -32,11 +33,13 @@ struct SettingsView: View {
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false,
-        settingsProofSafeExit: (() -> Void)? = nil
+        settingsProofSafeExit: (() -> Void)? = nil,
+        deletionFlowPresentationChanged: @escaping (Bool) -> Void = { _ in }
     ) {
         profile = .current(configuration: configuration)
         settingsProofState = configuration.settingsProofState
         self.settingsProofSafeExit = settingsProofSafeExit
+        self.deletionFlowPresentationChanged = deletionFlowPresentationChanged
         self.mobileAPIClient = mobileAPIClient
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
@@ -60,7 +63,8 @@ struct SettingsView: View {
             SettingsProofStateView(
                 state: settingsProofState,
                 profile: profile,
-                onSafeExit: settingsProofSafeExit
+                onSafeExit: settingsProofSafeExit,
+                deletionFlowPresentationChanged: deletionFlowPresentationChanged
             )
         } else {
             settingsHub
@@ -175,7 +179,9 @@ struct SettingsView: View {
                                         loadPhase: subscriptionLoadPhase
                                     ),
                                     proofSafeExit: nil,
-                                    reservesFloatingDock: true
+                                    reservesFloatingDock: false,
+                                    deletionFlowPresentationChanged:
+                                        deletionFlowPresentationChanged
                                 )
                             } label: {
                                 Text("Delete account")
@@ -513,6 +519,7 @@ private struct SettingsProofStateView: View {
     let state: SettingsProofState
     let profile: SettingsProfile
     let onSafeExit: () -> Void
+    let deletionFlowPresentationChanged: (Bool) -> Void
 
     var body: some View {
         switch state {
@@ -521,9 +528,11 @@ private struct SettingsProofStateView: View {
         case .deletionConsequences:
             SettingsDeletionConsequencesView(
                 profile: profile,
-                subscriptionTruth: .unknown,
+                subscriptionTruth: .billing,
                 proofSafeExit: onSafeExit,
-                reservesFloatingDock: true
+                reservesFloatingDock: false,
+                deletionFlowPresentationChanged:
+                    deletionFlowPresentationChanged
             )
         case .reauthentication:
             SettingsReauthenticationView(
@@ -617,40 +626,85 @@ private struct SettingsLocalRemovalView: View {
     }
 }
 
+private struct SettingsDeletionHeader: View {
+    let back: () -> Void
+
+    var body: some View {
+        ZStack {
+            Text("Delete account")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            HStack {
+                Button(action: back) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Settings")
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.action.color)
+                .accessibilityLabel("Settings")
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 56)
+        .background(Color.white)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
 private struct SettingsDeletionConsequencesView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
     let proofSafeExit: (() -> Void)?
     var reservesFloatingDock = false
+    let deletionFlowPresentationChanged: (Bool) -> Void
     @State private var managesSubscription = false
     @State private var presentsReauthentication = false
 
     var body: some View {
-        SettingsExplanationPage(
-            title: "Delete your SnapList account",
-            lead: "Read what this does before you continue. You can still stop at every step."
-        ) {
-            SettingsFactSection(
-                title: "What is deleted",
-                bullets: [
-                    "Your SnapList account and how you sign in",
-                    "Your items, photos, drafts, voice notes and runs",
-                    "Your price research and anything SnapList generated for you",
-                    "Your eBay connection, removed from SnapList"
-                ],
-                bulletColor: Color(hex: "#B42318")
-            )
-            SettingsFactSection(title: "What this does not do", bullets: [
-                "It does not end your eBay listings\nListings you already published stay on eBay and keep selling. Deleting this account removes the eBay connection from SnapList, so SnapList can no longer see or change them. Ending a listing is done in eBay.",
-                "It does not cancel SnapList Pro\n\(subscriptionTruth.longCopy)"
-            ], usesBullets: false)
-            Button("Manage subscription in the App Store") { managesSubscription = true }
-            Text("Nothing is deleted yet. The next step confirms it is you.")
-                .font(.footnote).foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            SettingsDeletionHeader(back: safeExit)
+            SettingsExplanationPage(
+                title: "Delete your SnapList account",
+                lead: "Read what this does before you continue. You can still stop at every step.",
+                titleFont: .system(size: 20, weight: .bold),
+                leadFont: .system(size: 16),
+                horizontalPadding: 25,
+                verticalPadding: 30,
+                titleToLeadSpacing: 22,
+                contentTopSpacing: 18,
+                contentSectionSpacing: 15
+            ) {
+                SettingsFactSection(
+                    title: "What is deleted",
+                    bullets: [
+                        "Your SnapList account and how you sign in",
+                        "Your items, photos, drafts, voice notes and runs",
+                        "Your price research and anything SnapList generated for you",
+                        "Your eBay connection, removed from SnapList"
+                    ],
+                    bulletColor: Color(hex: "#B42318"),
+                    rowFont: .system(size: 15),
+                    rowVerticalPadding: 15.5,
+                    rowHorizontalPadding: 12,
+                    bulletSpacing: 8,
+                    headerToCardSpacing: 5
+                )
+                SettingsDeletionBoundarySection(
+                    subscriptionCopy: subscriptionTruth.longCopy
+                )
+                Button("Manage subscription in the App Store") { managesSubscription = true }
+                Text("Nothing is deleted yet. The next step confirms it is you.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
-        .navigationTitle("Delete account")
-        .navigationBarTitleDisplayMode(.inline)
+        .background(Color.white.ignoresSafeArea(edges: .top))
+        .toolbar(.hidden, for: .navigationBar)
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
         .safeAreaInset(edge: .bottom) {
             SettingsActionTray(
@@ -661,6 +715,7 @@ private struct SettingsDeletionConsequencesView: View {
                 primaryAction: { presentsReauthentication = true },
                 secondaryAction: safeExit
             )
+            .offset(y: 16)
             .padding(
                 .bottom,
                 reservesFloatingDock
@@ -679,9 +734,15 @@ private struct SettingsDeletionConsequencesView: View {
             )
         }
         .accessibilityIdentifier("settings.state.del-01")
+        .onAppear { deletionFlowPresentationChanged(true) }
+        .onDisappear {
+            guard !presentsReauthentication else { return }
+            deletionFlowPresentationChanged(false)
+        }
     }
 
     private func safeExit() {
+        deletionFlowPresentationChanged(false)
         if let proofSafeExit {
             proofSafeExit()
         } else {
@@ -951,21 +1012,37 @@ private struct SettingsEmailCodeField: View {
 private struct SettingsExplanationPage<Content: View>: View {
     let title: String
     var lead: String? = nil
+    var titleFont: Font = .title.bold()
+    var leadFont: Font = .body
+    var horizontalPadding: CGFloat = 20
+    var verticalPadding: CGFloat = 20
+    var titleToLeadSpacing: CGFloat = 22
+    var contentTopSpacing: CGFloat = 22
+    var contentSectionSpacing: CGFloat = 22
     @ViewBuilder let content: Content
     @AccessibilityFocusState private var headingFocused: Bool
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(title)
-                    .font(.title.bold())
+                    .font(titleFont)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityFocused($headingFocused)
-                if let lead { Text(lead).font(.body) }
-                content
+                if let lead {
+                    Text(lead)
+                        .font(leadFont)
+                        .padding(.top, titleToLeadSpacing)
+                }
+                VStack(alignment: .leading, spacing: contentSectionSpacing) {
+                    content
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, contentTopSpacing)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
         }
         .background(Color(hex: "#F5F6F7"))
         .onAppear { headingFocused = true }
@@ -977,27 +1054,77 @@ private struct SettingsFactSection: View {
     let bullets: [String]
     var usesBullets = true
     var bulletColor = Color(hex: "#8A8E94")
+    var rowFont: Font = .body
+    var rowVerticalPadding: CGFloat = 13
+    var rowHorizontalPadding: CGFloat = 14
+    var bulletSpacing: CGFloat = 10
+    var headerToCardSpacing: CGFloat = 8
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: headerToCardSpacing) {
             if !title.isEmpty {
                 Text(title.uppercased()).font(.caption.weight(.semibold))
                     .tracking(1).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(bullets.enumerated()), id: \.offset) { index, text in
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .top, spacing: bulletSpacing) {
                         if usesBullets { Text("•").foregroundStyle(bulletColor) }
-                        Text(text).fixedSize(horizontal: false, vertical: true)
+                        Text(text)
+                            .font(rowFont)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.vertical, 13)
+                    .padding(.vertical, rowVerticalPadding)
                     if index < bullets.count - 1 { Divider() }
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, rowHorizontalPadding)
             .background(.white, in: RoundedRectangle(cornerRadius: 14))
             .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "#E3E5E8")) }
         }
+    }
+}
+
+private struct SettingsDeletionBoundarySection: View {
+    let subscriptionCopy: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6.5) {
+            Text("WHAT THIS DOES NOT DO")
+                .font(.caption.weight(.semibold))
+                .tracking(1)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                boundary(
+                    title: "It does not end your eBay listings",
+                    body: "Listings you already published stay on eBay and keep selling. Deleting this account removes the eBay connection from SnapList, so SnapList can no longer see or change them. Ending a listing is done in eBay."
+                )
+                Divider()
+                boundary(
+                    title: "It does not cancel SnapList Pro",
+                    body: subscriptionCopy
+                )
+            }
+            .background(.white, in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(hex: "#E3E5E8"))
+            }
+        }
+    }
+
+    private func boundary(title: String, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+            Text(body)
+                .font(.system(size: 16))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 16)
     }
 }
 
