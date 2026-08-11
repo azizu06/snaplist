@@ -631,14 +631,7 @@ struct GuestClaimView: View {
     @State private var presentsAccountEntry = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                stateContent
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.vertical, 24)
-        }
+        content
         .background(SnapListColorToken.canvas.color)
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -677,26 +670,84 @@ struct GuestClaimView: View {
     }
 
     @ViewBuilder
-    private var stateContent: some View {
+    private var content: some View {
         switch store.state {
         case .gate:
-            GuestClaimListingCard(projection: listingProjection)
-            claimMessage(
-                headline: "Save this listing to your account",
-                statements: [
-                    "Your draft is ready. Sign in, or make an account, and it stays exactly as you left it.",
-                ],
-                footnote: "Saved for 24 hours, then deleted. Claiming keeps it in your account beyond 24 hours."
-            )
+            gateContent
+                .toolbar(.hidden, for: .navigationBar)
+        default:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    stateContent
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, SnapListMetrics.screenGutter)
+                .padding(.vertical, 24)
+            }
+        }
+    }
+
+    private var gateContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: backToDraft) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .regular))
+                        .frame(
+                            width: SnapListMetrics.minimumTouchTarget,
+                            height: SnapListMetrics.minimumTouchTarget
+                        )
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .accessibilityLabel("Close and keep my draft")
+                .accessibilityIdentifier("guest-claim.close")
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 16)
+            .frame(height: SnapListMetrics.minimumTouchTarget)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    claimMessage(
+                        headline: "Save this listing to your account",
+                        statements: [
+                            "Your draft is ready. Sign in, or make an account, and it stays exactly as you left it.",
+                        ],
+                        footnote: nil
+                    )
+                    GuestClaimListingCard(projection: listingProjection)
+                    Text(
+                        "Saved for 24 hours, then deleted. Claiming keeps it in your account beyond 24 hours."
+                    )
+                    .snapListTypography(.metadata)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             SnapListPrimaryButton(
                 title: "Sign in or create account",
                 forceReducedMotion: reduceMotion,
                 action: beginSupportedAuthentication
             )
-            SnapListSecondaryButton(
-                title: "Not now",
-                action: backToDraft
-            )
+            .padding(.horizontal, 24)
+            .padding(.vertical, 12)
+            .background(SnapListColorToken.canvas.color)
+        }
+    }
+
+    @ViewBuilder
+    private var stateContent: some View {
+        switch store.state {
+        case .gate:
+            EmptyView()
         case .authenticating:
             ProgressView("Opening secure account entry…")
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -1047,31 +1098,80 @@ private struct GuestClaimEntryRejectedView: View {
 private struct GuestClaimListingCard: View {
     let projection: GuestClaimListingProjection
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            thumbnail
-                .frame(width: 72, height: 72)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(projection.title)
-                    .snapListTypography(.rowTitle)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(EbayPublishCurrency.string(projection.effectivePrice))
-                    .snapListTypography(.status)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                Text("Saved until \(projection.expiresAt.formatted(date: .abbreviated, time: .shortened))")
-                    .snapListTypography(.metadata)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 12) {
+                        listingThumbnail
+                        listingDetails
+                    }
+                    expiryLabel
+                }
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    listingThumbnail
+                    listingDetails
+                    Spacer(minLength: 4)
+                    expiryLabel
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(SnapListColorToken.quietFill.color)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .background(SnapListColorToken.canvas.color)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("guest-claim.listing")
+    }
+
+    private var listingThumbnail: some View {
+        thumbnail
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .accessibilityHidden(true)
+    }
+
+    private var listingDetails: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(projection.title)
+                .snapListTypography(.rowTitle)
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "Draft · \(EbayPublishCurrency.string(projection.effectivePrice))"
+            )
+            .snapListTypography(.status)
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var expiryLabel: some View {
+        Label(expiryText, systemImage: "clock")
+            .snapListTypography(.metadata)
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .accessibilityLabel(expiryAccessibilityLabel)
+    }
+
+    private var expiryText: String {
+        "\(expiryHours)h"
+    }
+
+    private var expiryHours: Int {
+        let remaining = projection.expiresAt.timeIntervalSinceNow / 3_600
+        return min(24, max(1, Int(remaining.rounded(.up))))
+    }
+
+    private var expiryAccessibilityLabel: String {
+        let unit = expiryHours == 1 ? "hour" : "hours"
+        return "Saved for \(expiryHours) \(unit)"
     }
 
     @ViewBuilder
