@@ -118,7 +118,9 @@ struct ActivationGuidanceCoachMark: View {
     }
 
     private var background: some ShapeStyle {
-        coachMark.isDarkSurface ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color.white)
+        coachMark.isDarkSurface
+            ? AnyShapeStyle(Color(hex: "#1A1B20"))
+            : AnyShapeStyle(Color.white)
     }
 
     private var tailColor: Color {
