@@ -75,6 +75,7 @@ struct ListingReviewView: View {
                 .accessibilityLabel("Back to Processing review")
                 .accessibilityFocused($focusedElement, equals: .back)
                 .accessibilityIdentifier("listing-review.back")
+                .buttonStyle(.plain)
             }
         }
         .navigationDestination(item: $destination) { destination in
@@ -182,22 +183,25 @@ struct ListingReviewView: View {
             // seller scrolls them into view, which at the largest Dynamic Type
             // sizes is most of the review — including the title control that
             // Voice Control and the rotor need to be able to name.
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 0) {
                 ListingReviewPhotoPager(photos: snapshot.photos)
 
-                stateBanner
+                VStack(alignment: .leading, spacing: 18) {
+                    stateBanner
 
-                identityAndPricing(snapshot: snapshot, draft: draft)
+                    identityAndPricing(snapshot: snapshot, draft: draft)
 
-                details(snapshot: snapshot, draft: draft)
+                    details(snapshot: snapshot, draft: draft)
 
-                ebayPublishEntry
+                    ebayPublishEntry
 
-                assistedExportEntry
+                    assistedExportEntry
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+                .padding(.bottom, 20)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 12)
-            .padding(.bottom, 20)
+            .padding(.top, 9)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
@@ -250,35 +254,21 @@ struct ListingReviewView: View {
         draft: ListingReviewDraft
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                if snapshot.identity.confident {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(SnapListColorToken.action.color)
-                        .accessibilityHidden(true)
-                }
-                Text(snapshot.identity.label)
-                    .font(.headline)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 14)
+            Text(snapshot.identity.label)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             price(snapshot: snapshot, draft: draft)
-                .padding(14)
+                .padding(.top, 6)
 
             if !snapshot.verifiedSoldMatches.isEmpty {
                 Divider()
-                    .padding(.horizontal, 14)
+                    .padding(.top, 18)
                 soldMatches(snapshot.verifiedSoldMatches)
-                    .padding(.vertical, 14)
+                    .padding(.top, 14)
+                    .padding(.horizontal, -18)
             }
-        }
-        .background(SnapListColorToken.canvas.color)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(SnapListColorToken.hairline.color)
         }
         .accessibilityElement(children: .contain)
     }
@@ -359,11 +349,11 @@ struct ListingReviewView: View {
                                 locale: locale
                             )
                         )
-                        .font(.largeTitle.weight(.bold).monospacedDigit())
+                        .font(.title.weight(.bold).monospacedDigit())
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
                         Image(systemName: "pencil")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(SnapListColorToken.action.color)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(SnapListColorToken.textTertiary.color)
                             .accessibilityHidden(true)
                     }
                     .frame(minHeight: SnapListMetrics.minimumTouchTarget)
@@ -404,18 +394,18 @@ struct ListingReviewView: View {
     private func soldMatches(
         _ matches: [ListingReviewSoldMatch]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("VERIFIED SOLD MATCHES")
-                    .font(.caption2.weight(.bold))
-                    .tracking(0.5)
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-                Spacer()
-                Text(ListingReviewSoldSummary.text(for: matches, locale: locale))
-                    .font(.caption)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-            }
-            .padding(.horizontal, 14)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("VERIFIED SOLD MATCHES")
+                .font(.caption2.weight(.bold))
+                .tracking(0.5)
+                .foregroundStyle(SnapListColorToken.textTertiary.color)
+                .padding(.horizontal, 18)
+
+            Text(ListingReviewSoldSummary.text(for: matches, locale: locale))
+                .font(.caption)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .padding(.horizontal, 18)
+                .padding(.top, 3)
 
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 12) {
@@ -438,13 +428,15 @@ struct ListingReviewView: View {
                 }
                 .scrollTargetLayout()
             }
-            .contentMargins(.horizontal, 14, for: .scrollContent)
+            .contentMargins(.horizontal, 6, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
+            .padding(.top, 10)
 
             Text("Sold prices, not asking prices.")
                 .font(.caption)
                 .foregroundStyle(SnapListColorToken.textTertiary.color)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
@@ -643,11 +635,12 @@ struct ListingReviewView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        .padding(.bottom, SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset)
+        .padding(.bottom, 8)
         .background(SnapListColorToken.canvas.color)
         .overlay(alignment: .top) {
             Divider()
         }
+        .offset(y: 8)
     }
 
     @ViewBuilder
@@ -765,16 +758,22 @@ struct ListingReviewView: View {
                 focusedElement = .title
             }
         } label: {
-            Label(
-                correctionAvailable
-                    ? ListingReviewCopy.fixItem
-                    : ListingReviewCopy.editDetails,
-                systemImage: correctionAvailable
-                    ? "sparkles"
-                    : "pencil"
-            )
+            Label {
+                Text(
+                    correctionAvailable
+                        ? ListingReviewCopy.fixItem
+                        : ListingReviewCopy.editDetails
+                )
+                .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            } icon: {
+                Image(
+                    systemName: correctionAvailable
+                        ? "sparkles"
+                        : "pencil"
+                )
+                .foregroundStyle(SnapListColorToken.action.color)
+            }
             .font(.headline)
-            .foregroundStyle(SnapListColorToken.inkPrimary.color)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 52)
             .contentShape(Rectangle())
@@ -904,4 +903,5 @@ struct ListingReviewView: View {
         return visible.joined(separator: " · ")
             + (remainder > 0 ? " · +\(remainder) more" : "")
     }
+
 }
