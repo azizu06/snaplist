@@ -1,5 +1,5 @@
 import SwiftUI
-import WebKit
+import AVFoundation
 
 struct ActivationGuidanceCoachMark: View {
     let coachMark: ActivationCoachMark
@@ -133,32 +133,72 @@ struct ActivationGuidanceCoachMark: View {
 }
 
 private struct ActivationScoutMotionView: UIViewRepresentable {
+    /// The accepted WebM remains the provenance URL selected by the domain
+    /// policy. AVFoundation plays its same-basename HEVC-alpha derivative.
     let url: URL
 
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.allowsInlineMediaPlayback = true
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        view.isOpaque = false
-        view.backgroundColor = .clear
-        view.scrollView.backgroundColor = .clear
-        view.scrollView.isScrollEnabled = false
-        view.isUserInteractionEnabled = false
-        return view
+    func makeUIView(context: Context) -> ActivationScoutPlayerUIView {
+        ActivationScoutPlayerUIView()
     }
 
-    func updateUIView(_ view: WKWebView, context: Context) {
-        guard context.coordinator.loadedResource != url else { return }
-        context.coordinator.loadedResource = url
-        view.loadHTMLString(
-            "<style>html,body,video{margin:0;width:100%;height:100%;background:transparent;object-fit:contain}</style><video autoplay muted loop playsinline src='\(url.lastPathComponent)'></video>",
-            baseURL: url.deletingLastPathComponent()
+    func updateUIView(
+        _ view: ActivationScoutPlayerUIView,
+        context: Context
+    ) {
+        view.play(
+            url: url.deletingPathExtension().appendingPathExtension("mov")
         )
     }
+}
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+private final class ActivationScoutPlayerUIView: UIView {
+    private var player: AVQueuePlayer?
+    private var looper: AVPlayerLooper?
+    private var loadedURL: URL?
 
-    final class Coordinator {
-        var loadedResource: URL?
+    override static var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    private var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        accessibilityElementsHidden = true
+        playerLayer.backgroundColor = UIColor.clear.cgColor
+        playerLayer.videoGravity = .resizeAspect
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func play(url: URL) {
+        guard loadedURL != url else {
+            player?.play()
+            return
+        }
+        loadedURL = url
+
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        let looper = AVPlayerLooper(
+            player: player,
+            templateItem: AVPlayerItem(url: url)
+        )
+        playerLayer.player = player
+        self.player = player
+        self.looper = looper
+        player.play()
+    }
+
+    deinit {
+        player?.pause()
     }
 }
