@@ -17,12 +17,19 @@ rescue JSON::ParserError, Errno::ENOENT => error
   abort "invalid test shard inventory: #{error.message}"
 end
 
-abort "test shard inventory schema_version must be 1" unless inventory["schema_version"] == 1
+abort "test shard inventory schema_version must be 2" unless inventory["schema_version"] == 2
+
+ui_shard_count = inventory.fetch("ui_shard_count") do
+  abort "test shard inventory must declare ui_shard_count"
+end
+unless ui_shard_count.is_a?(Integer) && ui_shard_count.positive?
+  abort "test shard inventory ui_shard_count must be a positive integer"
+end
 
 shards = inventory.fetch("shards") do
   abort "test shard inventory must define shards"
 end
-expected_shards = %w[unit ui-1 ui-2]
+expected_shards = ["unit"] + (1..ui_shard_count).map { |index| "ui-#{index}" }
 unless shards.keys.sort == expected_shards.sort
   abort "test shard inventory must define exactly: #{expected_shards.join(", ")}"
 end
@@ -37,6 +44,13 @@ end
 
 unless selectors_by_shard.fetch("unit") == ["SnapListTests"]
   abort "unit shard must own the complete SnapListTests target"
+end
+
+empty_ui_shards = selectors_by_shard
+  .select { |shard, selectors| shard.start_with?("ui-") && selectors.empty? }
+  .keys
+unless empty_ui_shards.empty?
+  abort "UI test shards must be nonempty: #{empty_ui_shards.sort.join(", ")}"
 end
 
 ui_selectors = selectors_by_shard
@@ -104,7 +118,81 @@ unless unexpected_selectors.empty?
   abort "unknown UI test selectors: #{unexpected_selectors.sort.join(", ")}"
 end
 
+baseline = inventory.fetch("baseline") do
+  abort "test shard inventory must define baseline timing evidence"
+end
+selector_observed_seconds = baseline.fetch("selector_observed_seconds") do
+  abort "test shard inventory baseline must define selector_observed_seconds"
+end
+unless selector_observed_seconds.is_a?(Hash) &&
+  selector_observed_seconds.all? do |selector, seconds|
+    selector.is_a?(String) && seconds.is_a?(Numeric) && seconds.finite? && seconds >= 0
+  end
+  abort "every selector timing must be a finite non-negative number"
+end
+
+missing_timings = discovered_ui_selectors - selector_observed_seconds.keys
+unexpected_timings = selector_observed_seconds.keys - discovered_ui_selectors
+unless missing_timings.empty?
+  abort "missing UI selector timings: #{missing_timings.sort.join(", ")}"
+end
+unless unexpected_timings.empty?
+  abort "unknown UI selector timings: #{unexpected_timings.sort.join(", ")}"
+end
+
+balanced_shards = Array.new(ui_shard_count) do
+  { observed_seconds: 0.0, selectors: [] }
+end
+selector_observed_seconds
+  .sort_by { |selector, seconds| [-seconds, selector] }
+  .each do |selector, seconds|
+    shard_index = balanced_shards.each_index.min_by do |index|
+      [balanced_shards[index].fetch(:observed_seconds), index]
+    end
+    balanced_shards.fetch(shard_index).fetch(:selectors) << selector
+    balanced_shards.fetch(shard_index)[:observed_seconds] += seconds
+  end
+
+balanced_shards.each_with_index do |balanced_shard, index|
+  shard_name = "ui-#{index + 1}"
+  actual_selectors = selectors_by_shard.fetch(shard_name).sort
+  expected_selectors = balanced_shard.fetch(:selectors).sort
+  next if actual_selectors == expected_selectors
+
+  abort "#{shard_name} does not match deterministic timing balance"
+end
+
+unless baseline["ui_test_count"] == discovered_ui_selectors.length
+  abort "baseline ui_test_count does not match discovered UI selectors"
+end
+
+selector_seconds_total = baseline["selector_seconds_total"]
+calculated_selector_seconds_total = selector_observed_seconds.values.sum
+unless selector_seconds_total.is_a?(Numeric) &&
+  selector_seconds_total.finite? &&
+  (selector_seconds_total - calculated_selector_seconds_total).abs <= 0.0005
+  abort "baseline selector_seconds_total does not match selector timings"
+end
+
+balanced_ui_shard_observed_seconds = baseline["balanced_ui_shard_observed_seconds"]
+unless balanced_ui_shard_observed_seconds.is_a?(Hash) &&
+  balanced_ui_shard_observed_seconds.keys.sort == expected_shards.drop(1).sort
+  abort "baseline balanced UI shard timing summary does not match declared shards"
+end
+
+balanced_shards.each_with_index do |balanced_shard, index|
+  shard_name = "ui-#{index + 1}"
+  declared_seconds = balanced_ui_shard_observed_seconds.fetch(shard_name)
+  calculated_seconds = balanced_shard.fetch(:observed_seconds)
+  unless declared_seconds.is_a?(Numeric) &&
+    declared_seconds.finite? &&
+    (declared_seconds - calculated_seconds).abs <= 0.0005
+    abort "baseline #{shard_name} timing summary does not match selector timings"
+  end
+end
+
 puts(
   "PASS test shard inventory: SnapListTests target and " \
-    "#{ui_selectors.length} UI selectors assigned exactly once"
+    "#{ui_selectors.length} UI selectors assigned exactly once across " \
+    "#{ui_shard_count} timing-balanced UI shards"
 )
