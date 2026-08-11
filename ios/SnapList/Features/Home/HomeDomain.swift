@@ -21,10 +21,10 @@ enum TrophyWallGridMetrics {
 /// twenty-point gap to the heading.
 enum TrophyWallEmptyMetrics {
     static let contentSpacing: CGFloat = 20
-    static let scoutHeight: CGFloat = 150
-    static let scoutOpticalBottomInset: CGFloat = -17
+    static let scoutHeight: CGFloat = 143
+    static let scoutOpticalBottomInset: CGFloat = -10
     static let horizontalPadding: CGFloat = 34
-    static let bottomPadding: CGFloat = 104
+    static let bottomPadding: CGFloat = 48
 }
 
 /// Presentation-only framing for a cleared bundled fixture photo. It does not
