@@ -681,12 +681,19 @@ final class SnapListUITests: XCTestCase {
         )
         let savedClose = saved.buttons["voice-note.close"]
         let playback = saved.buttons["voice-note.playback"]
+        let rerecord = saved.buttons["voice-note.rerecord"]
+        let delete = saved.buttons["voice-note.delete"]
         XCTAssertEqual(playback.label, "Pause voice note")
+        XCTAssertTrue(rerecord.exists)
+        XCTAssertTrue(delete.exists)
+
+        playback.tap()
+        XCTAssertEqual(playback.label, "Play voice note")
 
         attemptVoiceNoteSwipeDismiss(in: saved)
 
         XCTAssertTrue(savedClose.exists)
-        XCTAssertEqual(playback.label, "Pause voice note")
+        XCTAssertEqual(playback.label, "Play voice note")
 
         savedClose.tap()
         let savedRow = saved.buttons["photo-review.voice"]
