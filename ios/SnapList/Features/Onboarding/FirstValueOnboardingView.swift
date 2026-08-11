@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 @MainActor
 struct FirstValueOnboardingView: View {
@@ -7,34 +8,40 @@ struct FirstValueOnboardingView: View {
     let usesStaticScoutRendering: Bool
     /// Receives the completion contract #566 consumes, never a bare "done".
     let didFinish: (FirstValueOnboardingOutcome) -> Void
+    /// Delegates the existing-account handoff to the shell's typed route.
+    let openExistingAccount: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @State private var presentsSignIn = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AccessibilityFocusState private var headingIsFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
-                VStack(spacing: 18) {
-                    title
-                        .accessibilityFocused($headingIsFocused)
-                    screenContent
+                VStack(spacing: 0) {
+                    onboardingContent
+                    .frame(maxWidth: usesCompactAuthorityLayout ? 353 : 420)
+                    .padding(.horizontal, usesCompactAuthorityLayout ? 20 : 24)
+                    .padding(.top, usesCompactAuthorityLayout ? 2 : 8)
+                    .padding(.bottom, usesCompactAuthorityLayout ? 8 : 24)
+
+                    if usesFlowingIncludedFooter {
+                        footer
+                    }
                 }
-                .frame(maxWidth: 420)
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
             }
             .scrollIndicators(.hidden)
-            footer
+            .accessibilityIdentifier("first-value-onboarding.scroll")
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !usesFlowingIncludedFooter {
+                    footer
+                }
+            }
         }
         .background(SnapListColorToken.canvas.color.ignoresSafeArea())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("first-value-onboarding.state.\(model.screen.identifier)")
-        .sheet(isPresented: $presentsSignIn) {
-            ReturningSignInSheet { presentsSignIn = false }
-        }
         .onAppear { headingIsFocused = true }
         .onChange(of: model.screen) { _, _ in headingIsFocused = true }
     }
@@ -43,9 +50,58 @@ struct FirstValueOnboardingView: View {
         systemReduceMotion || forceReducedMotion
     }
 
+    /// At Accessibility Dynamic Type, ONB-06's longer listing content must scroll
+    /// before its actions rather than share the viewport with a sticky footer.
+    private var usesFlowingIncludedFooter: Bool {
+        model.screen == .onb06 && dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var usesCompactAuthorityLayout: Bool {
+        model.screen == .onb01
+            || model.screen == .onb02
+            || model.screen == .onb03
+            || model.screen == .onb04
+            || model.screen == .onb05
+            || model.screen == .onb06
+    }
+
+    @ViewBuilder
+    private var onboardingContent: some View {
+        if usesCompactAuthorityLayout {
+            VStack(spacing: 0) {
+                title
+                    .accessibilityFocused($headingIsFocused)
+                if model.screen == .onb03 {
+                    screenContent
+                        .padding(.top, 25)
+                } else if model.screen == .onb04 {
+                    screenContent
+                        .padding(.top, 20)
+                } else if model.screen == .onb05 {
+                    screenContent
+                        .padding(.top, 17.25)
+                } else if model.screen == .onb06 {
+                    screenContent
+                        .padding(.top, 14)
+                } else {
+                    Divider()
+                        .padding(.top, model.screen == .onb02 ? 6 : 18)
+                        .padding(.bottom, model.screen == .onb02 ? 6 : 14)
+                    screenContent
+                }
+            }
+        } else {
+            VStack(spacing: 18) {
+                title
+                    .accessibilityFocused($headingIsFocused)
+                screenContent
+            }
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
-            if model.screen != .onb01 && model.screen != .onb06 {
+            if model.screen != .onb01 {
                 Button(action: model.goBack) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 17, weight: .semibold))
@@ -70,10 +126,13 @@ struct FirstValueOnboardingView: View {
             .accessibilityValue("Step \(model.screen.rawValue) of 6")
 
             if model.screen != .onb06 {
-                Button("Skip") { finish(using: model.skip) }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .frame(minWidth: 44, minHeight: 44)
+                Button { finish(using: model.skip) } label: {
+                    Text("Skip")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(SnapListColorToken.action.color)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
                     .accessibilityIdentifier("first-value-onboarding.skip")
             }
         }
@@ -98,7 +157,15 @@ struct FirstValueOnboardingView: View {
                 highlightedTitle("Your first one\n", "is on us.", blue: SnapListColorToken.actionDeep.color)
             }
         }
-        .font(.system(.largeTitle, design: .rounded, weight: .bold))
+        .font(usesCompactAuthorityLayout
+            ? .system(
+                size: model.screen == .onb03 || model.screen == .onb04 || model.screen == .onb05
+                    ? 25
+                    : 27,
+                weight: .bold,
+                design: .rounded
+            )
+            : .system(.largeTitle, design: .rounded, weight: .bold))
         .frame(maxWidth: .infinity, alignment: .leading)
         .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)
@@ -123,30 +190,32 @@ struct FirstValueOnboardingView: View {
     }
 
     private var photographScreen: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 9) {
-                itemImage("FirstValueSneaker", label: "A worn sneaker photographed on a plain surface")
-                itemImage("FirstValueJacket", label: "A folded medium wash denim jacket")
-                itemImage("FirstValueLamp", label: "A desk lamp photographed on a plain surface")
-            }
-            .frame(height: 190)
-            card {
-                HStack(spacing: 12) {
-                    itemImage("FirstValueJacket", label: "")
-                        .frame(width: 64, height: 64).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Denim trucker jacket, size M").font(.body.weight(.semibold))
-                        HStack(spacing: 7) {
-                            Text("$58").font(.title2.bold())
-                            Text("Good").font(.caption.weight(.semibold))
-                                .padding(.horizontal, 7).padding(.vertical, 3)
-                                .background(SnapListColorToken.quietFill.color, in: RoundedRectangle(cornerRadius: 6))
-                        }
-                    }
-                    Spacer()
+        VStack(spacing: 0) {
+            GeometryReader { proxy in
+                let tileWidth = (proxy.size.width - 16) / 3
+                HStack(spacing: 8) {
+                    photographTile(
+                        "FirstValueSneaker",
+                        label: "A worn sneaker photographed on a plain surface",
+                        width: tileWidth
+                    )
+                    photographTile(
+                        "FirstValueJacket",
+                        label: "A folded medium wash denim jacket",
+                        width: tileWidth
+                    )
+                    photographTile(
+                        "FirstValueLamp",
+                        label: "A desk lamp photographed on a plain surface",
+                        width: tileWidth
+                    )
                 }
-                .accessibilityElement(children: .combine)
             }
+            .frame(height: 300)
+            Divider()
+                .padding(.top, 14)
+                .padding(.bottom, 14)
+            photographListingProjection
             FirstValueScoutView(
                 screen: .onb01,
                 reduceMotion: reduceMotion,
@@ -154,46 +223,123 @@ struct FirstValueOnboardingView: View {
             )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, FirstValueOnboardingScreen.onb01.scout.leadingPull)
+                .padding(.top, 28)
         }
     }
 
-    private var contextScreen: some View {
-        VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(spacing: 10) {
-                    contextPhoto(crop: .whole, caption: "The whole thing", height: 92)
-                        .accessibilitySortPriority(3)
-                    contextPhoto(crop: .flaw, caption: "Any flaws", height: 92)
-                        .accessibilitySortPriority(2)
+    private func photographTile(
+        _ name: String,
+        label: String,
+        width: CGFloat
+    ) -> some View {
+        Image(name)
+            .resizable()
+            .scaledToFill()
+            .frame(width: width, height: 300)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .accessibilityLabel(label)
+    }
+
+    private var photographListingProjection: some View {
+        HStack(spacing: 12) {
+            Image("FirstValueJacket")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 54, height: 54)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 11))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Denim trucker jacket, size M")
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+                HStack(spacing: 7) {
+                    Text("$58").font(.system(size: 22, weight: .bold))
+                    Text("Good")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            SnapListColorToken.quietFill.color,
+                            in: RoundedRectangle(cornerRadius: 6)
+                        )
                 }
-                contextPhoto(crop: .details, caption: "The details", height: 226)
-                    .accessibilitySortPriority(1)
             }
-            HStack(spacing: 10) {
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(.white, in: RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color(hex: "#ECEDF0"))
+        }
+        .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var contextScreen: some View {
+        VStack(spacing: 0) {
+            GeometryReader { proxy in
+                let columnWidth = (proxy.size.width - 10) / 2
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(spacing: 10) {
+                        contextPhoto(
+                            crop: .whole,
+                            caption: "The whole thing",
+                            height: 174,
+                            width: columnWidth
+                        )
+                        .accessibilitySortPriority(3)
+                        contextPhoto(
+                            crop: .flaw,
+                            caption: "Any flaws",
+                            height: 174,
+                            width: columnWidth
+                        )
+                        .accessibilitySortPriority(2)
+                    }
+                    contextPhoto(
+                        crop: .details,
+                        caption: "The details",
+                        height: 382,
+                        width: columnWidth
+                    )
+                    .accessibilitySortPriority(1)
+                }
+            }
+            .frame(height: 410)
+            Divider()
+                .padding(.top, 14)
+                .padding(.bottom, 16)
+            HStack(alignment: .top, spacing: 0) {
                 FirstValueScoutView(
                     screen: .onb02,
                     reduceMotion: reduceMotion,
                     usesStaticRendering: usesStaticScoutRendering
                 )
-                    .padding(.leading, FirstValueOnboardingScreen.onb02.scout.leadingPull)
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
+                .padding(.leading, FirstValueOnboardingScreen.onb02.scout.leadingPull)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
                         Image(systemName: "play.fill")
+                            .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 38, height: 38)
+                            .frame(width: 40, height: 40)
                             .background(SnapListColorToken.action.color, in: Circle())
-                        Image(systemName: "waveform")
-                            .foregroundStyle(SnapListColorToken.action.color)
+                        FirstValueVoiceWaveform()
                         Spacer(minLength: 0)
                         Text("0:09 / 0:15")
                             .font(.caption.monospacedDigit().weight(.semibold))
                             .foregroundStyle(SnapListColorToken.textSecondary.color)
+                            .fixedSize()
                     }
                     Text("“Small mark on the left cuff. Bought it in Tokyo in 2019.”")
-                        .font(.subheadline.weight(.medium))
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(14)
-                .background(Color(hex: "#F5F7FB"), in: RoundedRectangle(cornerRadius: 16))
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Optional. Voice note, 9 seconds of a possible 15. Play. Small mark on the left cuff. Bought it in Tokyo in 2019.")
@@ -201,17 +347,17 @@ struct FirstValueOnboardingView: View {
     }
 
     private var pricingScreen: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             VStack(spacing: 0) {
                 HStack(alignment: .lastTextBaseline, spacing: 12) {
-                    Text("$49 to $66").font(.title.bold())
+                    Text("$49 to $66").font(.system(size: 32, weight: .bold))
                     Spacer(minLength: 0)
                     Text("Based on sold listings.")
                         .font(.caption)
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                         .multilineTextAlignment(.trailing)
                 }
-                .padding(.bottom, 10)
+                .padding(.bottom, 8)
                 Rectangle().fill(SnapListColorToken.inkPrimary.color).frame(height: 1.5)
                 HStack(spacing: 8) {
                     VStack {
@@ -225,8 +371,8 @@ struct FirstValueOnboardingView: View {
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     SoldBandFixtureChart()
                 }
-                .frame(height: 116)
-                .padding(.top, 10)
+                .frame(height: 92)
+                .padding(.top, 22)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Sold prices over the last 90 days, from 40 to 70 dollars. Suggested, 58 dollars. Chart.")
                 HStack {
@@ -237,6 +383,7 @@ struct FirstValueOnboardingView: View {
                 .font(.caption)
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
                 .padding(.leading, 34)
+                .padding(.bottom, 6)
                 VStack(spacing: 0) {
                     soldRow("Excellent, barely worn", "4 days ago", "$66", scale: 1.5, offset: CGSize(width: 2, height: -2))
                     soldRow("Good, light wear", "6 days ago", "$62", scale: 1.6, offset: CGSize(width: -2, height: -3))
@@ -244,21 +391,28 @@ struct FirstValueOnboardingView: View {
                     soldRow("Good, small marks", "3 weeks ago", "$49", scale: 1.4, offset: CGSize(width: -3, height: 3))
                 }
             }
+            Divider()
+                .padding(.top, 20)
+                .padding(.bottom, 6)
             ScoutLine(
                 screen: .onb03,
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticScoutRendering
             ) {
                 Text("You can change the price later.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .padding(.leading, 8)
             }
         }
     }
 
     private var draftScreen: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             HStack(spacing: 12) {
                 itemImage("FirstValueJacket", label: "The jacket in its finished listing")
-                    .frame(width: 72, height: 72)
+                    .frame(width: 96, height: 96)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Your draft is ready").font(.title3.weight(.semibold))
                     Text("Four fields, written from your photos")
@@ -268,96 +422,182 @@ struct FirstValueOnboardingView: View {
             }
             .padding(12)
             .background(Color(hex: "#F8FAFF"), in: RoundedRectangle(cornerRadius: 16))
-            card {
-                VStack(alignment: .leading, spacing: 12) {
-                    draftRow("Title", "Medium wash denim trucker jacket, size M")
-                    draftRow("Condition", "Good, small mark on left cuff")
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("PRICE").font(.caption2.bold()).foregroundStyle(Color(hex: "#777A80"))
-                        HStack(spacing: 7) {
-                            Text("$58").strikethrough()
-                            Text("$64").fontWeight(.semibold)
-                            Text("You set this").foregroundStyle(SnapListColorToken.textSecondary.color)
-                        }
-                        .font(.subheadline)
-                    }
-                    .accessibilityElement(children: .combine)
-                    draftRow("Description", "Four paragraphs")
-                }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Your draft is ready. Four fields, written from your photos.")
+
+            VStack(spacing: 0) {
+                draftEditableRow(
+                    "Title",
+                    "Medium wash denim trucker jacket, size M",
+                    showsTopDivider: false
+                )
+                draftEditableRow(
+                    "Condition",
+                    "Good, small mark on left cuff"
+                )
+                draftPriceRow
+                draftEditableRow("Description", "Four paragraphs")
             }
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(hex: "#ECEDF0"))
+            }
+            .padding(.top, 16)
+
+            Divider()
+                .padding(.top, 33)
+
             ScoutLine(
                 screen: .onb04,
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticScoutRendering
             ) {
                 Text("Not right? One redo on the same photos is included.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .padding(.leading, -14)
             }
+            .padding(.top, -16)
         }
     }
 
     private var backgroundScreen: some View {
-        VStack(spacing: 12) {
-            card {
-                VStack(alignment: .leading, spacing: 12) {
-                    // ONB-05 illustrates the Trophy Wall; no item exists yet, so the
-                    // screen says so and shows no spinner or other live-work claim.
-                    Text(FirstValueOnboardingCopy.backgroundExampleCaption)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    ForEach(
-                        FirstValueOnboardingCopy.backgroundExampleRows,
-                        id: \.self
-                    ) { row in
-                        BackgroundExampleRowView(row: row)
-                    }
+        VStack(spacing: 0) {
+            VStack(spacing: 10) {
+                ForEach(FirstValueOnboardingCopy.backgroundExampleRows, id: \.self) { row in
+                    BackgroundExampleRowView(row: row)
                 }
             }
             HStack(spacing: 10) {
-                tile("camera.fill", "Scan the next one", "No waiting")
-                tile("trophy.fill", "Trophy Wall", "Finished listings")
+                backgroundActionTile("camera", "Scan the next one", "No waiting")
+                backgroundActionTile("trophy", "Trophy Wall", "Finished listings")
             }
+            .padding(.top, 27)
             ScoutLine(
                 screen: .onb05,
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticScoutRendering
             ) {
                 Text("Scout keeps working in the background.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                    .padding(.leading, 10)
             }
+            .padding(.top, 33.5)
         }
     }
 
-    private var includedScreen: some View {
-        VStack(spacing: 12) {
-            card {
-                VStack(spacing: 10) {
-                    ZStack(alignment: .topLeading) {
-                        itemImage("FirstValueJacket", label: "The finished listing for the denim jacket")
-                            .frame(maxWidth: .infinity).frame(height: 178).clipped()
-                        Text("Included").font(.caption.weight(.bold)).foregroundStyle(.white)
-                            .padding(.horizontal, 11).padding(.vertical, 6)
-                            .background(SnapListColorToken.action.color, in: Capsule())
-                            .padding(10)
-                    }
-                    Text("Medium wash denim trucker jacket, size M")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack {
-                        Text("Ready to review").font(.caption)
-                            .foregroundStyle(SnapListColorToken.textSecondary.color)
-                        Spacer()
-                        Text("$58").font(.body.bold())
-                    }
-                }
+    private func backgroundActionTile(
+        _ symbol: String,
+        _ title: String,
+        _ subtitle: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(SnapListColorToken.action.color)
+                .frame(width: 42, height: 42)
+                .background(Color(hex: "#EEF3FF"), in: RoundedRectangle(cornerRadius: 13))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
             }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 13)
+        .padding(.bottom, 11)
+        .frame(maxWidth: .infinity, minHeight: 116.5, alignment: .leading)
+        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(hex: "#ECEDF0"), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var includedScreen: some View {
+        VStack(spacing: 26) {
+            includedListingPreview
             ScoutLine(
                 screen: .onb06,
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticScoutRendering
             ) {
                 Text("No account needed, and you edit every field before anything leaves the app.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color(hex: "#3F4246"))
+                    .padding(.leading, 12)
             }
         }
+    }
+
+    private var includedListingPreview: some View {
+        VStack(spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                ZStack(alignment: .topLeading) {
+                    Image("FirstValueJacket")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 254)
+                        .clipped()
+                    Text("Included")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(SnapListColorToken.action.color, in: Capsule())
+                        .padding(11)
+                }
+                .accessibilityHidden(true)
+
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 254)
+                    .contentShape(Rectangle())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("The finished listing for the denim jacket")
+                    .accessibilityIdentifier("first-value-onboarding.included-photo-preview")
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 254)
+            .clipped()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Medium wash denim trucker jacket, size M")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Ready to review")
+                            .font(.caption)
+                            .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        Text("$58").font(.body.bold())
+                    }
+                } else {
+                    HStack {
+                        Text("Ready to review")
+                            .font(.caption)
+                            .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        Spacer()
+                        Text("$58").font(.body.bold())
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 14 : 0)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .frame(height: dynamicTypeSize.isAccessibilitySize ? nil : 67, alignment: .top)
+        }
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: Color.black.opacity(0.18), radius: 16, y: 10)
     }
 
     private var footer: some View {
@@ -374,16 +614,20 @@ struct FirstValueOnboardingView: View {
                 : "first-value-onboarding.continue")
 
             if model.screen == .onb06 {
-                Button("I already have an account") { presentsSignIn = true }
+                Button(action: openExistingAccount) {
+                    Text("I already have an account")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                    .buttonStyle(.plain)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(SnapListColorToken.action.color)
-                    .frame(maxWidth: .infinity, minHeight: 44)
                     .accessibilityIdentifier("first-value-onboarding.sign-in")
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.horizontal, model.screen == .onb06 ? 20 : 24)
+        .padding(.top, model.screen == .onb06 ? 10 : 12)
+        .padding(.bottom, model.screen == .onb06 ? 0 : 8)
         .background(.white)
         .overlay(alignment: .top) { Divider() }
     }
@@ -395,19 +639,24 @@ struct FirstValueOnboardingView: View {
 
     private enum JacketCrop: Equatable { case whole, flaw, details }
 
-    private func contextPhoto(crop: JacketCrop, caption: String, height: CGFloat) -> some View {
+    private func contextPhoto(
+        crop: JacketCrop,
+        caption: String,
+        height: CGFloat,
+        width: CGFloat
+    ) -> some View {
         VStack(spacing: 6) {
             jacketImage(crop)
-                .frame(height: height)
+                .frame(width: width, height: height)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             HStack(spacing: 5) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(SnapListColorToken.action.color)
-                Text(caption).font(.caption.weight(.semibold))
+                Text(caption).font(.subheadline.weight(.semibold))
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: width)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(caption). \(contextAlt(crop))")
     }
@@ -452,18 +701,78 @@ struct FirstValueOnboardingView: View {
             Spacer()
             Text(price).font(.body.bold())
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
         .overlay(alignment: .top) { Divider() }
         .accessibilityElement(children: .combine)
     }
 
-    private func draftRow(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label.uppercased()).font(.caption2.bold())
-                .foregroundStyle(Color(hex: "#777A80"))
-            Text(value).font(.subheadline.weight(.medium))
+    private func draftEditableRow(
+        _ label: String,
+        _ value: String,
+        showsTopDivider: Bool = true
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label.uppercased()).font(.caption2.bold())
+                    .foregroundStyle(Color(hex: "#55585C"))
+                Text(value)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "pencil")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.action.color)
+                .accessibilityHidden(true)
         }
-        .accessibilityElement(children: .combine)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .overlay(alignment: .top) {
+            if showsTopDivider { Divider() }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label). \(value).")
+    }
+
+    private var draftPriceRow: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("PRICE")
+                    .font(.caption2.bold())
+                    .foregroundStyle(Color(hex: "#55585C"))
+                Spacer(minLength: 0)
+                Text("$58")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .strikethrough()
+            }
+            HStack(spacing: 4) {
+                Text("$64")
+                    .font(.title3.bold())
+                Rectangle()
+                    .fill(SnapListColorToken.action.color)
+                    .frame(width: 2, height: 20)
+                    .accessibilityHidden(true)
+                Spacer(minLength: 0)
+                Text("You set this")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(SnapListColorToken.action.color)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 40)
+            .background(.white, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(SnapListColorToken.action.color, lineWidth: 2)
+            }
+            .shadow(color: SnapListColorToken.action.color.opacity(0.12), radius: 0, x: 0, y: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .overlay(alignment: .top) { Divider() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Price. Was 58 dollars. Now 64 dollars. You set this.")
     }
 
     private func tile(_ symbol: String, _ title: String, _ subtitle: String) -> some View {
@@ -488,18 +797,26 @@ struct FirstValueOnboardingView: View {
     }
 }
 
-/// An illustrative Trophy Wall row on ONB-05. It carries no `ProgressView`, percentage,
-/// or any other progress affordance: nothing is running while onboarding is on screen,
-/// and SnapList never fabricates progress.
-///
-/// The row is a named type rather than a helper on the screen so that guarantee is
-/// testable. `.accessibilityElement(children: .combine)` folds every descendant into one
-/// element, so a restored spinner never reaches the XCUI tree and no count of
-/// `app.progressIndicators` can see it. SwiftUI derives `body`'s concrete type from the
-/// subtree written here instead, which
-/// `OnboardingFlowTests.testBackgroundExampleRowBodyWritesNoProgressAffordance` reads —
-/// so keep any progress-bearing view out of this body rather than behind a nested type
-/// the rendered type name would hide.
+private struct FirstValueVoiceWaveform: View {
+    private let barHeights: [CGFloat] = [
+        14, 22, 30, 18, 34, 24, 16, 28, 20, 32, 18, 26, 38, 22, 30, 16,
+    ]
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(Array(barHeights.enumerated()), id: \.offset) { _, height in
+                Capsule()
+                    .fill(SnapListColorToken.action.color)
+                    .frame(width: 3, height: height)
+            }
+        }
+        .frame(height: 40)
+        .accessibilityHidden(true)
+    }
+}
+
+/// An approved ONB-05 work-example row. Its static status dot is decorative,
+/// never a `ProgressView`, percentage, or claim about a live pipeline run.
 struct BackgroundExampleRowView: View {
     let row: BackgroundExampleRow
 
@@ -507,16 +824,31 @@ struct BackgroundExampleRowView: View {
         HStack(spacing: 10) {
             Image(row.imageName)
                 .resizable()
-                .scaledToFit()
+                .scaledToFill()
                 .accessibilityLabel(row.item)
-                .frame(width: 44, height: 44)
+                .frame(width: 62, height: 62)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 11))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(row.item).font(.subheadline.weight(.semibold))
-                Text(row.state).font(.caption)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(Color(hex: "#85A8FF"))
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
+                    Text(row.state).font(.system(size: 13))
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                }
             }
             Spacer()
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10.5)
+        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(hex: "#ECEDF0"), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
     }
@@ -556,6 +888,7 @@ private struct ScoutLine<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("first-value-onboarding.scout-line.\(screen.identifier)")
     }
 }
 
@@ -570,11 +903,8 @@ private struct FirstValueScoutView: View {
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticRendering
             ) {
-            case .acceptedWebM(let url):
-                AcceptedScoutWebMView(
-                    url: url,
-                    fallbackAsset: screen.scout.fallback
-                )
+            case .acceptedRuntimeDerivative(_, let url):
+                AcceptedScoutPlayerView(url: url)
             case .staticFallbackPNG(let asset):
                 Image(asset).resizable().scaledToFit()
             }
@@ -585,138 +915,88 @@ private struct FirstValueScoutView: View {
     }
 }
 
-/// Plays one accepted Scout clip.
+/// Plays an alpha-preserving native derivative of one accepted Scout WebM.
 ///
-/// WebKit is resolved dynamically and only when this view is actually constructed, which
-/// `FirstValueOnboardingScreen.scoutRendering` decides. That keeps the framework out of
-/// processes that must not load it (the UI-test runner, via `--static-scout-rendering`)
-/// while leaving the seller-facing WebM path identical in Debug and Release.
-private struct AcceptedScoutWebMView: UIViewRepresentable {
+/// The caller resolves Reduced Motion and `--static-scout-rendering` before this
+/// representable is constructed, so those paths create no player.
+private struct AcceptedScoutPlayerView: UIViewRepresentable {
     let url: URL
-    let fallbackAsset: String
 
-    func makeUIView(context: Context) -> UIView {
-        let container = UIView()
-        container.backgroundColor = .clear
-        guard let webView = WebKitRuntime.makeConfiguredWebView() else {
-            installFallback(in: container)
-            return container
-        }
-        webView.frame = container.bounds
-        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.isUserInteractionEnabled = false
-        if let scrollView = (webView as NSObject).value(forKey: "scrollView")
-            as? UIScrollView {
-            scrollView.backgroundColor = .clear
-            scrollView.isScrollEnabled = false
-        }
-        container.addSubview(webView)
-        context.coordinator.webView = webView
-        return container
+    func makeUIView(context: Context) -> FirstValueScoutPlayerUIView {
+        FirstValueScoutPlayerUIView()
     }
 
-    func updateUIView(_ view: UIView, context: Context) {
-        guard context.coordinator.loadedResource != url,
-              let webView = context.coordinator.webView else { return }
-        context.coordinator.loadedResource = url
-        let html = """
-        <meta name='viewport' content='width=device-width,initial-scale=1'>
-        <style>*{margin:0}html,body,video{width:100%;height:100%;background:transparent}video{object-fit:contain}</style>
-        <video autoplay muted loop playsinline src='\(url.lastPathComponent)'></video>
-        """
-        _ = (webView as NSObject).perform(
-            NSSelectorFromString("loadHTMLString:baseURL:"),
-            with: html,
-            with: url.deletingLastPathComponent()
-        )
+    func updateUIView(
+        _ view: FirstValueScoutPlayerUIView,
+        context: Context
+    ) {
+        view.playLoop(url: url)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    private func installFallback(in container: UIView) {
-        let fallback = UIImageView(image: UIImage(named: fallbackAsset))
-        fallback.contentMode = .scaleAspectFit
-        fallback.frame = container.bounds
-        fallback.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        fallback.isAccessibilityElement = false
-        container.addSubview(fallback)
-    }
-
-    final class Coordinator {
-        weak var webView: UIView?
-        var loadedResource: URL?
+    static func dismantleUIView(
+        _ view: FirstValueScoutPlayerUIView,
+        coordinator: ()
+    ) {
+        view.stop()
     }
 }
 
-/// Builds the Scout clip's `WKWebView` without linking WebKit, which would load duplicate
-/// WebCore and WebKit accessibility bundles into every UI-test process (#685).
-///
-/// Internal rather than private so `OnboardingFlowTests` can prove the construction leaves
-/// no unbalanced retain; nothing outside the Scout clip should call it.
-enum WebKitRuntime {
-    private static let frameworkPath =
-        "/System/Library/Frameworks/WebKit.framework"
+private final class FirstValueScoutPlayerUIView: UIView {
+    private var player: AVQueuePlayer?
+    private var looper: AVPlayerLooper?
+    private var loadedURL: URL?
 
-    static func makeConfiguredWebView() -> UIView? {
-        guard load(),
-              let configurationType =
-                NSClassFromString("WKWebViewConfiguration") as? NSObject.Type,
-              let webViewType = NSClassFromString("WKWebView") as? NSObject.Type else {
-            return nil
-        }
-        let configuration = configurationType.init()
-        configuration.setValue(
-            0,
-            forKey: "mediaTypesRequiringUserActionForPlayback"
-        )
-        guard let allocated = class_createInstance(webViewType, 0) as AnyObject? else {
-            return nil
-        }
-        let selector = NSSelectorFromString("initWithFrame:configuration:")
-        guard let implementation = class_getMethodImplementation(
-            webViewType,
-            selector
-        ) else {
-            return nil
-        }
-        typealias InitializeWebView = @convention(c) (
-            AnyObject,
-            Selector,
-            CGRect,
-            AnyObject
-        ) -> Unmanaged<AnyObject>
-        let initialize = unsafeBitCast(
-            implementation,
-            to: InitializeWebView.self
-        )
-        // Ownership, because the balance here is easy to "fix" into a crash.
-        //
-        // `class_createInstance` is `OBJC_RETURNS_RETAINED`, so Swift imports it as a
-        // managed `Any?`: ARC owns that +1 and releases `allocated` when this scope ends.
-        // The `init` family then consumes the same +1 and hands back a +1 of its own.
-        // `takeUnretainedValue()` declines to consume the returned +1, and ARC's release
-        // of `allocated` — a reference the initializer already took — cancels it exactly.
-        //
-        // `takeRetainedValue()` looks more correct and is not: it consumes the returned
-        // +1 as well, leaving ARC's release to over-release and deallocate the view while
-        // the caller still holds it. `testScoutClipWebViewLeavesNoUnbalancedRetain` holds
-        // this balance.
-        return initialize(
-            allocated,
-            selector,
-            .zero,
-            configuration
-        ).takeUnretainedValue() as? UIView
+    override static var layerClass: AnyClass {
+        AVPlayerLayer.self
     }
 
-    private static func load() -> Bool {
-        if NSClassFromString("WKWebView") != nil {
-            return true
+    private var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isAccessibilityElement = false
+        accessibilityElementsHidden = true
+        playerLayer.backgroundColor = UIColor.clear.cgColor
+        playerLayer.videoGravity = .resizeAspect
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func playLoop(url: URL) {
+        guard loadedURL != url else {
+            player?.play()
+            return
         }
-        return Bundle(path: frameworkPath)?.load() == true
-            && NSClassFromString("WKWebView") != nil
+
+        stop()
+        loadedURL = url
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        looper = AVPlayerLooper(
+            player: player,
+            templateItem: AVPlayerItem(url: url)
+        )
+        playerLayer.player = player
+        self.player = player
+        player.play()
+    }
+
+    func stop() {
+        player?.pause()
+        playerLayer.player = nil
+        looper = nil
+        player = nil
+        loadedURL = nil
+    }
+
+    deinit {
+        player?.pause()
     }
 }
 

@@ -81,6 +81,7 @@ ios/SnapList/Features/FoundationDestinationView.swift
 ios/SnapList/Features/GuestRecovery/GuestRecoveryAuthority.swift
 ios/SnapList/Features/Home/HomeDomain.swift
 ios/SnapList/Features/Home/HomeRepository.swift
+ios/SnapList/Features/Home/HomeScoutMotion.swift
 ios/SnapList/Features/Home/HomeViews.swift
 ios/SnapList/Features/Home/ProcessingActionExecutor.swift
 ios/SnapList/Features/ListingReview/ItemSpecificsEditorView.swift

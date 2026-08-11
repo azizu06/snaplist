@@ -2,9 +2,21 @@
 import CoreFoundation
 import Foundation
 
-struct DelayedItemRunSubmissionFixture {
-    func complete() async {
-        try? await Task.sleep(for: .seconds(8))
+private struct DelayedItemRunSubmitter: ItemRunSubmitting {
+    func submit(
+        _ payload: ItemRunSubmissionPayload,
+        bearerToken: String
+    ) async -> ItemRunSubmissionTransportOutcome {
+        _ = payload
+        _ = bearerToken
+        do {
+            try await Task.sleep(for: .seconds(8))
+        } catch is CancellationError {
+            return .cancelled
+        } catch {
+            return .ambiguous
+        }
+        return .cancelled
     }
 }
 
@@ -180,7 +192,17 @@ enum ItemRunSubmissionDebugFixtureFactory {
             )
         case .delayed:
             return ItemRunSubmissionHost(
-                delayedFixture: DelayedItemRunSubmissionFixture()
+                coordinator: ItemRunSubmissionCoordinator(
+                    submitter: DelayedItemRunSubmitter(),
+                    attemptStore: LocalItemRunSubmissionAttemptStore(),
+                    draftStore: draftStore,
+                    tokenProvider:
+                        AcceptedPresentationGatedBearerTokenProvider(),
+                    readData: { @Sendable url in
+                        try AcceptedPresentationGatedItemRunSubmitter
+                            .readRestoredPhoto(at: url)
+                    }
+                )
             )
         case .rateLimited:
             return ItemRunSubmissionHost(

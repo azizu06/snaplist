@@ -203,30 +203,40 @@ enum ListingReviewLaunchFixture {
         )!
     ) -> ListingReviewResult {
         let title = usesLongText
-            ? "Canon AE-1 Program 35mm film camera with 50mm lens and original strap"
-            : "Canon AE-1 Program 35mm film camera"
+            ? "Levi's Trucker Jacket in medium-wash denim with classic button-front styling"
+            : "Levi's Trucker Jacket · Men's Denim"
         let description = usesLongText
             ? String(
                 repeating:
-                    "Tested camera body with visible handling wear. Controls, meter, and film advance are described without hiding condition details. ",
+                    "Medium-wash denim trucker jacket with visible wear consistent with regular use. Review the photos for the exact color, hardware, and condition shown. ",
                 count: 12
             )
-            : "Tested camera body with normal handling wear. Includes a 50mm lens and strap."
+            : "Medium-wash denim trucker jacket in good used condition. Review the photos for the exact wear shown."
         // Sold-comp facts rotate so one fixture proves all three shapes: a
         // free Buy It Now, a paid auction, and a record that simply lacks the
         // optional facts. The third case is the one that matters — an absent
         // fact must drop its row rather than render an empty one.
+        let soldPrices = [62, 54, 58, 60, 56]
+        let soldDates = [
+            1_783_080_000_000,
+            1_782_561_600_000,
+            1_781_956_800_000,
+            1_781_352_000_000,
+            1_780_747_200_000,
+        ]
         let matches = (0..<matchCount).map { index in
             var match: [String: Any] = [
                 "id": "fixture-sold-\(index + 1)",
                 "sourceURL":
                     "https://example.com/sold/\(index + 1)",
                 "title":
-                    "Canon AE-1 Program camera sold listing \(index + 1)",
-                "soldPrice": 52 + index,
+                    "Levi's denim trucker jacket sold listing \(index + 1)",
+                "soldPrice": soldPrices[index],
                 "currency": "USD",
                 "condition": "Used",
-                "soldAt": 1_785_024_000_000 + (index * 86_400_000),
+                "soldAt": soldDates[index],
+                "photoURL":
+                    "https://example.com/photos/jacket-\(index + 1).jpg",
             ]
             switch index % 3 {
             case 0:
@@ -261,14 +271,14 @@ enum ListingReviewLaunchFixture {
                 "reviewRevision":
                     "20800000-0000-4000-8000-000000000023",
             ],
-            "photos": (0..<3).map { index in
+            "photos": (0..<5).map { index in
                 [
                     "ordinal": index,
                     "url": "https://example.com/photos/\(index + 1).jpg",
                 ] as [String: Any]
             },
             "identity": [
-                "label": "Canon AE-1 Program · 35mm film camera",
+                "label": "Levi's Trucker Jacket · Men's Denim",
                 "confident": true,
             ],
             "listing": [
@@ -276,12 +286,12 @@ enum ListingReviewLaunchFixture {
                 "description": description,
                 "condition": "good",
                 "specifics": [
-                    ["name": "Brand", "value": "Canon"],
-                    ["name": "Type", "value": "35mm SLR"],
-                    ["name": "Model", "value": "AE-1 Program"],
-                    ["name": "Color", "value": "Black"],
-                    ["name": "Format", "value": "35 mm"],
-                    ["name": "Country of manufacture", "value": "Japan"],
+                    ["name": "Brand", "value": "Levi's"],
+                    ["name": "Type", "value": "Trucker jacket"],
+                    ["name": "Department", "value": "Men"],
+                    ["name": "Color", "value": "Blue"],
+                    ["name": "Material", "value": "Denim"],
+                    ["name": "Size", "value": "M"],
                 ],
             ],
             "pricing": [
@@ -474,19 +484,10 @@ struct ListingReviewPhotoPager: View {
         ZStack(alignment: .bottomTrailing) {
             TabView(selection: $selectedOrdinal) {
                 ForEach(photos, id: \.ordinal) { photo in
-                    AsyncImage(url: photo.url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        case .empty:
-                            ProgressView()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        case .failure:
-                            unavailablePhoto
-                        @unknown default:
-                            unavailablePhoto
-                        }
-                    }
+                    ListingReviewImage(
+                        url: photo.url,
+                        fallbackSystemImage: "photo"
+                    )
                     .frame(maxWidth: .infinity)
                     .aspectRatio(4 / 3, contentMode: .fit)
                     .clipped()
@@ -505,7 +506,7 @@ struct ListingReviewPhotoPager: View {
             .frame(maxWidth: .infinity)
             .aspectRatio(4 / 3, contentMode: .fit)
 
-            Text("\(selectedOrdinal + 1) / \(photos.count)")
+            Text("\(selectedOrdinal + 1) of \(photos.count)")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10)
@@ -515,15 +516,49 @@ struct ListingReviewPhotoPager: View {
                 .accessibilityHidden(true)
         }
         .background(SnapListColorToken.quietFill.color)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("listing-review.photos")
     }
+}
 
-    private var unavailablePhoto: some View {
+private struct ListingReviewImage: View {
+    let url: URL?
+    let fallbackSystemImage: String
+
+    var body: some View {
+#if DEBUG
+        if url?.host == "example.com" {
+            Image("FirstValueJacket")
+                .resizable()
+                .scaledToFill()
+        } else {
+            remoteImage
+        }
+#else
+        remoteImage
+#endif
+    }
+
+    private var remoteImage: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().scaledToFill()
+            case .empty:
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .failure:
+                fallback
+            @unknown default:
+                fallback
+            }
+        }
+    }
+
+    private var fallback: some View {
         ZStack {
             SnapListColorToken.quietFill.color
-            Image(systemName: "photo")
+            Image(systemName: fallbackSystemImage)
                 .font(.title2)
                 .foregroundStyle(SnapListColorToken.textTertiary.color)
         }
@@ -673,12 +708,12 @@ struct ListingReviewSoldCard: View {
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 9) {
-                ZStack {
-                    SnapListColorToken.quietFill.color
-                    Image(systemName: "shippingbox")
-                        .foregroundStyle(SnapListColorToken.textTertiary.color)
-                }
-                .aspectRatio(4 / 3, contentMode: .fit)
+                ListingReviewImage(
+                    url: match.photoURL,
+                    fallbackSystemImage: "shippingbox"
+                )
+                .frame(height: 130)
+                .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .accessibilityHidden(true)
 
@@ -694,18 +729,10 @@ struct ListingReviewSoldCard: View {
             .padding(10)
             .background(SnapListColorToken.canvas.color)
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(SnapListColorToken.hairline.color)
-            }
+            .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
         }
         .buttonStyle(.plain)
-        .containerRelativeFrame(
-            .horizontal,
-            count: 2,
-            span: 1,
-            spacing: 12
-        )
+        .frame(width: 176)
         .accessibilityLabel(
             "Sold \(soldPriceText) on \(match.soldDateLabel)"
         )

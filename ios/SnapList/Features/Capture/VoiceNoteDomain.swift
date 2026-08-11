@@ -288,6 +288,9 @@ final class VoiceNoteStore {
     private var provisionalDuration: TimeInterval?
     private var pendingFocusRequest: VoiceNoteFocusRequest?
     private var authorityMutationID: UUID?
+#if DEBUG
+    private var launchFixturePhaseApplied = false
+#endif
 
     init(
         savedNote: VoiceNoteAsset? = nil,
@@ -315,6 +318,9 @@ final class VoiceNoteStore {
     }
 
     func startRecording() async {
+#if DEBUG
+        launchFixturePhaseApplied = false
+#endif
         authorityMutationID = nil
         guard discardPendingProvisionalBeforeRecording() else {
             return
@@ -630,7 +636,38 @@ final class VoiceNoteStore {
 
 #if DEBUG
     func applyLaunchFixturePhase(_ phase: VoiceNotePhase) {
+        launchFixturePhaseApplied = true
         self.phase = phase
+    }
+
+    @discardableResult
+    func commitLaunchFixtureRecordingIfNeeded() -> Bool {
+        guard launchFixturePhaseApplied else {
+            return false
+        }
+        let duration: TimeInterval
+        switch phase {
+        case .recording(let elapsed, _):
+            duration = elapsed
+        case .takeReady(let heldDuration):
+            duration = heldDuration
+        default:
+            return false
+        }
+        guard duration > 0 else {
+            return false
+        }
+        launchFixturePhaseApplied = false
+        savedNote = VoiceNoteAsset(
+            url: URL(
+                fileURLWithPath:
+                    "/tmp/snaplist-voice-note-ui-fixture.wav"
+            ),
+            duration: duration
+        )
+        phase = .saved(isPlaying: false)
+        pendingFocusRequest = .savedNoteSummary
+        return true
     }
 #endif
 

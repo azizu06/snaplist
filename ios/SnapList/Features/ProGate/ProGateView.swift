@@ -8,7 +8,7 @@ enum ProGateCopy {
     static let allowance =
         "AI listings every month, counted from your billing date"
     static let allowanceUnknown =
-        "SnapList sets the monthly amount. Yours appears in Settings once your subscription starts."
+        "SnapList sets the monthly amount."
     static let keepsWork =
         "Your drafts and listings stay yours if you cancel"
     static let reassuranceTitle = "What happens if you don’t subscribe"
@@ -46,7 +46,9 @@ struct ProGateListingSummary {
 
 @MainActor
 struct ProGateSheet: View {
-    static let presentationDetentHeight: CGFloat = 522
+    static let presentationDetentHeight: CGFloat = 504
+
+    private static let contentGutter: CGFloat = 12
 
     @Bindable var store: ProGateStore
     let listingSummary: ProGateListingSummary?
@@ -56,7 +58,7 @@ struct ProGateSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AccessibilityFocusState private var headingFocused: Bool
-    @ScaledMetric(relativeTo: .title2) private var titleSize: CGFloat = 24
+    @ScaledMetric(relativeTo: .title2) private var titleSize: CGFloat = 26
     @ScaledMetric(relativeTo: .body) private var bodySize: CGFloat = 16
     @ScaledMetric(relativeTo: .footnote) private var detailSize: CGFloat = 13
     @ScaledMetric(relativeTo: .caption) private var labelSize: CGFloat = 12
@@ -69,12 +71,12 @@ struct ProGateSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 15) {
                     heading
                     stateBody
                 }
-                .padding(.horizontal, SnapListMetrics.screenGutter)
-                .padding(.top, 12)
+                .padding(.horizontal, contentHorizontalPadding)
+                .padding(.top, contentTopPadding)
                 .padding(.bottom, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -84,7 +86,7 @@ struct ProGateSheet: View {
                             .foregroundStyle(SnapListColorToken.divider.color)
                     }
                     actionStack
-                        .padding(.horizontal, SnapListMetrics.screenGutter)
+                        .padding(.horizontal, contentHorizontalPadding)
                         .padding(.top, 12)
                         .padding(.bottom, 20)
                 }
@@ -97,12 +99,13 @@ struct ProGateSheet: View {
                         .foregroundStyle(SnapListColorToken.divider.color)
                 }
                 actionStack
-                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                    .padding(.horizontal, contentHorizontalPadding)
                     .padding(.top, 12)
                     .padding(.bottom, 20)
             }
         }
         .background(SnapListColorToken.canvas.color)
+        .ignoresSafeArea(.container, edges: .bottom)
         .presentationDetents([.height(Self.presentationDetentHeight)])
         .presentationContentInteraction(.scrolls)
         .presentationCornerRadius(SnapListMetrics.sheetRadius)
@@ -314,7 +317,7 @@ struct ProGateSheet: View {
     private var actionStack: some View {
         switch store.state {
         case .offer(let product, _, let isRestoring):
-            VStack(spacing: 8) {
+            VStack(spacing: 0) {
                 VStack(spacing: 2) {
                     Text(product.proGatePriceDisplay)
                         .font(.system(size: actionSize, weight: .semibold))
@@ -325,9 +328,11 @@ struct ProGateSheet: View {
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                         .multilineTextAlignment(.center)
                 }
+                .padding(.bottom, 13)
                 proGatePrimaryButton("Subscribe") {
                     Task { await store.purchase() }
                 }
+                .padding(.bottom, 8)
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(spacing: 6) {
                         restoreControl(isRestoring: isRestoring)
@@ -340,6 +345,7 @@ struct ProGateSheet: View {
                     }
                 }
             }
+            .padding(.bottom, -5)
         case .confirming:
             busyLabel("Confirming", size: bodySize)
                 .frame(maxWidth: .infinity, minHeight: 52)
@@ -442,6 +448,18 @@ struct ProGateSheet: View {
         }
     }
 
+    private var contentTopPadding: CGFloat {
+        if case .confirming = store.state { 12 } else { 32 }
+    }
+
+    private var contentHorizontalPadding: CGFloat {
+        if case .confirming = store.state {
+            SnapListMetrics.screenGutter
+        } else {
+            Self.contentGutter
+        }
+    }
+
     private func readyStatement(_ source: ProGateStore.ReadySource) -> String {
         source == .purchase
             ? ProGateCopy.purchaseReadyStatement
@@ -471,10 +489,10 @@ private enum ProGateActionColor {
 private extension SubscriptionProductMetadata {
     var proGatePriceDisplay: String {
         switch (billingPeriod.value, billingPeriod.unit) {
-        case (1, .day): "\(localizedPrice) / day"
-        case (1, .week): "\(localizedPrice) / week"
-        case (1, .month): "\(localizedPrice) / month"
-        case (1, .year): "\(localizedPrice) / year"
+        case (1, .day): "\(localizedPrice) per day"
+        case (1, .week): "\(localizedPrice) per week"
+        case (1, .month): "\(localizedPrice) per month"
+        case (1, .year): "\(localizedPrice) per year"
         default:
             localizedPurchaseTerms() ?? localizedPrice
         }
@@ -523,8 +541,8 @@ struct ProGateFixtureHostView: View {
 
 private extension ProGateListingSummary {
     static let fixture = ProGateListingSummary(
-        title: "Tan leather tote",
-        condition: "Pre-owned · Good",
+        title: "Tan leather tote bag, medium",
+        condition: "Good condition",
         price: "$48",
         image: UIImage(systemName: "bag.fill")
     )

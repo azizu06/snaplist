@@ -87,10 +87,10 @@ final class TrophyWallDomainTests: XCTestCase {
 
     func testApprovedEmptyWallKeepsTheLiveV32OpticalSpacing() {
         XCTAssertEqual(TrophyWallEmptyMetrics.contentSpacing, 20)
-        XCTAssertEqual(TrophyWallEmptyMetrics.scoutHeight, 150)
-        XCTAssertEqual(TrophyWallEmptyMetrics.scoutOpticalBottomInset, -17)
+        XCTAssertEqual(TrophyWallEmptyMetrics.scoutHeight, 143)
+        XCTAssertEqual(TrophyWallEmptyMetrics.scoutOpticalBottomInset, -10)
         XCTAssertEqual(TrophyWallEmptyMetrics.horizontalPadding, 34)
-        XCTAssertEqual(TrophyWallEmptyMetrics.bottomPadding, 104)
+        XCTAssertEqual(TrophyWallEmptyMetrics.bottomPadding, 48)
     }
 
     func testApprovedSettledFixtureUsesSixDistinctClearedPhotoCompositions() {

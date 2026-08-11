@@ -18,6 +18,7 @@ struct AppShellView: View {
     @Environment(\.appDependencies) private var dependencies
     @State private var isKeyboardVisible = false
     @State private var keyboardProbeText = ""
+    @State private var isDeleteAccountFlowPresented = false
     @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
@@ -74,12 +75,7 @@ struct AppShellView: View {
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
             } else if shouldShowFirstValueOnboarding {
-                FirstValueOnboardingView(
-                    model: firstValueOnboardingModel,
-                    forceReducedMotion: configuration.forceReducedMotion,
-                    usesStaticScoutRendering: configuration.usesStaticScoutRendering,
-                    didFinish: handleFirstValueOnboardingCompletion
-                )
+                firstValueOnboardingHost
             } else if shouldBypassRetiredLegacyIntro {
                 Color.clear
                     .accessibilityHidden(true)
@@ -96,7 +92,10 @@ struct AppShellView: View {
 #if DEBUG
                 PhotoReviewFixtureView(
                     state: photoReviewState,
-                    forceReducedMotion: configuration.forceReducedMotion
+                    forceReducedMotion: configuration.forceReducedMotion,
+                    submissionPresentation: configuration.submissionVisualState
+                        .map(PhotoReviewSubmissionPresentation.visualState)
+                        ?? .idle
                 )
 #else
                 shell
@@ -182,6 +181,8 @@ struct AppShellView: View {
                              .retryAmbiguousSubmission:
                             break
                         case .openVoiceNote,
+                             .cancelSubmission,
+                             .completeSavedSubmission,
                              .reviewSubmission,
                              .reviewConflictedSubmission:
                             return
@@ -514,7 +515,11 @@ struct AppShellView: View {
         }
         .floatingDock(
             selectedTab: router.selectedTab,
-            isVisible: DockVisibilityPolicy.shouldShow(isKeyboardVisible: isKeyboardVisible),
+            isVisible: DockVisibilityPolicy.shouldShow(
+                isKeyboardVisible: isKeyboardVisible
+            )
+                && !isDeleteAccountFlowPresented
+                && !activationListingReviewPresented,
             select: router.select
         )
         .animation(
@@ -547,6 +552,26 @@ struct AppShellView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
+        }
+    }
+
+    /// Keeps the typed navigation stack mounted before the seller chooses the
+    /// existing-account boundary. The route is appended synchronously to this live
+    /// stack, so the handoff needs no conditional-shell state or lifecycle scheduling.
+    private var firstValueOnboardingHost: some View {
+        NavigationStack(path: router.pathBinding(for: router.selectedTab)) {
+            FirstValueOnboardingView(
+                model: firstValueOnboardingModel,
+                forceReducedMotion: configuration.forceReducedMotion,
+                usesStaticScoutRendering: configuration.usesStaticScoutRendering,
+                didFinish: handleFirstValueOnboardingCompletion,
+                openExistingAccount: {
+                    router.navigate(to: .future(.account))
+                }
+            )
+            .navigationDestination(for: AppRoute.self) { route in
+                destination(for: route)
+            }
         }
     }
 
@@ -650,8 +675,12 @@ struct AppShellView: View {
                 settingsProofSafeExit: configuration.settingsProofState == nil
                     ? nil
                     : {
+                        isDeleteAccountFlowPresented = false
                         router.reset(tab: .trophyWall)
-                    }
+                    },
+                deletionFlowPresentationChanged: {
+                    isDeleteAccountFlowPresented = $0
+                }
             )
         case .home(let route):
             switch route {
@@ -728,7 +757,18 @@ struct AppShellView: View {
         case .future(let boundary):
             switch FutureDestinationPresentation.resolve(boundary) {
             case .accountEntry:
+#if DEBUG
+                if configuration.usesZeroNetworkFixtures,
+                   configuration.fixture == .onboarding {
+                    AccountEntryFixtureView()
+                } else {
+                    AccountEntryView()
+                        .accessibilityIdentifier("account-entry")
+                }
+#else
                 AccountEntryView()
+                    .accessibilityIdentifier("account-entry")
+#endif
             case .placeholder(let destination):
                 FoundationDestinationView(destination: destination)
             }
@@ -1416,7 +1456,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 submissionHost: submissionHost
             )
             return
-        case .openVoiceNote, .reviewSubmission:
+        case .openVoiceNote, .cancelSubmission,
+             .completeSavedSubmission, .reviewSubmission:
             return
         }
 

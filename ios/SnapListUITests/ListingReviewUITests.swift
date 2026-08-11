@@ -323,21 +323,27 @@ final class ListingReviewUITests: XCTestCase {
             let done = app.buttons["listing-review.done"]
             let scan = app.buttons["dock.scan"]
             let trophyWall = app.buttons["dock.trophy-wall"]
+            let window = app.windows.firstMatch
 
-            for element in [secondary, done, scan, trophyWall] {
+            for element in [secondary, done] {
                 XCTAssertTrue(
                     element.waitForExistence(timeout: loadedTreeTimeout),
                     "Missing \(element.identifier) from the loaded tree."
                 )
             }
+            XCTAssertFalse(scan.exists)
+            XCTAssertFalse(trophyWall.exists)
+            XCTAssertTrue(window.exists)
 
-            let dockTop = min(scan.frame.minY, trophyWall.frame.minY)
             for action in [secondary, done] {
                 XCTAssertTrue(action.isHittable, action.identifier)
+                XCTAssertGreaterThanOrEqual(action.frame.minX, window.frame.minX)
+                XCTAssertGreaterThanOrEqual(action.frame.minY, window.frame.minY)
+                XCTAssertLessThanOrEqual(action.frame.maxX, window.frame.maxX)
                 XCTAssertLessThanOrEqual(
                     action.frame.maxY,
-                    dockTop,
-                    "\(action.identifier) overlaps the floating dock."
+                    window.frame.maxY,
+                    "\(action.identifier) escapes the visible window."
                 )
             }
 
@@ -349,6 +355,13 @@ final class ListingReviewUITests: XCTestCase {
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }
+
+            app.buttons["listing-review.back"].tap()
+            XCTAssertTrue(
+                scan.waitForExistence(timeout: loadedTreeTimeout),
+                "The primary dock must return after Listing Review closes."
+            )
+            XCTAssertTrue(trophyWall.exists)
 
             UIProcessTerminationBoundary()
                 .assertRetired(app, "The Listing Review dock-reservation fixture")

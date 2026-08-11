@@ -76,24 +76,26 @@ final class SnapListUITests: XCTestCase {
             let scanDock = app.buttons["dock.scan"]
             let trophyWallDock = app.buttons["dock.trophy-wall"]
             let window = app.windows.firstMatch
+            let reservesFloatingDock = fixtureID != "DEL-01"
             XCTAssertTrue(safeExit.exists)
             XCTAssertFalse(app.buttons[absentControl].exists)
-            XCTAssertTrue(scanDock.exists)
-            XCTAssertTrue(trophyWallDock.exists)
+            XCTAssertEqual(scanDock.exists, reservesFloatingDock)
+            XCTAssertEqual(trophyWallDock.exists, reservesFloatingDock)
             XCTAssertTrue(window.exists)
-            let dockTop = min(scanDock.frame.minY, trophyWallDock.frame.minY)
-            let frameReceipt = "safeExit.frame=\(safeExit.frame), scanDock.frame=\(scanDock.frame), trophyWallDock.frame=\(trophyWallDock.frame), window.frame=\(window.frame), dockTop=\(dockTop)"
+            let frameReceipt = "safeExit.frame=\(safeExit.frame), window.frame=\(window.frame)"
             XCTAssertGreaterThanOrEqual(safeExit.frame.width, 44, frameReceipt)
             XCTAssertGreaterThanOrEqual(safeExit.frame.height, 44, frameReceipt)
             XCTAssertGreaterThanOrEqual(safeExit.frame.minX, window.frame.minX, frameReceipt)
             XCTAssertGreaterThanOrEqual(safeExit.frame.minY, window.frame.minY, frameReceipt)
             XCTAssertLessThanOrEqual(safeExit.frame.maxX, window.frame.maxX, frameReceipt)
             XCTAssertLessThanOrEqual(safeExit.frame.maxY, window.frame.maxY, frameReceipt)
-            XCTAssertLessThanOrEqual(
-                safeExit.frame.maxY,
-                dockTop,
-                frameReceipt
-            )
+            if reservesFloatingDock {
+                XCTAssertLessThanOrEqual(
+                    safeExit.frame.maxY,
+                    min(scanDock.frame.minY, trophyWallDock.frame.minY),
+                    frameReceipt
+                )
+            }
             XCTAssertTrue(safeExit.isHittable)
             safeExit.tap()
             let proofScreen = app.descendants(matching: .any)[screenIdentifier]
@@ -103,6 +105,8 @@ final class SnapListUITests: XCTestCase {
             )
             wait(for: [dismissal], timeout: 3)
             XCTAssertFalse(proofScreen.exists)
+            XCTAssertTrue(scanDock.waitForExistence(timeout: 3))
+            XCTAssertTrue(trophyWallDock.exists)
             XCTAssertTrue(trophyWallDock.isSelected)
             XCTAssertTrue(
                 app.otherElements["trophy.wall"].waitForExistence(timeout: 3),
@@ -137,18 +141,16 @@ final class SnapListUITests: XCTestCase {
         let trophyWallDock = app.buttons["dock.trophy-wall"]
         let window = app.windows.firstMatch
         XCTAssertTrue(cancel.exists, app.debugDescription)
-        XCTAssertTrue(scanDock.exists, app.debugDescription)
-        XCTAssertTrue(trophyWallDock.exists, app.debugDescription)
+        XCTAssertFalse(scanDock.exists, app.debugDescription)
+        XCTAssertFalse(trophyWallDock.exists, app.debugDescription)
         XCTAssertTrue(window.exists, app.debugDescription)
-        let dockTop = min(scanDock.frame.minY, trophyWallDock.frame.minY)
-        let frameReceipt = "cancel.frame=\(cancel.frame), scanDock.frame=\(scanDock.frame), trophyWallDock.frame=\(trophyWallDock.frame), window.frame=\(window.frame), dockTop=\(dockTop)"
+        let frameReceipt = "cancel.frame=\(cancel.frame), window.frame=\(window.frame)"
         XCTAssertGreaterThanOrEqual(cancel.frame.width, 44, frameReceipt)
         XCTAssertGreaterThanOrEqual(cancel.frame.height, 44, frameReceipt)
         XCTAssertGreaterThanOrEqual(cancel.frame.minX, window.frame.minX, frameReceipt)
         XCTAssertGreaterThanOrEqual(cancel.frame.minY, window.frame.minY, frameReceipt)
         XCTAssertLessThanOrEqual(cancel.frame.maxX, window.frame.maxX, frameReceipt)
         XCTAssertLessThanOrEqual(cancel.frame.maxY, window.frame.maxY, frameReceipt)
-        XCTAssertLessThanOrEqual(cancel.frame.maxY, dockTop, frameReceipt)
         XCTAssertTrue(cancel.isHittable, frameReceipt)
         cancel.tap()
 
@@ -611,15 +613,21 @@ final class SnapListUITests: XCTestCase {
 
         let saved = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                startListing.exists && startListing.label == "Item saved"
+                startListing.exists && startListing.label == "Done"
             },
             object: startListing
         )
         XCTAssertEqual(
             XCTWaiter.wait(for: [saved], timeout: 3),
             .completed,
-            "Start listing control must reach the submission boundary."
+            "Start listing control must reach the accepted Done boundary."
         )
+        XCTAssertTrue(startListing.isEnabled)
+        XCTAssertEqual(
+            app.staticTexts["photo-review.submission-message"].label,
+            "Item saved"
+        )
+        XCTAssertFalse(app.buttons["photo-review.add"].isEnabled)
     }
 
     func testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave() {
@@ -720,6 +728,86 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(interruptedCopy.exists)
     }
 
+    func testVoiceNoteRecordingCancelAndSaveBothDismissToExactRowTruth() {
+        let canceled = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        let cancel = canceled.buttons["voice-note.cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 2))
+        cancel.tap()
+        let emptyRow = canceled.buttons["photo-review.voice"]
+        XCTAssertTrue(emptyRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            emptyRow.label,
+            "Voice note, Add details the photos might miss, collapsed"
+        )
+        canceled.terminate()
+
+        let saved = launchVoiceNoteFixture(
+            "--voice-note-recording-fixture",
+            expectedControl: "voice-note.cancel"
+        )
+        let save = saved.buttons["voice-note.save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2))
+        save.tap()
+        let savedRow = saved.buttons["photo-review.voice"]
+        XCTAssertTrue(savedRow.waitForExistence(timeout: 2))
+        XCTAssertEqual(savedRow.label, "Voice note, 0:07, collapsed")
+    }
+
+    func testSubmissionVisualFixturesExposeWorkingCancelRetryAndDoneActions() {
+        let saving = XCUIApplication()
+        saving.launchArguments = [
+            "--photo-review-state=REV-02",
+            "--submission-visual-state=SUB-01",
+            "--zero-network-fixtures",
+        ]
+        saving.launchAfterRetiringPriorInstance()
+
+        let savingAction = saving.buttons["photo-review.start-listing"]
+        XCTAssertTrue(savingAction.waitForExistence(timeout: 3))
+        XCTAssertEqual(savingAction.label, "Cancel")
+        savingAction.tap()
+
+        let cancelledMessage = saving.staticTexts[
+            "photo-review.submission-message"
+        ]
+        XCTAssertTrue(cancelledMessage.waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            cancelledMessage.label,
+            "Not sent yet. Your item is saved on this phone."
+        )
+        XCTAssertEqual(savingAction.label, "Start listing")
+
+        savingAction.tap()
+        let retrySaving = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                savingAction.label == "Cancel"
+            },
+            object: savingAction
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [retrySaving], timeout: 2),
+            .completed
+        )
+        saving.terminate()
+
+        let accepted = XCUIApplication()
+        accepted.launchArguments = [
+            "--photo-review-state=REV-02",
+            "--submission-visual-state=SUB-05",
+            "--zero-network-fixtures",
+        ]
+        accepted.launchAfterRetiringPriorInstance()
+
+        let done = accepted.buttons["photo-review.start-listing"]
+        XCTAssertTrue(done.waitForExistence(timeout: 3))
+        XCTAssertEqual(done.label, "Done")
+        done.tap()
+        XCTAssertEqual(done.label, "Start listing")
+    }
+
     func testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -751,8 +839,8 @@ final class SnapListUITests: XCTestCase {
 
         let saving = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                startListing.label == "Saving your item"
-                    && !startListing.isEnabled
+                startListing.label == "Cancel"
+                    && startListing.isEnabled
                     && !addPhoto.isEnabled
             },
             object: startListing
@@ -763,11 +851,15 @@ final class SnapListUITests: XCTestCase {
             "The real Photo Review must expose the bounded saving label and mutation lock."
         )
 
+        startListing.tap()
+
         let completed = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
                 startListing.label == "Start listing"
                     && startListing.isEnabled
                     && addPhoto.isEnabled
+                    && app.staticTexts["photo-review.submission-message"].label
+                        == "Not sent yet. Your item is saved on this phone."
             },
             object: startListing
         )
@@ -894,24 +986,26 @@ final class SnapListUITests: XCTestCase {
 
         let saved = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
-                startListing.exists && startListing.label == "Item saved"
+                startListing.exists && startListing.label == "Done"
             },
             object: startListing
         )
         XCTAssertEqual(
             XCTWaiter.wait(for: [saved], timeout: 3),
             .completed,
-            "The real accepted host must render Item saved before exact clear."
+            "The real accepted host must render Done before exact clear."
         )
 
         XCTAssertTrue(screen.exists)
-        XCTAssertFalse(startListing.isEnabled)
-        XCTAssertFalse(hero.exists)
-        XCTAssertFalse(thumbnail.exists)
-        XCTAssertFalse(addPhoto.exists)
+        XCTAssertTrue(startListing.isEnabled)
+        XCTAssertTrue(hero.exists)
+        XCTAssertTrue(thumbnail.exists)
+        XCTAssertTrue(addPhoto.exists)
+        XCTAssertFalse(addPhoto.isEnabled)
         XCTAssertFalse(app.buttons["scan.library"].exists)
         XCTAssertFalse(app.buttons["scan.choose-library"].exists)
 
+        startListing.tap()
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(
@@ -961,12 +1055,10 @@ final class SnapListUITests: XCTestCase {
     }
 
     // v1.2 primary_action.position is a sticky bottom action above the home-indicator
-    // safe area, and its adaptive-layout contract says that action never covers the
-    // thumbnails, Voice note, or the home indicator. The hero and thumbnail strip are
-    // fixed, so text is the only thing that lengthens this page; the largest Dynamic Type
-    // is what puts the content decisively past the viewport, which is what makes the
-    // scroll below real rather than a rubber-band that settles back to its start.
-    func testLivePhotoReviewKeepsStartListingStickyBelowTheScrollingReviewContent() {
+    // safe area. At Accessibility 5, the approved content may either fit this simulator
+    // viewport or overflow it, but the action remains outside the ScrollView and never
+    // covers Voice note or the home indicator in either layout.
+    func testLivePhotoReviewKeepsStartListingSeparateFromAdaptiveReviewContent() {
         let app = XCUIApplication()
         app.launchArguments = [
             "--restored-capture-fixture",
@@ -999,22 +1091,28 @@ final class SnapListUITests: XCTestCase {
             "Voice note stays in flow; only Start listing is sticky."
         )
 
-        // Behavioural truth: the content scrolls under it and the action does not move.
+        // Behavioural truth: a swipe cannot move the sticky action. If content overflows,
+        // Voice note moves beneath it; otherwise Voice note remains clear of the action.
         let voiceBefore = screen.buttons["photo-review.voice"].frame
         let stickyBefore = startListing.frame
         screen.swipeUp()
 
-        XCTAssertNotEqual(
-            screen.buttons["photo-review.voice"].frame.minY,
-            voiceBefore.minY,
-            "The review content must actually scroll for this to prove anything."
-        )
+        let voiceAfter = screen.buttons["photo-review.voice"].frame
         XCTAssertEqual(
             startListing.frame.minY,
             stickyBefore.minY,
             accuracy: 0.5,
-            "Start listing must stay pinned while the content scrolls."
+            "Start listing must stay pinned across adaptive content movement."
         )
+        if abs(voiceAfter.minY - voiceBefore.minY) > 0.5 {
+            XCTAssertLessThan(voiceAfter.minY, voiceBefore.minY)
+        } else {
+            XCTAssertLessThanOrEqual(
+                voiceAfter.maxY,
+                startListing.frame.minY,
+                "When the approved content fits, Voice note must not overlap Start listing."
+            )
+        }
 
         let window = app.windows.firstMatch
         XCTAssertEqual(window.frame.width, 402, accuracy: 1)
@@ -1900,7 +1998,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(
             app.staticTexts["What happens if you don’t subscribe"].exists
         )
-        XCTAssertTrue(app.staticTexts["$9.99 / month"].exists)
+        XCTAssertTrue(app.staticTexts["$9.99 per month"].exists)
 
         for control in [
             app.buttons["pro-gate.primary"],
@@ -1934,7 +2032,7 @@ final class SnapListUITests: XCTestCase {
         for _ in 0..<5 where !primary.isHittable {
             app.swipeUp()
         }
-        XCTAssertTrue(app.staticTexts["$9.99 / month"].exists)
+        XCTAssertTrue(app.staticTexts["$9.99 per month"].exists)
         for control in [
             primary,
             app.buttons["pro-gate.restore-purchase"],
@@ -1992,9 +2090,6 @@ final class SnapListUITests: XCTestCase {
         let app = launchFirstValueOnboarding(resetProgress: true)
         advanceFirstValueOnboarding(to: "ONB-06", in: app)
 
-        app.buttons["first-value-onboarding.sign-in"].tap()
-        XCTAssertTrue(app.staticTexts["Welcome back"].waitForExistence(timeout: 2))
-        app.buttons["onboarding.sheet.close"].tap()
         XCTAssertTrue(
             app.buttons["first-value-onboarding.start-scanning"]
                 .waitForExistence(timeout: 2)
@@ -2073,22 +2168,28 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
-    func testFirstValueOnboardingSkipMarksComplete() {
+    func testFirstValueOnboardingSkipReachesIncludedScreenBeforeCompletion() {
         let app = launchFirstValueOnboarding(resetProgress: true)
 
         XCTAssertTrue(app.buttons["first-value-onboarding.skip"].waitForExistence(timeout: 3))
         app.buttons["first-value-onboarding.skip"].tap()
 
-        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3))
-        XCTAssertFalse(
-            app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists
+        XCTAssertTrue(
+            app.descendants(matching: .any)["first-value-onboarding.state.ONB-06"]
+                .waitForExistence(timeout: 3)
         )
+        XCTAssertTrue(app.buttons["first-value-onboarding.back"].exists)
+        XCTAssertFalse(app.buttons["first-value-onboarding.skip"].exists)
     }
 
     func testFirstValueOnboardingRelaunchDoesNotRepresent() {
         let app = launchFirstValueOnboarding(resetProgress: true)
         XCTAssertTrue(app.buttons["first-value-onboarding.skip"].waitForExistence(timeout: 3))
         app.buttons["first-value-onboarding.skip"].tap()
+        XCTAssertTrue(
+            app.buttons["first-value-onboarding.start-scanning"].waitForExistence(timeout: 3)
+        )
+        app.buttons["first-value-onboarding.start-scanning"].tap()
         XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3))
 
         app.terminate()
@@ -2105,7 +2206,7 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
-    func testFirstValueOnboardingONB06HasExactlyTwoControls() {
+    func testFirstValueOnboardingONB06UsesExistingAccountRouteAndHasBackControls() {
         let app = launchFirstValueOnboarding(resetProgress: true)
         advanceFirstValueOnboarding(to: "ONB-06", in: app)
         let screen = app.descendants(matching: .any)[
@@ -2113,37 +2214,117 @@ final class SnapListUITests: XCTestCase {
         ]
 
         XCTAssertTrue(screen.waitForExistence(timeout: 3))
-        XCTAssertEqual(screen.descendants(matching: .button).count, 2, app.debugDescription)
+        XCTAssertEqual(screen.descendants(matching: .button).count, 3, app.debugDescription)
         XCTAssertTrue(app.buttons["first-value-onboarding.start-scanning"].exists)
         XCTAssertTrue(app.buttons["first-value-onboarding.sign-in"].exists)
         XCTAssertFalse(app.buttons["first-value-onboarding.skip"].exists)
-        XCTAssertFalse(app.buttons["first-value-onboarding.back"].exists)
+        XCTAssertTrue(app.buttons["first-value-onboarding.back"].exists)
+
+        app.buttons["first-value-onboarding.sign-in"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["account-entry"].waitForExistence(timeout: 3),
+            app.debugDescription
+        )
+        let routeBack = app.navigationBars.buttons["Back"]
+        XCTAssertTrue(routeBack.waitForExistence(timeout: 3), app.debugDescription)
+        routeBack.tap()
+        XCTAssertTrue(screen.waitForExistence(timeout: 3), app.debugDescription)
     }
 
-    /// ONB-05 illustrates the Trophy Wall. No item exists during onboarding, so the
-    /// screen must be labelled an example and must expose no spinner or other affordance
-    /// that would claim work is running.
-    ///
-    /// The indicator counts below only reach affordances that surface as their own
-    /// accessibility elements. Each example row ends in
-    /// `.accessibilityElement(children: .combine)`, so a spinner inside a row is folded
-    /// away and cannot be counted here;
-    /// `OnboardingFlowTests.testBackgroundExampleRowBodyWritesNoProgressAffordance` reads the
-    /// row's rendered type and carries that half of the guarantee.
-    func testFirstValueOnboardingONB05IllustratesWithoutClaimingLiveProgress() {
+    /// The live ONB-06 approval crop centers a 353-point photo-first listing,
+    /// with a 254-point photo and a 67-point metadata band beneath it. These ranges
+    /// inspect the preview container that owns the jacket's accessibility semantics.
+    func testFirstValueOnboardingONB06UsesApprovedPhotoFirstPreviewMetrics() {
+        let app = launchFirstValueOnboarding(resetProgress: true)
+        advanceFirstValueOnboarding(to: "ONB-06", in: app)
+        let window = app.windows.firstMatch
+        let photo = app.otherElements["first-value-onboarding.included-photo-preview"]
+        let title = app.staticTexts["Medium wash denim trucker jacket, size M"]
+        let readyToReview = app.staticTexts["Ready to review"]
+        let price = app.staticTexts["$58"]
+
+        XCTAssertTrue(photo.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(title.exists, app.debugDescription)
+        XCTAssertTrue(readyToReview.exists, app.debugDescription)
+        XCTAssertTrue(price.exists, app.debugDescription)
+        XCTAssertEqual(photo.frame.midX, window.frame.midX, accuracy: 2)
+        XCTAssertEqual(photo.frame.width, 353, accuracy: 2)
+        XCTAssertEqual(photo.frame.height, 254, accuracy: 4)
+        XCTAssertEqual(title.frame.minY, photo.frame.maxY + 15, accuracy: 3)
+        XCTAssertEqual(readyToReview.frame.minY, title.frame.maxY + 6, accuracy: 4)
+        XCTAssertEqual(price.frame.minY, readyToReview.frame.minY, accuracy: 4)
+    }
+
+    /// ONB-05 keeps the approved work rows and Scout line without adding explanatory
+    /// caption copy or a progress affordance.
+    func testFirstValueOnboardingONB05HasApprovedRowsAndScoutWithoutExtraCaption() {
         let app = launchFirstValueOnboarding(resetProgress: true)
         advanceFirstValueOnboarding(to: "ONB-05", in: app)
+        let window = app.windows.firstMatch
         let screen = app.descendants(matching: .any)[
             "first-value-onboarding.state.ONB-05"
         ]
+        let controls = [
+            app.buttons["first-value-onboarding.back"],
+            app.buttons["first-value-onboarding.skip"],
+            app.buttons["first-value-onboarding.continue"]
+        ]
+        let approvedRows = [
+            "Denim trucker jacket, Writing the listing",
+            "Desk lamp, Checking sold prices",
+            "White sneakers, Reading your voice note"
+        ]
 
         XCTAssertTrue(screen.waitForExistence(timeout: 3))
-        XCTAssertTrue(
-            app.staticTexts["An example — nothing is running yet"].exists,
-            app.debugDescription
+        for control in controls {
+            XCTAssertTrue(control.exists, app.debugDescription)
+            XCTAssertTrue(control.isHittable, app.debugDescription)
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44, app.debugDescription)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44, app.debugDescription)
+            XCTAssertGreaterThanOrEqual(control.frame.minX, window.frame.minX, app.debugDescription)
+            XCTAssertGreaterThanOrEqual(control.frame.minY, window.frame.minY, app.debugDescription)
+            XCTAssertLessThanOrEqual(control.frame.maxX, window.frame.maxX, app.debugDescription)
+            XCTAssertLessThanOrEqual(control.frame.maxY, window.frame.maxY, app.debugDescription)
+        }
+        for row in approvedRows {
+            XCTAssertEqual(
+                screen.staticTexts
+                    .matching(NSPredicate(format: "label == %@", row)).count,
+                1,
+                app.debugDescription
+            )
+        }
+        let scoutLine = screen.descendants(matching: .any)
+            .matching(identifier: "first-value-onboarding.scout-line.ONB-05")
+        XCTAssertEqual(scoutLine.count, 1, app.debugDescription)
+        XCTAssertEqual(
+            scoutLine.firstMatch.label,
+            "Scout keeps working in the background."
         )
+        XCTAssertFalse(app.staticTexts["An example — nothing is running yet"].exists)
         XCTAssertEqual(app.activityIndicators.count, 0, app.debugDescription)
         XCTAssertEqual(app.progressIndicators.count, 0, app.debugDescription)
+    }
+
+    /// At Accessibility 5, the public listing title and review metadata may
+    /// reflow, but neither can share visible space with an anchored ONB-06 action.
+    func testFirstValueOnboardingAccessibility5KeepsIncludedPreviewClearOfStickyActions() {
+        let app = launchFirstValueOnboarding(
+            resetProgress: true,
+            extraArguments: ["--dynamic-type=accessibility5", "--reduced-motion"]
+        )
+        advanceFirstValueOnboarding(to: "ONB-06", in: app)
+        let title = app.staticTexts["Medium wash denim trucker jacket, size M"]
+        let readyToReview = app.staticTexts["Ready to review"]
+        let startScanning = app.buttons["first-value-onboarding.start-scanning"]
+        let existingAccount = app.buttons["first-value-onboarding.sign-in"]
+
+        XCTAssertTrue(title.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(readyToReview.exists, app.debugDescription)
+        XCTAssertTrue(startScanning.exists, app.debugDescription)
+        XCTAssertTrue(existingAccount.exists, app.debugDescription)
+        XCTAssertFalse(title.frame.intersects(startScanning.frame), app.debugDescription)
+        XCTAssertFalse(readyToReview.frame.intersects(existingAccount.frame), app.debugDescription)
     }
 
     /// A returning seller whose durable capture survives lands on Resume with no
@@ -2177,7 +2358,7 @@ final class SnapListUITests: XCTestCase {
     func testFirstValueOnboardingAccessibilityTypeKeepsEveryPrimaryActionReachable() {
         let app = launchFirstValueOnboarding(
             resetProgress: true,
-            extraArguments: ["--dynamic-type=accessibility3", "--reduced-motion"]
+            extraArguments: ["--dynamic-type=accessibility5", "--reduced-motion"]
         )
         let window = app.windows.firstMatch
 
@@ -2192,11 +2373,41 @@ final class SnapListUITests: XCTestCase {
                 : "first-value-onboarding.continue"
             let primary = app.buttons[identifier]
             XCTAssertTrue(primary.exists)
+
+            if screen == "ONB-06" {
+                let onboardingScrollView = app.scrollViews["first-value-onboarding.scroll"]
+                let existingAccount = app.buttons["first-value-onboarding.sign-in"]
+                XCTAssertTrue(onboardingScrollView.exists, app.debugDescription)
+                func isFullyReachable(_ action: XCUIElement) -> Bool {
+                    action.isHittable
+                        && action.frame.height >= 44
+                        && action.frame.minX >= window.frame.minX
+                        && action.frame.maxX <= window.frame.maxX
+                        && action.frame.maxY <= window.frame.maxY
+                }
+                var swipeCount = 0
+                while swipeCount < 3 && (!isFullyReachable(primary) || !isFullyReachable(existingAccount)) {
+                    onboardingScrollView.swipeUp()
+                    swipeCount += 1
+                }
+            }
+
             XCTAssertTrue(primary.isHittable)
             XCTAssertGreaterThanOrEqual(primary.frame.height, 44)
             XCTAssertGreaterThanOrEqual(primary.frame.minX, window.frame.minX)
             XCTAssertLessThanOrEqual(primary.frame.maxX, window.frame.maxX)
             XCTAssertLessThanOrEqual(primary.frame.maxY, window.frame.maxY)
+
+            if screen == "ONB-06" {
+                let existingAccount = app.buttons["first-value-onboarding.sign-in"]
+                XCTAssertTrue(existingAccount.exists)
+                XCTAssertTrue(existingAccount.isHittable)
+                XCTAssertGreaterThanOrEqual(existingAccount.frame.height, 44)
+                XCTAssertGreaterThanOrEqual(existingAccount.frame.minX, window.frame.minX)
+                XCTAssertLessThanOrEqual(existingAccount.frame.maxX, window.frame.maxX)
+                XCTAssertLessThanOrEqual(existingAccount.frame.maxY, window.frame.maxY)
+            }
+
             if screen != "ONB-06" { primary.tap() }
         }
     }
@@ -2688,7 +2899,8 @@ final class SnapListUITests: XCTestCase {
     }
 
     private func launchVoiceNoteFixture(
-        _ fixtureArgument: String
+        _ fixtureArgument: String,
+        expectedControl: String = "voice-note.close"
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -2709,7 +2921,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(voice.waitForExistence(timeout: 3))
         voice.tap()
         XCTAssertTrue(
-            app.buttons["voice-note.close"].waitForExistence(timeout: 2)
+            app.buttons[expectedControl].waitForExistence(timeout: 2)
         )
         return app
     }

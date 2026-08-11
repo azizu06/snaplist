@@ -573,7 +573,7 @@ final class CaptureFlowTests: XCTestCase {
 
         XCTAssertEqual(handoff.acceptedRun, expectedRun)
         XCTAssertEqual(submissionHost.acceptedRun, expectedRun)
-        XCTAssertEqual(savedPresentation.primaryActionLabel, "Item saved")
+        XCTAssertEqual(savedPresentation.primaryActionLabel, "Done")
         XCTAssertEqual(
             savedPresentation.announcementEvent,
             .itemSaved(eventID: eventID)
@@ -582,7 +582,7 @@ final class CaptureFlowTests: XCTestCase {
             savedPresentation.accessibilityAnnouncement,
             "Item saved."
         )
-        XCTAssertFalse(savedPresentation.rendersSubmittedMedia)
+        XCTAssertTrue(savedPresentation.rendersSubmittedMedia)
         XCTAssertTrue(photoReviewHost.isCommitting)
         XCTAssertTrue(photoReviewHost.session === session)
         XCTAssertEqual(session.store.photos, [staged])
@@ -631,6 +631,13 @@ final class CaptureFlowTests: XCTestCase {
                     eventID: acknowledgedEventID
                 )
             }
+        )
+        events.record(.matchingAcknowledgment(eventID))
+        XCTAssertTrue(
+            PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                savedPresentation.primaryActionEvent,
+                submissionHost: submissionHost
+            )
         )
 
         await transaction.value
@@ -899,6 +906,12 @@ final class CaptureFlowTests: XCTestCase {
                     submissionHost.acknowledgePresentation(eventID: $0)
                 }
             )
+            XCTAssertTrue(
+                PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                    .completeSavedSubmission(eventID: eventID),
+                    submissionHost: submissionHost
+                )
+            )
             await transaction.value
 
             XCTAssertEqual(announcements, ["Item saved."], testCase.name)
@@ -1125,7 +1138,7 @@ final class CaptureFlowTests: XCTestCase {
 
         XCTAssertEqual(handoff.acceptedRun, expectedRun)
         XCTAssertEqual(submissionHost.acceptedRun, expectedRun)
-        XCTAssertEqual(savedPresentation.primaryActionLabel, "Item saved")
+        XCTAssertEqual(savedPresentation.primaryActionLabel, "Done")
         XCTAssertEqual(
             savedPresentation.announcementEvent,
             .itemSaved(eventID: eventID)
@@ -1134,7 +1147,7 @@ final class CaptureFlowTests: XCTestCase {
             savedPresentation.accessibilityAnnouncement,
             "Item saved."
         )
-        XCTAssertFalse(savedPresentation.rendersSubmittedMedia)
+        XCTAssertTrue(savedPresentation.rendersSubmittedMedia)
         XCTAssertTrue(photoReviewHost.isCommitting)
         XCTAssertTrue(photoReviewHost.session === session)
         XCTAssertEqual(session.store.photos, sessionPhotosBeforeSubmission)
@@ -1181,6 +1194,13 @@ final class CaptureFlowTests: XCTestCase {
                     eventID: acknowledgedEventID
                 )
             }
+        )
+        events.record(.matchingAcknowledgment(eventID))
+        XCTAssertTrue(
+            PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                savedPresentation.primaryActionEvent,
+                submissionHost: submissionHost
+            )
         )
 
         await fulfillment(of: [lockReleaseObserved], timeout: 3)
@@ -1532,6 +1552,16 @@ final class CaptureFlowTests: XCTestCase {
             acknowledgePresentation: {
                 submissionHost.acknowledgePresentation(eventID: $0)
             }
+        )
+        guard case .itemSaved(let savedEventID, _)? =
+                submissionHost.pendingPresentationEvent else {
+            return XCTFail("Expected Done to own the accepted retry event.")
+        }
+        XCTAssertTrue(
+            PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                .completeSavedSubmission(eventID: savedEventID),
+                submissionHost: submissionHost
+            )
         )
         await acceptedRetry.value
 
@@ -2779,6 +2809,16 @@ final class CaptureFlowTests: XCTestCase {
             acknowledgePresentation: { eventID in
                 submissionHost.acknowledgePresentation(eventID: eventID)
             }
+        )
+        guard case .completeSavedSubmission(let savedEventID) =
+                savedPresentation.primaryActionEvent else {
+            return XCTFail("Expected the accepted presentation to expose Done.")
+        }
+        XCTAssertTrue(
+            PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                .completeSavedSubmission(eventID: savedEventID),
+                submissionHost: submissionHost
+            )
         )
         await transaction.value
 

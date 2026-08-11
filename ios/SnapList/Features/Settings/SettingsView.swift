@@ -8,6 +8,7 @@ struct SettingsView: View {
     private let profile: SettingsProfile
     private let settingsProofState: SettingsProofState?
     private let settingsProofSafeExit: (() -> Void)?
+    private let deletionFlowPresentationChanged: (Bool) -> Void
     private let mobileAPIClient: any MobileAPIClient
     private let removeLocalData: () async -> Bool
     private let deletionOutstanding: Bool
@@ -32,11 +33,13 @@ struct SettingsView: View {
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false,
-        settingsProofSafeExit: (() -> Void)? = nil
+        settingsProofSafeExit: (() -> Void)? = nil,
+        deletionFlowPresentationChanged: @escaping (Bool) -> Void = { _ in }
     ) {
         profile = .current(configuration: configuration)
         settingsProofState = configuration.settingsProofState
         self.settingsProofSafeExit = settingsProofSafeExit
+        self.deletionFlowPresentationChanged = deletionFlowPresentationChanged
         self.mobileAPIClient = mobileAPIClient
         self.removeLocalData = removeLocalData
         self.deletionOutstanding = deletionOutstanding
@@ -60,7 +63,8 @@ struct SettingsView: View {
             SettingsProofStateView(
                 state: settingsProofState,
                 profile: profile,
-                onSafeExit: settingsProofSafeExit
+                onSafeExit: settingsProofSafeExit,
+                deletionFlowPresentationChanged: deletionFlowPresentationChanged
             )
         } else {
             settingsHub
@@ -68,115 +72,150 @@ struct SettingsView: View {
     }
 
     private var settingsHub: some View {
-        List {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
             profileCard
-            Section("Account") {
-                if let accountEntry = SettingsAccountEntryPolicy.destination(
-                    for: profile.identity
-                ) {
-                    NavigationLink(value: accountEntry) {
-                        Text("Create an account")
-                    }
-                    .accessibilityIdentifier("settings.create-account")
-                    .accessibilityHint("Opens the account entry screen")
-                } else {
-                    valueRow("Sign-in method", profile.methodLabel)
-                }
-            }
-            Section("Selling") {
-                valueRow(
-                    "Connected marketplaces",
-                    sellingPresentation.marketplaceValue,
-                    chevron: true
-                )
-                if let hint = sellingPresentation.hint {
-                    SettingsSellingHintRow(hint: hint)
-                }
-                valueRow("Photos", "Selected photos", chevron: true)
-                valueRow("Notifications", "On", chevron: true)
-            }
-            Section("Privacy") {
-                Toggle("Share usage analytics", isOn: analyticsConsentBinding)
-                    .accessibilityIdentifier("settings.share-usage-analytics")
-            }
-            if SettingsSubscriptionVisibility(
-                identity: profile.identity,
-                deletionOutstanding: deletionOutstanding
-            ).isVisible {
-                subscriptionSection
-            }
-            Section("About") {
-                navigationRow("Help")
-                navigationRow("Privacy Policy")
-                navigationRow("Terms of Service")
-            }
-            Section {
-                if hasLocalData {
-                    NavigationLink {
-                        SettingsLocalRemovalView(
-                            isGuest: profile.isGuest,
-                            remove: {
-                                guard await removeLocalData() else { return false }
-                                hasLocalData = false
-                                return true
+                settingsSectionHeader("ACCOUNT")
+                settingsCard {
+                    settingsCardRow {
+                        if let accountEntry = SettingsAccountEntryPolicy.destination(
+                            for: profile.identity
+                        ) {
+                            NavigationLink(value: accountEntry) {
+                                Text("Create an account")
                             }
-                        )
-                    } label: {
-                        Text("Remove unsent photos and voice notes")
+                            .accessibilityIdentifier("settings.create-account")
+                            .accessibilityHint("Opens the account entry screen")
+                        } else {
+                            valueRow("Sign-in method", profile.methodLabel)
+                        }
                     }
-                    .accessibilityIdentifier("settings.local-removal")
-                    .accessibilityHint("Explains what SnapList removes from this iPhone")
+                }
+
+                settingsSectionHeader("SELLING")
+                settingsCard {
+                    settingsCardRow {
+                        valueRow(
+                            "Connected marketplaces",
+                            sellingPresentation.marketplaceValue,
+                            chevron: true
+                        )
+                    }
+                    settingsCardDivider
+                    if let hint = sellingPresentation.hint {
+                        settingsCardRow {
+                            SettingsSellingHintRow(hint: hint)
+                        }
+                        settingsCardDivider
+                    }
+                    settingsCardRow {
+                        valueRow("Photos", "Selected photos", chevron: true)
+                    }
+                    settingsCardDivider
+                    settingsCardRow {
+                        valueRow("Notifications", "On", chevron: true)
+                    }
+                }
+
+                if SettingsSubscriptionVisibility(
+                    identity: profile.identity,
+                    deletionOutstanding: deletionOutstanding
+                ).isVisible {
+                    subscriptionSection
+                }
+
+                settingsSectionHeader("PRIVACY")
+                settingsCard {
+                    settingsCardRow {
+                        Toggle("Share usage analytics", isOn: analyticsConsentBinding)
+                            .accessibilityIdentifier("settings.share-usage-analytics")
+                    }
+                }
+
+                settingsSectionHeader("ABOUT")
+                settingsCard {
+                    settingsCardRow { navigationRow("Help") }
+                    settingsCardDivider
+                    settingsCardRow { navigationRow("Privacy Policy") }
+                    settingsCardDivider
+                    settingsCardRow { navigationRow("Terms of Service") }
+                }
+
+                settingsSectionHeader("THIS IPHONE")
+                settingsCard {
+                    settingsCardRow {
+                        if hasLocalData {
+                            NavigationLink {
+                                SettingsLocalRemovalView(
+                                    isGuest: profile.isGuest,
+                                    remove: {
+                                        guard await removeLocalData() else { return false }
+                                        hasLocalData = false
+                                        return true
+                                    }
+                                )
+                            } label: {
+                                Text("Remove unsent photos and voice notes")
+                            }
+                            .accessibilityIdentifier("settings.local-removal")
+                            .accessibilityHint("Explains what SnapList removes from this iPhone")
+                        } else {
+                            Text("No unsent photos or voice notes")
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("settings.local-empty")
+                        }
+                    }
+                }
+
+                if !profile.isGuest {
+                    settingsSectionHeader("ACCOUNT MANAGEMENT")
+                    settingsCard {
+                        settingsCardRow {
+                            NavigationLink {
+                                SettingsDeletionConsequencesView(
+                                    profile: profile,
+                                    subscriptionTruth: SettingsDeletionSubscriptionTruth(
+                                        state: subscriptionStore.state,
+                                        loadPhase: subscriptionLoadPhase
+                                    ),
+                                    proofSafeExit: nil,
+                                    reservesFloatingDock: false,
+                                    deletionFlowPresentationChanged:
+                                        deletionFlowPresentationChanged
+                                )
+                            } label: {
+                                Text("Delete account")
+                            }
+                            .accessibilityIdentifier("settings.delete-account")
+                            .accessibilityHint("Opens a screen that explains what deletion does")
+                        }
+                    }
                 } else {
-                    Text("No unsent photos or voice notes")
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("settings.local-empty")
-                }
-            } header: {
-                Text("This iPhone")
-            } footer: {
-                Text("This covers the copies SnapList keeps on this iPhone. It does not reach anything the server holds.")
-            }
-            if !profile.isGuest {
-                Section("Account management") {
-                    NavigationLink {
-                        SettingsDeletionConsequencesView(
-                            profile: profile,
-                            subscriptionTruth: SettingsDeletionSubscriptionTruth(
-                                state: subscriptionStore.state,
-                                loadPhase: subscriptionLoadPhase
-                            ),
-                            proofSafeExit: nil,
-                            reservesFloatingDock: true
-                        )
-                    } label: {
-                        Text("Delete account")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(SettingsGuestBoundaryCopy.title)
+                            .font(.subheadline.weight(.semibold))
+                        Text(SettingsGuestBoundaryCopy.body)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    .accessibilityIdentifier("settings.delete-account")
-                    .accessibilityHint("Opens a screen that explains what deletion does")
+                    .padding(.top, 24)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("settings.guest-boundary")
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(SettingsGuestBoundaryCopy.title)
-                        .font(.subheadline.weight(.semibold))
-                    Text(SettingsGuestBoundaryCopy.body)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("settings.guest-boundary")
+                Text(
+                    "SnapList \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") · \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1")"
+                )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 24)
             }
-            Text(
-                "SnapList \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") · \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1")"
-            )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .listRowBackground(Color.clear)
+            .padding(.horizontal, 21)
+            .padding(.top, 16)
+            .padding(.bottom, 100)
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .scrollContentBackground(.hidden)
         .background(Color(hex: "#F5F6F7"))
         .alert(
             "Couldn’t update analytics sharing",
@@ -189,9 +228,12 @@ struct SettingsView: View {
             Text("Your preference did not change. Try again.")
         }
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
-        .task { await loadEbayConnection() }
         .task {
-            guard !profile.isGuest else { return }
+            guard !isSettingsHubProof else { return }
+            await loadEbayConnection()
+        }
+        .task {
+            guard !profile.isGuest, !isSettingsHubProof else { return }
             await loadSubscription()
         }
         .accessibilityIdentifier("settings.screen")
@@ -209,27 +251,42 @@ struct SettingsView: View {
                 Text(profile.email).foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, minHeight: 74, maxHeight: 74, alignment: .leading)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
     private var subscriptionSection: some View {
-        let presentation = SettingsSubscriptionPresentation(
-            state: subscriptionStore.state,
-            loadPhase: subscriptionLoadPhase
-        )
-        Section {
-            valueRow("SnapList Pro", presentation.status)
+        let presentation = subscriptionPresentation
+        VStack(alignment: .leading, spacing: 0) {
+            settingsSubscriptionHeader(presentation)
+            settingsCard {
+                settingsCardRow {
+                    valueRow("SnapList Pro", presentation.status)
+                }
             ForEach(Array(presentation.facts.enumerated()), id: \.offset) { _, fact in
-                valueRow(fact.label, fact.value)
+                    settingsCardDivider
+                    settingsCardRow {
+                        valueRow(fact.label, fact.value)
+                    }
             }
             ForEach(presentation.actions, id: \.self) { action in
+                    settingsCardDivider
+                    settingsCardRow {
                 switch action {
                 case .manage:
-                    Button("Manage subscription in the App Store") {
+                    Button {
                         managesSubscription = true
+                    } label: {
+                        HStack {
+                            Text("Manage subscription in the App Store")
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                        }
                     }
+                    .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityHint("Opens the App Store")
                 case .restore:
                     Button("Restore purchase") {
@@ -241,15 +298,18 @@ struct SettingsView: View {
                         .accessibilityHint("Loads your subscription details again")
                 }
             }
-        } header: {
-            Text("Subscription")
-        } footer: {
+            }
+            }
             VStack(alignment: .leading, spacing: 6) {
                 if let note = presentation.note { Text(note) }
                 if presentation.showsOwnershipNote {
                     Text("Apple bills and cancels SnapList Pro. SnapList cannot cancel it for you.")
                 }
             }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+            .padding(.top, 8)
         }
         .accessibilityIdentifier("settings.subscription.\(presentation.stateID.lowercased())")
         .onChange(of: presentation) { _, reading in
@@ -316,10 +376,112 @@ struct SettingsView: View {
     }
 
     private var sellingPresentation: SettingsSellingPresentation {
-        SettingsSellingPresentation(
+        if isSettingsHubProof {
+            return SettingsSellingPresentation(
+                connection: EbayConnectionStatus(
+                    connected: true,
+                    ebayUsername: "JordanHale",
+                    policySetup: nil
+                ),
+                loadPhase: .loaded
+            )
+        }
+        return SettingsSellingPresentation(
             connection: ebayConnection,
             loadPhase: ebayConnectionLoadPhase
         )
+    }
+
+    private var subscriptionPresentation: SettingsSubscriptionPresentation {
+        if isSettingsHubProof {
+            return SettingsSubscriptionPresentation(
+                state: .verified(Self.settingsHubProofSubscription),
+                loadPhase: .loaded,
+                locale: Locale(identifier: "en_US")
+            )
+        }
+        return SettingsSubscriptionPresentation(
+            state: subscriptionStore.state,
+            loadPhase: subscriptionLoadPhase
+        )
+    }
+
+    private var isSettingsHubProof: Bool {
+#if DEBUG
+        settingsProofState == .settingsHub
+#else
+        false
+#endif
+    }
+
+    private static let settingsHubProofSubscription: ServerVerifiedSubscription = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        return ServerVerifiedSubscription(
+            source: .storeKit,
+            status: .active,
+            remainingItems: 12,
+            periodStart: nil,
+            periodEnd: calendar.date(
+                from: DateComponents(year: 2026, month: 8, day: 28, hour: 12)
+            )!,
+            gracePeriodEnd: nil,
+            transitionState: nil,
+            legacyStripeStatus: nil
+        )
+    }()
+
+    private func settingsSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+            .frame(height: 18, alignment: .leading)
+            .padding(.top, 19)
+            .padding(.bottom, 3)
+    }
+
+    private func settingsSubscriptionHeader(
+        _ presentation: SettingsSubscriptionPresentation
+    ) -> some View {
+        HStack {
+            Text("SUBSCRIPTION")
+            Spacer()
+            if isSettingsHubProof {
+                Text(presentation.stateID)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color(hex: "#8A6D3B"))
+            }
+        }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(.secondary)
+        .frame(height: 18)
+        .padding(.top, 19)
+        .padding(.bottom, 3)
+    }
+
+    private func settingsCard<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0, content: content)
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private func settingsCardRow<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .leading)
+            .padding(.horizontal, 16)
+    }
+
+    private var settingsCardDivider: some View {
+        Color.clear
+            .frame(height: 0)
+            .overlay {
+                Divider()
+                    .padding(.horizontal, 16)
+            }
+            .allowsHitTesting(false)
     }
 
     /// Settings reads the connection the seller already has. A guest has none,
@@ -357,6 +519,7 @@ private struct SettingsProofStateView: View {
     let state: SettingsProofState
     let profile: SettingsProfile
     let onSafeExit: () -> Void
+    let deletionFlowPresentationChanged: (Bool) -> Void
 
     var body: some View {
         switch state {
@@ -365,9 +528,11 @@ private struct SettingsProofStateView: View {
         case .deletionConsequences:
             SettingsDeletionConsequencesView(
                 profile: profile,
-                subscriptionTruth: .unknown,
+                subscriptionTruth: .billing,
                 proofSafeExit: onSafeExit,
-                reservesFloatingDock: true
+                reservesFloatingDock: false,
+                deletionFlowPresentationChanged:
+                    deletionFlowPresentationChanged
             )
         case .reauthentication:
             SettingsReauthenticationView(
@@ -461,40 +626,85 @@ private struct SettingsLocalRemovalView: View {
     }
 }
 
+private struct SettingsDeletionHeader: View {
+    let back: () -> Void
+
+    var body: some View {
+        ZStack {
+            Text("Delete account")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            HStack {
+                Button(action: back) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Settings")
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(SnapListColorToken.action.color)
+                .accessibilityLabel("Settings")
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 56)
+        .background(Color.white)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
 private struct SettingsDeletionConsequencesView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
     let proofSafeExit: (() -> Void)?
     var reservesFloatingDock = false
+    let deletionFlowPresentationChanged: (Bool) -> Void
     @State private var managesSubscription = false
     @State private var presentsReauthentication = false
 
     var body: some View {
-        SettingsExplanationPage(
-            title: "Delete your SnapList account",
-            lead: "Read what this does before you continue. You can still stop at every step."
-        ) {
-            SettingsFactSection(
-                title: "What is deleted",
-                bullets: [
-                    "Your SnapList account and how you sign in",
-                    "Your items, photos, drafts, voice notes and runs",
-                    "Your price research and anything SnapList generated for you",
-                    "Your eBay connection, removed from SnapList"
-                ],
-                bulletColor: Color(hex: "#B42318")
-            )
-            SettingsFactSection(title: "What this does not do", bullets: [
-                "It does not end your eBay listings\nListings you already published stay on eBay and keep selling. Deleting this account removes the eBay connection from SnapList, so SnapList can no longer see or change them. Ending a listing is done in eBay.",
-                "It does not cancel SnapList Pro\n\(subscriptionTruth.longCopy)"
-            ], usesBullets: false)
-            Button("Manage subscription in the App Store") { managesSubscription = true }
-            Text("Nothing is deleted yet. The next step confirms it is you.")
-                .font(.footnote).foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            SettingsDeletionHeader(back: safeExit)
+            SettingsExplanationPage(
+                title: "Delete your SnapList account",
+                lead: "Read what this does before you continue. You can still stop at every step.",
+                titleFont: .system(size: 20, weight: .bold),
+                leadFont: .system(size: 16),
+                horizontalPadding: 25,
+                verticalPadding: 30,
+                titleToLeadSpacing: 22,
+                contentTopSpacing: 18,
+                contentSectionSpacing: 15
+            ) {
+                SettingsFactSection(
+                    title: "What is deleted",
+                    bullets: [
+                        "Your SnapList account and how you sign in",
+                        "Your items, photos, drafts, voice notes and runs",
+                        "Your price research and anything SnapList generated for you",
+                        "Your eBay connection, removed from SnapList"
+                    ],
+                    bulletColor: Color(hex: "#B42318"),
+                    rowFont: .system(size: 15),
+                    rowVerticalPadding: 15.5,
+                    rowHorizontalPadding: 12,
+                    bulletSpacing: 8,
+                    headerToCardSpacing: 5
+                )
+                SettingsDeletionBoundarySection(
+                    subscriptionCopy: subscriptionTruth.longCopy
+                )
+                Button("Manage subscription in the App Store") { managesSubscription = true }
+                Text("Nothing is deleted yet. The next step confirms it is you.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
-        .navigationTitle("Delete account")
-        .navigationBarTitleDisplayMode(.inline)
+        .background(Color.white.ignoresSafeArea(edges: .top))
+        .toolbar(.hidden, for: .navigationBar)
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
         .safeAreaInset(edge: .bottom) {
             SettingsActionTray(
@@ -505,6 +715,7 @@ private struct SettingsDeletionConsequencesView: View {
                 primaryAction: { presentsReauthentication = true },
                 secondaryAction: safeExit
             )
+            .offset(y: 16)
             .padding(
                 .bottom,
                 reservesFloatingDock
@@ -523,9 +734,15 @@ private struct SettingsDeletionConsequencesView: View {
             )
         }
         .accessibilityIdentifier("settings.state.del-01")
+        .onAppear { deletionFlowPresentationChanged(true) }
+        .onDisappear {
+            guard !presentsReauthentication else { return }
+            deletionFlowPresentationChanged(false)
+        }
     }
 
     private func safeExit() {
+        deletionFlowPresentationChanged(false)
         if let proofSafeExit {
             proofSafeExit()
         } else {
@@ -795,21 +1012,37 @@ private struct SettingsEmailCodeField: View {
 private struct SettingsExplanationPage<Content: View>: View {
     let title: String
     var lead: String? = nil
+    var titleFont: Font = .title.bold()
+    var leadFont: Font = .body
+    var horizontalPadding: CGFloat = 20
+    var verticalPadding: CGFloat = 20
+    var titleToLeadSpacing: CGFloat = 22
+    var contentTopSpacing: CGFloat = 22
+    var contentSectionSpacing: CGFloat = 22
     @ViewBuilder let content: Content
     @AccessibilityFocusState private var headingFocused: Bool
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(title)
-                    .font(.title.bold())
+                    .font(titleFont)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityFocused($headingFocused)
-                if let lead { Text(lead).font(.body) }
-                content
+                if let lead {
+                    Text(lead)
+                        .font(leadFont)
+                        .padding(.top, titleToLeadSpacing)
+                }
+                VStack(alignment: .leading, spacing: contentSectionSpacing) {
+                    content
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, contentTopSpacing)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
         }
         .background(Color(hex: "#F5F6F7"))
         .onAppear { headingFocused = true }
@@ -821,27 +1054,77 @@ private struct SettingsFactSection: View {
     let bullets: [String]
     var usesBullets = true
     var bulletColor = Color(hex: "#8A8E94")
+    var rowFont: Font = .body
+    var rowVerticalPadding: CGFloat = 13
+    var rowHorizontalPadding: CGFloat = 14
+    var bulletSpacing: CGFloat = 10
+    var headerToCardSpacing: CGFloat = 8
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: headerToCardSpacing) {
             if !title.isEmpty {
                 Text(title.uppercased()).font(.caption.weight(.semibold))
                     .tracking(1).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(bullets.enumerated()), id: \.offset) { index, text in
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .top, spacing: bulletSpacing) {
                         if usesBullets { Text("•").foregroundStyle(bulletColor) }
-                        Text(text).fixedSize(horizontal: false, vertical: true)
+                        Text(text)
+                            .font(rowFont)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.vertical, 13)
+                    .padding(.vertical, rowVerticalPadding)
                     if index < bullets.count - 1 { Divider() }
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, rowHorizontalPadding)
             .background(.white, in: RoundedRectangle(cornerRadius: 14))
             .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "#E3E5E8")) }
         }
+    }
+}
+
+private struct SettingsDeletionBoundarySection: View {
+    let subscriptionCopy: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6.5) {
+            Text("WHAT THIS DOES NOT DO")
+                .font(.caption.weight(.semibold))
+                .tracking(1)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                boundary(
+                    title: "It does not end your eBay listings",
+                    body: "Listings you already published stay on eBay and keep selling. Deleting this account removes the eBay connection from SnapList, so SnapList can no longer see or change them. Ending a listing is done in eBay."
+                )
+                Divider()
+                boundary(
+                    title: "It does not cancel SnapList Pro",
+                    body: subscriptionCopy
+                )
+            }
+            .background(.white, in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(hex: "#E3E5E8"))
+            }
+        }
+    }
+
+    private func boundary(title: String, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+            Text(body)
+                .font(.system(size: 16))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 16)
     }
 }
 

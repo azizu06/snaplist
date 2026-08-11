@@ -22,6 +22,26 @@ struct AccountEntryView: View {
     }
 }
 
+#if DEBUG
+/// Secret-free destination used only to prove the typed account route in offline UI runs.
+struct AccountEntryFixtureView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Account entry")
+                .snapListTypography(.displayTitle)
+                .accessibilityAddTraits(.isHeader)
+            Text("Sign in or create your SnapList account to continue.")
+                .snapListTypography(.body)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(SnapListMetrics.screenGutter)
+        .background(SnapListColorToken.canvas.color.ignoresSafeArea())
+        .navigationTitle("Account")
+        .accessibilityIdentifier("account-entry")
+    }
+}
+#endif
+
 struct FoundationDestinationView: View {
     let destination: FutureBoundary
 

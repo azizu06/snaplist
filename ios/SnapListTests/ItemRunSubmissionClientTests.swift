@@ -162,14 +162,16 @@ final class ItemRunSubmissionClientTests: XCTestCase {
         }
     }
 
-    /// Offline and cancellation are both named by the criterion, and both have to leave
-    /// the submission retryable rather than looking like the server refused it.
-    func testTransportFailureIsAmbiguousRatherThanARejection() async {
-        for failure in [
-            URLError(.notConnectedToInternet),
-            URLError(.cancelled),
-            URLError(.timedOut)
-        ] {
+    /// Every transport failure remains retryable, while the two seller-actionable
+    /// conditions stay typed so Photo Review can tell the truth about offline and
+    /// locally cancelled waits.
+    func testTransportFailurePreservesItsRetryablePresentationReason() async {
+        let expectations: [(URLError, ItemRunSubmissionTransportOutcome)] = [
+            (URLError(.notConnectedToInternet), .offline),
+            (URLError(.cancelled), .cancelled),
+            (URLError(.timedOut), .ambiguous),
+        ]
+        for (failure, expected) in expectations {
             let session = makeSession { _ in
                 throw failure
             }
@@ -184,7 +186,7 @@ final class ItemRunSubmissionClientTests: XCTestCase {
                 bearerToken: "fresh-opaque-clerk-token"
             )
 
-            XCTAssertEqual(outcome, .ambiguous, "\(failure.code) was not retryable")
+            XCTAssertEqual(outcome, expected, "\(failure.code) lost its typed reason")
         }
     }
 

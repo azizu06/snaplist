@@ -5,15 +5,13 @@ import UIKit
 struct VoiceNoteSheet: View {
     @Bindable var store: VoiceNoteStore
     var forceReducedMotion = false
+    var dismissPresentation: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.dismiss) private var systemDismiss
     @Environment(\.scenePhase) private var scenePhase
     @AccessibilityFocusState private var focusedControl: FocusTarget?
-    @State private var selectedDetent: PresentationDetent = .height(
-        VoiceNotePresentation.sheetHeight
-    )
+    @State private var dismissAfterSuccessfulSave = false
 
     private enum FocusTarget: Hashable {
         case savedSummary
@@ -25,31 +23,42 @@ struct VoiceNoteSheet: View {
     }
 
     var body: some View {
-        ScrollView {
-            content
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, SnapListMetrics.screenGutter)
-                .padding(.bottom, 16)
-        }
-        .scrollIndicators(.hidden)
-        .background(SnapListColorToken.canvas.color)
-        .presentationDragIndicator(.visible)
-        .presentationCornerRadius(SnapListMetrics.sheetRadius)
-        .presentationDetents(
-            [.height(VoiceNotePresentation.sheetHeight), .medium],
-            selection: $selectedDetent
-        )
-        .interactiveDismissDisabled(true)
-        .onAppear {
-            if dynamicTypeSize.isAccessibilitySize {
-                selectedDetent = .medium
+        ZStack(alignment: .top) {
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
             }
+            .scrollIndicators(.hidden)
+
+            Button(action: {}) {
+                Capsule()
+                    .fill(Color(hex: "#D4D6DB"))
+                    .frame(width: 36, height: 5)
+                    .frame(width: 80, height: 32, alignment: .top)
+                    .padding(.top, 20)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Sheet Grabber")
         }
-        .onChange(of: dynamicTypeSize) { _, size in
-            selectedDetent = size.isAccessibilitySize
-                ? .medium
-                : .height(VoiceNotePresentation.sheetHeight)
-        }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: VoiceNotePresentation.sheetHeight,
+            maxHeight: VoiceNotePresentation.sheetHeight,
+            alignment: .top
+        )
+        .background(SnapListColorToken.canvas.color)
+        .clipShape(
+            UnevenRoundedRectangle(
+                cornerRadii: RectangleCornerRadii(
+                    topLeading: SnapListMetrics.sheetRadius,
+                    bottomLeading: 0,
+                    bottomTrailing: 0,
+                    topTrailing: SnapListMetrics.sheetRadius
+                ),
+                style: .continuous
+            )
+        )
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
@@ -67,9 +76,10 @@ struct VoiceNoteSheet: View {
             case .voiceNoteOpener, nil:
                 break
             }
+            resolvePendingSaveDismissal()
         }
         .task(id: isRecording) {
-            guard isRecording else {
+            guard isRecording, !usesStaticRecordingFixture else {
                 return
             }
             while !Task.isCancelled, isRecording {
@@ -90,39 +100,56 @@ struct VoiceNoteSheet: View {
             recordingControls(
                 elapsed: elapsed,
                 level: level,
-                canSave: elapsed > 0
+                canSave: elapsed > 0,
+                isHeldTake: false
             )
         case .takeReady(let duration):
             recordingControls(
                 elapsed: duration,
                 level: 0.64,
-                canSave: true
+                canSave: true,
+                isHeldTake: true
             )
         case .ready:
-            standardHeader
-            Text(VoiceNotePresentation.sheetContext)
-                .snapListTypography(.body)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .padding(.top, 12)
-                .accessibilityIdentifier("voice-note.helper")
-            recordButton
-                .padding(.top, 10)
+            VStack(spacing: 0) {
+                standardHeader
+                Text(VoiceNotePresentation.sheetContext)
+                    .snapListTypography(.body)
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    .padding(.top, 22)
+                    .accessibilityIdentifier("voice-note.helper")
+                recordButton
+                    .padding(.top, 20)
+            }
+            .padding(.top, 18)
         case .saved(let isPlaying):
-            standardHeader
-            savedPlayback(isPlaying: isPlaying)
-                .padding(.top, 8)
+            VStack(spacing: 0) {
+                standardHeader
+                savedPlayback(isPlaying: isPlaying)
+                    .padding(.top, 24)
+            }
+            .padding(.top, 18)
         case .accessOff(let permission):
-            standardHeader
-            accessOff(permission: permission)
-                .padding(.top, 8)
+            VStack(spacing: 0) {
+                standardHeader
+                accessOff(permission: permission)
+                    .padding(.top, 12)
+            }
+            .padding(.top, 18)
         case .interrupted:
-            standardHeader
-            interrupted
-                .padding(.top, 8)
+            VStack(spacing: 0) {
+                standardHeader
+                interrupted
+                    .padding(.top, 12)
+            }
+            .padding(.top, 18)
         case .saveFailed:
-            standardHeader
-            saveFailed
-                .padding(.top, 8)
+            VStack(spacing: 0) {
+                standardHeader
+                saveFailed
+                    .padding(.top, 12)
+            }
+            .padding(.top, 18)
         }
     }
 
@@ -134,11 +161,13 @@ struct VoiceNoteSheet: View {
                 .accessibilityIdentifier("voice-note.title")
             Spacer()
             Button {
-                if store.dismiss() {
-                    dismiss()
-                }
+                closePresentationIfPossible()
             } label: {
                 Image(systemName: "xmark")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(
+                        SnapListColorToken.textSecondary.color
+                    )
             }
             .buttonStyle(.plain)
             .frame(
@@ -149,6 +178,7 @@ struct VoiceNoteSheet: View {
             .accessibilityLabel("Close")
             .accessibilityIdentifier("voice-note.close")
         }
+        .padding(.trailing, -8)
     }
 
     private var recordButton: some View {
@@ -175,14 +205,21 @@ struct VoiceNoteSheet: View {
     private func recordingControls(
         elapsed: TimeInterval,
         level: Double,
-        canSave: Bool
+        canSave: Bool,
+        isHeldTake: Bool
     ) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 15) {
             HStack(spacing: 14) {
                 Button {
-                    store.cancelRecording()
+                    if store.cancelRecording() {
+                        closePresentationIfPossible()
+                    }
                 } label: {
                     Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(
+                            SnapListColorToken.textTertiary.color
+                        )
                         .frame(
                             width: VoiceNotePresentation.compactSheetControlLayoutTarget,
                             height: VoiceNotePresentation.compactSheetControlLayoutTarget
@@ -200,12 +237,13 @@ struct VoiceNoteSheet: View {
                 VoiceNoteWaveform(
                     level: level,
                     isLive: true,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    isHeldTake: isHeldTake
                 )
                 .frame(maxWidth: .infinity, minHeight: 52)
 
                 Button {
-                    store.save()
+                    saveAndDismissWhenCommitted()
                 } label: {
                     Image(systemName: "checkmark")
                         .font(.system(size: 18, weight: .bold))
@@ -229,8 +267,8 @@ struct VoiceNoteSheet: View {
             }
 
             Text(VoiceNotePresentation.elapsedText(elapsed))
-                .snapListTypography(.metadata)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .snapListTypography(.status)
+                .foregroundStyle(SnapListColorToken.textTertiary.color)
                 .accessibilityLabel(
                     VoiceNotePresentation.recordingAccessibilityLabel(
                         elapsed: elapsed
@@ -243,12 +281,12 @@ struct VoiceNoteSheet: View {
                         .sortPriority
                 )
         }
-        .padding(.top, 16)
+        .padding(.top, 71)
     }
 
     private func savedPlayback(isPlaying: Bool) -> some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 12) {
+        VStack(spacing: 19) {
+            HStack(spacing: 14) {
                 Button {
                     store.togglePlayback()
                 } label: {
@@ -281,7 +319,8 @@ struct VoiceNoteSheet: View {
                 VoiceNoteWaveform(
                     level: 0.72,
                     isLive: false,
-                    reduceMotion: true
+                    reduceMotion: true,
+                    isHeldTake: false
                 )
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .accessibilityHidden(
@@ -291,24 +330,26 @@ struct VoiceNoteSheet: View {
                 .allowsHitTesting(
                     VoiceNotePresentation.savedWaveformIsInteractive
                 )
+                .padding(.trailing, 18)
 
                 Text(
                     VoiceNotePresentation.elapsedText(
                         store.savedNote?.duration ?? 0
                     )
                 )
-                .snapListTypography(.status)
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 .accessibilityIdentifier("voice-note.duration")
             }
 
-            HStack(spacing: 34) {
+            HStack(spacing: 40) {
                 Button {
                     Task {
                         await store.rerecord()
                     }
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 22, weight: .regular))
                         .frame(
                             width: VoiceNotePresentation.compactSheetControlLayoutTarget,
                             height: VoiceNotePresentation.compactSheetControlLayoutTarget
@@ -324,6 +365,8 @@ struct VoiceNoteSheet: View {
                     }
                 } label: {
                     Image(systemName: "trash")
+                        .font(.system(size: 24, weight: .regular))
+                        .foregroundStyle(Color(hex: "#A63224"))
                         .frame(
                             width: VoiceNotePresentation.compactSheetControlLayoutTarget,
                             height: VoiceNotePresentation.compactSheetControlLayoutTarget
@@ -373,7 +416,7 @@ struct VoiceNoteSheet: View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
                 .accessibilityHidden(true)
-            Text("Voice note couldn’t be saved. Try again.")
+            Text("Voice note couldn't be saved. Try again.")
                 .snapListTypography(.rowTitle)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
             SnapListSecondaryButton(title: "Try again") {
@@ -388,33 +431,114 @@ struct VoiceNoteSheet: View {
         }
         return false
     }
+
+    private var usesStaticRecordingFixture: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains(
+            "--voice-note-recording-fixture"
+        )
+#else
+        false
+#endif
+    }
+
+    private func saveAndDismissWhenCommitted() {
+        dismissAfterSuccessfulSave = true
+#if DEBUG
+        if store.commitLaunchFixtureRecordingIfNeeded() {
+            resolvePendingSaveDismissal()
+            return
+        }
+#endif
+        store.save()
+        resolvePendingSaveDismissal()
+    }
+
+    private func resolvePendingSaveDismissal() {
+        guard dismissAfterSuccessfulSave else {
+            return
+        }
+        switch store.phase {
+        case .saved:
+            dismissAfterSuccessfulSave = false
+            closePresentationIfPossible()
+        case .recording, .takeReady:
+            break
+        case .ready, .accessOff, .interrupted, .saveFailed:
+            dismissAfterSuccessfulSave = false
+        }
+    }
+
+    private func closePresentationIfPossible() {
+        guard store.dismiss() else {
+            return
+        }
+        if let dismissPresentation {
+            dismissPresentation()
+        } else {
+            systemDismiss()
+        }
+    }
 }
 
 private struct VoiceNoteWaveform: View {
     let level: Double
     let isLive: Bool
     let reduceMotion: Bool
+    let isHeldTake: Bool
 
-    private let pattern: [Double] = [
-        0.70, 1.00, 0.54, 0.82, 0.64, 1.00,
-        0.42, 0.34, 0.30, 0.38, 0.80, 1.00,
-        0.62, 0.88, 0.52, 0.98, 0.70, 0.46,
-        0.34, 0.30, 0.72, 0.92, 0.60, 0.78
+    private let livePattern: [Double] = [
+        0.72, 0.86, 0.92, 0.80, 0.74, 0.66,
+        0.14, 0.12, 0.42, 0.72, 0.88, 0.96,
+        1.00, 0.82, 0.68, 0.78, 0.92, 0.70,
+        0.56, 0.42, 0.34, 0.12, 0.46, 0.82,
+        0.98, 0.14, 0.10
+    ]
+
+    private let savedPattern: [Double] = [
+        0.72, 0.64, 0.16, 0.48, 0.82, 0.78,
+        0.36, 0.14, 0.76, 0.18, 0.14, 0.12,
+        0.10, 0.12, 0.66, 0.18, 0.36, 0.90,
+        1.00, 0.72, 0.54, 0.16, 0.70, 0.68
     ]
 
     var body: some View {
-        HStack(alignment: .center, spacing: 3) {
-            ForEach(pattern.indices, id: \.self) { index in
-                Capsule()
-                    .fill(
-                        isLive
-                            ? SnapListColorToken.inkPrimary.color
-                            : Color(hex: "#B4B8BF")
-                    )
-                    .frame(
-                        width: 3,
-                        height: barHeight(at: index)
-                    )
+        Group {
+            if isHeldTake {
+                VoiceNoteHeldTakeWaveform()
+            } else {
+                Canvas { context, size in
+                    let pattern = isLive ? livePattern : savedPattern
+                    let color = isLive
+                        ? SnapListColorToken.inkPrimary.color
+                        : Color(hex: "#B5B7BC")
+                    let barWidth: CGFloat = 4
+                    let centerY = size.height / 2
+                    let step = pattern.count > 1
+                        ? (size.width - barWidth)
+                            / CGFloat(pattern.count - 1)
+                        : 0
+
+                    for (index, value) in pattern.enumerated() {
+                        let height = barHeight(
+                            value: value,
+                            isLive: isLive
+                        )
+                        let rect = CGRect(
+                            x: CGFloat(index) * step,
+                            y: centerY - (height / 2),
+                            width: barWidth,
+                            height: height
+                        )
+                        context.fill(
+                            Path(
+                                roundedRect: rect,
+                                cornerRadius: barWidth / 2
+                            ),
+                            with: .color(color)
+                        )
+                    }
+                }
             }
         }
         .animation(
@@ -425,8 +549,66 @@ private struct VoiceNoteWaveform: View {
         .allowsHitTesting(false)
     }
 
-    private func barHeight(at index: Int) -> CGFloat {
-        let visibleLevel = max(level, 0.12)
-        return 4 + (28 * pattern[index] * visibleLevel)
+    private func barHeight(
+        value: Double,
+        isLive: Bool
+    ) -> CGFloat {
+        if isLive {
+            let visibleLevel = max(level, 0.12)
+            return max(
+                4,
+                32 * value * (0.70 + (visibleLevel * 0.40))
+            )
+        }
+        return max(5, 30 * value)
+    }
+}
+
+private struct VoiceNoteHeldTakeWaveform: View {
+    private let heights: [CGFloat] = [
+        24, 32, 37, 31, 24, 20, 25, 22,
+        16, 12, 10, 9, 9, 9, 14, 34
+    ]
+
+    var body: some View {
+        Canvas { context, size in
+            let ink = SnapListColorToken.inkPrimary.color
+            let centerY = size.height / 2
+            let barWidth: CGFloat = 4
+            let barStep: CGFloat = 8.5
+
+            for (index, height) in heights.enumerated() {
+                let x = CGFloat(index) * barStep
+                let rect = CGRect(
+                    x: x,
+                    y: centerY - (height / 2),
+                    width: barWidth,
+                    height: height
+                )
+                context.fill(
+                    Path(roundedRect: rect, cornerRadius: barWidth / 2),
+                    with: .color(ink)
+                )
+            }
+
+            let dotSize: CGFloat = 3.5
+            var dotX = (CGFloat(heights.count) * barStep) + 2
+            while dotX + dotSize <= size.width - 10 {
+                context.fill(
+                    Path(
+                        ellipseIn: CGRect(
+                            x: dotX,
+                            y: centerY - (dotSize / 2),
+                            width: dotSize,
+                            height: dotSize
+                        )
+                    ),
+                    with: .color(ink)
+                )
+                dotX += 8.5
+            }
+        }
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
 }

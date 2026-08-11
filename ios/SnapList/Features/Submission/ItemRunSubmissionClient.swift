@@ -124,9 +124,17 @@ struct ItemRunSubmissionClient: ItemRunSubmitting {
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
-        } catch {
+        } catch let error as URLError {
             // The request may or may not have committed, so the caller has to retry the
             // same bytes under the same key rather than treat this as a refusal.
+            if Task.isCancelled || error.code == .cancelled {
+                return .cancelled
+            }
+            if error.code == .notConnectedToInternet {
+                return .offline
+            }
+            return .ambiguous
+        } catch {
             return .ambiguous
         }
         guard let httpResponse = response as? HTTPURLResponse else {

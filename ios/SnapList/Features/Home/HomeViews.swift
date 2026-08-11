@@ -46,7 +46,7 @@ struct TrophyWallView: View {
 
                 Button(action: openProcessing) {
                     Image(systemName: "clock")
-                        .font(.system(size: 21, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .frame(
                             width: SnapListMetrics.minimumTouchTarget,
                             height: SnapListMetrics.minimumTouchTarget
@@ -75,8 +75,8 @@ struct TrophyWallView: View {
                 .accessibilityLabel("Account, opens Settings")
                 .accessibilityIdentifier("trophy.wall.account")
             }
-            .padding(.leading, 18)
-            .padding(.trailing, 14)
+            .padding(.leading, 19)
+            .padding(.trailing, 16)
             .padding(.bottom, 12)
 
             wallBody
@@ -289,12 +289,12 @@ private struct TrophyWallEmptyView: View {
 
     var body: some View {
         VStack(spacing: TrophyWallEmptyMetrics.contentSpacing) {
-            Image("ScoutUncertain")
-                .resizable()
-                .scaledToFit()
-                .frame(height: TrophyWallEmptyMetrics.scoutHeight)
+            TrophyWallScoutView(
+                scout: .uncertainty,
+                height: TrophyWallEmptyMetrics.scoutHeight,
+                accessibilityLabel: "Scout, the SnapList camera helper"
+            )
                 .padding(.bottom, TrophyWallEmptyMetrics.scoutOpticalBottomInset)
-                .accessibilityLabel("Scout, the SnapList camera helper")
 
             Text("No items yet")
                 .snapListTypography(.cardTitle)
@@ -349,6 +349,10 @@ struct TrophyWallProcessingView: View {
         let action: Action
         let scoutImageName: String
         let scoutAccessibilityLabel: String
+
+        var scout: TrophyWallScout {
+            scoutImageName == "ScoutRetryReview" ? .recovery : .uncertainty
+        }
     }
 
     struct DisclosureTransition: Equatable {
@@ -734,8 +738,6 @@ private struct TrophyWallNoticeStripView: View {
 }
 
 struct TrophyWallCollectionMessageView: View {
-    // Only the approved static Scout artwork ships today. It is the approved
-    // Reduced Motion fallback, so it stays honest under any motion setting.
     private static let scoutHeight: CGFloat = 150
 
     let message: TrophyWallProcessingView.CollectionMessage
@@ -746,11 +748,11 @@ struct TrophyWallCollectionMessageView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Image(message.scoutImageName)
-                .resizable()
-                .scaledToFit()
-                .frame(height: Self.scoutHeight)
-                .accessibilityLabel(message.scoutAccessibilityLabel)
+            TrophyWallScoutView(
+                scout: message.scout,
+                height: Self.scoutHeight,
+                accessibilityLabel: message.scoutAccessibilityLabel
+            )
 
             Text(message.heading)
                 .font(.system(size: headingSize, weight: .bold))

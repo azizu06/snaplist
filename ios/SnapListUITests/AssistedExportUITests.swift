@@ -246,11 +246,13 @@ final class AssistedExportUITests: XCTestCase {
         review.tap()
 
         let entry = app.buttons["listing-review.assisted-export"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 5))
-        for _ in 0..<4 where !entry.isHittable {
-            app.scrollViews.firstMatch.swipeUp()
+        let scrollView = app.scrollViews.firstMatch
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 5))
+        for _ in 0..<6 where !entry.exists || !entry.isHittable {
+            scrollView.swipeUp()
         }
-        XCTAssertTrue(entry.isHittable)
+        XCTAssertTrue(entry.exists, app.debugDescription)
+        XCTAssertTrue(entry.isHittable, app.debugDescription)
         entry.tap()
 
         XCTAssertTrue(
