@@ -4295,7 +4295,11 @@ struct PhotoReviewView: View {
         // prevent. No package binds this attribute in `contracts/`; the canvases are the
         // only record of it.
         .opacity(isAddEnabled ? 1 : 0.5)
-        .disabled(!isAddEnabled)
+        .disabled(
+            !isAddEnabled
+                || isCommitting
+                || submissionPresentation.mutationControlsLocked
+        )
         .accessibilityLabel(
             PhotoReviewCapacityPolicy.addAccessibilityLabel(
                 photoCount: store.photos.count

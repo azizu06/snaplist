@@ -57,7 +57,7 @@
       "SnapListUITests/SnapListUITests/testKeyboardHidesTheFloatingDock",
       "SnapListUITests/SnapListUITests/testLibraryPickerCancelRestoresThePrimerAndItsOpener",
       "SnapListUITests/SnapListUITests/testLivePhotoReviewBackReturnsExactRestoredPhotoAndFocusesScanReview",
-      "SnapListUITests/SnapListUITests/testLivePhotoReviewKeepsStartListingStickyBelowTheScrollingReviewContent",
+      "SnapListUITests/SnapListUITests/testLivePhotoReviewKeepsStartListingSeparateFromAdaptiveReviewContent",
       "SnapListUITests/SnapListUITests/testOnboardingAccessibilityAtLargeDynamicTypeKeepsTargetsAndSafeAreas",
       "SnapListUITests/SnapListUITests/testPhotoPrimerRowsPublishOneAddressableAccessibilityElementEach",
       "SnapListUITests/SnapListUITests/testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity",

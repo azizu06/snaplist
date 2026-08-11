@@ -8,7 +8,7 @@ struct FirstValueOnboardingView: View {
     let usesStaticScoutRendering: Bool
     /// Receives the completion contract #566 consumes, never a bare "done".
     let didFinish: (FirstValueOnboardingOutcome) -> Void
-    /// Delegates the existing-account handoff to the shell's already-typed route.
+    /// Delegates the existing-account handoff to the shell's typed route.
     let openExistingAccount: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -614,10 +614,14 @@ struct FirstValueOnboardingView: View {
                 : "first-value-onboarding.continue")
 
             if model.screen == .onb06 {
-                Button("I already have an account", action: openExistingAccount)
+                Button(action: openExistingAccount) {
+                    Text("I already have an account")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                    .buttonStyle(.plain)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(SnapListColorToken.action.color)
-                    .frame(maxWidth: .infinity, minHeight: 44)
                     .accessibilityIdentifier("first-value-onboarding.sign-in")
             }
         }
@@ -884,6 +888,7 @@ private struct ScoutLine<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("first-value-onboarding.scout-line.\(screen.identifier)")
     }
 }
 

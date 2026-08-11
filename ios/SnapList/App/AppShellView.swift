@@ -517,7 +517,9 @@ struct AppShellView: View {
             selectedTab: router.selectedTab,
             isVisible: DockVisibilityPolicy.shouldShow(
                 isKeyboardVisible: isKeyboardVisible
-            ) && !isDeleteAccountFlowPresented,
+            )
+                && !isDeleteAccountFlowPresented
+                && !activationListingReviewPresented,
             select: router.select
         )
         .animation(
@@ -755,8 +757,18 @@ struct AppShellView: View {
         case .future(let boundary):
             switch FutureDestinationPresentation.resolve(boundary) {
             case .accountEntry:
+#if DEBUG
+                if configuration.usesZeroNetworkFixtures,
+                   configuration.fixture == .onboarding {
+                    AccountEntryFixtureView()
+                } else {
+                    AccountEntryView()
+                        .accessibilityIdentifier("account-entry")
+                }
+#else
                 AccountEntryView()
                     .accessibilityIdentifier("account-entry")
+#endif
             case .placeholder(let destination):
                 FoundationDestinationView(destination: destination)
             }

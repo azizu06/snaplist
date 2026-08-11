@@ -151,7 +151,11 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
 
     func primaryActionEvent(eventID: UUID) -> PhotoReviewBoundaryEvent {
         switch self {
-        case .cancelled, .offline, .ambiguity:
+        case .cancelled:
+            // The same durable attempt remains stored after local cancellation,
+            // so a fresh Start listing transaction safely reloads its exact key.
+            .startListing
+        case .offline, .ambiguity:
             .retryAmbiguousSubmission(eventID: eventID)
         case .conflict:
             .reviewConflictedSubmission(eventID: eventID)
@@ -263,13 +267,13 @@ final class ItemRunSubmissionHost {
     private(set) var trophyWallPrincipalScopeProof:
         ItemRunSubmissionPrincipalScopeProof? = nil
     private var activeSubmissionID: UUID?
+    private var cancellationRequestedSubmissionID: UUID?
     private var preparationTask:
         Task<ItemRunSubmissionCoordinator.Preparation, Never>?
     /// Fixture launches render approved states with no server behind them, so Start
     /// listing is inert by design there rather than unavailable.
     private let isInert: Bool
 #if DEBUG
-    private let delayedFixture: DelayedItemRunSubmissionFixture?
     private let acknowledgmentNotificationGate:
         ItemRunSubmissionAcknowledgmentNotificationGate?
 #endif
@@ -283,20 +287,11 @@ final class ItemRunSubmissionHost {
         self.isInert = isInert
         self.funnelAnalytics = funnelAnalytics
 #if DEBUG
-        delayedFixture = nil
         acknowledgmentNotificationGate = nil
 #endif
     }
 
 #if DEBUG
-    init(delayedFixture: DelayedItemRunSubmissionFixture) {
-        coordinator = nil
-        isInert = false
-        funnelAnalytics = NoOpFunnelAnalyticsEventSink()
-        self.delayedFixture = delayedFixture
-        acknowledgmentNotificationGate = nil
-    }
-
     init(
         coordinator: ItemRunSubmissionCoordinator,
         acknowledgmentNotification:
@@ -305,7 +300,6 @@ final class ItemRunSubmissionHost {
         self.coordinator = coordinator
         isInert = false
         funnelAnalytics = NoOpFunnelAnalyticsEventSink()
-        delayedFixture = nil
         acknowledgmentNotificationGate =
             ItemRunSubmissionAcknowledgmentNotificationGate(
                 notificationName: acknowledgmentNotification
@@ -358,6 +352,7 @@ final class ItemRunSubmissionHost {
         preparationTask?.cancel()
         preparationTask = nil
         activeSubmissionID = nil
+        cancellationRequestedSubmissionID = nil
         presentationAcknowledgmentGate?.cancel()
         presentationAcknowledgmentGate = nil
         pendingAmbiguousRetry = nil
@@ -381,14 +376,6 @@ final class ItemRunSubmissionHost {
         if case .destinationHandoff? = pendingPresentationEvent {
             return
         }
-#if DEBUG
-        if let delayedFixture {
-            isSubmitting = true
-            defer { isSubmitting = false }
-            await delayedFixture.complete()
-            return
-        }
-#endif
         guard let coordinator else {
             // A build with no API origin has nowhere to submit. Saying so beats a
             // button that silently does nothing.
@@ -462,6 +449,17 @@ final class ItemRunSubmissionHost {
             await task.value
         } onCancel: {
             task.cancel()
+        }
+        if cancellationRequestedSubmissionID == submissionID {
+            cancellationRequestedSubmissionID = nil
+            preparationTask = nil
+            if case .ambiguous(let retry) = preparation {
+                pendingAmbiguousRetry = retry
+            } else {
+                pendingAmbiguousRetry = nil
+            }
+            publish(retention: .cancelled)
+            return
         }
         guard activeSubmissionID == submissionID,
               isCurrent(),
@@ -604,13 +602,16 @@ final class ItemRunSubmissionHost {
 
     @discardableResult
     func cancelSubmission() -> Bool {
-        guard isSubmitting, preparationTask != nil else {
+        guard isSubmitting,
+              let activeSubmissionID,
+              let preparationTask else {
             return false
         }
         // Cancelling stops the local wait only. The transport resolves this as an
         // uncertain outcome, preserving the exact durable bytes and idempotency key
         // for the next Start listing tap.
-        preparationTask?.cancel()
+        cancellationRequestedSubmissionID = activeSubmissionID
+        preparationTask.cancel()
         return true
     }
 
@@ -1462,6 +1463,14 @@ final class ItemRunSubmissionCoordinator {
             payload,
             bearerToken: dispatchBearer.token
         )
+        if Task.isCancelled {
+            return await resolve(
+                .cancelled,
+                context: context,
+                payload: payload,
+                submittedPhotos: context.photos
+            )
+        }
 
         // The server may have committed even if the visible principal departed while
         // the request was open. Suppress that departed result and retain its exact key
