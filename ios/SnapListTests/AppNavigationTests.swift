@@ -19,18 +19,20 @@ final class AppNavigationTests: XCTestCase {
         }
     }
 
-    /// Live Trophy Wall v3.2 replaces the wide labeled bar with one compact,
-    /// icon-only control. These values are the approved rendered contract, not
-    /// incidental frames sampled from one simulator.
+    /// Scan and Trophy Wall share one compact icon-only dock contract. These
+    /// values are the approved rendered contract, not incidental frames sampled
+    /// from one simulator.
     func testDockUsesTheApprovedCompactIconContract() {
         XCTAssertEqual(FloatingDockMetrics.destinationWidth, 52)
         XCTAssertEqual(FloatingDockMetrics.destinationHeight(for: .scan), 52)
-        XCTAssertEqual(FloatingDockMetrics.destinationHeight(for: .trophyWall), 44)
+        XCTAssertEqual(FloatingDockMetrics.destinationHeight(for: .trophyWall), 52)
         XCTAssertEqual(FloatingDockMetrics.destinationSpacing, 6)
         XCTAssertEqual(FloatingDockMetrics.contentPadding, 6)
         XCTAssertEqual(FloatingDockMetrics.cornerRadius, 22)
         XCTAssertEqual(FloatingDockMetrics.bottomInset(for: .scan), 0)
-        XCTAssertEqual(FloatingDockMetrics.bottomInset(for: .trophyWall), 24)
+        XCTAssertEqual(FloatingDockMetrics.bottomInset(for: .trophyWall), 0)
+        XCTAssertEqual(FloatingDockMetrics.containerHeight(for: .scan), 64)
+        XCTAssertEqual(FloatingDockMetrics.containerHeight(for: .trophyWall), 64)
 
         XCTAssertEqual(PrimaryTab.scan.systemImage(isSelected: false), "camera")
         XCTAssertEqual(PrimaryTab.scan.systemImage(isSelected: true), "camera")

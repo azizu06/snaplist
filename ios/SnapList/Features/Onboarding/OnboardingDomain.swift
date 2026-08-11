@@ -28,6 +28,71 @@ enum FirstValueOnboardingPresentationPolicy {
     ) -> Bool {
         isFirstLaunch && !hasCompletedOnboarding && !hasResolvedCaptureRestoration
     }
+
+    /// The only First-Value route command is emitted by the mounted ONB-06 action.
+    /// Stored outcomes are presentation history; restored and staged work keep their
+    /// existing typed owner instead of being replaced by a Scan command.
+    static func shouldRouteMountedCompletionToCanonicalScan(
+        isFirstLaunch: Bool,
+        outcome: FirstValueOnboardingOutcome,
+        hasResolvedCaptureRestoration: Bool,
+        hasRestoredCapture: Bool,
+        stagedPhotoCount: Int
+    ) -> Bool {
+        isFirstLaunch
+            && outcome == .completed
+            && hasResolvedCaptureRestoration
+            && !hasRestoredCapture
+            && stagedPhotoCount == 0
+    }
+
+    /// A persisted terminal outcome hides only the retired pre-First-Value intro.
+    /// It never rewrites the typed state that owns an in-progress legacy handoff.
+    static func shouldRenderNormalShellForHistoricalOutcome(
+        isFirstLaunch: Bool,
+        recordedOutcome: FirstValueOnboardingOutcome?,
+        activeScreen: OnboardingScreen
+    ) -> Bool {
+        isFirstLaunch
+            && recordedOutcome != nil
+            && !activeScreen.hasCompletedLegacyIntro
+    }
+
+    /// Capture Launcher remains a legacy typed-handoff surface. Fresh First-Value
+    /// completion goes directly to Scan and therefore never creates this boundary.
+    static func shouldRouteLegacyCaptureThroughLauncher(
+        activeScreen: OnboardingScreen
+    ) -> Bool {
+        activeScreen == .captureBoundary
+    }
+}
+
+/// Activation guidance follows a seller who was actually taught First-Value into the
+/// normal Scan shell, without taking ownership from a typed recovery or restoration
+/// route. The legacy capture boundary remains its existing activation owner.
+enum FirstValueActivationEligibilityPolicy {
+    static func shouldBootstrapActivation(
+        activeScreen: OnboardingScreen,
+        hasConsumedMountedDirectScanCommand: Bool,
+        recordedOutcome: FirstValueOnboardingOutcome?,
+        isNormalScanShell: Bool,
+        hasRestoredCapture: Bool,
+        stagedPhotoCount: Int,
+        hasPhotoReviewSession: Bool
+    ) -> Bool {
+        guard !hasRestoredCapture, !hasPhotoReviewSession else { return false }
+
+        if activeScreen == .captureBoundary {
+            return true
+        }
+
+        guard !activeScreen.hasCompletedLegacyIntro,
+              stagedPhotoCount == 0,
+              isNormalScanShell else { return false }
+
+        return hasConsumedMountedDirectScanCommand
+            || recordedOutcome?.hasSeenIntroduction == true
+    }
 }
 
 enum FirstValueOnboardingScreen: Int, CaseIterable, Codable, Equatable {
@@ -434,16 +499,6 @@ final class OnboardingFlowModel {
     func startFirstItem() {
         guard state.screen == .promise else { return }
         update(screen: .allowance)
-    }
-
-    func beginPhotoPermissionAfterFirstValueOnboarding() {
-        switch state.screen {
-        case .launch, .promise, .allowance:
-            update(screen: .photoPrimer)
-        case .photoPrimer, .denied, .cameraHandoff, .libraryHandoff,
-             .captureBoundary, .settingsHandoff:
-            break
-        }
     }
 
     func presentReturningSignIn() {

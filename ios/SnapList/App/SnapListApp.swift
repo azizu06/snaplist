@@ -144,9 +144,6 @@ struct SnapListApp: App {
             screen: configuration.initialFirstValueOnboardingScreen,
             completionStore: dependencies.firstValueOnboardingCompletionStore
         )
-        if firstValueOnboardingModel.hasCompletedOnboarding {
-            onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
-        }
         _firstValueOnboardingModel = State(initialValue: firstValueOnboardingModel)
         _onboardingModel = State(initialValue: onboardingModel)
         _captureFlow = State(
@@ -220,8 +217,6 @@ struct SnapListApp: App {
                     let restoration = await captureFlow.restore()
                     if restoration == .stagedPhoto {
                         firstValueOnboardingModel.reconcileExistingProgress()
-                        onboardingModel
-                            .beginPhotoPermissionAfterFirstValueOnboarding()
                     }
                     router.handleCaptureRestoration(restoration)
                 }

@@ -1325,6 +1325,55 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(dockScan.frame.height, 52, accuracy: 0.5)
     }
 
+    func testIssue775RealAppShellReservesDockAboveLiveCameraControlsAt402x874() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--voice-note-take-ready-fixture"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3), app.debugDescription)
+        resume.tap()
+
+        let window = app.windows.firstMatch
+        let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
+        let photoCount = app.staticTexts["scan.photo-count"]
+        let library = app.buttons["scan.library"]
+        let shutter = app.buttons["scan.shutter"]
+        let review = app.buttons["scan.review"]
+        let dockScan = app.buttons["dock.scan"]
+        let dockTrophy = app.buttons["dock.trophy-wall"]
+
+        XCTAssertTrue(window.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(window.frame.size.width, 402, accuracy: 0.5)
+        XCTAssertEqual(window.frame.size.height, 874, accuracy: 0.5)
+
+        for element in [
+            firstPhoto,
+            photoCount,
+            library,
+            shutter,
+            review,
+            dockScan,
+            dockTrophy,
+        ] {
+            XCTAssertTrue(element.waitForExistence(timeout: 3), element.identifier)
+        }
+
+        for control in [library, shutter, review, dockScan, dockTrophy] {
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44, control.identifier)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44, control.identifier)
+        }
+
+        XCTAssertLessThanOrEqual(firstPhoto.frame.maxY, library.frame.minY)
+        XCTAssertLessThanOrEqual(photoCount.frame.maxY, review.frame.minY)
+        XCTAssertLessThanOrEqual(library.frame.maxY, dockScan.frame.minY)
+        XCTAssertLessThanOrEqual(shutter.frame.maxY, dockScan.frame.minY)
+        XCTAssertLessThanOrEqual(review.frame.maxY, dockScan.frame.minY)
+    }
+
     func testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed() {
         let app = launch(extraArguments: ["--visual-state=CAM-01", "--reduced-motion"])
         let fixturePreview = app.otherElements["scan.fixture-preview"]
@@ -2093,40 +2142,46 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Rendering boundary reserved for issue #211."].exists)
     }
 
-    func testFreshAccountlessJourneyEntersTheRealCaptureFlow() {
+    func testIssue775StartScanningLandsOnCanonicalScanWithoutLegacyLauncher() {
         let app = launchFirstValueOnboarding(resetProgress: true)
         advanceFirstValueOnboarding(to: "ONB-06", in: app)
 
-        XCTAssertTrue(
-            app.buttons["first-value-onboarding.start-scanning"]
-                .waitForExistence(timeout: 2)
-        )
+        let startScanning = app.buttons["first-value-onboarding.start-scanning"]
+        XCTAssertTrue(startScanning.waitForExistence(timeout: 3), app.debugDescription)
+        startScanning.tap()
 
-        app.buttons["first-value-onboarding.start-scanning"].tap()
-        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 2))
-        app.buttons["onboarding.back"].tap()
-        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 2))
-        XCTAssertFalse(app.staticTexts["Your first item is on us"].exists)
-        app.buttons["button.primary.use-camera"].tap()
-        XCTAssertTrue(app.staticTexts["Ready to capture"].waitForExistence(timeout: 2))
+        let legacyPrimer = app.otherElements["onboarding.state.ONB-07"]
+        let legacyUseCamera = app.buttons["button.primary.use-camera"]
+        let legacyContinue = app.buttons["button.primary.continue-to-capture"]
+        let legacyLauncherTitle = app.staticTexts["sheet.capture.title"]
+        let legacyTakeOneItem = app.buttons["capture.take-one-item"]
+        let legacyChooseLibrary = app.buttons["capture.choose-library"]
 
-        app.buttons["button.primary.continue-to-capture"].tap()
-        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
+        for legacyElement in [
+            legacyPrimer,
+            legacyUseCamera,
+            legacyContinue,
+            legacyLauncherTitle,
+            legacyTakeOneItem,
+            legacyChooseLibrary,
+        ] {
+            XCTAssertFalse(
+                legacyElement.waitForExistence(timeout: 1),
+                app.debugDescription
+            )
+        }
+
         let scanDock = app.buttons["dock.scan"]
-        XCTAssertTrue(scanDock.exists)
+        XCTAssertTrue(scanDock.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(scanDock.isSelected)
         XCTAssertEqual(scanDock.label, "Scan")
-        XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
-        XCTAssertTrue(app.buttons["capture.choose-library"].exists)
-        XCTAssertFalse(app.staticTexts["Capture entry boundary"].exists)
-        XCTAssertFalse(app.otherElements["boundary.CAP-01"].exists)
-        XCTAssertFalse(app.staticTexts["Photo Review"].exists)
-        XCTAssertFalse(app.staticTexts["Create account"].exists)
-        XCTAssertFalse(app.staticTexts["SnapList Pro"].exists)
 
-        app.buttons["capture.take-one-item"].tap()
-        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["scan.choose-library"].exists)
+        let liveLibrary = app.buttons["scan.library"]
+        let recoveryLibrary = app.buttons["scan.choose-library"]
+        let canonicalScanControlExists = liveLibrary.waitForExistence(timeout: 2)
+            || recoveryLibrary.waitForExistence(timeout: 2)
+        XCTAssertTrue(canonicalScanControlExists, app.debugDescription)
+        XCTAssertFalse(app.buttons["first-value-onboarding.start-scanning"].exists)
     }
 
     func testActualOnboardingCaptureEntryPresentsACT01BeforeCameraOrLibrary() {
@@ -2140,22 +2195,19 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(startScanning.waitForExistence(timeout: 2))
         startScanning.tap()
 
-        let useCamera = app.buttons["button.primary.use-camera"]
-        XCTAssertTrue(useCamera.waitForExistence(timeout: 2))
-        useCamera.tap()
-        let continueToCapture = app.buttons["button.primary.continue-to-capture"]
-        XCTAssertTrue(continueToCapture.waitForExistence(timeout: 2))
-        continueToCapture.tap()
-
-        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
-        XCTAssertTrue(app.buttons["capture.choose-library"].exists)
+        XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.otherElements["onboarding.state.ONB-07"].exists)
+        XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
         XCTAssertTrue(activationGuidance(in: app).waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["One item, up to five photos."].exists)
 
-        app.buttons["capture.take-one-item"].tap()
-        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["scan.choose-library"].exists)
+        let liveLibrary = app.buttons["scan.library"]
+        let recoveryLibrary = app.buttons["scan.choose-library"]
+        XCTAssertTrue(
+            liveLibrary.waitForExistence(timeout: 2)
+                || recoveryLibrary.waitForExistence(timeout: 2),
+            app.debugDescription
+        )
         XCTAssertTrue(activationGuidance(in: app).exists)
     }
 
@@ -2197,7 +2249,13 @@ final class SnapListUITests: XCTestCase {
             app.buttons["first-value-onboarding.start-scanning"].waitForExistence(timeout: 3)
         )
         app.buttons["first-value-onboarding.start-scanning"].tap()
-        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.buttons["scan.library"].waitForExistence(timeout: 2)
+                || app.buttons["scan.choose-library"].waitForExistence(timeout: 2),
+            app.debugDescription
+        )
+        XCTAssertFalse(app.otherElements["onboarding.state.ONB-07"].exists)
 
         app.terminate()
         app.launchArguments = [
@@ -2207,10 +2265,16 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        XCTAssertTrue(app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["dock.scan"].waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.buttons["scan.library"].waitForExistence(timeout: 2)
+                || app.buttons["scan.choose-library"].waitForExistence(timeout: 2),
+            app.debugDescription
+        )
         XCTAssertFalse(
             app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists
         )
+        XCTAssertFalse(app.otherElements["onboarding.state.ONB-07"].exists)
     }
 
     func testFirstValueOnboardingONB06UsesExistingAccountRouteAndHasBackControls() {
@@ -2313,6 +2377,127 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(app.progressIndicators.count, 0, app.debugDescription)
     }
 
+    func testIssue775KeepsDraftScoutClearAndFinalProgressFixed() {
+        let app = launchFirstValueOnboarding(resetProgress: true)
+        advanceFirstValueOnboarding(to: "ONB-04", in: app)
+
+        let draftScout = app.descendants(matching: .any)[
+            "first-value-onboarding.scout-line.ONB-04"
+        ]
+        let draftScoutCopy = app.staticTexts[
+            "first-value-onboarding.draft-scout-copy"
+        ]
+        let lastDraftValue = app.staticTexts["Four paragraphs"]
+        let continueButton = app.buttons["first-value-onboarding.continue"]
+
+        for element in [draftScout, draftScoutCopy, lastDraftValue, continueButton] {
+            XCTAssertTrue(element.waitForExistence(timeout: 3), app.debugDescription)
+        }
+        XCTAssertGreaterThanOrEqual(
+            draftScout.frame.minY - lastDraftValue.frame.maxY,
+            44
+        )
+        XCTAssertGreaterThanOrEqual(
+            continueButton.frame.minY - draftScoutCopy.frame.maxY,
+            32
+        )
+
+        let draftAttachment = XCTAttachment(
+            screenshot: XCUIScreen.main.screenshot()
+        )
+        draftAttachment.name = "issue-775-ONB-04.png"
+        draftAttachment.lifetime = .keepAlways
+        add(draftAttachment)
+
+        continueButton.tap()
+        let progress = app.descendants(matching: .any)[
+            "first-value-onboarding.progress"
+        ]
+        XCTAssertTrue(progress.waitForExistence(timeout: 3), app.debugDescription)
+        let penultimateFrame = progress.frame
+
+        app.buttons["first-value-onboarding.continue"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "first-value-onboarding.state.ONB-06"
+            ].waitForExistence(timeout: 3),
+            app.debugDescription
+        )
+        XCTAssertEqual(progress.frame.minX, penultimateFrame.minX, accuracy: 1)
+        XCTAssertEqual(progress.frame.width, penultimateFrame.width, accuracy: 1)
+        XCTAssertFalse(app.buttons["first-value-onboarding.skip"].exists)
+
+        let finalAttachment = XCTAttachment(
+            screenshot: XCUIScreen.main.screenshot()
+        )
+        finalAttachment.name = "issue-775-ONB-06.png"
+        finalAttachment.lifetime = .keepAlways
+        add(finalAttachment)
+    }
+
+    func testIssue775ONB04Accessibility5KeepsDraftHairlineScoutAndActionClear() {
+        let app = launchFirstValueOnboarding(
+            resetProgress: true,
+            extraArguments: [
+                "--first-value-onboarding-state=ONB-04",
+                "--dynamic-type=accessibility5",
+                "--reduced-motion",
+            ]
+        )
+        let window = app.windows.firstMatch
+        let scrollView = app.scrollViews["first-value-onboarding.scroll"]
+        let draftHeader = app.descendants(matching: .any)[
+            "Your draft is ready. Four fields, written from your photos."
+        ]
+        let titleRow = app.descendants(matching: .any)[
+            "Title. Medium wash denim trucker jacket, size M."
+        ]
+        let lastDraftValue = app.staticTexts["Four paragraphs"]
+        let draftScout = app.descendants(matching: .any)[
+            "first-value-onboarding.scout-line.ONB-04"
+        ]
+        let draftScoutCopy = app.staticTexts[
+            "first-value-onboarding.draft-scout-copy"
+        ]
+        let continueButton = app.buttons["first-value-onboarding.continue"]
+
+        for element in [
+            window,
+            scrollView,
+            draftHeader,
+            titleRow,
+            lastDraftValue,
+            draftScout,
+            draftScoutCopy,
+            continueButton,
+        ] {
+            XCTAssertTrue(element.waitForExistence(timeout: 3), app.debugDescription)
+            XCTAssertGreaterThan(element.frame.width, 0)
+            XCTAssertGreaterThan(element.frame.height, 0)
+        }
+
+        XCTAssertLessThanOrEqual(draftHeader.frame.maxY, titleRow.frame.minY)
+
+        var swipeCount = 0
+        while swipeCount < 4 &&
+            (!draftScout.isHittable || !continueButton.isHittable) {
+            scrollView.swipeUp()
+            swipeCount += 1
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            draftScout.frame.minY - lastDraftValue.frame.maxY,
+            44
+        )
+        XCTAssertFalse(draftScout.frame.intersects(continueButton.frame))
+        XCTAssertFalse(draftScoutCopy.frame.intersects(continueButton.frame))
+        XCTAssertTrue(continueButton.isHittable, app.debugDescription)
+        XCTAssertGreaterThanOrEqual(continueButton.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(continueButton.frame.minX, window.frame.minX)
+        XCTAssertLessThanOrEqual(continueButton.frame.maxX, window.frame.maxX)
+        XCTAssertLessThanOrEqual(continueButton.frame.maxY, window.frame.maxY)
+    }
+
     /// At Accessibility 5, the public listing title and review metadata may
     /// reflow, but neither can share visible space with an anchored ONB-06 action.
     func testFirstValueOnboardingAccessibility5KeepsIncludedPreviewClearOfStickyActions() {
@@ -2369,6 +2554,14 @@ final class SnapListUITests: XCTestCase {
         )
         let window = app.windows.firstMatch
 
+        func isFullyReachable(_ action: XCUIElement) -> Bool {
+            action.isHittable
+                && action.frame.height >= 44
+                && action.frame.minX >= window.frame.minX
+                && action.frame.maxX <= window.frame.maxX
+                && action.frame.maxY <= window.frame.maxY
+        }
+
         for screen in firstValueOnboardingStates {
             XCTAssertTrue(
                 app.descendants(matching: .any)[
@@ -2381,19 +2574,15 @@ final class SnapListUITests: XCTestCase {
             let primary = app.buttons[identifier]
             XCTAssertTrue(primary.exists)
 
-            if screen == "ONB-06" {
+            if screen == "ONB-04" || screen == "ONB-06" {
                 let onboardingScrollView = app.scrollViews["first-value-onboarding.scroll"]
                 let existingAccount = app.buttons["first-value-onboarding.sign-in"]
                 XCTAssertTrue(onboardingScrollView.exists, app.debugDescription)
-                func isFullyReachable(_ action: XCUIElement) -> Bool {
-                    action.isHittable
-                        && action.frame.height >= 44
-                        && action.frame.minX >= window.frame.minX
-                        && action.frame.maxX <= window.frame.maxX
-                        && action.frame.maxY <= window.frame.maxY
-                }
                 var swipeCount = 0
-                while swipeCount < 3 && (!isFullyReachable(primary) || !isFullyReachable(existingAccount)) {
+                let maximumSwipeCount = screen == "ONB-04" ? 4 : 3
+                while swipeCount < maximumSwipeCount
+                    && (!isFullyReachable(primary)
+                        || (screen == "ONB-06" && !isFullyReachable(existingAccount))) {
                     onboardingScrollView.swipeUp()
                     swipeCount += 1
                 }
@@ -2847,25 +3036,18 @@ final class SnapListUITests: XCTestCase {
         return app
     }
 
-    /// The dock's third affordance used to open the capture launcher. It was
-    /// removed with the retired seller-operations dock, so the launcher is
-    /// entered here through the onboarding capture boundary the product ships.
+    /// Capture Launcher behavior remains independently testable through its typed
+    /// fixture now that First-Value completion routes straight to canonical Scan.
     private func launchCaptureLauncherSheet(
         extraArguments: [String] = []
     ) -> XCUIApplication {
-        let app = launchFirstValueOnboarding(
-            resetProgress: true,
-            extraArguments: extraArguments
-        )
-        advanceFirstValueOnboarding(to: "ONB-06", in: app)
-
-        app.buttons["first-value-onboarding.start-scanning"].tap()
-        XCTAssertTrue(
-            app.staticTexts["Let's photograph your item"].waitForExistence(timeout: 3)
-        )
-        app.buttons["button.primary.use-camera"].tap()
-        XCTAssertTrue(app.staticTexts["Ready to capture"].waitForExistence(timeout: 3))
-        app.buttons["button.primary.continue-to-capture"].tap()
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=capture",
+            "--zero-network-fixtures",
+            "--camera-status=authorized",
+        ] + extraArguments
+        app.launchAfterRetiringPriorInstance()
         XCTAssertTrue(
             app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3)
         )
