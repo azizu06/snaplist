@@ -895,7 +895,10 @@ final class PhotoReviewDragPresentation {
 @MainActor
 final class PhotoReviewNativeDragSourceDelegate: NSObject,
     UIDragInteractionDelegate {
-    private static let previewSize = CGSize(width: 76, height: 76)
+    private static let previewSize = CGSize(
+        width: PhotoReviewV5VisualContract.thumbnailSize,
+        height: PhotoReviewV5VisualContract.thumbnailSize
+    )
     private static let previewCornerRadius: CGFloat = 12
 
     private var store: PhotoReviewStore
@@ -1061,15 +1064,19 @@ final class PhotoReviewNativeDragSourceDelegate: NSObject,
         previewView.layer.cornerRadius = Self.previewCornerRadius
 
         let parameters = UIDragPreviewParameters()
+        parameters.backgroundColor = .clear
         parameters.visiblePath = UIBezierPath(
             roundedRect: previewView.bounds,
             cornerRadius: Self.previewCornerRadius
         )
+        parameters.shadowPath = UIBezierPath()
         let target = UIDragPreviewTarget(
             container: sourceView,
             center: CGPoint(
                 x: activeSource.frame.midX + sourceView.bounds.minX,
-                y: activeSource.frame.midY + sourceView.bounds.minY
+                y: activeSource.frame.minY
+                    + Self.previewSize.height / 2
+                    + sourceView.bounds.minY
             )
         )
         return UITargetedDragPreview(
@@ -4144,7 +4151,7 @@ struct PhotoReviewView: View {
                 ? PhotoReviewDragLayout.insertionGap
                 : 0
         )
-        .opacity(dragPresentation.draggedPhotoID == photo.id ? 0.97 : 1)
+        .opacity(dragPresentation.draggedPhotoID == photo.id ? 0 : 1)
     }
 
     private func autoScrollThumbnailStripIfNeeded(
