@@ -22,7 +22,7 @@ final class ProGateStoreTests: XCTestCase {
         )
         XCTAssertEqual(
             ProGateSheet.presentationDetentHeight,
-            522
+            504
         )
     }
 

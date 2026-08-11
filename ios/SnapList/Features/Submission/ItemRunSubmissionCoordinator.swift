@@ -98,9 +98,9 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         switch self {
         case .offline, .ambiguity, .tryAgain:
             "Try again"
-        case .cancelled, .conflict:
+        case .cancelled:
             "Start listing"
-        case .review:
+        case .conflict, .review:
             "Review"
         }
     }
