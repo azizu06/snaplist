@@ -89,6 +89,11 @@ struct PrincipalBoundBearer: Sendable {
     let scopeProof: ItemRunSubmissionPrincipalScopeProof
 }
 
+struct ItemRunSubmissionScopedBearer: Sendable {
+    let bearerToken: String
+    let scopeProof: ItemRunSubmissionPrincipalScopeProof
+}
+
 protocol BearerTokenProviding: Sendable {
     /// Returns a fresh opaque Clerk bearer without exposing ClerkKit to callers.
     func bearerToken() async throws -> String
@@ -96,11 +101,26 @@ protocol BearerTokenProviding: Sendable {
     /// Returns a bearer and opaque scope proof captured from the same verified
     /// session. Callers compare the proof but cannot recover the Clerk subject.
     func principalBoundBearer() async throws -> PrincipalBoundBearer
+
+    /// Returns only the bearer whose verified identity owns the current opaque
+    /// NativeIntake scope. Unlike `principalBoundBearer`, this narrow seam may
+    /// bind a verified App Attest installation for the included guest run.
+    func itemRunSubmissionScopedBearer() async throws
+        -> ItemRunSubmissionScopedBearer
 }
 
 extension BearerTokenProviding {
     func principalBoundBearer() async throws -> PrincipalBoundBearer {
         throw BearerTokenProviderError.principalBindingUnavailable
+    }
+
+    func itemRunSubmissionScopedBearer() async throws
+        -> ItemRunSubmissionScopedBearer {
+        let principal = try await principalBoundBearer()
+        return ItemRunSubmissionScopedBearer(
+            bearerToken: principal.bearerToken,
+            scopeProof: principal.scopeProof
+        )
     }
 }
 
@@ -125,6 +145,9 @@ struct ClerkBearerTokenProvider: BearerTokenProviding {
     func principalBoundBearer() async throws -> PrincipalBoundBearer {
         let authentication = try await session.sessionAuthentication()
         guard let token = Self.usable(authentication.token) else {
+            if authentication.scopeProof != nil {
+                throw BearerTokenProviderError.principalBindingUnavailable
+            }
             throw BearerTokenProviderError.sessionAbsent
         }
         guard let scopeProof = authentication.scopeProof else {
@@ -150,16 +173,20 @@ struct ClerkBearerTokenProvider: BearerTokenProviding {
 struct GuestCapableBearerTokenProvider: BearerTokenProviding {
     private let clerk: any BearerTokenProviding
     private let guestCapabilities: any GuestCapabilityBearerStoring
+    private let appAttestKeys: any AppAttestKeyIDStoring
     private let now: @Sendable () -> Date
 
     init(
         clerk: any BearerTokenProviding,
         guestCapabilities: any GuestCapabilityBearerStoring =
             KeychainGuestCapabilityBearerStore(),
+        appAttestKeys: any AppAttestKeyIDStoring =
+            KeychainAppAttestKeyIDStore(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.clerk = clerk
         self.guestCapabilities = guestCapabilities
+        self.appAttestKeys = appAttestKeys
         self.now = now
     }
 
@@ -180,12 +207,46 @@ struct GuestCapableBearerTokenProvider: BearerTokenProviding {
         try await clerk.principalBoundBearer()
     }
 
+    func itemRunSubmissionScopedBearer() async throws
+        -> ItemRunSubmissionScopedBearer {
+        do {
+            let principal = try await clerk.principalBoundBearer()
+            return ItemRunSubmissionScopedBearer(
+                bearerToken: principal.bearerToken,
+                scopeProof: principal.scopeProof
+            )
+        } catch BearerTokenProviderError.sessionAbsent {
+            let bearer = try guestBearer()
+            guard let key = try? appAttestKeys.load(),
+                  key.state == .verified,
+                  let currentScopeProof = ItemRunSubmissionPrincipalScopeProof(
+                      verifiedAppAttestKeyID: key.id
+                  ),
+                  let storedScopeProof = bearer.appAttestScopeProof,
+                  storedScopeProof == currentScopeProof else {
+                // An unbound migrated bearer or a bearer earned by a prior key
+                // is not absent authority for the current scope. Reporting it as
+                // unusable gives the renewing wrapper one assertion to mint the
+                // exact current bearer/scope pair without ever synthesizing one.
+                throw BearerTokenProviderError.sessionAbsent
+            }
+            return ItemRunSubmissionScopedBearer(
+                bearerToken: bearer.token,
+                scopeProof: storedScopeProof
+            )
+        }
+    }
+
     private func guestBearerToken() throws -> String {
+        try guestBearer().token
+    }
+
+    private func guestBearer() throws -> GuestCapabilityBearer {
         guard let bearer = try? guestCapabilities.load(),
               bearer.isUsable(at: now()) else {
             throw BearerTokenProviderError.sessionAbsent
         }
-        return bearer.token
+        return bearer
     }
 }
 

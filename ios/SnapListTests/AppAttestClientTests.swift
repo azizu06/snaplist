@@ -393,7 +393,12 @@ final class AppAttestClientTests: XCTestCase {
 
         XCTAssertEqual(outcome, .ready)
         XCTAssertEqual(fixture.service.generateKeyCallCount, 1)
-        XCTAssertEqual(fixture.bearerStore.saved, [bearer])
+        XCTAssertEqual(
+            fixture.bearerStore.saved,
+            [bearer.bound(to: ItemRunSubmissionPrincipalScopeProof(
+                verifiedAppAttestKeyID: "native-fixed-key-id"
+            )!)]
+        )
         let assertionVerificationCallCount =
             await fixture.server.assertionVerificationCallCount
         XCTAssertEqual(assertionVerificationCallCount, 1)
@@ -441,7 +446,12 @@ final class AppAttestClientTests: XCTestCase {
 
         XCTAssertEqual(failed, .invalid(.keyPersistenceFailed))
         XCTAssertEqual(retried, .ready)
-        XCTAssertEqual(fixture.bearerStore.saved, [bearer])
+        XCTAssertEqual(
+            fixture.bearerStore.saved,
+            [bearer.bound(to: ItemRunSubmissionPrincipalScopeProof(
+                verifiedAppAttestKeyID: "native-fixed-key-id"
+            )!)]
+        )
         let challengeCallCount = await fixture.server.challengeCallCount
         let assertionVerificationCallCount =
             await fixture.server.assertionVerificationCallCount
@@ -604,7 +614,12 @@ final class AppAttestClientTests: XCTestCase {
 
         _ = await client.assert(requestBody: Data(#"{"operation":"proof"}"#.utf8))
 
-        XCTAssertEqual(bearerStore.saved, [bearer])
+        XCTAssertEqual(
+            bearerStore.saved,
+            [bearer.bound(to: ItemRunSubmissionPrincipalScopeProof(
+                verifiedAppAttestKeyID: "native-fixed-key-id"
+            )!)]
+        )
     }
 
     func testVerifiedAssertionReportsGuestCapabilityPersistenceFailure() async {

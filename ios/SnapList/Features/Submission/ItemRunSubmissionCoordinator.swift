@@ -1569,7 +1569,8 @@ final class ItemRunSubmissionCoordinator {
     ) async -> BearerAcquisition {
         do {
             if let expectedScopeProof = context.scopeProof {
-                let bound = try await tokenProvider.principalBoundBearer()
+                let bound = try await tokenProvider
+                    .itemRunSubmissionScopedBearer()
                 guard bound.scopeProof == expectedScopeProof else {
                     return .principalMismatch
                 }
