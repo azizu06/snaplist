@@ -75,8 +75,8 @@ struct ProGateSheet: View {
                     heading
                     stateBody
                 }
-                .padding(.horizontal, Self.contentGutter)
-                .padding(.top, 32)
+                .padding(.horizontal, contentHorizontalPadding)
+                .padding(.top, contentTopPadding)
                 .padding(.bottom, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -86,7 +86,7 @@ struct ProGateSheet: View {
                             .foregroundStyle(SnapListColorToken.divider.color)
                     }
                     actionStack
-                        .padding(.horizontal, Self.contentGutter)
+                        .padding(.horizontal, contentHorizontalPadding)
                         .padding(.top, 12)
                         .padding(.bottom, 20)
                 }
@@ -99,7 +99,7 @@ struct ProGateSheet: View {
                         .foregroundStyle(SnapListColorToken.divider.color)
                 }
                 actionStack
-                    .padding(.horizontal, Self.contentGutter)
+                    .padding(.horizontal, contentHorizontalPadding)
                     .padding(.top, 12)
                     .padding(.bottom, 20)
             }
@@ -445,6 +445,18 @@ struct ProGateSheet: View {
                 ? ProGateCopy.purchaseReadyTitle
                 : ProGateCopy.restoreReadyTitle
         case .hidden: ""
+        }
+    }
+
+    private var contentTopPadding: CGFloat {
+        if case .confirming = store.state { 12 } else { 32 }
+    }
+
+    private var contentHorizontalPadding: CGFloat {
+        if case .confirming = store.state {
+            SnapListMetrics.screenGutter
+        } else {
+            Self.contentGutter
         }
     }
 
