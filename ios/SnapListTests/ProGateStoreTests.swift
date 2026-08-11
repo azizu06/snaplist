@@ -229,6 +229,67 @@ final class ProGateStoreTests: XCTestCase {
         XCTAssertFalse(store.consumeResumeIntent())
     }
 
+    func testForegroundResumesExhaustedPurchaseAndRestoreVerificationOnce() async {
+        for source in [
+            ProGateStore.ReadySource.purchase,
+            .restoredPurchase,
+        ] {
+            let api = ProGateMobileAPIStub(
+                entitlements: [
+                    .includedUsed,
+                    .includedUsed,
+                    .activeStoreKit,
+                ],
+                configuration: .configured
+            )
+            let subscriptions = FixtureSubscriptionClient(products: [product])
+            let store = makeStore(api: api, subscriptions: subscriptions)
+            _ = await store.prepare()
+
+            switch source {
+            case .purchase:
+                await store.purchase()
+                XCTAssertEqual(store.state, .confirming)
+            case .restoredPurchase:
+                _ = await store.restore()
+                XCTAssertEqual(
+                    store.state,
+                    .offer(
+                        product: product,
+                        advisory: nil,
+                        isRestoring: true
+                    )
+                )
+            case .existingSubscription:
+                XCTFail("Existing subscriptions do not enter pending verification.")
+            }
+            var calls = await api.calls()
+            XCTAssertEqual(calls.entitlement, 2)
+
+            await AppShellProGateTransaction.scenePhaseChanged(
+                .background,
+                store: store
+            )
+            calls = await api.calls()
+            XCTAssertEqual(calls.entitlement, 2)
+
+            await AppShellProGateTransaction.scenePhaseChanged(
+                .active,
+                store: store
+            )
+
+            XCTAssertEqual(store.state, .ready(source: source))
+            XCTAssertTrue(store.consumeResumeIntent())
+            XCTAssertFalse(store.consumeResumeIntent())
+            await AppShellProGateTransaction.scenePhaseChanged(
+                .active,
+                store: store
+            )
+            calls = await api.calls()
+            XCTAssertEqual(calls.entitlement, 3)
+        }
+    }
+
     func testDismissedRestoreCannotReopenTheProGateWhenItFinishes() async {
         let api = ProGateMobileAPIStub(
             entitlements: [.includedUsed],
