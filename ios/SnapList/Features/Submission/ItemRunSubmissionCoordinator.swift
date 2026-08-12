@@ -59,6 +59,11 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
             self = .photoReview(.sub07)
         case .authenticationRequired:
             self = .handoff(.accountClaim12aThrough12c)
+        case .sessionRenewalRequired:
+            // A rejected session is fixed by sending the request again with a
+            // fresh token, which is what this destination's retry already does.
+            // It needs different words, not a different screen.
+            self = .photoReview(.sub06)
         case .receiptMismatch:
             self = .handoff(.pay08)
         case .intakeUnavailable:
@@ -79,6 +84,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
     case tryAgain
     case review
     case photosTooLarge
+    case sessionRenewal
 
     init?(retention: ItemRunSubmissionRetention) {
         // `sub07` carries every refusal the seller has to fix by hand, so the
@@ -86,6 +92,13 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         // a concrete remedy, so it earns its own copy ahead of the shared map.
         if case .photosTooLarge = retention {
             self = .photosTooLarge
+            return
+        }
+        // `sub06` is the same way: its retry is right for a rejected session,
+        // but "this didn't go through" would leave a signed-in seller with no
+        // idea what to do about it. Name the sign-in ahead of the shared map.
+        if case .sessionRenewalRequired = retention {
+            self = .sessionRenewal
             return
         }
         switch ItemRunSubmissionDestinationDecision(retention: retention) {
@@ -108,7 +121,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
 
     var primaryActionLabel: String {
         switch self {
-        case .offline, .ambiguity, .tryAgain:
+        case .offline, .ambiguity, .tryAgain, .sessionRenewal:
             "Try again"
         case .cancelled:
             "Start listing"
@@ -135,6 +148,12 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
             // Names the one thing the seller can change. "Remove or retake"
             // covers both remedies without explaining bytes or limits.
             "These photos are too large to send. Remove or retake one, then try again."
+        case .sessionRenewal:
+            // "Sign-in" is the seller's word for the thing that lapsed. Session,
+            // token, and credential are ours. The second sentence is the same
+            // promise every other retention makes, and it is the one the seller
+            // most needs after watching their photos upload into nothing.
+            "Your sign-in needs renewing. Your item is still saved on this phone."
         }
     }
 
@@ -142,7 +161,8 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         switch self {
         case .conflict:
             "Something changed since your last try."
-        case .cancelled, .offline, .ambiguity, .tryAgain, .review, .photosTooLarge:
+        case .cancelled, .offline, .ambiguity, .tryAgain, .review, .photosTooLarge,
+             .sessionRenewal:
             message
         }
     }
@@ -151,7 +171,8 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         switch self {
         case .offline:
             .offline
-        case .cancelled, .ambiguity, .conflict, .tryAgain, .review, .photosTooLarge:
+        case .cancelled, .ambiguity, .conflict, .tryAgain, .review, .photosTooLarge,
+             .sessionRenewal:
             .warning
         }
     }
@@ -160,7 +181,8 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         switch self {
         case .cancelled, .conflict:
             .filled
-        case .offline, .ambiguity, .tryAgain, .review, .photosTooLarge:
+        case .offline, .ambiguity, .tryAgain, .review, .photosTooLarge,
+             .sessionRenewal:
             .outlined
         }
     }
@@ -175,7 +197,10 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
             .retryAmbiguousSubmission(eventID: eventID)
         case .conflict:
             .reviewConflictedSubmission(eventID: eventID)
-        case .tryAgain:
+        case .tryAgain, .sessionRenewal:
+            // A fresh Start listing transaction reloads the exact stored key and
+            // asks the token provider for a new bearer, so the retry that fixes
+            // a rejected session is the one already wired here.
             .startListing
         case .review, .photosTooLarge:
             .reviewSubmission(eventID: eventID)
@@ -610,8 +635,9 @@ final class ItemRunSubmissionHost {
         case .ambiguous, .offline, .cancelled:
             return true
         case .conflict, .creditDenied, .rateLimited, .rejected,
-             .authenticationRequired, .receiptMismatch, .intakeUnavailable,
-             .attemptNotPersisted, .submissionUnavailable, .photosTooLarge:
+             .authenticationRequired, .sessionRenewalRequired, .receiptMismatch,
+             .intakeUnavailable, .attemptNotPersisted, .submissionUnavailable,
+             .photosTooLarge:
             // `photosTooLarge` sits here rather than above because the retry this
             // gate offers resends the identical bytes, which the platform already
             // refused for their size.
@@ -828,6 +854,11 @@ struct PhotoReviewSubmissionPresentation: Equatable {
     }
 #endif
 
+    /// `statusKind` has no default on purpose. Photo Review draws a message
+    /// beside its status icon, so a state that carried copy and let the kind
+    /// default to `nil` rendered as silence — the seller saw only a relabelled
+    /// button while their upload was refused (#803). Every state now has to say
+    /// what it looks like, and a state with nothing to show says `nil` out loud.
     private init(
         primaryActionLabel: String,
         primaryActionEvent: PhotoReviewBoundaryEvent,
@@ -836,7 +867,7 @@ struct PhotoReviewSubmissionPresentation: Equatable {
         accessibilityAnnouncement: String?,
         visibleMessage: String?,
         rendersSubmittedMedia: Bool,
-        statusKind: StatusKind? = nil,
+        statusKind: StatusKind?,
         actionStyle: ActionStyle = .filled
     ) {
         self.primaryActionLabel = primaryActionLabel
@@ -933,7 +964,8 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 announcementEvent: nil,
                 accessibilityAnnouncement: nil,
                 visibleMessage: nil,
-                rendersSubmittedMedia: true
+                rendersSubmittedMedia: true,
+                statusKind: nil
             )
         case .pay08:
             // A receipt that doesn't describe what was sent cannot confirm whether
@@ -947,7 +979,10 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 announcementEvent: .submissionRejected(eventID: eventID),
                 accessibilityAnnouncement: family.accessibilityAnnouncement,
                 visibleMessage: family.message,
-                rendersSubmittedMedia: true
+                rendersSubmittedMedia: true,
+                // Only the status kind is borrowed from the family here. The
+                // filled action style is this handoff's own and predates #803.
+                statusKind: family.statusKind
             )
         case .accountClaim12aThrough12c:
             // The seller keeps their photos either way, so say that before asking for
@@ -964,7 +999,8 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 announcementEvent: .submissionRejected(eventID: eventID),
                 accessibilityAnnouncement: message,
                 visibleMessage: message,
-                rendersSubmittedMedia: true
+                rendersSubmittedMedia: true,
+                statusKind: .warning
             )
         }
     }
@@ -979,7 +1015,11 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 announcementEvent: .submissionRejected(eventID: eventID),
                 accessibilityAnnouncement: ProGateCopy.intakeNeedsPro,
                 visibleMessage: ProGateCopy.intakeNeedsPro,
-                rendersSubmittedMedia: true
+                rendersSubmittedMedia: true,
+                // Same swallow as the account handoff: this advisory has always
+                // carried copy and never a status kind, so Photo Review drew
+                // none of it.
+                statusKind: .warning
             )
         }
     }
@@ -1489,7 +1529,8 @@ final class ItemRunSubmissionCoordinator {
                 .cancelled,
                 context: context,
                 payload: payload,
-                submittedPhotos: context.photos
+                submittedPhotos: context.photos,
+                dispatchBearer: dispatchBearer
             )
         }
 
@@ -1510,7 +1551,8 @@ final class ItemRunSubmissionCoordinator {
             outcome,
             context: context,
             payload: payload,
-            submittedPhotos: context.photos
+            submittedPhotos: context.photos,
+            dispatchBearer: dispatchBearer
         )
     }
 
@@ -1580,6 +1622,7 @@ final class ItemRunSubmissionCoordinator {
             context: retry.context,
             payload: retry.payload,
             submittedPhotos: retry.submittedPhotos,
+            dispatchBearer: dispatchBearer,
             canClearSubmittedIntake:
                 currentPhotos == retry.submittedPhotos
         )
@@ -1643,6 +1686,7 @@ final class ItemRunSubmissionCoordinator {
         context: CapturedContext,
         payload: ItemRunSubmissionPayload,
         submittedPhotos: [StagedCapturePhoto],
+        dispatchBearer: CapturedBearer,
         canClearSubmittedIntake: Bool = true
     ) async -> Preparation {
         let attempt = payload.attempt
@@ -1709,7 +1753,18 @@ final class ItemRunSubmissionCoordinator {
             // stop standing for the intake and a fresh key gets minted on its own.
             return .retained(.photosTooLarge)
         case .authenticationRequired:
-            return .retained(.authenticationRequired)
+            // The credential this request actually carried is the only thing
+            // that separates "you have no account" from "your session was
+            // refused". A guest capability proves an installation and never a
+            // subject, so its `401` really is an account demand. A Clerk session
+            // bearer means the seller is signed in and the route rejected their
+            // token, and telling them to create an account they already have
+            // sends them somewhere that cannot fix it.
+            return .retained(
+                dispatchBearer.isGuest
+                    ? .authenticationRequired
+                    : .sessionRenewalRequired
+            )
         case .creditDenied(let reason):
             return .retained(.creditDenied(reason: reason))
         case .conflict:

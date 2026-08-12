@@ -4461,11 +4461,15 @@ struct PhotoReviewView: View {
         contentWidth: CGFloat
     ) -> some View {
         VStack(spacing: 10) {
-            if let message = submissionPresentation.visibleMessage,
-               let statusKind = submissionPresentation.statusKind {
+            // The icon is decoration; the sentence is the outcome. Requiring both
+            // meant a state that set only `visibleMessage` rendered nothing, and
+            // the seller watched a refused upload finish in silence (#803).
+            if let message = submissionPresentation.visibleMessage {
                 HStack(alignment: .top, spacing: 10) {
-                    submissionStatusIcon(statusKind)
-                        .frame(width: 22, height: 22)
+                    if let statusKind = submissionPresentation.statusKind {
+                        submissionStatusIcon(statusKind)
+                            .frame(width: 22, height: 22)
+                    }
 
                     Text(message)
                         .font(.system(size: 14, weight: .semibold))

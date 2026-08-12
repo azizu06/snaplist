@@ -155,6 +155,10 @@ enum SubmissionFixture: String, Equatable {
     case delayed
     case acceptedPresentationGated = "accepted-presentation-gated"
     case rateLimited = "rate-limited"
+    /// A `401` against a seller who is signed in — the credential existed and the
+    /// route refused it. Named for the answer rather than the status code because
+    /// the guest capability's `401` is a different seller outcome entirely (#803).
+    case sessionRejected = "session-rejected"
 }
 
 enum PhotoReviewSubmissionVisualStateID: String, Equatable {

@@ -298,7 +298,15 @@ enum ItemRunSubmissionRetention: Equatable, Sendable {
     case creditDenied(reason: String?)
     case rateLimited(reason: String?)
     case rejected
+    /// There is no account behind this submission: no credential at all, or a
+    /// guest capability the route refused. Only this asks for an account.
     case authenticationRequired
+    /// The route answered `401` to a seller who was signed in. The credential
+    /// existed and was rejected — an expired or revoked session, clock skew, or
+    /// an origin that will not verify this token (#804). Nothing about it says
+    /// the seller lacks an account, and the next attempt mints a fresh token,
+    /// so this stays a retry rather than a demand to sign up.
+    case sessionRenewalRequired
     /// The request body was refused for size before it reached the app. Retrying the
     /// same photos cannot help, so this is separate from `ambiguous` — the seller has
     /// to change the photo set.

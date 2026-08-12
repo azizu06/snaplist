@@ -52,6 +52,13 @@ export function createMobileItemSubmissionHandler(
     }
     const token = bearerToken(request);
     if (!token) {
+      // The sibling `401` below has always been reported. This one refuses the
+      // request before the principal resolver ever runs, so it left no record
+      // at all — the server half of the silence #803 captured on device.
+      dependencies.reportError?.(
+        "mobile-item-submission.authenticate",
+        new Error("Submission carried no bearer credential."),
+      );
       return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
     }
     const idempotencyKey = z.string().uuid().safeParse(

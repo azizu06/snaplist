@@ -985,6 +985,82 @@ final class SnapListUITests: XCTestCase {
         // contract. XCUI proves rendered copy only; it cannot observe VoiceOver delivery.
     }
 
+    /// #803, captured on device: a signed-in seller taps Start listing, 425 KB of
+    /// photos upload, the route answers `401`, and the seller is shown nothing at
+    /// all while the button relabels itself to `Create an account`. This drives the
+    /// production Photo Review — the fixture replaces only the network submitter, so
+    /// the message node and the button label here are the ones a seller reads.
+    func testRejectedSessionRendersRenewalCopyAndKeepsPhotosInLivePhotoReview() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--submission-fixture=session-rejected"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+
+        let hero = app.buttons["photo-review.hero"]
+        let thumbnail = app.buttons["photo-review.thumbnail.1"]
+        let addPhoto = app.buttons["photo-review.add"]
+        let startListing = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(hero.exists)
+        XCTAssertTrue(thumbnail.exists)
+        XCTAssertEqual(startListing.label, "Start listing")
+
+        startListing.tap()
+
+        let renewalMessage =
+            app.staticTexts["photo-review.submission-message"]
+        let renewalPresented = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                startListing.exists
+                    && startListing.label == "Try again"
+                    && startListing.isEnabled
+                    && addPhoto.isEnabled
+                    && hero.exists
+                    && thumbnail.exists
+                    && renewalMessage.exists
+                    && renewalMessage.label
+                        == "Your sign-in needs renewing. Your item is still saved on this phone."
+            },
+            object: nil
+        )
+        // Same budget as the rate-limited render for the same reason: this waits
+        // out the whole tap-to-terminal-outcome transition in one predicate.
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [renewalPresented], timeout: 20),
+            .completed,
+            "A rejected session must render its own message, not silence."
+        )
+
+        // The captured defect: the seller already has an account, so offering one
+        // is both a lie and a dead end — the route that fixes this is the retry.
+        XCTAssertNotEqual(startListing.label, "Create an account")
+        // `account-entry` identifies the sheet's container view, not a button, so
+        // `app.buttons` would match nothing whether or not it presented and the
+        // assertion could never fail. Same query the sign-in sheet is asserted
+        // with elsewhere in this file.
+        XCTAssertFalse(app.descendants(matching: .any)["account-entry"].exists)
+        XCTAssertTrue(screen.exists)
+        XCTAssertEqual(
+            app.staticTexts.matching(
+                identifier: "photo-review.submission-message"
+            ).count,
+            1,
+            "One rejection event must render one stable visible message."
+        )
+    }
+
     func testAcceptedSubmissionRendersSavedWithoutSubmittedMediaThenReturnsToReadyScan() {
         let acknowledgmentNotification =
             "dev.snaplist.ios.test.submission-ack.\(UUID().uuidString)"

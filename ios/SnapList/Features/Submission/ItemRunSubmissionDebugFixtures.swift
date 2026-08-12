@@ -83,6 +83,15 @@ private struct RateLimitedItemRunSubmitter: ItemRunSubmitting {
     }
 }
 
+private struct SessionRejectedItemRunSubmitter: ItemRunSubmitting {
+    func submit(
+        _ payload: ItemRunSubmissionPayload,
+        bearerToken: String
+    ) async -> ItemRunSubmissionTransportOutcome {
+        .authenticationRequired
+    }
+}
+
 @MainActor
 final class ItemRunSubmissionAcknowledgmentNotificationGate {
     private typealias PendingAcknowledgment = (
@@ -208,6 +217,23 @@ enum ItemRunSubmissionDebugFixtureFactory {
             return ItemRunSubmissionHost(
                 coordinator: ItemRunSubmissionCoordinator(
                     submitter: RateLimitedItemRunSubmitter(),
+                    attemptStore: LocalItemRunSubmissionAttemptStore(),
+                    draftStore: draftStore,
+                    tokenProvider:
+                        AcceptedPresentationGatedBearerTokenProvider(),
+                    readData: { @Sendable url in
+                        try AcceptedPresentationGatedItemRunSubmitter
+                            .readRestoredPhoto(at: url)
+                    }
+                )
+            )
+        case .sessionRejected:
+            // The bearer decides which `401` this is, so the fixture has to keep
+            // carrying a session-shaped one: swap in a `guestcap_` token and this
+            // becomes the account demand instead of the renewal (#803).
+            return ItemRunSubmissionHost(
+                coordinator: ItemRunSubmissionCoordinator(
+                    submitter: SessionRejectedItemRunSubmitter(),
                     attemptStore: LocalItemRunSubmissionAttemptStore(),
                     draftStore: draftStore,
                     tokenProvider:
