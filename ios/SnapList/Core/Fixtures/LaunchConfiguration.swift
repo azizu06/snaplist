@@ -164,6 +164,10 @@ enum PhotoReviewSubmissionVisualStateID: String, Equatable {
     case unknown = "SUB-03"
     case conflict = "SUB-04"
     case accepted = "SUB-05"
+    // Its own rejection copy on the `SUB-07` destination, named the way
+    // `SUB-01-cancelled` names its variant. Reached only through the transport
+    // budget in a live run, which is why it needs a route of its own.
+    case photosTooLarge = "SUB-07-photos-too-large"
 }
 
 enum ProGateFixtureState: String, Equatable {

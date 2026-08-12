@@ -793,6 +793,8 @@ struct PhotoReviewSubmissionPresentation: Equatable {
             return rejectionFixture(.ambiguity, eventID: eventID)
         case .conflict:
             return rejectionFixture(.conflict, eventID: eventID)
+        case .photosTooLarge:
+            return rejectionFixture(.photosTooLarge, eventID: eventID)
         case .accepted:
             return PhotoReviewSubmissionPresentation(
                 primaryActionLabel: "Done",
