@@ -7,6 +7,7 @@ import {
   type ProviderUsageRecord,
 } from "@/lib/provider-usage";
 import { pipelineQueueEnvelopeSchema } from "./envelope";
+import { describeErrorForLog } from "./log-safe-error";
 import type { PipelineQueue } from "./queue";
 import {
   pipelineWorkerCheckpointSchema,
@@ -184,9 +185,12 @@ async function persistProviderUsage(
     });
     return true;
   } catch (error) {
+    // The rejection comes back from the usage write for a run whose seller
+    // transcript is in flight, so its message is not ours to repeat. Log the
+    // error's type and codes instead — see `describeErrorForLog`.
     console.error(
       `[pipeline.worker.provider_usage] run ${context.run.id} persistence_failed`,
-      error,
+      describeErrorForLog(error),
     );
     return false;
   }
@@ -387,10 +391,17 @@ export async function consumePipelineQueue(
       completed = true;
     } catch (error) {
       // `classifyFailure` collapses every non-Zod error into one retryable
-      // code, so the code alone cannot answer why an attempt failed. Log the
-      // original error first. This restores 23031e7e2, which a later squash
+      // code, so the code alone cannot answer why an attempt failed. Describe
+      // the original error first. This keeps 23031e7e2, which a later squash
       // merge dropped, leaving the first real production run undiagnosable.
-      console.error(`[pipeline.worker.attempt] run ${context.run.id}`, error);
+      //
+      // Described, not logged whole: this `catch` wraps every stage, and on a
+      // voice item the seller's transcript is in flight as `sellerContext`, so
+      // a stage error's message can carry the seller's own words (#795).
+      console.error(
+        `[pipeline.worker.attempt] run ${context.run.id}`,
+        describeErrorForLog(error),
+      );
       const failure = classifyFailure(error);
       console.error(
         `[pipeline.worker.attempt] run ${context.run.id} code ${failure.code}`,
