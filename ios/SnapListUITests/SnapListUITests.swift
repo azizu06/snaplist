@@ -1046,7 +1046,11 @@ final class SnapListUITests: XCTestCase {
         // The captured defect: the seller already has an account, so offering one
         // is both a lie and a dead end — the route that fixes this is the retry.
         XCTAssertNotEqual(startListing.label, "Create an account")
-        XCTAssertFalse(app.buttons["account-entry"].exists)
+        // `account-entry` identifies the sheet's container view, not a button, so
+        // `app.buttons` would match nothing whether or not it presented and the
+        // assertion could never fail. Same query the sign-in sheet is asserted
+        // with elsewhere in this file.
+        XCTAssertFalse(app.descendants(matching: .any)["account-entry"].exists)
         XCTAssertTrue(screen.exists)
         XCTAssertEqual(
             app.staticTexts.matching(
