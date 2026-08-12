@@ -310,6 +310,7 @@ src/lib/pipeline-queue/envelope.ts
 src/lib/pipeline-queue/index.ts
 src/lib/pipeline-queue/internal.ts
 src/lib/pipeline-queue/jsonb-safe.ts
+src/lib/pipeline-queue/log-safe-error.ts
 src/lib/pipeline-queue/memory.ts
 src/lib/pipeline-queue/queue.ts
 src/lib/pipeline-queue/supabase-pgmq.ts
