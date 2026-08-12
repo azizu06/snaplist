@@ -512,6 +512,7 @@ supabase/migrations/20260808131433_app_attest_optional_metadata.sql
 supabase/migrations/20260808131803_app_attest_optional_metadata_pair_integrity.sql
 supabase/migrations/20260811120000_durable_seller_voice_context.sql
 supabase/migrations/20260811123000_reconcile_durable_seller_voice_context.sql
+supabase/migrations/20260812140000_guest_recovery_envelope_mime.sql
 tsconfig.json
 vercel.json
 vitest.config.ts
