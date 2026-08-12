@@ -601,8 +601,13 @@ struct AppShellView: View {
     }
 
     /// Keeps the typed navigation stack mounted before the seller chooses the
-    /// existing-account boundary. The route is appended synchronously to this live
-    /// stack, so the handoff needs no conditional-shell state or lifecycle scheduling.
+    /// existing-account boundary. That boundary no longer touches this stack: it
+    /// sets `router.presentedAccountEntry` and opens as a sheet over the mounted
+    /// shell (#799), because ClerkKit's `AuthView` owns its own `NavigationStack`
+    /// and refuses to render when pushed onto this one. The stack still has to stay
+    /// mounted so the sheet has a live presenter, and so ordinary routes raised from
+    /// onboarding — which do push here — keep working without conditional-shell
+    /// state or lifecycle scheduling.
     private var firstValueOnboardingHost: some View {
         NavigationStack(path: router.pathBinding(for: router.selectedTab)) {
             FirstValueOnboardingView(

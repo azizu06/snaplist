@@ -224,6 +224,10 @@ final class AppRouter {
             selectedTab = .trophyWall
             presentedSheet = nil
             presentedFullScreen = nil
+            // The account boundary lives beside the typed path rather than on it
+            // (#799), so `setPath` no longer clears it. Left presented, the sheet
+            // covers the run the deep link just brought forward.
+            presentedAccountEntry = false
             setPath([.home(.run(runID))], for: .trophyWall)
         }
         return true

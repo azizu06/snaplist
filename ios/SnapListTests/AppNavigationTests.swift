@@ -220,6 +220,7 @@ final class AppNavigationTests: XCTestCase {
         router.navigate(to: .future(.account))
 
         XCTAssertEqual(router.pathBinding(for: .scan).wrappedValue, [])
+        XCTAssertTrue(router.presentedAccountEntry)
 
         // Positive control: an ordinary route still pushes, so the assertion above
         // is a rejection of one boundary rather than a router that stopped routing.
@@ -516,12 +517,18 @@ final class AppNavigationTests: XCTestCase {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000030")!
         let router = AppRouter(initialTab: .scan)
 
+        // The account boundary is modal state beside the typed path, so a deep link
+        // arriving while it is open has to dismiss it explicitly: the run detail
+        // renders underneath an undismissed sheet and the seller never sees it.
+        router.navigate(to: .future(.account))
+
         let didOpen = router.open(
             URL(string: "snaplist://runs/\(runID.uuidString.lowercased())")!
         )
 
         XCTAssertTrue(didOpen)
         XCTAssertEqual(router.selectedTab, .trophyWall)
+        XCTAssertFalse(router.presentedAccountEntry)
         XCTAssertEqual(
             router.pathBinding(for: .trophyWall).wrappedValue,
             [.home(.run(runID))]
