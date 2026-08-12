@@ -84,6 +84,25 @@ enum BearerTokenProviderError: Error, Equatable {
     case principalBindingUnavailable
 }
 
+/// Which credential a request actually carried.
+///
+/// A `401` alone cannot say, and the two answers mean opposite things. A
+/// guest-capability bearer proves an installation and never a subject, so a
+/// bearer route refusing it is that route working correctly: the caller is a
+/// guest. The same status answered to a Clerk bearer means a token minted for a
+/// verified subject was refused — a missing `CLERK_SECRET_KEY`, a wrong
+/// audience, a rotated signing key — and reading that as `.guest` puts a
+/// signed-in seller back in front of the activation coach marks.
+enum BearerCredential: Equatable, Sendable {
+    case clerkSubject
+    case guestCapability
+}
+
+struct ClassifiedBearerToken: Sendable {
+    let token: String
+    let credential: BearerCredential
+}
+
 struct PrincipalBoundBearer: Sendable {
     let bearerToken: String
     let scopeProof: ItemRunSubmissionPrincipalScopeProof
@@ -98,6 +117,11 @@ protocol BearerTokenProviding: Sendable {
     /// Returns a fresh opaque Clerk bearer without exposing ClerkKit to callers.
     func bearerToken() async throws -> String
 
+    /// Returns the same bearer plus which credential it turned out to be, so a
+    /// caller that gets refused can tell an unauthenticated answer apart from a
+    /// rejected one.
+    func classifiedBearerToken() async throws -> ClassifiedBearerToken
+
     /// Returns a bearer and opaque scope proof captured from the same verified
     /// session. Callers compare the proof but cannot recover the Clerk subject.
     func principalBoundBearer() async throws -> PrincipalBoundBearer
@@ -110,6 +134,15 @@ protocol BearerTokenProviding: Sendable {
 }
 
 extension BearerTokenProviding {
+    /// A provider with no guest fallback only ever mints a Clerk bearer, so the
+    /// classification is settled without asking it.
+    func classifiedBearerToken() async throws -> ClassifiedBearerToken {
+        ClassifiedBearerToken(
+            token: try await bearerToken(),
+            credential: .clerkSubject
+        )
+    }
+
     func principalBoundBearer() async throws -> PrincipalBoundBearer {
         throw BearerTokenProviderError.principalBindingUnavailable
     }
@@ -193,13 +226,26 @@ struct GuestCapableBearerTokenProvider: BearerTokenProviding {
     }
 
     func bearerToken() async throws -> String {
+        try await classifiedBearerToken().token
+    }
+
+    /// This is the only place that still knows which of the two credentials a
+    /// request went out on. Once the header is built they are both just a
+    /// bearer, and a `401` answered to either looks identical.
+    func classifiedBearerToken() async throws -> ClassifiedBearerToken {
         do {
-            return try await clerk.bearerToken()
+            return ClassifiedBearerToken(
+                token: try await clerk.bearerToken(),
+                credential: .clerkSubject
+            )
         } catch BearerTokenProviderError.sessionAbsent {
             // Only an absent session may fall through. Falling back on any other
             // Clerk failure would put an account holder's request on a guest
             // identity whenever Clerk merely stumbled.
-            return try guestBearerToken()
+            return ClassifiedBearerToken(
+                token: try guestBearerToken(),
+                credential: .guestCapability
+            )
         }
     }
 

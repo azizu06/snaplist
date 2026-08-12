@@ -300,11 +300,28 @@ enum ActivationAuthenticationPolicy {
            bearerError == .sessionAbsent {
             return .guest
         }
-        if let apiError = error as? MobileAPIClientError,
-           apiError == .httpStatus(unauthenticatedStatusCode) {
-            return .guest
+        guard let apiError = error as? MobileAPIClientError else {
+            return .unknown
         }
-        return .unknown
+        switch apiError {
+        case .unauthenticated(.guestCapability):
+            return .guest
+        case .unauthenticated(.clerkSubject):
+            // The route refused a token minted for a verified subject. That is
+            // a broken credential — a missing `CLERK_SECRET_KEY`, a rotated
+            // signing key — not an absent one, and it is exactly the class
+            // `.unknown` exists for. Calling it `.guest` would put the coach
+            // marks back in front of a signed-in seller (#789 item 2).
+            return .unknown
+        case .httpStatus(let status) where status == unauthenticatedStatusCode:
+            // A `401` no credential was classified for still means guest: it
+            // reached here from a caller that did not go through the
+            // authenticated seam, and the only credential that gets to a bearer
+            // route without a Clerk subject is the capability bearer.
+            return .guest
+        case .httpStatus, .invalidResponse:
+            return .unknown
+        }
     }
 }
 

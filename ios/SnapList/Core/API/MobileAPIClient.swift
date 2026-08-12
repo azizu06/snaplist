@@ -19,6 +19,10 @@ protocol ContractOnlyFixtureProviding {
 enum MobileAPIClientError: Error, Equatable {
     case invalidResponse
     case httpStatus(Int)
+    /// A `401` from a bearer-authenticated route, carrying the credential the
+    /// request actually sent. `httpStatus(401)` still describes a `401` no
+    /// credential was classified for.
+    case unauthenticated(credential: BearerCredential)
 }
 
 struct URLSessionMobileAPIClient: MobileAPIClient {
@@ -68,16 +72,28 @@ struct URLSessionMobileAPIClient: MobileAPIClient {
         )
     }
 
+    /// The status a bearer route answers a credential it will not accept.
+    private static let unauthenticatedStatusCode = 401
+
     private func sendAuthenticated<Response: Decodable>(
         path: String,
         method: String
     ) async throws -> Response {
-        let bearerToken = try await tokenProvider.bearerToken()
-        return try await send(
-            path: path,
-            method: method,
-            bearerToken: bearerToken
-        )
+        let bearer = try await tokenProvider.classifiedBearerToken()
+        do {
+            return try await send(
+                path: path,
+                method: method,
+                bearerToken: bearer.token
+            )
+        } catch MobileAPIClientError.httpStatus(Self.unauthenticatedStatusCode) {
+            // Which credential was sent is knowable here and nowhere after, so
+            // the refusal carries it rather than leaving every caller to guess
+            // from the status alone.
+            throw MobileAPIClientError.unauthenticated(
+                credential: bearer.credential
+            )
+        }
     }
 
     private func send<Response: Decodable>(

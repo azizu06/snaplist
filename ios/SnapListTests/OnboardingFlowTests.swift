@@ -281,6 +281,32 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(tenantWrites, 0)
     }
 
+    func testTheSame401MeansGuestOrOutageDependingOnTheCredentialItAnswered() {
+        // A capability bearer proves an installation and never a subject, so a
+        // route refusing it is that route working: this caller is a guest.
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: MobileAPIClientError.unauthenticated(
+                    credential: .guestCapability
+                )
+            ),
+            .guest
+        )
+
+        // The identical status answered to a Clerk bearer says the opposite: a
+        // token minted for a verified subject was refused. That is a Clerk
+        // misconfiguration, it clears on its own, and classifying it as guest
+        // would re-show the activation coach marks to a signed-in seller.
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: MobileAPIClientError.unauthenticated(
+                    credential: .clerkSubject
+                )
+            ),
+            .unknown
+        )
+    }
+
     func testASessionRejectionClassifiesTheCallerAsGuestNotAsAnOutage() {
         // A guest carries the App Attest capability bearer, so /v1/session
         // answers 401 rather than failing to produce a token at all. Both are
