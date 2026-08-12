@@ -1375,6 +1375,14 @@ final class SnapListUITests: XCTestCase {
 
         XCTAssertLessThanOrEqual(firstPhoto.frame.maxY, library.frame.minY)
         XCTAssertLessThanOrEqual(photoCount.frame.maxY, review.frame.minY)
+
+        // The dock's absence is scoped to the live preview, not a permanent
+        // side effect of having visited Scan: leaving capture must bring it
+        // back on Trophy Wall.
+        closeButton.tap()
+        XCTAssertTrue(dockTrophy.waitForExistence(timeout: 3))
+        XCTAssertTrue(dockScan.exists)
+        XCTAssertTrue(dockTrophy.isSelected)
     }
 
     func testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed() {
