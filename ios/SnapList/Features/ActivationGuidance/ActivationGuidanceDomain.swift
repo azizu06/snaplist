@@ -336,19 +336,23 @@ struct ActivationRetryPolicy: Equatable, Sendable {
     /// a thousand more requests; the next launch or navigation retries it.
     let maxAttempts: Int
     let baseDelay: Duration
-    let maxDelay: Duration
 
     static let standard = ActivationRetryPolicy(
         maxAttempts: 5,
-        baseDelay: .seconds(2),
-        maxDelay: .seconds(32)
+        baseDelay: .seconds(2)
     )
 
-    /// Exponential backoff from `baseDelay`, clamped at `maxDelay`.
+    /// Exponential backoff from `baseDelay`, clamped where the loop stops.
+    ///
+    /// `maxAttempts` is the only cap that can fire. The last attempt returns
+    /// instead of backing off, so attempt `maxAttempts - 1` is the last one that
+    /// ever produces a delay and its value is the top of the ladder. A separate
+    /// `maxDelay` constant above that point cannot be reached, and a retry
+    /// envelope stated in a number no run can produce misleads the next reader.
     func delay(afterAttempt attempt: Int) -> Duration {
-        let doublings = max(0, attempt - 1)
-        guard doublings < 16 else { return maxDelay }
-        return min(baseDelay * (1 << doublings), maxDelay)
+        let lastSleepingAttempt = max(1, maxAttempts - 1)
+        let doublings = max(0, min(attempt, lastSleepingAttempt) - 1)
+        return baseDelay * (1 << doublings)
     }
 }
 

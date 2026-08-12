@@ -473,6 +473,26 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(tenantWrites, 1)
     }
 
+    func testEveryStepOnTheBackoffLadderIsOneTheLoopCanActuallyReach() {
+        let policy = ActivationRetryPolicy.standard
+
+        // The loop sleeps after every attempt except the last, so these four
+        // are the whole retry envelope the doc comment states: 2 + 4 + 8 + 16.
+        let spent = (1..<policy.maxAttempts).map(policy.delay(afterAttempt:))
+        XCTAssertEqual(
+            spent,
+            [.seconds(2), .seconds(4), .seconds(8), .seconds(16)]
+        )
+
+        // A step the ladder can return but the loop can never ask for is not a
+        // longer envelope, it is a number that misleads the next reader about
+        // how long a failing activation actually retries for.
+        XCTAssertEqual(
+            Set((1...1_000).map(policy.delay(afterAttempt:))),
+            Set(spent)
+        )
+    }
+
     func testActivationRetriesBackOffAndStateTheirCap() {
         let policy = ActivationRetryPolicy.standard
 
@@ -481,7 +501,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(policy.delay(afterAttempt: 2), .seconds(4))
         XCTAssertEqual(policy.delay(afterAttempt: 3), .seconds(8))
         XCTAssertEqual(policy.delay(afterAttempt: 4), .seconds(16))
-        XCTAssertEqual(policy.delay(afterAttempt: 99), policy.maxDelay)
+        XCTAssertEqual(policy.delay(afterAttempt: 99), .seconds(16))
     }
 
     @MainActor
