@@ -183,9 +183,10 @@ async function persistProviderUsage(
       usage,
     });
     return true;
-  } catch {
+  } catch (error) {
     console.error(
       `[pipeline.worker.provider_usage] run ${context.run.id} persistence_failed`,
+      error,
     );
     return false;
   }
@@ -385,6 +386,11 @@ export async function consumePipelineQueue(
       });
       completed = true;
     } catch (error) {
+      // `classifyFailure` collapses every non-Zod error into one retryable
+      // code, so the code alone cannot answer why an attempt failed. Log the
+      // original error first. This restores 23031e7e2, which a later squash
+      // merge dropped, leaving the first real production run undiagnosable.
+      console.error(`[pipeline.worker.attempt] run ${context.run.id}`, error);
       const failure = classifyFailure(error);
       console.error(
         `[pipeline.worker.attempt] run ${context.run.id} code ${failure.code}`,
