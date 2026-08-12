@@ -23,20 +23,35 @@ struct AccountEntryView: View {
 }
 
 #if DEBUG
-/// Secret-free destination used only to prove the typed account route in offline UI runs.
+/// Secret-free stand-in used only to prove the typed account route in offline UI runs.
+///
+/// It carries `AuthView`'s presentation shape on purpose: its own `NavigationStack`
+/// and a dismiss control under Clerk's identifier. A stand-in without the nested
+/// stack certified a route the real screen could not survive (#799), so the fixture
+/// now breaks wherever the real screen would break.
 struct AccountEntryFixtureView: View {
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Account entry")
-                .snapListTypography(.displayTitle)
-                .accessibilityAddTraits(.isHeader)
-            Text("Sign in or create your SnapList account to continue.")
-                .snapListTypography(.body)
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Account entry")
+                    .snapListTypography(.displayTitle)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Sign in or create your SnapList account to continue.")
+                    .snapListTypography(.body)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(SnapListMetrics.screenGutter)
+            .background(SnapListColorToken.canvas.color.ignoresSafeArea())
+            .navigationTitle("Account")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close", systemImage: "xmark") { dismiss() }
+                        .accessibilityIdentifier("clerk.dismissButton")
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(SnapListMetrics.screenGutter)
-        .background(SnapListColorToken.canvas.color.ignoresSafeArea())
-        .navigationTitle("Account")
         .accessibilityIdentifier("account-entry")
     }
 }

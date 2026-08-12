@@ -14,6 +14,7 @@ struct SettingsView: View {
     private let deletionOutstanding: Bool
     private let analyticsClient: any AnalyticsClient
     private let ebayPublishService: any EbayPublishFeatureServing
+    private let navigate: (AppRoute) -> Void
     @State private var hasLocalData: Bool
     @State private var ebayConnection: EbayConnectionStatus?
     @State private var ebayConnectionLoadPhase =
@@ -30,6 +31,7 @@ struct SettingsView: View {
         subscriptionClient: any SubscriptionClient,
         analyticsClient: any AnalyticsClient,
         ebayPublishService: any EbayPublishFeatureServing,
+        navigate: @escaping (AppRoute) -> Void,
         hasLocalData: Bool,
         removeLocalData: @escaping () async -> Bool,
         deletionOutstanding: Bool = false,
@@ -45,6 +47,7 @@ struct SettingsView: View {
         self.deletionOutstanding = deletionOutstanding
         self.analyticsClient = analyticsClient
         self.ebayPublishService = ebayPublishService
+        self.navigate = navigate
         _hasLocalData = State(initialValue: hasLocalData)
         _analyticsConsentState = State(
             initialValue: SettingsAnalyticsConsentState(
@@ -81,8 +84,16 @@ struct SettingsView: View {
                         if let accountEntry = SettingsAccountEntryPolicy.destination(
                             for: profile.identity
                         ) {
-                            NavigationLink(value: accountEntry) {
+                            // Routed rather than pushed: the account boundary opens
+                            // modally, and a NavigationLink would push it (#799).
+                            Button {
+                                navigate(accountEntry)
+                            } label: {
                                 Text("Create an account")
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        alignment: .leading
+                                    )
                             }
                             .accessibilityIdentifier("settings.create-account")
                             .accessibilityHint("Opens the account entry screen")

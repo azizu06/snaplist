@@ -249,6 +249,14 @@ struct AppShellView: View {
                 activationGuidanceOverlay
             }
         }
+        // Attached above the shell/onboarding split so both sign-in entry points
+        // reach the same surface, whichever host is on screen.
+        .sheet(isPresented: $router.presentedAccountEntry) {
+            accountEntrySurface
+                .modifier(
+                    OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize)
+                )
+        }
         .sheet(
             isPresented: proGatePresentationBinding,
             onDismiss: restoreProGateStartListingFocus
@@ -702,6 +710,7 @@ struct AppShellView: View {
                 subscriptionClient: dependencies.subscriptionClient,
                 analyticsClient: dependencies.analyticsClient,
                 ebayPublishService: dependencies.ebayPublishService,
+                navigate: { router.navigate(to: $0) },
                 hasLocalData: (captureFlow.intakeSnapshot.map {
                     !$0.photos.isEmpty || $0.voice != nil
                 } ?? false) || settingsCachedData.hasData,
@@ -806,22 +815,36 @@ struct AppShellView: View {
         case .future(let boundary):
             switch FutureDestinationPresentation.resolve(boundary) {
             case .accountEntry:
-#if DEBUG
-                if configuration.usesZeroNetworkFixtures,
-                   configuration.fixture == .onboarding {
-                    AccountEntryFixtureView()
-                } else {
-                    AccountEntryView()
-                        .accessibilityIdentifier("account-entry")
-                }
-#else
-                AccountEntryView()
-                    .accessibilityIdentifier("account-entry")
-#endif
+                // The account boundary is modal — `AppRoutePresentation` sends it to
+                // `presentedAccountEntry`, never onto a stack. Arriving here means
+                // something pushed it past the router, which is the #799 failure:
+                // the pushed screen owns its own stack and never renders.
+                let _ = assertionFailure(
+                    "Account entry must be presented modally, not pushed (#799)."
+                )
+                EmptyView()
             case .placeholder(let destination):
                 FoundationDestinationView(destination: destination)
             }
         }
+    }
+
+    /// One account surface for every entry point, presented as a sheet because
+    /// ClerkKit's `AuthView` owns its own `NavigationStack`.
+    @ViewBuilder
+    private var accountEntrySurface: some View {
+#if DEBUG
+        if configuration.usesZeroNetworkFixtures,
+           configuration.fixture == .onboarding {
+            AccountEntryFixtureView()
+        } else {
+            AccountEntryView()
+                .accessibilityIdentifier("account-entry")
+        }
+#else
+        AccountEntryView()
+            .accessibilityIdentifier("account-entry")
+#endif
     }
 
     private var settingsCachedData: SettingsLocalCachedDataStore {

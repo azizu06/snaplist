@@ -45,6 +45,23 @@ enum AppRoute: Hashable {
     case future(FutureBoundary)
 }
 
+/// How a typed route reaches the seller. Almost every route is a push onto the
+/// tab's stack, but the account boundary renders ClerkKit's `AuthView`, whose body
+/// is its own `NavigationStack`. SwiftUI will not render a pushed destination that
+/// owns a second stack — the outer path keeps the route while the stack draws its
+/// root — so that boundary is presented modally instead of pushed.
+enum AppRoutePresentation: Equatable {
+    case push(AppRoute)
+    case accountEntryModal
+
+    static func resolve(_ route: AppRoute) -> Self {
+        switch route {
+        case .future(.account): .accountEntryModal
+        case .settings, .home, .future: .push(route)
+        }
+    }
+}
+
 enum AppSheet: String, Identifiable {
     case capture
 
@@ -113,6 +130,7 @@ final class AppRouter {
     var selectedTab: PrimaryTab
     var presentedSheet: AppSheet?
     var presentedFullScreen: AppFullScreen?
+    var presentedAccountEntry = false
     private(set) var captureBoundaryRequest: CaptureBoundaryRequest?
     private(set) var photoReviewScanReturn: PhotoReviewScanReturn?
 
@@ -145,9 +163,14 @@ final class AppRouter {
     }
 
     func navigate(to route: AppRoute) {
-        var current = path(for: selectedTab)
-        current.append(route)
-        setPath(current, for: selectedTab)
+        switch AppRoutePresentation.resolve(route) {
+        case .push(let pushed):
+            var current = path(for: selectedTab)
+            current.append(pushed)
+            setPath(current, for: selectedTab)
+        case .accountEntryModal:
+            presentedAccountEntry = true
+        }
     }
 
     func openCaptureBoundary(

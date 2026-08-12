@@ -2296,10 +2296,25 @@ final class SnapListUITests: XCTestCase {
             app.descendants(matching: .any)["account-entry"].waitForExistence(timeout: 3),
             app.debugDescription
         )
-        let routeBack = app.navigationBars.buttons["Back"]
-        XCTAssertTrue(routeBack.waitForExistence(timeout: 3), app.debugDescription)
-        routeBack.tap()
+
+        // The stand-in carries the real screen's presentation shape — its own
+        // NavigationStack inside a sheet — so a pushed account boundary fails here
+        // exactly as ClerkKit's AuthView does in production (#799).
+        XCTAssertTrue(
+            app.staticTexts["Account"].waitForExistence(timeout: 3),
+            app.debugDescription
+        )
+        XCTAssertFalse(app.navigationBars.buttons["Back"].exists, app.debugDescription)
+
+        let dismiss = app.buttons["clerk.dismissButton"]
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 3), app.debugDescription)
+        dismiss.tap()
+
+        // Dismissing returns to ONB-06 with its own controls intact rather than to
+        // a reset stack.
         XCTAssertTrue(screen.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.buttons["first-value-onboarding.sign-in"].exists)
+        XCTAssertTrue(app.buttons["first-value-onboarding.back"].exists)
     }
 
     /// The live ONB-06 approval crop centers a 353-point photo-first listing,
