@@ -62,6 +62,16 @@ final class ItemRunSubmissionTests: XCTestCase {
                 "These photos are too large to send. Remove or retake one, then try again.",
                 .reviewSubmission(eventID: eventID)
             ),
+            // A rejected session takes the same retry as `.tryAgain` and must
+            // not take its words: "this didn't go through" tells a seller whose
+            // sign-in lapsed nothing about what would make the next tap work.
+            (
+                .sessionRenewalRequired,
+                .sessionRenewal,
+                "Try again",
+                "Your sign-in needs renewing. Your item is still saved on this phone.",
+                .startListing
+            ),
         ]
 
         for testCase in cases {
@@ -107,9 +117,13 @@ final class ItemRunSubmissionTests: XCTestCase {
             // Reviewing the item is the only route that can change the outcome,
             // so this reuses that destination rather than inventing a state.
             (.photosTooLarge, .photoReview(.sub07)),
+            // The seller stays on Photo Review because the retry there mints a
+            // fresh bearer. Sending them to the account handoff would offer an
+            // account they already hold and strand the photos behind it (#803).
+            (.sessionRenewalRequired, .photoReview(.sub06)),
         ]
 
-        XCTAssertEqual(cases.count, 13)
+        XCTAssertEqual(cases.count, 14)
 
         for testCase in cases {
             XCTAssertEqual(
@@ -150,18 +164,21 @@ final class ItemRunSubmissionTests: XCTestCase {
     func testExternalRetentionsPublishOneTypedHandoffAndConsumeOnlyMatchingEvent() async throws {
         let cases: [(
             seed: String,
+            bearer: String,
             retention: ItemRunSubmissionRetention,
             handoff: ItemRunSubmissionDestinationDecision.Handoff,
             outcome: (SubmissionIntakeFixture) -> ItemRunSubmissionTransportOutcome
         )] = [
             (
                 "pay-01",
+                "clerk-session-token",
                 .creditDenied(reason: "snaplist-pro-required"),
                 .pay01,
                 { _ in .creditDenied(reason: "snaplist-pro-required") }
             ),
             (
                 "pay-08",
+                "clerk-session-token",
                 .receiptMismatch,
                 .pay08,
                 { intake in
@@ -176,7 +193,11 @@ final class ItemRunSubmissionTests: XCTestCase {
                 }
             ),
             (
+                // A capability bearer proves an installation and never a
+                // subject, so this seller really does need an account. The same
+                // `401` under a Clerk session is #803's session renewal.
                 "account-claim",
+                "guestcap_\(String(repeating: "A", count: 43))",
                 .authenticationRequired,
                 .accountClaim12aThrough12c,
                 { _ in .authenticationRequired }
@@ -203,7 +224,10 @@ final class ItemRunSubmissionTests: XCTestCase {
                     attemptStore: attemptStore,
                     submitter: submitter,
                     draftStore: draftStore,
-                    keys: [Self.firstKey]
+                    keys: [Self.firstKey],
+                    tokenProvider: TestBearerTokenProvider {
+                        testCase.bearer
+                    }
                 )
             )
 
@@ -334,20 +358,89 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(discardCount, 0)
     }
 
+    /// #803. A signed-in seller taps Start listing, the photos upload, and the
+    /// route answers `401` — captured on device as `response_status=401,
+    /// request_bytes=425594` on `POST /v1/items/runs`. Photo Review showed
+    /// nothing at all afterwards and the button relabelled itself to `Create an
+    /// account`, which is also untrue: this seller has an account.
+    ///
+    /// Every assertion here is something the seller can see. Asserting the
+    /// retention case instead would stay green while the footer swallowed the
+    /// message, which is how this reached a device.
+    func testASignedInSellerRejectedWithA401IsToldTheirSignInNeedsRenewing() async throws {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 2,
+            seed: "signed-in-401-presentation"
+        )
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: attemptStore,
+                submitter: RecordingItemRunSubmitter(
+                    outcomes: [.authenticationRequired]
+                ),
+                draftStore: draftStore,
+                keys: [Self.firstKey]
+            )
+        )
+
+        await host.startListing(photos: intake.photos)
+
+        let presentation = PhotoReviewSubmissionPresentation(host: host)
+        let message =
+            "Your sign-in needs renewing. Your item is still saved on this phone."
+        XCTAssertEqual(presentation.visibleMessage, message)
+        XCTAssertEqual(presentation.accessibilityAnnouncement, message)
+        // The footer draws its message beside a status icon and shows neither
+        // without a `statusKind`, so copy alone is not a visible outcome.
+        XCTAssertEqual(presentation.statusKind, .warning)
+        XCTAssertEqual(presentation.primaryActionLabel, "Try again")
+        XCTAssertNotEqual(presentation.primaryActionLabel, "Create an account")
+        XCTAssertEqual(presentation.primaryActionEvent, .startListing)
+        XCTAssertFalse(presentation.mutationControlsLocked)
+
+        // The staged set survives, so the retry the label offers is a retry of
+        // this submission rather than an invitation to pick the photos again.
+        XCTAssertNil(host.acceptedRun)
+        XCTAssertFalse(host.clearedIntake)
+        let discardCount = await draftStore.discardCount
+        XCTAssertEqual(discardCount, 0)
+        let retainedAttempt = try await attemptStore.loadAttempt()
+        XCTAssertNotNil(retainedAttempt)
+    }
+
+    /// The account demand belongs to a seller who really has no account, which
+    /// on this route means the request carried a guest capability rather than a
+    /// Clerk session. #803 moved the signed-in `401` out of here.
     func testTheAccountHandoffTellsTheSellerAnAccountIsNeeded() async {
         let intake = SubmissionIntakeFixture(
             photoCount: 2,
             seed: "account-claim-presentation"
         )
         let host = ItemRunSubmissionHost(
-            coordinator: makeCoordinator(
-                intake: intake,
-                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+            coordinator: ItemRunSubmissionCoordinator(
                 submitter: RecordingItemRunSubmitter(
                     outcomes: [.authenticationRequired]
                 ),
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
                 draftStore: RecordingCaptureDraftStore(photos: intake.photos),
-                keys: [Self.firstKey]
+                tokenProvider: TestBearerTokenProvider {
+                    "guestcap_\(String(repeating: "A", count: 43))"
+                },
+                guestRecoveryCredentials:
+                    RecordingGuestRecoveryCredentialStore(
+                        identity: GuestRecoverySubmissionIdentity(
+                            recoveryID: UUID(
+                                uuidString:
+                                    "80300000-0000-4000-8000-000000000011"
+                            )!,
+                            recoveryTokenHash: String(repeating: "b", count: 64)
+                        )
+                    ),
+                readData: intake.read,
+                newIdempotencyKey: { Self.firstKey }
             )
         )
 
@@ -367,6 +460,10 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertNotEqual(presentation, .idle)
         XCTAssertEqual(presentation.visibleMessage, message)
         XCTAssertEqual(presentation.accessibilityAnnouncement, message)
+        // #803: the footer shows a message only alongside a status icon, so a
+        // handoff that carries copy without a `statusKind` renders as nothing
+        // at all — the seller taps, waits, and sees only a relabelled button.
+        XCTAssertEqual(presentation.statusKind, .warning)
         XCTAssertEqual(presentation.primaryActionLabel, "Create an account")
         XCTAssertEqual(
             presentation.primaryActionEvent,
@@ -2001,20 +2098,28 @@ final class ItemRunSubmissionTests: XCTestCase {
 
             let remaining = await draftStore.photos
             let storedAttempt = await attemptStore.attempt
-            XCTAssertEqual(outcome, .retained(Self.retention(for: transport)))
+            XCTAssertEqual(
+                outcome,
+                .retained(Self.signedInRetention(for: transport))
+            )
             XCTAssertEqual(remaining, intake.photos)
             XCTAssertEqual(storedAttempt?.idempotencyKey, Self.firstKey)
         }
     }
 
-    private static func retention(
+    /// The retention each transport outcome earns when the request carried a
+    /// Clerk session bearer, which is what `makeCoordinator` supplies unless a
+    /// caller overrides it. Only `authenticationRequired` reads the bearer, and
+    /// under a signed-in one a `401` is a rejected session rather than a missing
+    /// account (#803), so the name has to say which seller these rows describe.
+    private static func signedInRetention(
         for transport: ItemRunSubmissionTransportOutcome
     ) -> ItemRunSubmissionRetention {
         switch transport {
         case .creditDenied(let reason): .creditDenied(reason: reason)
         case .rateLimited(let reason): .rateLimited(reason: reason)
         case .rejected: .rejected
-        case .authenticationRequired: .authenticationRequired
+        case .authenticationRequired: .sessionRenewalRequired
         case .conflict: .conflict
         case .tooLarge: .photosTooLarge
         case .offline: .offline
@@ -4064,7 +4169,10 @@ final class ItemRunSubmissionTests: XCTestCase {
 
             await host.startListing(photos: intake.photos)
 
-            XCTAssertEqual(host.retention, Self.retention(for: transport))
+            XCTAssertEqual(
+                host.retention,
+                Self.signedInRetention(for: transport)
+            )
             XCTAssertNil(host.acceptedRun, "\(transport) left a run behind")
             XCTAssertFalse(host.clearedIntake, "\(transport) read as acceptance")
             XCTAssertFalse(host.isSubmitting)
@@ -4208,19 +4316,16 @@ final class ItemRunSubmissionTests: XCTestCase {
             "clerk-session-token"
         }
     ) -> ItemRunSubmissionCoordinator {
-        if let readData {
-            let keySequence = KeySequence(keys: keys)
-            return ItemRunSubmissionCoordinator(
-                submitter: submitter,
-                attemptStore: attemptStore,
-                draftStore: draftStore ?? RecordingCaptureDraftStore(
-                    photos: intake.photos
-                ),
-                tokenProvider: tokenProvider,
-                readData: readData,
-                newIdempotencyKey: { keySequence.next() }
+        // A guest bearer mints a recovery credential before dispatch, so the
+        // double stands in for the Keychain the production store would open.
+        let guestRecoveryCredentials = RecordingGuestRecoveryCredentialStore(
+            identity: GuestRecoverySubmissionIdentity(
+                recoveryID: UUID(
+                    uuidString: "80300000-0000-4000-8000-000000000001"
+                )!,
+                recoveryTokenHash: String(repeating: "c", count: 64)
             )
-        }
+        )
         let keySequence = KeySequence(keys: keys)
         return ItemRunSubmissionCoordinator(
             submitter: submitter,
@@ -4229,7 +4334,8 @@ final class ItemRunSubmissionTests: XCTestCase {
                 photos: intake.photos
             ),
             tokenProvider: tokenProvider,
-            readData: intake.read,
+            guestRecoveryCredentials: guestRecoveryCredentials,
+            readData: readData ?? intake.read,
             newIdempotencyKey: { keySequence.next() }
         )
     }

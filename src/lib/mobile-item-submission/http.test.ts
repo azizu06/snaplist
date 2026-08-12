@@ -807,4 +807,49 @@ describe("POST /v1/items/runs", () => {
     expect({ reservations, queueMessages }).toEqual({ reservations: 1, queueMessages: 1 });
     expect(itemSubmission.resolvePrincipal).toHaveBeenCalledWith("signed-jwt");
   });
+
+  // #803 was captured on device as `response_status=401` against this route
+  // after a 425 KB upload, and the seller saw nothing. The client now says so,
+  // but a 401 no one can read afterwards is the same defect on the other side:
+  // whichever way the route refuses the credential, it has to leave a record.
+  it("reports every unauthorized submission instead of refusing it silently", async () => {
+    const submit = vi.fn();
+    const reportError = vi.fn();
+    const rejected = new Error("clerk: token verification failed");
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => "req_803_unauthorized",
+      reportError,
+      itemSubmission: {
+        async resolvePrincipal() {
+          throw rejected;
+        },
+        submit,
+      },
+    });
+    const headers = {
+      "content-type": "multipart/form-data; boundary=snaplist-803",
+      "idempotency-key": "80300000-0000-4000-8000-000000000010",
+    };
+
+    const refused = await handler(new Request("http://localhost/v1/items/runs", {
+      method: "POST",
+      headers: { ...headers, authorization: "Bearer expired-session-jwt" },
+    }));
+    // No `authorization` header at all: the route refuses this before it ever
+    // asks the principal resolver, which is exactly why it went unreported.
+    const anonymous = await handler(new Request("http://localhost/v1/items/runs", {
+      method: "POST",
+      headers,
+    }));
+
+    expect([refused.status, anonymous.status]).toEqual([401, 401]);
+    expect(submit).not.toHaveBeenCalled();
+    expect(reportError.mock.calls).toEqual([
+      ["mobile-item-submission.authenticate", rejected],
+      ["mobile-item-submission.authenticate", expect.any(Error)],
+    ]);
+    expect(reportError.mock.calls[1][1]).toMatchObject({
+      message: expect.stringContaining("bearer"),
+    });
+  });
 });

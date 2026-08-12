@@ -1740,7 +1740,9 @@ final class CaptureFlowTests: XCTestCase {
                 ),
                 attemptStore: attemptStore,
                 draftStore: scenario.draftStore,
-                tokenProvider: CaptureFlowBearerTokenProvider(),
+                tokenProvider: CaptureFlowGuestBearerTokenProvider(),
+                guestRecoveryCredentials:
+                    CaptureFlowGuestRecoveryCredentialStore(),
                 readData: intake.read,
                 newIdempotencyKey: { keySequence.next() }
             )
@@ -9894,6 +9896,51 @@ private struct CaptureFlowBearerTokenProvider: BearerTokenProviding {
     func bearerToken() async throws -> String {
         "clerk-session-token"
     }
+}
+
+/// A capability bearer proves an installation and never a subject, so a `401`
+/// against one really is the route saying there is no account here. The same
+/// `401` under the session bearer above is #803's rejected sign-in, which is a
+/// different outcome and a different screen.
+private struct CaptureFlowGuestBearerTokenProvider: BearerTokenProviding {
+    func bearerToken() async throws -> String {
+        "guestcap_\(String(repeating: "A", count: 43))"
+    }
+}
+
+/// Stands in for the Keychain a guest dispatch opens before it sends. These
+/// submissions are refused at the route, so only the mint has to answer.
+private actor CaptureFlowGuestRecoveryCredentialStore:
+    GuestRecoveryCredentialStoring {
+    private let identity = GuestRecoverySubmissionIdentity(
+        recoveryID: UUID(
+            uuidString: "50300000-0000-4000-8000-0000000000a1"
+        )!,
+        recoveryTokenHash: String(repeating: "d", count: 64)
+    )
+
+    func mintCredential() throws -> GuestRecoverySubmissionIdentity {
+        identity
+    }
+
+    func contains(_ identity: GuestRecoverySubmissionIdentity) -> Bool {
+        identity == self.identity
+    }
+
+    func bind(
+        _ identity: GuestRecoverySubmissionIdentity,
+        itemID: UUID,
+        runID: UUID,
+        photoIdentity: GuestPhotoIdentity
+    ) {}
+
+    func credential(runID: UUID) -> GuestRecoveryCredential? { nil }
+
+    func credential(recoveryID: UUID) -> GuestRecoveryCredential? { nil }
+
+    func setExpiry(recoveryID: UUID, expiresAt: Date) {}
+
+    func purge(recoveryID: UUID) {}
 }
 
 private actor SubmissionUnavailableRecordingAttemptStore:
