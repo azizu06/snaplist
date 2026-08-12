@@ -72,6 +72,50 @@ function handler(overrides: Record<string, unknown> = {}) {
   });
 }
 
+/** One canonical Trophy Wall entry, shaped exactly as the run store returns it. */
+function guestRunHistoryEntry(runId: string, itemId: string) {
+  return {
+    run: {
+      id: runId,
+      itemId,
+      listingId: null,
+      status: "queued",
+      stage: "queued",
+      attemptCount: 0,
+      maxAttempts: 3,
+      schemaVersion: 1,
+      timestamps: {
+        createdAt: "2026-08-12T17:16:58.000Z",
+        updatedAt: "2026-08-12T17:16:58.000Z",
+        enqueuedAt: "2026-08-12T17:16:58.000Z",
+        startedAt: null,
+        lastAttemptedAt: null,
+        nextAttemptAt: null,
+        completedAt: null,
+        retentionCleanedAt: null,
+      },
+      item: { title: "Canon AE-1", photoCount: 1 },
+      requiredInput: null,
+      terminalOutcome: null,
+      safeFailure: null,
+      allowance: "reserved",
+      legalActions: {
+        canRetry: false,
+        canCancel: true,
+        canOpenReview: false,
+        canStartNewCapture: false,
+      },
+      lastMeaningfulUpdateAt: "2026-08-12T17:16:58.000Z",
+      retentionCleanedAt: null,
+    },
+    logicalIdentity: { idempotencyKey: "guest-first-run" },
+    orderKey: {
+      lastMeaningfulUpdateAt: "2026-08-12T17:16:58.000Z",
+      runId,
+    },
+  };
+}
+
 const listingReviewSaveIntent = {
   expectedReviewRevision: "54900000-0000-4000-8000-000000000004",
   title: "Sony WH-1000XM4 Wireless Headphones",
@@ -269,6 +313,110 @@ describe("mobile API v1 provider-neutral handler", () => {
       data: { entries: [], nextCursor: "opaque-next-page" },
       meta: { requestId: "req_test" },
     });
+  });
+
+  it("lists a verified guest's own runs through a freshly minted operation token", async () => {
+    const list = vi.fn().mockResolvedValue({
+      entries: [
+        guestRunHistoryEntry(
+          "79100000-0000-4000-8000-000000000001",
+          "79100000-0000-4000-8000-000000000002",
+        ),
+      ],
+      nextCursor: null,
+    });
+    const mintOperationToken = vi
+      .fn()
+      .mockResolvedValue("guest-operation-jwt");
+
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({
+        kind: "verifiedGuest",
+        mintOperationToken,
+        userId: "guest_trophy_wall",
+      }),
+      runHistory: { list },
+    })(
+      new Request("http://localhost/v1/runs?limit=2", {
+        headers: { authorization: "Bearer guestcap_capability" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mintOperationToken).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledWith({
+      userId: "guest_trophy_wall",
+      bearerToken: "guest-operation-jwt",
+      limit: 2,
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        entries: [
+          { run: { id: "79100000-0000-4000-8000-000000000001" } },
+        ],
+        nextCursor: null,
+      },
+    });
+  });
+
+  it("keeps a Clerk principal's run history on its own verified bearer", async () => {
+    const list = vi.fn().mockResolvedValue({ entries: [], nextCursor: null });
+
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({
+        kind: "clerk",
+        userId: "user_native",
+      }),
+      runHistory: { list },
+    })(
+      new Request("http://localhost/v1/runs?limit=2", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(list).toHaveBeenCalledWith({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      limit: 2,
+    });
+  });
+
+  it("still refuses a verified guest the account-gated run retry and cancel", async () => {
+    const runOperations = { get: vi.fn(), retry: vi.fn(), cancel: vi.fn() };
+
+    for (const action of ["retry", "cancel"] as const) {
+      const response = await handler({
+        authenticate: vi.fn().mockResolvedValue({
+          kind: "verifiedGuest",
+          mintOperationToken: vi.fn().mockResolvedValue("guest-operation-jwt"),
+          userId: "guest_trophy_wall",
+        }),
+        runOperations,
+      })(
+        new Request(
+          `http://localhost/v1/runs/79100000-0000-4000-8000-000000000001/${action}`,
+          {
+            method: "POST",
+            headers: {
+              authorization: "Bearer guestcap_capability",
+              "idempotency-key": "79100000-0000-4000-8000-000000000003",
+            },
+          },
+        ),
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "forbidden",
+          message: "This run action requires an account.",
+          requestId: "req_test",
+        },
+      });
+    }
+    expect(runOperations.retry).not.toHaveBeenCalled();
+    expect(runOperations.cancel).not.toHaveBeenCalled();
   });
 
   it("rejects another authenticated principal's run-history cursor before the RLS adapter", async () => {
