@@ -163,6 +163,12 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
     abort "Release archive configuration contract changed" unless
       release_contract_step&.fetch("run") == "zsh ios/Scripts/release-config-contract.test.sh"
 
+    pairing_contract_step = validate_job.fetch("steps").find do |step|
+      step["name"] == "Validate Clerk instance and API origin pairing"
+    end
+    abort "Clerk instance and API origin pairing contract changed" unless
+      pairing_contract_step&.fetch("run") == "zsh ios/Scripts/clerk-origin-pairing.test.sh"
+
     release_job = jobs.fetch("release")
     abort "Release configuration must run for pull requests" unless
       release_job.fetch("if") == "github.event_name == '\''pull_request'\''"

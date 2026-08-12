@@ -386,7 +386,7 @@
 		E00000000000000000000002 /* SnapList */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 300000000000000000000002 /* Build configuration list for PBXNativeTarget "SnapList" */;
-			buildPhases = (400000000000000000000001 /* Sources */, 100000000000000000000001 /* Frameworks */, 500000000000000000000001 /* Resources */, 483600000000000000000001 /* Upload Sentry dSYMs */);
+			buildPhases = (483600000000000000000002 /* Validate Clerk instance and API origin pairing */, 400000000000000000000001 /* Sources */, 100000000000000000000001 /* Frameworks */, 500000000000000000000001 /* Resources */, 483600000000000000000001 /* Upload Sentry dSYMs */);
 			buildRules = ();
 			dependencies = ();
 			name = SnapList;
@@ -454,6 +454,7 @@
 
 /* Begin PBXShellScriptBuildPhase section */
 		483600000000000000000001 /* Upload Sentry dSYMs */ = {isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (); inputPaths = (); name = "Upload Sentry dSYMs"; outputPaths = (); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/zsh; shellScript = "\"${SRCROOT}/Scripts/upload-dsyms.sh\"\n"; };
+		483600000000000000000002 /* Validate Clerk instance and API origin pairing */ = {isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (); inputPaths = (); name = "Validate Clerk instance and API origin pairing"; outputPaths = (); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/zsh; shellScript = "\"${SRCROOT}/Scripts/clerk-origin-pairing-lint.sh\"\n"; };
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */

@@ -6,6 +6,7 @@ enum NativeAppConfigurationError: Error, Equatable {
     case invalidAPIOrigin
     case missingClerkPublishableKey
     case invalidClerkPublishableKey
+    case clerkInstanceOriginMismatch
 }
 
 struct NativeAppConfiguration: Equatable {
@@ -46,11 +47,44 @@ struct NativeAppConfiguration: Equatable {
                 ) else {
             throw NativeAppConfigurationError.invalidClerkPublishableKey
         }
+        guard instanceMatchesOrigin(
+            publishableKey: publishableKey,
+            apiOrigin: apiOrigin
+        ) else {
+            throw NativeAppConfigurationError.clerkInstanceOriginMismatch
+        }
 
         return NativeAppConfiguration(
             apiOrigin: apiOrigin,
             clerkPublishableKey: publishableKey
         )
+    }
+
+    /// A Clerk publishable key names the instance that minted it: `pk_live_`
+    /// for production, `pk_test_` for a development instance. The production
+    /// API validates sessions against the production instance alone, so a
+    /// crossed pair is a build defect rather than a runtime condition — #804
+    /// surfaced it as an opaque 401 after the seller had already uploaded
+    /// photos. `Scripts/clerk-origin-pairing-lint.sh` enforces the same rule on
+    /// the build settings before a build with a crossed pair can finish.
+    private static func instanceMatchesOrigin(
+        publishableKey: String,
+        apiOrigin: URL
+    ) -> Bool {
+        guard let host = apiOrigin.host?.lowercased() else {
+            return false
+        }
+        let isProductionOrigin = host == "snaplist.dev"
+            || host.hasSuffix(".snaplist.dev")
+        let isLoopbackOrigin = ["localhost", "127.0.0.1", "::1"].contains(host)
+
+        if publishableKey.hasPrefix("pk_test_") {
+            return !isProductionOrigin
+        }
+        if publishableKey.hasPrefix("pk_live_") {
+            return !isLoopbackOrigin
+        }
+        return false
     }
 }
 

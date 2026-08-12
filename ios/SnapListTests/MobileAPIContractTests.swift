@@ -196,7 +196,7 @@ final class MobileAPIContractTests: XCTestCase {
         let configuration = try NativeAppConfiguration.resolve(
             environment: [:],
             apiOriginBundleValue: "https://snaplist.dev",
-            clerkPublishableKeyBundleValue: "pk_test_checked_in_public_key",
+            clerkPublishableKeyBundleValue: "pk_live_checked_in_public_key",
             allowsLocalDevelopment: true
         )
 
@@ -206,7 +206,69 @@ final class MobileAPIContractTests: XCTestCase {
         )
         XCTAssertEqual(
             configuration.clerkPublishableKey,
-            "pk_test_checked_in_public_key"
+            "pk_live_checked_in_public_key"
+        )
+    }
+
+    /// #804: a development Clerk instance mints tokens whose issuer and JWKS the
+    /// production API does not trust, so the mismatch must fail here instead of
+    /// as an opaque 401 after the seller has already uploaded photos.
+    func testNativeAppConfigurationRejectsDevelopmentClerkInstanceAgainstProductionOrigin() {
+        for productionOrigin in ["https://snaplist.dev", "https://api.snaplist.dev"] {
+            XCTAssertThrowsError(
+                try NativeAppConfiguration.resolve(
+                    environment: [:],
+                    apiOriginBundleValue: productionOrigin,
+                    clerkPublishableKeyBundleValue: "pk_test_development_instance",
+                    allowsLocalDevelopment: true
+                ),
+                productionOrigin
+            ) { error in
+                XCTAssertEqual(
+                    error as? NativeAppConfigurationError,
+                    .clerkInstanceOriginMismatch
+                )
+            }
+        }
+    }
+
+    /// The same invariant in the other direction: a production Clerk instance
+    /// would hand real seller sessions to a loopback API no production tenant
+    /// owns.
+    func testNativeAppConfigurationRejectsProductionClerkInstanceAgainstLoopbackOrigin() {
+        XCTAssertThrowsError(
+            try NativeAppConfiguration.resolve(
+                environment: ["SNAPLIST_API_ORIGIN": "http://127.0.0.1:3001"],
+                apiOriginBundleValue: nil,
+                clerkPublishableKeyBundleValue: "pk_live_production_instance",
+                allowsLocalDevelopment: true
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? NativeAppConfigurationError,
+                .clerkInstanceOriginMismatch
+            )
+        }
+    }
+
+    /// The values this build actually shipped, not a fixture standing in for
+    /// them. #804 was invisible to every fixture-only test.
+    func testBundledClerkInstanceMatchesBundledAPIOrigin() throws {
+        let apiOrigin = Bundle.main.object(
+            forInfoDictionaryKey: "SnapListAPIOrigin"
+        ) as? String
+        let publishableKey = Bundle.main.object(
+            forInfoDictionaryKey: "SnapListClerkPublishableKey"
+        ) as? String
+
+        XCTAssertEqual(apiOrigin, "https://snaplist.dev")
+        XCTAssertNoThrow(
+            try NativeAppConfiguration.resolve(
+                environment: [:],
+                apiOriginBundleValue: apiOrigin,
+                clerkPublishableKeyBundleValue: publishableKey,
+                allowsLocalDevelopment: true
+            )
         )
     }
 
