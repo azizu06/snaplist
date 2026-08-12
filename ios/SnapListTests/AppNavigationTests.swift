@@ -208,17 +208,38 @@ final class AppNavigationTests: XCTestCase {
         )
     }
 
+    /// ClerkKit's `AuthView` body is itself a `NavigationStack`. SwiftUI refuses to
+    /// render a pushed destination that owns a second stack: the outer path keeps the
+    /// appended route while the stack renders its root, so the seller taps sign-in and
+    /// silently lands back where they started. The account boundary therefore has to
+    /// leave the typed path alone and open as a modal instead.
+    @MainActor
+    func testAccountBoundaryOpensModallyInsteadOfPushingOntoTheTypedPath() {
+        let router = AppRouter()
+
+        router.navigate(to: .future(.account))
+
+        XCTAssertEqual(router.pathBinding(for: .scan).wrappedValue, [])
+        XCTAssertTrue(router.presentedAccountEntry)
+
+        // Positive control: an ordinary route still pushes, so the assertion above
+        // is a rejection of one boundary rather than a router that stopped routing.
+        router.navigate(to: .settings)
+
+        XCTAssertEqual(router.pathBinding(for: .scan).wrappedValue, [.settings])
+    }
+
     @MainActor
     func testEachPrimaryTabKeepsAnIndependentNavigationPath() {
         let router = AppRouter()
 
-        router.navigate(to: .future(.account))
+        router.navigate(to: .home(.processing))
         router.select(.trophyWall)
         router.navigate(to: .settings)
 
         XCTAssertEqual(
             router.pathBinding(for: .scan).wrappedValue,
-            [.future(.account)]
+            [.home(.processing)]
         )
         XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.settings])
     }
@@ -496,12 +517,18 @@ final class AppNavigationTests: XCTestCase {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000030")!
         let router = AppRouter(initialTab: .scan)
 
+        // The account boundary is modal state beside the typed path, so a deep link
+        // arriving while it is open has to dismiss it explicitly: the run detail
+        // renders underneath an undismissed sheet and the seller never sees it.
+        router.navigate(to: .future(.account))
+
         let didOpen = router.open(
             URL(string: "snaplist://runs/\(runID.uuidString.lowercased())")!
         )
 
         XCTAssertTrue(didOpen)
         XCTAssertEqual(router.selectedTab, .trophyWall)
+        XCTAssertFalse(router.presentedAccountEntry)
         XCTAssertEqual(
             router.pathBinding(for: .trophyWall).wrappedValue,
             [.home(.run(runID))]
