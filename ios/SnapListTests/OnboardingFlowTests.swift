@@ -673,6 +673,7 @@ final class OnboardingFlowTests: XCTestCase {
     @MainActor
     func testGuestPromotionRecordsTheTenantMarkerOnItsFirstAuthenticatedPass() async {
         var sessionRequests = 0
+        var tenantWrites = 0
         var sleeps: [Duration] = []
 
         let result = await ActivationGuestCompletionPromotionCoordinator.promote(
@@ -682,11 +683,19 @@ final class OnboardingFlowTests: XCTestCase {
                 sessionRequests += 1
                 return "user_566"
             },
-            fetchTenantCompleted: { true },
-            writeTenantCompletion: { true }
+            // No marker is present yet, which is the only setup under which
+            // recording one is observable. With it already completed the loop
+            // promotes without ever reaching the write, and this test would
+            // pass against a coordinator that never wrote at all.
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: {
+                tenantWrites += 1
+                return true
+            }
         )
 
         XCTAssertEqual(result, "user_566")
+        XCTAssertEqual(tenantWrites, 1)
         XCTAssertEqual(sessionRequests, 1)
         XCTAssertEqual(sleeps, [])
     }
