@@ -65,7 +65,7 @@ describe("activation guidance completion RLS", () => {
       store.isCompleted({ bearerToken: "seller-b", userId: sellerA.id }),
     ).resolves.toBe(false);
 
-    const forged = await (sellerB.client as any)
+    const forged = await sellerB.client
       .from("activation_guidance_completions")
       .insert({ user_id: sellerA.id });
     expect(forged.error).not.toBeNull();

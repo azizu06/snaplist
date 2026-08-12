@@ -289,7 +289,11 @@ describe("durable pipeline queue consumer", () => {
     );
     const failAttemptMock = runs.failAttempt as unknown as ReturnType<typeof vi.fn>;
     expect(JSON.stringify(failAttemptMock.mock.calls)).not.toContain(transcriptSentinel);
-    expect(JSON.stringify(errorLog.mock.calls)).not.toContain(transcriptSentinel);
+    // `JSON.stringify` on an Error yields `{}` — it has no enumerable own
+    // properties — so stringifying the spy's calls cannot see a transcript
+    // carried in `error.message`. Join the arguments the way a console
+    // transport renders them instead (#795).
+    expect(errorLog.mock.calls.flat().join(" ")).not.toContain(transcriptSentinel);
     expect(errorLog).toHaveBeenCalledWith(
       `[pipeline.worker.attempt] run ${RUN_ID} code pipeline_temporarily_unavailable`,
     );
