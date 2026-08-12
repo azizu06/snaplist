@@ -138,6 +138,11 @@ final class ItemRunSubmissionClientTests: XCTestCase {
                 Self.errorJSON(code: "rate_limited", reason: "daily_capacity"),
                 .rateLimited(reason: "daily_capacity")
             ),
+            // The platform answers this above the app, so the body is its own
+            // and carries no SnapList error envelope. It still must not fall
+            // through to `.ambiguous`, which would tell the seller to retry the
+            // same oversize bytes that can never fit.
+            (413, "<html>Payload Too Large</html>", .tooLarge),
             (503, Self.errorJSON(code: "internal_error"), .ambiguous),
             (500, Self.errorJSON(code: "internal_error"), .ambiguous),
             (202, "{ not json", .ambiguous)

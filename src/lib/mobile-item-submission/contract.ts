@@ -9,7 +9,27 @@ import {
   type PreparedMobileSubmissionVoice,
 } from "./voice";
 
-export const MAX_MOBILE_ITEM_PHOTO_BYTES = 50 * 1024 * 1024;
+/**
+ * The largest single photo that can actually arrive.
+ *
+ * The platform rejects a request body above roughly 4.5 MB with `413` before
+ * this route handler, authentication, or any validation runs — measured against
+ * production on 2026-08-12, where a 4 MB body reached auth and answered `401`
+ * and a 6 MB body answered `413`. `next.config`'s `bodySizeLimit` lift does not
+ * reach here: it governs Server Actions, and this is a Route Handler. So no
+ * application-level config raises this ceiling and a constant above it would
+ * describe a limit no request can reach.
+ *
+ * This is the transport ceiling itself rather than the tighter on-device budget
+ * in `CapturePhotoBudget`, which bounds a five-photo set to roughly 3.4 MiB, for
+ * two reasons. A single photo from a build without that budget still submits
+ * successfully at any size the transport carries, so tightening this to the
+ * client budget would reject requests that work today. And `store.ts` validates
+ * stored rows against this same constant, so a value below the transport
+ * ceiling would make an already-accepted photo unreadable; nothing larger than
+ * the ceiling can ever have been stored, so this value cannot orphan a row.
+ */
+export const MAX_MOBILE_ITEM_PHOTO_BYTES = 4_500_000;
 export const MAX_MOBILE_ITEM_PHOTOS = 5;
 
 export const mobileSubmissionMediaTypeSchema = z.enum([
@@ -357,7 +377,9 @@ export async function prepareMobileItemSubmission(
       throw new Error("Every photo must contain image bytes.");
     }
     if (value.size > MAX_MOBILE_ITEM_PHOTO_BYTES) {
-      throw new Error("Each photo must be 50 MiB or smaller.");
+      throw new Error(
+        "A photo is too large to upload. Retake it and try again.",
+      );
     }
     const declaredType = mobileSubmissionMediaTypeSchema.safeParse(value.type);
     if (!declaredType.success) {

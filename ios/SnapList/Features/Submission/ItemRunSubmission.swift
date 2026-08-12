@@ -276,6 +276,10 @@ enum ItemRunSubmissionTransportOutcome: Equatable, Sendable {
     case creditDenied(reason: String?)
     /// `409` — the key is bound to different photos, cost, voice, or locale.
     case conflict
+    /// `413` — the request body exceeded the platform limit and was refused
+    /// above the app, so it carries no SnapList error envelope. The same bytes
+    /// can never fit, which makes this a refusal rather than an ambiguity.
+    case tooLarge
     /// `429` — submission capacity was reached.
     case rateLimited(reason: String?)
     /// Offline, cancelled, `503`, or any other unknown outcome. The submission may or
@@ -295,6 +299,10 @@ enum ItemRunSubmissionRetention: Equatable, Sendable {
     case rateLimited(reason: String?)
     case rejected
     case authenticationRequired
+    /// The request body was refused for size before it reached the app. Retrying the
+    /// same photos cannot help, so this is separate from `ambiguous` — the seller has
+    /// to change the photo set.
+    case photosTooLarge
     /// A `200`/`202` whose receipt did not describe what was submitted.
     case receiptMismatch
     /// The local intake could not be read as one to five valid photos, or the photos on

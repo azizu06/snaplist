@@ -340,10 +340,11 @@ actor NativeIntake {
             guard data.allSatisfy({ Self.isJPEG($0.0) }) else {
                 return .rejected(.invalidPhoto)
             }
+            let budgeted = Self.boundToTransportBudget(data)
             let staged: [Photo]
             let stagingRoot: URL
             do {
-                (staged, stagingRoot) = try await stagePhotoData(data, for: active)
+                (staged, stagingRoot) = try await stagePhotoData(budgeted, for: active)
             } catch {
                 return stagingFailure(expected: expected)
             }
@@ -368,10 +369,11 @@ actor NativeIntake {
             guard Self.isJPEG(data.0) else {
                 return .rejected(.invalidPhoto)
             }
+            let budgeted = Self.boundToTransportBudget([data])
             let staged: [Photo]
             let stagingRoot: URL
             do {
-                (staged, stagingRoot) = try await stagePhotoData([data], for: active)
+                (staged, stagingRoot) = try await stagePhotoData(budgeted, for: active)
             } catch {
                 return stagingFailure(expected: expected)
             }
@@ -757,6 +759,26 @@ actor NativeIntake {
             removeStagingRoot(stagingRoot)
             return .rejected(.storageFailure)
         }
+    }
+
+    /// Bounds captured bytes to what the upload can carry, before they are
+    /// staged rather than after.
+    ///
+    /// Staging is the right moment for two reasons. The bounded bytes are what
+    /// the submission sends and what its fingerprint is computed over, so a
+    /// retry re-reads one settled file instead of re-encoding and risking a
+    /// different identity. And camera capture, library import, add, and replace
+    /// all converge here, so none of them can route around the budget.
+    ///
+    /// The library transfer receipt already matched the original bytes back in
+    /// `load(_:)`, so re-encoding after that point cannot invalidate it.
+    ///
+    /// This adds no rejection path: `CapturePhotoBudget.bound` returns bytes for
+    /// every input, so a photo that reaches here still reaches staging.
+    private nonisolated static func boundToTransportBudget(
+        _ data: [(Data, LibraryPhotoTransferReceipt?)]
+    ) -> [(Data, LibraryPhotoTransferReceipt?)] {
+        data.map { (CapturePhotoBudget.bound($0.0), $0.1) }
     }
 
     private func stagingFailure(expected: Version) -> Outcome {

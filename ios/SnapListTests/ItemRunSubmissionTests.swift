@@ -52,6 +52,16 @@ final class ItemRunSubmissionTests: XCTestCase {
                 "This item can't be sent as it is.",
                 .reviewSubmission(eventID: eventID)
             ),
+            // A `413` is the platform refusing these exact bytes above the app.
+            // Retrying them unchanged can never succeed, so the seller has to
+            // hear what is actually wrong and be sent somewhere they can fix it.
+            (
+                .photosTooLarge,
+                .photosTooLarge,
+                "Review",
+                "These photos are too large to send. Remove or retake one, then try again.",
+                .reviewSubmission(eventID: eventID)
+            ),
         ]
 
         for testCase in cases {
@@ -94,9 +104,12 @@ final class ItemRunSubmissionTests: XCTestCase {
             ),
             (.receiptMismatch, .handoff(.pay08)),
             (.authenticationRequired, .handoff(.accountClaim12aThrough12c)),
+            // Reviewing the item is the only route that can change the outcome,
+            // so this reuses that destination rather than inventing a state.
+            (.photosTooLarge, .photoReview(.sub07)),
         ]
 
-        XCTAssertEqual(cases.count, 12)
+        XCTAssertEqual(cases.count, 13)
 
         for testCase in cases {
             XCTAssertEqual(
@@ -2003,6 +2016,7 @@ final class ItemRunSubmissionTests: XCTestCase {
         case .rejected: .rejected
         case .authenticationRequired: .authenticationRequired
         case .conflict: .conflict
+        case .tooLarge: .photosTooLarge
         case .offline: .offline
         case .cancelled: .cancelled
         case .ambiguous, .created, .replayed: .ambiguous

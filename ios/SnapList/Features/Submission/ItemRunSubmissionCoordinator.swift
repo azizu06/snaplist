@@ -53,6 +53,10 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
             self = .photoReview(.sub06)
         case .rejected:
             self = .photoReview(.sub07)
+        case .photosTooLarge:
+            // Reviewing the item is the only route that can change the outcome,
+            // so this reuses that destination rather than inventing a state.
+            self = .photoReview(.sub07)
         case .authenticationRequired:
             self = .handoff(.accountClaim12aThrough12c)
         case .receiptMismatch:
@@ -74,8 +78,16 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
     case conflict
     case tryAgain
     case review
+    case photosTooLarge
 
     init?(retention: ItemRunSubmissionRetention) {
+        // `sub07` carries every refusal the seller has to fix by hand, so the
+        // destination alone cannot say which one happened. Size is the one with
+        // a concrete remedy, so it earns its own copy ahead of the shared map.
+        if case .photosTooLarge = retention {
+            self = .photosTooLarge
+            return
+        }
         switch ItemRunSubmissionDestinationDecision(retention: retention) {
         case .photoReview(.sub01Cancelled):
             self = .cancelled
@@ -100,7 +112,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
             "Try again"
         case .cancelled:
             "Start listing"
-        case .conflict, .review:
+        case .conflict, .review, .photosTooLarge:
             "Review"
         }
     }
@@ -119,6 +131,10 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
             "This didn't go through. Your item is still saved on this phone."
         case .review:
             "This item can't be sent as it is."
+        case .photosTooLarge:
+            // Names the one thing the seller can change. "Remove or retake"
+            // covers both remedies without explaining bytes or limits.
+            "These photos are too large to send. Remove or retake one, then try again."
         }
     }
 
@@ -126,7 +142,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         switch self {
         case .conflict:
             "Something changed since your last try."
-        case .cancelled, .offline, .ambiguity, .tryAgain, .review:
+        case .cancelled, .offline, .ambiguity, .tryAgain, .review, .photosTooLarge:
             message
         }
     }
@@ -135,7 +151,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         switch self {
         case .offline:
             .offline
-        case .cancelled, .ambiguity, .conflict, .tryAgain, .review:
+        case .cancelled, .ambiguity, .conflict, .tryAgain, .review, .photosTooLarge:
             .warning
         }
     }
@@ -144,7 +160,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         switch self {
         case .cancelled, .conflict:
             .filled
-        case .offline, .ambiguity, .tryAgain, .review:
+        case .offline, .ambiguity, .tryAgain, .review, .photosTooLarge:
             .outlined
         }
     }
@@ -161,7 +177,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
             .reviewConflictedSubmission(eventID: eventID)
         case .tryAgain:
             .startListing
-        case .review:
+        case .review, .photosTooLarge:
             .reviewSubmission(eventID: eventID)
         }
     }
@@ -595,7 +611,10 @@ final class ItemRunSubmissionHost {
             return true
         case .conflict, .creditDenied, .rateLimited, .rejected,
              .authenticationRequired, .receiptMismatch, .intakeUnavailable,
-             .attemptNotPersisted, .submissionUnavailable:
+             .attemptNotPersisted, .submissionUnavailable, .photosTooLarge:
+            // `photosTooLarge` sits here rather than above because the retry this
+            // gate offers resends the identical bytes, which the platform already
+            // refused for their size.
             return false
         }
     }
@@ -1682,6 +1701,11 @@ final class ItemRunSubmissionCoordinator {
             )
         case .rejected:
             return .retained(.rejected)
+        case .tooLarge:
+            // Unlike `conflict`, nothing bound this key server-side — the body never
+            // reached the app. So the attempt stays: changing the photo set makes it
+            // stop standing for the intake and a fresh key gets minted on its own.
+            return .retained(.photosTooLarge)
         case .authenticationRequired:
             return .retained(.authenticationRequired)
         case .creditDenied(let reason):

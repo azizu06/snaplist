@@ -161,6 +161,12 @@ struct ItemRunSubmissionClient: ItemRunSubmitting {
             return .creditDenied(reason: Self.reason(in: data))
         case 409:
             return .conflict
+        case 413:
+            // The platform refuses an oversize body above this app, so `data` holds an
+            // edge-server page rather than a SnapList envelope. Nothing was committed and
+            // the same bytes will be refused again, so this must not fall into `ambiguous`,
+            // which offers the seller a retry that can only fail.
+            return .tooLarge
         case 429:
             return .rateLimited(reason: Self.reason(in: data))
         default:
