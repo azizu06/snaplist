@@ -50,6 +50,7 @@ final class AppNavigationTests: XCTestCase {
                 "processing",
                 AppShellChromeContext(
                     isKeyboardVisible: false,
+                    isLiveCameraPreviewActive: false,
                     isDeleteAccountFlowPresented: false,
                     isListingReviewPresented: false,
                     isGuestClaimPresented: false,
@@ -64,6 +65,7 @@ final class AppNavigationTests: XCTestCase {
                 "guest claim",
                 AppShellChromeContext(
                     isKeyboardVisible: false,
+                    isLiveCameraPreviewActive: false,
                     isDeleteAccountFlowPresented: false,
                     isListingReviewPresented: false,
                     isGuestClaimPresented: true,
@@ -78,6 +80,7 @@ final class AppNavigationTests: XCTestCase {
                 "claim canceled",
                 AppShellChromeContext(
                     isKeyboardVisible: false,
+                    isLiveCameraPreviewActive: false,
                     isDeleteAccountFlowPresented: false,
                     isListingReviewPresented: false,
                     isGuestClaimPresented: false,
@@ -92,6 +95,7 @@ final class AppNavigationTests: XCTestCase {
                 "canonical listing review",
                 AppShellChromeContext(
                     isKeyboardVisible: false,
+                    isLiveCameraPreviewActive: false,
                     isDeleteAccountFlowPresented: false,
                     isListingReviewPresented: true,
                     isGuestClaimPresented: false,
@@ -106,6 +110,7 @@ final class AppNavigationTests: XCTestCase {
                 "listing review dismissed",
                 AppShellChromeContext(
                     isKeyboardVisible: false,
+                    isLiveCameraPreviewActive: false,
                     isDeleteAccountFlowPresented: false,
                     isListingReviewPresented: false,
                     isGuestClaimPresented: false,

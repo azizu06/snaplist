@@ -156,6 +156,20 @@ enum CapturePhase: Equatable {
     case failed
 }
 
+extension CapturePhase {
+    /// Whether this phase renders the live camera feed rather than a recovery
+    /// or loading surface. The dock is only removed while this is true, since
+    /// only the live feed is the full-bleed "camera preview" Aziz asked for.
+    var isLiveCameraPreview: Bool {
+        switch self {
+        case .camera, .captured, .reviewHandoff, .failed:
+            true
+        case .idle, .requestingPermission, .denied, .unavailable:
+            false
+        }
+    }
+}
+
 enum CaptureRestoration: Equatable {
     case noDraft
     case stagedPhoto

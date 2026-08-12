@@ -1353,7 +1353,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(dockScan.frame.height, 52, accuracy: 0.5)
     }
 
-    func testIssue775RealAppShellReservesDockAboveLiveCameraControlsAt402x874() {
+    func testIssue775RealAppShellRemovesDockFromLiveCameraPreviewAt402x874() {
         let app = XCUIApplication()
         app.launchArguments = [
             "--restored-capture-fixture",
@@ -1368,6 +1368,7 @@ final class SnapListUITests: XCTestCase {
         let window = app.windows.firstMatch
         let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
         let photoCount = app.staticTexts["scan.photo-count"]
+        let closeButton = app.buttons["scan.close"]
         let library = app.buttons["scan.library"]
         let shutter = app.buttons["scan.shutter"]
         let review = app.buttons["scan.review"]
@@ -1381,25 +1382,35 @@ final class SnapListUITests: XCTestCase {
         for element in [
             firstPhoto,
             photoCount,
+            closeButton,
             library,
             shutter,
             review,
-            dockScan,
-            dockTrophy,
         ] {
             XCTAssertTrue(element.waitForExistence(timeout: 3), element.identifier)
         }
 
-        for control in [library, shutter, review, dockScan, dockTrophy] {
+        // Live camera preview is full-bleed: the dock is not just visually
+        // hidden, it is absent from the hierarchy (`if isVisible` in
+        // FloatingDock.swift), so these must never appear on this route.
+        XCTAssertFalse(dockScan.exists)
+        XCTAssertFalse(dockTrophy.exists)
+
+        for control in [closeButton, library, shutter, review] {
             XCTAssertGreaterThanOrEqual(control.frame.width, 44, control.identifier)
             XCTAssertGreaterThanOrEqual(control.frame.height, 44, control.identifier)
         }
 
         XCTAssertLessThanOrEqual(firstPhoto.frame.maxY, library.frame.minY)
         XCTAssertLessThanOrEqual(photoCount.frame.maxY, review.frame.minY)
-        XCTAssertLessThanOrEqual(library.frame.maxY, dockScan.frame.minY)
-        XCTAssertLessThanOrEqual(shutter.frame.maxY, dockScan.frame.minY)
-        XCTAssertLessThanOrEqual(review.frame.maxY, dockScan.frame.minY)
+
+        // The dock's absence is scoped to the live preview, not a permanent
+        // side effect of having visited Scan: leaving capture must bring it
+        // back on Trophy Wall.
+        closeButton.tap()
+        XCTAssertTrue(dockTrophy.waitForExistence(timeout: 3))
+        XCTAssertTrue(dockScan.exists)
+        XCTAssertTrue(dockTrophy.isSelected)
     }
 
     func testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed() {
@@ -1971,6 +1982,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["scan.motion-reduced"].waitForExistence(timeout: 2))
 
         for control in [
+            app.buttons["scan.close"],
             app.buttons["scan.flash"],
             app.buttons["scan.library"],
             app.buttons["scan.shutter"],

@@ -14,8 +14,33 @@ final class AccessibilityFoundationTests: XCTestCase {
     }
 
     func testKeyboardVisibilityHidesTheDock() {
-        XCTAssertTrue(DockVisibilityPolicy.shouldShow(isKeyboardVisible: false))
-        XCTAssertFalse(DockVisibilityPolicy.shouldShow(isKeyboardVisible: true))
+        XCTAssertTrue(
+            DockVisibilityPolicy.shouldShow(
+                isKeyboardVisible: false,
+                isLiveCameraPreviewActive: false
+            )
+        )
+        XCTAssertFalse(
+            DockVisibilityPolicy.shouldShow(
+                isKeyboardVisible: true,
+                isLiveCameraPreviewActive: false
+            )
+        )
+    }
+
+    func testLiveCameraPreviewHidesTheDock() {
+        XCTAssertTrue(
+            DockVisibilityPolicy.shouldShow(
+                isKeyboardVisible: false,
+                isLiveCameraPreviewActive: false
+            )
+        )
+        XCTAssertFalse(
+            DockVisibilityPolicy.shouldShow(
+                isKeyboardVisible: false,
+                isLiveCameraPreviewActive: true
+            )
+        )
     }
 
     func testReducedMotionLaunchFixtureIsDeterministic() {

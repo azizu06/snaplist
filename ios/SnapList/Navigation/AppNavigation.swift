@@ -259,7 +259,7 @@ final class AppRouter {
 }
 
 enum DockVisibilityPolicy {
-    static func shouldShow(isKeyboardVisible: Bool) -> Bool {
-        !isKeyboardVisible
+    static func shouldShow(isKeyboardVisible: Bool, isLiveCameraPreviewActive: Bool) -> Bool {
+        !isKeyboardVisible && !isLiveCameraPreviewActive
     }
 }

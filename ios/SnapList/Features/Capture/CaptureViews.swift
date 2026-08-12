@@ -264,6 +264,7 @@ private struct CaptureOptionRow: View {
 struct ScanCameraView: View {
     @Bindable var flow: CaptureFlowModel
     @Binding var returnFocus: PhotoReviewScanFocus?
+    let closeCapture: () -> Void
     let openBoundary: (
         CaptureBoundaryDestination,
         [StagedCapturePhoto],
@@ -342,9 +343,15 @@ struct ScanCameraView: View {
                 guard let captureID = flow.reservePhotoCapture() else { return }
                 Task { await flow.takePhoto(reservation: captureID) }
             },
+            close: closeLiveCameraPreview,
             returnFocus: $returnFocus,
             review: { open(.photoReview, opener: .reviewButton) }
         )
+    }
+
+    private func closeLiveCameraPreview() {
+        flow.cancelCamera()
+        closeCapture()
     }
 
     private func recoverySurface(mode: ScanCameraRecoveryMode) -> some View {
@@ -609,6 +616,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     @ViewBuilder let libraryControl: () -> LibraryControl
     let toggleFlash: () -> Void
     let takePhoto: () -> Void
+    let close: () -> Void
     @Binding var returnFocus: PhotoReviewScanFocus?
     let review: () -> Void
 
@@ -638,14 +646,11 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .accessibilitySortPriority(10)
             }
 
-            ResponsiveFramingCorners()
-                .ignoresSafeArea()
-                .accessibilityHidden(true)
-
             VStack(spacing: 0) {
                 HStack {
-                    flashButton
+                    closeButton
                     Spacer()
+                    flashButton
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 8)
@@ -673,6 +678,26 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             reduceMotion ? nil : .easeOut(duration: 0.18),
             value: thumbnailURLs.count
         )
+    }
+
+    private var closeButton: some View {
+        Button(action: close) {
+            Image(systemName: "xmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(Color(hex: "#14161A").opacity(0.66))
+                .overlay { Circle().stroke(.white.opacity(0.12), lineWidth: 1) }
+                .clipShape(.circle)
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 48, height: 48)
+        .contentShape(.circle)
+        .accessibilityLabel("Close camera")
+        .accessibilityHint("Leaves capture and returns to Home")
+        .accessibilityIdentifier("scan.close")
+        .accessibilitySortPriority(80)
     }
 
     private var flashButton: some View {
@@ -977,6 +1002,7 @@ struct ScanCameraVisualStateView: View {
                 },
                 toggleFlash: {},
                 takePhoto: {},
+                close: {},
                 returnFocus: .constant(nil),
                 review: {},
             )

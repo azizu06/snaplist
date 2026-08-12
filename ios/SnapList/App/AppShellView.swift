@@ -3,6 +3,7 @@ import UIKit
 
 struct AppShellChromeContext: Equatable {
     let isKeyboardVisible: Bool
+    let isLiveCameraPreviewActive: Bool
     let isDeleteAccountFlowPresented: Bool
     let isListingReviewPresented: Bool
     let isGuestClaimPresented: Bool
@@ -20,7 +21,8 @@ enum AppShellChromePolicy {
     ) -> AppShellChromeProjection {
         AppShellChromeProjection(
             showsDock: DockVisibilityPolicy.shouldShow(
-                isKeyboardVisible: context.isKeyboardVisible
+                isKeyboardVisible: context.isKeyboardVisible,
+                isLiveCameraPreviewActive: context.isLiveCameraPreviewActive
             )
                 && !context.isDeleteAccountFlowPresented
                 && !context.isListingReviewPresented
@@ -631,7 +633,11 @@ struct AppShellView: View {
         case .scan:
             ScanCameraView(
                 flow: captureFlow,
-                returnFocus: $pendingScanReturnFocus
+                returnFocus: $pendingScanReturnFocus,
+                closeCapture: {
+                    router.reset(tab: .trophyWall)
+                    router.selectedTab = .trophyWall
+                }
             ) { destination, photos, opener in
                 router.openCaptureBoundary(
                     destination: destination,
@@ -916,6 +922,8 @@ struct AppShellView: View {
         AppShellChromePolicy.project(
             AppShellChromeContext(
                 isKeyboardVisible: isKeyboardVisible,
+                isLiveCameraPreviewActive: router.selectedTab == .scan
+                    && captureFlow.phase.isLiveCameraPreview,
                 isDeleteAccountFlowPresented: isDeleteAccountFlowPresented,
                 isListingReviewPresented: activationListingReviewPresented,
                 isGuestClaimPresented: activationGuestClaimPresented,
