@@ -1333,3 +1333,72 @@ describe("createDefaultPricer Apify composition", () => {
     ).toEqual(["10", "20"]);
   });
 });
+
+/**
+ * The proxy template is the SECOND activation path for the sold tier (#715), so
+ * the operator-facing question is what a typo does. `createEbaySoldPricingProvider`
+ * resolves `EBAY_SOLD_PROXY_TEMPLATE` from the environment at CONSTRUCTION when no
+ * `fetchPage` is injected, and invalid config throws there rather than declining —
+ * ADR-0001 decision 2, "malformed config fails validation before egress".
+ *
+ * That contract is unit-tested on the pure egress functions, but not at the seam
+ * production actually calls. It matters here because `createDefaultPricer` is the
+ * composition root for all six tiers: a malformed template does not degrade the
+ * sold tier, it fails the whole pricer construction. These cases pin both halves —
+ * the fail-fast, and that a well-formed template is accepted at the same seam.
+ */
+describe("createDefaultPricer public sold-comp proxy egress", () => {
+  /** Lower tiers are stubbed so only the eBay-sold construction is under test. */
+  const inertLowerTiers = (): CreateDefaultPricerOptions => ({
+    apifySold: { enabled: false },
+    webSearch: { searchClient: { search: vi.fn(async () => []) } },
+    depreciation: { searchClient: { search: vi.fn(async () => []) } },
+    llmOnly: {
+      estimatePrice: async () => ({ suggested: 100, min: 50, max: 150 }),
+    },
+  });
+
+  beforeEach(() => {
+    __resetTtlCaches();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("fails pricer construction on a malformed proxy template instead of declining", () => {
+    // Missing the required {url} placeholder. The query string stands in for the
+    // provider credential these templates carry, so the no-echo rule is asserted
+    // on a value that would actually matter in a log.
+    const template = "https://proxy.example/fetch?key=NOT-A-REAL-CREDENTIAL";
+    vi.stubEnv("EBAY_SOLD_PROXY_TEMPLATE", template);
+    const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    let message = "";
+    try {
+      createRawDefaultPricer(inertLowerTiers());
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toMatch(/Invalid EBAY_SOLD_PROXY_TEMPLATE/);
+    expect(message).not.toContain("NOT-A-REAL-CREDENTIAL");
+    // Fail-fast means fail BEFORE egress: nothing was requested.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("accepts a well-formed proxy template at that same construction seam", () => {
+    vi.stubEnv(
+      "EBAY_SOLD_PROXY_TEMPLATE",
+      "https://proxy.example/fetch?key=NOT-A-REAL-CREDENTIAL&url={url}",
+    );
+    const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    expect(() => createRawDefaultPricer(inertLowerTiers())).not.toThrow();
+    // Construction alone never reaches the network, proxy or not.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
