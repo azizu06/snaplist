@@ -281,12 +281,89 @@ enum ActivationAuthenticationState: Equatable {
 }
 
 enum ActivationAuthenticationPolicy {
+    /// The status a bearer-authenticated route answers when the caller carries
+    /// no Clerk subject.
+    static let unauthenticatedStatusCode = 401
+
+    /// A guest reaches a bearer-authenticated route two ways, and both prove the
+    /// same fact. Either the provider has no session to mint a token from
+    /// (`sessionAbsent`), or it falls back to the App Attest capability bearer,
+    /// which is a real token the route then rejects with a 401. A capability
+    /// proves an installation, never a subject, so neither outcome improves by
+    /// asking again — both are terminal and both mean `.guest`.
+    ///
+    /// `.unknown` stays reserved for failures a retry can actually clear:
+    /// transport errors and 5xx. Classifying a 401 as `.unknown` is what left
+    /// every guest polling `/v1/session` forever (#784).
     static func state(forSessionError error: Error) -> ActivationAuthenticationState {
         if let bearerError = error as? BearerTokenProviderError,
            bearerError == .sessionAbsent {
             return .guest
         }
+        if let apiError = error as? MobileAPIClientError,
+           apiError == .httpStatus(unauthenticatedStatusCode) {
+            return .guest
+        }
         return .unknown
+    }
+}
+
+/// The bound on every activation loop that talks to the network. A `.retry` now
+/// only ever means "this might clear on its own" — a transport failure or a 5xx
+/// — so the loop backs off and then gives up, instead of spinning at a fixed
+/// interval for the whole app session (#784).
+struct ActivationRetryPolicy: Equatable, Sendable {
+    /// The cap, stated once and shared by all three activation loops. Five
+    /// attempts spend 2 + 4 + 8 + 16 = 30 seconds of backoff and then stop.
+    /// A loop that has failed for half a minute is not going to be rescued by
+    /// a thousand more requests; the next launch or navigation retries it.
+    let maxAttempts: Int
+    let baseDelay: Duration
+    let maxDelay: Duration
+
+    static let standard = ActivationRetryPolicy(
+        maxAttempts: 5,
+        baseDelay: .seconds(2),
+        maxDelay: .seconds(32)
+    )
+
+    /// Exponential backoff from `baseDelay`, clamped at `maxDelay`.
+    func delay(afterAttempt attempt: Int) -> Duration {
+        let doublings = max(0, attempt - 1)
+        guard doublings < 16 else { return maxDelay }
+        return min(baseDelay * (1 << doublings), maxDelay)
+    }
+}
+
+enum ActivationRetryOutcome<Value> {
+    case finished(Value)
+    case retry
+}
+
+/// Runs one attempt at a time under `policy` and stops for good when the cap is
+/// spent. The three activation loops used to live inside `AppShellView`, where
+/// a `while` was unreachable from a test; holding the loop here is what lets a
+/// test count the requests a guest actually makes.
+@MainActor
+enum ActivationBoundedRetry {
+    static func run<Value>(
+        policy: ActivationRetryPolicy = .standard,
+        isCancelled: () -> Bool = { Task.isCancelled },
+        sleep: (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        attempt: () async -> ActivationRetryOutcome<Value>
+    ) async -> Value? {
+        guard policy.maxAttempts > 0 else { return nil }
+        for attemptNumber in 1...policy.maxAttempts {
+            guard !isCancelled() else { return nil }
+            switch await attempt() {
+            case .finished(let value):
+                return value
+            case .retry:
+                guard attemptNumber < policy.maxAttempts else { return nil }
+                await sleep(policy.delay(afterAttempt: attemptNumber))
+            }
+        }
+        return nil
     }
 }
 
@@ -369,6 +446,41 @@ enum ActivationCompletionBootstrapCoordinator {
             )
         }
     }
+
+    /// The bootstrap loop itself. Returns the terminal result the caller should
+    /// apply, or nil when the caller stopped it or the retry cap ran out.
+    /// `onRetry` reports each deferred pass so the caller can record the
+    /// in-flight authentication without owning the loop.
+    static func bootstrap(
+        policy: ActivationRetryPolicy = .standard,
+        isCancelled: () -> Bool = { Task.isCancelled },
+        sleep: (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        onRetry: (ActivationAuthenticationState) -> Void,
+        guestCompleted: () -> Bool,
+        loadProgress: (String) -> ActivationGuidanceProgress,
+        fetchSessionUserID: () async throws -> String,
+        fetchTenantCompleted: () async throws -> Bool,
+        writeTenantCompletion: () async throws -> Bool
+    ) async -> ActivationCompletionBootstrapResult? {
+        await ActivationBoundedRetry.run(
+            policy: policy,
+            isCancelled: isCancelled,
+            sleep: sleep
+        ) {
+            let result = await resolve(
+                guestCompleted: guestCompleted(),
+                loadProgress: loadProgress,
+                fetchSessionUserID: fetchSessionUserID,
+                fetchTenantCompleted: fetchTenantCompleted,
+                writeTenantCompletion: writeTenantCompletion
+            )
+            guard case .retry(let authentication) = result else {
+                return .finished(result)
+            }
+            onRetry(authentication)
+            return .retry
+        }
+    }
 }
 
 enum ActivationGuestCompletionPromotionResult: Equatable {
@@ -403,6 +515,61 @@ enum ActivationGuestCompletionPromotionCoordinator {
             return .retry
         }
         return .retry
+    }
+
+    /// The promotion loop. Returns the promoted user ID, or nil when the caller
+    /// stopped it or the cap ran out. A guest who never signs in during this
+    /// session now stops asking after the cap; the marker still promotes on the
+    /// next launch, because bootstrap resolves it there.
+    static func promote(
+        policy: ActivationRetryPolicy = .standard,
+        isCancelled: () -> Bool = { Task.isCancelled },
+        sleep: (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        fetchSessionUserID: () async throws -> String,
+        fetchTenantCompleted: () async throws -> Bool,
+        writeTenantCompletion: () async throws -> Bool
+    ) async -> String? {
+        await ActivationBoundedRetry.run(
+            policy: policy,
+            isCancelled: isCancelled,
+            sleep: sleep
+        ) {
+            let result = await attempt(
+                fetchSessionUserID: fetchSessionUserID,
+                fetchTenantCompleted: fetchTenantCompleted,
+                writeTenantCompletion: writeTenantCompletion
+            )
+            guard case .promoted(let userID) = result else { return .retry }
+            return .finished(userID)
+        }
+    }
+}
+
+/// The authenticated completion write, bounded by the same policy. Reports
+/// whether the tenant marker was recorded, so the caller only advances local
+/// state on a write the server actually accepted.
+@MainActor
+enum ActivationCompletionRecordingCoordinator {
+    static func record(
+        policy: ActivationRetryPolicy = .standard,
+        isCancelled: () -> Bool = { Task.isCancelled },
+        sleep: (Duration) async -> Void = { try? await Task.sleep(for: $0) },
+        writeTenantCompletion: () async throws -> Bool
+    ) async -> Bool {
+        await ActivationBoundedRetry.run(
+            policy: policy,
+            isCancelled: isCancelled,
+            sleep: sleep
+        ) {
+            do {
+                guard try await writeTenantCompletion() else { return .retry }
+                return .finished(true)
+            } catch is CancellationError {
+                return .finished(false)
+            } catch {
+                return .retry
+            }
+        } ?? false
     }
 }
 

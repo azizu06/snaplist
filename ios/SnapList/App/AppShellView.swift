@@ -981,23 +981,15 @@ struct AppShellView: View {
             isCompletingActivation = true
             Task {
                 defer { isCompletingActivation = false }
-                while !Task.isCancelled {
-                    do {
-                        guard try await dependencies.mobileAPIClient
-                            .completeActivationGuidance().data.completed else {
-                            try await Task.sleep(for: .seconds(2))
-                            continue
-                        }
-                        _ = activationProgress.advance(for: .completionRecorded)
-                        hasCompletedActivation = true
-                        activationProgressStore.clear(for: userID)
-                        return
-                    } catch is CancellationError {
-                        return
-                    } catch {
-                        try? await Task.sleep(for: .seconds(2))
+                guard await ActivationCompletionRecordingCoordinator.record(
+                    writeTenantCompletion: {
+                        try await dependencies.mobileAPIClient
+                            .completeActivationGuidance().data.completed
                     }
-                }
+                ) else { return }
+                _ = activationProgress.advance(for: .completionRecorded)
+                hasCompletedActivation = true
+                activationProgressStore.clear(for: userID)
             }
         case .unknown:
             break
@@ -1021,17 +1013,62 @@ struct AppShellView: View {
     }
 
     private func bootstrapActivationCompletion() async {
-        while !Task.isCancelled {
-            guard hasOnboardedForActivation,
-                  !hasCompletedActivation else { return }
+        let result = await ActivationCompletionBootstrapCoordinator.bootstrap(
+            isCancelled: {
+                Task.isCancelled
+                    || !hasOnboardedForActivation
+                    || hasCompletedActivation
+            },
+            onRetry: { authentication in
+                activationAuthentication = authentication
+                activationCompletionChecked = false
+            },
+            guestCompleted: { activationGuestCompletionStore.isCompleted },
+            loadProgress: { identity in
+                configuration.activationGuidanceFixtureState
+                    .map { ActivationGuidanceProgress(state: $0) }
+                    ?? activationProgressStore.load(for: identity)
+            },
+            fetchSessionUserID: {
+                let session = try await dependencies.mobileAPIClient.getSession()
+                return session.data.userId
+            },
+            fetchTenantCompleted: {
+                try await dependencies.mobileAPIClient
+                    .getActivationGuidance().data.completed
+            },
+            writeTenantCompletion: {
+                try await dependencies.mobileAPIClient
+                    .completeActivationGuidance().data.completed
+            }
+        )
 
-            let guestCompleted = activationGuestCompletionStore.isCompleted
-            let result = await ActivationCompletionBootstrapCoordinator.resolve(
-                guestCompleted: guestCompleted,
-                loadProgress: { identity in
-                    configuration.activationGuidanceFixtureState
-                        .map { ActivationGuidanceProgress(state: $0) }
-                        ?? activationProgressStore.load(for: identity)
+        switch result {
+        case .present(let authentication, _, let progress):
+            activationAuthentication = authentication
+            hasCompletedActivation = false
+            activationProgress = progress
+            activationCompletionChecked = true
+        case .completed(let authentication, let identity):
+            activationAuthentication = authentication
+            hasCompletedActivation = true
+            activationProgress = .recordedInstall
+            activationProgressStore.clear(for: identity)
+            activationCompletionChecked = true
+        case .retry, .none:
+            // The coordinator resolves retries inside its own bound, so a
+            // caller only ever sees a terminal result or nothing at all.
+            break
+        }
+    }
+
+    private func promoteCompletedGuestMarkerWhenAuthenticated() async {
+        let promotedUserID = await ActivationGuestCompletionPromotionCoordinator
+            .promote(
+                isCancelled: {
+                    Task.isCancelled
+                        || activationAuthentication != .guest
+                        || !activationGuestCompletionStore.isCompleted
                 },
                 fetchSessionUserID: {
                     let session = try await dependencies.mobileAPIClient.getSession()
@@ -1046,58 +1083,10 @@ struct AppShellView: View {
                         .completeActivationGuidance().data.completed
                 }
             )
-
-            switch result {
-            case .present(let authentication, _, let progress):
-                activationAuthentication = authentication
-                hasCompletedActivation = false
-                activationProgress = progress
-                activationCompletionChecked = true
-                return
-            case .completed(let authentication, let identity):
-                activationAuthentication = authentication
-                hasCompletedActivation = true
-                activationProgress = .recordedInstall
-                activationProgressStore.clear(for: identity)
-                activationCompletionChecked = true
-                return
-            case .retry(let authentication):
-                activationAuthentication = authentication
-                activationCompletionChecked = false
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
-    }
-
-    private func promoteCompletedGuestMarkerWhenAuthenticated() async {
-        while !Task.isCancelled,
-              activationAuthentication == .guest,
-              activationGuestCompletionStore.isCompleted {
-            let result = await ActivationGuestCompletionPromotionCoordinator
-                .attempt(
-                    fetchSessionUserID: {
-                        let session = try await dependencies.mobileAPIClient.getSession()
-                        return session.data.userId
-                    },
-                    fetchTenantCompleted: {
-                        try await dependencies.mobileAPIClient
-                            .getActivationGuidance().data.completed
-                    },
-                    writeTenantCompletion: {
-                        try await dependencies.mobileAPIClient
-                            .completeActivationGuidance().data.completed
-                    }
-                )
-            switch result {
-            case .promoted(let userID):
-                activationAuthentication = .authenticated(userID: userID)
-                activationProgressStore.clear(for: "guest")
-                activationProgressStore.clear(for: userID)
-                return
-            case .waitingForSession, .retry:
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
+        guard let promotedUserID else { return }
+        activationAuthentication = .authenticated(userID: promotedUserID)
+        activationProgressStore.clear(for: "guest")
+        activationProgressStore.clear(for: promotedUserID)
     }
 
     private var shouldShowFirstValueOnboarding: Bool {

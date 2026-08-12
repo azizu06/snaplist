@@ -281,6 +281,42 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(tenantWrites, 0)
     }
 
+    func testASessionRejectionClassifiesTheCallerAsGuestNotAsAnOutage() {
+        // A guest carries the App Attest capability bearer, so /v1/session
+        // answers 401 rather than failing to produce a token at all. Both are
+        // the same fact — there is no Clerk subject — and both must terminate
+        // the bootstrap loop instead of scheduling another request.
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: MobileAPIClientError.httpStatus(401)
+            ),
+            .guest
+        )
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: BearerTokenProviderError.sessionAbsent
+            ),
+            .guest
+        )
+
+        // .unknown stays reserved for failures where retrying can succeed.
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: MobileAPIClientError.httpStatus(503)
+            ),
+            .unknown
+        )
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: NSError(
+                    domain: NSURLErrorDomain,
+                    code: NSURLErrorTimedOut
+                )
+            ),
+            .unknown
+        )
+    }
+
     @MainActor
     func testActivationCompletionBootstrapDefersDuringAuthOutage() async {
         XCTAssertEqual(
@@ -294,7 +330,7 @@ final class OnboardingFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             ActivationAuthenticationPolicy.state(
-                forSessionError: MobileAPIClientError.httpStatus(401)
+                forSessionError: MobileAPIClientError.httpStatus(500)
             ),
             .unknown
         )
@@ -409,6 +445,243 @@ final class OnboardingFlowTests: XCTestCase {
 
         XCTAssertEqual(result, .promoted(userID: "user_566"))
         XCTAssertEqual(tenantWrites, 1)
+    }
+
+    func testActivationRetriesBackOffAndStateTheirCap() {
+        let policy = ActivationRetryPolicy.standard
+
+        XCTAssertEqual(policy.maxAttempts, 5)
+        XCTAssertEqual(policy.delay(afterAttempt: 1), .seconds(2))
+        XCTAssertEqual(policy.delay(afterAttempt: 2), .seconds(4))
+        XCTAssertEqual(policy.delay(afterAttempt: 3), .seconds(8))
+        XCTAssertEqual(policy.delay(afterAttempt: 4), .seconds(16))
+        XCTAssertEqual(policy.delay(afterAttempt: 99), policy.maxDelay)
+    }
+
+    @MainActor
+    func testAGuestLeavesActivationBootstrapAfterOneSessionRequest() async {
+        var sessionRequests = 0
+        var sleeps: [Duration] = []
+
+        let result = await ActivationCompletionBootstrapCoordinator.bootstrap(
+            isCancelled: { false },
+            sleep: { sleeps.append($0) },
+            onRetry: { _ in },
+            guestCompleted: { false },
+            loadProgress: { _ in .init() },
+            fetchSessionUserID: {
+                sessionRequests += 1
+                throw MobileAPIClientError.httpStatus(401)
+            },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: { true }
+        )
+
+        XCTAssertEqual(
+            result,
+            .present(
+                authentication: .guest,
+                identity: "guest",
+                progress: .init()
+            )
+        )
+        XCTAssertEqual(sessionRequests, 1)
+        XCTAssertEqual(sleeps, [])
+    }
+
+    @MainActor
+    func testAnAuthenticatedTransportFailureIsNeverDowngradedToGuest() async {
+        var sessionRequests = 0
+        var sleeps: [Duration] = []
+        var retryStates: [ActivationAuthenticationState] = []
+
+        let result = await ActivationCompletionBootstrapCoordinator.bootstrap(
+            isCancelled: { false },
+            sleep: { sleeps.append($0) },
+            onRetry: { retryStates.append($0) },
+            guestCompleted: { false },
+            loadProgress: { _ in .init() },
+            fetchSessionUserID: {
+                sessionRequests += 1
+                throw NSError(
+                    domain: NSURLErrorDomain,
+                    code: NSURLErrorTimedOut
+                )
+            },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: { true }
+        )
+
+        // An outage is not evidence of a missing account. It resolves to
+        // nothing at all rather than to a guest.
+        XCTAssertNil(result)
+        XCTAssertFalse(retryStates.contains(.guest))
+        XCTAssertEqual(
+            retryStates,
+            Array(
+                repeating: .unknown,
+                count: ActivationRetryPolicy.standard.maxAttempts
+            )
+        )
+        XCTAssertEqual(
+            sessionRequests,
+            ActivationRetryPolicy.standard.maxAttempts
+        )
+        XCTAssertEqual(sleeps, [.seconds(2), .seconds(4), .seconds(8), .seconds(16)])
+    }
+
+    @MainActor
+    func testATransientTransportFailureStillResolvesTheAuthenticatedUser() async {
+        var sessionRequests = 0
+
+        let result = await ActivationCompletionBootstrapCoordinator.bootstrap(
+            isCancelled: { false },
+            sleep: { _ in },
+            onRetry: { _ in },
+            guestCompleted: { false },
+            loadProgress: { _ in .init() },
+            fetchSessionUserID: {
+                sessionRequests += 1
+                guard sessionRequests > 1 else {
+                    throw NSError(
+                        domain: NSURLErrorDomain,
+                        code: NSURLErrorNetworkConnectionLost
+                    )
+                }
+                return "user_566"
+            },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: { true }
+        )
+
+        XCTAssertEqual(
+            result,
+            .present(
+                authentication: .authenticated(userID: "user_566"),
+                identity: "user_566",
+                progress: .init()
+            )
+        )
+        XCTAssertEqual(sessionRequests, 2)
+    }
+
+    @MainActor
+    func testACancelledActivationBootstrapIssuesNoSessionRequest() async {
+        var sessionRequests = 0
+
+        let result = await ActivationCompletionBootstrapCoordinator.bootstrap(
+            isCancelled: { true },
+            sleep: { _ in },
+            onRetry: { _ in },
+            guestCompleted: { false },
+            loadProgress: { _ in .init() },
+            fetchSessionUserID: {
+                sessionRequests += 1
+                return "user_566"
+            },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: { true }
+        )
+
+        XCTAssertNil(result)
+        XCTAssertEqual(sessionRequests, 0)
+    }
+
+    @MainActor
+    func testGuestPromotionWaitsForASessionInsteadOfReadingA401AsAnOutage() async {
+        let result = await ActivationGuestCompletionPromotionCoordinator.attempt(
+            fetchSessionUserID: {
+                throw MobileAPIClientError.httpStatus(401)
+            },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: { true }
+        )
+
+        XCTAssertEqual(result, .waitingForSession)
+    }
+
+    @MainActor
+    func testGuestPromotionPollingIsBoundedWhileNoSessionAppears() async {
+        var sessionRequests = 0
+        var sleeps: [Duration] = []
+
+        let result = await ActivationGuestCompletionPromotionCoordinator.promote(
+            isCancelled: { false },
+            sleep: { sleeps.append($0) },
+            fetchSessionUserID: {
+                sessionRequests += 1
+                throw MobileAPIClientError.httpStatus(401)
+            },
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: { true }
+        )
+
+        XCTAssertNil(result)
+        XCTAssertEqual(
+            sessionRequests,
+            ActivationRetryPolicy.standard.maxAttempts
+        )
+        XCTAssertEqual(sleeps, [.seconds(2), .seconds(4), .seconds(8), .seconds(16)])
+    }
+
+    @MainActor
+    func testGuestPromotionRecordsTheTenantMarkerOnItsFirstAuthenticatedPass() async {
+        var sessionRequests = 0
+        var sleeps: [Duration] = []
+
+        let result = await ActivationGuestCompletionPromotionCoordinator.promote(
+            isCancelled: { false },
+            sleep: { sleeps.append($0) },
+            fetchSessionUserID: {
+                sessionRequests += 1
+                return "user_566"
+            },
+            fetchTenantCompleted: { true },
+            writeTenantCompletion: { true }
+        )
+
+        XCTAssertEqual(result, "user_566")
+        XCTAssertEqual(sessionRequests, 1)
+        XCTAssertEqual(sleeps, [])
+    }
+
+    @MainActor
+    func testTheAuthenticatedCompletionWriteStopsInsteadOfRetryingForever() async {
+        var writes = 0
+        var sleeps: [Duration] = []
+
+        let recorded = await ActivationCompletionRecordingCoordinator.record(
+            isCancelled: { false },
+            sleep: { sleeps.append($0) },
+            writeTenantCompletion: {
+                writes += 1
+                return false
+            }
+        )
+
+        XCTAssertFalse(recorded)
+        XCTAssertEqual(writes, ActivationRetryPolicy.standard.maxAttempts)
+        XCTAssertEqual(sleeps, [.seconds(2), .seconds(4), .seconds(8), .seconds(16)])
+    }
+
+    @MainActor
+    func testTheAuthenticatedCompletionWriteRecoversFromATransientFailure() async {
+        var writes = 0
+
+        let recorded = await ActivationCompletionRecordingCoordinator.record(
+            isCancelled: { false },
+            sleep: { _ in },
+            writeTenantCompletion: {
+                writes += 1
+                guard writes > 1 else {
+                    throw MobileAPIClientError.httpStatus(503)
+                }
+                return true
+            }
+        )
+
+        XCTAssertTrue(recorded)
+        XCTAssertEqual(writes, 2)
     }
 
     func testReducedMotionSelectsAnExplicitStaticAssetForEveryACTState() {
