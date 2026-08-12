@@ -60,6 +60,7 @@ export async function runMobileRuntimeSmoke(): Promise<MobileRuntimeSmokeResult>
       queue: createSupabasePgmqPipelineQueue(queueRpc),
       runs: {} as PipelineWorkerStore,
       photos: {} as never,
+      voice: {} as never,
       guestRecovery: { prepare: async () => null },
     },
     createStages: () => unusedStages(),

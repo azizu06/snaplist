@@ -3,6 +3,7 @@ import { resolveLanguageModel } from "../llm/registry";
 import {
   recordModelUsage,
   recordSoldCompUsage,
+  recordTranscriptionUsage,
   withProviderUsageRun,
   type ProviderUsageRecord,
 } from ".";
@@ -64,6 +65,13 @@ const SOLD_COMP_SHAPE = {
   results: "number",
 } as const;
 
+const TRANSCRIPTION_SHAPE = {
+  role: "string",
+  provider: "string",
+  model: "string",
+  calls: "number",
+} as const;
+
 /**
  * Asserts the record carries exactly the allowlisted fields, with no extra key
  * and no free-form string beyond the three routing labels (role, provider,
@@ -72,7 +80,12 @@ const SOLD_COMP_SHAPE = {
  */
 function expectOnlyAllowlistedFields(record: ProviderUsageRecord): void {
   expect(Object.keys(record).sort()).toEqual(
-    [...Object.keys(RECORD_SHAPE), "models", "soldComps"].sort(),
+    [
+      ...Object.keys(RECORD_SHAPE),
+      "models",
+      "transcriptions",
+      "soldComps",
+    ].sort(),
   );
   for (const [key, type] of Object.entries(RECORD_SHAPE)) {
     expect(typeof record[key as keyof typeof RECORD_SHAPE]).toBe(type);
@@ -93,6 +106,15 @@ function expectOnlyAllowlistedFields(record: ProviderUsageRecord): void {
     expect(
       entry.chargedUsd === null || typeof entry.chargedUsd === "number",
     ).toBe(true);
+  }
+  for (const entry of record.transcriptions) {
+    expect(Object.keys(entry).sort()).toEqual(
+      [...Object.keys(TRANSCRIPTION_SHAPE), "chargedUsd"].sort(),
+    );
+    for (const [key, type] of Object.entries(TRANSCRIPTION_SHAPE)) {
+      expect(typeof entry[key as keyof typeof TRANSCRIPTION_SHAPE]).toBe(type);
+    }
+    expect(entry.chargedUsd).toBeNull();
   }
 }
 
@@ -130,6 +152,14 @@ describe("provider usage record contents", () => {
         token: FORBIDDEN[1],
         query: FORBIDDEN[2],
       } as Parameters<typeof recordSoldCompUsage>[0]);
+      recordTranscriptionUsage({
+        role: "sellerContext",
+        provider: "openai",
+        model: "gpt-4o-mini-transcribe",
+        chargedUsd: null,
+        transcript: FORBIDDEN[2],
+        audio: FORBIDDEN[3],
+      } as Parameters<typeof recordTranscriptionUsage>[0]);
     });
 
     expectOnlyAllowlistedFields(usage);
@@ -140,6 +170,7 @@ describe("provider usage record contents", () => {
     // The counts themselves still made it: this is a filter, not a black hole.
     expect(usage.inputTokens).toBe(900);
     expect(usage.soldComps[0]?.results).toBe(8);
+    expect(usage.transcriptions[0]).toMatchObject({ calls: 1, chargedUsd: null });
   });
 
   it("adds nothing but counts from a real provider round trip", async () => {

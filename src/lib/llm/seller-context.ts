@@ -1,6 +1,16 @@
 import {
   canonicalizeScoutGuidanceLocale as canonicalizeBcp47LanguageTag,
 } from "../scout-guidance/contract";
+import {
+  isSellerContextTranscriptionEnabled,
+  resolveProvider,
+  resolveTranscriptionModel,
+  resolveTranscriptionModelId,
+  sellerContextTranscriptionConfigError,
+  SellerContextTranscriptionConfigurationError,
+} from "./registry";
+import { recordTranscriptionUsage } from "../provider-usage/collector";
+import type { ProviderUsageTranscriptionTotals } from "../provider-usage/record";
 
 const MAXIMUM_TRANSCRIPT_UNICODE_SCALARS = 1_000;
 const MAXIMUM_TRANSCRIPT_UTF8_BYTES = 4_096;
@@ -32,16 +42,29 @@ export type SellerContextTranscriptionResult =
       kind: "transcribed";
       text: string;
       language: CanonicalLanguageTag | null;
+      providerContacted: true;
     }
-  | { kind: "empty" | "unsupported" | "timed-out" | "failed" };
+  | {
+      kind: "empty" | "unsupported" | "timed-out" | "failed";
+      providerContacted: boolean;
+    };
+
+export type SellerContextTranscriptionAttempt =
+  ProviderUsageTranscriptionTotals & {
+    role: typeof SELLER_CONTEXT_TRANSCRIPTION_ROLE;
+    calls: 1;
+    chargedUsd: null;
+  };
 
 export interface SellerContextTranscriber {
+  readonly transcriptionAttempt?: SellerContextTranscriptionAttempt;
   transcribe(
     input: SellerContextTranscriptionInput,
   ): Promise<SellerContextTranscriptionResult>;
 }
 
 export interface SellerContextTranscriptionModel {
+  readonly transcriptionAttempt?: SellerContextTranscriptionAttempt;
   transcribe(input: SellerContextTranscriptionInput): Promise<
     | {
         text: string;
@@ -53,6 +76,59 @@ export interface SellerContextTranscriptionModel {
 
 export interface ResolveSellerContextTranscriberOptions {
   model?: SellerContextTranscriptionModel;
+}
+
+export function createRoleKeyedSellerContextTranscriptionModel(): SellerContextTranscriptionModel {
+  const env = process.env;
+  const configurationError = sellerContextTranscriptionConfigError(env);
+  if (configurationError) {
+    throw new SellerContextTranscriptionConfigurationError(configurationError);
+  }
+  const provider = isSellerContextTranscriptionEnabled(env)
+    ? resolveProvider(env)
+    : null;
+  const modelId = provider
+    ? resolveTranscriptionModelId(SELLER_CONTEXT_TRANSCRIPTION_ROLE, {
+        provider,
+        env,
+      })
+    : null;
+  const transcriptionAttempt =
+    provider === "openai" && modelId
+      ? ({
+          role: SELLER_CONTEXT_TRANSCRIPTION_ROLE,
+          provider,
+          model: modelId,
+          calls: 1,
+          chargedUsd: null,
+        } satisfies SellerContextTranscriptionAttempt)
+      : undefined;
+  return {
+    ...(transcriptionAttempt ? { transcriptionAttempt } : {}),
+    async transcribe(input) {
+      const model = await resolveTranscriptionModel(
+        SELLER_CONTEXT_TRANSCRIPTION_ROLE,
+      );
+      if (!model) return { kind: "unsupported" };
+      const { experimental_transcribe: transcribe } = await import("ai");
+      // Count the attempt immediately before the paid boundary. The installed
+      // API exposes neither token usage nor charge data, so provider/model/call
+      // count is the complete honest receipt even when the provider rejects.
+      recordTranscriptionUsage({
+        role: SELLER_CONTEXT_TRANSCRIPTION_ROLE,
+        provider: model.provider,
+        model: model.modelId,
+        chargedUsd: null,
+      });
+      const result = await transcribe({
+        model: model.model,
+        audio: input.bytes,
+        abortSignal: input.signal,
+        maxRetries: 0,
+      });
+      return { text: result.text, language: result.language };
+    },
+  };
 }
 
 function normalizeTranscript(text: string): string {
@@ -122,16 +198,23 @@ export function resolveSellerContextTranscriber(
   if (!options.model) {
     return {
       async transcribe() {
-        return { kind: "unsupported" };
+        return { kind: "unsupported", providerContacted: false };
       },
     };
   }
 
   const model = options.model;
   return {
+    ...(model.transcriptionAttempt
+      ? { transcriptionAttempt: model.transcriptionAttempt }
+      : {}),
     async transcribe(input) {
-      if (!isVerifiedVoiceInput(input)) return { kind: "unsupported" };
-      if (input.signal.aborted) return { kind: "failed" };
+      if (!isVerifiedVoiceInput(input)) {
+        return { kind: "unsupported", providerContacted: false };
+      }
+      if (input.signal.aborted) {
+        return { kind: "failed", providerContacted: false };
+      }
       const deadlineController = new AbortController();
       let cancelFromCaller: (() => void) | undefined;
       const callerCancellation = new Promise<typeof callerCancelled>((resolve) => {
@@ -155,18 +238,28 @@ export function resolveSellerContextTranscriber(
           timeout,
           callerCancellation,
         ]);
-        if (output === timedOut) return { kind: "timed-out" };
-        if (output === callerCancelled) return { kind: "failed" };
-        if ("kind" in output) return { kind: "unsupported" };
+        if (output === timedOut) {
+          return { kind: "timed-out", providerContacted: true };
+        }
+        if (output === callerCancelled) {
+          return { kind: "failed", providerContacted: true };
+        }
+        if ("kind" in output) {
+          return { kind: "unsupported", providerContacted: false };
+        }
         const text = normalizeTranscript(output.text);
-        if (!text) return { kind: "empty" };
+        if (!text) return { kind: "empty", providerContacted: true };
         return {
           kind: "transcribed",
           text,
           language: normalizeLanguage(output.language),
+          providerContacted: true,
         };
-      } catch {
-        return { kind: "failed" };
+      } catch (error) {
+        if (error instanceof SellerContextTranscriptionConfigurationError) {
+          throw error;
+        }
+        return { kind: "failed", providerContacted: true };
       } finally {
         if (deadline) clearTimeout(deadline);
         input.signal.removeEventListener("abort", abortFromCaller);

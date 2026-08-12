@@ -272,6 +272,7 @@ async function mandatoryOwnerResidue(): Promise<number> {
        union all select count(*)::integer from private.ebay_unmappable_connection_quarantines where user_id = $1
        union all select count(*)::integer from private.ebay_seller_identity_tenants where user_id = $1
        union all select count(*)::integer from private.pipeline_run_usage_reservations where user_id = $1
+       union all select count(*)::integer from private.item_seller_voice_contexts where user_id = $1
        union all select count(*)::integer from private.pipeline_staging_cleanup_intents where user_id = $1
        union all select count(*)::integer from private.legacy_pipeline_usage_reservations where user_id = $1
        union all select count(*)::integer from private.mobile_item_submissions where user_id = $1
@@ -407,6 +408,141 @@ afterAll(async () => {
 });
 
 describe("durable account erasure against local Supabase", () => {
+  it("discloses hosted transcription retention only after explicit provider contact", async () => {
+    const cases = [
+      {
+        outcome: "unsupported",
+        providerContacted: false,
+        expectsProviderCopy: false,
+      },
+      {
+        outcome: "timed-out",
+        providerContacted: true,
+        expectsProviderCopy: true,
+      },
+    ] as const;
+
+    for (const evidence of cases) {
+      const userId = `user_test_account_erasure_voice_${evidence.outcome}_${Date.now()}`;
+      const staged = await stageCreditedRun(userId);
+      const cleanupId = crypto.randomUUID();
+      let generationId: string | null = null;
+      try {
+        const run = await database.query<{ item_id: string }>(
+          "select item_id::text from public.pipeline_runs where id = $1::uuid",
+          [staged.runId],
+        );
+        expect(run.rows).toHaveLength(1);
+        await database.query(
+          `insert into private.mobile_item_submission_voice_handoffs (
+             user_id, idempotency_key, request_fingerprint, batch_id,
+             cleanup_id, receipt, state, item_id, run_id, cleanup_after,
+             accepted_at
+           ) values (
+             $1, $2::uuid, $3, $4::uuid, $5::uuid, $6::jsonb, 'accepted',
+             $7::uuid, $8::uuid, statement_timestamp() + interval '23 hours',
+             statement_timestamp()
+           )`,
+          [
+            userId,
+            crypto.randomUUID(),
+            "a".repeat(64),
+            crypto.randomUUID(),
+            cleanupId,
+            JSON.stringify({
+              version: 1,
+              storage_path: `${userId}/account-erasure/voice.wav`,
+              content_sha256: "b".repeat(64),
+              byte_length: 44,
+              duration_ms: 1_000,
+              locale: "en-US",
+              media_type: "audio/wav",
+            }),
+            run.rows[0]!.item_id,
+            staged.runId,
+          ],
+        );
+        const claimed = await admin.rpc("claim_pipeline_run_attempt", {
+          p_lease_seconds: 300,
+          p_message_id: staged.queueMessageId,
+          p_run_id: staged.runId,
+        });
+        expect(claimed.error).toBeNull();
+        const leaseToken = (claimed.data as {
+          kind: string;
+          context?: { run?: { lease_token?: string } };
+        }).context?.run?.lease_token;
+        expect(leaseToken).toBeTruthy();
+        const recorded = await admin.rpc("record_pipeline_run_voice_outcome", {
+          p_lease_token: leaseToken,
+          p_outcome: evidence.outcome,
+          p_provider_contacted: evidence.providerContacted,
+          p_run_id: staged.runId,
+        });
+        expect(recorded.error).toBeNull();
+        expect(recorded.data).toBe(true);
+
+        const authority = await database.query<{
+          terminal_voice_outcome: string;
+          transcription_provider_contacted: boolean;
+          transcription_outcome: string | null;
+        }>(
+          `select terminal_voice_outcome, transcription_provider_contacted,
+                  transcription_outcome
+           from private.mobile_item_submission_voice_handoffs
+           where run_id = $1::uuid`,
+          [staged.runId],
+        );
+        expect(authority.rows[0]).toEqual({
+          terminal_voice_outcome: evidence.outcome,
+          transcription_provider_contacted: evidence.providerContacted,
+          transcription_outcome: evidence.providerContacted
+            ? evidence.outcome
+            : null,
+        });
+
+        const started = await admin.rpc("begin_account_erasure", {
+          p_idempotency_key: crypto.randomUUID(),
+          p_user_id: userId,
+        });
+        expect(started.error).toBeNull();
+        const payload = erasurePayload(started.data);
+        generationId = payload.generation_id;
+        // `begin` fences the account and snapshots storage. The durable
+        // disclosure is assembled only by the deletion pass, before that pass
+        // removes the voice handoff that carries the provider-contact fact.
+        expect(payload.retained_records).toEqual([]);
+
+        const advanced = await advanceErasure(generationId);
+        expect(advanced.retained_records).toEqual(
+          evidence.expectsProviderCopy
+            ? ["hosted-transcription-provider-copy"]
+            : [],
+        );
+      } finally {
+        if (generationId) {
+          await database.query(
+            "delete from private.account_erasure_generations where generation_id = $1::uuid",
+            [generationId],
+          );
+        }
+        await admin.rpc("ack_pipeline_message", {
+          p_message_id: staged.queueMessageId,
+        });
+        await database.query(
+          `delete from private.pipeline_storage_cleanup_jobs
+           where source_type = 'raw_voice' and source_id = $1::uuid`,
+          [cleanupId],
+        );
+        await database.query(
+          "delete from private.mobile_item_submission_voice_handoffs where user_id = $1",
+          [userId],
+        );
+        await cleanupClerkTestUsers(admin, [userId]);
+      }
+    }
+  });
+
   it("fences an active upload, resumes one generation, and preserves foreign bytes", async () => {
 
     const foreignBefore = await foreignState();
@@ -690,6 +826,12 @@ describe("durable account erasure against local Supabase", () => {
         ),
       ]);
       await database.query(
+        `insert into private.item_seller_voice_contexts (
+           item_id, user_id, transcript, language
+         ) values ($1::uuid, $2, 'account erasure seller context', 'en-US')`,
+        [draft.itemId, publishOwnerId],
+      );
+      await database.query(
         `update public.listings
          set status = 'published',
              ebay_status = 'published',
@@ -928,6 +1070,12 @@ describe("durable account erasure against local Supabase", () => {
         status: "deletion_completed_with_retained_records",
         retained_records: ["ebay-live-listing"],
       });
+      await expect(database.query(
+        `select count(*)::integer count
+         from private.item_seller_voice_contexts
+         where user_id = $1`,
+        [publishOwnerId],
+      )).resolves.toMatchObject({ rows: [{ count: 0 }] });
       // Erasure ends no listing. Nothing was sent to eBay at any point.
       expect(adapter.requests).toHaveLength(0);
       expect(adapter.reviseRequests).toHaveLength(0);

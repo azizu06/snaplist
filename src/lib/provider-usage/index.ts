@@ -3,10 +3,14 @@
  * SnapList Pro allowance decision consumes instead of a modeled estimate.
  */
 export {
+  captureProviderUsageRun,
+  currentTranscriptionUsage,
   providerUsageRunActive,
   recordModelUsage,
   recordSoldCompUsage,
+  recordTranscriptionUsage,
   withProviderUsageRun,
+  type CapturedProviderUsageRun,
   type ProviderUsageRun,
 } from "./collector";
 export {
@@ -16,4 +20,6 @@ export {
   type ProviderUsageRecord,
   type SoldCompUsage,
   type SoldCompUsageReport,
+  type ProviderUsageTranscriptionTotals,
+  type TranscriptionUsageReport,
 } from "./record";

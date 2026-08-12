@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { recordModelUsage, recordSoldCompUsage } from "../provider-usage";
 import type { PipelineResult } from "@/lib/pipeline";
 import type { PipelineQueue } from "./queue";
@@ -19,6 +19,10 @@ const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const ITEM_ID = "22222222-2222-4222-8222-222222222222";
 const CHECKPOINTED_AT = "2026-07-20T08:00:00.000Z";
 const databaseClock = createDatabaseCheckpointClock(() => CHECKPOINTED_AT);
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const RESULT: PipelineResult = {
   attributes: { brand: "Sony", model: "WH-1000XM4", condition: "good" },
@@ -263,10 +267,14 @@ describe("durable pipeline queue consumer", () => {
   });
 
   it("turns a transient error into a bounded retry and extends visibility without ack", async () => {
+    const transcriptSentinel = "seller said scratch on left hinge";
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const queue = queueWith();
     const runs = storeWith();
     const pipeline = processor();
-    pipeline.process.mockRejectedValueOnce(new Error("provider timed out with secret text"));
+    pipeline.process.mockRejectedValueOnce(
+      new Error(`provider echoed transcript: ${transcriptSentinel}`),
+    );
 
     await expect(
       consumePipelineQueue({ queue, runs, processor: pipeline }),
@@ -280,7 +288,11 @@ describe("durable pipeline queue consumer", () => {
       }),
     );
     const failAttemptMock = runs.failAttempt as unknown as ReturnType<typeof vi.fn>;
-    expect(JSON.stringify(failAttemptMock.mock.calls)).not.toContain("secret text");
+    expect(JSON.stringify(failAttemptMock.mock.calls)).not.toContain(transcriptSentinel);
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain(transcriptSentinel);
+    expect(errorLog).toHaveBeenCalledWith(
+      `[pipeline.worker.attempt] run ${RUN_ID} code pipeline_temporarily_unavailable`,
+    );
     expect(queue.defer).toHaveBeenCalledWith("41", 30);
     expect(queue.ack).not.toHaveBeenCalled();
   });
@@ -439,6 +451,7 @@ describe("durable pipeline queue consumer provider usage", () => {
             reasoningTokens: 0,
           },
         ],
+        transcriptions: [],
         soldComps: [
           { strategy: "apify", attempts: 1, results: 7, chargedUsd: 0.02 },
         ],

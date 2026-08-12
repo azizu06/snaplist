@@ -63,6 +63,16 @@ describe("register", () => {
     await expect(register()).resolves.toBeUndefined();
   });
 
+  it("rejects startup before runs when seller-context transcription has no provider adapter", async () => {
+    deployedEnv();
+    vi.stubEnv("LLM_PROVIDER", "google");
+    vi.stubEnv("SELLER_CONTEXT_TRANSCRIPTION_ENABLED", "true");
+
+    await expect(register()).rejects.toThrow(
+      /SELLER_CONTEXT_TRANSCRIPTION_ENABLED.*LLM_PROVIDER.*google/i,
+    );
+  });
+
   it("rejects deployment startup when deployed validation rejects the Sandbox default", async () => {
     deployedEnv();
     vi.stubEnv("EBAY_BASE_URL", "");

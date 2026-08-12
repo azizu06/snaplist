@@ -170,8 +170,11 @@ Missing, skipped, deleted, permission-denied, interrupted, and canceled capture 
 voice asset and therefore enter the same photos-only path.
 
 Transcription has a 20-second attempt deadline and at most one billable attempt per logical run. The
-worker durably marks the attempt before an external call. An ambiguous response therefore loses the
-optional voice context rather than risking duplicate spend on queue redelivery. Transcription never
+worker durably checkpoints a strict content-free role/provider/model/call reservation and flushes
+its idempotent usage receipt before the external adapter can run. Replay inspects both the pending
+attempt and terminal voice checkpoints, conservatively reuses that receipt, and never retranscribes
+after an ambiguous persistence boundary. An ambiguous response therefore loses the optional voice
+context rather than risking duplicate spend on queue redelivery. Transcription never
 creates a second run, reserves another credit, changes allowance settlement, or makes the durable
 pipeline terminally fail.
 
@@ -232,6 +235,11 @@ That external policy cannot be described as SnapList deletion. Provider activati
 the operator verifies and discloses the current default retention and any approved zero-retention
 controls. With transcription disabled, SnapList incurs no hosted transcription cost or external
 audio disclosure.
+
+The server enforces that decision with the explicit
+`SELLER_CONTEXT_TRANSCRIPTION_ENABLED=true` operator gate. It defaults to disabled; selecting a
+provider, supplying a key, or overriding the transcription model never activates hosted audio
+disclosure. Unset or `false` yields the ordinary `unsupported` photos-only outcome.
 
 ## Contract evidence and finite implementation handoff
 

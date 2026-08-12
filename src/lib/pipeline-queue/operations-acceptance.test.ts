@@ -176,6 +176,11 @@ class AcceptanceStore implements PipelineWorkerStore {
     this.currentLease(input.runId, input.leaseToken);
   }
 
+  async recordVoiceOutcome(input: { runId: string; leaseToken: string }) {
+    this.currentLease(input.runId, input.leaseToken);
+    return false;
+  }
+
   async rejectMessage(input: { runId: string; messageId: string }) {
     const run = this.runs.get(input.runId);
     if (!run || run.messageId !== input.messageId) return false;

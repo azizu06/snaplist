@@ -6,6 +6,9 @@ import {
   resolveLanguageModel,
   resolveModelId,
   resolveProvider,
+  resolveTranscriptionModel,
+  isSellerContextTranscriptionEnabled,
+  sellerContextTranscriptionConfigError,
 } from "./registry";
 
 /**
@@ -143,6 +146,66 @@ describe("resolveApiKey", () => {
     ).toBe("g1");
     expect(resolveApiKey("google", { GEMINI_API_KEY: "g2" })).toBe("g2");
     expect(resolveApiKey("google", {})).toBeUndefined();
+  });
+});
+
+describe("seller context transcription activation", () => {
+  it("is default-off and accepts only an explicit boolean operator choice", () => {
+    expect(isSellerContextTranscriptionEnabled({})).toBe(false);
+    expect(isSellerContextTranscriptionEnabled({
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "false",
+    })).toBe(false);
+    expect(isSellerContextTranscriptionEnabled({
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "true",
+    })).toBe(true);
+    expect(sellerContextTranscriptionConfigError({
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "1",
+    })).toMatch(/neither "true" nor "false"/i);
+  });
+
+  it("rejects explicit activation for an unsupported selected provider without exposing keys", () => {
+    const error = sellerContextTranscriptionConfigError({
+      LLM_PROVIDER: "google",
+      GOOGLE_GENERATIVE_AI_API_KEY: "google-key-must-not-escape",
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "true",
+    });
+
+    expect(error).toMatch(/SELLER_CONTEXT_TRANSCRIPTION_ENABLED.*LLM_PROVIDER.*google/i);
+    expect(error).not.toContain("google-key-must-not-escape");
+  });
+
+  it("lets explicit OpenAI transcription override ambient Google selection", async () => {
+    await expect(
+      resolveTranscriptionModel("sellerContext", {
+        provider: "openai",
+        apiKey: "test-key",
+        env: {
+          LLM_PROVIDER: "google",
+          SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "true",
+        },
+      }),
+    ).resolves.toMatchObject({
+      provider: "openai",
+      modelId: "gpt-4o-mini-transcribe",
+    });
+  });
+
+  it("fails closed when explicit Google transcription overrides ambient OpenAI", async () => {
+    await expect(
+      resolveTranscriptionModel("sellerContext", {
+        provider: "google",
+        apiKey: "secret-must-not-escape",
+        env: {
+          LLM_PROVIDER: "openai",
+          SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "true",
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: "SellerContextTranscriptionConfigurationError",
+      message: expect.stringMatching(
+        /SELLER_CONTEXT_TRANSCRIPTION_ENABLED.*provider.*google/i,
+      ),
+    });
   });
 });
 

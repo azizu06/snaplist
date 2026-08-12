@@ -71,6 +71,23 @@ const workerContextSchema = z.object({
     review_revision: z.string().uuid(),
     review_content_revision: z.string().uuid(),
   }),
+  voice: z
+    .object({
+      receipt: z
+        .object({
+          version: z.literal(1),
+          storagePath: z.string().min(1).max(1_024),
+          contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
+          byteLength: z.number().int().positive().max(524_288),
+          durationMs: z.number().int().positive().max(15_000),
+          locale: z.string().min(1).max(255).nullable(),
+          mediaType: z.literal("audio/wav"),
+        })
+        .strict(),
+    })
+    .strict()
+    .nullable()
+    .optional(),
 });
 
 export type PipelineWorkerContext = z.infer<typeof workerContextSchema>;
@@ -110,6 +127,7 @@ type PipelineWorkerRpcName =
   | "complete_pipeline_run_with_guest_recovery"
   | "finish_pipeline_run_attempt"
   | "reject_pipeline_message"
+  | "record_pipeline_run_voice_outcome"
   | "record_pipeline_run_provider_usage";
 
 interface PipelineWorkerRpcResult {
@@ -160,6 +178,12 @@ export interface PipelineWorkerStore {
     leaseToken: string;
     usage: ProviderUsageRecord;
   }): Promise<void>;
+  recordVoiceOutcome(input: {
+    runId: string;
+    leaseToken: string;
+    outcome: "transcribed" | "empty" | "unsupported" | "timed-out" | "failed";
+    providerContacted: boolean;
+  }): Promise<boolean>;
   failAttempt(input: {
     runId: string;
     leaseToken: string;
@@ -294,7 +318,32 @@ export function createSupabasePipelineWorkerStore(
         p_run_id: parsed.runId,
         p_usage: parsed.usage,
       });
-      rpcData("provider usage recording", result);
+      z.literal(true).parse(rpcData("provider usage recording", result));
+    },
+
+    async recordVoiceOutcome(input) {
+      const parsed = z
+        .object({
+          runId: z.string().uuid(),
+          leaseToken: z.string().uuid(),
+          outcome: z.enum([
+            "transcribed",
+            "empty",
+            "unsupported",
+            "timed-out",
+            "failed",
+          ]),
+          providerContacted: z.boolean(),
+        })
+        .strict()
+        .parse(input);
+      const result = await client.rpc("record_pipeline_run_voice_outcome", {
+        p_lease_token: parsed.leaseToken,
+        p_outcome: parsed.outcome,
+        p_provider_contacted: parsed.providerContacted,
+        p_run_id: parsed.runId,
+      });
+      return z.boolean().parse(rpcData("voice outcome recording", result));
     },
 
     async failAttempt(input) {

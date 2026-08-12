@@ -618,6 +618,14 @@ describe("non-guest item deletion against local Supabase", () => {
       seedItem(owner, ownerId, "owned"),
       seedItem(foreign, foreignId, "foreign"),
     ]);
+    await database.query(
+      `insert into private.item_seller_voice_contexts (
+         item_id, user_id, transcript, language
+       ) values
+         ($1::uuid, $2, 'owned seller context', 'en-US'),
+         ($3::uuid, $4, 'foreign seller context', 'en-US')`,
+      [owned.itemId, ownerId, untouched.itemId, foreignId],
+    );
 
     const before = await tenantResidue(ownerId);
     expect(before).toEqual({
@@ -644,6 +652,15 @@ describe("non-guest item deletion against local Supabase", () => {
       listings: 0,
       listingSyncState: 0,
       listingSyncConflicts: 0,
+    });
+    await expect(database.query(
+      `select user_id, transcript
+       from private.item_seller_voice_contexts
+       where item_id = any($1::uuid[])
+       order by user_id`,
+      [[owned.itemId, untouched.itemId]],
+    )).resolves.toMatchObject({
+      rows: [{ user_id: foreignId, transcript: "foreign seller context" }],
     });
 
     // Storage removal is published as durable leased work, not performed inside

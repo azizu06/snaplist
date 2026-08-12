@@ -1,21 +1,66 @@
 -- Issue #716: the tenant contract for measured per-run provider consumption.
 --
--- On a shared local stack the migration is applied INSIDE this transaction and
--- rolled back with it, so the delta is proved against the live schema without a
--- database reset and without leaving the stack mutated.
+-- On the shared stale local stack, the exclusive lease applies only
+-- 20260811123000_reconcile_durable_seller_voice_context.sql before this file.
+-- This transaction then rolls every fixture back without changing migration
+-- history. A clean temporary database reaches the same schema through both
+-- ordered #774 migrations.
 
 begin;
 
--- CI builds a clean stack from every migration and sets this flag, so there the
--- contract runs against the installed surface and must not replace it. A shared
--- local stack may not have applied this branch migration without a reset; there
--- the same DDL is injected inside this transaction and rolled back at EOF.
--- Keep the block below identical to the migration it mirrors:
--- supabase/migrations/20260806200000_pipeline_run_provider_usage.sql.
-select to_regclass('pgtap_ci.require_installed_migrations') is not null
-  as require_installed_migration \gset
-\if :require_installed_migration
+-- This file now exercises #774 behavior as well as #716. Fail before fixtures
+-- unless the exact reconciliation contract is installed: usage accounting,
+-- typed provider-contact provenance, and the four-argument outcome capability.
+select exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'pipeline_run_provider_usage'
+      and column_name = 'transcriptions'
+  ) and (
+    select count(*) = 2
+    from information_schema.columns
+    where table_schema = 'private'
+      and table_name = 'mobile_item_submission_voice_handoffs'
+      and column_name in (
+        'terminal_voice_outcome',
+        'transcription_provider_contacted'
+      )
+  ) and exists (
+    select 1
+    from pg_constraint constraint_record
+    where constraint_record.conrelid =
+          'private.mobile_item_submission_voice_handoffs'::regclass
+      and constraint_record.conname =
+          'mobile_voice_terminal_provider_provenance_check'
+      and constraint_record.convalidated
+  ) and to_regprocedure(
+    'public.record_pipeline_run_voice_outcome(uuid,uuid,text,boolean)'
+  ) is not null and to_regprocedure(
+    'public.record_pipeline_run_voice_outcome(uuid,uuid,text)'
+  ) is null and exists (
+    select 1
+    from pg_proc procedure
+    where procedure.oid =
+          'public.record_pipeline_run_provider_usage(uuid,uuid,jsonb)'::regprocedure
+      and procedure.prosecdef
+      and procedure.proconfig @> array['search_path=""']::text[]
+      and position(
+        'private.provider_usage_record_is_strict'
+        in pg_get_functiondef(procedure.oid)
+      ) > 0
+      and position('for update' in lower(pg_get_functiondef(procedure.oid))) > 0
+  ) and exists (
+    select 1 from pg_proc procedure
+    where procedure.oid =
+          'private.provider_usage_record_is_strict(jsonb)'::regprocedure
+      and procedure.prosecdef
+      and procedure.proconfig @> array['search_path=""']::text[]
+  ) as require_issue_774_schema \gset
+\if :require_issue_774_schema
 \else
+\echo 'pipeline_run_provider_usage.test.sql requires the exact issue #774 reconciliation schema'
+\quit 3
 -- Issue #716: record what each pipeline run actually consumed at paid providers,
 -- so the SnapList Pro allowance is set on measured data instead of a model.
 --
@@ -382,7 +427,7 @@ revoke all on function private.account_erasure_owned_row_count(text)
   from public, anon, authenticated, service_role;
 \endif
 
-select plan(26);
+select plan(48);
 
 -- ---------------------------------------------------------------------------
 -- Table privileges: sellers read their own row, and no runtime role — the
@@ -472,7 +517,9 @@ from (values
   ('11110000-0000-4000-8000-000000000716'::uuid, 'user_pgtap_716_a',
    '88880000-0000-4000-8000-000000000716'::uuid),
   ('11110000-0000-4000-8000-000000000717'::uuid, 'user_pgtap_716_b',
-   '88880000-0000-4000-8000-000000000717'::uuid)
+   '88880000-0000-4000-8000-000000000717'::uuid),
+  ('11110000-0000-4000-8000-000000000718'::uuid, 'user_pgtap_716_a',
+   '88880000-0000-4000-8000-000000000718'::uuid)
 ) as ids(item_id, user_id, revision);
 
 insert into public.pipeline_runs (
@@ -490,6 +537,11 @@ values
    '11110000-0000-4000-8000-000000000717', 'running', 'generating',
    'cost-pgtap-716-b', 1, statement_timestamp(), statement_timestamp(),
    '33330000-0000-4000-8000-000000000717',
+   statement_timestamp() + interval '5 minutes'),
+  ('22220000-0000-4000-8000-000000000718', 'user_pgtap_716_a',
+   '11110000-0000-4000-8000-000000000718', 'running', 'generating',
+   'cost-pgtap-716-empty-upgrade', 1, statement_timestamp(), statement_timestamp(),
+   '33330000-0000-4000-8000-000000000718',
    statement_timestamp() + interval '5 minutes');
 
 -- ---------------------------------------------------------------------------
@@ -549,6 +601,50 @@ select extensions.throws_ok(
   'a payload carrying an unnamed key is refused rather than stored'
 );
 
+select extensions.throws_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000716'::uuid,
+      '33330000-0000-4000-8000-000000000716'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"gpt-4o-mini-transcribe","calls":1}],"soldComps":[]}'::jsonb
+    )$$,
+  '22023',
+  'Invalid provider usage record',
+  'a transcription receipt with a missing field is rejected before persistence'
+);
+
+select extensions.throws_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000716'::uuid,
+      '33330000-0000-4000-8000-000000000716'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"gpt-4o-mini-transcribe","calls":"1","chargedUsd":null}],"soldComps":[]}'::jsonb
+    )$$,
+  '22023',
+  'Invalid provider usage record',
+  'a transcription receipt with a wrong field type is rejected before persistence'
+);
+
+select extensions.throws_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000716'::uuid,
+      '33330000-0000-4000-8000-000000000716'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"gpt-4o-mini-transcribe","calls":1,"chargedUsd":null,"transcript":"PRIVATE_SENTINEL"}],"soldComps":[]}'::jsonb
+    )$$,
+  '22023',
+  'Invalid provider usage record',
+  'a transcription receipt with an extra text field is rejected without echoing it'
+);
+
+select extensions.throws_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000716'::uuid,
+      '33330000-0000-4000-8000-000000000716'::uuid,
+      '{"schemaVersion":1,"modelCalls":"PRIVATE_SENTINEL","inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[],"soldComps":[]}'::jsonb
+    )$$,
+  '22023',
+  'Invalid provider usage record',
+  'a malformed numeric scalar is rejected without echoing it'
+);
+
 select lives_ok(
   $$select public.record_pipeline_run_provider_usage(
       '22220000-0000-4000-8000-000000000716'::uuid,
@@ -558,14 +654,16 @@ select lives_ok(
   'the worker records the run cost through its lease'
 );
 
--- A redelivery cannot double the number the allowance is set from.
-select lives_ok(
-  $$select public.record_pipeline_run_provider_usage(
+-- An exact redelivery is already satisfied without doubling the number the
+-- allowance is set from.
+select is(
+  (select public.record_pipeline_run_provider_usage(
       '22220000-0000-4000-8000-000000000716'::uuid,
       '33330000-0000-4000-8000-000000000716'::uuid,
-      '{"schemaVersion":1,"modelCalls":99,"inputTokens":999999,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"soldComps":[]}'::jsonb
-    )$$,
-  'a duplicate record for the same run is accepted without erroring'
+      '{"schemaVersion":1,"modelCalls":2,"inputTokens":3000,"cachedInputTokens":640,"outputTokens":400,"reasoningTokens":64,"models":[{"role":"vision","provider":"openai","model":"resolved-vision","calls":1,"inputTokens":2000,"cachedInputTokens":640,"outputTokens":250,"reasoningTokens":64},{"role":"listing","provider":"openai","model":"resolved-listing","calls":1,"inputTokens":1000,"cachedInputTokens":0,"outputTokens":150,"reasoningTokens":0}],"soldComps":[{"strategy":"apify","attempts":1,"results":9,"chargedUsd":0.0247}]}'::jsonb
+    )),
+  true,
+  'an exact full-usage replay reports durable success'
 );
 reset role;
 
@@ -613,6 +711,216 @@ select is(
   'the owning seller sees their own run cost'
 );
 reset role;
+
+-- A rolling upgrade may inherit a complete old-worker usage row before the
+-- voice checkpoint exists. The late transcription receipt merges into that
+-- full authority exactly once, and a different identity conflicts visibly.
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select is(
+  (select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000716'::uuid,
+      '33330000-0000-4000-8000-000000000716'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"gpt-4o-mini-transcribe","calls":1,"chargedUsd":null}],"soldComps":[]}'::jsonb
+    )),
+  true,
+  'an old-worker full-first row accepts one late transcription receipt'
+);
+reset role;
+
+select is(
+  (select row(
+      model_calls,
+      input_tokens,
+      jsonb_array_length(models),
+      transcriptions->0->>'model',
+      (transcriptions->0->>'calls')::integer
+    )::text
+   from public.pipeline_run_provider_usage
+   where run_id = '22220000-0000-4000-8000-000000000716'),
+  row(3, 3000::bigint, 2, 'gpt-4o-mini-transcribe', 1)::text,
+  'the late receipt preserves full usage and adds one transcription call'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select is(
+  (select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000716'::uuid,
+      '33330000-0000-4000-8000-000000000716'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"gpt-4o-mini-transcribe","calls":1,"chargedUsd":null}],"soldComps":[]}'::jsonb
+    )),
+  true,
+  'the exact late transcription replay reports durable success'
+);
+reset role;
+
+select is(
+  (select row(model_calls, jsonb_array_length(models), jsonb_array_length(transcriptions))::text
+   from public.pipeline_run_provider_usage
+   where run_id = '22220000-0000-4000-8000-000000000716'),
+  row(3, 2, 1)::text,
+  'the exact late transcription replay does not double any usage'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select extensions.throws_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000716'::uuid,
+      '33330000-0000-4000-8000-000000000716'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"different-transcription-model","calls":1,"chargedUsd":null}],"soldComps":[]}'::jsonb
+    )$$,
+  '55000',
+  'Provider usage conflicts with the durable run receipt',
+  'a different late transcription identity conflicts instead of reporting success'
+);
+reset role;
+
+select is(
+  (select row(model_calls, transcriptions->0->>'model')::text
+   from public.pipeline_run_provider_usage
+   where run_id = '22220000-0000-4000-8000-000000000716'),
+  row(3, 'gpt-4o-mini-transcribe')::text,
+  'an incompatible late receipt leaves the durable usage unchanged'
+);
+
+-- A failed attempt persists only its paid transcription receipt. The replay
+-- fills the remaining run usage without repeating or overwriting that call.
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select lives_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000717'::uuid,
+      '33330000-0000-4000-8000-000000000717'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"gpt-4o-mini-transcribe","calls":1,"chargedUsd":null}],"soldComps":[]}'::jsonb
+    )$$,
+  'a failed attempt records one content-free transcription receipt'
+);
+
+select lives_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000717'::uuid,
+      '33330000-0000-4000-8000-000000000717'::uuid,
+      '{"schemaVersion":1,"modelCalls":2,"inputTokens":3000,"cachedInputTokens":640,"outputTokens":400,"reasoningTokens":64,"models":[{"role":"vision","provider":"openai","model":"resolved-vision","calls":1,"inputTokens":2000,"cachedInputTokens":640,"outputTokens":250,"reasoningTokens":64},{"role":"listing","provider":"openai","model":"resolved-listing","calls":1,"inputTokens":1000,"cachedInputTokens":0,"outputTokens":150,"reasoningTokens":0}],"transcriptions":[],"soldComps":[]}'::jsonb
+    )$$,
+  'a successful replay fills non-transcription usage'
+);
+reset role;
+
+select is(
+  (select row(
+      model_calls,
+      input_tokens,
+      jsonb_array_length(models),
+      (transcriptions->0->>'calls')::integer
+    )::text
+   from public.pipeline_run_provider_usage
+   where run_id = '22220000-0000-4000-8000-000000000717'),
+  row(3, 3000::bigint, 2, 1)::text,
+  'replay usage is combined while the transcription total stays one'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select lives_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000717'::uuid,
+      '33330000-0000-4000-8000-000000000717'::uuid,
+      '{"schemaVersion":1,"modelCalls":2,"inputTokens":3000,"cachedInputTokens":640,"outputTokens":400,"reasoningTokens":64,"models":[{"role":"vision","provider":"openai","model":"resolved-vision","calls":1,"inputTokens":2000,"cachedInputTokens":640,"outputTokens":250,"reasoningTokens":64},{"role":"listing","provider":"openai","model":"resolved-listing","calls":1,"inputTokens":1000,"cachedInputTokens":0,"outputTokens":150,"reasoningTokens":0}],"transcriptions":[],"soldComps":[]}'::jsonb
+    )$$,
+  'the same replay receipt is accepted idempotently'
+);
+reset role;
+
+select is(
+  (select row(
+      model_calls,
+      input_tokens,
+      jsonb_array_length(models),
+      (transcriptions->0->>'calls')::integer
+    )::text
+   from public.pipeline_run_provider_usage
+   where run_id = '22220000-0000-4000-8000-000000000717'),
+  row(3, 3000::bigint, 2, 1)::text,
+  'replaying the same success does not double any recorded attempt'
+);
+
+-- An old worker may have persisted a canonical all-zero row before any paid
+-- provider call. A rolling-upgrade worker may add exactly one late content-free
+-- transcription receipt to that row, but no other identity.
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select lives_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000718'::uuid,
+      '33330000-0000-4000-8000-000000000718'::uuid,
+      '{"schemaVersion":1,"modelCalls":0,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[],"soldComps":[]}'::jsonb
+    )$$,
+  'an all-zero old-worker row is recorded before a late transcription'
+);
+select is(
+  (select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000718'::uuid,
+      '33330000-0000-4000-8000-000000000718'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"gpt-4o-mini-transcribe","calls":1,"chargedUsd":null}],"soldComps":[]}'::jsonb
+    )),
+  true,
+  'an all-zero old-worker row accepts one late transcription receipt'
+);
+reset role;
+
+select is(
+  (select row(model_calls, jsonb_array_length(models), jsonb_array_length(transcriptions))::text
+   from public.pipeline_run_provider_usage
+   where run_id = '22220000-0000-4000-8000-000000000718'),
+  row(1, 0, 1)::text,
+  'the all-zero merge stores exactly one transcription call'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select is(
+  (select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000718'::uuid,
+      '33330000-0000-4000-8000-000000000718'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"gpt-4o-mini-transcribe","calls":1,"chargedUsd":null}],"soldComps":[]}'::jsonb
+    )),
+  true,
+  'the all-zero late receipt replays idempotently'
+);
+reset role;
+
+select is(
+  (select row(model_calls, jsonb_array_length(transcriptions))::text
+   from public.pipeline_run_provider_usage
+   where run_id = '22220000-0000-4000-8000-000000000718'),
+  row(1, 1)::text,
+  'the all-zero exact replay does not double the receipt'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select extensions.throws_ok(
+  $$select public.record_pipeline_run_provider_usage(
+      '22220000-0000-4000-8000-000000000718'::uuid,
+      '33330000-0000-4000-8000-000000000718'::uuid,
+      '{"schemaVersion":1,"modelCalls":1,"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningTokens":0,"models":[],"transcriptions":[{"role":"sellerContext","provider":"openai","model":"different-transcription-model","calls":1,"chargedUsd":null}],"soldComps":[]}'::jsonb
+    )$$,
+  '55000',
+  'Provider usage conflicts with the durable run receipt',
+  'a different late receipt conflicts with the all-zero old-worker row'
+);
+reset role;
+
+select is(
+  (select row(model_calls, transcriptions->0->>'model')::text
+   from public.pipeline_run_provider_usage
+   where run_id = '22220000-0000-4000-8000-000000000718'),
+  row(1, 'gpt-4o-mini-transcribe')::text,
+  'the all-zero conflict leaves the accepted receipt unchanged'
+);
 
 -- ---------------------------------------------------------------------------
 -- The allowance artifact: median and p95 per COMPLETED run over a range.

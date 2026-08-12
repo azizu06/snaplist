@@ -288,6 +288,7 @@ describe("run-scoped pipeline worker store", () => {
             reasoningTokens: 64,
           },
         ],
+        transcriptions: [],
         soldComps: [
           { strategy: "apify", attempts: 1, results: 9, chargedUsd: 0.0247 },
         ],
@@ -307,6 +308,70 @@ describe("run-scoped pipeline worker store", () => {
       "p_lease_token",
       "p_run_id",
       "p_usage",
+    ]);
+  });
+
+  it("rejects provider usage unless the RPC reports literal true", async () => {
+    for (const result of [false, null]) {
+      const store = createSupabasePipelineWorkerStore(
+        rpcClient({ record_pipeline_run_provider_usage: result }),
+      );
+
+      await expect(
+        store.recordProviderUsage({
+          runId: RUN_ID,
+          leaseToken: LEASE_TOKEN,
+          usage: {
+            schemaVersion: 1,
+            modelCalls: 1,
+            inputTokens: 0,
+            cachedInputTokens: 0,
+            outputTokens: 0,
+            reasoningTokens: 0,
+            models: [],
+            transcriptions: [
+              {
+                role: "sellerContext",
+                provider: "openai",
+                model: "gpt-4o-mini-transcribe",
+                calls: 1,
+                chargedUsd: null,
+              },
+            ],
+            soldComps: [],
+          },
+        }),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("records terminal voice cleanup through the leased run without tenant or content", async () => {
+    const client = rpcClient({ record_pipeline_run_voice_outcome: true });
+    const store = createSupabasePipelineWorkerStore(client);
+
+    await expect(
+      store.recordVoiceOutcome({
+        runId: RUN_ID,
+        leaseToken: LEASE_TOKEN,
+        outcome: "transcribed",
+        providerContacted: true,
+      }),
+    ).resolves.toBe(true);
+    expect(client.rpc).toHaveBeenCalledWith(
+      "record_pipeline_run_voice_outcome",
+      {
+        p_lease_token: LEASE_TOKEN,
+        p_outcome: "transcribed",
+        p_provider_contacted: true,
+        p_run_id: RUN_ID,
+      },
+    );
+    const [, args] = client.rpc.mock.calls[0] as [string, Record<string, unknown>];
+    expect(Object.keys(args).sort()).toEqual([
+      "p_lease_token",
+      "p_outcome",
+      "p_provider_contacted",
+      "p_run_id",
     ]);
   });
 
