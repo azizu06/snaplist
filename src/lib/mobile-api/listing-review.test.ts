@@ -586,11 +586,10 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
     expect(JSON.stringify(await response.json())).not.toContain("Sony WH-1000XM4");
   });
 
+  // Run *history* left this table in #791: Trophy Wall is where a guest's first
+  // item lands, so the list route now mints the guest's operation token and
+  // serves it under RLS. Retry and cancel stay account-gated.
   it.each([
-    {
-      name: "history",
-      request: new Request("https://api.snaplist.dev/v1/runs"),
-    },
     {
       name: "retry",
       request: new Request(`https://api.snaplist.dev/v1/runs/${RUN_ID}/retry`, {
@@ -605,10 +604,9 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
         headers: { "idempotency-key": REVIEW_REVISION },
       }),
     },
-  ])("does not extend GuestBearer to Clerk-only run $name", async ({ request }) => {
+  ])("does not extend GuestBearer to the account-gated run $name", async ({ request }) => {
     const retry = vi.fn();
     const cancel = vi.fn();
-    const list = vi.fn();
     request.headers.set("authorization", "Bearer guestcap_fixture");
     const response = await createMobileApiHandler({
       authenticate: vi.fn().mockResolvedValue({
@@ -616,7 +614,6 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
         userId: USER_ID,
         mintOperationToken: vi.fn(),
       } satisfies MobileApiPrincipal),
-      runHistory: { list },
       runOperations: { get: vi.fn(), retry, cancel },
       worker: { consume: vi.fn() },
     })(request);
@@ -624,6 +621,5 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
     expect(response.status).toBe(403);
     expect(retry).not.toHaveBeenCalled();
     expect(cancel).not.toHaveBeenCalled();
-    expect(list).not.toHaveBeenCalled();
   });
 });

@@ -601,6 +601,25 @@ describe("SwiftUI mobile HTTP contract", () => {
     );
   });
 
+  it("publishes #791's guest run history to both mirrors without widening the account-gated actions", () => {
+    expect(nativeContractSource).toBe(serverContractSource);
+    expect(contract.paths["/v1/runs"].get).toMatchObject({
+      operationId: "listRunHistory",
+      "x-owner-issue": 375,
+      "x-related-owner-issues": expect.arrayContaining([791]),
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }, { GuestBearer: [] }],
+    });
+    for (const [path, method] of [
+      ["/v1/runs/{runId}/retry", "post"],
+      ["/v1/runs/{runId}/cancel", "post"],
+    ] as const) {
+      expect(contract.paths[path][method]).toMatchObject({
+        security: [{ ClerkBearer: [] }],
+      });
+    }
+  });
+
   it("keeps the implemented run OpenAPI schema aligned with runtime Zod", () => {
     const openApiRun = contract.components.schemas.PipelineRun as {
       additionalProperties: boolean;

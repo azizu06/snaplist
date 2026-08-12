@@ -524,14 +524,6 @@ export function createMobileApiHandler(
           "Authentication is required.",
         );
       }
-      if (principal.kind === "verifiedGuest") {
-        return errorResponse(
-          requestId,
-          403,
-          "forbidden",
-          "Run history requires an account.",
-        );
-      }
       if (!dependencies.runHistory) {
         return errorResponse(
           requestId,
@@ -541,9 +533,16 @@ export function createMobileApiHandler(
         );
       }
       try {
+        // Same rule as the single-run read: a guest's bearer is an App Attest
+        // capability, not a Supabase JWT, so the RLS-scoped read needs one
+        // freshly minted per-operation token. Trophy Wall is where a guest's
+        // first item lands, so refusing this read strands it.
+        const runHistoryToken = principal.mintOperationToken
+          ? await principal.mintOperationToken()
+          : token;
         const history = await dependencies.runHistory.list({
           userId: principal.userId,
-          bearerToken: token,
+          bearerToken: runHistoryToken,
           ...query.data,
         });
         return json(
