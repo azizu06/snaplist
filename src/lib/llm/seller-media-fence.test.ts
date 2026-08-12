@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 import {
   LLM_ROLES,
   SELLER_MEDIA_ROLES,
+  TRANSCRIPTION_ROLES,
   geminiBillingConfigError,
   resolveLanguageModel,
   sellerMediaConfigError,
   type LlmRole,
+  type TranscriptionRole,
 } from "./registry";
 import { parseEnv } from "../env";
 
@@ -217,12 +219,18 @@ describe("parseEnv", () => {
  * Per-line matching let that walk straight through (#501 review).
  */
 const MEDIA_PART = /type:\s*"(image|file|audio)"/;
+const TRANSCRIPTION_AUDIO =
+  /experimental_transcribe:\s*transcribe[\s\S]{0,1200}\btranscribe\(\s*\{[\s\S]{0,600}\baudio\s*:/;
 const RESOLVE_ROLE = /resolveLanguageModel\(\s*"([A-Za-z]+)"/g;
 
 /** Modules that legitimately send seller media, and the role each sends it under. */
 const SELLER_MEDIA_MODULES: Record<string, LlmRole> = {
   "src/lib/vision/extract.ts": "vision",
   "src/lib/vision/measurements.ts": "vision",
+};
+
+const SELLER_AUDIO_MODULES: Record<string, TranscriptionRole> = {
+  "src/lib/llm/seller-context.ts": "sellerContext",
 };
 
 /**
@@ -291,6 +299,26 @@ describe("seller-media drift guard", () => {
     );
   });
 
+  it("finds transcription audio only in modules that have been accounted for", () => {
+    const found = sourceFiles(repoRoot)
+      .filter((file) => TRANSCRIPTION_AUDIO.test(codeLines(file).join("\n")))
+      .map((file) => path.relative(repoRoot, file))
+      .sort();
+
+    expect(found).toEqual(Object.keys(SELLER_AUDIO_MODULES).sort());
+  });
+
+  it("routes every seller-audio module through the transcription registry", () => {
+    for (const [relative, expectedRole] of Object.entries(SELLER_AUDIO_MODULES)) {
+      const source = readFileSync(path.join(repoRoot, relative), "utf8");
+      expect(source).toContain(`SELLER_CONTEXT_TRANSCRIPTION_ROLE = "${expectedRole}"`);
+      expect(source).toMatch(
+        /resolveTranscriptionModel\(\s*SELLER_CONTEXT_TRANSCRIPTION_ROLE/,
+      );
+      expect(SELLER_MEDIA_ROLES.has(expectedRole)).toBe(true);
+    }
+  });
+
   it("keeps an exemption from becoming a way to silence the guard", () => {
     for (const [relative, reason] of Object.entries(NON_SELLER_MEDIA_MODULES)) {
       // Product code is never exempt. Only something off every product path can
@@ -320,8 +348,9 @@ describe("seller-media drift guard", () => {
   });
 
   it("keeps every seller-media role a real registry role", () => {
+    const registryRoles = [...LLM_ROLES, ...TRANSCRIPTION_ROLES];
     for (const role of SELLER_MEDIA_ROLES) {
-      expect(LLM_ROLES).toContain(role);
+      expect(registryRoles).toContain(role);
     }
   });
 });

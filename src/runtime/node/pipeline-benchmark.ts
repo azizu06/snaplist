@@ -240,6 +240,11 @@ export async function runOfflinePipelineBenchmark(input: {
       queue: createSupabasePgmqPipelineQueue(queueRpc),
       runs: createSupabasePipelineWorkerStore(workerRpc),
       photos,
+      voice: {
+        async download() {
+          throw new Error("Offline benchmark has no seller voice fixture");
+        },
+      },
       guestRecovery: { prepare: async () => null },
     },
     createStages: ({ supabase }) =>

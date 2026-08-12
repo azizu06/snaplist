@@ -12,6 +12,7 @@ import {
 } from "./worker-store";
 import {
   createPipelinePhotoCapability,
+  createPipelineVoiceCapability,
   createPipelineWorker,
   type PipelineWorker,
   type PipelineWorkerCapabilities,
@@ -37,6 +38,7 @@ export function createInternalPipelineWorkerCapabilities(): PipelineWorkerCapabi
     },
   };
   const photos = createPipelinePhotoCapability(admin.storage);
+  const voice = createPipelineVoiceCapability(admin.storage);
   const recoveryEncryption = parseGuestRecoveryProducerEncryptionConfig({
     encodedKey: process.env.GUEST_RECOVERY_ENCRYPTION_KEY,
     keyId: process.env.GUEST_RECOVERY_ENCRYPTION_KEY_ID,
@@ -67,6 +69,7 @@ export function createInternalPipelineWorkerCapabilities(): PipelineWorkerCapabi
     queue: createSupabasePgmqPipelineQueue(queueRpc),
     runs: createSupabasePipelineWorkerStore(workerRpc),
     photos,
+    voice,
     guestRecovery,
   };
 }

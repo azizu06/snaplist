@@ -128,6 +128,33 @@ describe("listing/generate — corpusReadKey never uses the service role (#57)",
 });
 
 describe("listing/generate — valid output maps onto ListingCopy (ebay)", () => {
+  it("adds bounded seller context as an unverified note without replacing core identity", async () => {
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+    const sellerContext = {
+      text: "I think this is a Nintendo Switch; scratch on left hinge",
+      language: "en-US",
+      provenance: "seller_voice" as const,
+      verification: "unverified" as const,
+    };
+
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      sellerContext,
+      fewShot: EXEMPLARS,
+      generate,
+    });
+
+    expect(calls[0]).toMatchObject({ sellerContext });
+    expect(listing.title).toContain("Sony WH-1000XM4");
+    expect(listing.itemSpecifics).toMatchObject({
+      Brand: "Sony",
+      Model: "WH-1000XM4",
+    });
+    expect(listing.description).toContain(
+      "Seller note (unverified): I think this is a Nintendo Switch; scratch on left hinge",
+    );
+  });
+
   it("returns a schema-valid eBay listing mapped onto the ListingCopy seam", async () => {
     const { generate } = scriptedGenerate([GOOD_LISTING]);
     const { listing, copy } = await generateEbayListing({

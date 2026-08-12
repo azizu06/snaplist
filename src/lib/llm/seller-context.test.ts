@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LLM_ROLES } from "./index";
+import { captureProviderUsageRun } from "../provider-usage";
 import {
   SELLER_CONTEXT_TRANSCRIPTION_ROLE,
+  createRoleKeyedSellerContextTranscriptionModel,
   resolveSellerContextTranscriber,
   type SellerContextTranscriptionInput,
 } from "./seller-context";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function fixedWavBytes(): Uint8Array {
   const samples = 160;
@@ -47,6 +53,25 @@ describe("resolveSellerContextTranscriber", () => {
     expect(LLM_ROLES).not.toContain(SELLER_CONTEXT_TRANSCRIPTION_ROLE);
   });
 
+  it("fails before a run when transcription is enabled for a provider with no adapter", async () => {
+    vi.stubEnv("LLM_PROVIDER", "google");
+    vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key");
+    vi.stubEnv("SELLER_CONTEXT_TRANSCRIPTION_ENABLED", "true");
+
+    const captured = await captureProviderUsageRun(() =>
+      createRoleKeyedSellerContextTranscriptionModel().transcribe(verifiedVoice),
+    );
+
+    expect(captured.ok).toBe(false);
+    if (captured.ok) throw new Error("unsupported provider unexpectedly ran");
+    expect(captured.error).toMatchObject({
+      message: expect.stringMatching(
+        /SELLER_CONTEXT_TRANSCRIPTION_ENABLED.*LLM_PROVIDER.*google/i,
+      ),
+    });
+    expect(captured.usage).toMatchObject({ modelCalls: 0, transcriptions: [] });
+  });
+
   it("normalizes configured output and fails open when disabled or failed", async () => {
     let receivedInput: SellerContextTranscriptionInput | undefined;
     const transcriber = resolveSellerContextTranscriber({
@@ -67,6 +92,7 @@ describe("resolveSellerContextTranscriber", () => {
       kind: "transcribed",
       text: `Å${"x".repeat(999)}`,
       language: "en-US",
+      providerContacted: true,
     });
     expect(receivedInput).toMatchObject({
       bytes: verifiedVoice.bytes,
@@ -79,7 +105,7 @@ describe("resolveSellerContextTranscriber", () => {
 
     await expect(
       resolveSellerContextTranscriber().transcribe(verifiedVoice),
-    ).resolves.toEqual({ kind: "unsupported" });
+    ).resolves.toEqual({ kind: "unsupported", providerContacted: false });
 
     const failed = resolveSellerContextTranscriber({
       model: {
@@ -90,6 +116,7 @@ describe("resolveSellerContextTranscriber", () => {
     });
     await expect(failed.transcribe(verifiedVoice)).resolves.toEqual({
       kind: "failed",
+      providerContacted: true,
     });
   });
 
@@ -103,6 +130,7 @@ describe("resolveSellerContextTranscriber", () => {
     });
     await expect(empty.transcribe(verifiedVoice)).resolves.toEqual({
       kind: "empty",
+      providerContacted: true,
     });
 
     const unsupported = resolveSellerContextTranscriber({
@@ -118,6 +146,7 @@ describe("resolveSellerContextTranscriber", () => {
     });
     await expect(unsupported.transcribe(verifiedVoice)).resolves.toEqual({
       kind: "unsupported",
+      providerContacted: false,
     });
   });
 
@@ -139,6 +168,7 @@ describe("resolveSellerContextTranscriber", () => {
     for (const input of unsupportedInputs) {
       await expect(transcriber.transcribe(input)).resolves.toEqual({
         kind: "unsupported",
+        providerContacted: false,
       });
     }
     expect(transcribe).not.toHaveBeenCalled();
@@ -165,7 +195,10 @@ describe("resolveSellerContextTranscriber", () => {
       await vi.advanceTimersByTimeAsync(1);
 
       expect(adapterSignal?.aborted).toBe(true);
-      expect(settled).toHaveBeenCalledWith({ kind: "timed-out" });
+      expect(settled).toHaveBeenCalledWith({
+        kind: "timed-out",
+        providerContacted: true,
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -181,7 +214,7 @@ describe("resolveSellerContextTranscriber", () => {
 
     await expect(
       transcriber.transcribe({ ...verifiedVoice, signal: preAborted.signal }),
-    ).resolves.toEqual({ kind: "failed" });
+    ).resolves.toEqual({ kind: "failed", providerContacted: false });
     expect(shouldNotRun).not.toHaveBeenCalled();
 
     const caller = new AbortController();
@@ -202,7 +235,10 @@ describe("resolveSellerContextTranscriber", () => {
     }).transcribe({ ...verifiedVoice, signal: caller.signal });
 
     caller.abort();
-    await expect(inFlight).resolves.toEqual({ kind: "failed" });
+    await expect(inFlight).resolves.toEqual({
+      kind: "failed",
+      providerContacted: true,
+    });
     expect(adapterSignal?.aborted).toBe(true);
   });
 
@@ -229,6 +265,7 @@ describe("resolveSellerContextTranscriber", () => {
         kind: "transcribed",
         text: "seller context",
         language: null,
+        providerContacted: true,
       });
     }
   });
@@ -246,6 +283,7 @@ describe("resolveSellerContextTranscriber", () => {
       kind: "transcribed",
       text: "seller � context",
       language: null,
+      providerContacted: true,
     });
   });
 });

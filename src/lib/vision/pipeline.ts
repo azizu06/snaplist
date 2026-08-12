@@ -10,6 +10,7 @@ import type {
   Pipeline,
   PipelineInput,
   PipelineResult,
+  SellerContext,
 } from "../pipeline/types";
 import { attributesToSignal } from "../pipeline/stub";
 import {
@@ -73,6 +74,7 @@ export interface CreateVisionPipelineOptions {
    */
   generateListing?: (args: {
     attributes: ExtractedAttributes;
+    sellerContext?: SellerContext;
   }) => Promise<{ copy: ListingCopy; model: string }>;
 }
 
@@ -98,6 +100,7 @@ export interface VisionPipelineStages {
   price(input: { attributes: ExtractedAttributes }): Promise<PriceResult>;
   generate(input: {
     attributes: ExtractedAttributes;
+    sellerContext?: SellerContext;
   }): Promise<GeneratedVisionPipelineStage>;
   assemble(input: {
     identified: IdentifiedVisionPipelineStage;
@@ -122,10 +125,12 @@ export interface VisionPipelineStages {
  */
 function createDefaultListingGenerator(): (args: {
   attributes: ExtractedAttributes;
+  sellerContext?: SellerContext;
 }) => Promise<{ copy: ListingCopy; model: string }> {
-  return async ({ attributes }) => {
+  return async ({ attributes, sellerContext }) => {
     const { copy, model } = await generateEbayListing({
       attributes,
+      ...(sellerContext ? { sellerContext } : {}),
       retrieve: createRealFewShotRetrieval(),
     });
     return { copy, model };
@@ -243,8 +248,14 @@ export function createVisionPipelineStages(
   const price = async ({ attributes }: { attributes: ExtractedAttributes }) =>
     priceItem(attributesToSignal(attributes));
 
-  const generate = async ({ attributes }: { attributes: ExtractedAttributes }) =>
-    generateListing({ attributes: listingFactAttributes(attributes) });
+  const generate: VisionPipelineStages["generate"] = async ({
+    attributes,
+    sellerContext,
+  }) =>
+    generateListing({
+      attributes: listingFactAttributes(attributes),
+      ...(sellerContext ? { sellerContext } : {}),
+    });
 
   const assemble: VisionPipelineStages["assemble"] = ({
     identified,

@@ -180,13 +180,18 @@ The media path itself: the durable pipeline worker composes vision stages
 (`pipeline-queue/composition.ts:42`) → `vision/extract.ts:202` falls back to `createOpenAIVisionGenerate()`
 → `vision/extract.ts:331` resolves the model → `vision/extract.ts:336` attaches `{ type: "image" }`
 parts whose bytes were downloaded from the private `photos` bucket (`vision/photos.ts:183`). `vision`
-is the only role that sends media; every other role receives text derived from the item.
+is the seller-photo role; generation roles other than `vision` receive text derived from the item.
 
-**Audio never reaches this registry at all.** `llm/seller-context.ts` carries its own
-`sellerContext` transcription role, which is not one of `LLM_ROLES`, and
-`resolveSellerContextTranscriber` returns `unsupported` with no model injected — no transcription
-provider is wired. Transcription provider selection is decided separately (OpenAI
-`/v1/audio/transcriptions`) and is out of scope here.
+Seller audio now reaches the same provider/config authority through the separate `sellerContext`
+transcription role. It remains outside `LLM_ROLES` because the AI SDK transcription model is a
+different type, but its provider and model id resolve through this registry. Hosted transcription
+is explicit default-off (`SELLER_CONTEXT_TRANSCRIPTION_ENABLED=true` is required), and the only
+wired adapter is OpenAI. Enabling it while Google/Gemini is selected fails configuration before a
+run; it does not silently degrade to an unsupported paid path. The verified bounded WAV and
+transcript remain outside provider-usage records, which retain only role/provider/model/call facts.
+An explicit provider override is the effective provider for activation, model, adapter, and media
+fence checks: explicit OpenAI may override ambient Google, while explicit Google fails before work
+even when ambient `LLM_PROVIDER` names OpenAI.
 
 ### The one media call site that is not a seller's photo, and why it stays exempt
 
@@ -219,11 +224,15 @@ buyer's photo, a friend's testing image — this exemption ends and the script n
 
 ### Amended posture
 
-- `SELLER_MEDIA_ROLES` names the roles that carry the seller's own media. It contains `vision`.
+- `SELLER_MEDIA_ROLES` names the roles that carry the seller's own media. It contains `vision` for
+  photos and `sellerContext` for explicitly activated bounded audio.
 - Outside local development, resolving a seller-media role to Google **throws** unless
   `GEMINI_BILLING_ENABLED=true`. It is checked against the **effective** provider, so a call site
   that forces `provider: "google"` (the cross-family judge, a spike script) is fenced on the same
   terms as a deploy that selected it.
+- Google has no `sellerContext` transcription adapter in this decision. Explicitly enabling hosted
+  transcription with Google selected fails config startup even if Google billing is attested;
+  missing or false activation remains the ordinary photos-only path.
 - The same condition fails `parseEnv` at config startup and rejects from `instrumentation.register()`.
   A deploy configured this way could not process a single item, so it should say so at boot rather
   than on the first seller's photo. As in Amendment 1, how hard the startup check stops depends on

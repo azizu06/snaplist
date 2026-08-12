@@ -5,6 +5,7 @@ import {
   llmProviderConfigError,
   resolveApiKey,
   resolveProvider,
+  sellerContextTranscriptionConfigError,
   sellerMediaConfigError,
 } from "./llm/registry";
 import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
@@ -292,6 +293,14 @@ function llmProviderIssues(raw: Record<string, unknown>): string[] {
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(raw)) {
     if (typeof value === "string") env[key] = value;
+  }
+
+  const transcriptionActivationError =
+    sellerContextTranscriptionConfigError(env);
+  if (transcriptionActivationError) {
+    return [
+      `  - SELLER_CONTEXT_TRANSCRIPTION_ENABLED: ${transcriptionActivationError}`,
+    ];
   }
 
   // The provider must be SELECTABLE before anything can be said about its key.

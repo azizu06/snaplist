@@ -4,6 +4,7 @@ import {
   type ModelUsageReport,
   type ProviderUsageRecord,
   type SoldCompUsageReport,
+  type TranscriptionUsageReport,
 } from "./record";
 
 /**
@@ -36,6 +37,28 @@ export interface ProviderUsageRun<T> {
   usage: ProviderUsageRecord;
 }
 
+export type CapturedProviderUsageRun<T> =
+  | ({ ok: true } & ProviderUsageRun<T>)
+  | { ok: false; error: unknown; usage: ProviderUsageRecord };
+
+/**
+ * Capture the tally even when `work` throws. The durable worker uses this
+ * boundary to persist paid attempts before applying its existing failure
+ * classification; callers that only need the successful value should keep
+ * using `withProviderUsageRun`.
+ */
+export async function captureProviderUsageRun<T>(
+  work: () => Promise<T> | T,
+): Promise<CapturedProviderUsageRun<T>> {
+  const tally = new ProviderUsageTally();
+  try {
+    const value = await runStorage.run(tally, async () => work());
+    return { ok: true, value, usage: tally.snapshot() };
+  } catch (error) {
+    return { ok: false, error, usage: tally.snapshot() };
+  }
+}
+
 /**
  * Run `work` inside a fresh provider-usage scope and return its result together
  * with everything reported inside it.
@@ -47,9 +70,9 @@ export interface ProviderUsageRun<T> {
 export async function withProviderUsageRun<T>(
   work: () => Promise<T> | T,
 ): Promise<ProviderUsageRun<T>> {
-  const tally = new ProviderUsageTally();
-  const value = await runStorage.run(tally, async () => work());
-  return { value, usage: tally.snapshot() };
+  const captured = await captureProviderUsageRun(work);
+  if (!captured.ok) throw captured.error;
+  return { value: captured.value, usage: captured.usage };
 }
 
 /**
@@ -67,6 +90,21 @@ export function recordModelUsage(report: ModelUsageReport): void {
  */
 export function recordSoldCompUsage(report: SoldCompUsageReport): void {
   runStorage.getStore()?.addSoldCompRetrieval(report);
+}
+
+/** Report one completed transcription call without retaining media or transcript content. */
+export function recordTranscriptionUsage(report: TranscriptionUsageReport): void {
+  runStorage.getStore()?.addTranscriptionCall(report);
+}
+
+/**
+ * Read the content-free transcription receipt accumulated so far in the active
+ * run. The durable voice checkpoint uses this immediately after the paid call
+ * so a later bookkeeping outage can be retried without retaining audio or
+ * transcript content and without calling the provider again.
+ */
+export function currentTranscriptionUsage(): ProviderUsageRecord["transcriptions"] {
+  return runStorage.getStore()?.snapshot().transcriptions ?? [];
 }
 
 /** Whether a provider-usage run is currently open (the reporters' fast path). */

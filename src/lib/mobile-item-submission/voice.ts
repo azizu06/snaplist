@@ -19,7 +19,9 @@ function ascii(bytes: Uint8Array, offset: number, length: number): string {
   return String.fromCharCode(...bytes.subarray(offset, offset + length));
 }
 
-function pcmDurationMs(bytes: Uint8Array): number | null {
+export function mobileSubmissionVoiceDurationMs(
+  bytes: Uint8Array,
+): number | null {
   if (
     bytes.byteLength < 44 ||
     ascii(bytes, 0, 4) !== "RIFF" ||
@@ -98,7 +100,7 @@ export async function prepareMobileSubmissionVoice(
   }
 
   const bytes = new Uint8Array(await value.arrayBuffer());
-  const durationMs = pcmDurationMs(bytes);
+  const durationMs = mobileSubmissionVoiceDurationMs(bytes);
   if (
     durationMs === null ||
     durationMs < 1 ||

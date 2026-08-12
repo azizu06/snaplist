@@ -493,6 +493,12 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     const fixture = await createFixture("claim", {
       targetHasIncludedPeriod: true,
     });
+    await database.query(
+      `insert into private.item_seller_voice_contexts (
+         item_id, user_id, transcript, language
+       ) values ($1::uuid, $2, 'guest seller context', 'en-US')`,
+      [fixture.itemId, fixture.guest.id],
+    );
     const before = await database.query(
       `select id, pipeline_run_id, item_id, logical_run_key, state,
         reserved_at, settled_at, restored_at, settled_review_revision,
@@ -593,6 +599,18 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       ));
     });
     expect(guestItem.data).toEqual([]);
+    await expect(database.query(
+      `select user_id, transcript, language
+       from private.item_seller_voice_contexts
+       where item_id = $1::uuid`,
+      [fixture.itemId],
+    )).resolves.toMatchObject({
+      rows: [{
+        user_id: fixture.target.id,
+        transcript: "guest seller context",
+        language: "en-US",
+      }],
+    });
 
     for (const [index, path] of claimedPhotos.entries()) {
       const downloaded = await fixture.target.client.storage

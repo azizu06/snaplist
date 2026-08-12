@@ -20,6 +20,43 @@ describe("parseEnv", () => {
     expect(env.NODE_ENV).toBe("development");
   });
 
+  it("keeps hosted seller-context transcription default-off with an explicit boolean gate", () => {
+    expect(() => parseEnv(valid)).not.toThrow();
+    expect(() => parseEnv({
+      ...valid,
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "false",
+    })).not.toThrow();
+    expect(() => parseEnv({
+      ...valid,
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "true",
+    })).not.toThrow();
+    expect(() => parseEnv({
+      ...valid,
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "1",
+    })).toThrowError(/SELLER_CONTEXT_TRANSCRIPTION_ENABLED/);
+    const googlePhotosOnly = {
+      ...valid,
+      LLM_PROVIDER: "google",
+      GOOGLE_GENERATIVE_AI_API_KEY: "google-test-key",
+    };
+    expect(() => parseEnv(googlePhotosOnly)).not.toThrow();
+    expect(() => parseEnv({
+      ...googlePhotosOnly,
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "false",
+    })).not.toThrow();
+  });
+
+  it("fails startup when seller-context transcription is enabled for an unsupported provider", () => {
+    expect(() => parseEnv({
+      ...valid,
+      LLM_PROVIDER: "google",
+      GOOGLE_GENERATIVE_AI_API_KEY: "google-test-key",
+      SELLER_CONTEXT_TRANSCRIPTION_ENABLED: "true",
+    })).toThrowError(
+      /SELLER_CONTEXT_TRANSCRIPTION_ENABLED.*LLM_PROVIDER.*google/i,
+    );
+  });
+
   it("requires the production eBay API origin when mobile production is enabled", () => {
     const deployed = {
       ...valid,

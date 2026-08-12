@@ -17,6 +17,10 @@ import { createMobileItemSubmissionOperations } from "./service";
 import { createSupabaseMobileItemSubmissionStaging } from "./store";
 import { runPipelineMaintenance } from "@/lib/pipeline-operations/maintenance";
 import { createSupabasePipelineOperationsStore } from "@/lib/pipeline-operations/store";
+import { createDurableVisionPipelineProcessor } from "@/lib/pipeline-queue/durable-processor";
+import { createSupabasePipelineWorkerStore } from "@/lib/pipeline-queue/worker-store";
+import type { CanonicalLanguageTag } from "@/lib/llm/seller-context";
+import type { VisionPipelineStages } from "@/lib/vision";
 import {
   DATABASE_URL,
   PUBLISHABLE_KEY,
@@ -46,6 +50,7 @@ let preparationFirstId = "";
 let replayFirstId = "";
 let concurrentId = "";
 let legacyReplayId = "";
+let voiceJourneyId = "";
 let ownerToken = "";
 let foreignToken = "";
 let recoveryToken = "";
@@ -54,6 +59,7 @@ let preparationFirstToken = "";
 let replayFirstToken = "";
 let concurrentToken = "";
 let legacyReplayToken = "";
+let voiceJourneyToken = "";
 let itemId = "";
 let runId = "";
 let queueMessageId = "";
@@ -77,6 +83,58 @@ interface ExpiredUploadingSubmission {
   costBasis: string;
   photoReceipts: Array<{ storage_path: string }>;
   requestFingerprint: string;
+}
+
+interface AcceptedVoiceSubmission {
+  itemId: string;
+  runId: string;
+  queueMessageId: string;
+}
+
+async function createAcceptedVoiceSubmission(
+  userId: string,
+  token: string,
+): Promise<AcceptedVoiceSubmission> {
+  const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
+  const submitter = createConfiguredMobileItemSubmissionOperations({
+    supabaseURL: SUPABASE_URL,
+    publishableKey: PUBLISHABLE_KEY!,
+    secretKey: SECRET_KEY!,
+  });
+  const handler = createMobileItemSubmissionHandler({
+    requestId: () => crypto.randomUUID(),
+    itemSubmission: {
+      async resolvePrincipal(bearerToken) {
+        if (bearerToken !== token) throw new Error("invalid test principal");
+        return { kind: "clerk", userId, bearerToken };
+      },
+      submit: (input) => submitter.submit(input),
+    },
+  });
+  const response = await handler(request(
+    token,
+    crypto.randomUUID(),
+    fivePhotoMultipart("12.50", [0, 1, 2, 3, 4], null, {
+      bytes: fixedWavBytes(774),
+      locale: "en-US",
+    }),
+  ));
+  expect(response.status).toBe(202);
+  const envelope = await response.json();
+  const authority = await database.query<{ queue_message_id: string }>(
+    `select run.queue_message_id::text
+     from public.pipeline_runs run
+     where run.id = $1::uuid
+       and run.item_id = $2::uuid
+       and run.user_id = $3`,
+    [envelope.data.runId, envelope.data.itemId, userId],
+  );
+  expect(authority.rows).toHaveLength(1);
+  return {
+    itemId: envelope.data.itemId,
+    runId: envelope.data.runId,
+    queueMessageId: authority.rows[0]!.queue_message_id,
+  };
 }
 
 async function createExpiredUploadingSubmission(
@@ -216,6 +274,76 @@ async function waitForDatabaseBlock(
   );
 }
 
+async function waitForPipelineRunFence(
+  observer: Client,
+  waitingPid: number,
+  blockingPid: number,
+): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const result = await observer.query<{
+      blockers: number[];
+      has_pipeline_runs_lock: boolean;
+    }>(
+      `select
+         pg_blocking_pids(activity.pid) as blockers,
+         exists (
+           select 1
+           from pg_locks lock
+           where lock.pid = activity.pid
+             and lock.locktype = 'relation'
+             and lock.relation = 'public.pipeline_runs'::regclass
+             and lock.mode = 'RowShareLock'
+             and lock.granted
+         ) as has_pipeline_runs_lock
+       from pg_stat_activity activity
+       where activity.pid = $1`,
+      [waitingPid],
+    );
+    const row = result.rows[0];
+    if (
+      row?.blockers.includes(blockingPid)
+      && row.has_pipeline_runs_lock
+    ) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(
+    `Backend ${waitingPid} never queued behind ${blockingPid} on the pipeline run fence`,
+  );
+}
+
+async function readContentSafeProviderUsage(
+  observer: Client,
+  runId: string,
+) {
+  return observer.query<{
+    model_calls: number;
+    transcription_count: number;
+    transcription_role: string | null;
+    transcription_provider: string | null;
+    transcription_model: string | null;
+    transcription_calls: string | null;
+    charged_usd_unknown: boolean;
+    only_allowed_transcription_fields: boolean;
+  }>(
+    `select
+       usage.model_calls,
+       jsonb_array_length(usage.transcriptions)::integer transcription_count,
+       usage.transcriptions->0->>'role' transcription_role,
+       usage.transcriptions->0->>'provider' transcription_provider,
+       usage.transcriptions->0->>'model' transcription_model,
+       usage.transcriptions->0->>'calls' transcription_calls,
+       jsonb_typeof(usage.transcriptions->0->'chargedUsd') = 'null'
+         charged_usd_unknown,
+       (usage.transcriptions->0) - array[
+         'role', 'provider', 'model', 'calls', 'chargedUsd'
+       ] = '{}'::jsonb only_allowed_transcription_fields
+     from public.pipeline_run_provider_usage usage
+     where usage.run_id = $1::uuid`,
+    [runId],
+  );
+}
+
 async function waitForGrantedAdvisory(
   observer: Client,
   holderPid: number,
@@ -302,6 +430,7 @@ beforeAll(async () => {
   replayFirstId = `user_test_mobile_submit_replay_first_${Date.now()}`;
   concurrentId = `user_test_mobile_submit_concurrent_${Date.now()}`;
   legacyReplayId = `user_test_mobile_submit_legacy_replay_${Date.now()}`;
+  voiceJourneyId = `user_test_mobile_submit_voice_journey_${Date.now()}`;
   [
     ownerToken,
     foreignToken,
@@ -311,6 +440,7 @@ beforeAll(async () => {
     replayFirstToken,
     concurrentToken,
     legacyReplayToken,
+    voiceJourneyToken,
   ] = await Promise.all([
     mintUserJwt(ownerId),
     mintUserJwt(foreignId),
@@ -320,6 +450,7 @@ beforeAll(async () => {
     mintUserJwt(replayFirstId),
     mintUserJwt(concurrentId),
     mintUserJwt(legacyReplayId),
+    mintUserJwt(voiceJourneyId),
   ]);
   await Promise.all(
     [
@@ -331,6 +462,7 @@ beforeAll(async () => {
       replayFirstId,
       concurrentId,
       legacyReplayId,
+      voiceJourneyId,
     ].map((userId) => grantIncludedOfferDeviceClaim(admin, userId)),
   );
   });
@@ -355,6 +487,7 @@ afterAll(async () => {
       replayFirstId,
       concurrentId,
       legacyReplayId,
+      voiceJourneyId,
     ]],
   );
   const messageIds = new Set([
@@ -380,8 +513,17 @@ afterAll(async () => {
     replayFirstId,
     concurrentId,
     legacyReplayId,
+    voiceJourneyId,
   ];
   await cleanupClerkTestUsers(admin, testUserIds);
+  await database.query(
+    `delete from private.pipeline_storage_cleanup_jobs job
+     using private.mobile_item_submission_voice_handoffs handoff
+     where job.source_type = 'raw_voice'
+       and job.source_id = handoff.cleanup_id
+       and handoff.user_id = any($1::text[])`,
+    [testUserIds],
+  );
   await database.query(
     `delete from private.mobile_item_submission_voice_handoffs
      where user_id = any($1::text[])`,
@@ -1408,5 +1550,406 @@ describe("authenticated mobile item submission against local Supabase", () => {
     );
     expect(foreignVoice.data).toBeNull();
     expect(foreignVoice.error).not.toBeNull();
+  });
+
+  it("carries the accepted run voice through the claimed worker context into listing generation", async () => {
+    const submission = await createAcceptedVoiceSubmission(
+      voiceJourneyId,
+      voiceJourneyToken,
+    );
+    const runs = createSupabasePipelineWorkerStore({
+      async rpc(functionName, args) {
+        const { data, error } = await admin.rpc(functionName, args);
+        return { data, error: error ? { message: error.message } : null };
+      },
+    });
+    const acquisition = await runs.acquire({
+      runId: submission.runId,
+      messageId: submission.queueMessageId,
+      leaseSeconds: 300,
+    });
+    expect(acquisition.kind).toBe("acquired");
+    if (acquisition.kind !== "acquired") return;
+
+    const price = {
+      suggested: 149,
+      range: { min: 130, max: 170 },
+      confidence: 0.8,
+      sources: [],
+      tier: "llm-only" as const,
+    };
+    const identifiedCheckpoint = await runs.checkpoint({
+      runId: submission.runId,
+      leaseToken: acquisition.context.run.lease_token,
+      stage: "identifying",
+      checkpoint: {
+        identified: {
+          attributes: { brand: "Sony", model: "WH-1000XM4", condition: "good" },
+          identification: {
+            label: "Sony WH-1000XM4",
+            confident: true,
+            evidence: 1,
+          },
+          model: "vision-fixture",
+        },
+      },
+      leaseSeconds: 300,
+    });
+    const pricedCheckpoint = await runs.checkpoint({
+      runId: submission.runId,
+      leaseToken: acquisition.context.run.lease_token,
+      stage: "pricing",
+      checkpoint: {
+        ...identifiedCheckpoint,
+        priced: { result: price },
+      },
+      leaseSeconds: 300,
+    });
+    acquisition.context.run.stage = "pricing";
+    acquisition.context.run.checkpoint = pricedCheckpoint;
+    const generate = vi.fn(async ({ sellerContext }) => ({
+      copy: {
+        platform: "ebay" as const,
+        title: "Sony WH-1000XM4 Headphones",
+        description: `Seller note (unverified): ${sellerContext.text}`,
+        fields: {},
+      },
+      model: "listing-fixture",
+    }));
+    const stages: VisionPipelineStages = {
+      run: async () => {
+        throw new Error("the durable stage seam should be used");
+      },
+      identify: async () => ({
+        attributes: { brand: "Sony", model: "WH-1000XM4", condition: "good" },
+        identification: {
+          label: "Sony WH-1000XM4",
+          confident: true,
+          evidence: 1,
+        },
+        model: "vision-fixture",
+      }),
+      price: async () => price,
+      generate,
+      assemble: ({ identified, generated }) => ({
+        attributes: identified.attributes,
+        identification: identified.identification,
+        price,
+        confidence: { score: 0.8, band: "high", autopilotEligible: false },
+        listing: generated.copy,
+        model: identified.model,
+        listingModel: generated.model,
+      }),
+    };
+    const voiceBucket = admin.storage.from("photos");
+    const processor = createDurableVisionPipelineProcessor(stages, {
+      voiceStorage: {
+        async download({ path }) {
+          const { data, error } = await voiceBucket.download(path);
+          if (error) throw error;
+          return new Uint8Array(await data.arrayBuffer());
+        },
+      },
+      transcriber: {
+        transcriptionAttempt: {
+          role: "sellerContext",
+          provider: "openai",
+          model: "gpt-4o-mini-transcribe",
+          calls: 1,
+          chargedUsd: null,
+        },
+        async transcribe() {
+          return {
+            kind: "transcribed",
+            text: "scratch on left hinge",
+            language: "en-US" as CanonicalLanguageTag,
+            providerContacted: true,
+          };
+        },
+      },
+      recordTerminalOutcome: (outcome) => runs.recordVoiceOutcome(outcome),
+    });
+
+    const result = await processor.process({
+      context: acquisition.context,
+      onCheckpoint: (stage, checkpoint) =>
+        runs.checkpoint({
+          runId: submission.runId,
+          leaseToken: acquisition.context.run.lease_token,
+          stage,
+          checkpoint,
+          leaseSeconds: 300,
+        }),
+    });
+
+    expect(generate).toHaveBeenCalledWith({
+      attributes: { brand: "Sony", model: "WH-1000XM4", condition: "good" },
+      sellerContext: {
+        text: "scratch on left hinge",
+        language: "en-US",
+        provenance: "seller_voice",
+        verification: "unverified",
+      },
+    });
+    expect(result.identification?.label).toBe("Sony WH-1000XM4");
+    expect(result.price.suggested).toBe(149);
+    expect(result.listing.description).toContain("scratch on left hinge");
+
+    const providerUsage = {
+      schemaVersion: 1 as const,
+      modelCalls: 1,
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      models: [],
+      transcriptions: [
+        {
+          role: "sellerContext" as const,
+          provider: "openai" as const,
+          model: "gpt-4o-mini-transcribe",
+          calls: 1,
+          chargedUsd: null,
+        },
+      ],
+      soldComps: [],
+    };
+    const gate = await connectDatabase("issue-774-provider-usage-gate");
+    const usageWriter = await connectDatabase("issue-774-provider-usage-writer");
+    const completer = await connectDatabase("issue-774-provider-usage-completer");
+    let completion: { listingId: string } | undefined;
+    try {
+      const gatePid = (await gate.query<{ pid: number }>("select pg_backend_pid() pid"))
+        .rows[0]!.pid;
+      const usageWriterPid = (
+        await usageWriter.query<{ pid: number }>("select pg_backend_pid() pid")
+      ).rows[0]!.pid;
+      const completerPid = (
+        await completer.query<{ pid: number }>("select pg_backend_pid() pid")
+      ).rows[0]!.pid;
+
+      await gate.query("begin");
+      const gatedRun = await gate.query<{ id: string }>(
+        `select id::text
+         from public.pipeline_runs
+         where id = $1::uuid
+         for update`,
+        [submission.runId],
+      );
+      expect(gatedRun.rows).toEqual([{ id: submission.runId }]);
+      await usageWriter.query("begin");
+      await assumeServiceRole(usageWriter);
+      const usageStore = createSupabasePipelineWorkerStore({
+        async rpc(functionName, args) {
+          if (functionName !== "record_pipeline_run_provider_usage") {
+            throw new Error(`Unexpected usage RPC: ${functionName}`);
+          }
+          const persisted = await usageWriter.query<{ data: boolean }>(
+            `select public.record_pipeline_run_provider_usage(
+               $1::uuid, $2::uuid, $3::jsonb
+             ) as data`,
+            [
+              args.p_run_id,
+              args.p_lease_token,
+              JSON.stringify(args.p_usage),
+            ],
+          );
+          return { data: persisted.rows[0]!.data, error: null };
+        },
+      });
+      const usageWrite = usageStore.recordProviderUsage({
+        runId: submission.runId,
+        leaseToken: acquisition.context.run.lease_token,
+        usage: providerUsage,
+      });
+      await waitForPipelineRunFence(database, usageWriterPid, gatePid);
+
+      await completer.query("begin");
+      await assumeServiceRole(completer);
+      let markCompletionQueryStarted = () => {};
+      const completionQueryStarted = new Promise<void>((resolve) => {
+        markCompletionQueryStarted = resolve;
+      });
+      const completionStore = createSupabasePipelineWorkerStore({
+        async rpc(functionName, args) {
+          if (functionName !== "complete_pipeline_run_with_guest_recovery") {
+            throw new Error(`Unexpected completion RPC: ${functionName}`);
+          }
+          const guestRecoveryRegistration =
+            args.p_guest_recovery_registration;
+          expect(guestRecoveryRegistration).toBeNull();
+          markCompletionQueryStarted();
+
+          const persisted = await completer.query<{ data: unknown }>(
+            `select public.complete_pipeline_run_with_guest_recovery(
+               $1::uuid, $2::uuid, $3::jsonb, $4::jsonb
+             ) as data`,
+            [
+              args.p_run_id,
+              args.p_lease_token,
+              JSON.stringify(args.p_persistence),
+              guestRecoveryRegistration === null
+                ? null
+                : JSON.stringify(guestRecoveryRegistration),
+            ],
+          );
+          return { data: persisted.rows[0]!.data, error: null };
+        },
+      });
+      const completionWrite = completionStore.complete({
+        runId: submission.runId,
+        leaseToken: acquisition.context.run.lease_token,
+        result,
+        autopilotEnabled: acquisition.context.run.autopilot_enabled,
+      });
+      await completionQueryStarted;
+      await waitForPipelineRunFence(database, completerPid, usageWriterPid);
+
+      await gate.query("commit");
+      await usageWrite;
+      await usageWriter.query("commit");
+      completion = await completionWrite;
+      await completer.query("commit");
+    } finally {
+      await Promise.allSettled([
+        gate.query("rollback"),
+        usageWriter.query("rollback"),
+        completer.query("rollback"),
+      ]);
+      await Promise.allSettled([
+        gate.end(),
+        usageWriter.end(),
+        completer.end(),
+      ]);
+    }
+
+    const retention = await database.query<{
+      transcription_outcome: string;
+      terminal_voice_outcome: string;
+      transcription_provider_contacted: boolean;
+      raw_audio_cleanup_queued: boolean;
+      cleanup_jobs: number;
+      retained_transcript: string;
+      retained_language: string;
+      durable_transcript: string;
+      durable_language: string;
+      listing_description: string;
+      queue_message: Record<string, unknown>;
+      prediction_leaks: number;
+      usage_rows: number;
+      usage_leaks: number;
+    }>(
+      `select
+         handoff.transcription_outcome,
+         handoff.terminal_voice_outcome,
+         handoff.transcription_provider_contacted,
+         handoff.raw_audio_cleanup_queued_at is not null raw_audio_cleanup_queued,
+         (select count(*)::integer
+          from private.pipeline_storage_cleanup_jobs job
+          where job.source_type = 'raw_voice'
+            and job.source_id = handoff.cleanup_id) cleanup_jobs,
+         run.checkpoint #>> '{voice,sellerContext,text}' retained_transcript,
+         run.checkpoint #>> '{voice,sellerContext,language}' retained_language,
+         context.transcript durable_transcript,
+         context.language durable_language,
+         listing.description listing_description,
+         (select message from pgmq.q_pipeline_jobs where msg_id = $2::bigint) queue_message,
+         (select count(*)::integer
+          from public.prediction_logs prediction
+          where prediction.run_id = $1::uuid
+            and position($3 in to_jsonb(prediction)::text) > 0) prediction_leaks,
+         (select count(*)::integer
+          from public.pipeline_run_provider_usage usage
+          where usage.run_id = $1::uuid
+         ) usage_rows,
+         (select count(*)::integer
+          from public.pipeline_run_provider_usage usage
+          where usage.run_id = $1::uuid
+            and position($3 in to_jsonb(usage)::text) > 0) usage_leaks
+       from public.pipeline_runs run
+       join private.mobile_item_submission_voice_handoffs handoff
+         on handoff.run_id = run.id
+        and handoff.user_id = run.user_id
+        and handoff.item_id = run.item_id
+       join private.item_seller_voice_contexts context
+         on context.item_id = run.item_id
+        and context.user_id = run.user_id
+       join public.listings listing
+         on listing.id = run.listing_id
+        and listing.item_id = run.item_id
+        and listing.user_id = run.user_id
+       where run.id = $1::uuid`,
+      [submission.runId, submission.queueMessageId, "scratch on left hinge"],
+    );
+    expect(retention.rows[0]).toMatchObject({
+      transcription_outcome: "transcribed",
+      terminal_voice_outcome: "transcribed",
+      transcription_provider_contacted: true,
+      raw_audio_cleanup_queued: true,
+      cleanup_jobs: 1,
+      retained_transcript: "scratch on left hinge",
+      retained_language: "en-US",
+      durable_transcript: "scratch on left hinge",
+      durable_language: "en-US",
+      listing_description: "Seller note (unverified): scratch on left hinge",
+      prediction_leaks: 0,
+      usage_rows: 1,
+      usage_leaks: 0,
+    });
+    expect(Object.keys(retention.rows[0]!.queue_message).sort()).toEqual([
+      "run_id",
+      "schema_version",
+    ]);
+    expect(completion?.listingId).toBeTruthy();
+    const usageReceipt = await readContentSafeProviderUsage(
+      database,
+      submission.runId,
+    );
+    expect(usageReceipt.rows).toEqual([
+      {
+        model_calls: 1,
+        transcription_count: 1,
+        transcription_role: "sellerContext",
+        transcription_provider: "openai",
+        transcription_model: "gpt-4o-mini-transcribe",
+        transcription_calls: "1",
+        charged_usd_unknown: true,
+        only_allowed_transcription_fields: true,
+      },
+    ]);
+
+    await database.query(
+      `update public.pipeline_runs
+       set completed_at = statement_timestamp() - interval '31 days'
+       where id = $1::uuid`,
+      [submission.runId],
+    );
+    await database.query("begin");
+    try {
+      await assumeServiceRole(database);
+      await database.query("select public.prepare_pipeline_retention(100)");
+      await database.query("commit");
+    } catch (error) {
+      await database.query("rollback");
+      throw error;
+    }
+    const afterPrune = await database.query<{
+      checkpoint: Record<string, unknown>;
+      transcript: string;
+      language: string;
+    }>(
+      `select run.checkpoint, context.transcript, context.language
+       from public.pipeline_runs run
+       join private.item_seller_voice_contexts context
+         on context.item_id = run.item_id
+        and context.user_id = run.user_id
+       where run.id = $1::uuid`,
+      [submission.runId],
+    );
+    expect(afterPrune.rows[0]).toEqual({
+      checkpoint: {},
+      transcript: "scratch on left hinge",
+      language: "en-US",
+    });
   });
 });

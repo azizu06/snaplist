@@ -3,6 +3,17 @@ import { priceResultSchema, type PriceResult } from "../pricing";
 import type { ConfidenceResult } from "../confidence/confidence";
 import { measurementDraftsSchema } from "../vision/measurements";
 
+export const sellerContextSchema = z
+  .object({
+    text: z.string().min(1).max(4_096),
+    language: z.string().min(1).max(255).nullable(),
+    provenance: z.literal("seller_voice"),
+    verification: z.literal("unverified"),
+  })
+  .strict();
+
+export type SellerContext = z.infer<typeof sellerContextSchema>;
+
 /**
  * The listing-and-pricing pipeline seam (PRD Phase 1: "photo → vision identify +
  * attributes → pricing → generated listing → review/edit → persist").

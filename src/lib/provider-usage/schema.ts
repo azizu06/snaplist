@@ -40,6 +40,19 @@ export const providerUsageRecordSchema = z
         })
         .strict(),
     ),
+    transcriptions: z
+      .array(
+        z
+          .object({
+            role: z.literal("sellerContext"),
+            provider: z.enum(LLM_PROVIDERS),
+            model: z.string().min(1).max(200),
+            calls: countSchema,
+            chargedUsd: z.null(),
+          })
+          .strict(),
+      )
+      .default([]),
     soldComps: z.array(
       z
         .object({

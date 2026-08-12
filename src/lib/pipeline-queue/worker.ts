@@ -2,12 +2,17 @@ import { z } from "zod";
 import type { GuestRecoveryRegistrationProducer } from "@/lib/guest-recovery/producer";
 import type { PipelineResult } from "@/lib/pipeline";
 import { PIPELINE_OPERATIONS_POLICY } from "@/lib/pipeline-operations/policy";
-import { withProviderUsageRun } from "@/lib/provider-usage";
+import {
+  captureProviderUsageRun,
+  type ProviderUsageRecord,
+} from "@/lib/provider-usage";
 import { pipelineQueueEnvelopeSchema } from "./envelope";
 import type { PipelineQueue } from "./queue";
-import type {
-  PipelineWorkerCheckpoint,
-  PipelineWorkerCheckpointWrite,
+import {
+  pipelineWorkerCheckpointSchema,
+  type PipelineWorkerCheckpoint,
+  type PipelineWorkerCheckpointWrite,
+  type SellerVoiceTranscriptionAttempt,
 } from "./checkpoint";
 import type {
   PipelineRunStage,
@@ -19,7 +24,7 @@ export interface DurablePipelineProcessor {
   process(input: {
     context: PipelineWorkerContext;
     onCheckpoint: (
-      stage: Exclude<PipelineRunStage, "queued" | "completed" | "persisting">,
+      stage: Exclude<PipelineRunStage, "queued" | "completed">,
       checkpoint: PipelineWorkerCheckpointWrite,
     ) => Promise<PipelineWorkerCheckpoint>;
   }): Promise<PipelineResult>;
@@ -91,6 +96,101 @@ function retryDelay(attemptCount: number, base: number, maximum: number): number
   return Math.min(maximum, base * 2 ** Math.max(0, attemptCount - 1));
 }
 
+function transcriptionAttemptUsage(
+  usage: ProviderUsageRecord,
+): ProviderUsageRecord | null {
+  if (usage.transcriptions.length === 0) return null;
+  return {
+    schemaVersion: 1,
+    modelCalls: usage.transcriptions.reduce(
+      (total, entry) => total + entry.calls,
+      0,
+    ),
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    models: [],
+    transcriptions: usage.transcriptions,
+    soldComps: [],
+  };
+}
+
+function checkpointTranscriptionAttemptUsage(
+  attempt: SellerVoiceTranscriptionAttempt | undefined,
+): ProviderUsageRecord | null {
+  if (!attempt) return null;
+  return {
+    schemaVersion: 1,
+    modelCalls: attempt.calls,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    models: [],
+    transcriptions: [attempt],
+    soldComps: [],
+  };
+}
+
+function checkpointTranscriptionAttempt(
+  checkpoint: PipelineWorkerCheckpoint,
+): SellerVoiceTranscriptionAttempt | undefined {
+  return (
+    checkpoint.voiceAttempt?.transcriptionAttempt ??
+    checkpoint.voice?.transcriptionAttempt
+  );
+}
+
+function sameTranscriptionAttempt(
+  left: SellerVoiceTranscriptionAttempt | undefined,
+  right: SellerVoiceTranscriptionAttempt | undefined,
+): boolean {
+  return Boolean(
+    left &&
+      right &&
+      left.role === right.role &&
+      left.provider === right.provider &&
+      left.model === right.model &&
+      left.calls === right.calls &&
+      left.chargedUsd === right.chargedUsd,
+  );
+}
+
+function withoutTranscriptionUsage(
+  usage: ProviderUsageRecord,
+): ProviderUsageRecord {
+  const transcriptionCalls = usage.transcriptions.reduce(
+    (total, entry) => total + entry.calls,
+    0,
+  );
+  return {
+    ...usage,
+    modelCalls: Math.max(0, usage.modelCalls - transcriptionCalls),
+    transcriptions: [],
+  };
+}
+
+async function persistProviderUsage(
+  runs: PipelineWorkerStore,
+  context: PipelineWorkerContext,
+  usage: ProviderUsageRecord,
+): Promise<boolean> {
+  try {
+    await runs.recordProviderUsage({
+      runId: context.run.id,
+      leaseToken: context.run.lease_token,
+      usage,
+    });
+    return true;
+  } catch {
+    console.error(
+      `[pipeline.worker.provider_usage] run ${context.run.id} persistence_failed`,
+    );
+    return false;
+  }
+}
+
 export async function consumePipelineQueue(
   dependencies: {
     queue: PipelineQueue;
@@ -152,7 +252,28 @@ export async function consumePipelineQueue(
     const { context } = acquisition;
     let completed = false;
     try {
-      const { value: result, usage } = await withProviderUsageRun(() =>
+      let durableTranscriptionAttempt = checkpointTranscriptionAttempt(
+        pipelineWorkerCheckpointSchema.parse(context.run.checkpoint),
+      );
+      const pendingTranscriptionUsage = checkpointTranscriptionAttemptUsage(
+        durableTranscriptionAttempt,
+      );
+      if (
+        pendingTranscriptionUsage &&
+        !(await persistProviderUsage(
+          dependencies.runs,
+          context,
+          pendingTranscriptionUsage,
+        ))
+      ) {
+        throw new PipelineWorkerFailure({
+          code: "provider_usage_temporarily_unavailable",
+          safeMessage:
+            "SnapList could not finish this listing yet and will retry automatically.",
+          retryable: true,
+        });
+      }
+      const measured = await captureProviderUsageRun(() =>
         dependencies.processor.process({
           context,
           onCheckpoint: async (stage, checkpoint) => {
@@ -163,6 +284,34 @@ export async function consumePipelineQueue(
               checkpoint,
               leaseSeconds: config.visibilityTimeoutSeconds,
             });
+            const persistedAttempt = checkpointTranscriptionAttempt(
+              pipelineWorkerCheckpointSchema.parse(persisted),
+            );
+            if (
+              persistedAttempt &&
+              !sameTranscriptionAttempt(
+                durableTranscriptionAttempt,
+                persistedAttempt,
+              )
+            ) {
+              const usage = checkpointTranscriptionAttemptUsage(persistedAttempt);
+              if (
+                !usage ||
+                !(await persistProviderUsage(
+                  dependencies.runs,
+                  context,
+                  usage,
+                ))
+              ) {
+                throw new PipelineWorkerFailure({
+                  code: "provider_usage_temporarily_unavailable",
+                  safeMessage:
+                    "SnapList could not finish this listing yet and will retry automatically.",
+                  retryable: true,
+                });
+              }
+              durableTranscriptionAttempt = persistedAttempt;
+            }
             await dependencies.queue.defer(
               message.id,
               config.visibilityTimeoutSeconds,
@@ -171,21 +320,48 @@ export async function consumePipelineQueue(
           },
         }),
       );
+      if (!measured.ok) {
+        const usage = transcriptionAttemptUsage(measured.usage);
+        if (usage) {
+          const persisted = await persistProviderUsage(
+            dependencies.runs,
+            context,
+            usage,
+          );
+          if (!persisted && !durableTranscriptionAttempt) {
+            throw new PipelineWorkerFailure({
+              code: "provider_usage_temporarily_unavailable",
+              safeMessage:
+                "SnapList could not finish this listing yet and will retry automatically.",
+              retryable: true,
+            });
+          }
+        }
+        throw measured.error;
+      }
+      const { value: result, usage } = measured;
       // Cost telemetry (#716), written while the attempt's lease is still live
       // — completion clears it. Never allowed to fail the attempt: a listing the
       // seller already paid for cannot be lost to a bookkeeping insert, so the
       // failure is logged and the run proceeds to completion.
-      try {
-        await dependencies.runs.recordProviderUsage({
-          runId: context.run.id,
-          leaseToken: context.run.lease_token,
-          usage,
+      const usagePersisted = await persistProviderUsage(
+        dependencies.runs,
+        context,
+        durableTranscriptionAttempt
+          ? withoutTranscriptionUsage(usage)
+          : usage,
+      );
+      if (
+        !usagePersisted &&
+        usage.transcriptions.length > 0 &&
+        !durableTranscriptionAttempt
+      ) {
+        throw new PipelineWorkerFailure({
+          code: "provider_usage_temporarily_unavailable",
+          safeMessage:
+            "SnapList could not finish this listing yet and will retry automatically.",
+          retryable: true,
         });
-      } catch (usageError) {
-        console.error(
-          `[pipeline.worker.provider_usage] run ${context.run.id}`,
-          usageError,
-        );
       }
       const guestRecoveryRegistration = dependencies.guestRecovery
         ? await dependencies.guestRecovery.prepare({
@@ -209,8 +385,10 @@ export async function consumePipelineQueue(
       });
       completed = true;
     } catch (error) {
-      console.error(`[pipeline.worker.attempt] run ${context.run.id}`, error);
       const failure = classifyFailure(error);
+      console.error(
+        `[pipeline.worker.attempt] run ${context.run.id} code ${failure.code}`,
+      );
       const backoff = retryDelay(
         context.run.attempt_count,
         config.retryBaseSeconds,

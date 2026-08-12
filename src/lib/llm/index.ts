@@ -5,18 +5,24 @@
  */
 export {
   resolveLanguageModel,
+  resolveTranscriptionModel,
   resolveProvider,
   resolveModelId,
+  resolveTranscriptionModelId,
   resolveApiKey,
   oppositeProvider,
   sellerMediaConfigError,
   geminiBillingConfigError,
   LLM_PROVIDERS,
   LLM_ROLES,
+  TRANSCRIPTION_ROLES,
   SELLER_MEDIA_ROLES,
   type LlmProvider,
   type LlmRole,
+  type TranscriptionRole,
   type ResolveLanguageModelOptions,
+  type ResolveTranscriptionModelOptions,
+  type ResolvedTranscriptionModel,
 } from "./registry";
 // NOTE: the runtime barrel exports ONLY the registry. The fixture helpers
 // (`./fixtures`, which import `node:fs`) and the contract map (`./contracts`,

@@ -1,4 +1,4 @@
-import type { LlmProvider, LlmRole } from "../llm";
+import type { LlmProvider, LlmRole, TranscriptionRole } from "../llm";
 
 /**
  * The per-run provider-usage record (issue #716) — WHAT a listing-preparation
@@ -57,6 +57,16 @@ export interface SoldCompUsage {
   chargedUsd: number | null;
 }
 
+/** One media transcription triple whose provider exposes no token or charge usage. */
+export interface ProviderUsageTranscriptionTotals {
+  role: TranscriptionRole;
+  provider: LlmProvider;
+  model: string;
+  calls: number;
+  /** Null because the installed transcription API does not report a charge. */
+  chargedUsd: null;
+}
+
 /** One run's complete provider-usage measurement. */
 export interface ProviderUsageRecord {
   /** Bumped when the persisted shape changes; the reader pins it. */
@@ -70,6 +80,8 @@ export interface ProviderUsageRecord {
   reasoningTokens: number;
   /** Per-(role, provider, model) breakdown, ordered deterministically. */
   models: ProviderUsageModelTotals[];
+  /** Aggregate routing facts only; never audio, transcript, or provider payloads. */
+  transcriptions: ProviderUsageTranscriptionTotals[];
   /** Per-strategy sold-comp retrieval, ordered deterministically. */
   soldComps: SoldCompUsage[];
 }
@@ -92,6 +104,13 @@ export interface SoldCompUsageReport {
   chargedUsd?: number | null;
 }
 
+export interface TranscriptionUsageReport {
+  role: TranscriptionRole;
+  provider: LlmProvider;
+  model: string;
+  chargedUsd?: null;
+}
+
 /** A provider may omit a count; an omitted count is zero, never a guess. */
 function count(value: number | undefined): number {
   return Number.isFinite(value) && (value as number) > 0 ? Math.trunc(value as number) : 0;
@@ -104,6 +123,10 @@ function count(value: number | undefined): number {
  */
 export class ProviderUsageTally {
   private readonly models = new Map<string, ProviderUsageModelTotals>();
+  private readonly transcriptions = new Map<
+    string,
+    ProviderUsageTranscriptionTotals
+  >();
   private readonly soldComps = new Map<string, SoldCompUsage>();
 
   addModelCall(report: ModelUsageReport): void {
@@ -146,6 +169,19 @@ export class ProviderUsageTally {
     this.soldComps.set(report.strategy, totals);
   }
 
+  addTranscriptionCall(report: TranscriptionUsageReport): void {
+    const key = `${report.role}\u0000${report.provider}\u0000${report.model}`;
+    const totals = this.transcriptions.get(key) ?? {
+      role: report.role,
+      provider: report.provider,
+      model: report.model,
+      calls: 0,
+      chargedUsd: null,
+    };
+    totals.calls += 1;
+    this.transcriptions.set(key, totals);
+  }
+
   /** The run's aggregate. Ordering is deterministic so persisted rows diff cleanly. */
   snapshot(): ProviderUsageRecord {
     const models = [...this.models.values()].sort(
@@ -157,9 +193,17 @@ export class ProviderUsageTally {
     const soldComps = [...this.soldComps.values()].sort((a, b) =>
       a.strategy.localeCompare(b.strategy),
     );
+    const transcriptions = [...this.transcriptions.values()].sort(
+      (a, b) =>
+        a.role.localeCompare(b.role) ||
+        a.provider.localeCompare(b.provider) ||
+        a.model.localeCompare(b.model),
+    );
     return {
       schemaVersion: 1,
-      modelCalls: models.reduce((total, entry) => total + entry.calls, 0),
+      modelCalls:
+        models.reduce((total, entry) => total + entry.calls, 0) +
+        transcriptions.reduce((total, entry) => total + entry.calls, 0),
       inputTokens: models.reduce((total, entry) => total + entry.inputTokens, 0),
       cachedInputTokens: models.reduce(
         (total, entry) => total + entry.cachedInputTokens,
@@ -171,6 +215,7 @@ export class ProviderUsageTally {
         0,
       ),
       models,
+      transcriptions,
       soldComps,
     };
   }

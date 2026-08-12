@@ -1,4 +1,8 @@
-import { wrapLanguageModel, type LanguageModel } from "ai";
+import {
+  wrapLanguageModel,
+  type LanguageModel,
+  type TranscriptionModel,
+} from "ai";
 import { usageRecordingMiddleware } from "./usage-recording";
 
 /** A read-only env bag. `process.env` satisfies this, and tests pass plain objects. */
@@ -53,6 +57,11 @@ export const LLM_ROLES = [
 ] as const;
 export type LlmRole = (typeof LLM_ROLES)[number];
 
+/** Media-to-text roles use the same provider/config authority without pretending to be language models. */
+export const TRANSCRIPTION_ROLES = ["sellerContext"] as const;
+export type TranscriptionRole = (typeof TRANSCRIPTION_ROLES)[number];
+type ModelRole = LlmRole | TranscriptionRole;
+
 /**
  * Per-role model-id env override (provider-agnostic — an advanced operator sets
  * it to a value valid for the ACTIVE provider). Preserves the pre-registry env
@@ -64,6 +73,72 @@ const ROLE_ENV_VAR: Record<LlmRole, string> = {
   export: "EXPORT_PACK_MODEL",
   pricingAgent: "PRICING_MODEL",
   judge: "EVAL_JUDGE_MODEL",
+};
+
+const TRANSCRIPTION_ROLE_ENV_VAR: Record<TranscriptionRole, string> = {
+  sellerContext: "SELLER_CONTEXT_TRANSCRIPTION_MODEL",
+};
+
+const SELLER_CONTEXT_TRANSCRIPTION_ENABLED_VAR =
+  "SELLER_CONTEXT_TRANSCRIPTION_ENABLED";
+
+export class SellerContextTranscriptionConfigurationError extends Error {
+  readonly code = "seller_context_transcription_configuration";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "SellerContextTranscriptionConfigurationError";
+  }
+}
+
+function parseSellerContextTranscriptionActivation(
+  env: EnvLike,
+): boolean | undefined {
+  const raw = env[SELLER_CONTEXT_TRANSCRIPTION_ENABLED_VAR]?.trim().toLowerCase() ?? "";
+  if (raw === "" || raw === "false") return false;
+  if (raw === "true") return true;
+  return undefined;
+}
+
+export function sellerContextTranscriptionConfigError(
+  env: EnvLike = process.env,
+  providerOverride?: LlmProvider,
+): string | undefined {
+  const activation = parseSellerContextTranscriptionActivation(env);
+  if (activation === undefined) {
+    return (
+      `${SELLER_CONTEXT_TRANSCRIPTION_ENABLED_VAR} is set to ` +
+      `"${env[SELLER_CONTEXT_TRANSCRIPTION_ENABLED_VAR]}", which is neither ` +
+      `"true" nor "false". Hosted seller-audio transcription is default-off and ` +
+      `requires an explicit operator activation.`
+    );
+  }
+  if (!activation) return undefined;
+  if (!providerOverride && llmProviderConfigError(env)) return undefined;
+
+  const provider = providerOverride ?? resolveProvider(env);
+  if (provider === "openai") return undefined;
+  return (
+    `${SELLER_CONTEXT_TRANSCRIPTION_ENABLED_VAR}=true requires ` +
+    `the effective provider to be openai (LLM_PROVIDER=openai when no explicit ` +
+    `override is supplied); selected provider "${provider}" has no sellerContext ` +
+    `transcription adapter. Disable seller-context transcription or choose the ` +
+    `wired provider before startup.`
+  );
+}
+
+export function isSellerContextTranscriptionEnabled(
+  env: EnvLike = process.env,
+): boolean {
+  return parseSellerContextTranscriptionActivation(env) === true;
+}
+
+const TRANSCRIPTION_MODEL_DEFAULTS: Record<
+  LlmProvider,
+  Record<TranscriptionRole, string | null>
+> = {
+  openai: { sellerContext: "gpt-4o-mini-transcribe" },
+  google: { sellerContext: null },
 };
 
 /**
@@ -199,19 +274,21 @@ export function resolveProvider(env: EnvLike = process.env): LlmProvider {
  * Roles whose model request carries the SELLER'S OWN MEDIA — raw photo or audio
  * bytes — rather than text derived from it.
  *
- * `vision` is the only one: `vision/extract.ts` and `vision/measurements.ts` are
- * the product call sites that build `{ type: "image" }` parts, and the bytes they
- * send come straight out of the private `photos` bucket (`vision/photos.ts`).
- * Every other role receives text. `seller-media-fence.test.ts` scans the whole
- * repository and fails if a new module starts sending media without joining this
- * set or being recorded as an exemption, so the fence below cannot be reopened by
- * a role quietly gaining a media payload.
+ * `vision` carries seller photo bytes from the private `photos` bucket;
+ * `sellerContext` carries one verified bounded WAV only after explicit operator
+ * activation. The Google media fence covers both roles, and startup separately
+ * rejects enabled sellerContext transcription because only OpenAI has a wired
+ * audio adapter. `seller-media-fence.test.ts` scans the repository so a new media
+ * call site cannot quietly bypass this set.
  *
  * One media call site outside `src/` is exempt by decision: `scripts/spike/
  * garment-measure.ts` sends other sellers' already-public eBay gallery photos, not
  * a SnapList seller's own. ADR-0002 Amendment 2 records the reasoning.
  */
-export const SELLER_MEDIA_ROLES: ReadonlySet<LlmRole> = new Set<LlmRole>(["vision"]);
+export const SELLER_MEDIA_ROLES: ReadonlySet<ModelRole> = new Set<ModelRole>([
+  "vision",
+  "sellerContext",
+]);
 
 /**
  * The operator's attestation that the Google project behind the Gemini key is
@@ -278,7 +355,7 @@ export function geminiBillingConfigError(env: EnvLike = process.env): string | u
  * listing images, and ADR-0002 Amendment 2 records that as a decision.
  */
 export function sellerMediaConfigError(
-  role: LlmRole,
+  role: ModelRole,
   provider: LlmProvider,
   env: EnvLike = process.env,
 ): string | undefined {
@@ -300,6 +377,17 @@ export function sellerMediaConfigError(
     `to make this message go away — it is a claim about billing, and the seller's ` +
     `photos are what rests on it.`
   );
+}
+
+export function resolveTranscriptionModelId(
+  role: TranscriptionRole,
+  opts: { provider?: LlmProvider; modelId?: string; env?: EnvLike } = {},
+): string | null {
+  const env = opts.env ?? process.env;
+  const provider = opts.provider ?? resolveProvider(env);
+  const override =
+    opts.modelId?.trim() || env[TRANSCRIPTION_ROLE_ENV_VAR[role]]?.trim();
+  return override || TRANSCRIPTION_MODEL_DEFAULTS[provider][role];
 }
 
 /**
@@ -336,6 +424,50 @@ export interface ResolveLanguageModelOptions {
   apiKey?: string;
   /** Env bag to resolve against (defaults to `process.env`; injectable for tests). */
   env?: EnvLike;
+}
+
+export type ResolveTranscriptionModelOptions = ResolveLanguageModelOptions;
+
+export interface ResolvedTranscriptionModel {
+  model: TranscriptionModel;
+  provider: LlmProvider;
+  modelId: string;
+}
+
+/** Resolve a media transcription model without exposing transcript contents to usage rows. */
+export async function resolveTranscriptionModel(
+  role: TranscriptionRole,
+  opts: ResolveTranscriptionModelOptions = {},
+): Promise<ResolvedTranscriptionModel | null> {
+  const env = opts.env ?? process.env;
+  const activationError = sellerContextTranscriptionConfigError(
+    env,
+    opts.provider,
+  );
+  if (activationError) {
+    throw new SellerContextTranscriptionConfigurationError(activationError);
+  }
+  if (!isSellerContextTranscriptionEnabled(env)) return null;
+  const provider = opts.provider ?? resolveProvider(env);
+  const modelId = resolveTranscriptionModelId(role, {
+    provider,
+    modelId: opts.modelId,
+    env,
+  });
+  if (!modelId) return null;
+
+  const mediaError = sellerMediaConfigError(role, provider, env);
+  if (mediaError) throw new Error(mediaError);
+  if (provider !== "openai") return null;
+
+  const apiKey = opts.apiKey ?? resolveApiKey(provider, env);
+  const { createOpenAI } = await import("@ai-sdk/openai");
+  const openai = createOpenAI(apiKey ? { apiKey } : {});
+  return {
+    model: openai.transcription(modelId),
+    provider,
+    modelId,
+  };
 }
 
 /**
