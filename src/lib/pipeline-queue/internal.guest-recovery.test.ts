@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Client } from "pg";
+import { createClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PipelineResult } from "@/lib/pipeline";
 import type { PipelineWorkerContext } from "./worker-store";
@@ -19,10 +20,16 @@ const RECOVERY_ID = "63870000-0000-4000-8000-000000000003";
 const LEASE_TOKEN = "63870000-0000-4000-8000-000000000004";
 const LISTING_ID = "63870000-0000-4000-8000-000000000005";
 const ORIGINAL_PATH = "guest/raw/front.jpg";
+const GUEST_USER_ID = "guest_0123456789abcdef0123456789abcdef0123456789abcdef";
 const MASTER_KEY = new Uint8Array(32).fill(7);
 const LOCAL_DATABASE_URL =
   process.env.SNAPLIST_GUEST_RECOVERY_TEST_DATABASE_URL
   ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const SUPABASE_URL =
+  process.env.SUPABASE_URL
+  ?? process.env.NEXT_PUBLIC_SUPABASE_URL
+  ?? "http://127.0.0.1:54321";
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const stackIsReachable = await stackReachable();
 
 const result = {
@@ -51,11 +58,13 @@ const result = {
   listingModel: "listing-model",
 } satisfies PipelineResult;
 
-function guestContext(): PipelineWorkerContext {
+function guestContext(
+  overrides: { photos?: string[]; recoveryId?: string } = {},
+): PipelineWorkerContext {
   return {
     run: {
       id: RUN_ID,
-      user_id: "guest_0123456789abcdef0123456789abcdef0123456789abcdef",
+      user_id: GUEST_USER_ID,
       item_id: ITEM_ID,
       listing_id: null,
       status: "running",
@@ -68,13 +77,13 @@ function guestContext(): PipelineWorkerContext {
       lease_token: LEASE_TOKEN,
       lease_expires_at: "2026-08-04T12:00:00.000Z",
       next_attempt_at: null,
-      recovery_id: RECOVERY_ID,
+      recovery_id: overrides.recoveryId ?? RECOVERY_ID,
       recovery_token_hash: "a".repeat(64),
     },
     item: {
       id: ITEM_ID,
-      user_id: "guest_0123456789abcdef0123456789abcdef0123456789abcdef",
-      photos: [ORIGINAL_PATH],
+      user_id: GUEST_USER_ID,
+      photos: overrides.photos ?? [ORIGINAL_PATH],
       photo_identity_kind: "content_sha256_set_v1",
       photo_identity_fingerprint: "b".repeat(64),
       attributes: {},
@@ -167,6 +176,93 @@ describe("production guest recovery worker composition", () => {
       expect.objectContaining({ p_guest_recovery_registration: registration }),
     );
   });
+
+  // Every other test on this path stubs `storage`, so the mime type the
+  // producer declares is only ever checked against the stub that recorded it.
+  // The `photos` bucket allowlist lives in SQL and rejected the real write with
+  // a 415 in production. This test is the join: the real bucket policy decides.
+  it.skipIf(!stackIsReachable)(
+    "writes the guest recovery envelope into the real photos bucket",
+    async () => {
+      process.env.GUEST_RECOVERY_ENCRYPTION_KEY = Buffer.from(MASTER_KEY)
+        .toString("base64");
+      process.env.GUEST_RECOVERY_ENCRYPTION_KEY_ID = "guest-recovery-key-v1";
+      const storage = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!).storage;
+      const bucket = storage.from("photos");
+      const recoveryId = crypto.randomUUID();
+      const originalPath =
+        `${GUEST_USER_ID}/pipeline-staging/${recoveryId}/0/front.jpg`;
+      const uploaded = [originalPath];
+      try {
+        const seeded = await bucket.upload(
+          originalPath,
+          new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+          { contentType: "image/jpeg", upsert: true },
+        );
+        expect(seeded.error).toBeNull();
+        createAdminClient.mockReturnValue({
+          rpc: async () => {
+            throw new Error("Unexpected RPC during envelope production");
+          },
+          storage,
+        });
+
+        const registration = await createInternalPipelineWorkerCapabilities()
+          .guestRecovery.prepare({
+            context: guestContext({ photos: [originalPath], recoveryId }),
+            result,
+            stageUploadCleanup: async () => {},
+          });
+
+        const envelope = registration!.storageManifest[0]!;
+        uploaded.push(envelope.sourcePath);
+        const stored = await bucket.download(envelope.sourcePath);
+        expect(stored.error).toBeNull();
+        expect(stored.data!.type).toBe("application/octet-stream");
+        const bytes = new Uint8Array(await stored.data!.arrayBuffer());
+        expect(createHash("sha256").update(bytes).digest("hex"))
+          .toBe(envelope.sha256);
+      } finally {
+        await bucket.remove(uploaded);
+      }
+    },
+    30_000,
+  );
+
+  // The envelope type has to be *appended*. Asserted through real uploads
+  // rather than by reading `storage.buckets.allowed_mime_types`, so a migration
+  // that rewrote the array wholesale fails here on the type it dropped.
+  it.skipIf(!stackIsReachable)(
+    "keeps accepting every content type the photos bucket accepted before",
+    async () => {
+      const bucket = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!)
+        .storage.from("photos");
+      const prefix = `${GUEST_USER_ID}/mime-allowlist/${crypto.randomUUID()}`;
+      const uploaded: string[] = [];
+      try {
+        for (const contentType of [
+          "image/png",
+          "image/jpeg",
+          "image/webp",
+          "image/heic",
+          "image/heif",
+          "audio/wav",
+        ]) {
+          const path = `${prefix}/${contentType.replace("/", "-")}`;
+          const { error } = await bucket.upload(
+            path,
+            new Uint8Array([0x00, 0x01, 0x02, 0x03]),
+            { contentType, upsert: true },
+          );
+          uploaded.push(path);
+          expect(error?.message ?? null, contentType).toBeNull();
+        }
+      } finally {
+        await bucket.remove(uploaded);
+      }
+    },
+    30_000,
+  );
 
   it.skipIf(!stackIsReachable)(
     "carries a committed local-stack guest run through production composition to recovery and handoff",
