@@ -1,5 +1,16 @@
 #include "SnapList.xcconfig"
 
-// Development Clerk instance for Debug builds only.
-SNAPLIST_CLERK_PUBLISHABLE_KEY = pk_test_d2l0dHktd2FscnVzLTI3LmNsZXJrLmFjY291bnRzLmRldiQ
-SNAPLIST_CLERK_FRONTEND_DOMAIN = witty-walrus-27.clerk.accounts.dev
+// Debug builds talk to the production API origin declared in SnapList.xcconfig,
+// so they must authenticate against the production Clerk instance. A key from
+// any other instance mints tokens with a different issuer and JWKS, which the
+// production API rejects with an opaque 401 only after the seller has already
+// worked (#804). The trust-boundary reasoning for using the production instance
+// here — including that a Debug build then holds real seller sessions — is
+// recorded in docs/adr/0013-debug-builds-use-the-production-clerk-instance.md.
+//
+// A Clerk publishable key is not a secret: it is base64 of the frontend API
+// domain plus "$" behind a pk_live_ or pk_test_ prefix, and it ships inside
+// every client binary. Scripts/clerk-origin-pairing-lint.sh runs on every build
+// and fails it if this key and SNAPLIST_API_ORIGIN ever disagree again.
+SNAPLIST_CLERK_PUBLISHABLE_KEY = pk_live_Y2xlcmsuc25hcGxpc3QuZGV2JA
+SNAPLIST_CLERK_FRONTEND_DOMAIN = clerk.snaplist.dev

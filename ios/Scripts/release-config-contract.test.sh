@@ -22,9 +22,13 @@ test -f "$debug_config"
 test -f "$release_config"
 grep -Fq 'SnapList.Debug.xcconfig' "$project_file"
 grep -Fq 'SnapList.Release.xcconfig' "$project_file"
-grep -Fq 'pk_test_' "$debug_config"
+grep -Eq '^SNAPLIST_CLERK_PUBLISHABLE_KEY = pk_(live|test)_' "$debug_config"
 if grep -Fq 'pk_test_' "$release_config"; then
   print -u2 -r -- "Release configuration contains a development Clerk key"
+  exit 1
+fi
+if grep -Fq 'pk_' "$release_config"; then
+  print -u2 -r -- "Release configuration contains a committed Clerk key"
   exit 1
 fi
 grep -Fq 'webcredentials:$(SNAPLIST_CLERK_FRONTEND_DOMAIN)' "$entitlements"

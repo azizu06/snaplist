@@ -57,6 +57,9 @@ jobs:
       - name: Validate Release archive configuration
         run: zsh ios/Scripts/release-config-contract.test.sh
 
+      - name: Validate Clerk instance and API origin pairing
+        run: zsh ios/Scripts/clerk-origin-pairing.test.sh
+
   shard:
     name: shard (${{ matrix.shard }})
     if: github.event_name == 'pull_request'
