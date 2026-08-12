@@ -8,16 +8,16 @@
     "xcode_version": "26.5",
     "xcode_build": "17F42",
     "unit_test_count": 705,
-    "ui_test_count": 133,
+    "ui_test_count": 136,
     "source_ui_shard_suite_seconds": {
       "ui-1": 1361.911,
       "ui-2": 1174.858
     },
-    "selector_seconds_total": 2583.764,
+    "selector_seconds_total": 2589.731,
     "balanced_ui_shard_observed_seconds": {
-      "ui-1": 862.776,
-      "ui-2": 858.088,
-      "ui-3": 862.9
+      "ui-1": 863.233,
+      "ui-2": 863.262,
+      "ui-3": 863.236
     },
     "selector_observed_seconds": {
       "SnapListUITests/AssistedExportUITests/testAPackUpdateTakesDownAConfirmSheetTheSellerIsLookingAt": 29.919,
@@ -115,6 +115,7 @@
       "SnapListUITests/SnapListUITests/testPhotoReviewREV05ShowsOnlyTheFirstRejectedSaveExit": 9.045,
       "SnapListUITests/SnapListUITests/testPhotoReviewREV06WithdrawsRetryAndKeepsOnlyDiscard": 8.566,
       "SnapListUITests/SnapListUITests/testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionCoverAndProgressiveActions": 12.476,
+      "SnapListUITests/SnapListUITests/testPhotosTooLargeBannerHasALaunchableFixtureRoute": 5.849,
       "SnapListUITests/SnapListUITests/testPrimaryShellNavigationAndTypedDestinations": 10.241,
       "SnapListUITests/SnapListUITests/testProGateAccessibilityTypeScalesAndKeepsActionsInTheSheetScroll": 24.602,
       "SnapListUITests/SnapListUITests/testProGateOfferKeepsTheApprovedLabelAndDecisionControlsReachable": 11.707,
@@ -140,6 +141,8 @@
       "SnapListUITests/UILaunchBoundaryTests/testLaunchIsIssuedOnlyAfterTheProcessIsObservedNotRunning": 0.152,
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementIsReportedBeforeTheLaunchIsIssued": 0.137,
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure": 0.117,
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheRestoredWallSurvivesTheSlowRunnerTimelineThatFlakedTheDeepLink": 0.056,
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheThreeSecondBudgetStillMissesThatSameRestoredWall": 0.062,
       "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest": 0.113,
       "SnapListUITests/UIProcessTerminationBoundaryTests/testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget": 0.128,
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget": 0.117,
@@ -202,7 +205,11 @@
       "SnapListUITests/SnapListUITests/testScanCameraFlashRetainsTheFortyEightPointTapTarget",
       "SnapListUITests/SnapListUITests/testScanCameraKeepsNamedControlsReachableAtAccessibilityTypeAndReducedMotion",
       "SnapListUITests/SnapListUITests/testSettingsMemberReauthenticationCancelReturnsToDeletionConsequences",
-      "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachCAP01"
+      "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachCAP01",
+      "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessUsesNativeWaitToObserveSuspensionBeforeTermination",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testStuckRetirementNamesTheObservedStateAndTheBudgetItWaited"
     ],
     "ui-2": [
       "SnapListUITests/AssistedExportUITests/testAPackUpdateTakesDownAConfirmSheetTheSellerIsLookingAt",
@@ -240,25 +247,21 @@
       "SnapListUITests/SnapListUITests/testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity",
       "SnapListUITests/SnapListUITests/testPhotoReviewNativeDragMovesThirdPhotoToCoverAndOutsideDropStaysInertWithReducedMotion",
       "SnapListUITests/SnapListUITests/testPhotoReviewREV01RendersOneSelectedCoverPhotoWithProgressiveActions",
+      "SnapListUITests/SnapListUITests/testPhotosTooLargeBannerHasALaunchableFixtureRoute",
       "SnapListUITests/SnapListUITests/testRestoredCaptureResumesWithNoFirstValueOnboardingControl",
       "SnapListUITests/SnapListUITests/testScanCameraCAM04MatchesLiveRenderedGeometryAt402x874",
       "SnapListUITests/SnapListUITests/testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets",
       "SnapListUITests/UILaunchBoundaryTests/testAlreadyStoppedProcessLaunchesWithoutAnotherTerminateRequest",
       "SnapListUITests/UILaunchBoundaryTests/testLaunchIsIssuedOnlyAfterTheProcessIsObservedNotRunning",
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementIsReportedBeforeTheLaunchIsIssued",
-      "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure",
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheRestoredWallSurvivesTheSlowRunnerTimelineThatFlakedTheDeepLink",
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheThreeSecondBudgetStillMissesThatSameRestoredWall",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessThatSuspendsAfterHomeStillTerminatesAndVerifiesExit",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessUsesNativeWaitToObserveSuspensionBeforeTermination",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testStuckRetirementNamesTheObservedStateAndTheBudgetItWaited",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testTargetOutOfForegroundRetiresEvenWhenTheWitnessNeverResolves",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessCannotConsumeTheBudgetTheTargetNeedsToBeObserved",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget"
     ],
     "ui-3": [
@@ -300,7 +303,10 @@
       "SnapListUITests/SnapListUITests/testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable",
       "SnapListUITests/SnapListUITests/testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave",
       "SnapListUITests/SnapListUITests/testVoiceNoteRecordingCancelAndSaveBothDismissToExactRowTruth",
-      "SnapListUITests/SnapListUITests/testVoiceNoteSheetRejectsSwipeAndCloseRestoresStableReopenTruth"
+      "SnapListUITests/SnapListUITests/testVoiceNoteSheetRejectsSwipeAndCloseRestoresStableReopenTruth",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessThatSuspendsAfterHomeStillTerminatesAndVerifiesExit",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessCannotConsumeTheBudgetTheTargetNeedsToBeObserved"
     ]
   },
   "ui_shard_count": 3

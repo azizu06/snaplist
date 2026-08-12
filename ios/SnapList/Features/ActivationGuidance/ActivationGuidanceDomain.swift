@@ -300,11 +300,28 @@ enum ActivationAuthenticationPolicy {
            bearerError == .sessionAbsent {
             return .guest
         }
-        if let apiError = error as? MobileAPIClientError,
-           apiError == .httpStatus(unauthenticatedStatusCode) {
-            return .guest
+        guard let apiError = error as? MobileAPIClientError else {
+            return .unknown
         }
-        return .unknown
+        switch apiError {
+        case .unauthenticated(.guestCapability):
+            return .guest
+        case .unauthenticated(.clerkSubject):
+            // The route refused a token minted for a verified subject. That is
+            // a broken credential — a missing `CLERK_SECRET_KEY`, a rotated
+            // signing key — not an absent one, and it is exactly the class
+            // `.unknown` exists for. Calling it `.guest` would put the coach
+            // marks back in front of a signed-in seller (#789 item 2).
+            return .unknown
+        case .httpStatus(let status) where status == unauthenticatedStatusCode:
+            // A `401` no credential was classified for still means guest: it
+            // reached here from a caller that did not go through the
+            // authenticated seam, and the only credential that gets to a bearer
+            // route without a Clerk subject is the capability bearer.
+            return .guest
+        case .httpStatus, .invalidResponse:
+            return .unknown
+        }
     }
 }
 
@@ -319,19 +336,23 @@ struct ActivationRetryPolicy: Equatable, Sendable {
     /// a thousand more requests; the next launch or navigation retries it.
     let maxAttempts: Int
     let baseDelay: Duration
-    let maxDelay: Duration
 
     static let standard = ActivationRetryPolicy(
         maxAttempts: 5,
-        baseDelay: .seconds(2),
-        maxDelay: .seconds(32)
+        baseDelay: .seconds(2)
     )
 
-    /// Exponential backoff from `baseDelay`, clamped at `maxDelay`.
+    /// Exponential backoff from `baseDelay`, clamped where the loop stops.
+    ///
+    /// `maxAttempts` is the only cap that can fire. The last attempt returns
+    /// instead of backing off, so attempt `maxAttempts - 1` is the last one that
+    /// ever produces a delay and its value is the top of the ladder. A separate
+    /// `maxDelay` constant above that point cannot be reached, and a retry
+    /// envelope stated in a number no run can produce misleads the next reader.
     func delay(afterAttempt attempt: Int) -> Duration {
-        let doublings = max(0, attempt - 1)
-        guard doublings < 16 else { return maxDelay }
-        return min(baseDelay * (1 << doublings), maxDelay)
+        let lastSleepingAttempt = max(1, maxAttempts - 1)
+        let doublings = max(0, min(attempt, lastSleepingAttempt) - 1)
+        return baseDelay * (1 << doublings)
     }
 }
 

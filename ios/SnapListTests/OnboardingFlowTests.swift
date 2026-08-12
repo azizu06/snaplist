@@ -281,6 +281,32 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(tenantWrites, 0)
     }
 
+    func testTheSame401MeansGuestOrOutageDependingOnTheCredentialItAnswered() {
+        // A capability bearer proves an installation and never a subject, so a
+        // route refusing it is that route working: this caller is a guest.
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: MobileAPIClientError.unauthenticated(
+                    credential: .guestCapability
+                )
+            ),
+            .guest
+        )
+
+        // The identical status answered to a Clerk bearer says the opposite: a
+        // token minted for a verified subject was refused. That is a Clerk
+        // misconfiguration, it clears on its own, and classifying it as guest
+        // would re-show the activation coach marks to a signed-in seller.
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: MobileAPIClientError.unauthenticated(
+                    credential: .clerkSubject
+                )
+            ),
+            .unknown
+        )
+    }
+
     func testASessionRejectionClassifiesTheCallerAsGuestNotAsAnOutage() {
         // A guest carries the App Attest capability bearer, so /v1/session
         // answers 401 rather than failing to produce a token at all. Both are
@@ -447,6 +473,26 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(tenantWrites, 1)
     }
 
+    func testEveryStepOnTheBackoffLadderIsOneTheLoopCanActuallyReach() {
+        let policy = ActivationRetryPolicy.standard
+
+        // The loop sleeps after every attempt except the last, so these four
+        // are the whole retry envelope the doc comment states: 2 + 4 + 8 + 16.
+        let spent = (1..<policy.maxAttempts).map(policy.delay(afterAttempt:))
+        XCTAssertEqual(
+            spent,
+            [.seconds(2), .seconds(4), .seconds(8), .seconds(16)]
+        )
+
+        // A step the ladder can return but the loop can never ask for is not a
+        // longer envelope, it is a number that misleads the next reader about
+        // how long a failing activation actually retries for.
+        XCTAssertEqual(
+            Set((1...1_000).map(policy.delay(afterAttempt:))),
+            Set(spent)
+        )
+    }
+
     func testActivationRetriesBackOffAndStateTheirCap() {
         let policy = ActivationRetryPolicy.standard
 
@@ -455,7 +501,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(policy.delay(afterAttempt: 2), .seconds(4))
         XCTAssertEqual(policy.delay(afterAttempt: 3), .seconds(8))
         XCTAssertEqual(policy.delay(afterAttempt: 4), .seconds(16))
-        XCTAssertEqual(policy.delay(afterAttempt: 99), policy.maxDelay)
+        XCTAssertEqual(policy.delay(afterAttempt: 99), .seconds(16))
     }
 
     @MainActor
@@ -627,6 +673,7 @@ final class OnboardingFlowTests: XCTestCase {
     @MainActor
     func testGuestPromotionRecordsTheTenantMarkerOnItsFirstAuthenticatedPass() async {
         var sessionRequests = 0
+        var tenantWrites = 0
         var sleeps: [Duration] = []
 
         let result = await ActivationGuestCompletionPromotionCoordinator.promote(
@@ -636,11 +683,19 @@ final class OnboardingFlowTests: XCTestCase {
                 sessionRequests += 1
                 return "user_566"
             },
-            fetchTenantCompleted: { true },
-            writeTenantCompletion: { true }
+            // No marker is present yet, which is the only setup under which
+            // recording one is observable. With it already completed the loop
+            // promotes without ever reaching the write, and this test would
+            // pass against a coordinator that never wrote at all.
+            fetchTenantCompleted: { false },
+            writeTenantCompletion: {
+                tenantWrites += 1
+                return true
+            }
         )
 
         XCTAssertEqual(result, "user_566")
+        XCTAssertEqual(tenantWrites, 1)
         XCTAssertEqual(sessionRequests, 1)
         XCTAssertEqual(sleeps, [])
     }

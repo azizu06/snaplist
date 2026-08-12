@@ -188,15 +188,19 @@ final class HomeUITests: XCTestCase {
     }
 
     func testExactCustomRunDeepLinkOpensDetailAndBackReturnsHome() {
+        // Every wait here is a view a navigation this test drove has to bring
+        // back, so all three go through the shared budget. A literal here is a
+        // bet on runner speed, which is what flaked this test on ui-2 (#710).
+        let navigation = UINavigationReturnBoundary()
         let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=loaded"])
         let wall = app.otherElements["trophy.wall"]
-        XCTAssertTrue(wall.waitForExistence(timeout: 3))
+        XCTAssertTrue(navigation.restored(wall))
 
         app.openRunDetail()
 
-        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].waitForExistence(timeout: 3))
+        XCTAssertTrue(navigation.restored(app.staticTexts["Canon AE-1 film camera"]))
         app.buttons["Back"].tap()
-        XCTAssertTrue(wall.waitForExistence(timeout: 3))
+        XCTAssertTrue(navigation.restored(wall))
     }
 
     func testRun02VisualStateUsesTheCanonicalDetailRouteShell() {

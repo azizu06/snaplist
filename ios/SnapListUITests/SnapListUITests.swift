@@ -815,6 +815,34 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(done.label, "Start listing")
     }
 
+    /// Every other rejection state has a launch route, which is what makes a
+    /// simctl launch plus a screenshot a free see-the-screen check. The
+    /// `photosTooLarge` banner shipped in #785 without one and sits on the
+    /// seller's critical path, so this proves the route by taking it — reading
+    /// the switch would prove only that a case was written.
+    func testPhotosTooLargeBannerHasALaunchableFixtureRoute() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--photo-review-state=REV-02",
+            "--submission-visual-state=SUB-07-photos-too-large",
+            "--zero-network-fixtures",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let message = app.staticTexts["photo-review.submission-message"]
+        XCTAssertTrue(UINavigationReturnBoundary().restored(message))
+        XCTAssertEqual(
+            message.label,
+            "These photos are too large to send. Remove or retake one, then try again."
+        )
+
+        // The remedy the banner names is reviewing the photos, so the route has
+        // to land on that action and not on a retry of the same bytes.
+        let action = app.buttons["photo-review.start-listing"]
+        XCTAssertTrue(action.exists)
+        XCTAssertEqual(action.label, "Review")
+    }
+
     func testLivePhotoReviewShowsBoundedSavingStateDuringZeroNetworkSubmission() {
         let app = XCUIApplication()
         app.launchArguments = [

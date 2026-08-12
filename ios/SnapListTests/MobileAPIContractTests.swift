@@ -105,6 +105,68 @@ final class MobileAPIContractTests: XCTestCase {
         XCTAssertNil(recorder.request)
     }
 
+    /// A `401` is the same status whichever credential earned it, so the client
+    /// is the only place that still knows which one was sent. Both branches run
+    /// against one identical refusal: only the credential differs.
+    func testA401NamesWhichCredentialTheAuthenticatedRequestSent() async {
+        let guestBearer = GuestCapabilityBearer(
+            expiresAt: .distantFuture,
+            token: "guestcap_\(String(repeating: "G", count: 43))"
+        )
+        let providers: [(any BearerTokenProviding, BearerCredential)] = [
+            (
+                GuestCapableBearerTokenProvider(
+                    clerk: ClerkBearerTokenProvider(
+                        session: StubClerkSessionToken(token: nil)
+                    ),
+                    guestCapabilities: CountingGuestCapabilityBearerStore(
+                        bearer: guestBearer
+                    )
+                ),
+                .guestCapability
+            ),
+            (
+                GuestCapableBearerTokenProvider(
+                    clerk: ClerkBearerTokenProvider(
+                        session: StubClerkSessionToken(token: "clerk-token")
+                    ),
+                    guestCapabilities: CountingGuestCapabilityBearerStore(
+                        bearer: guestBearer
+                    )
+                ),
+                .clerkSubject
+            ),
+        ]
+
+        for (provider, expected) in providers {
+            let client = URLSessionMobileAPIClient(
+                baseURL: URL(string: "https://api.snaplist.dev")!,
+                tokenProvider: provider,
+                session: Self.makeSession { request in
+                    (
+                        HTTPURLResponse(
+                            url: request.url!,
+                            statusCode: 401,
+                            httpVersion: nil,
+                            headerFields: nil
+                        )!,
+                        Data()
+                    )
+                }
+            )
+
+            do {
+                _ = try await client.getSession()
+                XCTFail("A 401 must not decode as a session.")
+            } catch {
+                XCTAssertEqual(
+                    error as? MobileAPIClientError,
+                    .unauthenticated(credential: expected)
+                )
+            }
+        }
+    }
+
     func testClerkSubjectWithoutTokenCannotDowngradeGenericMobileRequestToGuest()
         async {
         for token in [nil, "   "] as [String?] {

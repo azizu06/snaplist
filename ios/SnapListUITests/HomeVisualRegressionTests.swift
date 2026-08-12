@@ -14,6 +14,42 @@ enum UIProcessLifecycleBudget {
     static let transition: TimeInterval = 30
 }
 
+/// Budget a UI test spends waiting for a view that a navigation it drove must
+/// bring back on screen.
+///
+/// Same shape as `UIProcessLifecycleBudget.transition`, and for the same reason:
+/// the wait returns the instant the view exists, so a healthy run never pays it
+/// and only a genuinely slow runner does. A small budget here is not a stricter
+/// assertion, it is a bet that the runner is fast — and on ui-2 that bet lost
+/// (#710). Thirty is the value `UIProcessLifecycleBudget.transition` already
+/// carries for the same class of wait, reused rather than competed with.
+enum UINavigationBudget {
+    static let restoredView: TimeInterval = 30
+}
+
+/// The one thing a restored-view wait needs from `XCUIElement`, named so the
+/// budget can be observed against a view whose delay the test chooses.
+protocol UIViewAppearance {
+    func waitForExistence(timeout: TimeInterval) -> Bool
+}
+
+extension XCUIElement: UIViewAppearance {}
+
+/// Waits for a view a navigation must restore, through a single budget rather
+/// than a number repeated at each call site.
+struct UINavigationReturnBoundary {
+    let budget: TimeInterval
+
+    init(budget: TimeInterval = UINavigationBudget.restoredView) {
+        self.budget = budget
+    }
+
+    /// Reports whether `view` came back within the budget.
+    func restored(_ view: any UIViewAppearance) -> Bool {
+        view.waitForExistence(timeout: budget)
+    }
+}
+
 extension XCUIApplication.State {
     /// `XCUIApplication.State` has no readable description, so a lifecycle wait
     /// that fails can only name the state it wanted, never the one it saw.
@@ -524,6 +560,48 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
             description.contains("still observed runningForeground"),
             "Unexpected failure description: \(description)"
         )
+    }
+}
+
+final class UINavigationReturnBoundaryTests: XCTestCase {
+    /// The ui-2 timeline that flaked `testExactCustomRunDeepLinkOpensDetail…`
+    /// (#710), replayed. That runner needed 36.59s to bring the deep-linked
+    /// detail to idle (23.10s to 59.69s), Back landed at 63.65s, and the wall
+    /// had still not come back when the budget expired at 70.669s — 7.02s of
+    /// waiting. The budget has to clear that second number on a runner capable
+    /// of producing the first, or the assertion is measuring the runner.
+    func testTheRestoredWallSurvivesTheSlowRunnerTimelineThatFlakedTheDeepLink() {
+        let wall = DelayedView(appearsAfter: 7.02)
+
+        XCTAssertTrue(UINavigationReturnBoundary().restored(wall))
+        XCTAssertEqual(wall.requestedBudgets, [UINavigationBudget.restoredView])
+    }
+
+    /// Pins the delay, not the fake: the same view on the budget this test was
+    /// written against is still reported absent, so a `restored` that answered
+    /// `true` unconditionally could not pass both tests.
+    func testTheThreeSecondBudgetStillMissesThatSameRestoredWall() {
+        let wall = DelayedView(appearsAfter: 7.02)
+
+        XCTAssertFalse(UINavigationReturnBoundary(budget: 3).restored(wall))
+        XCTAssertEqual(wall.requestedBudgets, [3])
+    }
+}
+
+/// A view that only becomes observable `appearsAfter` seconds into the runner's
+/// wall clock. `waitForExistence` answers what XCUITest answers: true only when
+/// the budget it was handed covers that delay.
+private final class DelayedView: UIViewAppearance {
+    private let appearsAfter: TimeInterval
+    private(set) var requestedBudgets: [TimeInterval] = []
+
+    init(appearsAfter: TimeInterval) {
+        self.appearsAfter = appearsAfter
+    }
+
+    func waitForExistence(timeout: TimeInterval) -> Bool {
+        requestedBudgets.append(timeout)
+        return timeout >= appearsAfter
     }
 }
 
