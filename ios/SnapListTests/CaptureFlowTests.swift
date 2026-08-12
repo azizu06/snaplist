@@ -2532,6 +2532,88 @@ final class CaptureFlowTests: XCTestCase {
         try await scenario.assertPreserved()
     }
 
+    /// A `413` tells the seller to remove or retake a photo. That instruction is
+    /// only true if the control under it actually returns them to the intake, so
+    /// the whole recovery is exercised here rather than only its copy: the action
+    /// consumes once, the banner clears, and the button reverts to Start listing.
+    func testPhotosTooLargeSubmissionPresentsReviewAndReturnsTheSellerToTheirIntake() async throws {
+        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
+            name: "snaplist-photos-too-large-review",
+            photoData: [
+                makeLandscapeImageData(
+                    leftColor: .systemBrown,
+                    rightColor: .systemTeal
+                ),
+                makeLandscapeImageData(
+                    leftColor: .systemPink,
+                    rightColor: .systemIndigo
+                ),
+            ]
+        )
+        defer { scenario.cleanUp() }
+        let intake = SubmissionIntakeFixture(stagedPhotos: scenario.displayedPhotos)
+        let submitter = RecordingItemRunSubmitter(outcomes: [.tooLarge])
+        let attemptStore = LocalItemRunSubmissionAttemptStore(
+            rootDirectory: scenario.attemptRoot
+        )
+        let submissionHost = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: attemptStore,
+                draftStore: scenario.draftStore,
+                tokenProvider: CaptureFlowBearerTokenProvider(),
+                readData: intake.read,
+                newIdempotencyKey: {
+                    UUID(uuidString: "50300000-0000-4000-8000-000000000070")!
+                }
+            )
+        )
+        await scenario.perform(submissionHost: submissionHost)
+
+        XCTAssertEqual(submissionHost.retention, .photosTooLarge)
+        XCTAssertNil(submissionHost.acceptedRun)
+        XCTAssertFalse(submissionHost.clearedIntake)
+
+        var presentationProbe = RetainedSubmissionPresentationProbe()
+        let rejection = try presentationProbe.assertNewEvent(
+            host: submissionHost,
+            retention: .photosTooLarge,
+            family: .photosTooLarge
+        )
+        XCTAssertEqual(
+            rejection.presentation.visibleMessage,
+            "These photos are too large to send. Remove or retake one, then try again."
+        )
+        XCTAssertEqual(rejection.presentation.primaryActionLabel, "Review")
+
+        // The action has to do something the first time and nothing the second,
+        // exactly like the `.review` case. An inert control would fail here.
+        XCTAssertTrue(
+            PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                rejection.presentation.primaryActionEvent,
+                submissionHost: submissionHost
+            )
+        )
+        XCTAssertFalse(
+            PhotoReviewSubmissionPrimaryActionConsumer.consume(
+                rejection.presentation.primaryActionEvent,
+                submissionHost: submissionHost
+            )
+        )
+
+        XCTAssertNil(submissionHost.pendingPresentationEvent)
+        let returned = PhotoReviewSubmissionPresentation(host: submissionHost)
+        XCTAssertEqual(returned.primaryActionLabel, "Start listing")
+        XCTAssertNil(returned.visibleMessage)
+        XCTAssertEqual(returned.primaryActionEvent, .startListing)
+
+        // The refusal never reached the server, so the photos and their key stay
+        // put for the seller to edit.
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+        try await scenario.assertPreserved()
+    }
+
     func testIntakeUnavailableSubmissionPresentsReviewWithoutStartingTransport() async throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(

@@ -7,6 +7,132 @@ import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Bounds one captured photo to bytes the upload can actually carry.
+///
+/// `POST /v1/items/runs` is a Route Handler behind a platform body limit of
+/// roughly 4.5 MB, enforced above the function: a request over it is answered
+/// `413` before the handler, authentication, or any validation runs. Measured
+/// against production on 2026-08-12, a 4 MB body reached auth and answered `401`
+/// while a 6 MB body answered `413`. `next.config`'s `bodySizeLimit` lift does
+/// not apply — it governs Server Actions — and no application-level config
+/// raises a limit enforced ahead of the function. So the only place the five
+/// photo contract can be honoured is here, before the bytes are staged.
+///
+/// The whole worst-case request has to fit, not just the photos. Voice context
+/// rides in the same multipart body and is uncompressed 16 kHz mono PCM, capped
+/// at `ItemRunSubmissionVoice.maximumByteLength`:
+///
+///     photos     5 x 655360 = 3276800
+///     voice                 =  524288
+///     envelope              =    2048
+///                             ---------
+///                               3803136
+///
+/// which is 84.5% of 4500000 and leaves 696864 bytes of headroom against a
+/// ceiling whose exact value is only known to sit between the measured 4 MB
+/// pass and 6 MB rejection.
+///
+/// Sizing is a ladder rather than a single quality, so a photo lands inside the
+/// ceiling by construction instead of by a bet on how it compresses. Each step
+/// is tried in order and the first result inside the ceiling wins.
+/// That also makes the output a pure function of the input bytes, which the
+/// photo-set fingerprint depends on: it is computed over these bytes and their
+/// length, and it governs guest allowance, guided correction, and AI-item credit
+/// settlement. A capture that bounded differently on a retry would read as a
+/// different submission and buy a second run.
+///
+/// 2048px on the long edge is the top of the ladder because vision models gain
+/// nothing above it — the analysis provider downsamples internally regardless —
+/// so spending body bytes there buys no identification accuracy. Below the top
+/// step the ladder gives up resolution before it gives up quality: JPEG artifacts
+/// on a brand tag or serial number cost more identification accuracy than fewer
+/// pixels of the same subject do.
+enum CapturePhotoBudget {
+    static let maximumPhotoBytes = 640 * 1024
+    static let maximumRequestBodyBytes = 4_500_000
+    /// Multipart boundaries and part headers for a full five-photo submission
+    /// with voice, locale, guest recovery, and cost basis. Measured at 1410
+    /// bytes against `ItemRunSubmissionMultipart.body`; rounded up.
+    static let multipartEnvelopeAllowanceBytes = 2048
+
+    private static let ladder: [(longEdge: Int, quality: CGFloat)] = [
+        (2048, 0.75),
+        (2048, 0.65),
+        (2048, 0.60),
+        (1728, 0.65),
+        (1536, 0.65),
+        (1280, 0.60)
+    ]
+
+    /// Returns the smallest bytes this ladder can produce for `data`, stopping at
+    /// the first step inside the budget.
+    ///
+    /// This shrinks; it never rejects. Bytes that cannot be decoded come back
+    /// untouched rather than failing, because deciding what counts as a valid
+    /// photo belongs to the `isJPEG` gate ahead of this and to the server, not to
+    /// a size budget. A photo the ladder cannot bring inside the ceiling comes
+    /// back at its smallest achieved size for the same reason: losing the capture
+    /// is worse for the seller than a large one, and an oversize body now reaches
+    /// them as plain language rather than a bare `413`.
+    ///
+    /// So the ceiling is a guarantee for every image ImageIO can decode — which is
+    /// every real capture — and best effort otherwise.
+    static func bound(_ data: Data) -> Data {
+        // A capture already inside the ceiling is left exactly as it is. Re-encoding
+        // it would spend quality for bytes the request does not need, and it keeps
+        // the submitted bytes identical to the sensor's for the photos that fit.
+        guard data.count > maximumPhotoBytes else { return data }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0 else {
+            return data
+        }
+        var smallest = data
+        for step in ladder {
+            guard let image = downscale(source, longEdge: step.longEdge),
+                  let encoded = encode(image, quality: step.quality) else {
+                continue
+            }
+            if encoded.count < smallest.count {
+                smallest = encoded
+            }
+            if encoded.count <= maximumPhotoBytes {
+                break
+            }
+        }
+        return smallest
+    }
+
+    private static func downscale(
+        _ source: CGImageSource,
+        longEdge: Int
+    ) -> CGImage? {
+        CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: longEdge
+        ] as CFDictionary)
+    }
+
+    private static func encode(_ image: CGImage, quality: CGFloat) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+        CGImageDestinationAddImage(
+            destination,
+            image,
+            [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
+}
+
 enum CaptureCameraAuthorization: Equatable {
     case notDetermined
     case authorized

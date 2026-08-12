@@ -1,3 +1,4 @@
+import ImageIO
 import UIKit
 import XCTest
 @testable import SnapList
@@ -1207,6 +1208,181 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(recovered.voice, prior.voice)
         XCTAssertEqual(recovered.recovery, prior.recovery)
     }
+
+    /// The platform rejects a request body above roughly 4.5 MB with `413` before
+    /// the route handler runs, so a full-resolution capture set has to be bounded
+    /// before it is staged rather than negotiated with afterwards.
+    func testStagesAFullResolutionCaptureInsideTheTransportBudget() async throws {
+        let harness = NativeIntakeHarness(identity: .clerk("user_native_intake_budget"))
+        let session = try await harness.makeSession()
+        addTeardownBlock { harness.cleanUp() }
+
+        let capture = try harness.makeCaptureJPEG(seed: 0)
+        XCTAssertGreaterThan(
+            capture.count,
+            CapturePhotoBudget.maximumPhotoBytes,
+            "the fixture has to start over budget or it proves nothing"
+        )
+
+        let staged = try await session.commit(
+            .addPhotos([.init(loadData: { capture })])
+        )
+
+        let stagedBytes = try Data(contentsOf: XCTUnwrap(staged.photos.first).photoURL)
+        XCTAssertLessThanOrEqual(
+            stagedBytes.count,
+            CapturePhotoBudget.maximumPhotoBytes
+        )
+        assertStillAPhoto(stagedBytes)
+    }
+
+    /// Every size assertion in this file is one-sided — `<=` a ceiling, `!=` the
+    /// capture — and empty bytes satisfy both. So a `bound` that returned nothing
+    /// for an over-budget photo would ship green while destroying the seller's
+    /// capture. The product property is that what was staged is still a photo, and
+    /// only this asserts it. Found by mutation: seeding the ladder's `smallest`
+    /// with empty `Data` passes three of the five bounding tests without this.
+    private func assertStillAPhoto(
+        _ bytes: Data,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let source = CGImageSourceCreateWithData(bytes as CFData, nil) else {
+            XCTFail(
+                "staged \(bytes.count) bytes ImageIO cannot open at all",
+                file: file,
+                line: line
+            )
+            return
+        }
+        XCTAssertGreaterThan(
+            CGImageSourceGetCount(source),
+            0,
+            "staged \(bytes.count) bytes carry no image",
+            file: file,
+            line: line
+        )
+    }
+
+    /// The budget shrinks photos; it does not decide which bytes are a photo.
+    /// `isJPEG` ahead of it and the server behind it own that, so bytes no
+    /// encoder can read have to survive staging exactly as they arrived rather
+    /// than becoming a new way to lose a capture.
+    ///
+    /// This covers the ladder-failure passthrough specifically. ImageIO accepts
+    /// any `FF D8 FF` prefix as a source, so `bound`'s decode guard is not what
+    /// catches this fixture — every ladder step fails to produce an image and the
+    /// original bytes fall through. Verified by mutation: replacing the loop's
+    /// `smallest` seed with empty `Data` fails this test, while changing the
+    /// decode guard's return does not, because that guard is never reached.
+    func testStagesUndecodableBytesWithoutChangingThem() async throws {
+        let harness = NativeIntakeHarness(identity: .clerk("user_native_intake_opaque"))
+        let session = try await harness.makeSession()
+        addTeardownBlock { harness.cleanUp() }
+
+        // A JPEG magic number in front of bytes ImageIO cannot decode. It has to
+        // exceed the ceiling, or the budget returns at its size guard and the
+        // decode path this test exists to cover never runs.
+        let opaque = Data([0xFF, 0xD8, 0xFF])
+            + Data(repeating: 0x5A, count: CapturePhotoBudget.maximumPhotoBytes)
+        XCTAssertGreaterThan(opaque.count, CapturePhotoBudget.maximumPhotoBytes)
+
+        let staged = try await session.commit(
+            .addPhotos([.init(loadData: { opaque })])
+        )
+
+        let stagedBytes = try Data(contentsOf: XCTUnwrap(staged.photos.first).photoURL)
+        XCTAssertEqual(stagedBytes, opaque)
+    }
+
+    /// Five photos and a full-length voice note share one multipart body, so the
+    /// worst realistic request is the one this has to fit.
+    func testStagesFivePhotosThatFitOneRequestBodyAlongsideVoice() async throws {
+        let harness = NativeIntakeHarness(identity: .clerk("user_native_intake_budget_set"))
+        let session = try await harness.makeSession()
+        addTeardownBlock { harness.cleanUp() }
+
+        let captures = try (0..<5).map(harness.makeCaptureJPEG(seed:))
+        let staged = try await session.commit(
+            .addPhotos(captures.map { capture in .init(loadData: { capture }) })
+        )
+        XCTAssertEqual(staged.photos.count, 5)
+
+        let stagedTotal = try staged.photos
+            .map { photo -> Int in
+                let bytes = try Data(contentsOf: photo.photoURL)
+                assertStillAPhoto(bytes)
+                return bytes.count
+            }
+            .reduce(0, +)
+        let worstCaseBody = stagedTotal
+            + ItemRunSubmissionVoice.maximumByteLength
+            + CapturePhotoBudget.multipartEnvelopeAllowanceBytes
+
+        XCTAssertLessThanOrEqual(
+            worstCaseBody,
+            CapturePhotoBudget.maximumRequestBodyBytes
+        )
+    }
+
+    /// The photo-set fingerprint is computed over these bytes, and it governs guest
+    /// allowance, guided correction, and AI-item credit settlement. A capture that
+    /// staged to different bytes on a retry would read as a different submission and
+    /// spend a second credit, so the bounding has to be deterministic.
+    func testStagesOneCaptureToTheSameBytesEveryTime() async throws {
+        let capture = try NativeIntakeHarness(identity: .clerk("seed"))
+            .makeCaptureJPEG(seed: 3)
+
+        var digests: Set<String> = []
+        for attempt in 0..<3 {
+            let harness = NativeIntakeHarness(
+                identity: .clerk("user_native_intake_determinism_\(attempt)")
+            )
+            let session = try await harness.makeSession()
+            addTeardownBlock { harness.cleanUp() }
+            let staged = try await session.commit(
+                .addPhotos([.init(loadData: { capture })])
+            )
+            let bytes = try Data(contentsOf: XCTUnwrap(staged.photos.first).photoURL)
+            // Staging the same `Data` three times matches trivially if nothing
+            // re-encodes it, so the bytes have to be shown to have changed first.
+            // Without this the digest agreement proves nothing about bounding.
+            XCTAssertNotEqual(bytes, capture)
+            XCTAssertLessThanOrEqual(bytes.count, CapturePhotoBudget.maximumPhotoBytes)
+            assertStillAPhoto(bytes)
+            digests.insert(LocalPhotoFingerprint.digest(of: bytes))
+        }
+
+        XCTAssertEqual(digests.count, 1)
+    }
+
+    /// The other half of the fingerprint contract: bounding must not collapse
+    /// distinct captures onto identical bytes, or replacing a photo would settle as
+    /// a replay of the submission it replaced.
+    func testStagesDistinctCapturesToDistinctBytes() async throws {
+        let harness = NativeIntakeHarness(identity: .clerk("user_native_intake_distinct"))
+        let session = try await harness.makeSession()
+        addTeardownBlock { harness.cleanUp() }
+
+        let captures = try (0..<3).map(harness.makeCaptureJPEG(seed:))
+        let staged = try await session.commit(
+            .addPhotos(captures.map { capture in .init(loadData: { capture }) })
+        )
+
+        let stagedBytes = try staged.photos.map { photo in
+            try Data(contentsOf: photo.photoURL)
+        }
+        // These seeds already differ before bounding, so distinctness alone would
+        // hold with no re-encoding at all. Pinning each staged photo against the
+        // capture it came from is what makes the distinctness claim about bounding.
+        for (bytes, capture) in zip(stagedBytes, captures) {
+            XCTAssertNotEqual(bytes, capture)
+            XCTAssertLessThanOrEqual(bytes.count, CapturePhotoBudget.maximumPhotoBytes)
+            assertStillAPhoto(bytes)
+        }
+        XCTAssertEqual(Set(stagedBytes.map(LocalPhotoFingerprint.digest(of:))).count, 3)
+    }
+
     private func voice(_ text: String, duration: TimeInterval) -> NativeIntake.VoiceInput {
         .init(duration: duration, loadData: { Data(text.utf8) })
     }
@@ -1305,6 +1481,45 @@ final class NativeIntakeHarness {
     func photoInput(seed: Int) throws -> NativeIntake.PhotoInput {
         let data = try makeJPEG(seed: seed)
         return .init(loadData: { data })
+    }
+    /// A 12 MP JPEG the size of a real phone capture.
+    ///
+    /// The content is seeded incompressible noise rather than a photograph on
+    /// purpose: it guarantees the fixture starts well over budget, and it is the
+    /// hardest input the bounding can be handed, so a set that fits with this
+    /// fits with anything a camera produces.
+    func makeCaptureJPEG(seed: Int) throws -> Data {
+        let width = 4032
+        let height = 3024
+        var state = (UInt64(bitPattern: Int64(seed)) &* 0x9E37_79B9_7F4A_7C15) | 1
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            state ^= state << 13
+            state ^= state >> 7
+            state ^= state << 17
+            pixels[index] = UInt8(truncatingIfNeeded: state)
+            pixels[index + 1] = UInt8(truncatingIfNeeded: state >> 8)
+            pixels[index + 2] = UInt8(truncatingIfNeeded: state >> 16)
+        }
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(pixels) as CFData))
+        let image = try XCTUnwrap(
+            CGImage(
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(
+                    rawValue: CGImageAlphaInfo.noneSkipLast.rawValue
+                ),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+            )
+        )
+        return try XCTUnwrap(UIImage(cgImage: image).jpegData(compressionQuality: 0.95))
     }
     func makeJPEG(seed: Int) throws -> Data {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 16))

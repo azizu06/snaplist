@@ -115,10 +115,19 @@ struct ItemRunSubmissionClient: ItemRunSubmitting {
             "multipart/form-data; boundary=\(boundary)",
             forHTTPHeaderField: "Content-Type"
         )
-        request.httpBody = ItemRunSubmissionMultipart.body(
+        let body = ItemRunSubmissionMultipart.body(
             for: payload,
             boundary: boundary
         )
+        // The on-device budget bounds each photo, but it is best effort for bytes
+        // no encoder can shrink, so an over-ceiling body is still reachable. The
+        // platform would answer `413` after the whole thing crossed the network;
+        // refusing here costs the seller nothing and reaches the same honest
+        // message. This is the only place the assembled body size is known.
+        guard body.count <= CapturePhotoBudget.maximumRequestBodyBytes else {
+            return .tooLarge
+        }
+        request.httpBody = body
 
         let data: Data
         let response: URLResponse
@@ -161,6 +170,12 @@ struct ItemRunSubmissionClient: ItemRunSubmitting {
             return .creditDenied(reason: Self.reason(in: data))
         case 409:
             return .conflict
+        case 413:
+            // The platform refuses an oversize body above this app, so `data` holds an
+            // edge-server page rather than a SnapList envelope. Nothing was committed and
+            // the same bytes will be refused again, so this must not fall into `ambiguous`,
+            // which offers the seller a retry that can only fail.
+            return .tooLarge
         case 429:
             return .rateLimited(reason: Self.reason(in: data))
         default:

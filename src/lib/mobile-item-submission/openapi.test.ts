@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { MAX_MOBILE_ITEM_PHOTO_BYTES } from "./contract";
 
 const serverSource = readFileSync("docs/contracts/mobile-api-v1.openapi.json", "utf8");
 const nativeSource = readFileSync("ios/DesignContracts/V1/mobile-api-v1.openapi.json", "utf8");
@@ -82,7 +83,13 @@ describe("mobile item submission OpenAPI", () => {
         },
       });
     expect(contract.components.schemas.MobileItemSubmissionPhoto).toMatchObject({
-      properties: { ordinal: { minimum: 0, maximum: 4 } },
+      properties: {
+        ordinal: { minimum: 0, maximum: 4 },
+        // The platform refuses a body above roughly 4.5 MB before the handler
+        // runs, so a declared maximum above it describes a photo no request can
+        // deliver. Kept in step with MAX_MOBILE_ITEM_PHOTO_BYTES.
+        byteLength: { maximum: MAX_MOBILE_ITEM_PHOTO_BYTES },
+      },
     });
     expect(contract.components.schemas.GuestClaimClaimedOutcome.properties)
       .not.toHaveProperty("accountRecovery");
