@@ -4,6 +4,35 @@ import XCTest
 @testable import SnapList
 
 final class OnboardingFlowTests: XCTestCase {
+    func testPrimaryDockKeepsOneGeometryAcrossDestinations() {
+        let scanHeight = FloatingDockMetrics.destinationHeight(for: .scan)
+        let trophyHeight = FloatingDockMetrics.destinationHeight(for: .trophyWall)
+        let scanInset = FloatingDockMetrics.bottomInset(for: .scan)
+        let trophyInset = FloatingDockMetrics.bottomInset(for: .trophyWall)
+
+        XCTAssertEqual(scanHeight, 52)
+        XCTAssertEqual(trophyHeight, scanHeight)
+        XCTAssertEqual(trophyInset, scanInset)
+    }
+
+    func testFinalOnboardingStepReservesTheSkipControlSlot() {
+        XCTAssertEqual(
+            FirstValueOnboardingHeaderMetrics.trailingSlotWidth(for: .onb05),
+            44
+        )
+        XCTAssertEqual(
+            FirstValueOnboardingHeaderMetrics.trailingSlotWidth(for: .onb06),
+            44
+        )
+    }
+
+    func testDraftScoutUsesCenteredHairlineSpacing() {
+        XCTAssertEqual(
+            FirstValueOnboardingLayoutMetrics.draftScoutTopPadding,
+            8
+        )
+    }
+
     func testActivationPresentsForAnOnboardedSellerUntilCompletion() {
         XCTAssertTrue(
             ActivationPresentationPolicy.shouldPresent(
@@ -32,6 +61,47 @@ final class OnboardingFlowTests: XCTestCase {
                 hasCompletedActivation: true
             )
         )
+    }
+
+    func testFirstValueActivationEligibilityKeepsDirectAndHistoricalScanSeparateFromTypedWork() {
+        func isEligible(
+            activeScreen: OnboardingScreen = .launch,
+            consumedDirectScan: Bool = false,
+            outcome: FirstValueOnboardingOutcome? = nil,
+            isNormalScanShell: Bool = false,
+            hasRestoredCapture: Bool = false,
+            stagedPhotoCount: Int = 0,
+            hasPhotoReviewSession: Bool = false
+        ) -> Bool {
+            FirstValueActivationEligibilityPolicy.shouldBootstrapActivation(
+                activeScreen: activeScreen,
+                hasConsumedMountedDirectScanCommand: consumedDirectScan,
+                recordedOutcome: outcome,
+                isNormalScanShell: isNormalScanShell,
+                hasRestoredCapture: hasRestoredCapture,
+                stagedPhotoCount: stagedPhotoCount,
+                hasPhotoReviewSession: hasPhotoReviewSession
+            )
+        }
+
+        XCTAssertTrue(isEligible(activeScreen: .captureBoundary))
+        XCTAssertTrue(isEligible(consumedDirectScan: true, isNormalScanShell: true))
+        XCTAssertTrue(isEligible(outcome: .completed, isNormalScanShell: true))
+        XCTAssertTrue(isEligible(outcome: .skipped, isNormalScanShell: true))
+        XCTAssertFalse(isEligible(
+            outcome: .supersededByExistingProgress,
+            isNormalScanShell: true
+        ))
+        XCTAssertFalse(isEligible(
+            consumedDirectScan: true,
+            isNormalScanShell: true,
+            hasRestoredCapture: true
+        ))
+        XCTAssertFalse(isEligible(
+            activeScreen: .denied,
+            outcome: .completed,
+            isNormalScanShell: true
+        ))
     }
 
     func testActivationGuidanceDeclaresTheFullApprovedEightStateSet() {
@@ -724,18 +794,116 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(store.outcome, .supersededByExistingProgress)
     }
 
-    @MainActor
-    func testFirstValueCompletionReplacesOnlyTheLegacyIntroBeforePhotoPermission() {
-        let model = makeModel(camera: .notDetermined)
+    func testFirstValueDirectScanCommandRequiresLiveCompletedOnb06WithNoActiveWork() {
+        XCTAssertTrue(
+            FirstValueOnboardingPresentationPolicy
+                .shouldRouteMountedCompletionToCanonicalScan(
+                    isFirstLaunch: true,
+                    outcome: .completed,
+                    hasResolvedCaptureRestoration: true,
+                    hasRestoredCapture: false,
+                    stagedPhotoCount: 0
+                )
+        )
 
-        model.beginPhotoPermissionAfterFirstValueOnboarding()
+        let blockedInputs: [(Bool, FirstValueOnboardingOutcome, Bool, Bool, Int)] = [
+            (true, .skipped, true, false, 0),
+            (true, .supersededByExistingProgress, true, false, 0),
+            (false, .completed, true, false, 0),
+            (true, .completed, false, false, 0),
+            (true, .completed, true, true, 0),
+            (true, .completed, true, false, 1),
+        ]
 
-        XCTAssertEqual(model.state.screen, .photoPrimer)
+        for (isFirstLaunch, outcome, hasResolvedRestoration, hasRestoredCapture, stagedPhotoCount)
+            in blockedInputs
+        {
+            XCTAssertFalse(
+                FirstValueOnboardingPresentationPolicy
+                    .shouldRouteMountedCompletionToCanonicalScan(
+                        isFirstLaunch: isFirstLaunch,
+                        outcome: outcome,
+                        hasResolvedCaptureRestoration: hasResolvedRestoration,
+                        hasRestoredCapture: hasRestoredCapture,
+                        stagedPhotoCount: stagedPhotoCount
+                    ),
+                "Only a completed mounted ONB-06 with no restored or staged work may command Scan."
+            )
+        }
+    }
 
-        model.restore(.init(screen: .denied))
-        model.beginPhotoPermissionAfterFirstValueOnboarding()
+    func testFirstValueHistorySuppressesOnlyRetiredIntroAndNeverClaimsActiveLegacyState() {
+        let historicalOutcomes: [FirstValueOnboardingOutcome] = [
+            .completed,
+            .skipped,
+            .supersededByExistingProgress,
+        ]
+        let retiredIntroStates: [OnboardingScreen] = [.launch, .promise, .allowance]
+        let activeLegacyStates: [OnboardingScreen] = [
+            .photoPrimer,
+            .denied,
+            .settingsHandoff,
+            .cameraHandoff,
+            .libraryHandoff,
+            .captureBoundary,
+        ]
 
-        XCTAssertEqual(model.state.screen, .denied)
+        for outcome in historicalOutcomes {
+            for screen in retiredIntroStates {
+                XCTAssertTrue(
+                    FirstValueOnboardingPresentationPolicy
+                        .shouldRenderNormalShellForHistoricalOutcome(
+                            isFirstLaunch: true,
+                            recordedOutcome: outcome,
+                            activeScreen: screen
+                        ),
+                    "\(outcome) suppresses only the retired intro."
+                )
+            }
+            for screen in activeLegacyStates {
+                XCTAssertFalse(
+                    FirstValueOnboardingPresentationPolicy
+                        .shouldRenderNormalShellForHistoricalOutcome(
+                            isFirstLaunch: true,
+                            recordedOutcome: outcome,
+                            activeScreen: screen
+                        ),
+                    "\(outcome) must not replace active \(screen) work."
+                )
+            }
+        }
+
+        XCTAssertFalse(
+            FirstValueOnboardingPresentationPolicy
+                .shouldRenderNormalShellForHistoricalOutcome(
+                    isFirstLaunch: true,
+                    recordedOutcome: nil,
+                    activeScreen: .launch
+                )
+        )
+    }
+
+    func testOnlyAnActiveLegacyCaptureBoundaryMayOpenTheCaptureLauncher() {
+        let screens: [OnboardingScreen] = [
+            .launch,
+            .promise,
+            .allowance,
+            .photoPrimer,
+            .denied,
+            .cameraHandoff,
+            .libraryHandoff,
+            .captureBoundary,
+            .settingsHandoff,
+        ]
+
+        for screen in screens {
+            XCTAssertEqual(
+                FirstValueOnboardingPresentationPolicy
+                    .shouldRouteLegacyCaptureThroughLauncher(activeScreen: screen),
+                screen == .captureBoundary,
+                "Launcher ownership follows the active typed handoff, not completion history."
+            )
+        }
     }
 
     func testApprovedScoutMediaKeepsPerScreenSizingAndPulls() {

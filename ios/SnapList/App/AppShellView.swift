@@ -53,6 +53,7 @@ struct AppShellView: View {
     @State private var isKeyboardVisible = false
     @State private var keyboardProbeText = ""
     @State private var isDeleteAccountFlowPresented = false
+    @State private var hasConsumedMountedFirstValueDirectScanCommand = false
     @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
@@ -111,12 +112,8 @@ struct AppShellView: View {
                     .accessibilityHidden(true)
             } else if shouldShowFirstValueOnboarding {
                 firstValueOnboardingHost
-            } else if shouldBypassRetiredLegacyIntro {
-                Color.clear
-                    .accessibilityHidden(true)
-                    .task(id: onboardingModel.state.screen) {
-                        onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
-                    }
+            } else if shouldRenderNormalShellForHistoricalFirstValueOutcome {
+                shell
             } else if shouldShowOnboarding {
                 OnboardingFlowView(
                     model: onboardingModel,
@@ -353,7 +350,7 @@ struct AppShellView: View {
         .task(id: activationPresentationInputs) {
             guard !hasCompletedActivation,
                   ActivationPresentationPolicy.shouldPresent(
-                    hasOnboarded: onboardingModel.state.screen == .captureBoundary,
+                    hasOnboarded: hasOnboardedForActivation,
                     hasCompletedActivation: hasCompletedActivation
                   ),
                   !activationCompletionChecked else { return }
@@ -377,7 +374,8 @@ struct AppShellView: View {
         }
         .task(id: onboardingCaptureRouteID) {
             guard configuration.usesOnboarding,
-                  captureFlow.hasCompletedRestoration else { return }
+                  captureFlow.hasCompletedRestoration,
+                  shouldRouteOnboardingCaptureThroughLauncher else { return }
             await AppCaptureHandoffCoordinator.presentCaptureLauncher(
                 onboardingModel: onboardingModel,
                 captureFlow: captureFlow,
@@ -628,6 +626,12 @@ struct AppShellView: View {
                     opener: opener
                 )
             }
+            .safeAreaPadding(
+                .bottom,
+                shellChromeProjection.showsDock
+                    ? FloatingDockMetrics.containerHeight(for: .scan)
+                    : 0
+            )
             .task(id: router.selectedTab) {
                 guard router.selectedTab == .scan else { return }
                 await captureFlow.startCamera()
@@ -840,7 +844,7 @@ struct AppShellView: View {
 
     private var activationPresentationInputs: ActivationPresentationInputs {
         .init(
-            onboardingScreen: onboardingModel.state.screen,
+            hasOnboarded: hasOnboardedForActivation,
             hasCompletedActivation: hasCompletedActivation
         )
     }
@@ -849,9 +853,24 @@ struct AppShellView: View {
         activationCompletionChecked
             && activationAuthentication != .unknown
             && ActivationPresentationPolicy.shouldPresent(
-                hasOnboarded: onboardingModel.state.screen == .captureBoundary,
+                hasOnboarded: hasOnboardedForActivation,
                 hasCompletedActivation: hasCompletedActivation
             )
+    }
+
+    private var hasOnboardedForActivation: Bool {
+        FirstValueActivationEligibilityPolicy.shouldBootstrapActivation(
+            activeScreen: onboardingModel.state.screen,
+            hasConsumedMountedDirectScanCommand:
+                hasConsumedMountedFirstValueDirectScanCommand,
+            recordedOutcome: firstValueOnboardingModel.recordedOutcome,
+            isNormalScanShell: router.selectedTab == .scan
+                && router.presentedSheet == nil
+                && router.presentedFullScreen == nil,
+            hasRestoredCapture: captureFlow.stagedPhoto != nil,
+            stagedPhotoCount: onboardingModel.state.stagedPhotoCount,
+            hasPhotoReviewSession: photoReviewHost.session != nil
+        )
     }
 
     private var activationIdentity: String? {
@@ -1003,7 +1022,7 @@ struct AppShellView: View {
 
     private func bootstrapActivationCompletion() async {
         while !Task.isCancelled {
-            guard onboardingModel.state.screen == .captureBoundary,
+            guard hasOnboardedForActivation,
                   !hasCompletedActivation else { return }
 
             let guestCompleted = activationGuestCompletionStore.isCompleted
@@ -1082,7 +1101,8 @@ struct AppShellView: View {
     }
 
     private var shouldShowFirstValueOnboarding: Bool {
-        FirstValueOnboardingPresentationPolicy.shouldPresent(
+        !hasConsumedMountedFirstValueDirectScanCommand
+            && FirstValueOnboardingPresentationPolicy.shouldPresent(
             isFirstLaunch: configuration.usesFirstValueOnboarding,
             hasCompletedOnboarding:
                 firstValueOnboardingModel.hasCompletedOnboarding,
@@ -1107,13 +1127,37 @@ struct AppShellView: View {
     private func handleFirstValueOnboardingCompletion(
         _ outcome: FirstValueOnboardingOutcome
     ) {
-        onboardingModel.beginPhotoPermissionAfterFirstValueOnboarding()
+        guard !hasConsumedMountedFirstValueDirectScanCommand,
+            FirstValueOnboardingPresentationPolicy
+            .shouldRouteMountedCompletionToCanonicalScan(
+                isFirstLaunch: configuration.usesFirstValueOnboarding,
+                outcome: outcome,
+                hasResolvedCaptureRestoration: captureFlow.hasCompletedRestoration,
+                hasRestoredCapture: captureFlow.stagedPhoto != nil,
+                stagedPhotoCount: onboardingModel.state.stagedPhotoCount
+            ) else { return }
+        hasConsumedMountedFirstValueDirectScanCommand = true
+        router.reset(tab: .scan)
+        router.select(.scan)
     }
 
-    private var shouldBypassRetiredLegacyIntro: Bool {
-        configuration.usesFirstValueOnboarding
-            && firstValueOnboardingModel.hasCompletedOnboarding
-            && !onboardingModel.state.screen.hasCompletedLegacyIntro
+    /// First-Value completion owns a direct handoff to the canonical Scan root.
+    /// Keep the launcher only for the legacy flow and recoverable staged-library work.
+    private var shouldRouteOnboardingCaptureThroughLauncher: Bool {
+        FirstValueOnboardingPresentationPolicy
+            .shouldRouteLegacyCaptureThroughLauncher(
+                activeScreen: onboardingModel.state.screen
+            )
+    }
+
+    private var shouldRenderNormalShellForHistoricalFirstValueOutcome: Bool {
+        photoReviewHost.session == nil
+            && FirstValueOnboardingPresentationPolicy
+            .shouldRenderNormalShellForHistoricalOutcome(
+                isFirstLaunch: configuration.usesFirstValueOnboarding,
+                recordedOutcome: firstValueOnboardingModel.recordedOutcome,
+                activeScreen: onboardingModel.state.screen
+            )
     }
 
     private var onboardingCaptureRouteID: OnboardingCaptureRouteID {
@@ -1434,7 +1478,7 @@ enum AppShellDepartedPhotoReviewTransaction {
 }
 
 private struct ActivationPresentationInputs: Equatable {
-    let onboardingScreen: OnboardingScreen
+    let hasOnboarded: Bool
     let hasCompletedActivation: Bool
 }
 

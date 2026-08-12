@@ -1,6 +1,20 @@
 import SwiftUI
 import AVFoundation
 
+enum FirstValueOnboardingHeaderMetrics {
+    static let controlSlotWidth: CGFloat = 44
+
+    static func trailingSlotWidth(
+        for _: FirstValueOnboardingScreen
+    ) -> CGFloat {
+        controlSlotWidth
+    }
+}
+
+enum FirstValueOnboardingLayoutMetrics {
+    static let draftScoutTopPadding: CGFloat = 8
+}
+
 @MainActor
 struct FirstValueOnboardingView: View {
     @Bindable var model: FirstValueOnboardingModel
@@ -50,10 +64,11 @@ struct FirstValueOnboardingView: View {
         systemReduceMotion || forceReducedMotion
     }
 
-    /// At Accessibility Dynamic Type, ONB-06's longer listing content must scroll
-    /// before its actions rather than share the viewport with a sticky footer.
+    /// At Accessibility Dynamic Type, the two dense preview screens must scroll
+    /// before their actions rather than share the viewport with a sticky footer.
     private var usesFlowingIncludedFooter: Bool {
-        model.screen == .onb06 && dynamicTypeSize.isAccessibilitySize
+        (model.screen == .onb04 || model.screen == .onb06)
+            && dynamicTypeSize.isAccessibilitySize
     }
 
     private var usesCompactAuthorityLayout: Bool {
@@ -124,16 +139,32 @@ struct FirstValueOnboardingView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Onboarding progress")
             .accessibilityValue("Step \(model.screen.rawValue) of 6")
+            .accessibilityIdentifier("first-value-onboarding.progress")
 
             if model.screen != .onb06 {
                 Button { finish(using: model.skip) } label: {
                     Text("Skip")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(SnapListColorToken.action.color)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(
+                            width: FirstValueOnboardingHeaderMetrics
+                                .trailingSlotWidth(for: model.screen),
+                            height: FirstValueOnboardingHeaderMetrics
+                                .controlSlotWidth
+                        )
                         .contentShape(Rectangle())
                 }
                     .accessibilityIdentifier("first-value-onboarding.skip")
+            } else {
+                Color.clear
+                    .frame(
+                        width: FirstValueOnboardingHeaderMetrics
+                            .trailingSlotWidth(for: model.screen),
+                        height: FirstValueOnboardingHeaderMetrics
+                            .controlSlotWidth
+                    )
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
             }
         }
         .padding(.horizontal, 16)
@@ -458,8 +489,14 @@ struct FirstValueOnboardingView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
                     .padding(.leading, -14)
+                    .accessibilityIdentifier(
+                        "first-value-onboarding.draft-scout-copy"
+                    )
             }
-            .padding(.top, -16)
+            .padding(
+                .top,
+                FirstValueOnboardingLayoutMetrics.draftScoutTopPadding
+            )
         }
     }
 

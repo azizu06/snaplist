@@ -6,12 +6,18 @@ enum FloatingDockMetrics {
     static let contentPadding: CGFloat = 6
     static let cornerRadius: CGFloat = 22
 
-    static func destinationHeight(for selectedTab: PrimaryTab) -> CGFloat {
-        selectedTab == .scan ? 52 : 44
+    static func destinationHeight(for _: PrimaryTab) -> CGFloat {
+        52
     }
 
-    static func bottomInset(for selectedTab: PrimaryTab) -> CGFloat {
-        selectedTab == .scan ? 0 : 24
+    static func bottomInset(for _: PrimaryTab) -> CGFloat {
+        0
+    }
+
+    static func containerHeight(for selectedTab: PrimaryTab) -> CGFloat {
+        destinationHeight(for: selectedTab)
+            + (contentPadding * 2)
+            + bottomInset(for: selectedTab)
     }
 }
 
