@@ -1383,6 +1383,99 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(Set(stagedBytes.map(LocalPhotoFingerprint.digest(of:))).count, 3)
     }
 
+    /// Pins the photo-set fingerprint to the two things moving the bounding can
+    /// break: which bytes reach the disk, and what order they reach it in.
+    ///
+    /// `testStagesDistinctCapturesToDistinctBytes` zips staged against captured,
+    /// but only asserts the pairs differ — a set staged in the wrong order still
+    /// satisfies it. This says staged photo `i` is the bounded form of capture
+    /// `i` and nothing else, so bounding done after staging fails it on the
+    /// bytes and bounding done out of order fails it on the position.
+    ///
+    /// That matters beyond the file: the fingerprint over these bytes is what
+    /// makes a retry settle as the same submission rather than a second one
+    /// against the seller's guest allowance and AI-item credit.
+    func testStagesEachCaptureAsItsOwnBoundedBytesInTheOrderHandedOver() async throws {
+        let harness = NativeIntakeHarness(
+            identity: .clerk("user_native_intake_bounded_order")
+        )
+        let session = try await harness.makeSession()
+        addTeardownBlock { harness.cleanUp() }
+
+        let captures = try (0..<3).map(harness.makeCaptureJPEG(seed:))
+        let staged = try await session.commit(
+            .addPhotos(captures.map { capture in .init(loadData: { capture }) })
+        )
+
+        let stagedDigests = try staged.photos.map { photo in
+            LocalPhotoFingerprint.digest(of: try Data(contentsOf: photo.photoURL))
+        }
+        XCTAssertEqual(
+            stagedDigests,
+            captures.map {
+                LocalPhotoFingerprint.digest(of: CapturePhotoBudget.bound($0))
+            }
+        )
+
+        // Both lists are derived from the same three captures, so they would
+        // also agree if nothing re-encoded anything. The sensor's own digests
+        // have to disagree before the agreement above is about bounding at all.
+        XCTAssertNotEqual(
+            stagedDigests,
+            captures.map(LocalPhotoFingerprint.digest(of:))
+        )
+        // And three equal digests would satisfy any ordering, which would leave
+        // the position claim vacuous.
+        XCTAssertEqual(Set(stagedDigests).count, 3)
+    }
+
+    /// Bounding one 12 MP capture measured 0.439s to 0.461s, and it runs once per
+    /// photo, so a five-photo add spends 2.27s in it. Spent holding the intake
+    /// actor, that is 2.27s in which nothing else the seller does reaches the
+    /// intake at all — not removing a photo, not reading the set back, not the
+    /// next capture. The work still has to happen; it just cannot happen there.
+    func testTheIntakeActorAnswersWhileAPhotoIsStillBeingBounded() async throws {
+        let harness = NativeIntakeHarness(
+            identity: .clerk("user_native_intake_bounding_actor")
+        )
+        let bounding = NativeIntakeBoundingGate()
+        // Registered before the session so it runs after the rest of teardown:
+        // a failed run leaves a bounding call parked on a semaphore, and this is
+        // what lets that thread unwind.
+        addTeardownBlock { bounding.open() }
+        let session = try await harness.makeSession(bound: bounding.bound)
+        addTeardownBlock { harness.cleanUp() }
+
+        let photo = try harness.makeJPEG(seed: 1)
+        let add = Task {
+            await session.perform(.addPhotos([.init(loadData: { photo })]))
+        }
+        await bounding.waitUntilRunning()
+
+        let answered = expectation(description: "intake answers during bounding")
+        let read = Task {
+            _ = try? await session.inspect()
+            answered.fulfill()
+        }
+        await fulfillment(of: [answered], timeout: 5)
+        // Read before releasing, asserted after. Nothing has opened the gate at
+        // this point, so a read that has finished can only have been answered
+        // while the bounding was still running. Releasing first and asking
+        // afterwards would not be able to tell the two apart.
+        let answeredDuringBounding = bounding.isRunning
+
+        // Everything below has to run even when the expectation above already
+        // failed: the read and the add are both parked behind this gate, and a
+        // test that awaits them without opening it hangs the shard instead of
+        // reporting the failure it just found.
+        bounding.open()
+        await read.value
+        let outcome = await add.value
+
+        XCTAssertTrue(answeredDuringBounding)
+        XCTAssertEqual(outcome, .committed)
+    }
+
     private func voice(_ text: String, duration: TimeInterval) -> NativeIntake.VoiceInput {
         .init(duration: duration, loadData: { Data(text.utf8) })
     }
@@ -1390,6 +1483,60 @@ final class NativeIntakeTests: XCTestCase {
         let harness = NativeIntakeHarness(identity: identity)
         addTeardownBlock { harness.cleanUp() }
         return (harness, try await harness.makeSession())
+    }
+}
+/// Holds one bounding call open so a test can ask the intake something while it
+/// is still running.
+///
+/// The real `CapturePhotoBudget.bound` is synchronous and CPU-bound, so this
+/// occupies its thread the same way rather than suspending. Whether the intake
+/// can answer anything while that happens is the whole question.
+private final class NativeIntakeBoundingGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var runningCount = 0
+    private let opened = DispatchSemaphore(value: 0)
+
+    /// Handed to `NativeIntake` in place of the real bounding. Returns the bytes
+    /// untouched: this test is about where the work runs, not what it produces.
+    var bound: @Sendable (Data) -> Data {
+        { [self] data in
+            lock.lock()
+            runningCount += 1
+            lock.unlock()
+            opened.wait()
+            return data
+        }
+    }
+
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return runningCount > 0
+    }
+
+    /// Polls instead of blocking, so waiting here never occupies a thread the
+    /// intake needs to reach the bounding in the first place.
+    func waitUntilRunning(
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !isRunning, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertTrue(
+            isRunning,
+            "bounding never started",
+            file: file,
+            line: line
+        )
+    }
+
+    /// Safe to call more than once. Teardown calls it to unwind a bounding that
+    /// a failed test left parked.
+    func open() {
+        opened.signal()
     }
 }
 private enum NativeIntakeTestFailure: Error { case unavailableSource }
@@ -1468,14 +1615,16 @@ final class NativeIntakeHarness {
         fileManager: FileManager = .default,
         now: @escaping @Sendable () -> Date = { Date() },
         sleepUntil: @escaping @Sendable (Date) async throws -> Void =
-            NativeIntake.sleepUntil
+            NativeIntake.sleepUntil,
+        bound: @escaping @Sendable (Data) -> Data = CapturePhotoBudget.bound
     ) async throws -> NativeIntakeTestSession {
         try await NativeIntakeTestSession(NativeIntake(
             applicationSupportDirectory: applicationSupport,
             identitySource: identity.source,
             fileManager: fileManager,
             now: now,
-            sleepUntil: sleepUntil
+            sleepUntil: sleepUntil,
+            bound: bound
         ))
     }
     func photoInput(seed: Int) throws -> NativeIntake.PhotoInput {

@@ -216,6 +216,10 @@ actor NativeIntake {
     private let fileManager: FileManager
     private let now: @Sendable () -> Date
     private let sleeper: @Sendable (Date) async throws -> Void
+    /// Injected for the same reason as `now` and `sleeper`: the real one costs
+    /// about 0.45s per 12 MP capture, and a test that has to observe what runs
+    /// alongside it needs to say when it finishes rather than race it.
+    private let bound: @Sendable (Data) -> Data
     private var active: ActiveBundle?
     private var observers: [UUID: AsyncStream<Event>.Continuation] = [:]
     private var operationSnapshots: [UUID: Snapshot] = [:]
@@ -230,7 +234,8 @@ actor NativeIntake {
         applicationSupportDirectory: URL, identitySource: IdentitySource,
         fileManager: FileManager = .default,
         now: @escaping @Sendable () -> Date = { Date() },
-        sleepUntil: @escaping @Sendable (Date) async throws -> Void = NativeIntake.sleepUntil
+        sleepUntil: @escaping @Sendable (Date) async throws -> Void = NativeIntake.sleepUntil,
+        bound: @escaping @Sendable (Data) -> Data = CapturePhotoBudget.bound
     ) {
         durableAnchor = applicationSupportDirectory.standardizedFileURL
         let temporaryAnchor = fileManager.temporaryDirectory.standardizedFileURL
@@ -246,6 +251,7 @@ actor NativeIntake {
         self.fileManager = fileManager
         self.now = now
         sleeper = sleepUntil
+        self.bound = bound
     }
 
     deinit {
@@ -340,11 +346,10 @@ actor NativeIntake {
             guard data.allSatisfy({ Self.isJPEG($0.0) }) else {
                 return .rejected(.invalidPhoto)
             }
-            let budgeted = Self.boundToTransportBudget(data)
             let staged: [Photo]
             let stagingRoot: URL
             do {
-                (staged, stagingRoot) = try await stagePhotoData(budgeted, for: active)
+                (staged, stagingRoot) = try await stagePhotoData(data, for: active)
             } catch {
                 return stagingFailure(expected: expected)
             }
@@ -369,11 +374,10 @@ actor NativeIntake {
             guard Self.isJPEG(data.0) else {
                 return .rejected(.invalidPhoto)
             }
-            let budgeted = Self.boundToTransportBudget([data])
             let staged: [Photo]
             let stagingRoot: URL
             do {
-                (staged, stagingRoot) = try await stagePhotoData(budgeted, for: active)
+                (staged, stagingRoot) = try await stagePhotoData([data], for: active)
             } catch {
                 return stagingFailure(expected: expected)
             }
@@ -775,10 +779,25 @@ actor NativeIntake {
     ///
     /// This adds no rejection path: `CapturePhotoBudget.bound` returns bytes for
     /// every input, so a photo that reaches here still reaches staging.
+    ///
+    /// Called from inside `stagePhotoData`'s detached task rather than from the
+    /// actor. It costs about 0.45s per 12 MP capture, and the actor is the one
+    /// thing every other intake operation has to go through; 2.27s of a
+    /// five-photo add spent holding it is 2.27s the seller cannot remove a
+    /// photo, read the set back, or start the next capture (#789 item 6). It
+    /// joins the write that was already detached instead of taking a hop of its
+    /// own, so `perform` keeps exactly the suspension points it had — one
+    /// `await` spanning bound-then-stage, with the same `expected` version
+    /// re-checked in `commitMutation` on the far side of it.
+    ///
+    /// Nothing here reads or writes actor state — it is a `map` over its
+    /// argument — so leaving the actor costs no invariant, and the order it
+    /// returns is the order it was given.
     private nonisolated static func boundToTransportBudget(
-        _ data: [(Data, LibraryPhotoTransferReceipt?)]
+        _ data: [(Data, LibraryPhotoTransferReceipt?)],
+        bound: @Sendable (Data) -> Data
     ) -> [(Data, LibraryPhotoTransferReceipt?)] {
-        data.map { (CapturePhotoBudget.bound($0.0), $0.1) }
+        data.map { (bound($0.0), $0.1) }
     }
 
     private func stagingFailure(expected: Version) -> Outcome {
@@ -833,9 +852,10 @@ actor NativeIntake {
         let locations = try stagingLocations(for: bundle)
         let createdAt = now()
         let fileManager = fileManager
+        let bound = bound
         let photos = try await Task.detached {
             try Self.stagePhotos(
-                data,
+                Self.boundToTransportBudget(data, bound: bound),
                 in: locations.assets,
                 publishingIn: locations.published,
                 under: locations.anchor,
