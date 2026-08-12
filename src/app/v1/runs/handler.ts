@@ -1,4 +1,5 @@
 import { verifyToken } from "@clerk/nextjs/server";
+import { logServerError } from "@/lib/api/errors";
 import { createConfiguredVerifiedGuestPrincipalResolver } from "@/lib/guest-capability/configured";
 import {
   createConfiguredSupabaseListingReviewReader,
@@ -75,6 +76,14 @@ function configuredGuidedCorrection() {
 }
 
 const handler = createMobileApiHandler({
+  // Every internal failure on `/v1/runs` and `/v1/runs/{id}` reaches the native
+  // client as the same generic 503. Without this the reporter in
+  // `createMobileApiHandler` is optional-chained away, so the failure leaves no
+  // trace at all: the seller sees "Review unavailable" and the server log is
+  // empty (#796). `logServerError` is the canonical seam — a structured
+  // `ok:false` line plus a Sentry capture (#62) — and it records IDENTIFIERS
+  // only, never a bearer token, a Supabase key, or seller voice transcript.
+  reportError: logServerError,
   async authenticate(token) {
     if (token.startsWith("guestcap_")) {
       const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();

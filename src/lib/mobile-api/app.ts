@@ -214,7 +214,18 @@ export interface MobileApiDependencies {
   itemDeletion?: ItemDeletionGateway;
   workerSecret?: string;
   requestId?: () => string;
-  reportError?: (context: string, error: unknown) => void;
+  /**
+   * `fields` carries the IDENTIFIERS a reader needs to tie the report back to
+   * one request — never anything a seller typed or said. The retention contract
+   * (`docs/contracts/lean-mvp-retention-v1.json`) and ADR-0011 keep voice
+   * transcript out of every log sink; #795 tracks the worker-log tests that
+   * assert exactly that redaction.
+   */
+  reportError?: (
+    context: string,
+    error: unknown,
+    fields?: Record<string, string | number | boolean>,
+  ) => void;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -1382,9 +1393,13 @@ export function createMobileApiHandler(
             "The run changed. Refresh its latest status before trying again.",
           );
         }
+        // The run ID is what makes this report actionable: the response body is
+        // the same generic 503 for every seller, so without it a production log
+        // line cannot be tied back to the run that failed (#796).
         dependencies.reportError?.(
           `mobile-api.run-${action ?? "detail"}`,
           error,
+          { runId: parsedRunId.data },
         );
         return errorResponse(
           requestId,
