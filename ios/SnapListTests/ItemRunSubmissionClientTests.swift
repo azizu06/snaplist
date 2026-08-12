@@ -220,6 +220,54 @@ final class ItemRunSubmissionClientTests: XCTestCase {
         XCTAssertEqual(sent.count, 0, "an over-ceiling body must not be sent")
     }
 
+    /// The boundary itself, from both sides. `testSendsABodyInsideTheCeiling` uses
+    /// 13-byte photos, so it only shows the guard does not reject something
+    /// trivially small — a `<` where the guard needs `<=` would sail through it.
+    /// A body sitting exactly on the ceiling has to send, and the same body plus
+    /// one byte has to be refused; between them a one-byte slip in either direction
+    /// fails instead of passing.
+    func testSendsABodyExactlyOnTheCeilingAndRefusesOneByteMore() async {
+        let sent = SendProbe()
+        let session = makeSession { request in
+            sent.record()
+            return (Self.response(202, for: request), Data(Self.receiptJSON.utf8))
+        }
+        let client = ItemRunSubmissionClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            session: session,
+            boundary: { "snaplist-boundary" }
+        )
+
+        let onTheCeiling = Self.payload(
+            assembledBodyBytes: CapturePhotoBudget.maximumRequestBodyBytes
+        )
+        XCTAssertEqual(
+            Self.assembledBodyBytes(of: onTheCeiling),
+            CapturePhotoBudget.maximumRequestBodyBytes,
+            "the fixture has to land on the boundary or it proves nothing"
+        )
+        let accepted = await client.submit(
+            onTheCeiling,
+            bearerToken: "fresh-opaque-clerk-token"
+        )
+        XCTAssertEqual(accepted, .created(Self.expectedReceipt))
+        XCTAssertEqual(sent.count, 1, "a body exactly on the ceiling has to be sent")
+
+        let oneByteOver = Self.payload(
+            assembledBodyBytes: CapturePhotoBudget.maximumRequestBodyBytes + 1
+        )
+        XCTAssertEqual(
+            Self.assembledBodyBytes(of: oneByteOver),
+            CapturePhotoBudget.maximumRequestBodyBytes + 1
+        )
+        let refused = await client.submit(
+            oneByteOver,
+            bearerToken: "fresh-opaque-clerk-token"
+        )
+        XCTAssertEqual(refused, .tooLarge)
+        XCTAssertEqual(sent.count, 1, "one byte over the ceiling must not be sent")
+    }
+
     /// The complement: a body inside the ceiling is unaffected by the guard.
     func testSendsABodyInsideTheCeiling() async {
         let sent = SendProbe()
@@ -261,9 +309,10 @@ final class ItemRunSubmissionClientTests: XCTestCase {
         }
     }
 
-    /// Five photos each just inside the per-photo ceiling. Bounding cannot produce
-    /// this from a decodable image, but it can pass bytes through untouched when no
-    /// ladder step converges, which is exactly the case the guard covers.
+    /// Five photos at 1,125,000 bytes each — about 1.7x the 655,360 per-photo
+    /// ceiling, so the set is over the request ceiling several times over. Bounding
+    /// cannot produce this from a decodable image, but it can pass bytes through
+    /// untouched when no ladder step converges, which is the case the guard covers.
     private static func oversizePayload() -> ItemRunSubmissionPayload {
         let photoData = (0..<5).map { index -> Data in
             var data = Data([0xFF, 0xD8, 0xFF])
@@ -292,6 +341,58 @@ final class ItemRunSubmissionClientTests: XCTestCase {
                 voiceContext: nil
             ),
             photoData: photoData,
+            voiceData: nil
+        )
+    }
+
+    private static let probeBoundary = "snaplist-boundary"
+
+    private static func assembledBodyBytes(
+        of payload: ItemRunSubmissionPayload
+    ) -> Int {
+        ItemRunSubmissionMultipart
+            .body(for: payload, boundary: probeBoundary)
+            .count
+    }
+
+    /// One photo sized so the assembled body lands on exactly `assembledBodyBytes`.
+    /// The envelope is measured with a probe rather than written down as a constant:
+    /// `body` never emits a photo's length, so the overhead does not vary with the
+    /// photo size and a single probe pins it exactly. A change to the multipart
+    /// format retunes this instead of quietly sliding the fixture off the boundary
+    /// it exists to sit on.
+    private static func payload(
+        assembledBodyBytes target: Int
+    ) -> ItemRunSubmissionPayload {
+        let probeLength = 1_024
+        let overhead = assembledBodyBytes(
+            of: singlePhotoPayload(photoByteLength: probeLength)
+        ) - probeLength
+        return singlePhotoPayload(photoByteLength: target - overhead)
+    }
+
+    private static func singlePhotoPayload(
+        photoByteLength: Int
+    ) -> ItemRunSubmissionPayload {
+        var data = Data([0xFF, 0xD8, 0xFF])
+        data.append(Data(repeating: 0x2A, count: photoByteLength - 3))
+        return ItemRunSubmissionPayload(
+            attempt: ItemRunSubmissionAttempt(
+                idempotencyKey: UUID(
+                    uuidString: "45700000-0000-4000-8000-000000000010"
+                )!,
+                photos: [
+                    ItemRunSubmissionPhoto(
+                        photoID: UUID(),
+                        ordinal: 0,
+                        contentSha256: LocalPhotoFingerprint.digest(of: data),
+                        byteLength: data.count,
+                        mediaType: .jpeg
+                    )
+                ],
+                voiceContext: nil
+            ),
+            photoData: [data],
             voiceData: nil
         )
     }

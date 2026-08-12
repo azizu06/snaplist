@@ -42,7 +42,14 @@ describe("mobile item submission photo transport budget", () => {
     );
   });
 
-  it("explains an oversize photo in plain language instead of a bare 413", async () => {
+  // Named for what it reaches, not what the seller reads. `prepareMobileItemSubmission`
+  // does raise this string, but nothing downstream carries it: `http.ts:71-87` wraps
+  // the call in a bare catch that answers a fixed 400 with the generic
+  // "Submit 1-5 valid JPEG, PNG, or WebP photos and an optional cost basis.", and an
+  // oversize photo is discarded even earlier by `boundedCollector` at
+  // `bounded-multipart.ts:154`. The plain-language message the seller actually sees
+  // comes from the client, not from here.
+  it("rejects an oversize photo at the contract seam with a size-specific reason", async () => {
     await expect(
       prepareMobileItemSubmission(
         submission([jpeg(MAX_MOBILE_ITEM_PHOTO_BYTES + 1)]),

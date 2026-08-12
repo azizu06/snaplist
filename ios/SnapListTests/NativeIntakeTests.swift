@@ -1,3 +1,4 @@
+import ImageIO
 import UIKit
 import XCTest
 @testable import SnapList
@@ -1232,6 +1233,35 @@ final class NativeIntakeTests: XCTestCase {
             stagedBytes.count,
             CapturePhotoBudget.maximumPhotoBytes
         )
+        assertStillAPhoto(stagedBytes)
+    }
+
+    /// Every size assertion in this file is one-sided — `<=` a ceiling, `!=` the
+    /// capture — and empty bytes satisfy both. So a `bound` that returned nothing
+    /// for an over-budget photo would ship green while destroying the seller's
+    /// capture. The product property is that what was staged is still a photo, and
+    /// only this asserts it. Found by mutation: seeding the ladder's `smallest`
+    /// with empty `Data` passes three of the five bounding tests without this.
+    private func assertStillAPhoto(
+        _ bytes: Data,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let source = CGImageSourceCreateWithData(bytes as CFData, nil) else {
+            XCTFail(
+                "staged \(bytes.count) bytes ImageIO cannot open at all",
+                file: file,
+                line: line
+            )
+            return
+        }
+        XCTAssertGreaterThan(
+            CGImageSourceGetCount(source),
+            0,
+            "staged \(bytes.count) bytes carry no image",
+            file: file,
+            line: line
+        )
     }
 
     /// The budget shrinks photos; it does not decide which bytes are a photo.
@@ -1279,7 +1309,11 @@ final class NativeIntakeTests: XCTestCase {
         XCTAssertEqual(staged.photos.count, 5)
 
         let stagedTotal = try staged.photos
-            .map { try Data(contentsOf: $0.photoURL).count }
+            .map { photo -> Int in
+                let bytes = try Data(contentsOf: photo.photoURL)
+                assertStillAPhoto(bytes)
+                return bytes.count
+            }
             .reduce(0, +)
         let worstCaseBody = stagedTotal
             + ItemRunSubmissionVoice.maximumByteLength
@@ -1315,6 +1349,7 @@ final class NativeIntakeTests: XCTestCase {
             // Without this the digest agreement proves nothing about bounding.
             XCTAssertNotEqual(bytes, capture)
             XCTAssertLessThanOrEqual(bytes.count, CapturePhotoBudget.maximumPhotoBytes)
+            assertStillAPhoto(bytes)
             digests.insert(LocalPhotoFingerprint.digest(of: bytes))
         }
 
@@ -1343,6 +1378,7 @@ final class NativeIntakeTests: XCTestCase {
         for (bytes, capture) in zip(stagedBytes, captures) {
             XCTAssertNotEqual(bytes, capture)
             XCTAssertLessThanOrEqual(bytes.count, CapturePhotoBudget.maximumPhotoBytes)
+            assertStillAPhoto(bytes)
         }
         XCTAssertEqual(Set(stagedBytes.map(LocalPhotoFingerprint.digest(of:))).count, 3)
     }
