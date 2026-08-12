@@ -8,15 +8,15 @@
     "xcode_version": "26.5",
     "xcode_build": "17F42",
     "unit_test_count": 705,
-    "ui_test_count": 133,
+    "ui_test_count": 135,
     "source_ui_shard_suite_seconds": {
       "ui-1": 1361.911,
       "ui-2": 1174.858
     },
-    "selector_seconds_total": 2583.764,
+    "selector_seconds_total": 2583.882,
     "balanced_ui_shard_observed_seconds": {
       "ui-1": 862.776,
-      "ui-2": 858.088,
+      "ui-2": 858.206,
       "ui-3": 862.9
     },
     "selector_observed_seconds": {
@@ -140,6 +140,8 @@
       "SnapListUITests/UILaunchBoundaryTests/testLaunchIsIssuedOnlyAfterTheProcessIsObservedNotRunning": 0.152,
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementIsReportedBeforeTheLaunchIsIssued": 0.137,
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure": 0.117,
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheRestoredWallSurvivesTheSlowRunnerTimelineThatFlakedTheDeepLink": 0.056,
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheThreeSecondBudgetStillMissesThatSameRestoredWall": 0.062,
       "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest": 0.113,
       "SnapListUITests/UIProcessTerminationBoundaryTests/testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget": 0.128,
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget": 0.117,
@@ -247,6 +249,8 @@
       "SnapListUITests/UILaunchBoundaryTests/testLaunchIsIssuedOnlyAfterTheProcessIsObservedNotRunning",
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementIsReportedBeforeTheLaunchIsIssued",
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure",
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheRestoredWallSurvivesTheSlowRunnerTimelineThatFlakedTheDeepLink",
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheThreeSecondBudgetStillMissesThatSameRestoredWall",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget",
