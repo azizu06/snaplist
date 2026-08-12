@@ -2834,7 +2834,11 @@ describe("mobile API v1 provider-neutral handler", () => {
       },
     });
     expect(body).not.toContain("service role");
-    expect(reportError).toHaveBeenCalledWith("mobile-api.run-detail", expect.any(Error));
+    expect(reportError).toHaveBeenCalledWith(
+      "mobile-api.run-detail",
+      expect.any(Error),
+      { runId: "24100000-0000-4000-8000-000000000001" },
+    );
   });
 
   it("returns one authenticated run-coherent pricing evidence snapshot", async () => {

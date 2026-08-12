@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { LogFields } from "@/lib/observability";
 import { reportServerError } from "@/lib/sentry";
 
 /**
@@ -11,8 +12,12 @@ import { reportServerError } from "@/lib/sentry";
  * convention. The real error is recorded via `reportServerError` (#62): a
  * structured `ok:false` log line plus a Sentry capture when a DSN is configured.
  */
-export function logServerError(context: string, err: unknown): void {
-  reportServerError(context, err);
+export function logServerError(
+  context: string,
+  err: unknown,
+  fields?: LogFields,
+): void {
+  reportServerError(context, err, fields);
 }
 
 /** Log the real error server-side and return a GENERIC 500 JSON response. */
