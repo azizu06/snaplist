@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { generateTestPkcs8PrivateKeyPem } from "./lib/guest-capability/signer.testing";
 import { register } from "./instrumentation";
 
 /**
@@ -40,7 +41,9 @@ describe("register", () => {
       REVENUECAT_SECRET_API_KEY: "revenuecat-secret",
       SERVER_RPC_SECRET: "dOD9IRVTwgq/GTVsIoNQ29nsUWHdqgRjpgdYQN7Yy0QUqS7yFBsMq6fknzT+jiTI",
       SNAPLIST_PUBLIC_ORIGIN: "https://app.snaplist.example",
-      SUPABASE_SECRET_KEY: "supabase-secret",
+      SUPABASE_GUEST_JWT_KEY_ID: "guest-es256-test",
+      SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM: generateTestPkcs8PrivateKeyPem(),
+      SUPABASE_SECRET_KEY: "sb_secret_test",
     })) {
       vi.stubEnv(name, value);
     }
@@ -79,4 +82,31 @@ describe("register", () => {
 
     await expect(register()).rejects.toThrow(/EBAY_BASE_URL/);
   });
+
+  it("rejects deployment startup when the verified-guest signing key id is invalid", async () => {
+    deployedEnv();
+    vi.stubEnv("SUPABASE_GUEST_JWT_KEY_ID", "guest signer with spaces");
+
+    await expect(register()).rejects.toThrow(
+      /SUPABASE_GUEST_JWT_KEY_ID.*valid signing key id/,
+    );
+  });
+
+  it.each([
+    [
+      "malformed",
+      "-----BEGIN PRIVATE KEY-----\ntest-only\n-----END PRIVATE KEY-----",
+    ],
+    ["non-ES256", generateTestPkcs8PrivateKeyPem("P-384")],
+  ])(
+    "rejects deployment startup when the verified-guest private key is %s",
+    async (_kind, privateKeyPem) => {
+      deployedEnv();
+      vi.stubEnv("SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM", privateKeyPem);
+
+      await expect(register()).rejects.toThrow(
+        /SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM.*importable ES256 private key/,
+      );
+    },
+  );
 });

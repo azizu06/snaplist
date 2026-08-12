@@ -21,6 +21,20 @@ final class GuestCapabilityBearerTests: XCTestCase {
         )
     }
 
+    private static func bearer(
+        expiringIn seconds: TimeInterval,
+        appAttestKeyID: String,
+        token: String = guestToken
+    ) -> GuestCapabilityBearer {
+        GuestCapabilityBearer(
+            expiresAt: instant.addingTimeInterval(seconds),
+            token: token,
+            appAttestScopeProof: ItemRunSubmissionPrincipalScopeProof(
+                verifiedAppAttestKeyID: appAttestKeyID
+            )!
+        )
+    }
+
     // MARK: The order a bearer is resolved in
 
     func testALiveClerkSessionWinsOverAStoredGuestCapability() async throws {
@@ -120,6 +134,39 @@ final class GuestCapabilityBearerTests: XCTestCase {
         }
     }
 
+    func testALiveClerkSessionWinsForScopedItemRunSubmission() async throws {
+        let guestStore = GuestCapabilityStoreDouble(
+            bearer: Self.bearer(expiringIn: 3_600)
+        )
+        let appAttestKeyStore = AppAttestKeyStoreDouble(
+            key: AppAttestStoredKey(
+                id: "guest-key-that-must-not-be-read",
+                state: .verified
+            )
+        )
+        let provider = GuestCapableBearerTokenProvider(
+            clerk: ClerkProviderDouble(
+                token: "fresh-opaque-clerk-token",
+                principalSubject: "user_scoped_clerk"
+            ),
+            guestCapabilities: guestStore,
+            appAttestKeys: appAttestKeyStore,
+            now: { Self.instant }
+        )
+
+        let scoped = try await provider.itemRunSubmissionScopedBearer()
+
+        XCTAssertEqual(scoped.bearerToken, "fresh-opaque-clerk-token")
+        XCTAssertEqual(
+            scoped.scopeProof,
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "user_scoped_clerk"
+            )
+        )
+        XCTAssertEqual(guestStore.loadCount, 0)
+        XCTAssertEqual(appAttestKeyStore.loadCount, 0)
+    }
+
     // MARK: Issue #733 — submission-safe renewal
 
     func testAShortLivedGuestCapabilityIsRenewedBeforeSubmission() async throws {
@@ -141,6 +188,46 @@ final class GuestCapabilityBearerTests: XCTestCase {
         let token = try await provider.bearerToken()
 
         XCTAssertEqual(token, refreshedToken)
+        let renewalCallCount = await renewal.callCount
+        XCTAssertEqual(renewalCallCount, 1)
+    }
+
+    func testAShortLivedScopedGuestCapabilityRenewsAgainstTheSameAppAttestKey()
+        async throws {
+        let refreshedToken = "guestcap_\(String(repeating: "D", count: 43))"
+        let store = GuestCapabilityStoreDouble(
+            bearer: Self.bearer(expiringIn: 299)
+        )
+        let appAttestKeyStore = AppAttestKeyStoreDouble(
+            key: AppAttestStoredKey(
+                id: "renewed-scoped-key-758",
+                state: .verified
+            )
+        )
+        let renewal = GuestCapabilityRenewalDouble(outcomes: [.ready]) { _ in
+            try? store.save(
+                Self.bearer(
+                    expiringIn: 3_600,
+                    appAttestKeyID: "renewed-scoped-key-758",
+                    token: refreshedToken
+                )
+            )
+        }
+        let provider = makeSignedOutRenewingProvider(
+            store: store,
+            renewal: renewal,
+            appAttestKeys: appAttestKeyStore
+        )
+
+        let scoped = try await provider.itemRunSubmissionScopedBearer()
+
+        XCTAssertEqual(scoped.bearerToken, refreshedToken)
+        XCTAssertEqual(
+            scoped.scopeProof,
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedAppAttestKeyID: "renewed-scoped-key-758"
+            )
+        )
         let renewalCallCount = await renewal.callCount
         XCTAssertEqual(renewalCallCount, 1)
     }
@@ -267,6 +354,247 @@ final class GuestCapabilityBearerTests: XCTestCase {
     // MARK: The request the signed-out seller actually sends
 
     @MainActor
+    func testLaunchEnrollmentAndScopedSubmissionShareGuestCapabilityAndKeyCustody()
+        async throws {
+        let guestStore = GuestCapabilityStoreDouble(bearer: nil)
+        let appAttestKeyStore = AppAttestKeyStoreDouble(key: nil)
+        let enrollment = GuestCapabilityRenewalDouble(
+            outcomes: [.ready]
+        ) { _ in
+            try? appAttestKeyStore.save(
+                AppAttestStoredKey(
+                    id: "launch-enrolled-app-attest-key-758",
+                    state: .verified
+                )
+            )
+            try? guestStore.save(
+                Self.bearer(
+                    expiringIn: 3_600,
+                    appAttestKeyID: "launch-enrolled-app-attest-key-758"
+                )
+            )
+        }
+        let composition = makeLaunchComposition(
+            clerk: ClerkProviderDouble(
+                error: BearerTokenProviderError.sessionAbsent
+            ),
+            enrollment: enrollment,
+            instant: Self.instant,
+            store: guestStore,
+            appAttestKeys: appAttestKeyStore
+        )
+
+        await composition.beginLaunchEnrollment().value
+        let submission = try await submitScopedNativeIntake(
+            applicationSupportName: "guest-composition-submission",
+            keyStore: appAttestKeyStore,
+            tokenProvider: composition.tokenProvider,
+            idempotencyKey: UUID(
+                uuidString: "75800000-0000-4000-8000-000000000002"
+            )!
+        )
+
+        let enrollmentCount = await enrollment.callCount
+        XCTAssertEqual(enrollmentCount, 1)
+        XCTAssertEqual(submission.host.retention, .ambiguous)
+        let payloads = await submission.submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+        let bearerTokenLengths = await submission.submitter.bearerTokenLengths
+        XCTAssertEqual(bearerTokenLengths, [Self.guestToken.count])
+    }
+
+    @MainActor
+    func testAReplacedAppAttestKeyCannotPairItsScopeWithThePriorGuestCapability()
+        async throws {
+        let priorToken = "guestcap_\(String(repeating: "K", count: 43))"
+        let currentToken = "guestcap_\(String(repeating: "N", count: 43))"
+        let guestStore = GuestCapabilityStoreDouble(bearer: nil)
+        let keyStore = AppAttestKeyStoreDouble(
+            key: AppAttestStoredKey(
+                id: "app-attest-prior-key-758",
+                state: .verified
+            )
+        )
+        let assertionServer = GuestCapabilityAssertionServerDouble(
+            truths: [
+                .verified(.init(
+                    counter: 1,
+                    environment: .production,
+                    guestCapability: GuestCapabilityBearer(
+                        expiresAt: Self.instant.addingTimeInterval(3_600),
+                        token: priorToken
+                    ),
+                    keyID: "app-attest-prior-key-758",
+                    kind: .assertion
+                )),
+                .verified(.init(
+                    counter: 1,
+                    environment: .production,
+                    guestCapability: GuestCapabilityBearer(
+                        expiresAt: Self.instant.addingTimeInterval(3_600),
+                        token: currentToken
+                    ),
+                    keyID: "app-attest-current-key-758",
+                    kind: .assertion
+                )),
+            ]
+        )
+        let client = AppAttestClient(
+            appID: "35YFS8XJRQ.dev.snaplist.ios",
+            environment: .production,
+            guestCapabilityStore: guestStore,
+            keyStore: keyStore,
+            server: assertionServer,
+            service: GuestCapabilityAppAttestServiceDouble()
+        )
+        guard case .verified = await client.assert(
+            requestBody: Data(#"{"operation":"issue-prior-capability"}"#.utf8)
+        ) else {
+            XCTFail("The prior key did not earn its guest capability")
+            return
+        }
+        try keyStore.save(
+            AppAttestStoredKey(
+                id: "app-attest-current-key-758",
+                state: .verified
+            )
+        )
+        let renewalCount = GuestCapabilityInvocationCounter()
+        let provider = GuestCapabilityRenewingBearerTokenProvider(
+            base: GuestCapableBearerTokenProvider(
+                clerk: ClerkProviderDouble(
+                    error: BearerTokenProviderError.sessionAbsent
+                ),
+                guestCapabilities: guestStore,
+                appAttestKeys: keyStore,
+                now: { Self.instant }
+            ),
+            guestCapabilities: guestStore,
+            renewGuestCapability: {
+                await renewalCount.increment()
+                guard case .verified = await client.assert(
+                    requestBody: Data(
+                        #"{"operation":"issue-current-capability"}"#.utf8
+                    )
+                ) else {
+                    return .invalid(.serverRejected)
+                }
+                return .ready
+            },
+            now: { Self.instant }
+        )
+        let submission = try await submitScopedNativeIntake(
+            applicationSupportName: "guest-replaced-key-submission",
+            keyStore: keyStore,
+            tokenProvider: provider,
+            idempotencyKey: UUID(
+                uuidString: "75800000-0000-4000-8000-000000000002"
+            )!
+        )
+
+        let observedRenewalCount = await renewalCount.value
+        XCTAssertEqual(observedRenewalCount, 1)
+        XCTAssertEqual(try guestStore.load()?.token, currentToken)
+        XCTAssertEqual(submission.host.retention, .ambiguous)
+        let payloads = await submission.submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+    }
+
+    @MainActor
+    func testAClerkSubjectWithoutATokenCannotDowngradeScopedItemRunSubmissionToGuest()
+        async throws {
+        let keyID = "app-attest-key-before-clerk-token-758"
+        let keyStore = AppAttestKeyStoreDouble(
+            key: AppAttestStoredKey(id: keyID, state: .verified)
+        )
+        let clerk = ClerkBearerTokenProvider(
+            session: ClerkSessionAuthenticationDouble(
+                authentication: ClerkSessionAuthentication(
+                    token: nil,
+                    scopeProof: ItemRunSubmissionPrincipalScopeProof(
+                        verifiedClerkSubject: "user_clerk_token_unavailable_758"
+                    )
+                )
+            )
+        )
+        var clerkClassification: BearerTokenProviderError?
+        do {
+            _ = try await clerk.principalBoundBearer()
+            XCTFail("A Clerk subject without a token must fail closed")
+        } catch let error as BearerTokenProviderError {
+            clerkClassification = error
+        } catch {
+            XCTFail("Expected a typed Clerk bearer error, got \(error)")
+        }
+
+        let guestStore = GuestCapabilityStoreDouble(
+            bearer: Self.bearer(
+                expiringIn: 3_600,
+                appAttestKeyID: keyID
+            )
+        )
+        let submission = try await submitScopedNativeIntake(
+            applicationSupportName: "clerk-token-unavailable-submission",
+            keyStore: keyStore,
+            tokenProvider: GuestCapableBearerTokenProvider(
+                clerk: clerk,
+                guestCapabilities: guestStore,
+                appAttestKeys: keyStore,
+                now: { Self.instant }
+            ),
+            idempotencyKey: UUID(
+                uuidString: "75800000-0000-4000-8000-000000000003"
+            )!
+        )
+
+        XCTAssertEqual(
+            clerkClassification,
+            .principalBindingUnavailable
+        )
+        XCTAssertEqual(submission.host.retention, .submissionUnavailable)
+        XCTAssertEqual(guestStore.loadCount, 0)
+        let payloads = await submission.submitter.payloads
+        XCTAssertTrue(payloads.isEmpty)
+    }
+
+    @MainActor
+    func testASignedOutSellerWithAppAttestScopedNativeIntakeDispatchesWithGuestCapabilityBearer()
+        async throws {
+        let keyStore = AppAttestKeyStoreDouble(
+            key: AppAttestStoredKey(
+                id: "app-attest-key-758",
+                state: .verified
+            )
+        )
+        let submission = try await submitScopedNativeIntake(
+            applicationSupportName: "guest-scoped-submission",
+            keyStore: keyStore,
+            tokenProvider: GuestCapableBearerTokenProvider(
+                clerk: ClerkProviderDouble(
+                    error: BearerTokenProviderError.sessionAbsent
+                ),
+                guestCapabilities: GuestCapabilityStoreDouble(
+                    bearer: Self.bearer(
+                        expiringIn: 3_600,
+                        appAttestKeyID: "app-attest-key-758"
+                    )
+                ),
+                appAttestKeys: keyStore,
+                now: { Self.instant }
+            ),
+            idempotencyKey: UUID(
+                uuidString: "75800000-0000-4000-8000-000000000001"
+            )!
+        )
+
+        let payloads = await submission.submitter.payloads
+        XCTAssertEqual(submission.host.retention, .ambiguous)
+        XCTAssertEqual(payloads.count, 1)
+        let bearerTokenLengths = await submission.submitter.bearerTokenLengths
+        XCTAssertEqual(bearerTokenLengths, [Self.guestToken.count])
+    }
+
+    @MainActor
     func testASignedOutSellerReachesTheNetworkWithTheGuestCapabilityBearer() async throws {
         let intake = SubmissionIntakeFixture(photoCount: 1)
         // The coordinator refuses a receipt whose photo identity is not the
@@ -295,7 +623,7 @@ final class GuestCapabilityBearerTests: XCTestCase {
                 meta: ResponseMeta(requestId: "req_test")
             )
         )
-        let observed = ObservedRequest()
+        let observed = ObservedRequests()
         ItemRunSubmissionURLProtocolStub.handler = { request in
             observed.record(request)
             return (
@@ -345,7 +673,7 @@ final class GuestCapabilityBearerTests: XCTestCase {
                 """
                 Start listing never published an accepted run — \
                 retention \(String(describing: host.retention)), \
-                reached network: \(observed.request != nil)
+                reached network: \(observed.latestRequest != nil)
                 """
             )
             return
@@ -353,7 +681,7 @@ final class GuestCapabilityBearerTests: XCTestCase {
         host.acknowledgePresentation(eventID: eventID)
         await submission.value
 
-        let request = try XCTUnwrap(observed.request)
+        let request = try XCTUnwrap(observed.latestRequest)
         // The token is a fixture literal, not a credential, so the header is
         // compared whole. A prefix check would pass for any token of that shape.
         XCTAssertEqual(
@@ -366,11 +694,192 @@ final class GuestCapabilityBearerTests: XCTestCase {
         XCTAssertEqual(mintCount, 1)
     }
 
+    @MainActor
+    func testOneScopedGuestStartListingMakesOnePOSTWhenAuthenticationIsRejected()
+        async throws {
+        let keyID = "app-attest-one-post-key-758"
+        let keyStore = AppAttestKeyStoreDouble(
+            key: AppAttestStoredKey(id: keyID, state: .verified)
+        )
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "guest-one-post-submission-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: applicationSupport)
+        }
+        let native = try await makeAppAttestScopedNativeIntake(
+            applicationSupport: applicationSupport,
+            keyStore: keyStore
+        )
+        let observed = ObservedRequests()
+        ItemRunSubmissionURLProtocolStub.handler = { request in
+            observed.record(request)
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(
+                    #"{"error":{"code":"unauthorized","message":"Authentication is required.","requestId":"req_758"}}"#.utf8
+                )
+            )
+        }
+        addTeardownBlock { ItemRunSubmissionURLProtocolStub.handler = nil }
+        let delegate = ItemRunSubmissionTaskDelegateObserver()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ItemRunSubmissionURLProtocolStub.self]
+        let session = URLSession(
+            configuration: configuration,
+            delegate: delegate,
+            delegateQueue: nil
+        )
+        let idempotencyKey = UUID(
+            uuidString: "75800000-0000-4000-8000-000000000004"
+        )!
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: ItemRunSubmissionClient(
+                    baseURL: URL(string: "https://api.snaplist.dev")!,
+                    session: session,
+                    boundary: { "snaplist-boundary" }
+                ),
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: GuestCapableBearerTokenProvider(
+                    clerk: ClerkProviderDouble(
+                        error: BearerTokenProviderError.sessionAbsent
+                    ),
+                    guestCapabilities: GuestCapabilityStoreDouble(
+                        bearer: Self.bearer(
+                            expiringIn: 3_600,
+                            appAttestKeyID: keyID
+                        )
+                    ),
+                    appAttestKeys: keyStore,
+                    now: { Self.instant }
+                ),
+                guestRecoveryCredentials: GuestRecoveryCredentialStoreDouble(),
+                newIdempotencyKey: { idempotencyKey }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+
+        await host.startListing(photos: native.snapshot.photos)
+
+        let requests = observed.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.compactMap(\.httpMethod), ["POST"])
+        XCTAssertEqual(
+            requests.compactMap {
+                $0.value(forHTTPHeaderField: "Idempotency-Key")
+            },
+            [idempotencyKey.uuidString.lowercased()]
+        )
+        XCTAssertEqual(delegate.authenticationChallengeCount, 0)
+        XCTAssertEqual(delegate.bodyStreamRenewalCount, 0)
+        XCTAssertEqual(host.retention, .authenticationRequired)
+    }
+
     // MARK: Helpers
+
+    @MainActor
+    private func makeAppAttestScopedNativeIntake(
+        applicationSupport: URL,
+        keyStore: any AppAttestKeyIDStoring
+    ) async throws -> (intake: NativeIntake, snapshot: NativeIntake.Snapshot) {
+        let intake = NativeIntake(
+            applicationSupportDirectory: applicationSupport,
+            identitySource:
+                ClerkAuthenticationComposition.makeNativeIntakeIdentitySource(
+                    keyStore: keyStore,
+                    verifiedClerkSubject: { nil },
+                    clerkChanges: { AsyncStream { _ in } },
+                    appAttestChanges: { AsyncStream { _ in } }
+                )
+        )
+        let events = await intake.events()
+        var iterator = events.makeAsyncIterator()
+        guard case .snapshot? = await iterator.next() else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        let photoData = SubmissionIntakeFixture.jpeg(
+            filling: "app-attest-scope-758",
+            repeated: 1
+        )
+        guard await intake.perform(
+            .addPhotos([NativeIntake.PhotoInput { photoData }])
+        ) == .committed else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        while let event = await iterator.next() {
+            if case .snapshot(let snapshot) = event,
+               snapshot.photos.count == 1,
+               snapshot.recovery == .ready {
+                return (intake, snapshot)
+            }
+        }
+        throw CocoaError(.fileReadUnknown)
+    }
+
+    private struct ScopedNativeIntakeSubmission {
+        let host: ItemRunSubmissionHost
+        let submitter: RecordingItemRunSubmitter
+    }
+
+    @MainActor
+    private func submitScopedNativeIntake(
+        applicationSupportName: String,
+        keyStore: any AppAttestKeyIDStoring,
+        tokenProvider: any BearerTokenProviding,
+        idempotencyKey: UUID
+    ) async throws -> ScopedNativeIntakeSubmission {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "\(applicationSupportName)-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: applicationSupport)
+        }
+        let native = try await makeAppAttestScopedNativeIntake(
+            applicationSupport: applicationSupport,
+            keyStore: keyStore
+        )
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: tokenProvider,
+                guestRecoveryCredentials: GuestRecoveryCredentialStoreDouble(),
+                newIdempotencyKey: { idempotencyKey }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        await host.startListing(photos: native.snapshot.photos)
+        return ScopedNativeIntakeSubmission(host: host, submitter: submitter)
+    }
 
     private func makeSignedOutRenewingProvider(
         store: GuestCapabilityStoreDouble,
-        renewal: GuestCapabilityRenewalDouble
+        renewal: GuestCapabilityRenewalDouble,
+        appAttestKeys: any AppAttestKeyIDStoring =
+            KeychainAppAttestKeyIDStore()
     ) -> GuestCapabilityRenewingBearerTokenProvider {
         GuestCapabilityRenewingBearerTokenProvider(
             base: GuestCapableBearerTokenProvider(
@@ -378,6 +887,7 @@ final class GuestCapabilityBearerTests: XCTestCase {
                     error: BearerTokenProviderError.sessionAbsent
                 ),
                 guestCapabilities: store,
+                appAttestKeys: appAttestKeys,
                 now: { Self.instant }
             ),
             guestCapabilities: store,
@@ -390,11 +900,14 @@ final class GuestCapabilityBearerTests: XCTestCase {
         clerk: any BearerTokenProviding,
         enrollment: GuestCapabilityRenewalDouble,
         instant: Date,
-        store: GuestCapabilityStoreDouble
+        store: GuestCapabilityStoreDouble,
+        appAttestKeys: any AppAttestKeyIDStoring =
+            KeychainAppAttestKeyIDStore()
     ) -> AppAttestGuestCapabilityComposition {
         let base = GuestCapableBearerTokenProvider(
             clerk: clerk,
             guestCapabilities: store,
+            appAttestKeys: appAttestKeys,
             now: { instant }
         )
         return AppAttestGuestCapabilityComposition(
@@ -481,6 +994,19 @@ private final class ClerkProviderDouble: BearerTokenProviding, @unchecked Sendab
     }
 }
 
+private struct ClerkSessionAuthenticationDouble: ClerkSessionTokenProviding {
+    let authentication: ClerkSessionAuthentication
+
+    func sessionToken() async throws -> String? {
+        authentication.token
+    }
+
+    func sessionAuthentication() async throws
+        -> ClerkSessionAuthentication {
+        authentication
+    }
+}
+
 private final class GuestCapabilityStoreDouble: GuestCapabilityBearerStoring,
     @unchecked Sendable {
     private(set) var loadCount = 0
@@ -499,6 +1025,29 @@ private final class GuestCapabilityStoreDouble: GuestCapabilityBearerStoring,
         self.bearer = bearer
     }
 
+}
+
+private final class AppAttestKeyStoreDouble: AppAttestKeyIDStoring,
+    @unchecked Sendable {
+    private(set) var loadCount = 0
+    private var key: AppAttestStoredKey?
+
+    init(key: AppAttestStoredKey?) {
+        self.key = key
+    }
+
+    func load() throws -> AppAttestStoredKey? {
+        loadCount += 1
+        return key
+    }
+
+    func save(_ key: AppAttestStoredKey) throws {
+        self.key = key
+    }
+
+    func remove() throws {
+        key = nil
+    }
 }
 
 private actor GuestCapabilityRenewalDouble {
@@ -525,11 +1074,132 @@ private actor GuestCapabilityRenewalDouble {
     }
 }
 
-private final class ObservedRequest: @unchecked Sendable {
-    private(set) var request: URLRequest?
+private actor GuestCapabilityInvocationCounter {
+    private(set) var value = 0
 
-    func record(_ request: URLRequest) {
-        self.request = request
+    func increment() {
+        value += 1
+    }
+}
+
+private final class GuestCapabilityAppAttestServiceDouble: AppAttestServicing,
+    @unchecked Sendable {
+    let isSupported = true
+
+    func generateKey() async throws -> String {
+        "unused-generated-key"
+    }
+
+    func attestKey(_ keyID: String, clientDataHash: Data) async throws -> Data {
+        Data("unused-attestation".utf8)
+    }
+
+    func generateAssertion(
+        _ keyID: String,
+        clientDataHash: Data
+    ) async throws -> Data {
+        Data("assertion-for-\(keyID)".utf8)
+    }
+}
+
+private actor GuestCapabilityAssertionServerDouble: AppAttestServerClient {
+    private var truths: [AppAttestTruth]
+
+    init(truths: [AppAttestTruth]) {
+        self.truths = truths
+    }
+
+    func issueChallenge(
+        kind: AppAttestChallenge.Kind,
+        keyID: String?
+    ) async throws -> AppAttestChallenge {
+        AppAttestChallenge(
+            bytes: Data("challenge-for-\(keyID ?? "none")".utf8),
+            expiresAt: Date.distantFuture,
+            id: UUID(),
+            kind: kind
+        )
+    }
+
+    func verifyAttestation(
+        challengeID: UUID,
+        keyID: String,
+        attestationObject: Data
+    ) async throws -> AppAttestTruth {
+        .invalid(.serverRejected)
+    }
+
+    func verifyAssertion(
+        challengeID: UUID,
+        clientData: Data,
+        keyID: String,
+        assertionObject: Data,
+        requestBody: Data
+    ) async throws -> AppAttestTruth {
+        guard !truths.isEmpty else {
+            return .invalid(.serverRejected)
+        }
+        return truths.removeFirst()
+    }
+}
+
+private final class ObservedRequests: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRequests: [URLRequest] = []
+
+    var latestRequest: URLRequest? {
+        lock.withLock { storedRequests.last }
+    }
+
+    var requests: [URLRequest] {
+        lock.withLock { storedRequests }
+    }
+
+    @discardableResult
+    func record(_ request: URLRequest) -> Int {
+        lock.withLock {
+            storedRequests.append(request)
+            return storedRequests.count
+        }
+    }
+}
+
+private final class ItemRunSubmissionTaskDelegateObserver: NSObject,
+    URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var authenticationChallenges = 0
+    private var bodyStreamRenewals = 0
+
+    var authenticationChallengeCount: Int {
+        lock.withLock { authenticationChallenges }
+    }
+
+    var bodyStreamRenewalCount: Int {
+        lock.withLock { bodyStreamRenewals }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (
+            URLSession.AuthChallengeDisposition,
+            URLCredential?
+        ) -> Void
+    ) {
+        lock.withLock { authenticationChallenges += 1 }
+        completionHandler(.performDefaultHandling, nil)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        needNewBodyStream completionHandler: @escaping (InputStream?) -> Void
+    ) {
+        lock.withLock { bodyStreamRenewals += 1 }
+        completionHandler(
+            task.originalRequest?.httpBody.map(InputStream.init(data:))
+        )
     }
 }
 

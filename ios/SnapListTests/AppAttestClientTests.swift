@@ -393,7 +393,11 @@ final class AppAttestClientTests: XCTestCase {
 
         XCTAssertEqual(outcome, .ready)
         XCTAssertEqual(fixture.service.generateKeyCallCount, 1)
-        XCTAssertEqual(fixture.bearerStore.saved, [bearer])
+        assertSavedGuestCapability(
+            fixture.bearerStore.saved,
+            bearer: bearer,
+            verifiedKeyID: "native-fixed-key-id"
+        )
         let assertionVerificationCallCount =
             await fixture.server.assertionVerificationCallCount
         XCTAssertEqual(assertionVerificationCallCount, 1)
@@ -441,7 +445,11 @@ final class AppAttestClientTests: XCTestCase {
 
         XCTAssertEqual(failed, .invalid(.keyPersistenceFailed))
         XCTAssertEqual(retried, .ready)
-        XCTAssertEqual(fixture.bearerStore.saved, [bearer])
+        assertSavedGuestCapability(
+            fixture.bearerStore.saved,
+            bearer: bearer,
+            verifiedKeyID: "native-fixed-key-id"
+        )
         let challengeCallCount = await fixture.server.challengeCallCount
         let assertionVerificationCallCount =
             await fixture.server.assertionVerificationCallCount
@@ -604,7 +612,36 @@ final class AppAttestClientTests: XCTestCase {
 
         _ = await client.assert(requestBody: Data(#"{"operation":"proof"}"#.utf8))
 
-        XCTAssertEqual(bearerStore.saved, [bearer])
+        assertSavedGuestCapability(
+            bearerStore.saved,
+            bearer: bearer,
+            verifiedKeyID: "native-fixed-key-id"
+        )
+    }
+
+    private func assertSavedGuestCapability(
+        _ saved: [GuestCapabilityBearer],
+        bearer: GuestCapabilityBearer,
+        verifiedKeyID: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let scope = ItemRunSubmissionPrincipalScopeProof(
+            verifiedAppAttestKeyID: verifiedKeyID
+        ) else {
+            XCTFail(
+                "Expected a valid App Attest principal scope",
+                file: file,
+                line: line
+            )
+            return
+        }
+        XCTAssertEqual(
+            saved,
+            [bearer.bound(to: scope)],
+            file: file,
+            line: line
+        )
     }
 
     func testVerifiedAssertionReportsGuestCapabilityPersistenceFailure() async {

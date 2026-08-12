@@ -212,6 +212,7 @@ src/lib/export/persist.ts
 src/lib/export/schema.ts
 src/lib/guest-capability/configured.ts
 src/lib/guest-capability/service.ts
+src/lib/guest-capability/signer.testing.ts
 src/lib/guest-capability/signer.ts
 src/lib/guest-capability/supabase-store.ts
 src/lib/guest-recovery/decryption-keyring.ts

@@ -35,13 +35,41 @@ struct AppAttestStoredKey: Codable, Equatable, Sendable {
  Issue #727. The server-issued capability a verified assertion earns, which is
  the only credential a signed-out seller has.
 
- It is opaque here: SnapList carries it and watches its expiry, and never reads
- what is inside it. Only `expiresAt` is client business, because a spent bearer
- must not be offered to a request that would then fail as unauthenticated.
+ The token is opaque here: SnapList carries it and never reads what is inside.
+ Only `expiresAt` and its one-way App Attest scope digest are client business,
+ so a spent or cross-key bearer is never offered to submission.
  */
 struct GuestCapabilityBearer: Codable, Equatable, Sendable {
+    private let appAttestScopeDigest: Data?
     let expiresAt: Date
     let token: String
+
+    init(
+        expiresAt: Date,
+        token: String,
+        appAttestScopeProof: ItemRunSubmissionPrincipalScopeProof? = nil
+    ) {
+        self.appAttestScopeDigest = appAttestScopeProof?.opaqueDigest
+        self.expiresAt = expiresAt
+        self.token = token
+    }
+
+    var appAttestScopeProof: ItemRunSubmissionPrincipalScopeProof? {
+        guard let appAttestScopeDigest else { return nil }
+        return ItemRunSubmissionPrincipalScopeProof(
+            opaqueDigest: appAttestScopeDigest
+        )
+    }
+
+    func bound(
+        to scopeProof: ItemRunSubmissionPrincipalScopeProof
+    ) -> Self {
+        Self(
+            expiresAt: expiresAt,
+            token: token,
+            appAttestScopeProof: scopeProof
+        )
+    }
 
     func isUsable(at instant: Date) -> Bool { instant < expiresAt }
 }
@@ -761,8 +789,17 @@ actor AppAttestClient {
             // seller unable to authorize the later submission.
             if case .verified(let verified) = truth,
                let capability = verified.guestCapability {
+                guard verified.kind == .assertion,
+                      verified.keyID == keyID,
+                      let scopeProof = ItemRunSubmissionPrincipalScopeProof(
+                          verifiedAppAttestKeyID: keyID
+                      ) else {
+                    return .truth(.invalid(.serverRejected))
+                }
                 do {
-                    try guestCapabilityStore.save(capability)
+                    try guestCapabilityStore.save(
+                        capability.bound(to: scopeProof)
+                    )
                 } catch {
                     return .truth(.invalid(.keyPersistenceFailed))
                 }
@@ -968,6 +1005,40 @@ struct GuestCapabilityRenewingBearerTokenProvider: BearerTokenProviding {
 
     func principalBoundBearer() async throws -> PrincipalBoundBearer {
         try await base.principalBoundBearer()
+    }
+
+    func itemRunSubmissionScopedBearer() async throws
+        -> ItemRunSubmissionScopedBearer {
+        do {
+            let resolved = try await base.itemRunSubmissionScopedBearer()
+            guard Self.isGuestCapability(resolved.bearerToken) else {
+                return resolved
+            }
+            if let bearer = storedBearer(matching: resolved.bearerToken),
+               bearer.expiresAt.timeIntervalSince(now())
+                > Self.minimumRemainingLifetime {
+                return resolved
+            }
+        } catch BearerTokenProviderError.sessionAbsent {
+            // The signed-out path gets one chance to earn the missing bearer.
+            // Any other Clerk error remains an account error and propagates.
+        }
+
+        guard await renewGuestCapability() == .ready else {
+            throw BearerTokenProviderError.sessionAbsent
+        }
+
+        let renewed = try await base.itemRunSubmissionScopedBearer()
+        guard Self.isGuestCapability(renewed.bearerToken) else {
+            return renewed
+        }
+        guard let renewedBearer = storedBearer(
+            matching: renewed.bearerToken
+        ), renewedBearer.expiresAt.timeIntervalSince(now())
+            > Self.minimumRemainingLifetime else {
+            throw BearerTokenProviderError.sessionAbsent
+        }
+        return renewed
     }
 
     private func storedBearer(matching token: String) -> GuestCapabilityBearer? {

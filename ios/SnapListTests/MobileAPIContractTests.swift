@@ -105,6 +105,61 @@ final class MobileAPIContractTests: XCTestCase {
         XCTAssertNil(recorder.request)
     }
 
+    func testClerkSubjectWithoutTokenCannotDowngradeGenericMobileRequestToGuest()
+        async {
+        for token in [nil, "   "] as [String?] {
+            let guestStore = CountingGuestCapabilityBearerStore(
+                bearer: GuestCapabilityBearer(
+                    expiresAt: .distantFuture,
+                    token: "guestcap_\(String(repeating: "G", count: 43))"
+                )
+            )
+            let provider = GuestCapableBearerTokenProvider(
+                clerk: ClerkBearerTokenProvider(
+                    session: StubClerkSessionToken(
+                        token: token,
+                        scopeProof: ItemRunSubmissionPrincipalScopeProof(
+                            verifiedClerkSubject: "user_generic_consumer"
+                        )
+                    )
+                ),
+                guestCapabilities: guestStore
+            )
+            let recorder = MobileAPIRequestRecorder()
+            let session = Self.makeSession { request in
+                recorder.record(request)
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    Data(
+                        #"{"data":{"userId":"guest"},"meta":{"requestId":"req_guest"}}"#.utf8
+                    )
+                )
+            }
+            let client = URLSessionMobileAPIClient(
+                baseURL: URL(string: "https://api.snaplist.dev")!,
+                tokenProvider: provider,
+                session: session
+            )
+
+            do {
+                _ = try await client.getSession()
+                XCTFail("A live Clerk subject must not downgrade to guest authority.")
+            } catch {
+                XCTAssertEqual(
+                    error as? BearerTokenProviderError,
+                    .principalBindingUnavailable
+                )
+            }
+            XCTAssertEqual(guestStore.loadCount, 0)
+            XCTAssertNil(recorder.request)
+        }
+    }
+
     func testNativeAppConfigurationRejectsUndefinedAPIOrigin() {
         XCTAssertThrowsError(
             try NativeAppConfiguration.resolve(
@@ -782,6 +837,34 @@ private final class MobileAPIRequestRecorder: @unchecked Sendable {
     func record(_ request: URLRequest) {
         lock.withLock {
             storedRequest = request
+        }
+    }
+}
+
+private final class CountingGuestCapabilityBearerStore:
+    GuestCapabilityBearerStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var bearer: GuestCapabilityBearer?
+    private var loads = 0
+
+    var loadCount: Int {
+        lock.withLock { loads }
+    }
+
+    init(bearer: GuestCapabilityBearer?) {
+        self.bearer = bearer
+    }
+
+    func load() throws -> GuestCapabilityBearer? {
+        lock.withLock {
+            loads += 1
+            return bearer
+        }
+    }
+
+    func save(_ bearer: GuestCapabilityBearer) throws {
+        lock.withLock {
+            self.bearer = bearer
         }
     }
 }

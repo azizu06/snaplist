@@ -1,12 +1,21 @@
 import CryptoKit
 import Foundation
 
-/// In-memory comparison value for #540's opaque authenticated scope. It is
-/// neither a bearer nor an authorization capability, and it is never encoded.
-/// The raw Clerk subject is consumed only long enough to reproduce #540's
-/// one-way scope digest.
+/// Comparison value for #540's opaque authenticated scope. It is neither a
+/// bearer nor an authorization capability. The App Attest form may be encoded
+/// only inside its guest capability so that one assertion's bearer and scope
+/// stay atomic; the raw identity value is never retained.
 struct ItemRunSubmissionPrincipalScopeProof: Equatable, Sendable {
     private let digest: Data
+
+    init?(opaqueDigest: Data) {
+        guard opaqueDigest.count == 32 else {
+            return nil
+        }
+        digest = opaqueDigest
+    }
+
+    var opaqueDigest: Data { digest }
 
     init?(filesystemRoot: URL) {
         let component = filesystemRoot.standardizedFileURL.lastPathComponent
@@ -34,14 +43,28 @@ struct ItemRunSubmissionPrincipalScopeProof: Equatable, Sendable {
     }
 
     init?(verifiedClerkSubject: String) {
-        guard !verifiedClerkSubject.isEmpty else {
+        self.init(
+            tag: "clerk-subject",
+            verifiedValue: verifiedClerkSubject
+        )
+    }
+
+    init?(verifiedAppAttestKeyID: String) {
+        self.init(
+            tag: "app-attest-key-id",
+            verifiedValue: verifiedAppAttestKeyID
+        )
+    }
+
+    private init?(tag: String, verifiedValue: String) {
+        guard !verifiedValue.isEmpty else {
             return nil
         }
         let tagged = [
             "dev.snaplist.native-intake-principal",
             "v1",
-            "clerk-subject",
-            verifiedClerkSubject,
+            tag,
+            verifiedValue,
         ].joined(separator: "\u{0}")
         digest = Data(SHA256.hash(data: Data(tagged.utf8)))
     }
