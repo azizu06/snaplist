@@ -5,6 +5,7 @@ import {
   type Identification,
 } from "../pipeline/types";
 import { resolveLanguageModel, resolveModelId } from "../llm";
+import { ITEM_CONDITIONS } from "../items/condition";
 
 /**
  * Real single-shot multimodal vision extraction (issue #6).
@@ -259,10 +260,17 @@ export const visionResponseSchema = z.object({
   brand: z.string().nullable(),
   model: z.string().nullable(),
   category: z.string().nullable(),
+  // The taxonomy, not a free string (issue #798). Strict structured decoding
+  // enforces an enum at the provider, so the model cannot emit `"Good"` and
+  // strand an item behind the case-sensitive review projection. `null` stays
+  // available — a generic item legitimately resolves no condition.
   condition: z
-    .string()
+    .enum(ITEM_CONDITIONS)
     .nullable()
-    .describe("Assessed wear state, e.g. new / like-new / good / fair."),
+    .describe(
+      "Assessed wear state. Use EXACTLY one of: new, like-new, very-good, good, " +
+        "acceptable, fair, poor, for-parts. Null if you cannot judge it.",
+    ),
   isbn: z
     .string()
     .nullable()

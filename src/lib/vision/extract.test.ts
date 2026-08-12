@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { extractedAttributesSchema } from "../pipeline/types";
+import { ITEM_CONDITIONS } from "../items/condition";
 import {
   extractItemAttributes,
+  visionResponseSchema,
   type VisionGenerate,
   type VisionGenerateResult,
 } from "./extract";
@@ -204,6 +206,56 @@ describe("vision/extract — identification flagging (no fabricated confident id
     expect(identification.confident).toBe(false);
     expect(identification.reason).toMatch(/blurry|uncertain|confirm/i);
     expect(identification.candidates).toEqual(["JBL Flip", "Anker Soundcore"]);
+  });
+});
+
+describe("vision/extract — the provider schema constrains condition (#798)", () => {
+  /**
+   * `visionResponseSchema` is the object handed to `generateObject`
+   * (`MODEL_FACING_SCHEMAS`), so an enum here is enforced by strict structured
+   * decoding — the model cannot emit `"Good"` in the first place. This is the
+   * upstream half of the fix; `buildPipelinePersistencePayload` still
+   * canonicalizes, because a provider that ignores the constraint must not be
+   * able to write an unreadable row.
+   */
+  const provider = {
+    brand: "Sony",
+    model: "WH-1000XM4",
+    category: "electronics",
+    isbn: null,
+    upc: "027242920866",
+    specs: ["wireless"],
+    title: "Sony WH-1000XM4",
+    ambiguous: null,
+    uncertaintyReason: null,
+    candidates: null,
+  };
+
+  it("accepts every canonical taxonomy value", () => {
+    for (const condition of ITEM_CONDITIONS) {
+      expect(
+        visionResponseSchema.safeParse({ ...provider, condition }).success,
+      ).toBe(true);
+    }
+  });
+
+  it("accepts a null condition (a generic item resolves none)", () => {
+    expect(
+      visionResponseSchema.safeParse({ ...provider, condition: null }).success,
+    ).toBe(true);
+  });
+
+  it("rejects the capitalized casing that broke a production review", () => {
+    expect(
+      visionResponseSchema.safeParse({ ...provider, condition: "Good" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a free-form condition outside the taxonomy", () => {
+    expect(
+      visionResponseSchema.safeParse({ ...provider, condition: "Used - Good" })
+        .success,
+    ).toBe(false);
   });
 });
 
