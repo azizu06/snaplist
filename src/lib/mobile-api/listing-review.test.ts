@@ -193,6 +193,45 @@ function providerEvidenceReview(comps: EbaySoldComp[]) {
   return review;
 }
 
+/**
+ * A review whose `item.condition` is exactly what the persistence boundary would
+ * have stored for a run whose vision step reported `"Good"` (issue #798). This
+ * closes the loop between the two seams: the write path decides the value, the
+ * read path validates it with a case-sensitive `z.enum(ITEM_CONDITIONS)`, and a
+ * production run proved that an unnormalized write makes the review answer 503
+ * forever. Deriving the fixture from `buildPipelinePersistencePayload` rather
+ * than hardcoding `"good"` is the point — a regression in the write path fails
+ * this test instead of quietly passing it.
+ */
+function persistedConditionReview(visionCondition: string) {
+  const review = rawReview();
+  const persisted = buildPipelinePersistencePayload({
+    attributes: { title: "Sony WH-1000XM4", condition: visionCondition },
+    price: {
+      suggested: 145,
+      range: { min: 130, max: 160 },
+      confidence: 0.72,
+      sources: [{ url: "https://www.ebay.com/itm/cited" }],
+      tier: "depreciation",
+    },
+    confidence: { score: 0.72, band: "medium", autopilotEligible: false },
+    listing: {
+      platform: "ebay",
+      title: "Sony WH-1000XM4",
+      description: "Persisted-condition fixture",
+      fields: {},
+    },
+    model: "test-vision-model",
+    identification: {
+      label: "Sony WH-1000XM4",
+      confident: true,
+      evidence: 1,
+    },
+  } satisfies PipelineResult);
+  review.item.condition = persisted.item.condition as string;
+  return review;
+}
+
 function completeProviderEvidenceReview() {
   return providerEvidenceReview([
     {
@@ -457,6 +496,23 @@ describe("GET /v1/runs/:id coherent Listing Review", () => {
         soldAt: null,
       },
     ]);
+  });
+
+  it("opens the review for an item whose condition came through the persist path", async () => {
+    const response = await handler({
+      principal: { kind: "clerk", userId: USER_ID },
+      reviewClient: dataClient(persistedConditionReview("Good")),
+    })(
+      new Request(`https://api.snaplist.dev/v1/runs/${RUN_ID}`, {
+        headers: { authorization: "Bearer clerk-bearer" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      data: { review: { listing: { condition: string } } };
+    };
+    expect(payload.data.review.listing.condition).toBe("good");
   });
 
   it("returns the same strict persisted sold projection after JSON replay", async () => {

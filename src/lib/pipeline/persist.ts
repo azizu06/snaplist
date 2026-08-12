@@ -5,6 +5,11 @@ import { buildPredictionLogValues, logPrediction } from "./prediction-log";
 import { initialListingStatus } from "./autopilot";
 import { logEvent, timed } from "../observability";
 import { buildPricingEvidenceSnapshotInput } from "../pricing-evidence";
+import {
+  canonicalizeCondition,
+  isItemCondition,
+  type ItemCondition,
+} from "../items/condition";
 
 /**
  * Persistence layer for one pipeline run — the end-to-end spine the walking
@@ -36,6 +41,24 @@ export interface RunAndPersistResult {
   result: PipelineResult;
 }
 
+/**
+ * The stored condition, forced into the canonical taxonomy or dropped (issue #798).
+ *
+ * `items.condition` is read back through a case-sensitive `z.enum(ITEM_CONDITIONS)`
+ * (`listing-review/read.ts`), so a model-authored `"Good"` makes that item's review
+ * permanently unopenable — a 503 no retry can clear. The model's casing is
+ * nondeterministic, so this cannot be left to the prompt or to the provider schema
+ * alone; the persistence boundary is where a stored fact becomes canonical or not
+ * at all. A value still outside the taxonomy after canonicalization is honestly
+ * absent rather than a raw string: "no condition" is a supported state, an
+ * unopenable review is not.
+ */
+function canonicalPersistedCondition(value: string | undefined): ItemCondition | null {
+  if (value == null) return null;
+  const canonical = canonicalizeCondition(value);
+  return isItemCondition(canonical) ? canonical : null;
+}
+
 /** Identity-free write payload shared by request and run-scoped worker persistence. */
 export function buildPipelinePersistencePayload(
   result: PipelineResult,
@@ -43,8 +66,11 @@ export function buildPipelinePersistencePayload(
 ) {
   return {
     item: {
+      // `attributes` stays the model's verbatim output — it round-trips into
+      // `prediction_logs.extracted_attrs` as run provenance for the eval harness.
+      // Only the queryable column is canonicalized.
       attributes: result.attributes,
-      condition: result.attributes.condition ?? null,
+      condition: canonicalPersistedCondition(result.attributes.condition),
       identification: result.identification ?? null,
     },
     listing: {
