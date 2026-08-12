@@ -4,7 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PipelineResult } from "@/lib/pipeline";
 import type { PipelineWorkerContext } from "./worker-store";
-import { stackReachable } from "@/test/supabase-stack";
+import {
+  resolveStackServiceRoleKey,
+  resolveStackUrl,
+  stackReachable,
+} from "@/test/supabase-stack";
 
 const { createAdminClient } = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
@@ -25,11 +29,8 @@ const MASTER_KEY = new Uint8Array(32).fill(7);
 const LOCAL_DATABASE_URL =
   process.env.SNAPLIST_GUEST_RECOVERY_TEST_DATABASE_URL
   ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
-const SUPABASE_URL =
-  process.env.SUPABASE_URL
-  ?? process.env.NEXT_PUBLIC_SUPABASE_URL
-  ?? "http://127.0.0.1:54321";
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL = resolveStackUrl();
+const SERVICE_ROLE_KEY = resolveStackServiceRoleKey();
 const stackIsReachable = await stackReachable();
 
 const result = {
@@ -192,7 +193,7 @@ describe("production guest recovery worker composition", () => {
       const recoveryId = crypto.randomUUID();
       const originalPath =
         `${GUEST_USER_ID}/pipeline-staging/${recoveryId}/0/front.jpg`;
-      const uploaded = [originalPath];
+      const recoveryPrefix = `${GUEST_USER_ID}/guest-recovery/${recoveryId}`;
       try {
         const seeded = await bucket.upload(
           originalPath,
@@ -215,7 +216,6 @@ describe("production guest recovery worker composition", () => {
           });
 
         const envelope = registration!.storageManifest[0]!;
-        uploaded.push(envelope.sourcePath);
         const stored = await bucket.download(envelope.sourcePath);
         expect(stored.error).toBeNull();
         expect(stored.data!.type).toBe("application/octet-stream");
@@ -223,7 +223,15 @@ describe("production guest recovery worker composition", () => {
         expect(createHash("sha256").update(bytes).digest("hex"))
           .toBe(envelope.sha256);
       } finally {
-        await bucket.remove(uploaded);
+        // `prepare` can upload and then throw on its own post-upload
+        // verification, so a manifest returned to the caller is not a reliable
+        // record of what reached the bucket. Sweep the whole recovery prefix
+        // instead — this bucket is shared with every other worktree.
+        const { data: leftovers } = await bucket.list(recoveryPrefix);
+        await bucket.remove([
+          originalPath,
+          ...(leftovers ?? []).map(({ name }) => `${recoveryPrefix}/${name}`),
+        ]);
       }
     },
     30_000,
