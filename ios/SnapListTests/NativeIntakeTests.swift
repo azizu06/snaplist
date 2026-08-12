@@ -1238,13 +1238,24 @@ final class NativeIntakeTests: XCTestCase {
     /// `isJPEG` ahead of it and the server behind it own that, so bytes no
     /// encoder can read have to survive staging exactly as they arrived rather
     /// than becoming a new way to lose a capture.
+    ///
+    /// This covers the ladder-failure passthrough specifically. ImageIO accepts
+    /// any `FF D8 FF` prefix as a source, so `bound`'s decode guard is not what
+    /// catches this fixture — every ladder step fails to produce an image and the
+    /// original bytes fall through. Verified by mutation: replacing the loop's
+    /// `smallest` seed with empty `Data` fails this test, while changing the
+    /// decode guard's return does not, because that guard is never reached.
     func testStagesUndecodableBytesWithoutChangingThem() async throws {
         let harness = NativeIntakeHarness(identity: .clerk("user_native_intake_opaque"))
         let session = try await harness.makeSession()
         addTeardownBlock { harness.cleanUp() }
 
-        // A JPEG magic number in front of bytes ImageIO cannot decode.
-        let opaque = Data([0xFF, 0xD8, 0xFF]) + Data("not an image".utf8)
+        // A JPEG magic number in front of bytes ImageIO cannot decode. It has to
+        // exceed the ceiling, or the budget returns at its size guard and the
+        // decode path this test exists to cover never runs.
+        let opaque = Data([0xFF, 0xD8, 0xFF])
+            + Data(repeating: 0x5A, count: CapturePhotoBudget.maximumPhotoBytes)
+        XCTAssertGreaterThan(opaque.count, CapturePhotoBudget.maximumPhotoBytes)
 
         let staged = try await session.commit(
             .addPhotos([.init(loadData: { opaque })])
@@ -1299,6 +1310,11 @@ final class NativeIntakeTests: XCTestCase {
                 .addPhotos([.init(loadData: { capture })])
             )
             let bytes = try Data(contentsOf: XCTUnwrap(staged.photos.first).photoURL)
+            // Staging the same `Data` three times matches trivially if nothing
+            // re-encodes it, so the bytes have to be shown to have changed first.
+            // Without this the digest agreement proves nothing about bounding.
+            XCTAssertNotEqual(bytes, capture)
+            XCTAssertLessThanOrEqual(bytes.count, CapturePhotoBudget.maximumPhotoBytes)
             digests.insert(LocalPhotoFingerprint.digest(of: bytes))
         }
 
@@ -1318,10 +1334,17 @@ final class NativeIntakeTests: XCTestCase {
             .addPhotos(captures.map { capture in .init(loadData: { capture }) })
         )
 
-        let digests = try staged.photos.map { photo in
-            LocalPhotoFingerprint.digest(of: try Data(contentsOf: photo.photoURL))
+        let stagedBytes = try staged.photos.map { photo in
+            try Data(contentsOf: photo.photoURL)
         }
-        XCTAssertEqual(Set(digests).count, 3)
+        // These seeds already differ before bounding, so distinctness alone would
+        // hold with no re-encoding at all. Pinning each staged photo against the
+        // capture it came from is what makes the distinctness claim about bounding.
+        for (bytes, capture) in zip(stagedBytes, captures) {
+            XCTAssertNotEqual(bytes, capture)
+            XCTAssertLessThanOrEqual(bytes.count, CapturePhotoBudget.maximumPhotoBytes)
+        }
+        XCTAssertEqual(Set(stagedBytes.map(LocalPhotoFingerprint.digest(of:))).count, 3)
     }
 
     private func voice(_ text: String, duration: TimeInterval) -> NativeIntake.VoiceInput {

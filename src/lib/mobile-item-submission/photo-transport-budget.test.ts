@@ -73,14 +73,20 @@ describe("mobile item submission photo transport budget", () => {
 });
 
 /**
- * Bounding photo bytes on-device changes what is sent, and the fingerprint is
- * computed over those bytes and their `byteLength`. It governs guest allowance,
- * guided correction, and AI-item credit settlement, so the two properties that
- * make it safe are asserted here rather than assumed: a retry of one photo set
- * must settle as the same submission, and a set the seller actually edited must
- * not.
+ * Regression locks on behaviour this change does not touch, not evidence for it.
+ *
+ * `requestFingerprint` is the submission idempotency key. It is unchanged by this
+ * PR and these tests pass with the whole change reverted — they exist so a later
+ * edit to `requestFingerprint` cannot silently break replay while photo bytes are
+ * being re-encoded upstream of it.
+ *
+ * The identity that governs guest allowance and AI-item credit settlement is
+ * `canonicalizeVerifiedPhotoSet` (`src/lib/photo-identity/photo-set.ts`), not this
+ * function, and the two differ: that one sorts its digests and is order-
+ * insensitive, while this one is not. Evidence for the credit seam under bounded
+ * bytes lives in `src/lib/photo-identity/photo-set-under-re-encoding.test.ts`.
  */
-describe("photo-set fingerprint under a changed photo transport", () => {
+describe("submission idempotency fingerprint (unchanged behaviour)", () => {
   const staged = [jpeg(2_048, 1), jpeg(2_048, 2), jpeg(2_048, 3)];
 
   const fingerprintOf = async (photos: Uint8Array[]) =>

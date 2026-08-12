@@ -115,10 +115,19 @@ struct ItemRunSubmissionClient: ItemRunSubmitting {
             "multipart/form-data; boundary=\(boundary)",
             forHTTPHeaderField: "Content-Type"
         )
-        request.httpBody = ItemRunSubmissionMultipart.body(
+        let body = ItemRunSubmissionMultipart.body(
             for: payload,
             boundary: boundary
         )
+        // The on-device budget bounds each photo, but it is best effort for bytes
+        // no encoder can shrink, so an over-ceiling body is still reachable. The
+        // platform would answer `413` after the whole thing crossed the network;
+        // refusing here costs the seller nothing and reaches the same honest
+        // message. This is the only place the assembled body size is known.
+        guard body.count <= CapturePhotoBudget.maximumRequestBodyBytes else {
+            return .tooLarge
+        }
+        request.httpBody = body
 
         let data: Data
         let response: URLResponse

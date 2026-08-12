@@ -652,9 +652,9 @@ final class ItemRunSubmissionHost {
             eventID: let pendingEventID,
             retention: let retention
         )? = pendingPresentationEvent,
-              PhotoReviewSubmissionRejectionFamily(
-                  retention: retention
-              ) == .review,
+              [.review, .photosTooLarge].contains(
+                  PhotoReviewSubmissionRejectionFamily(retention: retention)
+              ),
               pendingEventID == eventID else {
             return false
         }

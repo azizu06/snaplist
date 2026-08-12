@@ -195,7 +195,106 @@ final class ItemRunSubmissionClientTests: XCTestCase {
         }
     }
 
+    /// The whole point of the on-device budget is that an over-ceiling body never
+    /// leaves the phone. Bounding is best effort for images no encoder can shrink,
+    /// so the client still has to refuse what it can predict will be refused —
+    /// otherwise the seller pays a full cellular round trip for a `413`.
+    func testRefusesAnOverCeilingBodyWithoutSendingIt() async {
+        let sent = SendProbe()
+        let session = makeSession { request in
+            sent.record()
+            return (Self.response(202, for: request), Data(Self.receiptJSON.utf8))
+        }
+        let client = ItemRunSubmissionClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            session: session,
+            boundary: { "snaplist-boundary" }
+        )
+
+        let outcome = await client.submit(
+            Self.oversizePayload(),
+            bearerToken: "fresh-opaque-clerk-token"
+        )
+
+        XCTAssertEqual(outcome, .tooLarge)
+        XCTAssertEqual(sent.count, 0, "an over-ceiling body must not be sent")
+    }
+
+    /// The complement: a body inside the ceiling is unaffected by the guard.
+    func testSendsABodyInsideTheCeiling() async {
+        let sent = SendProbe()
+        let session = makeSession { request in
+            sent.record()
+            return (Self.response(202, for: request), Data(Self.receiptJSON.utf8))
+        }
+        let client = ItemRunSubmissionClient(
+            baseURL: URL(string: "https://api.snaplist.dev")!,
+            session: session,
+            boundary: { "snaplist-boundary" }
+        )
+
+        let outcome = await client.submit(
+            Self.payload(photoCount: 5, voice: true),
+            bearerToken: "fresh-opaque-clerk-token"
+        )
+
+        XCTAssertEqual(outcome, .created(Self.expectedReceipt))
+        XCTAssertEqual(sent.count, 1)
+    }
+
     // MARK: Helpers
+
+    private final class SendProbe: @unchecked Sendable {
+        private let lock = NSLock()
+        private var sends = 0
+
+        var count: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return sends
+        }
+
+        func record() {
+            lock.lock()
+            defer { lock.unlock() }
+            sends += 1
+        }
+    }
+
+    /// Five photos each just inside the per-photo ceiling. Bounding cannot produce
+    /// this from a decodable image, but it can pass bytes through untouched when no
+    /// ladder step converges, which is exactly the case the guard covers.
+    private static func oversizePayload() -> ItemRunSubmissionPayload {
+        let photoData = (0..<5).map { index -> Data in
+            var data = Data([0xFF, 0xD8, 0xFF])
+            data.append(
+                Data(
+                    repeating: UInt8(truncatingIfNeeded: index),
+                    count: CapturePhotoBudget.maximumRequestBodyBytes / 4
+                )
+            )
+            return data
+        }
+        return ItemRunSubmissionPayload(
+            attempt: ItemRunSubmissionAttempt(
+                idempotencyKey: UUID(
+                    uuidString: "45700000-0000-4000-8000-000000000009"
+                )!,
+                photos: photoData.enumerated().map { ordinal, data in
+                    ItemRunSubmissionPhoto(
+                        photoID: UUID(),
+                        ordinal: ordinal,
+                        contentSha256: LocalPhotoFingerprint.digest(of: data),
+                        byteLength: data.count,
+                        mediaType: .jpeg
+                    )
+                },
+                voiceContext: nil
+            ),
+            photoData: photoData,
+            voiceData: nil
+        )
+    }
 
     private func makeSession(
         handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
