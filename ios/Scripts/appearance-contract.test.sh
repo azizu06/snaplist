@@ -22,6 +22,17 @@ tokens_file=${repository_root}/ios/SnapList/DesignSystem/SnapListTokens.swift
   exit 1
 }
 
+# The palette check below greps this file, and grep on a missing path only warns
+# on stderr and returns non-zero, which reads as "no match found" and passes the
+# contract. Splitting the palette into a new file is a plausible way to write
+# #832, so without this guard the lock would silently stop being enforced by the
+# very change it exists to catch.
+[[ -f $tokens_file ]] || {
+  print -u2 -r -- "SnapListTokens.swift is missing at ${tokens_file}. If the palette
+moved, point this contract at its new home or delete the contract as part of #832."
+  exit 1
+}
+
 declared_style=$(plutil -extract UIUserInterfaceStyle raw "$info_plist" 2>/dev/null) || {
   print -u2 -r -- "Info.plist declares no UIUserInterfaceStyle. SnapList's palette is
 light-only, so without this key Dark Mode renders white text on white cards. Add
