@@ -22,6 +22,59 @@ enum SnapListColorToken: String, CaseIterable {
     case inProgressFill = "#F7F9FC"
     case inProgressBorder = "#E3E8F2"
 
+    // MARK: - Routed bypass tokens (#830)
+    //
+    // Each of these matches a hex value that was already hardcoded at one or more call
+    // sites before #830 routed every color through this enum. None of them introduce a
+    // new visual value; they only give an existing value a name and a chokepoint.
+    case mutedSurface = "#F5F6F7"
+    case avatarBackground = "#E7E9EC"
+    case debugProofText = "#8A6D3B"
+    case destructiveText = "#B42318"
+    case destructiveBorder = "#E4B9B4"
+    case otpInactiveBorder = "#D6D8DC"
+    case bulletNeutral = "#8A8E94"
+    case neutralOutline = "#E3E5E8"
+    case neutralFill = "#F2F3F5"
+    case inputBorder = "#D3D6DB"
+    case evidenceChipFill = "#EDF1FD"
+    case dragHandle = "#C7C9CD"
+    case dragHandleMuted = "#D4D6DB"
+    case subtleActionFill = "#F5F8FF"
+    case cameraSurface = "#0B0C0E"
+    case cameraControlFill = "#14161A"
+    case imagePlaceholderFill = "#E9EAEC"
+    case placeholderStripe = "#CCD0D5"
+    case cameraFixturePreview = "#282B31"
+    case scrimOverlay = "#101214"
+    case fixtureSceneGradientEnd = "#D4D5D8"
+    case fixtureSubjectFill = "#25272A"
+    case fixtureSubjectOutline = "#A7A9AD"
+    case fixtureSubjectShadow = "#303236"
+    case deleteIconTint = "#A63224"
+    case waveformInactive = "#B5B7BC"
+    case priceErrorBorder = "#D68A8A"
+    case infoBannerFill = "#F4F7FF"
+    case infoBannerDivider = "#E3EAFC"
+    case actionOnDark = "#7CA0FF"
+    case coachMarkDarkFill = "#1A1B20"
+    case coachMarkDarkTail = "#24262A"
+    case ebayAccent = "#4C63ED"
+    case progressTrackInactive = "#E2E4E8"
+    case cardHairline = "#ECEDF0"
+    case onboardingHighlightFill = "#F8FAFF"
+    case mutedHeadlineText = "#3F4246"
+    case summaryCardFill = "#F5F7FB"
+    case accentDotLight = "#85A8FF"
+    case settingsLinkOnDark = "#8FB2FF"
+    /// Content (text, icons, thin strokes) drawn on a dark or saturated fill — the
+    /// camera overlay, a coach mark's dark variant, or the action-color button label —
+    /// where it must stay light regardless of what `canvas` resolves to. Its raw value
+    /// is lowercase only because Swift forbids two enum cases from sharing one raw
+    /// value literal; `Color(hex:)` parses hex digits case-insensitively, so this
+    /// resolves to the exact same white as `canvas`.
+    case onDarkSurface = "#ffffff"
+
     var color: Color {
         Color(hex: rawValue)
     }

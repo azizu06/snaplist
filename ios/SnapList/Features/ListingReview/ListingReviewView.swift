@@ -297,7 +297,7 @@ struct ListingReviewView: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .stroke(
                                     priceInvalid
-                                        ? Color(hex: "#D68A8A")
+                                        ? SnapListColorToken.priceErrorBorder.color
                                         : SnapListColorToken.hairline.color
                                 )
                         }
@@ -781,7 +781,7 @@ struct ListingReviewView: View {
         .buttonStyle(.plain)
         .overlay {
             RoundedRectangle(cornerRadius: 15)
-                .stroke(Color(hex: "#D3D6DB"))
+                .stroke(SnapListColorToken.inputBorder.color)
         }
         .accessibilityHint(
             correctionAvailable
@@ -803,7 +803,7 @@ struct ListingReviewView: View {
                             .accessibilityHidden(true)
                     } else {
                         ProgressView()
-                            .tint(.white)
+                            .tint(SnapListColorToken.onDarkSurface.color)
                             .accessibilityHidden(true)
                     }
                 }
@@ -814,7 +814,7 @@ struct ListingReviewView: View {
                 )
                 .font(.headline)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 52)
             .contentShape(Rectangle())
