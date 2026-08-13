@@ -123,7 +123,10 @@ jobs:
   serial:
     if: github.event_name == 'push'
     runs-on: macos-26
-    timeout-minutes: 60
+    # The unsharded suite took 54m53s on 00da4f57a. Sixty left no room for
+    # growth, and a timeout reports `cancelled`, which reads like nothing
+    # failed even when the suite never finished. See issue #827.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
         with:
@@ -143,6 +146,19 @@ jobs:
 
       - name: Build app and run complete serial test suite
         run: ios/Scripts/test.sh
+
+  release-main:
+    name: Release configuration (main)
+    if: github.event_name == 'push'
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Show Apple toolchain
+        run: xcodebuild -version
 
       - name: Build verified Release configuration
         env:
