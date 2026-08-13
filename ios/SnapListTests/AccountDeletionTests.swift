@@ -386,6 +386,13 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
     /// `AccountDeletionComposition.fixture`, which never calls `removeIntake`
     /// at all. Pinning it needs the shell's dependency assembly to be reachable
     /// from a test, which is more than a rename.
+    ///
+    /// Be clear about what is left, too: the assertion below cannot be made to
+    /// fail by any edit to `steps`. It is a synchronous factory over
+    /// `@escaping () async -> Bool`, so it cannot await, so it has no way to
+    /// hold a result rather than the removal. The signature guarantees that,
+    /// not this test. Read this as documentation of a type-enforced property,
+    /// not as protection for it.
     func testAStepHoldsTheRemovalItselfRatherThanAResultFromConstructionTime()
         async {
         var intakeVersion = 1
@@ -494,6 +501,9 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
     private static func declaredKeychainLiterals(
         in source: String
     ) -> (services: Set<String>, accounts: Set<String>) {
+        // Assumes the `let service = "literal"` spelling, which is what all
+        // four current writers use. A writer that built its service from an
+        // interpolation or a constant would read as zero declarations here.
         let pattern = #"let\s+(service|account)\s*(?::\s*String\s*)?=\s*"([^"]+)""#
         let expression = try! NSRegularExpression(pattern: pattern)
         var services: Set<String> = []
