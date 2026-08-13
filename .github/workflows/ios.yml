@@ -57,6 +57,9 @@ jobs:
       - name: Validate Release archive configuration
         run: zsh ios/Scripts/release-config-contract.test.sh
 
+      - name: Validate light-only appearance lock
+        run: zsh ios/Scripts/appearance-contract.test.sh
+
       - name: Validate Clerk instance and API origin pairing
         run: zsh ios/Scripts/clerk-origin-pairing.test.sh
 
@@ -144,6 +147,9 @@ jobs:
       - name: Validate app icon asset catalog
         run: zsh ios/Scripts/app-icon-contract.test.sh
 
+      - name: Validate light-only appearance lock
+        run: zsh ios/Scripts/appearance-contract.test.sh
+
       - name: Build app and run complete serial test suite
         run: ios/Scripts/test.sh
 
@@ -209,6 +215,9 @@ jobs:
 
       - name: Validate exact-head app icon asset catalog
         run: zsh test-target/ios/Scripts/app-icon-contract.test.sh
+
+      - name: Validate exact-head light-only appearance lock
+        run: zsh test-target/ios/Scripts/appearance-contract.test.sh
 
       - name: Build app and run one focused test
         env:

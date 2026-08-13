@@ -71,5 +71,15 @@
 	<dict/>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleDefault</string>
+	<!-- SnapList's palette is light-only. SnapListColorToken emits fixed sRGB
+	     values with no dark variant, so the canvas token stays #FFFFFF whatever
+	     the device appearance is, while the app's semantic .primary and
+	     .secondary text does invert. Without this key Dark Mode rendered white
+	     labels on those white surfaces and Settings was unreadable. Declaring
+	     the app light-only keeps every screen internally consistent for a seller
+	     whose device is dark. Remove this key only together with an adaptive
+	     palette, which is issue #832. -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
 </dict>
 </plist>
