@@ -564,6 +564,13 @@ struct AppShellView: View {
                 }
             }
         }
+        // #385. Above the stack, not on the settings destination. The deletion
+        // tail is pushed by a `navigationDestination` nested two levels inside
+        // that destination, and the stack hosts those pushes itself, so a value
+        // attached to the destination never reaches them: the tail read the
+        // unconfigured default and reported a refusal while every screen looked
+        // right. `AccountDeletionUITests` is what catches this.
+        .environment(\.accountDeletionDependencies, accountDeletionDependencies)
         .floatingDock(
             selectedTab: router.selectedTab,
             isVisible: shellChromeProjection.showsDock,
@@ -708,6 +715,39 @@ struct AppShellView: View {
             store: trophyWallStore,
             repository: trophyWallHistoryRepository,
             refreshState: $trophyWallCollectionRefreshState
+        )
+    }
+
+    /// #385. Built here rather than in the shared dependency factory because
+    /// the stores it clears are this view's, and read on the main actor.
+    private var accountDeletionDependencies:
+        AccountDeletionCoordinator.Dependencies {
+        let intakeVersion = captureFlow.intakeSnapshot?.version
+        let intake = dependencies.nativeIntake
+        let cachedData = settingsCachedData
+        if let fixture = configuration.accountErasureFixture {
+            return AccountDeletionComposition.fixture(fixture)
+        }
+        // No loopback fallback. `resolveAPIOrigin` rejects 127.0.0.1 outside
+        // DEBUG on purpose, and a Release build missing `SnapListAPIOrigin`
+        // silently posting an account erasure to a host that is not there is
+        // worse than a screen that says this build cannot delete accounts.
+        guard let apiOrigin = HomeRepositoryFactory.defaultAPIOrigin else {
+            return AccountDeletionComposition.unconfigured()
+        }
+        return AccountDeletionComposition.make(
+            apiOrigin: apiOrigin,
+            removeStoredAppData: {
+                await SettingsLocalRemovalTransaction.perform(
+                    removeIntake: {
+                        guard let intakeVersion else { return true }
+                        return await intake.perform(
+                            .discard(expected: intakeVersion)
+                        ) == .committed
+                    },
+                    removeCachedItems: { cachedData.removeAll() }
+                )
+            }
         )
     }
 

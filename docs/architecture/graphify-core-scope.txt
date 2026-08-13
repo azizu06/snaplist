@@ -35,6 +35,7 @@ ios/SnapList/App/AppShellView.swift
 ios/SnapList/App/FloatingDock.swift
 ios/SnapList/App/SnapListApp.swift
 ios/SnapList/AppAttest/AppAttestClient.swift
+ios/SnapList/Core/API/AccountErasureClient.swift
 ios/SnapList/Core/API/ClerkAuthentication.swift
 ios/SnapList/Core/API/MobileAPIClient.swift
 ios/SnapList/Core/API/MobileAPIModels.swift
@@ -106,6 +107,7 @@ ios/SnapList/Features/Runs/RunAPIClient.swift
 ios/SnapList/Features/Runs/RunDetailView.swift
 ios/SnapList/Features/Runs/RunModels.swift
 ios/SnapList/Features/Runs/RunStore.swift
+ios/SnapList/Features/Settings/AccountDeletion.swift
 ios/SnapList/Features/Settings/LegalLinkRow.swift
 ios/SnapList/Features/Settings/SettingsDomain.swift
 ios/SnapList/Features/Settings/SettingsSellingHintRow.swift

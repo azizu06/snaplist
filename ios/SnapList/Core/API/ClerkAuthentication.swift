@@ -439,3 +439,119 @@ enum ClerkAuthenticationComposition {
         }
     }
 }
+
+/**
+ Issue #385. The live account deletion wiring.
+
+ Split out from `MobileAPIClient` because it needs ClerkKit for two things the
+ rest of the API surface does not: a bearer minted after the strict
+ reverification, and the sign-out that follows a confirmed deletion.
+ */
+enum AccountDeletionComposition {
+    struct MissingSessionError: Error {}
+
+    /// A build with no API origin. It refuses before it touches the device, and
+    /// says which kind of refusal it is so the screen does not blame a server
+    /// that was never asked anything.
+    static func unconfigured() -> AccountDeletionCoordinator.Dependencies {
+        AccountDeletionCoordinator.Dependencies(
+            requestErasure: { _ in .notConfirmed(.clientNotConfigured) },
+            clearDeviceState: { false },
+            signOut: { false },
+            newIdempotencyKey: { UUID().uuidString.lowercased() },
+            maximumStatusFollowUps: 0
+        )
+    }
+
+    /// Scripts the server half for the UI test that exercises the real route.
+    /// Everything from the environment value down through the tail host and the
+    /// coordinator is the shipped code; only the server's answer is supplied.
+    static func fixture(
+        _ fixture: AccountErasureFixtureState
+    ) -> AccountDeletionCoordinator.Dependencies {
+        let outcome: AccountErasureOutcome = switch fixture {
+        case .completed: .completed(retainedRecords: [.ebayLiveListing])
+        case .unavailable: .notConfirmed(.serverUnavailable)
+        case .needsAttention: .needsAttention
+        case .reverificationExpired: .notConfirmed(.reverificationRequired)
+        }
+        return AccountDeletionCoordinator.Dependencies(
+            requestErasure: { _ in outcome },
+            clearDeviceState: { true },
+            signOut: { true },
+            newIdempotencyKey: { UUID().uuidString.lowercased() },
+            maximumStatusFollowUps: 0
+        )
+    }
+
+    @MainActor
+    static func make(
+        apiOrigin: URL,
+        session: URLSession = .shared,
+        removeStoredAppData: @escaping @Sendable () async -> Bool
+    ) -> AccountDeletionCoordinator.Dependencies {
+        // Read once, here, while the seller is still signed in. The store has to
+        // be reachable from a later coordinator that starts with nothing, and
+        // after a completed deletion there is no user left to key it by.
+        let keyStore = AccountErasureKeyStore(
+            userID: Clerk.shared.user?.id ?? "unknown-user"
+        )
+        let client = URLSessionAccountErasureClient(
+            apiOrigin: apiOrigin,
+            reverifiedBearerToken: {
+                // `skipCache` is the whole point. The handler reads the session's
+                // factor verification age, and a token cached before the seller
+                // reverified carries the older claim, so reusing one earns a
+                // challenge for a challenge they already answered.
+                let clerkSession = await MainActor.run { Clerk.shared.session }
+                guard
+                    let token = try await clerkSession?
+                        .getToken(.init(skipCache: true))
+                else {
+                    throw MissingSessionError()
+                }
+                return token
+            },
+            session: session
+        )
+
+        return AccountDeletionCoordinator.Dependencies(
+            requestErasure: { key in
+                await client.requestErasure(idempotencyKey: key)
+            },
+            clearDeviceState: {
+                await AccountDeletionDeviceState.clear(
+                    steps: [
+                        .init(name: "app-data", remove: removeStoredAppData),
+                    ] + AccountDeletionDeviceState.keychainSteps
+                )
+            },
+            signOut: {
+                do {
+                    try await Clerk.shared.auth.signOut()
+                    return true
+                } catch {
+                    // Reported, never swallowed. Clerk holds the session in its
+                    // own Keychain item, so a failure here leaves a live
+                    // credential on a device whose account is already gone.
+                    return false
+                }
+            },
+            // Lowercased because the handler parses this header with a UUID
+            // schema before it authenticates, and a rejected key is a 400 that
+            // never reaches the erasure at all.
+            newIdempotencyKey: { UUID().uuidString.lowercased() },
+            loadIdempotencyKey: { keyStore.load() },
+            rememberIdempotencyKey: { keyStore.remember($0) },
+            forgetIdempotencyKey: { keyStore.forget() },
+            waitBeforeFollowUp: { attempt in
+                // 1s, 2s, 4s. Each follow-up re-runs the server's whole erase
+                // pipeline, so the gap is the difference between resuming work
+                // and multiplying it.
+                let seconds = UInt64(1) << UInt64(max(0, attempt - 1))
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            },
+            maximumStatusFollowUps: 3
+        )
+    }
+}
