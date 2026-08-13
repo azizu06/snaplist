@@ -210,18 +210,36 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
     serial_job = jobs.fetch("serial")
     abort "serial confidence must remain on main pushes" unless
       serial_job.fetch("if") == "github.event_name == '\''push'\''"
-    abort "serial confidence budget must remain 60 minutes" unless
-      serial_job.fetch("timeout-minutes") == 60
+    abort "serial confidence budget must remain 75 minutes" unless
+      serial_job.fetch("timeout-minutes") == 75
     serial_step = serial_job.fetch("steps").find do |step|
       step["name"] == "Build app and run complete serial test suite"
     end
     abort "serial confidence command changed" unless
       serial_step&.fetch("run") == "ios/Scripts/test.sh"
-    serial_release_step = serial_job.fetch("steps").find do |step|
+    abort "the Release build must not re-enter the serial budget" if
+      serial_job.fetch("steps").any? { |step|
+        step["name"] == "Build verified Release configuration"
+      }
+
+    release_main_job = jobs.fetch("release-main")
+    abort "main Release configuration must run for main pushes" unless
+      release_main_job.fetch("if") == "github.event_name == '\''push'\''"
+    abort "main Release configuration must use the declared Apple runner" unless
+      release_main_job.fetch("runs-on") == "macos-26"
+    release_main_checkout_step = release_main_job.fetch("steps").find do |step|
+      step["uses"] == "actions/checkout@v4"
+    end
+    abort "main Release configuration must check out the pushed commit" unless
+      release_main_checkout_step&.fetch("with")&.fetch("ref") == "${{ github.sha }}"
+    release_main_step = release_main_job.fetch("steps").find do |step|
       step["name"] == "Build verified Release configuration"
     end
     abort "main must build the verified Release configuration" unless
-      serial_release_step&.fetch("run") == "ios/Scripts/build-release.sh"
+      release_main_step&.fetch("run") == "ios/Scripts/build-release.sh"
+    abort "main Release build must inject only a synthetic live Clerk key" unless
+      release_main_step&.fetch("env")&.fetch("SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY") ==
+        "pk_live_ci_release_validation"
 
     focused_job = jobs.fetch("focused")
     abort "focused dispatch guard changed" unless
