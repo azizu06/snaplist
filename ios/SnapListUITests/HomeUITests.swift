@@ -668,6 +668,70 @@ final class HomeUITests: XCTestCase {
         )
     }
 
+    /// Trophy Wall's processing-row item name was capped at `.lineLimit(2)`
+    /// unconditionally, with no accessibility-size guard, so at the largest
+    /// accessibility Dynamic Type size a long item name still ellipsized: the
+    /// two-line cap holds roughly 30 characters at the default size but only
+    /// roughly 12 at accessibility5, so a title this size cannot fit within
+    /// two lines and is silently cut (#831 acceptance: "no label truncates"
+    /// at the largest accessibility size). The fix switches it to
+    /// `dynamicTypeSize.isAccessibilitySize ? nil : 2`, the same idiom used
+    /// at the state-label site above.
+    ///
+    /// This proves it structurally. "Sony Walkman" (two words, 12
+    /// characters) fits on a single line at accessibility5 whether the
+    /// title's line limit is 2 or unbounded, so its height is unaffected by
+    /// the fix and serves as this font scale's true baseline. "Vintage
+    /// Pyrex bowl set" (23 characters) does not fit within two lines at this
+    /// scale: unfixed, `.lineLimit(2)` caps it at a two-line height
+    /// (ellipsizing); fixed, it wraps to as many lines as it needs. A flat
+    /// margin over the baseline would not discriminate here, because even
+    /// the *unfixed* two-line cap is already taller than a one-line title —
+    /// so the assertion instead requires the long title to clear a multiple
+    /// of the short title's height, calibrated so the two-line unfixed
+    /// height fails it and the fixed multi-line height clears it. (Measured
+    /// against this head: "Sony Walkman" renders at 50.7pt; "Vintage Pyrex
+    /// bowl set" renders at 123.3pt unfixed — its two-line-capped height,
+    /// which does not clear the 2.5x-plus-margin threshold — and 224.3pt
+    /// fixed, roughly 4.4x the baseline, consistent with a four-line wrap.)
+    func testTrophyWallProcessingItemNameStopsTruncatingAtLargestAccessibilitySize() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--dynamic-type=accessibility5",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let firstRow = app.buttons[
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000003"
+        ]
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10))
+
+        let disclosure = app.buttons["trophy.processing.disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        disclosure.tap()
+
+        let shortTitle = app.staticTexts["Sony Walkman"]
+        let longTitle = app.staticTexts["Vintage Pyrex bowl set"]
+        XCTAssertTrue(shortTitle.waitForExistence(timeout: 10))
+        XCTAssertTrue(longTitle.waitForExistence(timeout: 10))
+
+        let receipt =
+            "shortTitle.frame=\(shortTitle.frame), longTitle.frame=\(longTitle.frame)"
+        // The unfixed two-line cap already renders taller than one line, so
+        // a flat margin over the short title would pass on both sides of
+        // the fix. Requiring more than 2.5x the one-line baseline instead
+        // fails against the unfixed two-line-capped height and only clears
+        // once the title is free to wrap past two lines.
+        XCTAssertGreaterThan(
+            longTitle.frame.height,
+            (shortTitle.frame.height * 2.5) + 10,
+            receipt
+        )
+    }
+
     /// Proves the last settled tile remains reachable above the floating dock.
     /// The approved six-tile fixture can fit on taller viewports, so scrolling
     /// is conditional rather than part of the behavior contract.

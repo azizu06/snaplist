@@ -876,7 +876,7 @@ private struct TrophyWallProcessingRowView: View {
                 Text(row.itemName)
                     .snapListTypography(.rowTitle)
                     .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .lineLimit(2)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if row.action == nil {
