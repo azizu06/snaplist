@@ -344,6 +344,8 @@ struct ProGateSheet: View {
                         declineControl
                     }
                 }
+                ProGateLegalFooter()
+                    .padding(.top, 10)
             }
             .padding(.bottom, -5)
         case .confirming:
@@ -483,6 +485,58 @@ private enum ProGateActionColor {
         case .action: SnapListColorToken.action.color
         case .ink: SnapListColorToken.inkPrimary.color
         }
+    }
+}
+
+/// The paywall's Terms/Privacy disclosure (issue #812). App Review 3.1.2
+/// requires both documents reachable wherever the auto-renewing subscription
+/// is offered, and `.offer` is the only `ProGateStore.State` that offers one.
+struct ProGateLegalFooter: View {
+    @Environment(\.openURL) private var openURL
+    @ScaledMetric(relativeTo: .caption) private var footerSize: CGFloat = 12
+
+    var body: some View {
+        HStack(spacing: 6) {
+            link(.termsOfService, identifier: "pro-gate.terms-of-service")
+            Text("·")
+                .font(.system(size: footerSize))
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+            link(.privacyPolicy, identifier: "pro-gate.privacy-policy")
+        }
+    }
+
+    /// Matches `HomeViews.swift`'s trophy-wall header buttons: `.frame` alone
+    /// only grows layout space, not the hit-tested/accessibility region for a
+    /// `.buttonStyle(.plain)` button — `.contentShape(.rect)` is what makes
+    /// that region actually cover the frame. Not padding sized to add up to
+    /// 44 at the base font either, since that stops summing to 44 once
+    /// `footerSize` scales for Dynamic Type.
+    ///
+    /// The requested height measures a few points short of what it asks for
+    /// here specifically (verified via `testProGateOfferLegalFooterOpensTermsAndPrivacy`
+    /// against the real measured frame, not the requested one) — this sheet
+    /// sits on `.ignoresSafeArea(.container, edges: .bottom)`, and rendering
+    /// that close to the sheet's own edge loses a small, consistent amount
+    /// off the requested frame. `minimumLegalLinkHeight` pads past that loss
+    /// so the actual on-screen target still clears the 44pt floor.
+    private static let minimumLegalLinkHeight = SnapListMetrics.minimumTouchTarget + 4
+
+    private func link(_ destination: LegalDestination, identifier: String) -> some View {
+        Button {
+            openURL(destination.url)
+        } label: {
+            Text(destination.label)
+                .underline()
+                .font(.system(size: footerSize))
+                .frame(
+                    minWidth: SnapListMetrics.minimumTouchTarget,
+                    minHeight: Self.minimumLegalLinkHeight
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(SnapListColorToken.textSecondary.color)
+        .accessibilityIdentifier(identifier)
     }
 }
 

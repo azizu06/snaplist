@@ -47,6 +47,7 @@ ios/SnapList/Core/Analytics/FunnelAnalytics.swift
 ios/SnapList/Core/Analytics/PostHogAnalyticsClient.swift
 ios/SnapList/Core/CrashReporting/SentryCrashReporting.swift
 ios/SnapList/Core/Fixtures/LaunchConfiguration.swift
+ios/SnapList/Core/LegalDestination.swift
 ios/SnapList/Core/Subscriptions/RevenueCatSubscriptionClient.swift
 ios/SnapList/Core/Subscriptions/SubscriptionClient.swift
 ios/SnapList/Core/Subscriptions/SubscriptionModels.swift
@@ -105,6 +106,7 @@ ios/SnapList/Features/Runs/RunAPIClient.swift
 ios/SnapList/Features/Runs/RunDetailView.swift
 ios/SnapList/Features/Runs/RunModels.swift
 ios/SnapList/Features/Runs/RunStore.swift
+ios/SnapList/Features/Settings/LegalLinkRow.swift
 ios/SnapList/Features/Settings/SettingsDomain.swift
 ios/SnapList/Features/Settings/SettingsSellingHintRow.swift
 ios/SnapList/Features/Settings/SettingsView.swift

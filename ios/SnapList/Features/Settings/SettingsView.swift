@@ -108,9 +108,9 @@ struct SettingsView: View {
                     settingsCardRow {
                         valueRow(
                             "Connected marketplaces",
-                            sellingPresentation.marketplaceValue,
-                            chevron: true
+                            sellingPresentation.marketplaceValue
                         )
+                        .accessibilityIdentifier("settings.selling.marketplaces")
                     }
                     settingsCardDivider
                     if let hint = sellingPresentation.hint {
@@ -120,11 +120,13 @@ struct SettingsView: View {
                         settingsCardDivider
                     }
                     settingsCardRow {
-                        valueRow("Photos", "Selected photos", chevron: true)
+                        valueRow("Photos", "Selected photos")
+                            .accessibilityIdentifier("settings.selling.photos")
                     }
                     settingsCardDivider
                     settingsCardRow {
-                        valueRow("Notifications", "On", chevron: true)
+                        valueRow("Notifications", "On")
+                            .accessibilityIdentifier("settings.selling.notifications")
                     }
                 }
 
@@ -145,11 +147,26 @@ struct SettingsView: View {
 
                 settingsSectionHeader("ABOUT")
                 settingsCard {
-                    settingsCardRow { navigationRow("Help") }
+                    settingsCardRow {
+                        LegalLinkRow(
+                            destination: .help,
+                            accessibilityIdentifier: "settings.about.help"
+                        )
+                    }
                     settingsCardDivider
-                    settingsCardRow { navigationRow("Privacy Policy") }
+                    settingsCardRow {
+                        LegalLinkRow(
+                            destination: .privacyPolicy,
+                            accessibilityIdentifier: "settings.about.privacy-policy"
+                        )
+                    }
                     settingsCardDivider
-                    settingsCardRow { navigationRow("Terms of Service") }
+                    settingsCardRow {
+                        LegalLinkRow(
+                            destination: .termsOfService,
+                            accessibilityIdentifier: "settings.about.terms-of-service"
+                        )
+                    }
                 }
 
                 settingsSectionHeader("THIS IPHONE")
@@ -511,18 +528,16 @@ struct SettingsView: View {
         }
     }
 
-    private func valueRow(_ label: String, _ value: String, chevron: Bool = false) -> some View {
+    /// No `chevron` parameter on purpose (issue #812): a value row here never
+    /// navigates, so there is nothing for it to promise. A row that does
+    /// navigate should use a real `Button`, as `LegalLinkRow` does.
+    private func valueRow(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label)
             Spacer()
             Text(value).foregroundStyle(.secondary)
-            if chevron { Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private func navigationRow(_ label: String) -> some View {
-        HStack { Text(label); Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
     }
 }
 
