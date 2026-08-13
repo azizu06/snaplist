@@ -86,6 +86,17 @@ export function createMobileItemSubmissionHandler(
     try {
       principal = await dependencies.itemSubmission.resolvePrincipal(token);
     } catch (error) {
+      // #816 accepted, not fixed: this sibling reports on every request and is
+      // deliberately unsampled, so a caller looping with a junk
+      // `Authorization: Bearer x` reaches the report volume the no-token
+      // sampling above sets out to bound. That bound is therefore narrower in
+      // practice than it looks. It stays unsampled because the two branches
+      // are not symmetric: above has exactly one cause, so dropping 99 of 100
+      // reports loses nothing, while this one carries every resolver failure —
+      // store outage, expired capability, bad signature — and sampling it
+      // would let a junk-bearer loop bury a real incident in its own noise. A
+      // genuine cost fence needs shared state across instances, which is out
+      // of scope for #810 and #816 alike.
       dependencies.reportError?.("mobile-item-submission.authenticate", error);
       return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
     }

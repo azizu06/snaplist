@@ -36,6 +36,15 @@ struct AppAttestStoredKey: Codable, Equatable, Sendable {
 /// a cross-language test keeps the two boundaries synchronized.
 enum GuestCapabilityToken {
     static let prefix = "guestcap_"
+
+    /// Issue #816. The prefix is escaped rather than spliced raw so a future
+    /// prefix carrying a regex metacharacter — `guesthandoff_v1.` is a sibling
+    /// that already does — is matched as text and cannot widen what counts as
+    /// a guest bearer. `guest-capability/token-prefix.ts` escapes for the same
+    /// reason, so both boundaries keep accepting the same set of tokens.
+    static func bearerTokenPattern(for prefix: String) -> String {
+        "^\(NSRegularExpression.escapedPattern(for: prefix))[A-Za-z0-9_-]{43}$"
+    }
 }
 
 /**
@@ -578,7 +587,7 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
         }
         let token = issued.bearerToken
         guard token.range(
-            of: "^\(GuestCapabilityToken.prefix)[A-Za-z0-9_-]{43}$",
+            of: GuestCapabilityToken.bearerTokenPattern(for: GuestCapabilityToken.prefix),
             options: .regularExpression
         ) != nil else {
             throw AppAttestServerClientError.invalidResponse

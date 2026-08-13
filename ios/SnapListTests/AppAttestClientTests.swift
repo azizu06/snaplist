@@ -764,28 +764,70 @@ final class AppAttestClientTests: XCTestCase {
         XCTAssertEqual(outcome, .unavailable(.unsupportedDevice))
     }
 
-    // Issue #810. `GuestCapabilityToken.prefix` is the one place this file may
-    // spell the literal; a hand-written `"guestcap_"` anywhere else in this
-    // source silently re-forks the value the cross-language test cannot see,
-    // because that test only compares the constant, not every call site.
-    func testAppAttestClientHasExactlyOneGuestCapabilityTokenPrefixLiteral() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("SnapList/AppAttest/AppAttestClient.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+    func testGuestCapabilityBearerPatternAcceptsATokenMintedUnderTheShippedPrefix() {
+        let pattern = GuestCapabilityToken.bearerTokenPattern(for: GuestCapabilityToken.prefix)
+        let token = "\(GuestCapabilityToken.prefix)\(String(repeating: "A", count: 43))"
 
-        let matchingLines = source
-            .components(separatedBy: .newlines)
-            .filter { $0.contains("guestcap_") }
+        XCTAssertNotNil(token.range(of: pattern, options: .regularExpression))
+    }
+
+    // Issue #816. #810 made the prefix shared so that editing it propagates to
+    // the server by itself. A prefix carrying a regex metacharacter would then
+    // propagate as *pattern* rather than as text and quietly widen what this
+    // client accepts as a guest bearer; the sibling `guesthandoff_v1.` prefix
+    // shows a dotted prefix is a real shape here. The server escapes the same
+    // way in `guest-capability/token-prefix.ts`, so both sides stay in step.
+    func testGuestCapabilityBearerPatternMatchesAPrefixMetacharacterLiterally() {
+        let pattern = GuestCapabilityToken.bearerTokenPattern(for: "guestcap.v2_")
+        let body = String(repeating: "A", count: 43)
+
+        XCTAssertNotNil("guestcap.v2_\(body)".range(of: pattern, options: .regularExpression))
+        XCTAssertNil("guestcapXv2_\(body)".range(of: pattern, options: .regularExpression))
+    }
+
+    // Issue #810, widened by #816. `GuestCapabilityToken.prefix` is the one
+    // place production Swift may spell the literal; a hand-written prefix
+    // anywhere else silently re-forks the value the cross-language test cannot
+    // see, because that test compares only the constant, not every call site.
+    //
+    // #816 widened this two ways. The round-1 defect on #810 was literals in
+    // `RunStore.swift` and `ItemRunSubmissionCoordinator.swift`, which scanning
+    // `AppAttestClient.swift` alone could never have caught; all three consumers
+    // are scanned now. And occurrences are counted rather than lines, so a
+    // second literal sharing a physical line with the declaration cannot hide
+    // behind the first.
+    func testGuestCapabilityTokenPrefixLiteralAppearsOnlyInItsDeclaration() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("SnapList")
+        let scanned = [
+            "AppAttest/AppAttestClient.swift",
+            "Features/Runs/RunStore.swift",
+            "Features/Submission/ItemRunSubmissionCoordinator.swift",
+        ]
+
+        var occurrences: [String] = []
+        for relativePath in scanned {
+            let source = try String(
+                contentsOf: sources.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+            for line in source.components(separatedBy: .newlines) {
+                let perLine = line.components(separatedBy: GuestCapabilityToken.prefix).count - 1
+                occurrences.append(
+                    contentsOf: Array(repeating: "\(relativePath): \(line)", count: perLine)
+                )
+            }
+        }
 
         XCTAssertEqual(
-            matchingLines.count, 1,
-            "Expected exactly one guestcap_ occurrence (the shared constant); found \(matchingLines)"
+            occurrences.count, 1,
+            "Expected exactly one \(GuestCapabilityToken.prefix) occurrence across \(scanned) (the shared constant); found \(occurrences)"
         )
         XCTAssertTrue(
-            matchingLines.first?.contains("static let prefix") ?? false,
-            "The one guestcap_ occurrence must be the GuestCapabilityToken.prefix declaration, got \(String(describing: matchingLines.first))"
+            occurrences.first?.contains("static let prefix") ?? false,
+            "The one occurrence must be the GuestCapabilityToken.prefix declaration, got \(String(describing: occurrences.first))"
         )
     }
 
