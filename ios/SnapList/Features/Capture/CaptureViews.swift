@@ -101,13 +101,22 @@ struct CaptureLauncherSheet: View {
             }
             .accessibilityHint("Returns to the staged photo without replacing it")
 
-            Label(
-                "This photo stays on this device for up to 24 hours.",
-                systemImage: "clock"
-            )
+            // `Label(_:systemImage:)`'s internal icon+text composition still
+            // truncated this text to a single ellipsized line at AX5 even
+            // with `.frame(maxWidth: .infinity)` and `.fixedSize(horizontal:
+            // false, vertical: true)` applied — a plain `Text` right above in
+            // `CaptureOptionRow.subtitle` wraps correctly at the identical
+            // width in the identical `ScrollView`, so the constraint is
+            // internal to `Label`, not the surrounding layout (#831). Manually
+            // composing icon + `Text`, the same technique `CaptureOptionRow`
+            // already uses instead of `Label`, sidesteps it.
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "clock")
+                Text("This photo stays on this device for up to 24 hours.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             .font(.caption)
             .foregroundStyle(SnapListColorToken.textTertiary.color)
-            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, SnapListMetrics.screenGutter)
         .padding(.top, 18)
@@ -142,13 +151,15 @@ struct CaptureLauncherSheet: View {
                 .accessibilityIdentifier(CaptureEntryPoint.chooseFromLibrary.identifier)
             }
 
-            Label(
-                "Capture and organize photos before choosing what to list.",
-                systemImage: "info.circle"
-            )
+            // Same `Label` AX5 truncation as `restoredDraft`'s clock label
+            // above; same manual icon+`Text` fix (#831).
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "info.circle")
+                Text("Capture and organize photos before choosing what to list.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             .font(.caption)
             .foregroundStyle(SnapListColorToken.textTertiary.color)
-            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, SnapListMetrics.screenGutter)
         .padding(.top, 10)
@@ -219,10 +230,17 @@ private struct CaptureOptionRow: View {
                 .clipShape(.rect(cornerRadius: 11))
 
             VStack(alignment: .leading, spacing: 3) {
+                // Without `.fixedSize(horizontal: false, vertical: true)`, this
+                // HStack's width negotiation against its icon and chevron
+                // siblings truncates the title to a single ellipsized line at
+                // the largest accessibility Dynamic Type sizes instead of
+                // wrapping — the same fix `restoredDraft` and the info `Label`
+                // below already apply to their own multi-line text (#831).
                 HStack(spacing: 7) {
                     Text(title)
                         .snapListTypography(.rowTitle)
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let badge {
                         Text(badge.uppercased())
                             .font(.system(size: 9, weight: .bold))
@@ -232,12 +250,14 @@ private struct CaptureOptionRow: View {
                             .padding(.vertical, 3)
                             .background(SnapListColorToken.infoChipFill.color)
                             .clipShape(.capsule)
+                            .fixedSize()
                     }
                 }
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

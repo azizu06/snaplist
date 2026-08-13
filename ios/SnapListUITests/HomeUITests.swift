@@ -597,6 +597,141 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }
 
+    /// Trophy Wall's processing-state label used to hard-truncate to one
+    /// line (`.lineLimit(1)`) regardless of Dynamic Type, so a
+    /// sentence-length processing state silently lost its ending at the
+    /// largest accessibility size (#831, `HomeViews.swift` state-label
+    /// site). The fix switches it to
+    /// `dynamicTypeSize.isAccessibilitySize ? nil : 1`, matching the
+    /// `isAccessibilitySize` idiom already used elsewhere in this codebase
+    /// (`ListingReviewView.footer`/`priceEditing`, `ProGateView`,
+    /// `FirstValueOnboardingView`).
+    ///
+    /// This proves it structurally, not by a hardcoded bound. The
+    /// trophy-processing fixture's terminal "Polaroid camera" row carries
+    /// the full sentence "This item could not be processed.", while its
+    /// "Sony Walkman" row sits right beside it carrying only the single
+    /// word "Retrying" — a word that cannot wrap onto a second line at any
+    /// font size. Both labels share the identical `.status` typography and
+    /// identical row layout, so at the largest accessibility size a
+    /// `lineLimit(1)` label would render both at the same single-line
+    /// height; only a wrapped, unbounded label can make the sentence
+    /// measurably taller than the single word beside it. (Measured against
+    /// this head: "Retrying" renders at 44.3pt, the sentence at 88.3pt —
+    /// almost exactly double, consistent with a two-line wrap.)
+    ///
+    /// The disclosure label (`HomeViews.swift:527`, same class of fix) is
+    /// not covered by an equivalent geometric assertion here: on this
+    /// fixture and device, "Show fewer items" / "Show 2 more items" both
+    /// measured a single-line 48pt regardless of the fix, because the
+    /// trophy-processing fixture never produces a disclosure string long
+    /// enough to wrap at this row width. Growing that fixture's row count
+    /// to force a longer count string would still only add one digit, not
+    /// enough width to wrap, and would also break several other tests that
+    /// assert this fixture's exact row set and disclosure copy. Widening it
+    /// honestly needs its own fixture, which is out of this delta's scope.
+    func testTrophyWallProcessingStateLabelStopsTruncatingAtLargestAccessibilitySize() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--dynamic-type=accessibility5",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let firstRow = app.buttons[
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000003"
+        ]
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10))
+
+        let disclosure = app.buttons["trophy.processing.disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        disclosure.tap()
+
+        let retryingLabel = app.staticTexts["Retrying"]
+        let notListedLabel = app.staticTexts["This item could not be processed."]
+        XCTAssertTrue(retryingLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(notListedLabel.waitForExistence(timeout: 10))
+
+        let receipt =
+            "retryingLabel.frame=\(retryingLabel.frame), "
+            + "notListedLabel.frame=\(notListedLabel.frame)"
+        // A single word ("Retrying") cannot wrap, so its height is this
+        // font scale's true single-line floor. The six-word sentence must
+        // clear that floor by a wide margin — a lineLimit(1) truncation
+        // defect would instead hold both to the same single-line height.
+        XCTAssertGreaterThan(
+            notListedLabel.frame.height,
+            retryingLabel.frame.height + 20,
+            receipt
+        )
+    }
+
+    /// Trophy Wall's processing-row item name was capped at `.lineLimit(2)`
+    /// unconditionally, with no accessibility-size guard, so at the largest
+    /// accessibility Dynamic Type size a long item name still ellipsized: the
+    /// two-line cap holds roughly 30 characters at the default size but only
+    /// roughly 12 at accessibility5, so a title this size cannot fit within
+    /// two lines and is silently cut (#831 acceptance: "no label truncates"
+    /// at the largest accessibility size). The fix switches it to
+    /// `dynamicTypeSize.isAccessibilitySize ? nil : 2`, the same idiom used
+    /// at the state-label site above.
+    ///
+    /// This proves it structurally. "Sony Walkman" (two words, 12
+    /// characters) fits on a single line at accessibility5 whether the
+    /// title's line limit is 2 or unbounded, so its height is unaffected by
+    /// the fix and serves as this font scale's true baseline. "Vintage
+    /// Pyrex bowl set" (23 characters) does not fit within two lines at this
+    /// scale: unfixed, `.lineLimit(2)` caps it at a two-line height
+    /// (ellipsizing); fixed, it wraps to as many lines as it needs. A flat
+    /// margin over the baseline would not discriminate here, because even
+    /// the *unfixed* two-line cap is already taller than a one-line title —
+    /// so the assertion instead requires the long title to clear a multiple
+    /// of the short title's height, calibrated so the two-line unfixed
+    /// height fails it and the fixed multi-line height clears it. (Measured
+    /// against this head: "Sony Walkman" renders at 50.7pt; "Vintage Pyrex
+    /// bowl set" renders at 123.3pt unfixed — its two-line-capped height,
+    /// which does not clear the 2.5x-plus-margin threshold — and 224.3pt
+    /// fixed, roughly 4.4x the baseline, consistent with a four-line wrap.)
+    func testTrophyWallProcessingItemNameStopsTruncatingAtLargestAccessibilitySize() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--dynamic-type=accessibility5",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let firstRow = app.buttons[
+            "trophy.processing.row.run.37500000-0000-4000-8000-000000000003"
+        ]
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10))
+
+        let disclosure = app.buttons["trophy.processing.disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        disclosure.tap()
+
+        let shortTitle = app.staticTexts["Sony Walkman"]
+        let longTitle = app.staticTexts["Vintage Pyrex bowl set"]
+        XCTAssertTrue(shortTitle.waitForExistence(timeout: 10))
+        XCTAssertTrue(longTitle.waitForExistence(timeout: 10))
+
+        let receipt =
+            "shortTitle.frame=\(shortTitle.frame), longTitle.frame=\(longTitle.frame)"
+        // The unfixed two-line cap already renders taller than one line, so
+        // a flat margin over the short title would pass on both sides of
+        // the fix. Requiring more than 2.5x the one-line baseline instead
+        // fails against the unfixed two-line-capped height and only clears
+        // once the title is free to wrap past two lines.
+        XCTAssertGreaterThan(
+            longTitle.frame.height,
+            (shortTitle.frame.height * 2.5) + 10,
+            receipt
+        )
+    }
+
     /// Proves the last settled tile remains reachable above the floating dock.
     /// The approved six-tile fixture can fit on taller viewports, so scrolling
     /// is conditional rather than part of the behavior contract.

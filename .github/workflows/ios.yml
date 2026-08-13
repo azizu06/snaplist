@@ -60,6 +60,9 @@ jobs:
       - name: Validate light-only appearance lock
         run: zsh ios/Scripts/appearance-contract.test.sh
 
+      - name: Validate Reduce Transparency material fallbacks
+        run: zsh ios/Scripts/reduce-transparency-contract.test.sh
+
       - name: Validate Release archive configuration
         run: zsh ios/Scripts/release-config-contract.test.sh
 
@@ -156,6 +159,9 @@ jobs:
       - name: Validate light-only appearance lock
         run: zsh ios/Scripts/appearance-contract.test.sh
 
+      - name: Validate Reduce Transparency material fallbacks
+        run: zsh ios/Scripts/reduce-transparency-contract.test.sh
+
       - name: Build app and run complete serial test suite
         run: ios/Scripts/test.sh
 
@@ -227,6 +233,9 @@ jobs:
 
       - name: Validate exact-head light-only appearance lock
         run: zsh test-target/ios/Scripts/appearance-contract.test.sh
+
+      - name: Validate exact-head Reduce Transparency material fallbacks
+        run: zsh test-target/ios/Scripts/reduce-transparency-contract.test.sh
 
       - name: Build app and run one focused test
         env:

@@ -285,38 +285,24 @@ struct ListingReviewView: View {
             }
 
             if priceEditing {
-                HStack(spacing: 10) {
-                    TextField("Price", text: $priceText)
-                        .focused($priceFieldFocused)
-                        .keyboardType(.decimalPad)
-                        .font(.title.weight(.bold).monospacedDigit())
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 48)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(
-                                    priceInvalid
-                                        ? SnapListColorToken.priceErrorBorder.color
-                                        : SnapListColorToken.hairline.color
-                                )
+                // A bare HStack squeezed the Apply button down to an
+                // unreadable sliver once the price field's title-weight text
+                // scaled up at an accessibility Dynamic Type size (#831).
+                // `footer` below already solves the same two-flexible-control
+                // problem by switching to a VStack at accessibility sizes;
+                // this copies that idiom rather than inventing a new one.
+                Group {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        VStack(alignment: .leading, spacing: 10) {
+                            priceField
+                            priceApplyButton
                         }
-                        .accessibilityLabel("Price")
-                        .accessibilityValue(priceText)
-                        .accessibilityIdentifier("listing-review.price.field")
-                    Button {
-                        Task { await commitPrice() }
-                    } label: {
-                        Text("Apply")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(SnapListColorToken.action.color)
-                            .padding(.horizontal, 12)
-                            .frame(
-                                minHeight: SnapListMetrics.minimumTouchTarget
-                            )
+                    } else {
+                        HStack(spacing: 10) {
+                            priceField
+                            priceApplyButton
+                        }
                     }
-                    .accessibilityLabel("Apply price, keeps it on this phone")
-                    .accessibilityIdentifier("listing-review.price.apply")
                 }
                 // The seller already aimed at the price to change it, so the
                 // field takes the keyboard on arrival rather than waiting for
@@ -389,6 +375,41 @@ struct ListingReviewView: View {
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
             }
         }
+    }
+
+    private var priceField: some View {
+        TextField("Price", text: $priceText)
+            .focused($priceFieldFocused)
+            .keyboardType(.decimalPad)
+            .font(.title.weight(.bold).monospacedDigit())
+            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 48)
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        priceInvalid
+                            ? SnapListColorToken.priceErrorBorder.color
+                            : SnapListColorToken.hairline.color
+                    )
+            }
+            .accessibilityLabel("Price")
+            .accessibilityValue(priceText)
+            .accessibilityIdentifier("listing-review.price.field")
+    }
+
+    private var priceApplyButton: some View {
+        Button {
+            Task { await commitPrice() }
+        } label: {
+            Text("Apply")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(SnapListColorToken.action.color)
+                .padding(.horizontal, 12)
+                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+        }
+        .accessibilityLabel("Apply price, keeps it on this phone")
+        .accessibilityIdentifier("listing-review.price.apply")
     }
 
     private func soldMatches(

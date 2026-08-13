@@ -301,6 +301,11 @@ struct LaunchConfiguration: Equatable {
     var usesStaticScoutRendering: Bool
     var keyboardProbe: Bool
     var dynamicTypeSize: DynamicTypeSize?
+    /// Overrides `\.legibilityWeight` to `.bold` so a test can prove nothing
+    /// reflows off screen with the system Bold Text accessibility setting on
+    /// (#831), without a UI test being able to toggle the real OS-level
+    /// setting the way it can flip Dynamic Type via `dynamicTypeSize`.
+    var boldTextEnabled: Bool
     var usesZeroNetworkFixtures: Bool
     var cameraAuthorizationFixture: CameraAuthorizationStatus?
     var resetOnboardingProgress: Bool
@@ -332,6 +337,7 @@ struct LaunchConfiguration: Equatable {
         usesStaticScoutRendering: false,
         keyboardProbe: false,
         dynamicTypeSize: nil,
+        boldTextEnabled: false,
         usesZeroNetworkFixtures: false,
         cameraAuthorizationFixture: nil,
         resetOnboardingProgress: false,
@@ -363,6 +369,7 @@ struct LaunchConfiguration: Equatable {
         usesStaticScoutRendering: false,
         keyboardProbe: false,
         dynamicTypeSize: nil,
+        boldTextEnabled: false,
         usesZeroNetworkFixtures: true,
         cameraAuthorizationFixture: .authorized,
         resetOnboardingProgress: false,
@@ -491,6 +498,12 @@ struct LaunchConfiguration: Equatable {
                 configuration.dynamicTypeSize = .xSmall
             } else if argument == "--dynamic-type=medium" {
                 configuration.dynamicTypeSize = .medium
+            } else if argument == "--bold-text" {
+                // The real OS-level Bold Text accessibility setting cannot be
+                // toggled from a UI test, so this overrides `\.legibilityWeight`
+                // the same way `--dynamic-type=` overrides `\.dynamicTypeSize`
+                // (#831).
+                configuration.boldTextEnabled = true
             } else if argument.hasPrefix("--run-detail-fixture=") {
                 let value = String(argument.dropFirst("--run-detail-fixture=".count))
                 configuration.runDetailFixture = RunDetailFixture(rawValue: value)

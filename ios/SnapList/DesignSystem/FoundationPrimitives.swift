@@ -180,6 +180,8 @@ struct SnapListSellerRow: View {
 struct SnapListPinnedActionTray<Content: View>: View {
     let content: Content
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
@@ -189,7 +191,16 @@ struct SnapListPinnedActionTray<Content: View>: View {
             .padding(.horizontal, SnapListMetrics.screenGutter)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial)
+            // A seller with Reduce Transparency on falls back to the same
+            // opaque canvas token `FloatingDock` already uses for its
+            // chrome, instead of staying translucent regardless (#831).
+            .background {
+                if reduceTransparency {
+                    SnapListColorToken.canvas.color
+                } else {
+                    Rectangle().fill(.ultraThinMaterial)
+                }
+            }
             .overlay(alignment: .top) {
                 Divider().foregroundStyle(SnapListColorToken.hairline.color)
             }

@@ -22,6 +22,17 @@ struct LegalLinkRow: View {
                 Spacer()
                 Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }
+            // `settingsCardRow` proposes its full `minHeight: 52` down to
+            // this label, but a plain-button label otherwise reports back
+            // only its own intrinsic text height and centers within that
+            // taller row (#831). That leaves a real tappable and
+            // accessibility-frame area of roughly 20pt — under the 44pt
+            // floor at every Dynamic Type size, not only the smallest one —
+            // with the row's remaining height acting as untappable padding.
+            // Claiming the full proposed height here, before `contentShape`
+            // captures it, is what makes the button's actual hit area match
+            // its visually full-height row.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
