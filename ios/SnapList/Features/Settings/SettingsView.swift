@@ -591,10 +591,11 @@ private struct SettingsDeletionConfirmationProofHost: View {
     @State private var reauthenticating = false
 
     var body: some View {
-        // Its own stack because the proof route enters here directly. DEL-03
-        // pushes the tail with `navigationDestination`, and without a container
-        // that push is inert, which would make this fixture unable to reach the
-        // states it exists to prove.
+        // No stack of its own. The proof route reaches this through the shell's
+        // NavigationStack, which is what hosts DEL-03's `navigationDestination`
+        // push, and that is why the tail states are reachable here at all. An
+        // inner stack suppressed the pushed content and made the shell render
+        // its root instead.
         content
     }
 
@@ -1112,7 +1113,7 @@ private struct SettingsDeletionTailView: View {
         case .unfinished:
             "SnapList sent your request and has not been told it finished."
         case .stalled(.needsAttention):
-            "Your deletion started and stopped partway. Someone at SnapList has to finish it, and asking again from here will not move it."
+            "Your deletion started and stopped partway. Asking the server again may finish it."
         case .stalled(.keyConflict):
             "The server is already working on a deletion for this account that this iPhone cannot continue."
         case .stalled(.appNotConfigured):
@@ -1141,7 +1142,7 @@ private struct SettingsDeletionTailView: View {
             ]
         case .stalled(.needsAttention):
             [
-                "Some of your account may already be deleted.",
+                "Some of your account may already be deleted, including your sign-in.",
                 "Nothing on this iPhone has been cleared.",
             ]
         case .stalled(.keyConflict):
@@ -1172,9 +1173,11 @@ private struct SettingsDeletionTailView: View {
                 "You are still signed in on this iPhone so that you can try the removal again.",
             ]
         case .deleted(let retainedRecords):
-            ["Listings you published are still on eBay. End them in eBay."]
-                + retainedRecords.map(\.sellerFacingCopy)
-                + [subscriptionTruth.shortCopy]
+            // Only what the server actually reported as retained. The packaged
+            // eBay line used to be unconditional, which asserted a live listing
+            // for a seller who had none and read as a near-duplicate for a
+            // seller who did. Its instruction now rides the retained record.
+            retainedRecords.map(\.sellerFacingCopy) + [subscriptionTruth.shortCopy]
         }
     }
 
@@ -1191,10 +1194,21 @@ private struct SettingsDeletionTailView: View {
                 primaryAction: retry,
                 secondaryAction: leave
             )
+        case .stalled(let stall) where stall.allowsAnotherRequest:
+            // DEL-05's tray. The server does not treat this status as terminal,
+            // so the same key resumes the erasure rather than replaying an
+            // answer, and the seller's data is already gone by the time they
+            // read this. Taking the control away would strand them.
+            SettingsActionTray(
+                primary: "Check the server again",
+                secondary: "Not now",
+                destructive: false,
+                primaryAction: retry,
+                secondaryAction: leave
+            )
         case .stalled:
-            // No retry: every one of these states answers the same way however
-            // many times it is asked, and a control that cannot work is worse
-            // than no control.
+            // The remaining stalls answer the same way however many times they
+            // are asked, and a control that cannot work is worse than none.
             SettingsActionTray(
                 primary: "Back to Settings",
                 secondary: nil,
@@ -1249,7 +1263,7 @@ private extension AccountErasureRetainedRecord {
     var sellerFacingCopy: String {
         switch self {
         case .ebayLiveListing:
-            "A listing you published is still live on eBay. SnapList does not own it and cannot end it."
+            "A listing you published is still live on eBay. SnapList does not own it and cannot end it, so end it in eBay."
         case .hostedTranscriptionProviderCopy:
             "A transcription provider still holds its own copy of a voice note. SnapList has asked for its removal and cannot confirm it."
         }
@@ -1270,6 +1284,7 @@ private struct SettingsDeletionConfirmationView: View {
             lead: "This is the last step. It deletes your SnapList account, your items, your photos and your drafts, and removes your eBay connection from SnapList."
         ) {
             SettingsFactSection(title: "", bullets: [
+                "It's you, confirmed a moment ago. Nothing is sent until you tap Delete account.",
                 "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
                 subscriptionTruth.shortCopy
             ], usesBullets: false)
@@ -1281,13 +1296,22 @@ private struct SettingsDeletionConfirmationView: View {
             // #385 this tray offered only "Keep my account", so a seller who
             // read "This is the last step." and reauthenticated with a real
             // credential had no way to finish and nothing happened.
-            SettingsActionTray(
-                primary: "Delete account",
-                secondary: "Keep my account",
-                destructive: true,
-                primaryAction: { deleting = true },
-                secondaryAction: keepAccount
-            )
+            VStack(spacing: 12) {
+                // Packaged DEL-03 footnote, and true of this build: the tap is
+                // the only thing that sends the request.
+                Text("Keep my account is the safe way out and it works right up to the tap.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                SettingsActionTray(
+                    primary: "Delete account",
+                    secondary: "Keep my account",
+                    destructive: true,
+                    primaryAction: { deleting = true },
+                    secondaryAction: keepAccount
+                )
+            }
             .padding(
                 .bottom,
                 reservesFloatingDock

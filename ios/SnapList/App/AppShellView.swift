@@ -722,7 +722,7 @@ struct AppShellView: View {
     /// the stores it clears are this view's, and read on the main actor.
     private var accountDeletionDependencies:
         AccountDeletionCoordinator.Dependencies {
-        let intakeVersion = captureFlow.intakeSnapshot?.version
+        let flow = captureFlow
         let intake = dependencies.nativeIntake
         let cachedData = settingsCachedData
         if let fixture = configuration.accountErasureFixture {
@@ -737,17 +737,19 @@ struct AppShellView: View {
         }
         return AccountDeletionComposition.make(
             apiOrigin: apiOrigin,
-            removeStoredAppData: {
-                await SettingsLocalRemovalTransaction.perform(
-                    removeIntake: {
-                        guard let intakeVersion else { return true }
-                        return await intake.perform(
-                            .discard(expected: intakeVersion)
-                        ) == .committed
-                    },
-                    removeCachedItems: { cachedData.removeAll() }
-                )
-            }
+            removeIntake: {
+                // Read at removal time, not at render time. A version captured
+                // when this property was evaluated goes stale the moment the
+                // seller's intake changes, and a discard against a stale
+                // version never commits, so every retry for the life of this
+                // host would fail the same way.
+                guard let version = await MainActor.run(
+                    body: { flow.intakeSnapshot?.version }
+                ) else { return true }
+                return await intake.perform(.discard(expected: version))
+                    == .committed
+            },
+            removeCachedItems: { cachedData.removeAll() }
         )
     }
 

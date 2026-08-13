@@ -473,6 +473,7 @@ enum AccountDeletionComposition {
         case .completed: .completed(retainedRecords: [.ebayLiveListing])
         case .unavailable: .notConfirmed(.serverUnavailable)
         case .needsAttention: .needsAttention
+        case .keyConflict: .notConfirmed(.idempotencyKeyConflict)
         case .reverificationExpired: .notConfirmed(.reverificationRequired)
         }
         return AccountDeletionCoordinator.Dependencies(
@@ -484,33 +485,54 @@ enum AccountDeletionComposition {
         )
     }
 
+    /// Mints the bearer one erasure request carries.
+    ///
+    /// Split out from `make` so the one decision in it is reachable without a
+    /// Clerk session: the token is always minted with the cache skipped. The
+    /// handler reads the session's factor verification age, and a token cached
+    /// before the seller answered the strict reverification carries the older
+    /// claim, so a cached one earns a challenge for a challenge they already
+    /// answered and the erasure never starts.
+    ///
+    /// No session is an error rather than a request with no bearer, because an
+    /// unauthenticated erasure request is one the handler refuses anyway and the
+    /// seller would read that refusal as the server failing.
+    static func reverifiedBearerToken(
+        mint: (_ skipCache: Bool) async throws -> String?
+    ) async throws -> String {
+        guard let token = try await mint(true) else {
+            throw MissingSessionError()
+        }
+        return token
+    }
+
     @MainActor
     static func make(
         apiOrigin: URL,
         session: URLSession = .shared,
-        removeStoredAppData: @escaping @Sendable () async -> Bool
+        removeIntake: @escaping @Sendable () async -> Bool,
+        removeCachedItems: @escaping @Sendable () async -> Bool
     ) -> AccountDeletionCoordinator.Dependencies {
         // Read once, here, while the seller is still signed in. The store has to
         // be reachable from a later coordinator that starts with nothing, and
         // after a completed deletion there is no user left to key it by.
-        let keyStore = AccountErasureKeyStore(
-            userID: Clerk.shared.user?.id ?? "unknown-user"
-        )
+        //
+        // Fail closed with no user. A placeholder id would file every such
+        // seller's key in one shared bucket, so one seller's deletion would
+        // hand its key to the next, and that key is the only thing that makes
+        // an interrupted deletion resumable rather than a permanent 409.
+        guard let userID = Clerk.shared.user?.id else {
+            return unconfigured()
+        }
+        let keyStore = AccountErasureKeyStore(userID: userID)
         let client = URLSessionAccountErasureClient(
             apiOrigin: apiOrigin,
             reverifiedBearerToken: {
-                // `skipCache` is the whole point. The handler reads the session's
-                // factor verification age, and a token cached before the seller
-                // reverified carries the older claim, so reusing one earns a
-                // challenge for a challenge they already answered.
-                let clerkSession = await MainActor.run { Clerk.shared.session }
-                guard
-                    let token = try await clerkSession?
-                        .getToken(.init(skipCache: true))
-                else {
-                    throw MissingSessionError()
-                }
-                return token
+                try await reverifiedBearerToken(mint: { skipCache in
+                    let clerkSession = await MainActor.run { Clerk.shared.session }
+                    return try await clerkSession?
+                        .getToken(.init(skipCache: skipCache))
+                })
             },
             session: session
         )
@@ -521,9 +543,10 @@ enum AccountDeletionComposition {
             },
             clearDeviceState: {
                 await AccountDeletionDeviceState.clear(
-                    steps: [
-                        .init(name: "app-data", remove: removeStoredAppData),
-                    ] + AccountDeletionDeviceState.keychainSteps
+                    steps: AccountDeletionDeviceState.steps(
+                        removeIntake: removeIntake,
+                        removeCachedItems: removeCachedItems
+                    )
                 )
             },
             signOut: {

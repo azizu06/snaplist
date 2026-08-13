@@ -36,16 +36,37 @@ enum AccountErasureRefusal: Equatable, Sendable {
     case clientNotConfigured
 }
 
-/// Why a deletion stopped somewhere no retry can move it. Every case here means
-/// asking the server again would produce the same answer.
+/// Why a deletion stopped short of finishing. Whether another request can move
+/// it differs per case, so read `allowsAnotherRequest` rather than assuming a
+/// stall is a dead end.
 enum AccountDeletionStall: Equatable, Sendable {
-    /// `deletion_needs_attention`. The erasure began and is waiting on a person.
+    /// `deletion_needs_attention`. The erasure began and stopped partway.
     case needsAttention
     /// The server has this account bound to a different Idempotency-Key, so the
     /// erasure this device can ask about is not the one that exists.
     case keyConflict
     /// The app itself has no route to the erasure endpoint.
     case appNotConfigured
+
+    /// Whether asking the server again can still change this answer.
+    ///
+    /// `needsAttention` can. `deletion_needs_attention` is not in the server's
+    /// `TERMINAL_STATUSES`, so a request carrying the same key re-walks storage
+    /// and re-runs the identity delete rather than returning the stored state.
+    /// The common way to land here is a transient Clerk failure, which
+    /// `deleteClerkIdentity` reports as unproved absence, and one more request
+    /// is exactly what finishes it. Removing the retry here would leave a seller
+    /// whose data is gone and whose login survives with no way to finish.
+    ///
+    /// The other two cannot. A key conflict means the erasure this device can
+    /// ask about is not the one the server has, and an unconfigured build has
+    /// nowhere to send the request.
+    var allowsAnotherRequest: Bool {
+        switch self {
+        case .needsAttention: true
+        case .keyConflict, .appNotConfigured: false
+        }
+    }
 }
 
 /**
@@ -62,8 +83,10 @@ enum AccountErasureOutcome: Equatable, Sendable {
     case completed(retainedRecords: [AccountErasureRetainedRecord])
     /// Accepted and not finished. Asking again with the same key resumes it.
     case pending
-    /// `deletion_needs_attention`. Not terminal, and not something asking again
-    /// will resolve, because it is waiting on a person rather than on work.
+    /// `deletion_needs_attention`. Not terminal. The erasure stopped partway,
+    /// and because the server does not treat this status as terminal, asking
+    /// again with the same key resumes the work rather than replaying a stored
+    /// answer.
     case needsAttention
     /// No durable answer. Nothing on this device may be touched.
     case notConfirmed(AccountErasureRefusal)
@@ -86,8 +109,9 @@ enum AccountDeletionPhase: Equatable, Sendable {
     case deleted(retainedRecords: [AccountErasureRetainedRecord])
     /// DEL-05. A request went out and no completion was reported.
     case unfinished
-    /// DEL-05a. The deletion stopped somewhere asking again cannot move it.
-    /// Offering "Try again" here would be a button that provably does nothing.
+    /// DEL-05a. The deletion stopped short of finishing. Whether asking again
+    /// can move it depends on the reason, so the tray is decided by
+    /// `AccountDeletionStall.allowsAnotherRequest` rather than by the state.
     case stalled(AccountDeletionStall)
     /// DEL-06. Completion could not be confirmed and this device is untouched.
     case failed
@@ -109,8 +133,11 @@ enum AccountDeletionPhase: Equatable, Sendable {
     var offersRetry: Bool {
         switch self {
         case .unfinished, .failed, .deviceNotCleared: true
+        // Per reason, never wholesale. Two of the three stalls are dead ends
+        // and one is a deletion that stopped partway and can still be finished.
+        case .stalled(let stall): stall.allowsAnotherRequest
         case .confirming, .requesting, .clearingDevice, .deleted,
-             .stalled, .reverificationExpired: false
+             .reverificationExpired: false
         }
     }
 
@@ -212,6 +239,28 @@ enum AccountDeletionDeviceState {
             clearedEverything = false
         }
         return clearedEverything
+    }
+
+    /// Everything one deletion removes from this device: the app's own stores
+    /// first, then every Keychain item.
+    ///
+    /// Intake and cached items are separate steps on purpose. Composing them
+    /// through `SettingsLocalRemovalTransaction` short-circuits on the first
+    /// failure, so a failed intake removal would leave the seller's cached
+    /// items untouched and break the invariant this type exists to hold.
+    ///
+    /// Each removal is a closure rather than a captured value because it has to
+    /// read its subject when it runs. The seller can change the draft between
+    /// opening the screen and confirming, and a discard aimed at the version
+    /// that was current at render time is a discard the store refuses.
+    static func steps(
+        removeIntake: @escaping () async -> Bool,
+        removeCachedItems: @escaping () async -> Bool
+    ) -> [Step] {
+        [
+            Step(name: "intake", remove: removeIntake),
+            Step(name: "cached-items", remove: removeCachedItems),
+        ] + keychainSteps
     }
 
     /// The Keychain half, as one step per item so a single stubborn item is

@@ -85,9 +85,13 @@ final class AccountDeletionTests: XCTestCase {
         let phase = await coordinator.phase
         XCTAssertFalse(phase.reportsDeletion)
         XCTAssertEqual(phase, .stalled(.needsAttention))
-        // It is waiting on a person, not on work. A "Try again" here would be a
-        // control whose only possible effect is another identical answer.
-        XCTAssertFalse(phase.offersRetry)
+        // Not a deletion, and not a dead end either. This status is absent from
+        // the handler's `TERMINAL_STATUSES` (src/lib/account-erasure/service.ts,
+        // the two `deletion_completed` members), so a request carrying the same
+        // key re-walks storage and re-runs the identity delete instead of
+        // replaying the stored answer. Taking the control away would strand a
+        // seller whose data is gone and whose sign-in survived.
+        XCTAssertTrue(phase.offersRetry)
     }
 
     func testAKeyTheServerBoundElsewhereIsNotOfferedAsSomethingToRetry() async {
@@ -345,6 +349,45 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
         XCTAssertEqual(attempted, ["intake", "cache", "keychain"])
     }
 
+    func testIntakeAndCachedItemsAreSeparateStepsSoOneFailureSparesNothing() async {
+        var attempted: [String] = []
+        let steps = AccountDeletionDeviceState.steps(
+            removeIntake: { attempted.append("intake"); return false },
+            removeCachedItems: { attempted.append("cached-items"); return true }
+        )
+
+        let cleared = await AccountDeletionDeviceState.clear(steps: steps)
+
+        // Composing these two through `SettingsLocalRemovalTransaction` would
+        // short-circuit here, and the seller's cached items would survive a
+        // deletion because intake removal happened to fail first.
+        XCTAssertEqual(attempted, ["intake", "cached-items"])
+        XCTAssertFalse(cleared)
+        // The Keychain half still follows the app's own stores, in that order.
+        XCTAssertEqual(
+            steps.map(\.name),
+            ["intake", "cached-items"]
+                + AccountDeletionDeviceState.keychainSteps.map(\.name)
+        )
+    }
+
+    func testAStepReadsWhatItRemovesWhenItRuns() async {
+        var intakeVersion = 1
+        let steps = AccountDeletionDeviceState.steps(
+            removeIntake: { intakeVersion == 2 },
+            removeCachedItems: { true }
+        )
+        // Whatever the seller did between opening the screen and confirming.
+        intakeVersion = 2
+
+        let cleared = await AccountDeletionDeviceState.clear(steps: [steps[0]])
+
+        // A step that captured its subject at construction would still be
+        // holding version 1 and would discard against a version the app no
+        // longer has, which fails and leaves the draft on the device.
+        XCTAssertTrue(cleared)
+    }
+
     func testDeletionKnowsEveryKeychainItemTheAppWrites() {
         // Adding a Keychain item without adding it here leaves a credential
         // behind after an account deletion, which is the failure Guideline
@@ -369,6 +412,95 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
                 "verified-app-attest-key-id",
             ]
         )
+    }
+}
+
+/// Issue #385. The key that makes an interrupted deletion resumable rather than
+/// a permanent 409, and who it belongs to.
+final class AccountErasureKeyStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "dev.snaplist.tests.account-erasure-key.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        suiteName = nil
+        super.tearDown()
+    }
+
+    func testOneSellersKeyIsNeverHandedToTheNextSellerOnTheSameDevice() {
+        let first = AccountErasureKeyStore(userID: "user_a", defaults: defaults)
+        let second = AccountErasureKeyStore(userID: "user_b", defaults: defaults)
+
+        first.remember("key-a")
+
+        // `begin_account_erasure` binds one key per account and raises 23505 for
+        // a second one, which the handler returns as 409. A device-wide key
+        // would hand user A's key to user B, whose own erasure would then be
+        // refused with no way to mint the key the server actually wants.
+        XCTAssertNil(second.load())
+        XCTAssertEqual(first.load(), "key-a")
+
+        second.remember("key-b")
+        XCTAssertEqual(first.load(), "key-a")
+        XCTAssertEqual(second.load(), "key-b")
+
+        second.forget()
+        // Forgetting one account's key is not permission to lose another's.
+        XCTAssertNil(second.load())
+        XCTAssertEqual(first.load(), "key-a")
+    }
+
+    func testAKeyOutlivesTheStoreThatWroteIt() {
+        AccountErasureKeyStore(userID: "user_a", defaults: defaults)
+            .remember("key-a")
+
+        // The store is a value built fresh by every host. A seller who taps
+        // "Not now" and comes back gets a new one, and it has to find the key
+        // the earlier attempt left behind.
+        XCTAssertEqual(
+            AccountErasureKeyStore(userID: "user_a", defaults: defaults).load(),
+            "key-a"
+        )
+    }
+}
+
+/// Issue #385. The bearer every erasure request carries.
+final class AccountDeletionBearerTests: XCTestCase {
+    func testTheBearerIsMintedFreshRatherThanReadFromTheTokenCache() async throws {
+        var requestedSkipCache: [Bool] = []
+
+        let token = try await AccountDeletionComposition.reverifiedBearerToken(
+            mint: { skipCache in
+                requestedSkipCache.append(skipCache)
+                return "token"
+            }
+        )
+
+        // The handler reads the session's factor verification age. A token
+        // minted before the seller answered the strict reverification carries
+        // the older claim, so a cached one earns a challenge for a challenge
+        // they already answered and the deletion never starts.
+        XCTAssertEqual(requestedSkipCache, [true])
+        XCTAssertEqual(token, "token")
+    }
+
+    func testNoSessionIsAnErrorRatherThanARequestWithNoBearer() async {
+        do {
+            _ = try await AccountDeletionComposition.reverifiedBearerToken(
+                mint: { _ in nil }
+            )
+            XCTFail("A missing session must not produce a request.")
+        } catch is AccountDeletionComposition.MissingSessionError {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 }
 

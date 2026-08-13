@@ -277,6 +277,7 @@ enum AccountErasureFixtureState: String, Equatable {
     case completed = "completed"
     case unavailable = "unavailable"
     case needsAttention = "needs-attention"
+    case keyConflict = "key-conflict"
     case reverificationExpired = "reverification-expired"
 }
 

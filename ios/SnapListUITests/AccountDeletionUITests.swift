@@ -49,18 +49,40 @@ final class AccountDeletionUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["settings.state.del-08"].exists)
     }
 
-    func testADeletionWaitingOnAPersonIsNotOfferedARetryThatCannotWork() {
+    func testADeletionThatStoppedPartwayKeepsTheControlThatCanFinishIt() {
         let app = launch(fixture: "needs-attention")
 
         app.buttons["Delete account"].tap()
 
         // `deletion_needs_attention` rides the same 202 as
-        // `deletion_in_progress`. It is waiting on a person, so the one control
-        // that must not be here is the one that asks again.
+        // `deletion_in_progress`, so this is not a deletion. It is also not a
+        // dead end: the status is absent from the handler's `TERMINAL_STATUSES`,
+        // so the same key re-walks storage and re-runs the identity delete. A
+        // seller whose data is gone and whose sign-in survived reaches the rest
+        // of the erasure through this control and nowhere else.
         XCTAssertTrue(
             app.descendants(matching: .any)["settings.state.del-05a"]
                 .waitForExistence(timeout: 10)
         )
+        XCTAssertTrue(app.buttons["Check the server again"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["settings.state.del-08"].exists)
+    }
+
+    func testAKeyTheServerBoundElsewhereIsNotOfferedARetryThatCannotWork() {
+        let app = launch(fixture: "key-conflict")
+
+        app.buttons["Delete account"].tap()
+
+        // The same DEL-05a state as the test above, and the opposite tray. The
+        // erasure this device can ask about is not the one the server has, so
+        // re-sending the key that was just rejected cannot become the key the
+        // server already holds. The decision is the stall's reason, never the
+        // state, which is what these two tests together pin down.
+        XCTAssertTrue(
+            app.descendants(matching: .any)["settings.state.del-05a"]
+                .waitForExistence(timeout: 10)
+        )
+        XCTAssertFalse(app.buttons["Check the server again"].exists)
         XCTAssertFalse(app.buttons["Try again"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["settings.state.del-08"].exists)
     }
