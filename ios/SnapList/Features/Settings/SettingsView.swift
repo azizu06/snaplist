@@ -1095,7 +1095,7 @@ private struct SettingsDeletionTailView: View {
         switch phase {
         case .confirming, .requesting: "Deleting your account"
         case .unfinished: "This deletion has not finished"
-        case .stalled(.needsAttention): "This deletion needs a person"
+        case .stalled(.needsAttention): "This deletion stopped partway"
         case .stalled(.keyConflict): "SnapList cannot continue this deletion"
         case .stalled(.appNotConfigured): "This build cannot delete accounts"
         case .failed: "The deletion did not finish"

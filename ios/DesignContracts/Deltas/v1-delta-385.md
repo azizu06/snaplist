@@ -3,7 +3,7 @@
 Delta id: `v1-delta-385`
 Predecessor: Settings Hub + Delete Account v1, approved 2026-08-04
 Owning issue: #385 (App Store Guideline 5.1.1(v))
-Status: built and shipped in this delta, not candidate-only
+Status: built and shipped, pending design ratification
 
 ## What this delta is
 
@@ -11,6 +11,11 @@ The approved package covers DEL-01 through DEL-08. Building the client half of
 the erasure endpoint produced three states the package does not have, because
 the server can answer in ways no approved state describes truthfully. All three
 are implemented in this delta. They are not recorded here as future work.
+
+This file records what the code does. It does not promote anything out of
+candidate status: whether these states become frozen, take different copy, or
+fold into existing ones is the design owner's call, and ratification is routed
+separately.
 
 Every state below is reachable in the shipped build, carries the frozen
 accessibility identifier `settings.state.<lowercased id>`, and is covered by a
