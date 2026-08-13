@@ -849,6 +849,7 @@ extension SettingsTests {
     /// the row's rendered body actually carries a `Button`, not the bare
     /// `HStack` issue #812 found shipped inert with a chevron that promised
     /// navigation the row never performed.
+    @MainActor
     func testLegalLinkRowWiresItsRowToAnOpenAction() {
         let row = LegalLinkRow(
             destination: .privacyPolicy,

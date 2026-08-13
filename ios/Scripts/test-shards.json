@@ -8,16 +8,16 @@
     "xcode_version": "26.5",
     "xcode_build": "17F42",
     "unit_test_count": 705,
-    "ui_test_count": 139,
+    "ui_test_count": 140,
     "source_ui_shard_suite_seconds": {
       "ui-1": 1361.911,
       "ui-2": 1174.858
     },
-    "selector_seconds_total": 2650.816,
+    "selector_seconds_total": 2656.477,
     "balanced_ui_shard_observed_seconds": {
-      "ui-1": 883.59,
-      "ui-2": 883.613,
-      "ui-3": 883.613
+      "ui-1": 887.934,
+      "ui-2": 884.274,
+      "ui-3": 884.269
     },
     "selector_observed_seconds": {
       "SnapListUITests/AssistedExportUITests/testAPackUpdateTakesDownAConfirmSheetTheSellerIsLookingAt": 29.919,
@@ -158,7 +158,8 @@
       "SnapListUITests/UIProcessTerminationBoundaryTests/testTargetOutOfForegroundRetiresEvenWhenTheWitnessNeverResolves": 0.119,
       "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest": 0.13,
       "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessCannotConsumeTheBudgetTheTargetNeedsToBeObserved": 0.112,
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget": 0.112
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget": 0.112,
+      "SnapListUITests/SnapListUITests/testSettingsSellingValueRowsAreNotButtons": 5.661
     }
   },
   "execution_model": {
@@ -210,17 +211,7 @@
       "SnapListUITests/SnapListUITests/testRateLimitedSubmissionRendersExactRetainedMessageInLivePhotoReview",
       "SnapListUITests/SnapListUITests/testRealSystemCameraPermissionCanBeDeniedWithoutCounterfeitSuccess",
       "SnapListUITests/SnapListUITests/testRestoredCaptureResumesWithNoFirstValueOnboardingControl",
-      "SnapListUITests/UILaunchBoundaryTests/testAlreadyStoppedProcessLaunchesWithoutAnotherTerminateRequest",
-      "SnapListUITests/UILaunchBoundaryTests/testLaunchIsIssuedOnlyAfterTheProcessIsObservedNotRunning",
-      "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementIsReportedBeforeTheLaunchIsIssued",
-      "SnapListUITests/UINavigationReturnBoundaryTests/testTheThreeSecondBudgetStillMissesThatSameRestoredWall",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testTargetOutOfForegroundRetiresEvenWhenTheWitnessNeverResolves",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget"
+      "SnapListUITests/SnapListUITests/testSettingsSellingValueRowsAreNotButtons"
     ],
     "ui-2": [
       "SnapListUITests/AssistedExportUITests/testAPackUpdateTakesDownAConfirmSheetTheSellerIsLookingAt",
@@ -263,9 +254,15 @@
       "SnapListUITests/SnapListUITests/testScanLibraryUsesExactLiveAndRecoveryLabels",
       "SnapListUITests/SnapListUITests/testStagedLibraryPhotosSurviveInterruptionAndReachCAP01",
       "SnapListUITests/SnapListUITests/testTrophyWallHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets",
+      "SnapListUITests/UILaunchBoundaryTests/testAlreadyStoppedProcessLaunchesWithoutAnotherTerminateRequest",
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheRestoredWallSurvivesTheSlowRunnerTimelineThatFlakedTheDeepLink",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundExitWitnessDoesNotTerminateAStillForegroundTarget",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessThatSuspendsAfterHomeStillTerminatesAndVerifiesExit",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessCannotConsumeTheBudgetTheTargetNeedsToBeObserved"
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testTargetOutOfForegroundRetiresEvenWhenTheWitnessNeverResolves",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testUnknownProcessStateFailsClosedWithoutTerminateRequest",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessShareStaysCappedAtTwoSecondsOnTheFullTransitionBudget"
     ],
     "ui-3": [
       "SnapListUITests/AssistedExportUITests/testConfirmationControlsRemainReachableAtAccessibilityFive",
@@ -308,11 +305,16 @@
       "SnapListUITests/SnapListUITests/testVoiceNoteRecordingAccessibilityOrderIsCancelElapsedSave",
       "SnapListUITests/SnapListUITests/testVoiceNoteRecordingCancelAndSaveBothDismissToExactRowTruth",
       "SnapListUITests/SnapListUITests/testVoiceNoteSheetRejectsSwipeAndCloseRestoresStableReopenTruth",
+      "SnapListUITests/UILaunchBoundaryTests/testLaunchIsIssuedOnlyAfterTheProcessIsObservedNotRunning",
+      "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementIsReportedBeforeTheLaunchIsIssued",
       "SnapListUITests/UILaunchBoundaryTests/testUnverifiableRetirementStillIssuesTheLaunchAndReportsTheFailure",
-      "SnapListUITests/UINavigationReturnBoundaryTests/testTheRestoredWallSurvivesTheSlowRunnerTimelineThatFlakedTheDeepLink",
+      "SnapListUITests/UINavigationReturnBoundaryTests/testTheThreeSecondBudgetStillMissesThatSameRestoredWall",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testContendedForegroundExitNeedsMoreThanTheOldThreeSecondBudget",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut",
       "SnapListUITests/UIProcessTerminationBoundaryTests/testForegroundProcessUsesNativeWaitToObserveSuspensionBeforeTermination",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow",
-      "SnapListUITests/UIProcessTerminationBoundaryTests/testStuckRetirementNamesTheObservedStateAndTheBudgetItWaited"
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testStuckRetirementNamesTheObservedStateAndTheBudgetItWaited",
+      "SnapListUITests/UIProcessTerminationBoundaryTests/testWitnessCannotConsumeTheBudgetTheTargetNeedsToBeObserved"
     ]
   },
   "ui_shard_count": 3

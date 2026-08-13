@@ -221,15 +221,44 @@ final class SnapListUITests: XCTestCase {
                 app.swipeUp()
             }
             XCTAssertTrue(row.exists, "\(identifier): \(app.debugDescription)")
-            XCTAssertTrue(row.isHittable, "\(identifier): \(app.debugDescription)")
+            // `row.isHittable` is true even when the dock covers only the
+            // row's frame center (issue #812's dock-overlap finding) — the
+            // element underneath the tap is the label, so that is what must
+            // actually be hittable.
+            let label = row.staticTexts.firstMatch
+            XCTAssertTrue(label.isHittable, "\(identifier): \(app.debugDescription)")
 
-            row.staticTexts.firstMatch.tap()
+            label.tap()
 
             XCTAssertTrue(
                 waitForBackgroundHandoff(app, timeout: 5),
                 "\(identifier) did not hand off to Safari: observed \(app.state.reportedName)"
             )
             app.terminate()
+        }
+    }
+
+    /// Issue #812's own title: a row with a chevron promising navigation it
+    /// never performs. `SettingsView.valueRow` no longer takes a `chevron`
+    /// argument at all, so these three SELLING rows cannot render one — this
+    /// confirms the rows still exist (not silently dropped) and are exactly
+    /// what they claim to be: non-navigating, so not `XCUIElementTypeButton`.
+    func testSettingsSellingValueRowsAreNotButtons() {
+        let app = launch(extraArguments: ["--fixture=account"])
+        let settingsScreen = app.descendants(matching: .any)["settings.screen"]
+        XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
+
+        for identifier in [
+            "settings.selling.marketplaces",
+            "settings.selling.photos",
+            "settings.selling.notifications",
+        ] {
+            let row = app.descendants(matching: .any)[identifier]
+            for _ in 0..<4 where !row.exists {
+                app.swipeUp()
+            }
+            XCTAssertTrue(row.exists, "\(identifier): \(app.debugDescription)")
+            XCTAssertFalse(app.buttons[identifier].exists, "\(identifier): \(app.debugDescription)")
         }
     }
 
@@ -2271,6 +2300,8 @@ final class SnapListUITests: XCTestCase {
             }
             XCTAssertTrue(link.exists, "\(identifier): \(app.debugDescription)")
             XCTAssertTrue(link.isHittable, "\(identifier): \(app.debugDescription)")
+            XCTAssertGreaterThanOrEqual(link.frame.width, 44, identifier)
+            XCTAssertGreaterThanOrEqual(link.frame.height, 44, identifier)
 
             link.tap()
 
