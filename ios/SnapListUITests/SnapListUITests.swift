@@ -13,12 +13,16 @@ final class SnapListUITests: XCTestCase {
     /// first handoff of a shard, which cold-launches Safari, exceeded the old
     /// five seconds and failed — `testProGateOfferLegalFooterOpensTermsAndPrivacy`
     /// in run 31668920327 and `testSettingsAboutRowsOpenTheirLiveLegalDestinations`
-    /// in run 31660491907, each on its own first iteration. Every later handoff
-    /// in the same shard, with Safari already warm, took 2.6s–4.8s, so the old
-    /// budget was passing on roughly two hundred milliseconds of margin. The
-    /// same handoff takes 1s–2s locally. This wait returns the moment the app
-    /// leaves the foreground, so the larger budget costs nothing when the
-    /// handoff works and only buys an honest verdict when the runner is slow.
+    /// in run 31660491907, each on its own first iteration. Where it survived,
+    /// that first handoff took 4.81s against the 5s ceiling — 0.19s of margin —
+    /// and the two behind it took 3.12s and 2.61s. Both tests terminate Safari
+    /// before every iteration, so that speedup is simulator and OS warmth, not a
+    /// live Safari process, and every handoff here is a cold launch. Size against
+    /// 4.81s rather than 2.61s. The same handoff takes 1s–2s locally, which is
+    /// why neither test reproduces on a developer Mac. This wait returns the
+    /// moment the app leaves the foreground, so the larger budget costs nothing
+    /// when the handoff works and only buys an honest verdict when the runner
+    /// is slow.
     private static let legalHandoffBudget: TimeInterval = 20
 
     /// A Safari handoff can settle directly into `.runningBackgroundSuspended`
