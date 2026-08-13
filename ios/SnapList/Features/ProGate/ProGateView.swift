@@ -344,6 +344,8 @@ struct ProGateSheet: View {
                         declineControl
                     }
                 }
+                ProGateLegalFooter()
+                    .padding(.top, 10)
             }
             .padding(.bottom, -5)
         case .confirming:
@@ -483,6 +485,34 @@ private enum ProGateActionColor {
         case .action: SnapListColorToken.action.color
         case .ink: SnapListColorToken.inkPrimary.color
         }
+    }
+}
+
+/// The paywall's Terms/Privacy disclosure (issue #812). App Review 3.1.2
+/// requires both documents reachable wherever the auto-renewing subscription
+/// is offered, and `.offer` is the only `ProGateStore.State` that offers one.
+struct ProGateLegalFooter: View {
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        HStack(spacing: 6) {
+            link(.termsOfService, identifier: "pro-gate.terms-of-service")
+            Text("·")
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+            link(.privacyPolicy, identifier: "pro-gate.privacy-policy")
+        }
+        .font(.system(size: 12))
+    }
+
+    private func link(_ destination: LegalDestination, identifier: String) -> some View {
+        Button {
+            openURL(destination.url)
+        } label: {
+            Text(destination.label).underline()
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(SnapListColorToken.textSecondary.color)
+        .accessibilityIdentifier(identifier)
     }
 }
 

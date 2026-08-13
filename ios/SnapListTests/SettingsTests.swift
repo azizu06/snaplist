@@ -827,4 +827,39 @@ extension SettingsTests {
             URL(string: "https://www.bizpolicy.ebay.com/businesspolicy/manage")
         )
     }
+
+    // MARK: - Legal links (issue #812)
+
+    func testLegalDestinationsPointAtTheLiveMarketingSiteDocuments() {
+        XCTAssertEqual(
+            LegalDestination.privacyPolicy.url,
+            URL(string: "https://snaplist.dev/privacy")
+        )
+        XCTAssertEqual(
+            LegalDestination.termsOfService.url,
+            URL(string: "https://snaplist.dev/terms")
+        )
+        XCTAssertEqual(
+            LegalDestination.help.url,
+            URL(string: "https://snaplist.dev/support")
+        )
+    }
+
+    /// Same reflection technique as the eBay policy hint row above: it proves
+    /// the row's rendered body actually carries a `Button`, not the bare
+    /// `HStack` issue #812 found shipped inert with a chevron that promised
+    /// navigation the row never performed.
+    func testLegalLinkRowWiresItsRowToAnOpenAction() {
+        let row = LegalLinkRow(
+            destination: .privacyPolicy,
+            accessibilityIdentifier: "settings.about.privacy-policy"
+        )
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("Button"),
+            "The legal link row is not wrapped in a Button: \(rendered)"
+        )
+    }
 }

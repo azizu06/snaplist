@@ -381,6 +381,22 @@ final class ProGateStoreTests: XCTestCase {
         XCTAssertEqual(store.state, .hidden)
     }
 
+    // MARK: - Legal links (issue #812)
+
+    /// Same reflection technique `SettingsTests` uses for `LegalLinkRow`: it
+    /// proves the paywall's Terms/Privacy footer carries real `Button`s wired
+    /// to `openURL`, not static text App Review's 3.1.2 would reject.
+    func testProGateLegalFooterWiresBothLinksToAnOpenAction() {
+        let footer = ProGateLegalFooter()
+
+        let rendered = String(reflecting: type(of: footer.body))
+
+        XCTAssertTrue(
+            rendered.contains("Button"),
+            "The paywall legal footer is not wrapped in Buttons: \(rendered)"
+        )
+    }
+
     private func makeStore(
         api: any MobileAPIClient,
         subscriptions: any SubscriptionClient

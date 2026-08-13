@@ -8,6 +8,30 @@ final class SnapListUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// A Safari handoff can settle directly into `.runningBackgroundSuspended`
+    /// without ever being observed transiently in `.runningBackground` —
+    /// `HomeVisualRegressionTests.swift`'s `isSafeToTerminate` treats both
+    /// states (plus `.notRunning`) as equally valid evidence the app left the
+    /// foreground, and a wait pinned to `.runningBackground` alone is exactly
+    /// the flake that precedent works around.
+    private func waitForBackgroundHandoff(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        let states: [XCUIApplication.State] = [.runningBackground, .runningBackgroundSuspended, .notRunning]
+        var index = 0
+        while true {
+            switch app.state {
+            case .runningBackground, .runningBackgroundSuspended, .notRunning:
+                return true
+            default:
+                break
+            }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { return false }
+            _ = app.wait(for: states[index], timeout: min(remaining, 0.5))
+            index = (index + 1) % states.count
+        }
+    }
+
     func testPrimaryShellNavigationAndTypedDestinations() {
         let app = launch(extraArguments: ["--camera-status=unavailable"])
 
@@ -159,6 +183,54 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(reauthentication.exists)
         XCTAssertFalse(app.descendants(matching: .any)["settings.state.del-03"].exists)
         XCTAssertFalse(app.buttons["Verify"].exists)
+    }
+
+    /// Issue #812: each ABOUT row used to be a bare `HStack` with a chevron
+    /// that promised navigation and delivered nothing. Tapping a real
+    /// `openURL` hands the system off to Safari, which backgrounds this app —
+    /// an outcome only genuine wiring can produce, so this asserts the
+    /// behavior the row exists to perform rather than its appearance.
+    ///
+    /// One fresh launch per row, matching `testProGateOfferLegalFooterOpensTermsAndPrivacy`:
+    /// a second `openURL` fired later in the same continuous foreground/
+    /// background/foreground cycle does not reliably re-trigger the Safari
+    /// handoff on the Simulator, so reusing one `app` across rows is not a
+    /// faithful test of the row's own wiring.
+    ///
+    /// Taps the row's visible label rather than the full-width button's
+    /// frame center: on this fixture the floating Scan/Trophy Wall dock
+    /// (not dock-aware on this screen, a pre-existing gap outside #812's
+    /// contract) happens to float over the privacy-policy row's horizontal
+    /// midpoint, so a center tap lands on the dock instead of the row
+    /// underneath. The label itself sits outside that strip and is what a
+    /// real finger would actually land on.
+    func testSettingsAboutRowsOpenTheirLiveLegalDestinations() {
+        for identifier in [
+            "settings.about.help",
+            "settings.about.privacy-policy",
+            "settings.about.terms-of-service",
+        ] {
+            XCUIApplication(bundleIdentifier: "com.apple.mobilesafari").terminate()
+
+            let app = launch(extraArguments: ["--fixture=account"])
+            let settingsScreen = app.descendants(matching: .any)["settings.screen"]
+            XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
+
+            let row = app.buttons[identifier]
+            for _ in 0..<4 where !row.isHittable {
+                app.swipeUp()
+            }
+            XCTAssertTrue(row.exists, "\(identifier): \(app.debugDescription)")
+            XCTAssertTrue(row.isHittable, "\(identifier): \(app.debugDescription)")
+
+            row.staticTexts.firstMatch.tap()
+
+            XCTAssertTrue(
+                waitForBackgroundHandoff(app, timeout: 5),
+                "\(identifier) did not hand off to Safari: observed \(app.state.reportedName)"
+            )
+            app.terminate()
+        }
     }
 
     func testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch() {
@@ -2182,6 +2254,32 @@ final class SnapListUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(control.frame.height, 44)
         }
         addScreenshot(named: "pro-gate-default")
+    }
+
+    /// Issue #812, AC 2: the paywall carried no Terms or Privacy link at all
+    /// before this. A real `openURL` hands off to Safari and backgrounds this
+    /// app, which a static disclosure line could never do.
+    func testProGateOfferLegalFooterOpensTermsAndPrivacy() {
+        for identifier in ["pro-gate.terms-of-service", "pro-gate.privacy-policy"] {
+            let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
+            let title = app.staticTexts["pro-gate.title"]
+            XCTAssertTrue(title.waitForExistence(timeout: 3))
+
+            let link = app.buttons[identifier]
+            for _ in 0..<4 where !link.isHittable {
+                app.swipeUp()
+            }
+            XCTAssertTrue(link.exists, "\(identifier): \(app.debugDescription)")
+            XCTAssertTrue(link.isHittable, "\(identifier): \(app.debugDescription)")
+
+            link.tap()
+
+            XCTAssertTrue(
+                waitForBackgroundHandoff(app, timeout: 5),
+                "\(identifier) did not hand off to Safari: observed \(app.state.reportedName)"
+            )
+            app.terminate()
+        }
     }
 
     func testProGateAccessibilityTypeScalesAndKeepsActionsInTheSheetScroll() {

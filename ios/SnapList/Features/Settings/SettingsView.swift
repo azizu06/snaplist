@@ -145,11 +145,26 @@ struct SettingsView: View {
 
                 settingsSectionHeader("ABOUT")
                 settingsCard {
-                    settingsCardRow { navigationRow("Help") }
+                    settingsCardRow {
+                        LegalLinkRow(
+                            destination: .help,
+                            accessibilityIdentifier: "settings.about.help"
+                        )
+                    }
                     settingsCardDivider
-                    settingsCardRow { navigationRow("Privacy Policy") }
+                    settingsCardRow {
+                        LegalLinkRow(
+                            destination: .privacyPolicy,
+                            accessibilityIdentifier: "settings.about.privacy-policy"
+                        )
+                    }
                     settingsCardDivider
-                    settingsCardRow { navigationRow("Terms of Service") }
+                    settingsCardRow {
+                        LegalLinkRow(
+                            destination: .termsOfService,
+                            accessibilityIdentifier: "settings.about.terms-of-service"
+                        )
+                    }
                 }
 
                 settingsSectionHeader("THIS IPHONE")
@@ -519,10 +534,6 @@ struct SettingsView: View {
             if chevron { Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private func navigationRow(_ label: String) -> some View {
-        HStack { Text(label); Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
     }
 }
 
