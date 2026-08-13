@@ -271,6 +271,16 @@ enum SettingsProofState: String, Equatable {
     case deletionConfirmation = "DEL-03"
 }
 
+/// Issue #385. Scripts what the erasure endpoint answers, so a UI test can walk
+/// the shipped deletion route without a server and without deleting anything.
+enum AccountErasureFixtureState: String, Equatable {
+    case completed = "completed"
+    case unavailable = "unavailable"
+    case needsAttention = "needs-attention"
+    case keyConflict = "key-conflict"
+    case reverificationExpired = "reverification-expired"
+}
+
 struct LaunchConfiguration: Equatable {
     static let runDetailFixtureID = UUID(
         uuidString: "20800000-0000-4000-8000-000000000020"
@@ -309,6 +319,7 @@ struct LaunchConfiguration: Equatable {
     var assistedExportFixture: AssistedExportFixture?
     var proGateFixture: ProGateFixtureState?
     var settingsProofState: SettingsProofState?
+    var accountErasureFixture: AccountErasureFixtureState?
     var ebayPublishFixture: EbayPublishFixtureState?
     var guestClaimFixture: GuestClaimFixtureState?
 
@@ -338,6 +349,7 @@ struct LaunchConfiguration: Equatable {
         assistedExportFixture: nil,
         proGateFixture: nil,
         settingsProofState: nil,
+        accountErasureFixture: nil,
         ebayPublishFixture: nil,
         guestClaimFixture: nil
     )
@@ -368,6 +380,7 @@ struct LaunchConfiguration: Equatable {
         assistedExportFixture: nil,
         proGateFixture: nil,
         settingsProofState: nil,
+        accountErasureFixture: nil,
         ebayPublishFixture: nil,
         guestClaimFixture: nil
     )
@@ -513,6 +526,15 @@ struct LaunchConfiguration: Equatable {
                 )
                 configuration.settingsProofState =
                     SettingsProofState(rawValue: value)
+            } else if argument.hasPrefix("--account-erasure-fixture=") {
+                let value = String(
+                    argument.dropFirst("--account-erasure-fixture=".count)
+                )
+                // No zero-network side effect: this fixture replaces the
+                // erasure client itself, and flipping that flag changes which
+                // screen the app launches into.
+                configuration.accountErasureFixture =
+                    AccountErasureFixtureState(rawValue: value)
             } else if argument.hasPrefix("--ebay-publish-fixture=") {
                 let value = String(
                     argument.dropFirst("--ebay-publish-fixture=".count)

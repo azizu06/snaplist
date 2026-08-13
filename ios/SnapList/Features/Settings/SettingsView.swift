@@ -570,9 +570,50 @@ private struct SettingsProofStateView: View {
                 reservesFloatingDock: true
             )
         case .deletionConfirmation:
+            SettingsDeletionConfirmationProofHost(
+                profile: profile,
+                onSafeExit: onSafeExit
+            )
+        }
+    }
+}
+
+/// Issue #385. DEL-03 with somewhere for DEL-06r's exit to land.
+///
+/// The shipped route reaches DEL-03 from the reauthentication screen, so the
+/// tail's "Confirm it is you" pops back onto a screen that is already there. The
+/// proof route enters at DEL-03 with nothing behind it, and a route back to
+/// verification that had nowhere to go could not be tested at all.
+private struct SettingsDeletionConfirmationProofHost: View {
+    let profile: SettingsProfile
+    let onSafeExit: () -> Void
+
+    @State private var reauthenticating = false
+
+    var body: some View {
+        // No stack of its own. The proof route reaches this through the shell's
+        // NavigationStack, which is what hosts DEL-03's `navigationDestination`
+        // push, and that is why the tail states are reachable here at all. An
+        // inner stack suppressed the pushed content and made the shell render
+        // its root instead.
+        content
+    }
+
+    @ViewBuilder private var content: some View {
+        if reauthenticating {
+            SettingsReauthenticationView(
+                profile: profile,
+                subscriptionTruth: .unknown,
+                keepAccount: onSafeExit,
+                isPresented: .constant(true),
+                proofSafeExit: onSafeExit,
+                reservesFloatingDock: true
+            )
+        } else {
             SettingsDeletionConfirmationView(
                 subscriptionTruth: .unknown,
                 keepAccount: onSafeExit,
+                returnToReauthentication: { reauthenticating = true },
                 reservesFloatingDock: true
             )
         }
@@ -848,6 +889,10 @@ private struct SettingsReauthenticationView: View {
             SettingsDeletionConfirmationView(
                 subscriptionTruth: subscriptionTruth,
                 keepAccount: keepAccount,
+                // DEL-06r's exit. Dismissing the confirmation lands back on this
+                // screen, and `onChange` below already clears the code and sends
+                // a fresh one, which is what a second verification needs.
+                returnToReauthentication: { confirmed = false },
                 reservesFloatingDock: reservesFloatingDock
             )
         }
@@ -937,10 +982,301 @@ private struct SettingsReauthenticationView: View {
     }
 }
 
+/**
+ Issue #385. How the deletion route reaches a real server.
+
+ The default deletes nothing and says which kind of nothing. Reporting the same
+ refusal a real server produces would make an unwired build indistinguishable
+ from a server outage, and an unwired build is exactly how this issue shipped
+ the first time: every screen rendered, nothing was deleted, and the suite
+ stayed green because the tests injected dependencies directly.
+
+ The assertion is the second half of that. A debug or test run that reaches this
+ default has lost the environment somewhere between the settings route and the
+ tail, and it should stop there rather than render a plausible failure screen.
+ */
+private struct AccountDeletionDependenciesKey: EnvironmentKey {
+    static let defaultValue = AccountDeletionCoordinator.Dependencies(
+        requestErasure: { _ in
+            assertionFailure(
+                "Account deletion reached the unconfigured default. The settings route did not supply real dependencies."
+            )
+            return .notConfirmed(.clientNotConfigured)
+        },
+        clearDeviceState: { false },
+        signOut: { false },
+        newIdempotencyKey: { UUID().uuidString.lowercased() },
+        maximumStatusFollowUps: 0
+    )
+}
+
+extension EnvironmentValues {
+    var accountDeletionDependencies: AccountDeletionCoordinator.Dependencies {
+        get { self[AccountDeletionDependenciesKey.self] }
+        set { self[AccountDeletionDependenciesKey.self] = newValue }
+    }
+}
+
+/// Owns one deletion and renders whatever state it is in. The coordinator is
+/// created once per host so a redraw cannot start a second erasure.
+private struct SettingsDeletionTailHost: View {
+    let subscriptionTruth: SettingsDeletionSubscriptionTruth
+    let leave: () -> Void
+    var confirmIdentityAgain: (() -> Void)?
+    var reservesFloatingDock = false
+
+    @Environment(\.accountDeletionDependencies)
+    private var dependencies
+    @State private var coordinator: AccountDeletionCoordinator?
+
+    var body: some View {
+        SettingsDeletionTailView(
+            phase: coordinator?.phase ?? .requesting,
+            subscriptionTruth: subscriptionTruth,
+            retry: { Task { await coordinator?.retry() } },
+            leave: leave,
+            confirmIdentityAgain: confirmIdentityAgain ?? leave,
+            reservesFloatingDock: reservesFloatingDock
+        )
+        .task {
+            guard coordinator == nil else { return }
+            let coordinator = AccountDeletionCoordinator(
+                dependencies: dependencies
+            )
+            self.coordinator = coordinator
+            await coordinator.deleteAccount()
+        }
+    }
+}
+
+/**
+ Issue #385. DEL-04 through DEL-08, plus DEL-07f.
+
+ Copy is the approved package's candidate golden for each state, except DEL-08's
+ footnote: the package wrote it for a build that signs out when the seller taps
+ Done, and this build signs out before the state is shown, so the packaged
+ sentence would be false here. The package names DEL-08's terminal wording as
+ #384's to write, which is the authority this change is under.
+
+ DEL-07f has no golden. The package's DEL-07 assumed clearing succeeds, and a
+ device that will not give up its copies needs a state that says so rather than
+ borrowing DEL-06, whose two bullets ("Nothing on this iPhone has been cleared",
+ "could not confirm") would both be false here.
+ */
+private struct SettingsDeletionTailView: View {
+    let phase: AccountDeletionPhase
+    let subscriptionTruth: SettingsDeletionSubscriptionTruth
+    let retry: () -> Void
+    let leave: () -> Void
+    let confirmIdentityAgain: () -> Void
+    var reservesFloatingDock = false
+
+    var body: some View {
+        SettingsExplanationPage(title: heading, lead: lead) {
+            SettingsFactSection(title: "", bullets: bullets, usesBullets: false)
+        }
+        .navigationTitle(phase.reportsDeletion ? "SnapList" : "Delete account")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .safeAreaInset(edge: .bottom) {
+            tray.padding(
+                .bottom,
+                reservesFloatingDock
+                    ? SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+                    : 0
+            )
+        }
+        .accessibilityIdentifier(
+            "settings.state.\(phase.stateID.lowercased())"
+        )
+    }
+
+    private var heading: String {
+        switch phase {
+        case .confirming, .requesting: "Deleting your account"
+        case .unfinished: "This deletion has not finished"
+        case .stalled(.needsAttention): "This deletion stopped partway"
+        case .stalled(.keyConflict): "SnapList cannot continue this deletion"
+        case .stalled(.appNotConfigured): "This build cannot delete accounts"
+        case .failed: "The deletion did not finish"
+        case .reverificationExpired: "Confirm it is you again"
+        case .clearingDevice: "Clearing this iPhone"
+        case .deviceNotCleared: "This iPhone was not fully cleared"
+        case .deleted: "Your account is deleted"
+        }
+    }
+
+    private var lead: String {
+        switch phase {
+        case .confirming, .requesting:
+            "SnapList sent the request and is waiting for the server to report."
+        case .unfinished:
+            "SnapList sent your request and has not been told it finished."
+        case .stalled(.needsAttention):
+            "Your deletion started and stopped partway. Asking the server again may finish it."
+        case .stalled(.keyConflict):
+            "The server is already working on a deletion for this account that this iPhone cannot continue."
+        case .stalled(.appNotConfigured):
+            "This copy of SnapList was built without a way to reach the deletion service, so no request was sent."
+        case .failed:
+            "SnapList could not confirm that the server finished deleting this account."
+        case .reverificationExpired:
+            "Too much time passed since you confirmed your identity, so the server would not accept the request."
+        case .clearingDevice:
+            "The server reported that the deletion finished. SnapList is removing what is stored on this device."
+        case .deviceNotCleared:
+            "Your account is deleted. Some of what SnapList stored on this iPhone is still here."
+        case .deleted:
+            "The server reported the deletion as finished and this iPhone has been cleared. You are signed out."
+        }
+    }
+
+    private var bullets: [String] {
+        switch phase {
+        case .confirming, .requesting:
+            ["Nothing on this iPhone is cleared until the server reports that it finished."]
+        case .unfinished:
+            [
+                "SnapList can ask the server for the current state.",
+                "Nothing on this iPhone has been cleared.",
+            ]
+        case .stalled(.needsAttention):
+            [
+                "Some of your account may already be deleted, including your sign-in.",
+                "Nothing on this iPhone has been cleared.",
+            ]
+        case .stalled(.keyConflict):
+            [
+                "Nothing on this iPhone has been cleared.",
+                "Your account may still be deleted by the request already running.",
+            ]
+        case .stalled(.appNotConfigured):
+            [
+                "Nothing has been deleted and nothing on this iPhone has been cleared.",
+                "Your account is unchanged.",
+            ]
+        case .failed:
+            [
+                "Nothing on this iPhone has been cleared.",
+                "You can try again, or leave and come back to it.",
+            ]
+        case .reverificationExpired:
+            [
+                "Nothing has been deleted and nothing on this iPhone has been cleared.",
+                "Confirming your identity again returns you to the last step.",
+            ]
+        case .clearingDevice:
+            ["This step begins only after the server reported. It never runs beside the request."]
+        case .deviceNotCleared:
+            [
+                "Your account and its data are gone from SnapList's servers.",
+                "You are still signed in on this iPhone so that you can try the removal again.",
+            ]
+        case .deleted(let retainedRecords):
+            // Only what the server actually reported as retained. The packaged
+            // eBay line used to be unconditional, which asserted a live listing
+            // for a seller who had none and read as a near-duplicate for a
+            // seller who did. Its instruction now rides the retained record.
+            retainedRecords.map(\.sellerFacingCopy) + [subscriptionTruth.shortCopy]
+        }
+    }
+
+    @ViewBuilder private var tray: some View {
+        switch phase {
+        case .confirming, .requesting, .clearingDevice:
+            // Nothing the seller can usefully do, so no control pretends they can.
+            EmptyView()
+        case .unfinished:
+            SettingsActionTray(
+                primary: "Check the server again",
+                secondary: "Not now",
+                destructive: false,
+                primaryAction: retry,
+                secondaryAction: leave
+            )
+        case .stalled(let stall) where stall.allowsAnotherRequest:
+            // DEL-05's tray. The server does not treat this status as terminal,
+            // so the same key resumes the erasure rather than replaying an
+            // answer, and the seller's data is already gone by the time they
+            // read this. Taking the control away would strand them.
+            SettingsActionTray(
+                primary: "Check the server again",
+                secondary: "Not now",
+                destructive: false,
+                primaryAction: retry,
+                secondaryAction: leave
+            )
+        case .stalled:
+            // The remaining stalls answer the same way however many times they
+            // are asked, and a control that cannot work is worse than none.
+            SettingsActionTray(
+                primary: "Back to Settings",
+                secondary: nil,
+                destructive: false,
+                primaryAction: leave,
+                secondaryAction: leave
+            )
+        case .failed:
+            SettingsActionTray(
+                primary: "Try again",
+                secondary: "Back to Settings",
+                destructive: false,
+                primaryAction: retry,
+                secondaryAction: leave
+            )
+        case .reverificationExpired:
+            SettingsActionTray(
+                primary: "Confirm it is you",
+                secondary: "Back to Settings",
+                destructive: false,
+                primaryAction: confirmIdentityAgain,
+                secondaryAction: leave
+            )
+        case .deviceNotCleared:
+            SettingsActionTray(
+                primary: "Try removing it again",
+                secondary: "Not now",
+                destructive: false,
+                note: "Leaving now keeps you signed in so this can be finished later.",
+                primaryAction: retry,
+                secondaryAction: leave
+            )
+        case .deleted:
+            // One control. Passing an empty secondary label still rendered a
+            // 52pt tappable button with no name on it.
+            SettingsActionTray(
+                primary: "Done",
+                secondary: nil,
+                destructive: false,
+                note: "Done returns to the signed-out entry.",
+                primaryAction: leave,
+                secondaryAction: leave
+            )
+        }
+    }
+}
+
+private extension AccountErasureRetainedRecord {
+    /// What survived the erasure, named plainly. The server reports these as
+    /// part of a completed deletion, so leaving them unsaid would make a true
+    /// completion read as a wider one than it is.
+    var sellerFacingCopy: String {
+        switch self {
+        case .ebayLiveListing:
+            "A listing you published is still live on eBay. SnapList does not own it and cannot end it, so end it in eBay."
+        case .hostedTranscriptionProviderCopy:
+            "A transcription provider still holds its own copy of a voice note. SnapList has asked for its removal and cannot confirm it."
+        }
+    }
+}
+
 private struct SettingsDeletionConfirmationView: View {
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
     let keepAccount: () -> Void
+    var returnToReauthentication: (() -> Void)?
     var reservesFloatingDock = false
+
+    @State private var deleting = false
 
     var body: some View {
         SettingsExplanationPage(
@@ -948,6 +1284,7 @@ private struct SettingsDeletionConfirmationView: View {
             lead: "This is the last step. It deletes your SnapList account, your items, your photos and your drafts, and removes your eBay connection from SnapList."
         ) {
             SettingsFactSection(title: "", bullets: [
+                "It's you, confirmed a moment ago. Nothing is sent until you tap Delete account.",
                 "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
                 subscriptionTruth.shortCopy
             ], usesBullets: false)
@@ -955,37 +1292,45 @@ private struct SettingsDeletionConfirmationView: View {
         .navigationTitle("Delete account")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            SettingsConfirmationOnlyTray(keepAccount: keepAccount)
-                .padding(
-                    .bottom,
-                    reservesFloatingDock
-                        ? SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
-                        : 0
+            // The destructive control the screen's own copy promises. Until
+            // #385 this tray offered only "Keep my account", so a seller who
+            // read "This is the last step." and reauthenticated with a real
+            // credential had no way to finish and nothing happened.
+            VStack(spacing: 12) {
+                // Packaged DEL-03 footnote, and true of this build: the tap is
+                // the only thing that sends the request.
+                Text("Keep my account is the safe way out and it works right up to the tap.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, SnapListMetrics.screenGutter)
+                SettingsActionTray(
+                    primary: "Delete account",
+                    secondary: "Keep my account",
+                    destructive: true,
+                    primaryAction: { deleting = true },
+                    secondaryAction: keepAccount
                 )
+            }
+            .padding(
+                .bottom,
+                reservesFloatingDock
+                    ? SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+                    : 0
+            )
+        }
+        .navigationDestination(isPresented: $deleting) {
+            SettingsDeletionTailHost(
+                subscriptionTruth: subscriptionTruth,
+                leave: keepAccount,
+                confirmIdentityAgain: {
+                    deleting = false
+                    returnToReauthentication?()
+                },
+                reservesFloatingDock: reservesFloatingDock
+            )
         }
         .accessibilityIdentifier("settings.state.del-03")
-    }
-}
-
-private struct SettingsConfirmationOnlyTray: View {
-    let keepAccount: () -> Void
-
-    var body: some View {
-        Button(action: keepAccount) {
-            Text("Keep my account")
-                .font(.headline)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .background(
-            SnapListColorToken.action.color,
-            in: RoundedRectangle(cornerRadius: 18)
-        )
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(.bar)
     }
 }
 
@@ -1156,7 +1501,9 @@ private struct SettingsDeletionBoundarySection: View {
 
 private struct SettingsActionTray<Destination: View>: View {
     let primary: String
-    let secondary: String
+    /// `nil` when the state has one control. An empty string still rendered a
+    /// full-height unlabelled button, which is a tap target with no name.
+    let secondary: String?
     let destructive: Bool
     var disabled = false
     var note: String? = nil
@@ -1165,7 +1512,7 @@ private struct SettingsActionTray<Destination: View>: View {
     var destination: Destination?
 
     init(
-        primary: String, secondary: String, destructive: Bool,
+        primary: String, secondary: String?, destructive: Bool,
         disabled: Bool = false, note: String? = nil,
         primaryAction: @escaping () -> Void,
         secondaryAction: @escaping () -> Void,
@@ -1186,15 +1533,17 @@ private struct SettingsActionTray<Destination: View>: View {
                 Button(action: primaryAction) { primaryLabel }
                     .buttonStyle(.plain).disabled(disabled)
             }
-            Button(action: secondaryAction) {
-                Text(secondary)
-                    .font(.headline).foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .contentShape(.rect)
+            if let secondary {
+                Button(action: secondaryAction) {
+                    Text(secondary)
+                        .font(.headline).foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .background(commitsAccountDeletion ? SnapListColorToken.action.color : Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 18))
+                .foregroundStyle(commitsAccountDeletion ? .white : .primary)
             }
-            .buttonStyle(.plain)
-            .background(destructive && primary == "Delete account" ? SnapListColorToken.action.color : Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 18))
-            .foregroundStyle(destructive && primary == "Delete account" ? .white : .primary)
             if let note { Text(note).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center) }
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
@@ -1226,7 +1575,7 @@ private struct SettingsActionTray<Destination: View>: View {
 
 private extension SettingsActionTray where Destination == EmptyView {
     init(
-        primary: String, secondary: String, destructive: Bool,
+        primary: String, secondary: String?, destructive: Bool,
         disabled: Bool = false, note: String? = nil,
         primaryAction: @escaping () -> Void,
         secondaryAction: @escaping () -> Void
