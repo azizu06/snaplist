@@ -33,7 +33,7 @@ struct ActivationGuidanceCoachMark: View {
 
             Text(coachMark.copy)
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(coachMark.isDarkSurface ? .white : SnapListColorToken.inkPrimary.color)
+                .foregroundStyle(coachMark.isDarkSurface ? SnapListColorToken.onDarkSurface.color : SnapListColorToken.inkPrimary.color)
                 .fixedSize(horizontal: false, vertical: true)
 
             Button(action: dismiss) {
@@ -92,7 +92,7 @@ struct ActivationGuidanceCoachMark: View {
     private var dismissalColor: Color {
         // ACT-01 and ACT-06 sit on dark frosted camera glass. #7CA0FF is the
         // approved 6.9:1 exception; #3665F3 fails the 4.5:1 text floor there.
-        coachMark.isDarkSurface ? Color(hex: "#7CA0FF") : Color(hex: "#3665F3")
+        coachMark.isDarkSurface ? SnapListColorToken.actionOnDark.color : SnapListColorToken.action.color
     }
 
     @ViewBuilder
@@ -119,16 +119,16 @@ struct ActivationGuidanceCoachMark: View {
 
     private var background: some ShapeStyle {
         coachMark.isDarkSurface
-            ? AnyShapeStyle(Color(hex: "#1A1B20"))
-            : AnyShapeStyle(Color.white)
+            ? AnyShapeStyle(SnapListColorToken.coachMarkDarkFill.color)
+            : AnyShapeStyle(SnapListColorToken.canvas.color)
     }
 
     private var tailColor: Color {
-        coachMark.isDarkSurface ? Color(hex: "#24262A").opacity(0.82) : .white
+        coachMark.isDarkSurface ? SnapListColorToken.coachMarkDarkTail.color.opacity(0.82) : SnapListColorToken.canvas.color
     }
 
     private var borderColor: Color {
-        coachMark.isDarkSurface ? .white.opacity(0.16) : Color.black.opacity(0.08)
+        coachMark.isDarkSurface ? SnapListColorToken.onDarkSurface.color.opacity(0.16) : Color.black.opacity(0.08)
     }
 }
 

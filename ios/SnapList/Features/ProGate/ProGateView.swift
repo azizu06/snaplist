@@ -308,7 +308,7 @@ struct ProGateSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
-        .background(Color(hex: "#F5F6F7"))
+        .background(SnapListColorToken.mutedSurface.color)
         .clipShape(.rect(cornerRadius: 14))
         .accessibilityIdentifier("pro-gate.advisory")
     }
@@ -351,7 +351,7 @@ struct ProGateSheet: View {
         case .confirming:
             busyLabel("Confirming", size: bodySize)
                 .frame(maxWidth: .infinity, minHeight: 52)
-                .background(Color(hex: "#F5F6F7"))
+                .background(SnapListColorToken.mutedSurface.color)
                 .clipShape(.rect(cornerRadius: 15))
                 .accessibilityIdentifier("pro-gate.confirming")
         case .ready:
@@ -368,7 +368,7 @@ struct ProGateSheet: View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: actionSize, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .contentShape(.rect)
         }

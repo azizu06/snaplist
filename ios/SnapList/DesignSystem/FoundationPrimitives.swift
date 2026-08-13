@@ -11,7 +11,7 @@ struct SnapListPrimaryButton: View {
         Button(action: action) {
             Text(title)
                 .snapListTypography(.rowTitle)
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: SnapListMetrics.primaryButtonHeight)
                 .contentShape(.rect)
@@ -56,11 +56,11 @@ struct SnapListSecondaryButton: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .clipShape(.rect(cornerRadius: 25))
         .overlay {
             RoundedRectangle(cornerRadius: 25)
-                .stroke(Color(hex: "#D3D6DB"), lineWidth: 1)
+                .stroke(SnapListColorToken.inputBorder.color, lineWidth: 1)
         }
         .accessibilityIdentifier("button.secondary.\(title.accessibilitySlug)")
     }
@@ -83,9 +83,9 @@ enum SnapListChipVariant {
     var background: Color {
         switch self {
         case .info: SnapListColorToken.infoChipFill.color
-        case .evidenceStrong: Color(hex: "#EDF1FD")
+        case .evidenceStrong: SnapListColorToken.evidenceChipFill.color
         case .caution: SnapListColorToken.cautionFill.color
-        case .neutral: Color(hex: "#F2F3F5")
+        case .neutral: SnapListColorToken.neutralFill.color
         }
     }
 }
@@ -167,7 +167,7 @@ struct SnapListSellerRow: View {
             }
         }
         .padding(12)
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .clipShape(.rect(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)

@@ -1479,7 +1479,7 @@ private struct EbayCenteredActionScreen: View {
                             HStack(alignment: .top, spacing: 12) {
                                 if usesApprovedConnectVisuals {
                                     Circle()
-                                        .fill(Color(hex: "#4C63ED"))
+                                        .fill(SnapListColorToken.ebayAccent.color)
                                         .frame(width: 5, height: 5)
                                         .padding(.top, 6)
                                         .accessibilityHidden(true)
@@ -1557,13 +1557,13 @@ private struct EbayConnectPrimaryButton: View {
         Button(action: action) {
             Text(title)
                 .snapListTypography(.rowTitle)
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 52)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .background(Color(hex: "#4C63ED"))
+        .background(SnapListColorToken.ebayAccent.color)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("button.primary.continue-to-ebay")
     }
@@ -1577,13 +1577,13 @@ private struct EbayConfirmationPrimaryButton: View {
         Button(action: action) {
             Text(title)
                 .snapListTypography(.rowTitle)
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 52)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .background(Color(hex: "#4C63ED"))
+        .background(SnapListColorToken.ebayAccent.color)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("button.primary.post-to-ebay")
     }

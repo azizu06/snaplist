@@ -508,7 +508,7 @@ struct ListingReviewPhotoPager: View {
 
             Text("\(selectedOrdinal + 1) of \(photos.count)")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(.black.opacity(0.64), in: Capsule())
@@ -670,10 +670,10 @@ struct ListingReviewPendingStrip: View {
         }
         .padding(.horizontal, 18)
         .frame(minHeight: 44)
-        .background(Color(hex: "#F4F7FF"))
+        .background(SnapListColorToken.infoBannerFill.color)
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(Color(hex: "#E3EAFC"))
+                .fill(SnapListColorToken.infoBannerDivider.color)
                 .frame(height: 1)
         }
         .accessibilityElement(children: .combine)

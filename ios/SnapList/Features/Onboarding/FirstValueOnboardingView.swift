@@ -132,7 +132,7 @@ struct FirstValueOnboardingView: View {
                     Capsule()
                         .fill(screen.rawValue <= model.screen.rawValue
                             ? SnapListColorToken.inkPrimary.color
-                            : Color(hex: "#E2E4E8"))
+                            : SnapListColorToken.progressTrackInactive.color)
                         .frame(height: 4)
                 }
             }
@@ -303,10 +303,10 @@ struct FirstValueOnboardingView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
-        .background(.white, in: RoundedRectangle(cornerRadius: 18))
+        .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 18))
         .overlay {
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color(hex: "#ECEDF0"))
+                .stroke(SnapListColorToken.cardHairline.color)
         }
         .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
         .accessibilityElement(children: .combine)
@@ -357,7 +357,7 @@ struct FirstValueOnboardingView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                             .frame(width: 40, height: 40)
                             .background(SnapListColorToken.action.color, in: Circle())
                         FirstValueVoiceWaveform()
@@ -452,7 +452,7 @@ struct FirstValueOnboardingView: View {
                 Spacer()
             }
             .padding(12)
-            .background(Color(hex: "#F8FAFF"), in: RoundedRectangle(cornerRadius: 16))
+            .background(SnapListColorToken.onboardingHighlightFill.color, in: RoundedRectangle(cornerRadius: 16))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Your draft is ready. Four fields, written from your photos.")
 
@@ -469,11 +469,11 @@ struct FirstValueOnboardingView: View {
                 draftPriceRow
                 draftEditableRow("Description", "Four paragraphs")
             }
-            .background(.white)
+            .background(SnapListColorToken.canvas.color)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay {
                 RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color(hex: "#ECEDF0"))
+                    .stroke(SnapListColorToken.cardHairline.color)
             }
             .padding(.top, 16)
 
@@ -536,7 +536,7 @@ struct FirstValueOnboardingView: View {
                 .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(SnapListColorToken.action.color)
                 .frame(width: 42, height: 42)
-                .background(Color(hex: "#EEF3FF"), in: RoundedRectangle(cornerRadius: 13))
+                .background(SnapListColorToken.actionTint.color, in: RoundedRectangle(cornerRadius: 13))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.subheadline.weight(.semibold))
@@ -549,10 +549,10 @@ struct FirstValueOnboardingView: View {
         .padding(.top, 13)
         .padding(.bottom, 11)
         .frame(maxWidth: .infinity, minHeight: 116.5, alignment: .leading)
-        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+        .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 14))
         .overlay {
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color(hex: "#ECEDF0"), lineWidth: 1)
+                .stroke(SnapListColorToken.cardHairline.color, lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
     }
@@ -567,7 +567,7 @@ struct FirstValueOnboardingView: View {
             ) {
                 Text("No account needed, and you edit every field before anything leaves the app.")
                     .font(.system(size: 13))
-                    .foregroundStyle(Color(hex: "#3F4246"))
+                    .foregroundStyle(SnapListColorToken.mutedHeadlineText.color)
                     .padding(.leading, 12)
             }
         }
@@ -585,7 +585,7 @@ struct FirstValueOnboardingView: View {
                         .clipped()
                     Text("Included")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 6)
                         .background(SnapListColorToken.action.color, in: Capsule())
@@ -632,7 +632,7 @@ struct FirstValueOnboardingView: View {
             .frame(maxWidth: .infinity, alignment: .top)
             .frame(height: dynamicTypeSize.isAccessibilitySize ? nil : 67, alignment: .top)
         }
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .shadow(color: Color.black.opacity(0.18), radius: 16, y: 10)
     }
@@ -643,7 +643,7 @@ struct FirstValueOnboardingView: View {
                 finish(using: model.continueForward)
             }
             .font(.body.bold())
-            .foregroundStyle(.white)
+            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
             .frame(maxWidth: .infinity, minHeight: 52)
             .background(SnapListColorToken.action.color, in: RoundedRectangle(cornerRadius: 14))
             .accessibilityIdentifier(model.screen == .onb06
@@ -665,7 +665,7 @@ struct FirstValueOnboardingView: View {
         .padding(.horizontal, model.screen == .onb06 ? 20 : 24)
         .padding(.top, model.screen == .onb06 ? 10 : 12)
         .padding(.bottom, model.screen == .onb06 ? 0 : 8)
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .overlay(alignment: .top) { Divider() }
     }
 
@@ -751,7 +751,7 @@ struct FirstValueOnboardingView: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(label.uppercased()).font(.caption2.bold())
-                    .foregroundStyle(Color(hex: "#55585C"))
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
                 Text(value)
                     .font(.subheadline)
                     .lineLimit(1)
@@ -777,7 +777,7 @@ struct FirstValueOnboardingView: View {
             HStack {
                 Text("PRICE")
                     .font(.caption2.bold())
-                    .foregroundStyle(Color(hex: "#55585C"))
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
                 Spacer(minLength: 0)
                 Text("$58")
                     .font(.caption.weight(.semibold))
@@ -798,7 +798,7 @@ struct FirstValueOnboardingView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
-            .background(.white, in: RoundedRectangle(cornerRadius: 12))
+            .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 12))
             .overlay {
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(SnapListColorToken.action.color, lineWidth: 2)
@@ -820,7 +820,7 @@ struct FirstValueOnboardingView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Color(hex: "#F5F7FB"), in: RoundedRectangle(cornerRadius: 15))
+        .background(SnapListColorToken.summaryCardFill.color, in: RoundedRectangle(cornerRadius: 15))
         .accessibilityElement(children: .combine)
     }
 
@@ -828,8 +828,8 @@ struct FirstValueOnboardingView: View {
         content()
             .padding(16)
             .frame(maxWidth: .infinity)
-            .background(.white, in: RoundedRectangle(cornerRadius: 18))
-            .overlay { RoundedRectangle(cornerRadius: 18).stroke(Color(hex: "#ECEDF0")) }
+            .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 18))
+            .overlay { RoundedRectangle(cornerRadius: 18).stroke(SnapListColorToken.cardHairline.color) }
             .shadow(color: .black.opacity(0.05), radius: 14, y: 5)
     }
 }
@@ -871,7 +871,7 @@ struct BackgroundExampleRowView: View {
                 Text(row.item).font(.subheadline.weight(.semibold))
                 HStack(spacing: 7) {
                     Circle()
-                        .fill(Color(hex: "#85A8FF"))
+                        .fill(SnapListColorToken.accentDotLight.color)
                         .frame(width: 7, height: 7)
                         .accessibilityHidden(true)
                     Text(row.state).font(.system(size: 13))
@@ -882,10 +882,10 @@ struct BackgroundExampleRowView: View {
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 10.5)
-        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+        .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 14))
         .overlay {
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color(hex: "#ECEDF0"), lineWidth: 1)
+                .stroke(SnapListColorToken.cardHairline.color, lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
     }

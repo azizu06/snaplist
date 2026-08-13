@@ -74,7 +74,7 @@ struct VoiceNoteSheet: View {
 
             Button(action: {}) {
                 Capsule()
-                    .fill(Color(hex: "#D4D6DB"))
+                    .fill(SnapListColorToken.dragHandleMuted.color)
                     .frame(width: 36, height: 5)
                     .frame(width: 80, height: 32, alignment: .top)
                     .padding(.top, 20)
@@ -230,7 +230,7 @@ struct VoiceNoteSheet: View {
         } label: {
             Image(systemName: "mic.fill")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(
                     width: 52,
                     height: 52
@@ -290,7 +290,7 @@ struct VoiceNoteSheet: View {
                 } label: {
                     Image(systemName: "checkmark")
                         .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                         .frame(
                             width: 52,
                             height: 52
@@ -339,7 +339,7 @@ struct VoiceNoteSheet: View {
                             : "play.fill"
                     )
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                     .frame(
                         width: VoiceNotePresentation.compactSheetControlLayoutTarget,
                         height: VoiceNotePresentation.compactSheetControlLayoutTarget
@@ -410,7 +410,7 @@ struct VoiceNoteSheet: View {
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 24, weight: .regular))
-                        .foregroundStyle(Color(hex: "#A63224"))
+                        .foregroundStyle(SnapListColorToken.deleteIconTint.color)
                         .frame(
                             width: VoiceNotePresentation.compactSheetControlLayoutTarget,
                             height: VoiceNotePresentation.compactSheetControlLayoutTarget
@@ -568,7 +568,7 @@ private struct VoiceNoteWaveform: View {
                     }
                     let color = isLive
                         ? SnapListColorToken.inkPrimary.color
-                        : Color(hex: "#B5B7BC")
+                        : SnapListColorToken.waveformInactive.color
                     let barWidth: CGFloat = 4
                     let centerY = size.height / 2
                     let step = barHeights.count > 1

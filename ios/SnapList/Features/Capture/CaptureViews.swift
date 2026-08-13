@@ -20,7 +20,7 @@ struct CaptureLauncherSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             Capsule()
-                .fill(Color(hex: "#C7C9CD"))
+                .fill(SnapListColorToken.dragHandle.color)
                 .frame(width: 38, height: 5)
                 .padding(.top, 8)
 
@@ -60,7 +60,7 @@ struct CaptureLauncherSheet: View {
             }
             .scrollIndicators(.hidden)
         }
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(SnapListMetrics.sheetRadius)
         .presentationDetents([.height(640)])
@@ -208,7 +208,7 @@ private struct CaptureOptionRow: View {
             Image(systemName: systemImage)
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(
-                    isPrimary ? .white : SnapListColorToken.textSecondary.color
+                    isPrimary ? SnapListColorToken.onDarkSurface.color : SnapListColorToken.textSecondary.color
                 )
                 .frame(width: 42, height: 42)
                 .background(
@@ -247,7 +247,7 @@ private struct CaptureOptionRow: View {
         }
         .padding(.horizontal, isPrimary ? 10 : 8)
         .frame(minHeight: isPrimary ? 64 : 60)
-        .background(isPrimary ? Color(hex: "#F5F8FF") : .white)
+        .background(isPrimary ? SnapListColorToken.subtleActionFill.color : SnapListColorToken.canvas.color)
         .clipShape(.rect(cornerRadius: isPrimary ? 14 : 0))
         .overlay {
             if isPrimary {
@@ -291,9 +291,9 @@ struct ScanCameraView: View {
                 liveSurface
             case .idle, .requestingPermission:
                 ZStack {
-                    Color(hex: "#0B0C0E").ignoresSafeArea()
+                    SnapListColorToken.cameraSurface.color.ignoresSafeArea()
                     ProgressView()
-                        .tint(.white)
+                        .tint(SnapListColorToken.onDarkSurface.color)
                         .accessibilityLabel("Preparing camera")
                 }
             }
@@ -482,18 +482,18 @@ private struct ScanLibraryLabel: View {
             case .icon:
                 Image(systemName: "photo")
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                     .frame(width: 48, height: 48)
-                    .background(Color(hex: "#14161A").opacity(0.66))
-                    .overlay { Circle().stroke(.white.opacity(0.12), lineWidth: 1) }
+                    .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
+                    .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
                     .clipShape(.circle)
             case .recovery:
                 Text("Choose from library")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                     .padding(.horizontal, 22)
                     .frame(minWidth: 210, minHeight: 48)
-                    .background(Color(hex: "#3665F3"))
+                    .background(SnapListColorToken.action.color)
                     .clipShape(.rect(cornerRadius: 14))
             }
         }
@@ -545,12 +545,12 @@ private struct ScanReviewButton: View {
     var body: some View {
         Button("Review", action: review)
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
             .padding(.horizontal, 18)
             .frame(minHeight: 48)
-            .background(Color(hex: "#3665F3"))
+            .background(SnapListColorToken.action.color)
             .clipShape(.capsule)
-            .shadow(color: Color(hex: "#3665F3").opacity(0.28), radius: 12, y: 6)
+            .shadow(color: SnapListColorToken.action.color.opacity(0.28), radius: 12, y: 6)
             .accessibilityLabel(
                 photoCount == 1
                     ? "Review 1 photo"
@@ -673,7 +673,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             .safeAreaPadding(.top, 2)
             .safeAreaPadding(.bottom, 30)
         }
-        .background(Color(hex: "#0B0C0E").ignoresSafeArea())
+        .background(SnapListColorToken.cameraSurface.color.ignoresSafeArea())
         .animation(
             reduceMotion ? nil : .easeOut(duration: 0.18),
             value: thumbnailURLs.count
@@ -684,10 +684,10 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         Button(action: close) {
             Image(systemName: "xmark")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(width: 44, height: 44)
-                .background(Color(hex: "#14161A").opacity(0.66))
-                .overlay { Circle().stroke(.white.opacity(0.12), lineWidth: 1) }
+                .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
+                .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
                 .clipShape(.circle)
                 .accessibilityHidden(true)
         }
@@ -704,10 +704,10 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         Button(action: toggleFlash) {
             Image(systemName: flashMode == .on ? "bolt.fill" : "bolt.slash")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .frame(width: 44, height: 44)
-                .background(Color(hex: "#14161A").opacity(0.66))
-                .overlay { Circle().stroke(.white.opacity(0.12), lineWidth: 1) }
+                .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
+                .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.12), lineWidth: 1) }
                 .clipShape(.circle)
                 .accessibilityHidden(true)
         }
@@ -745,10 +745,10 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             Button(action: takePhoto) {
                 ZStack {
                     Circle()
-                        .stroke(.white, lineWidth: 3)
+                        .stroke(SnapListColorToken.onDarkSurface.color, lineWidth: 3)
                         .frame(width: 72, height: 72)
                     Circle()
-                        .fill(.white)
+                        .fill(SnapListColorToken.canvas.color)
                         .frame(width: 56, height: 56)
                 }
                 .frame(width: 72, height: 72)
@@ -787,30 +787,30 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
 
     var body: some View {
         ZStack {
-            Color(hex: "#0B0C0E").ignoresSafeArea()
+            SnapListColorToken.cameraSurface.color.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()
                 VStack(spacing: 14) {
                     Image(systemName: "camera.fill")
                         .font(.system(size: 39, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color.opacity(0.85))
                         .frame(width: 52, height: 52)
                         .overlay {
                             Capsule()
-                                .fill(.white.opacity(0.85))
+                                .fill(SnapListColorToken.onDarkSurface.color.opacity(0.85))
                                 .frame(width: 2, height: 62)
                                 .rotationEffect(.degrees(-45))
                         }
                         .accessibilityHidden(true)
                     Text(mode.title)
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                         .multilineTextAlignment(.center)
                         .accessibilityIdentifier("scan.recovery-title")
                     Text(mode.body)
                         .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.78))
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color.opacity(0.78))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                     VStack(spacing: 6) {
@@ -818,7 +818,7 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
                         if mode == .denied {
                             Button("Open Settings", action: openSettings)
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color(hex: "#8FB2FF"))
+                                .foregroundStyle(SnapListColorToken.settingsLinkOnDark.color)
                                 .padding(.horizontal, 16)
                                 .frame(minWidth: 44, minHeight: 44)
                                 .accessibilityIdentifier("scan.open-settings")
@@ -868,10 +868,10 @@ private struct ScanPhotoProgressRow: View {
             Spacer(minLength: 8)
             Text("\(thumbnailURLs.count) of 5")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .padding(.horizontal, 15)
                 .frame(minWidth: 60, minHeight: 34)
-                .background(Color(hex: "#14161A").opacity(0.66))
+                .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
                 .clipShape(.capsule)
                 .accessibilityIdentifier("scan.photo-count")
                 .accessibilitySortPriority(69)
@@ -896,7 +896,7 @@ private struct ScanPhotoThumbnail: View {
         }
         .frame(width: 34, height: 43)
         .clipShape(.rect(cornerRadius: 6))
-        .overlay { RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.9), lineWidth: 1) }
+        .overlay { RoundedRectangle(cornerRadius: 6).stroke(SnapListColorToken.onDarkSurface.color.opacity(0.9), lineWidth: 1) }
         .shadow(color: .black.opacity(0.28), radius: 4, y: 3)
         .accessibilityIdentifier("scan.photo-\(index + 1)")
         .accessibilityLabel("Photo \(index + 1) of \(count)")
@@ -910,7 +910,7 @@ private struct ScanPhotoPlaceholder: View {
         Canvas { context, size in
             context.fill(
                 Path(CGRect(origin: .zero, size: size)),
-                with: .color(Color(hex: "#E3E5E8"))
+                with: .color(SnapListColorToken.neutralOutline.color)
             )
 
             for offset in stride(from: -size.height, through: size.width, by: 11) {
@@ -919,7 +919,7 @@ private struct ScanPhotoPlaceholder: View {
                 stripe.addLine(to: CGPoint(x: offset + size.height, y: 0))
                 context.stroke(
                     stripe,
-                    with: .color(Color(hex: "#CCD0D5").opacity(0.72)),
+                    with: .color(SnapListColorToken.placeholderStripe.color.opacity(0.72)),
                     lineWidth: 5
                 )
             }
@@ -933,7 +933,7 @@ private struct ScanPhotoPlaceholder: View {
 /// has no subject or image content so it cannot be mistaken for device camera output.
 private struct ScanCameraFixturePreview: View {
     var body: some View {
-        Color(hex: "#282B31")
+        SnapListColorToken.cameraFixturePreview.color
             .ignoresSafeArea()
             .accessibilityHidden(true)
     }
@@ -1032,7 +1032,7 @@ struct LocalCaptureImage: View {
                     .resizable()
                     .accessibilityLabel("Staged item photo")
             } else {
-                Color(hex: "#E9EAEC")
+                SnapListColorToken.imagePlaceholderFill.color
                     .overlay {
                         Image(systemName: "photo")
                             .foregroundStyle(SnapListColorToken.textTertiary.color)
@@ -1100,7 +1100,7 @@ private struct FramingCorners: View {
     var body: some View {
         Canvas { context, size in
             let lineWidth: CGFloat = 2
-            let color = Color.white.opacity(0.86)
+            let color = SnapListColorToken.onDarkSurface.color.opacity(0.86)
             var path = Path()
 
             path.move(to: CGPoint(x: 0, y: length))
@@ -1150,7 +1150,7 @@ struct CaptureVisualStateView: View {
         case .captureLauncher:
             ZStack(alignment: .bottom) {
                 CaptureFixtureHomeBackdrop()
-                Color(hex: "#101214").opacity(0.42).ignoresSafeArea()
+                SnapListColorToken.scrimOverlay.color.opacity(0.42).ignoresSafeArea()
                 CaptureLauncherFixture()
             }
         case .captureCoaching:
@@ -1194,7 +1194,7 @@ private struct CaptureFixtureHomeBackdrop: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 58)
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .accessibilityIdentifier("visual.capture.home-preserved")
     }
 }
@@ -1202,7 +1202,7 @@ private struct CaptureFixtureHomeBackdrop: View {
 private struct CaptureLauncherFixture: View {
     var body: some View {
         VStack(spacing: 0) {
-            Capsule().fill(Color(hex: "#C7C9CD")).frame(width: 38, height: 5).padding(.top, 8)
+            Capsule().fill(SnapListColorToken.dragHandle.color).frame(width: 38, height: 5).padding(.top, 8)
             HStack {
                 Image(systemName: "xmark")
                     .frame(width: 44, height: 44)
@@ -1238,7 +1238,7 @@ private struct CaptureLauncherFixture: View {
             .padding(.bottom, 14)
         }
         .frame(height: 680, alignment: .top)
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .clipShape(.rect(topLeadingRadius: 26, topTrailingRadius: 26))
         .accessibilityIdentifier("visual-state.CAP-01")
     }
@@ -1260,14 +1260,14 @@ private struct CameraFixtureSurface: View {
             VStack {
                 HStack {
                     Image(systemName: "xmark")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                         .frame(width: 44, height: 44)
                         .background(.black.opacity(0.38))
                         .clipShape(.circle)
                     Spacer()
                     Label(captured ? "1 of 4 photos" : "Auto", systemImage: captured ? "photo.stack" : "bolt.slash.fill")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                         .padding(.horizontal, 12)
                         .frame(minHeight: 44)
                         .background(.ultraThinMaterial)
@@ -1276,7 +1276,7 @@ private struct CameraFixtureSurface: View {
                         Spacer()
                         Image(systemName: "bolt.slash.fill")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                             .frame(width: 44, height: 44)
                             .background(.ultraThinMaterial)
                             .clipShape(.circle)
@@ -1291,12 +1291,12 @@ private struct CameraFixtureSurface: View {
                             .resizable().scaledToFit().frame(width: 82, height: 82)
                         Text("Start with one clear photo. Add angles, labels, or damage for a stronger match.")
                             .font(.system(size: 13, weight: .medium))
-                            .padding(14).background(.white).clipShape(.rect(cornerRadius: 16))
+                            .padding(14).background(SnapListColorToken.canvas.color).clipShape(.rect(cornerRadius: 16))
                     }
                 } else if let cue = guidance.cue {
                     Label(cue, systemImage: guidance.systemImage)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(SnapListColorToken.onDarkSurface.color)
                         .padding(.horizontal, 16)
                         .frame(minHeight: 44)
                         .background(SnapListColorToken.action.color.opacity(0.48))
@@ -1305,12 +1305,12 @@ private struct CameraFixtureSurface: View {
                 }
                 if !captured {
                     Text("Tap the scene to update positioning")
-                        .font(.caption).foregroundStyle(.white.opacity(0.7))
+                        .font(.caption).foregroundStyle(SnapListColorToken.onDarkSurface.color.opacity(0.7))
                     HStack {
-                        Image(systemName: "photo").foregroundStyle(.white).frame(width: 44, height: 44)
+                        Image(systemName: "photo").foregroundStyle(SnapListColorToken.onDarkSurface.color).frame(width: 44, height: 44)
                         Spacer()
-                        Circle().fill(.white).frame(width: 68, height: 68)
-                            .overlay { Circle().stroke(.white.opacity(0.8), lineWidth: 4).padding(-5) }
+                        Circle().fill(SnapListColorToken.canvas.color).frame(width: 68, height: 68)
+                            .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.8), lineWidth: 4).padding(-5) }
                         Spacer()
                         Color.clear.frame(width: 44, height: 44)
                     }
@@ -1345,11 +1345,11 @@ private struct CameraFixtureSurface: View {
                 Text("Add angles, labels, or damage — or continue.").font(.caption)
             }
             Spacer()
-            Text("Continue").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+            Text("Continue").font(.subheadline.weight(.semibold)).foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .padding(.horizontal, 16).frame(minHeight: 44)
                 .background(SnapListColorToken.action.color).clipShape(.capsule)
         }
-        .padding(12).background(.white).clipShape(.rect(cornerRadius: 16))
+        .padding(12).background(SnapListColorToken.canvas.color).clipShape(.rect(cornerRadius: 16))
     }
 }
 
@@ -1360,21 +1360,21 @@ private struct FixtureItemScene: View {
         GeometryReader { proxy in
             ZStack {
                 LinearGradient(
-                    colors: [Color(hex: "#F7F7F7"), Color(hex: "#D4D5D8")],
+                    colors: [SnapListColorToken.groupingFill.color, SnapListColorToken.fixtureSceneGradientEnd.color],
                     startPoint: .top,
                     endPoint: .bottom
                 )
                 VStack(spacing: 0) {
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(hex: "#25272A"))
+                        .fill(SnapListColorToken.fixtureSubjectFill.color)
                         .frame(width: 58, height: 82)
                         .overlay {
                             RoundedRectangle(cornerRadius: 7)
-                                .stroke(Color(hex: "#A7A9AD"), lineWidth: 3)
+                                .stroke(SnapListColorToken.fixtureSubjectOutline.color, lineWidth: 3)
                                 .padding(6)
                         }
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(hex: "#303236"))
+                        .fill(SnapListColorToken.fixtureSubjectShadow.color)
                         .frame(width: 34, height: 74)
                 }
                 .scaleEffect(subjectScale)
@@ -1399,7 +1399,7 @@ private struct CaptureHandoffFixture: View {
                 FixtureItemScene(subjectScale: 0.84)
                     .frame(width: 82, height: 82).clipShape(.rect(cornerRadius: 18))
                     .shadow(color: .black.opacity(0.16), radius: 16, y: 8)
-                Text("1").font(.caption2.bold()).foregroundStyle(.white).frame(width: 22, height: 22)
+                Text("1").font(.caption2.bold()).foregroundStyle(SnapListColorToken.onDarkSurface.color).frame(width: 22, height: 22)
                     .background(SnapListColorToken.action.color).clipShape(.circle).offset(x: 7, y: 7)
             }
             Text("Photos ready to review").snapListTypography(.cardTitle).padding(.top, 24)
@@ -1407,7 +1407,7 @@ private struct CaptureHandoffFixture: View {
                 .font(.subheadline).foregroundStyle(SnapListColorToken.textSecondary.color)
                 .multilineTextAlignment(.center).padding(.horizontal, 42).padding(.top, 8)
             Label("Open photo review", systemImage: "chevron.right")
-                .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(SnapListColorToken.onDarkSurface.color)
                 .padding(.horizontal, 20).frame(minHeight: 50)
                 .background(SnapListColorToken.action.color).clipShape(.capsule).padding(.top, 22)
             Text("Back to camera").font(.subheadline.weight(.semibold))
@@ -1417,7 +1417,7 @@ private struct CaptureHandoffFixture: View {
                 .multilineTextAlignment(.center).padding(.horizontal, 36).padding(.top, 12)
             Spacer()
         }
-        .padding(.top, 46).padding(.bottom, 28).background(.white)
+        .padding(.top, 46).padding(.bottom, 28).background(SnapListColorToken.canvas.color)
         .accessibilityIdentifier("visual-state.CAP-03-handoff")
     }
 }

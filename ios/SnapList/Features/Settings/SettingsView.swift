@@ -244,7 +244,7 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .background(Color(hex: "#F5F6F7"))
+        .background(SnapListColorToken.mutedSurface.color)
         .alert(
             "Couldn’t update analytics sharing",
             isPresented: analyticsConsentErrorBinding
@@ -273,7 +273,7 @@ struct SettingsView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
                 .frame(width: 46, height: 46)
-                .background(Color(hex: "#E7E9EC"), in: Circle())
+                .background(SnapListColorToken.avatarBackground.color, in: Circle())
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.name).font(.headline)
                 Text(profile.email).foregroundStyle(.secondary)
@@ -281,7 +281,7 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, minHeight: 74, maxHeight: 74, alignment: .leading)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -477,7 +477,7 @@ struct SettingsView: View {
             if isSettingsHubProof {
                 Text(presentation.stateID)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(Color(hex: "#8A6D3B"))
+                    .foregroundStyle(SnapListColorToken.debugProofText.color)
             }
         }
         .font(.subheadline.weight(.medium))
@@ -491,7 +491,7 @@ struct SettingsView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(spacing: 0, content: content)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private func settingsCardRow<Content: View>(
@@ -718,7 +718,7 @@ private struct SettingsDeletionHeader: View {
         }
         .padding(.horizontal, 20)
         .frame(height: 56)
-        .background(Color.white)
+        .background(SnapListColorToken.canvas.color)
         .overlay(alignment: .bottom) { Divider() }
     }
 }
@@ -755,7 +755,7 @@ private struct SettingsDeletionConsequencesView: View {
                         "Your price research and anything SnapList generated for you",
                         "Your eBay connection, removed from SnapList"
                     ],
-                    bulletColor: Color(hex: "#B42318"),
+                    bulletColor: SnapListColorToken.destructiveText.color,
                     rowFont: .system(size: 15),
                     rowVerticalPadding: 15.5,
                     rowHorizontalPadding: 12,
@@ -770,7 +770,7 @@ private struct SettingsDeletionConsequencesView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }
-        .background(Color.white.ignoresSafeArea(edges: .top))
+        .background(SnapListColorToken.canvas.color.ignoresSafeArea(edges: .top))
         .toolbar(.hidden, for: .navigationBar)
         .manageSubscriptionsSheet(isPresented: $managesSubscription)
         .safeAreaInset(edge: .bottom) {
@@ -844,11 +844,11 @@ private struct SettingsReauthenticationView: View {
                 email: profile.email
             ) {
                 Text(failureCopy)
-                    .padding().background(Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 14))
+                    .padding().background(SnapListColorToken.neutralFill.color, in: RoundedRectangle(cornerRadius: 14))
                     .accessibilityFocused($errorFocused)
             } else if failed {
                 Text("That did not confirm it was you. Nothing has been deleted. You can try again.")
-                    .padding().background(Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 14))
+                    .padding().background(SnapListColorToken.neutralFill.color, in: RoundedRectangle(cornerRadius: 14))
                     .accessibilityFocused($errorFocused)
             }
             if profile.method == .apple {
@@ -1348,14 +1348,14 @@ private struct SettingsEmailCodeField: View {
                         : "")
                         .font(.title2.bold())
                         .frame(maxWidth: .infinity, minHeight: 56)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                        .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 12))
                         .overlay {
                             let isActive = isFocused.wrappedValue
                                 && presentation.focusedBoxIndex == index
                             RoundedRectangle(cornerRadius: 12).stroke(
                                 isActive
                                     ? SnapListColorToken.action.color
-                                    : Color(hex: "#D6D8DC"),
+                                    : SnapListColorToken.otpInactiveBorder.color,
                                 lineWidth: isActive ? 2 : 1
                             )
                         }
@@ -1415,7 +1415,7 @@ private struct SettingsExplanationPage<Content: View>: View {
             .padding(.horizontal, horizontalPadding)
             .padding(.vertical, verticalPadding)
         }
-        .background(Color(hex: "#F5F6F7"))
+        .background(SnapListColorToken.mutedSurface.color)
         .onAppear { headingFocused = true }
     }
 }
@@ -1424,7 +1424,7 @@ private struct SettingsFactSection: View {
     let title: String
     let bullets: [String]
     var usesBullets = true
-    var bulletColor = Color(hex: "#8A8E94")
+    var bulletColor = SnapListColorToken.bulletNeutral.color
     var rowFont: Font = .body
     var rowVerticalPadding: CGFloat = 13
     var rowHorizontalPadding: CGFloat = 14
@@ -1450,8 +1450,8 @@ private struct SettingsFactSection: View {
                 }
             }
             .padding(.horizontal, rowHorizontalPadding)
-            .background(.white, in: RoundedRectangle(cornerRadius: 14))
-            .overlay { RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "#E3E5E8")) }
+            .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 14))
+            .overlay { RoundedRectangle(cornerRadius: 14).stroke(SnapListColorToken.neutralOutline.color) }
         }
     }
 }
@@ -1476,10 +1476,10 @@ private struct SettingsDeletionBoundarySection: View {
                     body: subscriptionCopy
                 )
             }
-            .background(.white, in: RoundedRectangle(cornerRadius: 14))
+            .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 14))
             .overlay {
                 RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color(hex: "#E3E5E8"))
+                    .stroke(SnapListColorToken.neutralOutline.color)
             }
         }
     }
@@ -1541,8 +1541,8 @@ private struct SettingsActionTray<Destination: View>: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .background(commitsAccountDeletion ? SnapListColorToken.action.color : Color(hex: "#F2F3F5"), in: RoundedRectangle(cornerRadius: 18))
-                .foregroundStyle(commitsAccountDeletion ? .white : .primary)
+                .background(commitsAccountDeletion ? SnapListColorToken.action.color : SnapListColorToken.neutralFill.color, in: RoundedRectangle(cornerRadius: 18))
+                .foregroundStyle(commitsAccountDeletion ? SnapListColorToken.onDarkSurface.color : .primary)
             }
             if let note { Text(note).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center) }
         }
@@ -1556,17 +1556,17 @@ private struct SettingsActionTray<Destination: View>: View {
 
     private var primaryLabel: some View {
         Text(primary).font(.headline)
-            .foregroundStyle(destructive ? Color(hex: "#B42318") : .white)
+            .foregroundStyle(destructive ? SnapListColorToken.destructiveText.color : SnapListColorToken.onDarkSurface.color)
             .frame(maxWidth: .infinity, minHeight: 52)
             .background(
                 commitsAccountDeletion
-                    ? Color.white
+                    ? SnapListColorToken.canvas.color
                     : destructive ? Color.clear : SnapListColorToken.action.color,
                 in: RoundedRectangle(cornerRadius: 18)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 18).stroke(
-                    commitsAccountDeletion ? Color(hex: "#E4B9B4") : .clear,
+                    commitsAccountDeletion ? SnapListColorToken.destructiveBorder.color : .clear,
                     lineWidth: 1
                 )
             }

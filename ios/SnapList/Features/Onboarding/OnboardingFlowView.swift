@@ -223,7 +223,7 @@ struct OnboardingFlowView: View {
                                 expandedIndex: $expandedAllowance
                             )
                         }
-                        .background(.white)
+                        .background(SnapListColorToken.canvas.color)
                         .clipShape(.rect(cornerRadius: 16))
                         .overlay {
                             RoundedRectangle(cornerRadius: 16)
@@ -698,7 +698,7 @@ private struct OnboardingBottomTray<Content: View>: View {
         .padding(.top, 10)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .overlay(alignment: .top) {
             Divider().foregroundStyle(SnapListColorToken.divider.color)
         }
@@ -725,7 +725,7 @@ private struct OnboardingPrimaryAction: View {
                 }
             }
             .font(.system(size: 16, weight: .bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
             .frame(maxWidth: .infinity)
             .frame(minHeight: SnapListMetrics.primaryButtonHeight)
             .contentShape(.rect)
@@ -749,11 +749,11 @@ private struct OnboardingSecondaryAction: View {
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .background(.white)
+        .background(SnapListColorToken.canvas.color)
         .clipShape(.rect(cornerRadius: 25))
         .overlay {
             RoundedRectangle(cornerRadius: 25)
-                .stroke(Color(hex: "#D3D6DB"), lineWidth: 1)
+                .stroke(SnapListColorToken.inputBorder.color, lineWidth: 1)
         }
     }
 }
