@@ -6,12 +6,15 @@ import {
   randomUUID as secureRandomUUID,
 } from "node:crypto";
 import type { AppAttestVerificationResult } from "@/lib/app-attest/service";
-import { GUEST_CAPABILITY_TOKEN_PREFIX } from "./token-prefix";
+import {
+  GUEST_CAPABILITY_TOKEN_PREFIX,
+  guestCapabilityBearerTokenPattern,
+} from "./token-prefix";
 
 const CAPABILITY_LIFETIME_MS = 30 * 60 * 1_000;
 const REFRESH_WINDOW_MS = 5 * 60 * 1_000;
-const BEARER_TOKEN_PATTERN = new RegExp(
-  `^${GUEST_CAPABILITY_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`,
+const BEARER_TOKEN_PATTERN = guestCapabilityBearerTokenPattern(
+  GUEST_CAPABILITY_TOKEN_PREFIX,
 );
 
 export interface VerifiedGuestCapabilityAuthority {
