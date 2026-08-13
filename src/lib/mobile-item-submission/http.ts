@@ -40,11 +40,18 @@ function bearerToken(request: Request): string | null {
   return token.length > 0 ? token : null;
 }
 
+// This route has no auth middleware or rate limiting in front of it, so an
+// unauthenticated caller can loop token-less requests indefinitely (#810).
+// Reporting the first occurrence keeps the #803 evidence; sampling the rest
+// bounds the log volume such a loop can drive without going silent again.
+const NO_TOKEN_REPORT_SAMPLE_INTERVAL = 100;
+
 /** Public web-standard POST /v1/items/runs transport seam. */
 export function createMobileItemSubmissionHandler(
   dependencies: MobileItemSubmissionHttpDependencies,
 ): (request: Request) => Promise<Response> {
   const nextRequestId = dependencies.requestId ?? (() => crypto.randomUUID());
+  let noTokenOccurrences = 0;
   return async (request) => {
     const requestId = nextRequestId();
     if (request.method !== "POST") {
@@ -55,10 +62,13 @@ export function createMobileItemSubmissionHandler(
       // The sibling `401` below has always been reported. This one refuses the
       // request before the principal resolver ever runs, so it left no record
       // at all — the server half of the silence #803 captured on device.
-      dependencies.reportError?.(
-        "mobile-item-submission.authenticate",
-        new Error("Submission carried no bearer credential."),
-      );
+      noTokenOccurrences += 1;
+      if (noTokenOccurrences === 1 || noTokenOccurrences % NO_TOKEN_REPORT_SAMPLE_INTERVAL === 0) {
+        dependencies.reportError?.(
+          "mobile-item-submission.authenticate",
+          new Error("Submission carried no bearer credential."),
+        );
+      }
       return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
     }
     const idempotencyKey = z.string().uuid().safeParse(

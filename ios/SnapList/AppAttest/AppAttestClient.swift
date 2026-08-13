@@ -31,6 +31,13 @@ struct AppAttestStoredKey: Codable, Equatable, Sendable {
     let state: AppAttestKeyVerificationState
 }
 
+/// Issue #810. The single client-side literal recognizing a guest capability
+/// bearer by shape. The server mints it in `guest-capability/service.ts`;
+/// a cross-language test keeps the two boundaries synchronized.
+enum GuestCapabilityToken {
+    static let prefix = "guestcap_"
+}
+
 /**
  Issue #727. The server-issued capability a verified assertion earns, which is
  the only credential a signed-out seller has.

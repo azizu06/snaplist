@@ -216,6 +216,7 @@ src/lib/guest-capability/service.ts
 src/lib/guest-capability/signer.testing.ts
 src/lib/guest-capability/signer.ts
 src/lib/guest-capability/supabase-store.ts
+src/lib/guest-capability/token-prefix.ts
 src/lib/guest-recovery/decryption-keyring.ts
 src/lib/guest-recovery/index.ts
 src/lib/guest-recovery/internal.ts

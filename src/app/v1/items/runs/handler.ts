@@ -1,5 +1,6 @@
 import { verifyToken } from "@clerk/nextjs/server";
 import { createConfiguredVerifiedGuestPrincipalResolver } from "@/lib/guest-capability/configured";
+import { GUEST_CAPABILITY_TOKEN_PREFIX } from "@/lib/guest-capability/token-prefix";
 import { createConfiguredMobileItemSubmissionOperations } from "@/lib/mobile-item-submission/configured";
 import { createMobileItemSubmissionHandler } from "@/lib/mobile-item-submission/http";
 
@@ -25,7 +26,7 @@ const handler = createMobileItemSubmissionHandler({
   },
   itemSubmission: {
     async resolvePrincipal(bearerToken) {
-      if (bearerToken.startsWith("guestcap_")) {
+      if (bearerToken.startsWith(GUEST_CAPABILITY_TOKEN_PREFIX)) {
         const { secretKey, supabaseURL } = supabaseConfiguration();
         const keyId = process.env.SUPABASE_GUEST_JWT_KEY_ID?.trim();
         const privateKeyPem = process.env.SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM?.trim();

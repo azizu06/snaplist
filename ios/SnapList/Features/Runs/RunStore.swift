@@ -92,7 +92,7 @@ final class RunDetailStore {
                   review.binding.listingID == listingID else {
                 return nil
             }
-            guard token.hasPrefix("guestcap_") else {
+            guard token.hasPrefix(GuestCapabilityToken.prefix) else {
                 return .listingReview(review)
             }
             guard run.status == .succeeded,
@@ -243,7 +243,7 @@ final class RunDetailStore {
             guard run.id == runID else { throw RunAPIError.invalidResponse }
             if let credential = try await guestRecoveryCredentials
                 .credential(runID: runID) {
-                if !token.hasPrefix("guestcap_") {
+                if !token.hasPrefix(GuestCapabilityToken.prefix) {
                     try await guestClaimAuthorities.purge(
                         recoveryID: credential.recoveryID
                     )
