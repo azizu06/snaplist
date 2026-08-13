@@ -371,7 +371,30 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
         )
     }
 
-    func testAStepReadsWhatItRemovesWhenItRuns() async {
+    /// #819 item 4. Renamed from `testAStepReadsWhatItRemovesWhenItRuns`, which
+    /// named a defect it does not cover.
+    ///
+    /// What this pins is `steps(removeIntake:removeCachedItems:)` storing the
+    /// removal itself rather than its result: the closure runs when `clear`
+    /// runs, so it observes whatever the seller left behind at that moment.
+    ///
+    /// What it does not pin is the call site. The defect the old name described
+    /// lives at `AppShellView.swift:746`, where the intake version is read
+    /// inside the closure rather than captured when the property is evaluated.
+    /// Reverting that line to a render-time capture leaves this test, the whole
+    /// unit suite and `AccountDeletionUITests` green, because the UI tests run
+    /// `AccountDeletionComposition.fixture`, which never calls `removeIntake`
+    /// at all. Pinning it needs the shell's dependency assembly to be reachable
+    /// from a test, which is more than a rename.
+    ///
+    /// Be clear about what is left, too: the assertion below cannot be made to
+    /// fail by any edit to `steps`. It is a synchronous factory over
+    /// `@escaping () async -> Bool`, so it cannot await, so it has no way to
+    /// hold a result rather than the removal. The signature guarantees that,
+    /// not this test. Read this as documentation of a type-enforced property,
+    /// not as protection for it.
+    func testAStepHoldsTheRemovalItselfRatherThanAResultFromConstructionTime()
+        async {
         var intakeVersion = 1
         let steps = AccountDeletionDeviceState.steps(
             removeIntake: { intakeVersion == 2 },
@@ -388,30 +411,115 @@ final class AccountDeletionDeviceStateTests: XCTestCase {
         XCTAssertTrue(cleared)
     }
 
-    func testDeletionKnowsEveryKeychainItemTheAppWrites() {
-        // Adding a Keychain item without adding it here leaves a credential
-        // behind after an account deletion, which is the failure Guideline
-        // 5.1.1(v) is about. This list is meant to be updated deliberately.
+    /// #819 item 4. Replaces `testDeletionKnowsEveryKeychainItemTheAppWrites`,
+    /// which compared the constant against a literal copy of itself: it went
+    /// red when someone edited the list and stayed green when someone added a
+    /// Keychain writer somewhere else, the exact inverse of the drift its name
+    /// claimed to catch.
+    ///
+    /// This one reads the app target instead. Adding a generic-password writer
+    /// without adding its item here leaves a credential on a device whose
+    /// account is gone, which is what Guideline 5.1.1(v) is about.
+    ///
+    /// A source scan that matches nothing and then agrees with itself is the
+    /// same false green in a new costume, so every stage runs its own positive
+    /// control before anything is concluded from a count.
+    func testEveryKeychainItemTheAppWritesIsOneTheDeletionRemoves() throws {
+        let appTarget = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("SnapList")
+
+        // Control 1: the walk reaches the app target's Swift at all. A walk
+        // that returned nothing would agree with an empty everything below.
+        let swiftSources = try Self.swiftSources(under: appTarget)
+        XCTAssertTrue(
+            swiftSources.contains { $0.path.hasSuffix("/AppAttest/AppAttestClient.swift") },
+            "The source walk missed a file known to be in the app target; it found \(swiftSources.count) Swift files under \(appTarget.path)."
+        )
+
+        // Control 2: the needle matches a file known to write one of these.
+        let writers = try swiftSources.filter {
+            try String(contentsOf: $0, encoding: .utf8)
+                .contains("kSecClassGenericPassword")
+        }
+        XCTAssertTrue(
+            writers.contains { $0.path.hasSuffix("/AppAttest/AppAttestClient.swift") },
+            "The kSecClassGenericPassword scan matched \(writers.count) files and none of them was AppAttestClient.swift, which writes two."
+        )
+
+        // Control 3: the literal pattern extracts a pair from a sample this
+        // test owns, so a pattern that stopped matching production spellings
+        // cannot pass itself off as production having none.
+        let sample = Self.declaredKeychainLiterals(in: """
+        private let service = "dev.snaplist.example"
+        private let account: String = "example-v1"
+        """)
+        XCTAssertEqual(sample.services, ["dev.snaplist.example"])
+        XCTAssertEqual(sample.accounts, ["example-v1"])
+
+        var services: Set<String> = []
+        var accounts: Set<String> = []
+        for writer in writers {
+            let declared = Self.declaredKeychainLiterals(
+                in: try String(contentsOf: writer, encoding: .utf8)
+            )
+            services.formUnion(declared.services)
+            accounts.formUnion(declared.accounts)
+        }
+
+        // `AccountDeletion.swift` writes nothing of its own: it declares
+        // `service` and `account` as stored properties with no literal, so the
+        // list under test never scans itself back into agreement.
+        let listed = AccountDeletionKeychainItem.everythingSnapListStores
         XCTAssertEqual(
-            Set(AccountDeletionKeychainItem.everythingSnapListStores.map(\.service)),
-            [
-                "dev.snaplist.ios.guest-recovery-credential",
-                "dev.snaplist.ios.guest-claim-authority",
-                "dev.snaplist.ios.guest-claim-handoff",
-                "dev.snaplist.ios.app-attest",
-                "dev.snaplist.ios.guest-capability",
-            ]
+            services, Set(listed.map(\.service)),
+            "A generic-password service the app writes is missing from AccountDeletionKeychainItem.everythingSnapListStores (or listed there and no longer written). Scanned: \(writers.map(\.lastPathComponent).sorted())"
         )
         XCTAssertEqual(
-            AccountDeletionKeychainItem.everythingSnapListStores.map(\.account).sorted(),
-            [
-                "guest-capability-bearer",
-                "listing-authorities-v1",
-                "recovery-credentials-v1",
-                "retained-handoffs-v1",
-                "verified-app-attest-key-id",
-            ]
+            accounts, Set(listed.map(\.account)),
+            "A generic-password account the app writes is missing from AccountDeletionKeychainItem.everythingSnapListStores (or listed there and no longer written). Scanned: \(writers.map(\.lastPathComponent).sorted())"
         )
+    }
+
+    private static func swiftSources(under root: URL) throws -> [URL] {
+        guard let walk = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: nil
+        ) else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        return walk.compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" }
+    }
+
+    /// Every `service` and `account` a file declares with a string literal.
+    ///
+    /// A declaration, never a use: `let service: String` with no literal is a
+    /// stored property of the deletion list itself, and matching that would
+    /// make the scan circular.
+    private static func declaredKeychainLiterals(
+        in source: String
+    ) -> (services: Set<String>, accounts: Set<String>) {
+        // Assumes the `let service = "literal"` spelling, which is what all
+        // four current writers use. A writer that built its service from an
+        // interpolation or a constant would read as zero declarations here.
+        let pattern = #"let\s+(service|account)\s*(?::\s*String\s*)?=\s*"([^"]+)""#
+        let expression = try! NSRegularExpression(pattern: pattern)
+        var services: Set<String> = []
+        var accounts: Set<String> = []
+        let text = source as NSString
+        for match in expression.matches(
+            in: source,
+            range: NSRange(location: 0, length: text.length)
+        ) {
+            let name = text.substring(with: match.range(at: 1))
+            let literal = text.substring(with: match.range(at: 2))
+            if name == "service" { services.insert(literal) } else {
+                accounts.insert(literal)
+            }
+        }
+        return (services, accounts)
     }
 }
 
@@ -502,6 +610,279 @@ final class AccountDeletionBearerTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+}
+
+/**
+ Issue #385, closed by #819 item 5.
+
+ `AccountDeletionComposition.make` is where the deletion's live parts are joined:
+ the fail-closed identity guard, the per-seller key store, the reverified bearer,
+ the device clearing and the sign-out. Until #819 nothing tested it. Every other
+ test in this family hands the coordinator dependencies built by hand, and the UI
+ tests run `AccountDeletionComposition.fixture`, whose `clearDeviceState` and
+ `signOut` return `true` without doing anything — so this wiring was proved only
+ by running the app on a device.
+
+ Nothing here reaches ClerkKit. `make` takes its Clerk seams as arguments and the
+ shipped entry point supplies them, which is the only reason a signed-in seller
+ can be stood up at all: `Clerk.shared.client` has an `internal(set)` setter.
+ */
+final class AccountDeletionCompositionTests: XCTestCase {
+    private let apiOrigin = URL(string: "https://snaplist.dev")!
+    private var defaults: UserDefaults!
+    private var suiteName: String!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "dev.snaplist.tests.account-deletion-composition.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        AccountDeletionCompositionURLProtocolStub.reset()
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        suiteName = nil
+        super.tearDown()
+    }
+
+    @MainActor
+    func testNoSignedInSellerRefusesBeforeAnythingOnThisDeviceIsTouched() async {
+        let device = AccountDeletionCompositionRecorder()
+        let dependencies = AccountDeletionComposition.make(
+            apiOrigin: apiOrigin,
+            session: stubbedSession(),
+            signedInUserID: nil,
+            mintBearerToken: { _ in "token" },
+            endSession: { device.record("signed-out") },
+            keyStoreDefaults: defaults,
+            removeIntake: { device.record("intake"); return true },
+            removeCachedItems: { device.record("cached-items"); return true }
+        )
+
+        let outcome = await dependencies.requestErasure("38520000-0000-4000-8000-000000000001")
+        let cleared = await dependencies.clearDeviceState()
+        let signedOut = await dependencies.signOut()
+
+        // Fail closed. A placeholder id would file every seller with no user
+        // under one shared key, and that key is the only thing that makes an
+        // interrupted deletion resumable rather than a permanent 409 — the
+        // round-1 P0 on #814 in a second costume.
+        XCTAssertEqual(outcome, .notConfirmed(.clientNotConfigured))
+        XCTAssertNil(
+            AccountDeletionCompositionURLProtocolStub.lastRequest,
+            "A build that cannot identify the seller must not post an erasure."
+        )
+        // Not a claim that the device is clean, and not a signed-out session
+        // either: a seller left signed out with their copies still here has no
+        // route back to remove them.
+        XCTAssertFalse(cleared)
+        XCTAssertFalse(signedOut)
+        XCTAssertEqual(device.events, [])
+    }
+
+    @MainActor
+    func testTheLiveWiringPostsTheErasureThenClearsEveryStoreOnThisDevice()
+        async {
+        AccountDeletionCompositionURLProtocolStub.responses = [
+            .init(
+                status: 200,
+                body: """
+                {"data":{"generationId":"38520000-0000-4000-8000-000000000002",\
+                "status":"deletion_completed_with_retained_records",\
+                "retainedRecords":["ebay-live-listing"],"deferrals":[],\
+                "attentionReasons":[]},"meta":{"requestId":"request-819"}}
+                """
+            ),
+        ]
+        let device = AccountDeletionCompositionRecorder()
+        let dependencies = AccountDeletionComposition.make(
+            apiOrigin: apiOrigin,
+            session: stubbedSession(),
+            signedInUserID: "user_819",
+            mintBearerToken: { skipCache in
+                device.record("minted(skipCache: \(skipCache))")
+                return "reverified-token"
+            },
+            endSession: { device.record("signed-out") },
+            keyStoreDefaults: defaults,
+            removeIntake: { device.record("intake"); return true },
+            removeCachedItems: { device.record("cached-items"); return true }
+        )
+
+        let key = dependencies.newIdempotencyKey()
+        let outcome = await dependencies.requestErasure(key)
+        let cleared = await dependencies.clearDeviceState()
+        let signedOut = await dependencies.signOut()
+
+        XCTAssertEqual(outcome, .completed(retainedRecords: [.ebayLiveListing]))
+        let request = AccountDeletionCompositionURLProtocolStub.lastRequest
+        XCTAssertEqual(request?.httpMethod, "POST")
+        XCTAssertEqual(request?.url?.path, "/v1/account/erasure")
+        XCTAssertEqual(
+            request?.value(forHTTPHeaderField: "Idempotency-Key"),
+            key
+        )
+        // The handler parses this header against a UUID schema before it
+        // authenticates, so an uppercased one is a 400 that never reaches the
+        // erasure at all.
+        XCTAssertEqual(key, key.lowercased())
+        XCTAssertNotNil(UUID(uuidString: key))
+        XCTAssertEqual(
+            request?.value(forHTTPHeaderField: "Authorization"),
+            "Bearer reverified-token"
+        )
+        // The bearer is minted with the cache skipped. A token issued before
+        // the seller answered the strict reverification carries the older
+        // factor verification age, and the handler reads that claim.
+        XCTAssertEqual(
+            device.events.first,
+            "minted(skipCache: true)"
+        )
+        // Intake and cached items are separate steps, and both run even though
+        // the seller may have neither. The Keychain half follows, one item at a
+        // time, and a device holding none of them is already clean.
+        XCTAssertEqual(
+            Array(device.events.dropFirst()),
+            ["intake", "cached-items", "signed-out"]
+        )
+        XCTAssertTrue(cleared)
+        XCTAssertTrue(signedOut)
+    }
+
+    @MainActor
+    func testTheKeyIsFiledUnderTheSellerItBelongsToAndNoOneElse() {
+        let dependencies = makeDependencies(signedInUserID: "user_a")
+        let otherSeller = makeDependencies(signedInUserID: "user_b")
+
+        dependencies.rememberIdempotencyKey("key-a")
+
+        // `begin_account_erasure` binds one key per account and raises 23505 for
+        // a second, which the handler returns as 409. A device-wide store would
+        // hand seller A's key to seller B, whose own erasure would then be
+        // refused with no way to mint the key the server actually wants.
+        XCTAssertEqual(dependencies.loadIdempotencyKey(), "key-a")
+        XCTAssertNil(otherSeller.loadIdempotencyKey())
+
+        // Durable, not view state: the store outlives the screen that minted
+        // it, which is what makes an interrupted deletion resumable.
+        XCTAssertEqual(
+            makeDependencies(signedInUserID: "user_a").loadIdempotencyKey(),
+            "key-a"
+        )
+
+        dependencies.forgetIdempotencyKey()
+        XCTAssertNil(dependencies.loadIdempotencyKey())
+    }
+
+    /// #819 item 5. `waitsBeforeFollowUp == [1, 2]` asserts only that the wait
+    /// was called, so replacing the exponent with a constant survived the whole
+    /// suite. The gap itself is the thing that matters: every follow-up re-runs
+    /// the server's erase pipeline, provider calls included.
+    func testFollowUpsBackOffInsteadOfWaitingTheSameGapEveryTime() {
+        XCTAssertEqual(
+            (1...3).map {
+                AccountDeletionComposition.followUpDelaySeconds(attempt: $0)
+            },
+            [1, 2, 4]
+        )
+        // A shift by a negative amount traps. An attempt counter below one is a
+        // caller bug, not a reason to crash a seller's deletion.
+        XCTAssertEqual(
+            AccountDeletionComposition.followUpDelaySeconds(attempt: 0),
+            1
+        )
+    }
+
+    @MainActor
+    private func makeDependencies(
+        signedInUserID: String?
+    ) -> AccountDeletionCoordinator.Dependencies {
+        AccountDeletionComposition.make(
+            apiOrigin: apiOrigin,
+            session: stubbedSession(),
+            signedInUserID: signedInUserID,
+            mintBearerToken: { _ in "reverified-token" },
+            endSession: {},
+            keyStoreDefaults: defaults,
+            removeIntake: { true },
+            removeCachedItems: { true }
+        )
+    }
+
+    private func stubbedSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [
+            AccountDeletionCompositionURLProtocolStub.self,
+        ]
+        return URLSession(configuration: configuration)
+    }
+}
+
+/// What the live wiring actually reached, in order.
+private final class AccountDeletionCompositionRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+
+    var events: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recorded
+    }
+
+    func record(_ event: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        recorded.append(event)
+    }
+}
+
+private final class AccountDeletionCompositionURLProtocolStub: URLProtocol,
+    @unchecked Sendable {
+    struct StubResponse {
+        let status: Int
+        let body: String
+    }
+
+    nonisolated(unsafe) static var responses: [StubResponse] = []
+    nonisolated(unsafe) static var lastRequest: URLRequest?
+
+    static func reset() {
+        responses = []
+        lastRequest = nil
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.lastRequest = request
+        guard !Self.responses.isEmpty else {
+            client?.urlProtocol(
+                self,
+                didFailWithError: URLError(.notConnectedToInternet)
+            )
+            return
+        }
+        let stub = Self.responses.removeFirst()
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: stub.status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(
+            self,
+            didReceive: response,
+            cacheStoragePolicy: .notAllowed
+        )
+        client?.urlProtocol(self, didLoad: Data(stub.body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
 
 /// Records what the coordinator actually did, in the order it did it. Ordering

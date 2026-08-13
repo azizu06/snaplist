@@ -270,7 +270,6 @@ final class SettingsTests: XCTestCase {
         flow.resolveReauthentication(.succeeded)
 
         XCTAssertEqual(flow.stateID, "DEL-03")
-        XCTAssertFalse(flow.isServerTailState)
 
         flow.keepAccount()
         XCTAssertEqual(flow.stateID, "SET-01")

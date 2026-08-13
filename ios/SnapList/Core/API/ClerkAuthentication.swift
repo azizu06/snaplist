@@ -506,10 +506,64 @@ enum AccountDeletionComposition {
         return token
     }
 
+    /// The gap before follow-up `attempt`: 1s, 2s, then 4s.
+    ///
+    /// Split out from the closure in `make` so the exponent is reachable
+    /// without sleeping through it. Doubling is the point: every follow-up
+    /// re-runs the server's whole erase pipeline, provider calls included, so a
+    /// flat gap multiplies that work rather than giving the first request time
+    /// to finish it. `max(0,)` because a shift by a negative amount traps, and
+    /// an attempt counter below one is a caller bug, not a reason to crash a
+    /// seller's deletion.
+    static func followUpDelaySeconds(attempt: Int) -> UInt64 {
+        UInt64(1) << UInt64(max(0, attempt - 1))
+    }
+
+    /// The shipped entry point. Reads every ClerkKit seam here and hands them
+    /// to the wiring below, which is the same code the app runs.
     @MainActor
     static func make(
         apiOrigin: URL,
         session: URLSession = .shared,
+        removeIntake: @escaping @Sendable () async -> Bool,
+        removeCachedItems: @escaping @Sendable () async -> Bool
+    ) -> AccountDeletionCoordinator.Dependencies {
+        make(
+            apiOrigin: apiOrigin,
+            session: session,
+            signedInUserID: Clerk.shared.user?.id,
+            mintBearerToken: { skipCache in
+                let clerkSession = await MainActor.run { Clerk.shared.session }
+                return try await clerkSession?
+                    .getToken(.init(skipCache: skipCache))
+            },
+            endSession: { try await Clerk.shared.auth.signOut() },
+            keyStoreDefaults: .standard,
+            removeIntake: removeIntake,
+            removeCachedItems: removeCachedItems
+        )
+    }
+
+    /// The wiring, with every ClerkKit seam passed in rather than read here.
+    ///
+    /// Split from the entry point above so this is reachable from a test.
+    /// `Clerk.shared.client` has an `internal(set)` setter, so nothing in this
+    /// module can put a signed-in seller behind `Clerk.shared.user`, and while
+    /// those reads sat in this body the whole of it — the fail-closed guard,
+    /// the per-seller key store, the reverified bearer, the device clearing and
+    /// the sign-out — was proved only by running the app on a device.
+    ///
+    /// Every argument the entry point passes is the expression that used to
+    /// stand in its place here, so the shipped path is unchanged.
+    @MainActor
+    static func make(
+        apiOrigin: URL,
+        session: URLSession,
+        signedInUserID: String?,
+        mintBearerToken: @escaping @Sendable (_ skipCache: Bool) async throws
+            -> String?,
+        endSession: @escaping @Sendable () async throws -> Void,
+        keyStoreDefaults: UserDefaults,
         removeIntake: @escaping @Sendable () async -> Bool,
         removeCachedItems: @escaping @Sendable () async -> Bool
     ) -> AccountDeletionCoordinator.Dependencies {
@@ -521,18 +575,17 @@ enum AccountDeletionComposition {
         // seller's key in one shared bucket, so one seller's deletion would
         // hand its key to the next, and that key is the only thing that makes
         // an interrupted deletion resumable rather than a permanent 409.
-        guard let userID = Clerk.shared.user?.id else {
+        guard let userID = signedInUserID else {
             return unconfigured()
         }
-        let keyStore = AccountErasureKeyStore(userID: userID)
+        let keyStore = AccountErasureKeyStore(
+            userID: userID,
+            defaults: keyStoreDefaults
+        )
         let client = URLSessionAccountErasureClient(
             apiOrigin: apiOrigin,
             reverifiedBearerToken: {
-                try await reverifiedBearerToken(mint: { skipCache in
-                    let clerkSession = await MainActor.run { Clerk.shared.session }
-                    return try await clerkSession?
-                        .getToken(.init(skipCache: skipCache))
-                })
+                try await reverifiedBearerToken(mint: mintBearerToken)
             },
             session: session
         )
@@ -551,7 +604,7 @@ enum AccountDeletionComposition {
             },
             signOut: {
                 do {
-                    try await Clerk.shared.auth.signOut()
+                    try await endSession()
                     return true
                 } catch {
                     // Reported, never swallowed. Clerk holds the session in its
@@ -571,7 +624,7 @@ enum AccountDeletionComposition {
                 // 1s, 2s, 4s. Each follow-up re-runs the server's whole erase
                 // pipeline, so the gap is the difference between resuming work
                 // and multiplying it.
-                let seconds = UInt64(1) << UInt64(max(0, attempt - 1))
+                let seconds = followUpDelaySeconds(attempt: attempt)
                 try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
             },
             maximumStatusFollowUps: 3
