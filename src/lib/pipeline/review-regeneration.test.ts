@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ListingCopy } from "./types";
 import type { PriceResult } from "../pricing";
+import { recordModelUsage } from "../provider-usage";
+import type { GuidedCorrectionCompletionGateway } from "./guided-correction-completion";
 import {
+  createSupabaseReviewRegenerationStore,
   parseIdentityCorrections,
   regenerateReviewListing,
   type ReviewRegenerationStore,
@@ -28,6 +31,7 @@ const REVIEW_REVISION = "00000000-0000-4000-8000-000000000124";
 function store(): ReviewRegenerationStore & {
   authorize: ReturnType<typeof vi.fn>;
   commit: ReturnType<typeof vi.fn>;
+  recordProviderUsage?: ReturnType<typeof vi.fn>;
 } {
   return {
     load: vi.fn(async () => ({
@@ -649,5 +653,137 @@ describe("regenerateReviewListing", () => {
     expect(beforeModelWork).not.toHaveBeenCalled();
     expect(priceItem).not.toHaveBeenCalled();
     expect(persistence.commit).not.toHaveBeenCalled();
+  });
+
+  it("reports what the correction consumed under the capability that committed it", async () => {
+    const persistence = store();
+    const recordProviderUsage = vi.fn(async () => undefined);
+    persistence.recordProviderUsage = recordProviderUsage;
+
+    await regenerateReviewListing(
+      persistence,
+      {
+        itemId: "item-1",
+        expectedReviewRevision: REVIEW_REVISION,
+        corrections: {
+          brand: "Sony",
+          model: "WH-1000XM4",
+          category: "electronics",
+          condition: "good",
+          isbn: null,
+          upc: null,
+          specs: [],
+        },
+      },
+      {
+        priceItem: async () => {
+          recordModelUsage({
+            role: "pricingAgent",
+            provider: "openai",
+            model: "resolved-pricing",
+            inputTokens: 100,
+            outputTokens: 20,
+          });
+          return soldPrice;
+        },
+        generateListing: async () => {
+          recordModelUsage({
+            role: "listing",
+            provider: "openai",
+            model: "resolved-listing",
+            inputTokens: 200,
+            outputTokens: 40,
+          });
+          return { copy: generated, model: "resolved-listing" };
+        },
+      },
+    );
+
+    expect(recordProviderUsage).toHaveBeenCalledTimes(1);
+    expect(recordProviderUsage).toHaveBeenCalledWith({
+      capabilityToken: "a".repeat(43),
+      usage: expect.objectContaining({
+        schemaVersion: 1,
+        modelCalls: 2,
+        inputTokens: 300,
+        outputTokens: 60,
+        models: [
+          expect.objectContaining({ role: "listing", model: "resolved-listing", calls: 1 }),
+          expect.objectContaining({ role: "pricingAgent", model: "resolved-pricing", calls: 1 }),
+        ],
+      }),
+    });
+    // Bookkeeping follows the durable correction; it never gates it.
+    expect(recordProviderUsage.mock.invocationCallOrder[0]).toBeGreaterThan(
+      persistence.commit.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("returns the seller's correction even when the usage record cannot be written", async () => {
+    const persistence = store();
+    persistence.recordProviderUsage = vi.fn(async () => {
+      throw new Error("provider usage writer is unavailable");
+    });
+
+    const result = await regenerateReviewListing(
+      persistence,
+      {
+        itemId: "item-1",
+        expectedReviewRevision: REVIEW_REVISION,
+        corrections: {
+          brand: "Sony",
+          model: "WH-1000XM4",
+          category: "electronics",
+          condition: "good",
+          isbn: null,
+          upc: null,
+          specs: [],
+        },
+      },
+      {
+        priceItem: async () => soldPrice,
+        generateListing: async () => ({ copy: generated, model: "resolved-listing" }),
+        randomUUID: () => "00000000-0000-4000-8000-000000000131",
+      },
+    );
+
+    expect(persistence.commit).toHaveBeenCalledTimes(1);
+    expect(result.runId).toBe("00000000-0000-4000-8000-000000000131");
+    expect(result.listing).toEqual(generated);
+  });
+
+  it("wires the Supabase store to report a correction's spend", async () => {
+    // The store is what regenerateReviewListing reports through, so a store
+    // built for production has to actually carry the reporter. Without it the
+    // measurement is taken and then dropped on the floor.
+    const gateway = {
+      authorize: vi.fn(),
+      authorizeMobile: vi.fn(),
+      complete: vi.fn(),
+      completeMobile: vi.fn(),
+      recordProviderUsage: vi.fn(async () => {}),
+    } satisfies GuidedCorrectionCompletionGateway;
+    const store = createSupabaseReviewRegenerationStore(
+      {} as never,
+      gateway,
+    );
+    const report = {
+      capabilityToken: "b".repeat(43),
+      usage: {
+        schemaVersion: 1 as const,
+        modelCalls: 1,
+        inputTokens: 10,
+        cachedInputTokens: 0,
+        outputTokens: 2,
+        reasoningTokens: 0,
+        models: [],
+        transcriptions: [],
+        soldComps: [],
+      },
+    };
+
+    await store.recordProviderUsage?.(report);
+
+    expect(gateway.recordProviderUsage).toHaveBeenCalledWith(report);
   });
 });

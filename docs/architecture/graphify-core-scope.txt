@@ -367,6 +367,7 @@ src/lib/pricing/sold-comps-smoke.ts
 src/lib/pricing/types.ts
 src/lib/provider-usage/collector.ts
 src/lib/provider-usage/index.ts
+src/lib/provider-usage/post-completion.ts
 src/lib/provider-usage/record.ts
 src/lib/provider-usage/schema.ts
 src/lib/public-origin.ts
@@ -518,6 +519,7 @@ supabase/migrations/20260808131803_app_attest_optional_metadata_pair_integrity.s
 supabase/migrations/20260811120000_durable_seller_voice_context.sql
 supabase/migrations/20260811123000_reconcile_durable_seller_voice_context.sql
 supabase/migrations/20260812140000_guest_recovery_envelope_mime.sql
+supabase/migrations/20260813030000_post_completion_provider_usage.sql
 tsconfig.json
 vercel.json
 vitest.config.ts
