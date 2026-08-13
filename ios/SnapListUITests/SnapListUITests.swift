@@ -8,6 +8,23 @@ final class SnapListUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// The budget a real `openURL` handoff needs on a loaded CI runner, not on
+    /// a warm developer Mac. Measured on the GitHub runner (issue #824): the
+    /// first handoff of a shard, which cold-launches Safari, exceeded the old
+    /// five seconds and failed — `testProGateOfferLegalFooterOpensTermsAndPrivacy`
+    /// in run 31668920327 and `testSettingsAboutRowsOpenTheirLiveLegalDestinations`
+    /// in run 31660491907, each on its own first iteration. Where it survived,
+    /// that first handoff took 4.81s against the 5s ceiling — 0.19s of margin —
+    /// and the two behind it took 3.12s and 2.61s. Both tests terminate Safari
+    /// before every iteration, so that speedup is simulator and OS warmth, not a
+    /// live Safari process, and every handoff here is a cold launch. Size against
+    /// 4.81s rather than 2.61s. The same handoff takes 1s–2s locally, which is
+    /// why neither test reproduces on a developer Mac. This wait returns the
+    /// moment the app leaves the foreground, so the larger budget costs nothing
+    /// when the handoff works and only buys an honest verdict when the runner
+    /// is slow.
+    private static let legalHandoffBudget: TimeInterval = 20
+
     /// A Safari handoff can settle directly into `.runningBackgroundSuspended`
     /// without ever being observed transiently in `.runningBackground` —
     /// `HomeVisualRegressionTests.swift`'s `isSafeToTerminate` treats both
@@ -231,8 +248,9 @@ final class SnapListUITests: XCTestCase {
             label.tap()
 
             XCTAssertTrue(
-                waitForBackgroundHandoff(app, timeout: 5),
-                "\(identifier) did not hand off to Safari: observed \(app.state.reportedName)"
+                waitForBackgroundHandoff(app, timeout: Self.legalHandoffBudget),
+                "\(identifier) did not hand off to Safari within "
+                    + "\(Self.legalHandoffBudget)s: observed \(app.state.reportedName)"
             )
             app.terminate()
         }
@@ -1250,16 +1268,26 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["scan.review"].exists)
         XCTAssertFalse(app.staticTexts["scan.photo-count"].exists)
 
+        // Which ready Scan surface mounts decides whether a dock exists at all.
+        // Issue #805 made the live camera preview full-bleed: the dock is absent
+        // from the hierarchy there (`if isVisible` in FloatingDock.swift), and
+        // `scan.close` is the approved way back out of capture. Recovery
+        // surfaces are not the live preview, so they still carry the dock.
+        // This assertion previously demanded a selected `dock.scan` on both,
+        // which the live preview can no longer satisfy.
         if liveLibrary.exists {
             XCTAssertEqual(liveLibrary.label, "Library")
             XCTAssertTrue(liveLibrary.isEnabled)
+            XCTAssertTrue(app.buttons["scan.close"].exists)
+            XCTAssertFalse(app.buttons["dock.scan"].exists)
+            XCTAssertFalse(app.buttons["dock.trophy-wall"].exists)
         } else {
             XCTAssertEqual(recoveryLibrary.label, "Choose from library")
             XCTAssertTrue(recoveryLibrary.isEnabled)
+            XCTAssertTrue(app.buttons["dock.scan"].isSelected)
+            XCTAssertFalse(app.buttons["dock.trophy-wall"].isSelected)
         }
 
-        XCTAssertTrue(app.buttons["dock.scan"].isSelected)
-        XCTAssertFalse(app.buttons["dock.trophy-wall"].isSelected)
         XCTAssertFalse(app.staticTexts["Listing Review"].exists)
         XCTAssertFalse(app.buttons["Cancel"].exists)
         // Announcement delivery remains the direct B1 effect-consumer contract.
@@ -2288,8 +2316,16 @@ final class SnapListUITests: XCTestCase {
     /// Issue #812, AC 2: the paywall carried no Terms or Privacy link at all
     /// before this. A real `openURL` hands off to Safari and backgrounds this
     /// app, which a static disclosure line could never do.
+    ///
+    /// Retires Safari between links for the same reason
+    /// `testSettingsAboutRowsOpenTheirLiveLegalDestinations` does: a
+    /// background/foreground cycle does not reliably re-trigger the handoff on
+    /// the Simulator, so each link has to prove its own wiring against a known
+    /// Safari state rather than inherit the previous link's.
     func testProGateOfferLegalFooterOpensTermsAndPrivacy() {
         for identifier in ["pro-gate.terms-of-service", "pro-gate.privacy-policy"] {
+            XCUIApplication(bundleIdentifier: "com.apple.mobilesafari").terminate()
+
             let app = launch(extraArguments: ["--pro-gate-fixture=PAY-01"])
             let title = app.staticTexts["pro-gate.title"]
             XCTAssertTrue(title.waitForExistence(timeout: 3))
@@ -2306,8 +2342,9 @@ final class SnapListUITests: XCTestCase {
             link.tap()
 
             XCTAssertTrue(
-                waitForBackgroundHandoff(app, timeout: 5),
-                "\(identifier) did not hand off to Safari: observed \(app.state.reportedName)"
+                waitForBackgroundHandoff(app, timeout: Self.legalHandoffBudget),
+                "\(identifier) did not hand off to Safari within "
+                    + "\(Self.legalHandoffBudget)s: observed \(app.state.reportedName)"
             )
             app.terminate()
         }
