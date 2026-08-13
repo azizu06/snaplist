@@ -1155,7 +1155,7 @@ final class ItemRunSubmissionCoordinator {
     private struct CapturedBearer {
         let token: String
 
-        var isGuest: Bool { token.hasPrefix("guestcap_") }
+        var isGuest: Bool { token.hasPrefix(GuestCapabilityToken.prefix) }
     }
 
     private enum BearerAcquisition {

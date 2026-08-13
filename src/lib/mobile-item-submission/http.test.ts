@@ -852,4 +852,42 @@ describe("POST /v1/items/runs", () => {
       message: expect.stringContaining("bearer"),
     });
   });
+
+  // #810: this route sits behind no auth middleware and no rate limiter, so an
+  // unauthenticated caller can loop token-less requests to drive log volume.
+  // The first occurrence still surfaces (parity with #803); the rest sample.
+  // The counter is per handler closure, i.e. per warm serverless instance:
+  // this cuts report volume ~100x on one instance, it does not cap the total
+  // across concurrently running instances.
+  it("caps no-token reportError volume per handler instance against a request loop", async () => {
+    const submit = vi.fn();
+    const reportError = vi.fn();
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => "req_810_no_token_volume",
+      reportError,
+      itemSubmission: {
+        async resolvePrincipal(bearerToken) {
+          return { kind: "clerk", userId: "user_native", bearerToken };
+        },
+        submit,
+      },
+    });
+    const anonymousRequest = () =>
+      new Request("http://localhost/v1/items/runs", { method: "POST" });
+
+    const responses: number[] = [];
+    for (let i = 0; i < 205; i += 1) {
+      responses.push((await handler(anonymousRequest())).status);
+    }
+
+    expect(responses.every((status) => status === 401)).toBe(true);
+    expect(submit).not.toHaveBeenCalled();
+    // Reported on occurrence 1, 100, and 200 of 205 — not all 205.
+    expect(reportError).toHaveBeenCalledTimes(3);
+    expect(
+      reportError.mock.calls.every(
+        ([context]) => context === "mobile-item-submission.authenticate",
+      ),
+    ).toBe(true);
+  });
 });

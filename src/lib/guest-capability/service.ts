@@ -6,9 +6,13 @@ import {
   randomUUID as secureRandomUUID,
 } from "node:crypto";
 import type { AppAttestVerificationResult } from "@/lib/app-attest/service";
+import { GUEST_CAPABILITY_TOKEN_PREFIX } from "./token-prefix";
 
 const CAPABILITY_LIFETIME_MS = 30 * 60 * 1_000;
 const REFRESH_WINDOW_MS = 5 * 60 * 1_000;
+const BEARER_TOKEN_PATTERN = new RegExp(
+  `^${GUEST_CAPABILITY_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`,
+);
 
 export interface VerifiedGuestCapabilityAuthority {
   capabilityId: string;
@@ -45,7 +49,7 @@ export function createVerifiedGuestCapabilityService(options: {
     async issue(assertion: VerifiedAssertion) {
       const activatedAt = clock();
       const expiresAt = new Date(activatedAt.getTime() + CAPABILITY_LIFETIME_MS);
-      const bearerToken = `guestcap_${Buffer.from(makeBytes(32)).toString("base64url")}`;
+      const bearerToken = `${GUEST_CAPABILITY_TOKEN_PREFIX}${Buffer.from(makeBytes(32)).toString("base64url")}`;
       const userId = `guest_${createHash("sha256")
         .update(assertion.appId)
         .update("\0")
@@ -68,7 +72,7 @@ export function createVerifiedGuestCapabilityService(options: {
     },
 
     async resolve(bearerToken: string): Promise<VerifiedGuestCapabilityAuthority> {
-      if (!/^guestcap_[A-Za-z0-9_-]{43}$/.test(bearerToken)) {
+      if (!BEARER_TOKEN_PATTERN.test(bearerToken)) {
         throw new Error("Invalid guest capability.");
       }
       const authority = await options.store.resolve(

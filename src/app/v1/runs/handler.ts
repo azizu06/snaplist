@@ -1,6 +1,7 @@
 import { verifyToken } from "@clerk/nextjs/server";
 import { logServerError } from "@/lib/api/errors";
 import { createConfiguredVerifiedGuestPrincipalResolver } from "@/lib/guest-capability/configured";
+import { GUEST_CAPABILITY_TOKEN_PREFIX } from "@/lib/guest-capability/token-prefix";
 import {
   createConfiguredSupabaseListingReviewReader,
   createConfiguredSupabaseListingReviewSaver,
@@ -85,7 +86,7 @@ const handler = createMobileApiHandler({
   // only, never a bearer token, a Supabase key, or seller voice transcript.
   reportError: logServerError,
   async authenticate(token) {
-    if (token.startsWith("guestcap_")) {
+    if (token.startsWith(GUEST_CAPABILITY_TOKEN_PREFIX)) {
       const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
       const secretKey = process.env.SUPABASE_SECRET_KEY?.trim()
         || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
