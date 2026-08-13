@@ -219,7 +219,7 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       serial_step&.fetch("run") == "ios/Scripts/test.sh"
     abort "the Release build must not re-enter the serial budget" if
       serial_job.fetch("steps").any? { |step|
-        step["name"] == "Build verified Release configuration"
+        step["run"] == "ios/Scripts/build-release.sh"
       }
 
     release_main_job = jobs.fetch("release-main")
@@ -227,6 +227,8 @@ assert_workflow_parallelizes_pr_shards_and_retains_main_serial_confidence() {
       release_main_job.fetch("if") == "github.event_name == '\''push'\''"
     abort "main Release configuration must use the declared Apple runner" unless
       release_main_job.fetch("runs-on") == "macos-26"
+    abort "main Release configuration budget must remain 25 minutes" unless
+      release_main_job.fetch("timeout-minutes") == 25
     release_main_checkout_step = release_main_job.fetch("steps").find do |step|
       step["uses"] == "actions/checkout@v4"
     end
