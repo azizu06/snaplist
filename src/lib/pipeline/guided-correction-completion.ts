@@ -4,6 +4,10 @@ import {
   buildPricingEvidenceSnapshotInput,
   pricingEvidenceSnapshotInputSchema,
 } from "../pricing-evidence";
+import {
+  recordGuidedCorrectionProviderUsage,
+  type PostCompletionProviderUsage,
+} from "../provider-usage/post-completion";
 import { buildPredictionLogValues } from "./prediction-log";
 import {
   listingCopySchema,
@@ -18,7 +22,8 @@ type GuidedCorrectionAuthorizationRpcName =
   | "authorize_mobile_guided_correction";
 type GuidedCorrectionCompletionRpcName =
   | "complete_guided_review_correction"
-  | "complete_mobile_guided_correction";
+  | "complete_mobile_guided_correction"
+  | "record_guided_correction_provider_usage";
 
 interface GuidedCorrectionRpcResult {
   data: unknown;
@@ -95,6 +100,14 @@ export interface GuidedCorrectionCompletionGateway {
   completeMobile(
     input: MobileGuidedCorrectionCompletionInput,
   ): Promise<void>;
+  /**
+   * Attribute a committed correction's provider spend to the run it corrected.
+   *
+   * Runs after the correction is durable, so it may fail without costing the
+   * seller their work — see reportPostCompletionProviderUsage, which is what
+   * both correction paths call this through.
+   */
+  recordProviderUsage(input: PostCompletionProviderUsage): Promise<void>;
 }
 
 interface GuidedCorrectionGatewayDependencies {
@@ -276,6 +289,10 @@ export function createSupabaseGuidedCorrectionCompletionGateway(
         rpcData("mobile authorization", response),
       );
       return { token, expiresAt: authorization.expiresAt };
+    },
+
+    async recordProviderUsage(input) {
+      await recordGuidedCorrectionProviderUsage(completionClient, input);
     },
 
     async complete(rawInput) {

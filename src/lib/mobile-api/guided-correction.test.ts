@@ -6,6 +6,8 @@ import type {
   PricingEvidenceSnapshotInput,
 } from "@/lib/pricing-evidence";
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
+import { recordModelUsage } from "@/lib/provider-usage";
+import type { PostCompletionProviderUsage } from "@/lib/provider-usage/post-completion";
 import type { ListingCopy } from "@/lib/pipeline/types";
 import { createMobileApiHandler, type MobileApiPrincipal } from "./app";
 import {
@@ -113,6 +115,8 @@ interface Harness {
   handler: (request: Request) => Promise<Response>;
   commits: GuidedCorrectionCommit[];
   priceItem: ReturnType<typeof vi.fn>;
+  /** What each completed correction reported spending at paid providers (#724). */
+  providerUsageReports: PostCompletionProviderUsage[];
   /**
    * What `get_mobile_listing_review` would project for this item after every
    * commit above — the durable review the native client renders next.
@@ -209,18 +213,39 @@ function harness(
     price?: PriceResult;
     commitError?: Error;
     settleFailures?: number;
+    providerUsageError?: Error;
   } = {},
 ): Harness {
   let stored = input.stored ?? snapshot();
   const owner = input.owner ?? OWNER;
   const commits: GuidedCorrectionCommit[] = [];
-  const priceItem = vi.fn(
-    async () => input.price ?? soldPrice(180),
-  );
-  const generateListing = vi.fn(async () => ({
-    copy: REGENERATED_LISTING,
-    model: "regenerated-listing-model",
-  }));
+  const providerUsageReports: PostCompletionProviderUsage[] = [];
+  // Both fakes report through the registry's usage middleware, so the assertions
+  // below prove the correction's paid work runs inside an open usage scope
+  // rather than that a number was passed along by hand.
+  const priceItem = vi.fn(async () => {
+    recordModelUsage({
+      role: "pricingAgent",
+      provider: "openai",
+      model: "resolved-pricing",
+      inputTokens: 100,
+      outputTokens: 20,
+    });
+    return input.price ?? soldPrice(180);
+  });
+  const generateListing = vi.fn(async () => {
+    recordModelUsage({
+      role: "listing",
+      provider: "openai",
+      model: "resolved-listing",
+      inputTokens: 200,
+      outputTokens: 40,
+    });
+    return {
+      copy: REGENERATED_LISTING,
+      model: "regenerated-listing-model",
+    };
+  });
 
   /**
    * The durable `items.identification` column, modelled exactly as the two RPCs
@@ -389,6 +414,12 @@ function harness(
       claims.set(key, { ...existing, state: "completed", receipt });
       allowanceCompleted = true;
     },
+    async recordProviderUsage(operation, report) {
+      const caller = await callerFor(operation);
+      if (caller !== owner) throw new Error("RLS refused a foreign write.");
+      if (input.providerUsageError) throw input.providerUsageError;
+      providerUsageReports.push(report);
+    },
     async release(operation, attemptGeneration) {
       const caller = await callerFor(operation);
       const key = `${caller}:${operation.idempotencyKey}`;
@@ -434,6 +465,7 @@ function harness(
     handler,
     commits,
     priceItem,
+    providerUsageReports,
     readBackIdentity: () => ({ ...durableIdentity }),
     readBackListing: () => structuredClone(durableListing),
     rlsTokens,
@@ -992,6 +1024,49 @@ describe("POST /v1/runs/{runId}/sharpen — provider spend", () => {
     expect(priceItem).not.toHaveBeenCalled();
     expect(commits).toEqual([]);
   });
+
+  it("attributes what the correction consumed to the capability that committed it", async () => {
+    const { handler, providerUsageReports } = harness();
+
+    const response = await handler(correctionRequest(OWNER_TOKEN));
+
+    expect(response.status).toBe(200);
+    expect(providerUsageReports).toEqual([
+      {
+        capabilityToken: "a".repeat(43),
+        usage: expect.objectContaining({
+          schemaVersion: 1,
+          modelCalls: 2,
+          inputTokens: 300,
+          outputTokens: 60,
+        }),
+      },
+    ]);
+  });
+
+  it("keeps the seller's correction when the usage record cannot be written", async () => {
+    const { handler, commits, providerUsageReports } = harness({
+      providerUsageError: new Error("provider usage writer is unavailable"),
+    });
+
+    const response = await handler(correctionRequest(OWNER_TOKEN));
+
+    // A bookkeeping outage costs a telemetry row, never the correction the
+    // seller just paid an included credit for.
+    expect(response.status).toBe(200);
+    expect(commits).toHaveLength(1);
+    expect(providerUsageReports).toEqual([]);
+  });
+
+  it("replays a completed correction without recording its spend twice", async () => {
+    const { handler, providerUsageReports } = harness();
+
+    await handler(correctionRequest(OWNER_TOKEN));
+    const replay = await handler(correctionRequest(OWNER_TOKEN));
+
+    expect(replay.status).toBe(200);
+    expect(providerUsageReports).toHaveLength(1);
+  });
 });
 
 describe("POST /v1/runs/{runId}/sharpen — verified guest", () => {
@@ -1396,5 +1471,36 @@ describe("POST /v1/runs/{runId}/sharpen — publish state", () => {
 
       expect(snapshotRead?.publishState).toBe("authoritative");
     }
+  });
+
+  it("wires the Supabase data client to report a correction's spend", async () => {
+    // The native Sharpen correction spends at the same two providers the web
+    // correction does. Its production client has to carry the reporter, or the
+    // measurement is taken inside withProviderUsageRun and then discarded.
+    const completionRpc = vi.fn(async () => ({ data: true, error: null }));
+    const report = {
+      capabilityToken: "a".repeat(43),
+      usage: {
+        schemaVersion: 1 as const,
+        modelCalls: 2,
+        inputTokens: 1500,
+        cachedInputTokens: 100,
+        outputTokens: 300,
+        reasoningTokens: 20,
+        models: [],
+        transcriptions: [],
+        soldComps: [],
+      },
+    };
+
+    await createSupabaseGuidedCorrectionDataClient(
+      () => ({}) as never,
+      { rpc: completionRpc },
+    ).recordProviderUsage?.(operation(), report);
+
+    expect(completionRpc).toHaveBeenCalledWith(
+      "record_guided_correction_provider_usage",
+      { p_completion_token: report.capabilityToken, p_usage: report.usage },
+    );
   });
 });

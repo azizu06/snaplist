@@ -12,6 +12,11 @@ import {
 } from "../listing";
 import { createDefaultPricer } from "../pricing/default-pricer";
 import type { ItemSignal, PriceResult } from "../pricing";
+import { withProviderUsageRun } from "../provider-usage";
+import {
+  reportPostCompletionProviderUsage,
+  type PostCompletionProviderUsage,
+} from "../provider-usage/post-completion";
 import {
   deriveIdentification,
   garmentClassOf,
@@ -254,6 +259,13 @@ export interface ReviewRegenerationStore {
     input: GuidedCorrectionAttemptIdentity,
   ): Promise<GuidedCorrectionCapability>;
   commit(input: ReviewRegenerationCommit): Promise<void>;
+  /**
+   * Attribute the correction's provider spend to the originating run (#724).
+   *
+   * Optional because this is telemetry: a store that cannot record it still
+   * performs a complete, correct correction.
+   */
+  recordProviderUsage?(input: PostCompletionProviderUsage): Promise<void>;
 }
 
 export interface RegenerateReviewListingInput {
@@ -320,10 +332,15 @@ export async function regenerateReviewListing(
   await deps.beforeModelWork?.();
   const priceItem = deps.priceItem ?? createDefaultPricer();
   const generateListing = deps.generateListing ?? defaultGenerateListing;
-  const [price, generated] = await Promise.all([
-    priceItem(attributesToSignal(attributes)),
-    generateListing({ attributes: listingFactAttributes(attributes) }),
-  ]);
+  // The paid work runs inside its OWN usage scope. Outside one the registry's
+  // reporters are no-ops, which is why this spend has been invisible until now.
+  const measured = await withProviderUsageRun(() =>
+    Promise.all([
+      priceItem(attributesToSignal(attributes)),
+      generateListing({ attributes: listingFactAttributes(attributes) }),
+    ]),
+  );
+  const [price, generated] = measured.value;
 
   // Manual correction is always human-controlled. The score is unchanged by this
   // choice, but eligibility is false and the transaction resets the listing to draft.
@@ -349,6 +366,11 @@ export async function regenerateReviewListing(
     expectedReviewRevision: input.expectedReviewRevision,
     result,
   });
+
+  await reportPostCompletionProviderUsage(
+    { capabilityToken: capability.token, usage: measured.usage },
+    store.recordProviderUsage?.bind(store),
+  );
 
   const override =
     snapshot.priceOverride == null ? null : Number(snapshot.priceOverride);
@@ -402,6 +424,10 @@ export function createSupabaseReviewRegenerationStore(
 
     async commit(input) {
       await guidedCorrection.complete(input);
+    },
+
+    async recordProviderUsage(input) {
+      await guidedCorrection.recordProviderUsage(input);
     },
   };
 }

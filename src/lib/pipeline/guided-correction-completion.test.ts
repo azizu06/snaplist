@@ -120,6 +120,38 @@ const strictReaderInvalidCases: Array<{
 ];
 
 describe("guided correction completion gateway", () => {
+  it("reports a correction's provider spend through the same privileged seam", async () => {
+    // The correction runs after its run completed, so no worker lease exists.
+    // The capability that just committed the correction is the authority, and
+    // it travels on the service-role completion client — the one identity that
+    // holds execute on the post-completion writer.
+    const rpc = clients();
+    const gateway = createSupabaseGuidedCorrectionCompletionGateway(
+      rpc.authorization,
+      rpc.completion,
+      { now: () => now, tokenGenerator: () => token },
+    );
+    const usage = {
+      schemaVersion: 1 as const,
+      modelCalls: 2,
+      inputTokens: 1500,
+      cachedInputTokens: 100,
+      outputTokens: 300,
+      reasoningTokens: 20,
+      models: [],
+      transcriptions: [],
+      soldComps: [],
+    };
+
+    await gateway.recordProviderUsage({ capabilityToken: token, usage });
+
+    expect(rpc.completionRpc).toHaveBeenCalledWith(
+      "record_guided_correction_provider_usage",
+      { p_completion_token: token, p_usage: usage },
+    );
+    expect(rpc.authorizationRpc).not.toHaveBeenCalled();
+  });
+
   it("mints a deterministic short-lived capability bound to the whole review attempt", async () => {
     const rpc = clients();
     const gateway = createSupabaseGuidedCorrectionCompletionGateway(

@@ -34,6 +34,12 @@ import {
   type PipelineResult,
 } from "@/lib/pipeline/types";
 import type { ItemSignal, PriceResult } from "@/lib/pricing";
+import { withProviderUsageRun } from "@/lib/provider-usage";
+import {
+  recordGuidedCorrectionProviderUsage,
+  reportPostCompletionProviderUsage,
+  type PostCompletionProviderUsage,
+} from "@/lib/provider-usage/post-completion";
 import { deriveIdentification, listingFactAttributes } from "@/lib/vision";
 
 /**
@@ -233,6 +239,16 @@ export interface GuidedCorrectionDataClient {
   release(
     operation: GuidedCorrectionOperation,
     attemptGeneration: number,
+  ): Promise<void>;
+  /**
+   * Attribute the correction's provider spend to the originating run (#724).
+   *
+   * Runs only after `complete` has committed, and its failure is swallowed:
+   * this is telemetry, and the included correction is already durable.
+   */
+  recordProviderUsage?(
+    operation: GuidedCorrectionOperation,
+    report: PostCompletionProviderUsage,
   ): Promise<void>;
 }
 
@@ -545,12 +561,13 @@ export function createGuidedCorrectionService(
           attempt,
           attemptGeneration,
         );
-        const prepared = await runCorrection(
-          operation,
-          snapshot,
-          dependencies,
-          runId,
+        // The paid work runs inside its OWN usage scope: outside one the
+        // registry's reporters are no-ops, which is why this correction's spend
+        // has never reached the run's record.
+        const measured = await withProviderUsageRun(() =>
+          runCorrection(operation, snapshot, dependencies, runId),
         );
+        const prepared = measured.value;
         const completion: GuidedCorrectionAtomicCompletion = {
           ...attempt,
           listingId: snapshot.listingId,
@@ -561,6 +578,12 @@ export function createGuidedCorrectionService(
           receipt: prepared.receipt,
         };
         await client.complete(operation, completion);
+        await reportPostCompletionProviderUsage(
+          { capabilityToken: capability.token, usage: measured.usage },
+          client.recordProviderUsage
+            ? (report) => client.recordProviderUsage!(operation, report)
+            : undefined,
+        );
         return prepared.receipt;
       } catch (error) {
         // Nothing durable happened, so the lease must not outlive the failure —
@@ -867,6 +890,10 @@ export function createSupabaseGuidedCorrectionDataClient(
         }
         throw new GuidedCorrectionDataError();
       }
+    },
+    async recordProviderUsage(_operation, report) {
+      if (!completionClient) throw new GuidedCorrectionDataError();
+      await recordGuidedCorrectionProviderUsage(completionClient, report);
     },
     async release(operation, attemptGeneration) {
       const result = await (await rpcFor(operation)).rpc(
