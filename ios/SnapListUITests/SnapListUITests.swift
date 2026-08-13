@@ -3544,5 +3544,4 @@ final class SnapListUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
-
 }

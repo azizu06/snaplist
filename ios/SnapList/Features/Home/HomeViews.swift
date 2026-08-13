@@ -391,6 +391,7 @@ struct TrophyWallProcessingView: View {
     @ScaledMetric(relativeTo: .callout) private var disclosureSize = 14
     @AccessibilityFocusState private var isDisclosureFocused: Bool
     @State private var isExpanded = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let rows: [TrophyWallProcessingRow]
     let collectionOutcome: TrophyWallCollectionOutcome
@@ -524,7 +525,7 @@ struct TrophyWallProcessingView: View {
                                             )
                                         )
                                         .foregroundStyle(SnapListColorToken.action.color)
-                                        .lineLimit(1)
+                                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                                         .frame(
                                             maxWidth: .infinity,
                                             minHeight: SnapListMetrics.minimumTouchTarget
@@ -811,6 +812,8 @@ private struct TrophyWallProcessingRowView: View {
     let openRoute: (HomeRoute) -> Void
     let onAction: (TrophyWallProcessingAction) -> Void
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         HStack(spacing: 0) {
             Group {
@@ -884,7 +887,8 @@ private struct TrophyWallProcessingRowView: View {
                                 ? SnapListColorToken.textSecondary.color
                                 : SnapListColorToken.inkPrimary.color
                         )
-                        .lineLimit(1)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
