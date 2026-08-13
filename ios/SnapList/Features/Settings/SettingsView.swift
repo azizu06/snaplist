@@ -1283,10 +1283,13 @@ private struct SettingsDeletionConfirmationView: View {
             title: "Delete this account?",
             lead: "This is the last step. It deletes your SnapList account, your items, your photos and your drafts, and removes your eBay connection from SnapList."
         ) {
+            // #819 item 6. The frozen DEL-03 line order, and the catalog's
+            // typographic apostrophe. Alignment only: not one word of this copy
+            // is changed.
             SettingsFactSection(title: "", bullets: [
-                "It's you, confirmed a moment ago. Nothing is sent until you tap Delete account.",
                 "Your eBay listings stay on eBay. End them in eBay if you want them gone.",
-                subscriptionTruth.shortCopy
+                subscriptionTruth.shortCopy,
+                "It’s you, confirmed a moment ago. Nothing is sent until you tap Delete account."
             ], usesBullets: false)
         }
         .navigationTitle("Delete account")

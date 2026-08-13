@@ -62,7 +62,6 @@ struct SettingsFlow: Equatable {
     var isMember: Bool {
         if case .member = identity { true } else { false }
     }
-    var isServerTailState: Bool { false }
 
     var localRemovalUnchangedFacts: [String] {
         let common = [

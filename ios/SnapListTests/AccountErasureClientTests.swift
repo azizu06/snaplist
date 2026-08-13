@@ -50,8 +50,12 @@ final class AccountErasureClientTests: XCTestCase {
 
     func testAnAcceptedRequestIsNeverReadAsADeletionWhateverItSays() async {
         // All three ride HTTP 202. Only the status field tells them apart, and
-        // `deletion_needs_attention` is the one that must never resolve itself
-        // by being asked again, because it is waiting on a person.
+        // `deletion_needs_attention` is the one that must never be read as a
+        // deletion: the erasure began and stopped partway. It is not a dead end
+        // either. The status is absent from the handler's `TERMINAL_STATUSES`,
+        // so a request carrying the same key re-walks storage and re-runs the
+        // identity delete rather than replaying a stored answer, which is why
+        // `AccountDeletionStall.allowsAnotherRequest` keeps the control here.
         let expected: [(String, AccountErasureOutcome)] = [
             ("deletion_requested", .pending),
             ("deletion_in_progress", .pending),
@@ -125,6 +129,19 @@ final class AccountErasureClientTests: XCTestCase {
                 """
                 {"error":{"code":"unauthorized","message":"Authentication is \
                 required.","requestId":"r"}}
+                """,
+                .transport
+            ),
+            // #819 item 5. A plain 403 carries no `clerk_error`, so it is not
+            // the reverification challenge and the seller cannot answer it by
+            // confirming their identity again. Without this case, widening the
+            // challenge test to "any 403" survived the whole suite and would
+            // send a seller to DEL-06r for a refusal DEL-02 cannot clear.
+            (
+                403,
+                """
+                {"error":{"code":"forbidden","message":"This account cannot be \
+                erased.","requestId":"r"}}
                 """,
                 .transport
             ),
