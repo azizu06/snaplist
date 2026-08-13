@@ -764,6 +764,31 @@ final class AppAttestClientTests: XCTestCase {
         XCTAssertEqual(outcome, .unavailable(.unsupportedDevice))
     }
 
+    // Issue #810. `GuestCapabilityToken.prefix` is the one place this file may
+    // spell the literal; a hand-written `"guestcap_"` anywhere else in this
+    // source silently re-forks the value the cross-language test cannot see,
+    // because that test only compares the constant, not every call site.
+    func testAppAttestClientHasExactlyOneGuestCapabilityTokenPrefixLiteral() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("SnapList/AppAttest/AppAttestClient.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        let matchingLines = source
+            .components(separatedBy: .newlines)
+            .filter { $0.contains("guestcap_") }
+
+        XCTAssertEqual(
+            matchingLines.count, 1,
+            "Expected exactly one guestcap_ occurrence (the shared constant); found \(matchingLines)"
+        )
+        XCTAssertTrue(
+            matchingLines.first?.contains("static let prefix") ?? false,
+            "The one guestcap_ occurrence must be the GuestCapabilityToken.prefix declaration, got \(String(describing: matchingLines.first))"
+        )
+    }
+
     private func makeURLSessionServerClient() -> URLSessionAppAttestServerClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AppAttestURLProtocolStub.self]

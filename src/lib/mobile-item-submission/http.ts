@@ -42,8 +42,12 @@ function bearerToken(request: Request): string | null {
 
 // This route has no auth middleware or rate limiting in front of it, so an
 // unauthenticated caller can loop token-less requests indefinitely (#810).
-// Reporting the first occurrence keeps the #803 evidence; sampling the rest
-// bounds the log volume such a loop can drive without going silent again.
+// `noTokenOccurrences` is per handler closure, which is per warm serverless
+// instance, not global: reporting the first occurrence and sampling the rest
+// cuts report volume by ~100x on any one instance, but a caller spread across
+// many concurrent instances can still scale total report volume with
+// instance count. This is a partial, per-instance mitigation, not a global
+// cap — a global cap would need shared state, which is out of scope (#810).
 const NO_TOKEN_REPORT_SAMPLE_INTERVAL = 100;
 
 /** Public web-standard POST /v1/items/runs transport seam. */

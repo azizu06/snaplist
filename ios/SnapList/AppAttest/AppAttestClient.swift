@@ -578,7 +578,7 @@ struct URLSessionAppAttestServerClient: AppAttestServerClient, @unchecked Sendab
         }
         let token = issued.bearerToken
         guard token.range(
-            of: #"^guestcap_[A-Za-z0-9_-]{43}$"#,
+            of: "^\(GuestCapabilityToken.prefix)[A-Za-z0-9_-]{43}$",
             options: .regularExpression
         ) != nil else {
             throw AppAttestServerClientError.invalidResponse
@@ -1057,7 +1057,7 @@ struct GuestCapabilityRenewingBearerTokenProvider: BearerTokenProviding {
     }
 
     private static func isGuestCapability(_ token: String) -> Bool {
-        token.hasPrefix("guestcap_")
+        token.hasPrefix(GuestCapabilityToken.prefix)
     }
 }
 

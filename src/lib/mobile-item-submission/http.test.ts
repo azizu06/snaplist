@@ -856,7 +856,10 @@ describe("POST /v1/items/runs", () => {
   // #810: this route sits behind no auth middleware and no rate limiter, so an
   // unauthenticated caller can loop token-less requests to drive log volume.
   // The first occurrence still surfaces (parity with #803); the rest sample.
-  it("bounds no-token reportError volume against an unauthenticated request loop", async () => {
+  // The counter is per handler closure, i.e. per warm serverless instance:
+  // this cuts report volume ~100x on one instance, it does not cap the total
+  // across concurrently running instances.
+  it("caps no-token reportError volume per handler instance against a request loop", async () => {
     const submit = vi.fn();
     const reportError = vi.fn();
     const handler = createMobileItemSubmissionHandler({
