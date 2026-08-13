@@ -158,6 +158,114 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
+    /// `settingsCardRow` used to pin every SELLING-section row to exactly
+    /// 52pt no matter how tall its content wanted to be, which clipped
+    /// `SettingsSellingHintRow`'s footnote-plus-policy-link content even at
+    /// the default type size (#831). The hint row only renders when the
+    /// server reports an eBay policy problem, which this fixture does not
+    /// simulate, but the fix lives in the shared container every SELLING row
+    /// passes through: "Connected marketplaces" is reachable with no extra
+    /// fixture plumbing and, once its label plus value stop fitting one line
+    /// at the largest accessibility size, exercises the identical
+    /// fixed-height defect. A row still reporting 52pt at that size would
+    /// mean the fix regressed and the wrapped line is invisible again.
+    func testSellingSectionRowGrowsPastTheOldFixedHeightCapAtLargestAccessibilitySize() {
+        for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--settings-proof=SET-01"] + arguments
+            app.launchAfterRetiringPriorInstance()
+
+            XCTAssertTrue(
+                app.descendants(matching: .any)["settings.screen"].waitForExistence(timeout: 3),
+                app.debugDescription
+            )
+
+            let marketplacesRow = app.descendants(matching: .any)["settings.selling.marketplaces"]
+            let window = app.windows.firstMatch
+            XCTAssertTrue(marketplacesRow.waitForExistence(timeout: 3), app.debugDescription)
+            // At the largest accessibility size the wrapped row is taller
+            // than the screen, so scrolling it into view, the same
+            // `app.swipeUp()` pattern this suite already uses to reach
+            // `settings.delete-account`, is required before checking it
+            // fits the window, exactly as a seller would need to scroll to
+            // reach it. `isHittable` alone is not a reliable guard here: it
+            // reports true for this row even while its bottom edge sits
+            // below the window, so the loop keeps swiping until the row's
+            // own frame is fully on screen instead.
+            for _ in 0..<6 where marketplacesRow.frame.maxY > window.frame.maxY {
+                app.swipeUp()
+            }
+            let frameReceipt =
+                "row.frame=\(marketplacesRow.frame), window.frame=\(window.frame), arguments=\(arguments)"
+            XCTAssertTrue(marketplacesRow.isHittable, frameReceipt)
+            XCTAssertGreaterThanOrEqual(marketplacesRow.frame.minX, window.frame.minX, frameReceipt)
+            XCTAssertLessThanOrEqual(marketplacesRow.frame.maxX, window.frame.maxX, frameReceipt)
+            XCTAssertLessThanOrEqual(marketplacesRow.frame.maxY, window.frame.maxY, frameReceipt)
+
+            if arguments.contains("--dynamic-type=accessibility5") {
+                XCTAssertGreaterThan(marketplacesRow.frame.height, 52, frameReceipt)
+            }
+
+            app.terminate()
+        }
+    }
+
+    /// The real OS-level Bold Text accessibility setting cannot be toggled
+    /// from a UI test, so `--bold-text` drives the same
+    /// `\.legibilityWeight` override the system setting would apply
+    /// (`OptionalBoldTextModifier` in `AppShellView.swift`). The acceptance
+    /// criterion is that nothing reflows off screen with it on (#831). This
+    /// checks `settings.about.help`, not a SELLING value row: a value row
+    /// (`valueRow`, e.g. `settings.selling.marketplaces`) is a plain
+    /// `.accessibilityElement(children: .combine)` display with no button
+    /// semantics — `testSettingsSellingValueRowsAreNotButtons` already
+    /// proves it is deliberately not a control — so XCUITest reports its
+    /// combined accessibility frame as the union of its label/value glyph
+    /// bounds, not the padded `settingsCardRow` it sits inside. That is not
+    /// a 44pt "control" in the touch-target sense the acceptance criterion
+    /// means. `LegalLinkRow` (`settings.about.help`) is an actual `Button`
+    /// with the identifier on the button itself, so its accessibility frame
+    /// is its real hit-testable bounds, including the same `settingsCardRow`
+    /// `minHeight: 52` floor.
+    func testAboutRowStaysOnScreenWithBoldTextOn() {
+        let app = launch(extraArguments: ["--fixture=account", "--bold-text"])
+        let helpRow = app.buttons["settings.about.help"]
+        let window = app.windows.firstMatch
+        for _ in 0..<4 where !helpRow.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(helpRow.waitForExistence(timeout: 3), app.debugDescription)
+        for _ in 0..<6 where helpRow.frame.maxY > window.frame.maxY {
+            app.swipeUp()
+        }
+        let frameReceipt = "row.frame=\(helpRow.frame), window.frame=\(window.frame)"
+        XCTAssertGreaterThanOrEqual(helpRow.frame.minX, window.frame.minX, frameReceipt)
+        XCTAssertLessThanOrEqual(helpRow.frame.maxX, window.frame.maxX, frameReceipt)
+        XCTAssertLessThanOrEqual(helpRow.frame.maxY, window.frame.maxY, frameReceipt)
+        XCTAssertGreaterThanOrEqual(helpRow.frame.height, 44, frameReceipt)
+    }
+
+    /// A touch target derived from padding around scaled text, rather than
+    /// from the 44pt floor, is thinnest at the smallest Dynamic Type size —
+    /// the opposite failure direction from the largest-accessibility-size
+    /// checks elsewhere in this file (#831). `settingsCardRow`'s
+    /// `minHeight: 52` is a hard floor independent of type size, so this
+    /// proves it actually holds there rather than assuming a fix proved at
+    /// one extreme automatically holds at the other. See
+    /// `testAboutRowStaysOnScreenWithBoldTextOn` for why this checks
+    /// `settings.about.help` (a real `Button`) rather than a SELLING value
+    /// row (not a control).
+    func testAboutRowMeetsTouchTargetFloorAtSmallestDynamicTypeSize() {
+        let app = launch(extraArguments: ["--fixture=account", "--dynamic-type=xSmall"])
+        let helpRow = app.buttons["settings.about.help"]
+        for _ in 0..<4 where !helpRow.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(helpRow.waitForExistence(timeout: 3), app.debugDescription)
+        let frameReceipt = "row.frame=\(helpRow.frame)"
+        XCTAssertGreaterThanOrEqual(helpRow.frame.height, 44, frameReceipt)
+    }
+
     func testSettingsMemberReauthenticationCancelReturnsToDeletionConsequences() {
         let app = launch(extraArguments: ["--fixture=account"])
         let settingsScreen = app.descendants(matching: .any)["settings.screen"]
@@ -3436,4 +3544,5 @@ final class SnapListUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
 }

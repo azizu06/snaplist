@@ -447,6 +447,159 @@ final class ListingReviewUITests: XCTestCase {
         )
     }
 
+    /// The price editor used to be a bare `HStack`, so the title-weight price
+    /// field squeezed the Apply button down to an unreadable sliver once
+    /// Dynamic Type scaled up to the largest accessibility size (#831). The
+    /// fix reuses `footer`'s existing `isAccessibilitySize` idiom to switch
+    /// to a `VStack` instead, which this test proves two ways: both controls
+    /// stay reachable and on-screen, and the field sits structurally above
+    /// the button rather than beside it, which a squeezed `HStack` could
+    /// never produce.
+    func testPriceEditorStacksInsteadOfSqueezingAtTheLargestAccessibilitySize() {
+        let app = launch(
+            resetDraft: true,
+            extraArguments: ["--dynamic-type=accessibility5"]
+        )
+        _ = openReview(in: app)
+
+        let price = app.buttons["listing-review.price"]
+        let secondary = app.buttons["listing-review.secondary"]
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        XCTAssertTrue(secondary.waitForExistence(timeout: loadedTreeTimeout))
+        // A full-length `swipeUp()` flick carries enough momentum on this
+        // tall accessibility-size layout to blow straight past the price
+        // row's resting position and land several sections further down (it
+        // was verified directly, via a captured screenshot, to overscroll
+        // into the verified-sold-matches list with the price row clipped
+        // behind the status bar). `ListingReviewView.swift` reserves the
+        // footer's real, dynamically measured height via
+        // `.safeAreaInset(edge: .bottom, spacing: 0) { footer }`, so a
+        // resting position exists where the price row sits fully above the
+        // footer; reaching it needs the same small, deliberate,
+        // momentum-free drag `HomeUITests.scrollUntilFullyVisible` already
+        // uses for this exact class of problem, not a flick.
+        let scrollView = app.scrollViews.firstMatch
+        scrollUntilClearOfFooter(price, footerTopEdge: secondary, scrollView: scrollView, in: app)
+        let clearanceReceipt = "price.frame=\(price.frame), secondary.frame=\(secondary.frame)"
+        XCTAssertTrue(price.isHittable, clearanceReceipt)
+        XCTAssertLessThanOrEqual(price.frame.maxY, secondary.frame.minY, clearanceReceipt)
+        XCTAssertGreaterThanOrEqual(
+            price.frame.minY,
+            app.navigationBars.firstMatch.frame.maxY,
+            clearanceReceipt
+        )
+        price.tap()
+
+        let priceField = app.textFields["listing-review.price.field"]
+        let apply = app.buttons["listing-review.price.apply"]
+        let window = app.windows.firstMatch
+        // Accessibility-size layout and the accessibility-tree snapshot it
+        // forces are measurably slower than default size (this file already
+        // budgets `loadedTreeTimeout` for the same reason elsewhere), so this
+        // waits longer than the default-size price test does for the same
+        // field.
+        XCTAssertTrue(priceField.waitForExistence(timeout: loadedTreeTimeout))
+        XCTAssertTrue(apply.waitForExistence(timeout: loadedTreeTimeout))
+
+        let frameReceipt =
+            "priceField.frame=\(priceField.frame), apply.frame=\(apply.frame), window.frame=\(window.frame)"
+        XCTAssertTrue(priceField.isHittable, frameReceipt)
+        XCTAssertTrue(apply.isHittable, frameReceipt)
+        XCTAssertGreaterThanOrEqual(apply.frame.height, 44, frameReceipt)
+        XCTAssertGreaterThanOrEqual(priceField.frame.height, 44, frameReceipt)
+        XCTAssertLessThanOrEqual(priceField.frame.maxX, window.frame.maxX, frameReceipt)
+        XCTAssertLessThanOrEqual(apply.frame.maxX, window.frame.maxX, frameReceipt)
+        XCTAssertLessThanOrEqual(apply.frame.maxY, window.frame.maxY, frameReceipt)
+        // The structural proof: a `VStack` puts the field's bottom edge at or
+        // above the button's top edge. A bare `HStack` squeezed to this width
+        // would instead place them side by side, sharing a vertical range.
+        XCTAssertLessThanOrEqual(priceField.frame.maxY, apply.frame.minY, frameReceipt)
+    }
+
+    /// The real OS-level Bold Text accessibility setting cannot be toggled
+    /// from a UI test, so `--bold-text` drives the same
+    /// `\.legibilityWeight` override the system setting would apply
+    /// (`OptionalBoldTextModifier` in `AppShellView.swift`). The acceptance
+    /// criterion is that nothing reflows off screen with it on (#831); this
+    /// proves the price control and the pinned footer's two buttons — the
+    /// exact controls the largest-Dynamic-Type price editor fix above
+    /// covers — all stay inside the window at Bold Text's heavier glyph
+    /// metrics, at the default (non-accessibility) Dynamic Type size where
+    /// this setting most commonly applies on its own.
+    func testPriceAndFooterStayOnScreenWithBoldTextOn() {
+        let app = launch(resetDraft: true, extraArguments: ["--bold-text"])
+        _ = openReview(in: app)
+
+        let price = app.buttons["listing-review.price"]
+        let secondary = app.buttons["listing-review.secondary"]
+        let done = app.buttons["listing-review.done"]
+        let window = app.windows.firstMatch
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        XCTAssertTrue(secondary.waitForExistence(timeout: loadedTreeTimeout))
+        XCTAssertTrue(done.waitForExistence(timeout: loadedTreeTimeout))
+
+        let frameReceipt =
+            "price.frame=\(price.frame), secondary.frame=\(secondary.frame), done.frame=\(done.frame), window.frame=\(window.frame)"
+        for control in [price, secondary, done] {
+            XCTAssertTrue(control.isHittable, frameReceipt)
+            XCTAssertGreaterThanOrEqual(control.frame.minX, window.frame.minX, frameReceipt)
+            XCTAssertLessThanOrEqual(control.frame.maxX, window.frame.maxX, frameReceipt)
+            XCTAssertLessThanOrEqual(control.frame.maxY, window.frame.maxY, frameReceipt)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44, frameReceipt)
+        }
+    }
+
+    /// A touch target derived from padding around scaled text, rather than
+    /// from the 44pt floor, is thinnest at the smallest Dynamic Type size,
+    /// the opposite failure direction from the accessibility-size checks
+    /// above (#831). The price button carries an explicit
+    /// `.frame(minHeight: SnapListMetrics.minimumTouchTarget)` floor; this
+    /// proves that floor actually holds once the text inside it shrinks to
+    /// its smallest size, rather than assuming it does.
+    func testPriceControlMeetsTouchTargetFloorAtSmallestDynamicTypeSize() {
+        let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
+        _ = openReview(in: app)
+
+        let price = app.buttons["listing-review.price"]
+        XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
+        let frameReceipt = "price.frame=\(price.frame)"
+        XCTAssertTrue(price.isHittable, frameReceipt)
+        XCTAssertGreaterThanOrEqual(price.frame.height, 44, frameReceipt)
+    }
+
+    /// Scrolls `element` into the band above `footerTopEdge` using small,
+    /// momentum-free drags rather than `swipeUp()`. A full-length swipe
+    /// flick carries enough velocity on a tall accessibility-size layout to
+    /// overshoot the target by several sections in one gesture; this mirrors
+    /// `HomeUITests.scrollUntilFullyVisible`'s `nudge` technique, which
+    /// exists for the identical problem.
+    private func scrollUntilClearOfFooter(
+        _ element: XCUIElement,
+        footerTopEdge: XCUIElement,
+        scrollView: XCUIElement,
+        in app: XCUIApplication,
+        maximumNudges: Int = 12,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 3), file: file, line: line)
+        let navigationBarBottom = app.navigationBars.firstMatch.frame.maxY
+
+        for _ in 0..<maximumNudges {
+            let clearOfFooter = element.frame.maxY <= footerTopEdge.frame.minY
+            let clearOfNavigationBar = element.frame.minY >= navigationBarBottom
+            if clearOfFooter, clearOfNavigationBar, element.isHittable {
+                return
+            }
+            let upward = !clearOfFooter
+            let startY = upward ? 0.62 : 0.4
+            let endY = upward ? 0.52 : 0.5
+            let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+            let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+    }
+
     private func launch(
         fixture: String = "loaded",
         resetDraft: Bool,

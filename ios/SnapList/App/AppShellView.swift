@@ -246,6 +246,7 @@ struct AppShellView: View {
             }
         }
         .modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
+        .modifier(OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled))
         .overlay(alignment: .bottom) {
             if router.presentedSheet == nil {
                 activationGuidanceOverlay
@@ -258,6 +259,7 @@ struct AppShellView: View {
                 .modifier(
                     OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize)
                 )
+                .modifier(OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled))
         }
         .sheet(
             isPresented: proGatePresentationBinding,
@@ -275,6 +277,7 @@ struct AppShellView: View {
                         size: configuration.dynamicTypeSize
                     )
                 )
+                .modifier(OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled))
             }
         }
         .onOpenURL { url in
@@ -1915,6 +1918,22 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let size {
             content.dynamicTypeSize(size)
+        } else {
+            content
+        }
+    }
+}
+
+/// Overrides `\.legibilityWeight` to `.bold` when the fixture harness asks
+/// for it, since a UI test cannot flip the real OS-level Bold Text setting
+/// the way `OptionalDynamicTypeModifier` can flip Dynamic Type (#831).
+private struct OptionalBoldTextModifier: ViewModifier {
+    let isEnabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.environment(\.legibilityWeight, .bold)
         } else {
             content
         }

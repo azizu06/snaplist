@@ -90,10 +90,16 @@ struct SettingsView: View {
                                 navigate(accountEntry)
                             } label: {
                                 Text("Create an account")
+                                    // `maxHeight: .infinity` claims the full
+                                    // row `settingsCardRow` proposes, not
+                                    // just this text's own line height, the
+                                    // same fix `LegalLinkRow` needed (#831).
                                     .frame(
                                         maxWidth: .infinity,
+                                        maxHeight: .infinity,
                                         alignment: .leading
                                     )
+                                    .contentShape(Rectangle())
                             }
                             .accessibilityIdentifier("settings.create-account")
                             .accessibilityHint("Opens the account entry screen")
@@ -213,6 +219,15 @@ struct SettingsView: View {
                                 )
                             } label: {
                                 Text("Delete account")
+                                    // Same `settingsCardRow` fixed-height
+                                    // touch-target gap `LegalLinkRow` and
+                                    // "Create an account" needed (#831).
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        maxHeight: .infinity,
+                                        alignment: .leading
+                                    )
+                                    .contentShape(Rectangle())
                             }
                             .accessibilityIdentifier("settings.delete-account")
                             .accessibilityHint("Opens a screen that explains what deletion does")
@@ -280,7 +295,11 @@ struct SettingsView: View {
             }
         }
         .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, minHeight: 74, maxHeight: 74, alignment: .leading)
+        // Same fixed-height defect as `settingsCardRow` (#831): the name and
+        // email column can need more than 74pt once Dynamic Type or Bold
+        // Text grows them, so 74pt stays the floor and stops being a
+        // ceiling.
+        .frame(maxWidth: .infinity, minHeight: 74, alignment: .leading)
         .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .accessibilityElement(children: .combine)
     }
@@ -498,7 +517,13 @@ struct SettingsView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
-            .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .leading)
+            // `maxHeight: 52` used to pin every row to exactly 52pt no
+            // matter what it held, which clipped `SettingsSellingHintRow`'s
+            // footnote-plus-policy-link content even at the default type
+            // size (#831). 52pt is still the floor every row asks for, but
+            // nothing here caps how tall a row's own content is allowed to
+            // grow.
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
             .padding(.horizontal, 16)
     }
 
@@ -1511,6 +1536,8 @@ private struct SettingsActionTray<Destination: View>: View {
     let secondaryAction: () -> Void
     var destination: Destination?
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     init(
         primary: String, secondary: String?, destructive: Bool,
         disabled: Bool = false, note: String? = nil,
@@ -1547,7 +1574,16 @@ private struct SettingsActionTray<Destination: View>: View {
             if let note { Text(note).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center) }
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
-        .background(.bar)
+        // `.bar` is translucent chrome with nothing under it here, so a
+        // seller with Reduce Transparency on falls back to the same opaque
+        // canvas token `FloatingDock` already uses for its chrome (#831).
+        .background {
+            if reduceTransparency {
+                SnapListColorToken.canvas.color
+            } else {
+                Rectangle().fill(.bar)
+            }
+        }
     }
 
     private var commitsAccountDeletion: Bool {
