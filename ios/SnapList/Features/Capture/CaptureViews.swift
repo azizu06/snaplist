@@ -748,7 +748,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                         .stroke(SnapListColorToken.onDarkSurface.color, lineWidth: 3)
                         .frame(width: 72, height: 72)
                     Circle()
-                        .fill(SnapListColorToken.canvas.color)
+                        .fill(SnapListColorToken.onDarkSurface.color)
                         .frame(width: 56, height: 56)
                 }
                 .frame(width: 72, height: 72)
@@ -1291,7 +1291,7 @@ private struct CameraFixtureSurface: View {
                             .resizable().scaledToFit().frame(width: 82, height: 82)
                         Text("Start with one clear photo. Add angles, labels, or damage for a stronger match.")
                             .font(.system(size: 13, weight: .medium))
-                            .padding(14).background(SnapListColorToken.canvas.color).clipShape(.rect(cornerRadius: 16))
+                            .padding(14).background(SnapListColorToken.onDarkSurface.color).clipShape(.rect(cornerRadius: 16))
                     }
                 } else if let cue = guidance.cue {
                     Label(cue, systemImage: guidance.systemImage)
@@ -1309,7 +1309,7 @@ private struct CameraFixtureSurface: View {
                     HStack {
                         Image(systemName: "photo").foregroundStyle(SnapListColorToken.onDarkSurface.color).frame(width: 44, height: 44)
                         Spacer()
-                        Circle().fill(SnapListColorToken.canvas.color).frame(width: 68, height: 68)
+                        Circle().fill(SnapListColorToken.onDarkSurface.color).frame(width: 68, height: 68)
                             .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.8), lineWidth: 4).padding(-5) }
                         Spacer()
                         Color.clear.frame(width: 44, height: 44)
