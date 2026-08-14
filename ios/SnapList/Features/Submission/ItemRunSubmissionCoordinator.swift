@@ -760,6 +760,27 @@ final class ItemRunSubmissionHost {
         publish(retention: .submissionUnavailable)
     }
 
+    /// #846. The gate refused this seller because they have no account, not
+    /// because it failed. Sending them back to the retry every other failure
+    /// takes is what left a guest tapping a `Try again` that could never work,
+    /// so the pending Pro handoff becomes the account demand instead.
+    @discardableResult
+    func replaceProGateHandoffWithAccountClaim(eventID: UUID) -> Bool {
+        guard case .destinationHandoff(
+            eventID: let pendingEventID,
+            handoff: .pay01
+        )? = pendingPresentationEvent,
+              pendingEventID == eventID else {
+            return false
+        }
+        publish(retention: .authenticationRequired)
+        return true
+    }
+
+    func publishProGateAccountClaim() {
+        publish(retention: .authenticationRequired)
+    }
+
     func completeClearedIntakePresentation() {
         guard clearedIntake,
               case .itemSaved(_, _)? = pendingPresentationEvent else {
@@ -1821,6 +1842,19 @@ final class ItemRunSubmissionCoordinator {
                     : .sessionRenewalRequired
             )
         case .creditDenied(let reason):
+            // #846, and the same credential test the `401` above makes.
+            // `snaplist-pro-required` is the only credit denial the server can
+            // name for a guest: the device fence is evaluated in the non-guest
+            // branch alone, and the two subscription denials both sit behind a
+            // paid period a principal with no account cannot hold. Pro cannot
+            // be sold to that seller either — the entitlement read the paywall
+            // opens with and the RevenueCat identity call behind it both
+            // authenticate a Clerk subject — so the offer is a destination they
+            // can neither reach nor use. The account is the step that unblocks
+            // every one after it, which makes it the only honest answer.
+            if dispatchBearer.isGuest, reason == "snaplist-pro-required" {
+                return .retained(.authenticationRequired)
+            }
             return .retained(.creditDenied(reason: reason))
         case .conflict:
             // This key is bound to other bytes and can never accept these, so retiring

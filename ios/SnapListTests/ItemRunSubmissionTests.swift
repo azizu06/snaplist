@@ -416,6 +416,73 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(Set(observedEventIDs).count, cases.count)
     }
 
+    /// #846. `snaplist-pro-required` is the only credit denial the server can
+    /// name for a guest: the fence branch in
+    /// `20260731190000_included_offer_device_fence.sql` never runs for a
+    /// `guest_…` principal, so `device-fence-required` is unreachable for one.
+    /// The paywall that denial routes to cannot render for a guest either — it
+    /// opens by reading `/v1/entitlements/ai-items`, which authenticates with
+    /// `clerkPrincipal` — and Pro could not be sold to them if it did, because
+    /// the RevenueCat identity route is Clerk-only too. The account is the step
+    /// that unblocks every one after it, so it is the honest destination.
+    func testAGuestDeniedForProIsAskedForTheAccountRatherThanThePaywall() async throws {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 2,
+            seed: "guest-pro-denial"
+        )
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.creditDenied(reason: "snaplist-pro-required")]
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: attemptStore,
+                submitter: submitter,
+                draftStore: draftStore,
+                keys: [Self.firstKey],
+                tokenProvider: TestBearerTokenProvider {
+                    "guestcap_\(String(repeating: "C", count: 43))"
+                }
+            )
+        )
+
+        await host.startListing(photos: intake.photos)
+
+        XCTAssertEqual(host.retention, .authenticationRequired)
+        guard case .destinationHandoff(
+            eventID: let eventID,
+            handoff: let handoff
+        )? = host.pendingPresentationEvent else {
+            return XCTFail("Expected one typed destination handoff.")
+        }
+        XCTAssertEqual(handoff, .accountClaim12aThrough12c)
+
+        // The destination has to name the situation and offer a step this
+        // seller can finish. A retry is the one thing it may not be.
+        let presentation = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(presentation.primaryActionLabel, "Create an account")
+        XCTAssertEqual(
+            presentation.primaryActionEvent,
+            .createAccount(eventID: eventID)
+        )
+        XCTAssertEqual(
+            presentation.visibleMessage,
+            """
+            You need a SnapList account to send this item. Your item is still \
+            saved on this phone.
+            """
+        )
+
+        // Nothing about the denial may cost the seller the item they still
+        // have to send once the account exists.
+        let retainedPhotos = try await draftStore.loadPhotos()
+        let retainedAttempt = try await attemptStore.loadAttempt()
+        XCTAssertEqual(retainedPhotos, intake.photos)
+        XCTAssertEqual(retainedAttempt?.idempotencyKey, Self.firstKey)
+    }
+
     func testPendingProGateHandoffLocksMutationsUntilUnavailableFallbackReturnsToPhotoReview() async throws {
         let intake = SubmissionIntakeFixture(photoCount: 2, seed: "pro-fallback")
         let attemptStore = InMemoryItemRunSubmissionAttemptStore()
@@ -463,6 +530,71 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertEqual(presentation.primaryActionLabel, "Try again")
         XCTAssertFalse(presentation.mutationControlsLocked)
         XCTAssertTrue(presentation.rendersSubmittedMedia)
+        let retainedPhotos = try await draftStore.loadPhotos()
+        let retainedAttempt = try await attemptStore.loadAttempt()
+        XCTAssertEqual(retainedPhotos, intake.photos)
+        XCTAssertNotNil(retainedAttempt)
+        let payloads = await submitter.payloads
+        XCTAssertEqual(payloads.count, 1)
+        let discardCount = await draftStore.discardCount
+        XCTAssertEqual(discardCount, 0)
+    }
+
+    /// #846. A gate that cannot open because the seller has no account is a
+    /// different answer from one that failed, and it may not collapse into the
+    /// same retry. This is the host transition `ProGateStore`'s
+    /// `.fallbackToAccountClaim` drives, and it stays event-scoped so a stale
+    /// gate can never rewrite a handoff the seller is already looking at.
+    func testAProGateThatCannotOpenWithoutAnAccountBecomesTheAccountDemand() async throws {
+        let intake = SubmissionIntakeFixture(
+            photoCount: 2,
+            seed: "pro-account-claim"
+        )
+        let attemptStore = InMemoryItemRunSubmissionAttemptStore()
+        let draftStore = RecordingCaptureDraftStore(photos: intake.photos)
+        let submitter = RecordingItemRunSubmitter(
+            outcomes: [.creditDenied(reason: "snaplist-pro-required")]
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: attemptStore,
+                submitter: submitter,
+                draftStore: draftStore,
+                keys: [Self.firstKey]
+            )
+        )
+
+        await host.startListing(photos: intake.photos)
+
+        guard case .destinationHandoff(
+            eventID: let eventID,
+            handoff: .pay01
+        )? = host.pendingPresentationEvent else {
+            return XCTFail("Expected the readable Pro denial handoff.")
+        }
+        XCTAssertFalse(
+            host.replaceProGateHandoffWithAccountClaim(eventID: UUID())
+        )
+        XCTAssertTrue(
+            host.replaceProGateHandoffWithAccountClaim(eventID: eventID)
+        )
+
+        guard case .destinationHandoff(
+            eventID: _,
+            handoff: .accountClaim12aThrough12c
+        )? = host.pendingPresentationEvent else {
+            return XCTFail("Expected the account claim handoff.")
+        }
+        let presentation = PhotoReviewSubmissionPresentation(host: host)
+        XCTAssertEqual(presentation.primaryActionLabel, "Create an account")
+        XCTAssertEqual(
+            presentation.visibleMessage,
+            """
+            You need a SnapList account to send this item. Your item is still \
+            saved on this phone.
+            """
+        )
         let retainedPhotos = try await draftStore.loadPhotos()
         let retainedAttempt = try await attemptStore.loadAttempt()
         XCTAssertEqual(retainedPhotos, intake.photos)

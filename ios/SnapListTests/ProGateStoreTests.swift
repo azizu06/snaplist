@@ -361,6 +361,82 @@ final class ProGateStoreTests: XCTestCase {
         }
     }
 
+    // MARK: - Refused entitlement reads (issue #846)
+
+    /// A guest carries a capability bearer and `/v1/entitlements/ai-items`
+    /// authenticates with `clerkPrincipal`, so the gate's own opening read is
+    /// refused before it can present anything. That refusal is not a failure to
+    /// report — it is the account demand itself, and collapsing it into the
+    /// same silent retry every other error takes is what left a guest tapping
+    /// a `Try again` that could never work.
+    func testAGuestRefusedByTheEntitlementReadIsNotSentBackToARetry() async {
+        let api = ProGateMobileAPIStub(
+            entitlements: [
+                .failure(.unauthenticated(credential: .guestCapability)),
+            ],
+            configuration: .configured
+        )
+        let subscriptions = FixtureSubscriptionClient(products: [product])
+        let store = makeStore(api: api, subscriptions: subscriptions)
+
+        let preparation = await store.prepare()
+
+        XCTAssertNotEqual(preparation, .fallbackToPhotoReview)
+        XCTAssertEqual(preparation, .fallbackToAccountClaim)
+        XCTAssertEqual(store.state, .hidden)
+        // Nothing past the entitlement read can serve a guest either: the
+        // RevenueCat identity route is Clerk-only, so the gate must not ask.
+        let calls = await api.calls()
+        XCTAssertEqual(calls.entitlement, 1)
+        XCTAssertEqual(calls.configuration, 0)
+        let subscriptionCalls = await subscriptions.callCounts()
+        XCTAssertEqual(subscriptionCalls.configure, 0)
+    }
+
+    /// Control. A refused connection proves nothing about whether an account
+    /// exists, so a guest on a bad network keeps the retryable outcome.
+    func testATransientlyFailedEntitlementReadStaysRetryable() async {
+        for failure: MobileAPIClientError in [
+            .httpStatus(503),
+            .invalidResponse,
+        ] {
+            let api = ProGateMobileAPIStub(
+                entitlements: [.failure(failure)],
+                configuration: .configured
+            )
+            let store = makeStore(
+                api: api,
+                subscriptions: FixtureSubscriptionClient(products: [product])
+            )
+
+            let preparation = await store.prepare()
+
+            XCTAssertEqual(preparation, .fallbackToPhotoReview)
+            XCTAssertEqual(store.state, .hidden)
+        }
+    }
+
+    /// Control. A signed-in seller whose token the route rejects is #803's
+    /// session renewal, not an account demand, so the gate keeps the outcome it
+    /// shipped with.
+    func testASignedInSellerRefusedByTheEntitlementReadKeepsTheShippedFallback() async {
+        let api = ProGateMobileAPIStub(
+            entitlements: [
+                .failure(.unauthenticated(credential: .clerkSubject)),
+            ],
+            configuration: .configured
+        )
+        let store = makeStore(
+            api: api,
+            subscriptions: FixtureSubscriptionClient(products: [product])
+        )
+
+        let preparation = await store.prepare()
+
+        XCTAssertEqual(preparation, .fallbackToPhotoReview)
+        XCTAssertEqual(store.state, .hidden)
+    }
+
     func testDeclinePreservesTheApprovedPAY10IntakeAdvisory() async {
         let api = ProGateMobileAPIStub(
             entitlements: [.includedUsed],

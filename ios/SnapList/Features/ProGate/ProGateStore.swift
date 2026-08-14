@@ -7,6 +7,10 @@ final class ProGateStore {
     enum PrepareOutcome: Equatable {
         case presented
         case fallbackToPhotoReview
+        /// The gate cannot open for this seller because they have no account
+        /// yet, which is a different answer from "it did not work this time"
+        /// and needs a different destination (#846).
+        case fallbackToAccountClaim
     }
 
     enum Advisory: Equatable {
@@ -81,7 +85,20 @@ final class ProGateStore {
                 .getAiItemEntitlement()
                 .data
                 .serverVerifiedSubscription
+        } catch MobileAPIClientError.unauthenticated(
+            credential: .guestCapability
+        ) {
+            // #846. A capability bearer proves an installation and never a
+            // subject, and this route authenticates a Clerk subject, so its
+            // refusal is not a failure to report — it is the account demand
+            // itself. Everything past this read is Clerk-only too, so there is
+            // no offer to fall back to and no reason to keep asking.
+            hide()
+            return .fallbackToAccountClaim
         } catch {
+            // Every other refusal, including a rejected Clerk session and a
+            // phone with no signal, proves nothing about whether an account
+            // exists. Those stay on the retry that can still succeed.
             hide()
             return .fallbackToPhotoReview
         }
