@@ -322,6 +322,13 @@ enum ItemRunSubmissionRetention: Equatable, Sendable {
     case attemptNotPersisted
     /// The app has no API origin configured, so there is nowhere to submit.
     case submissionUnavailable
+    /// #843 item 3. The intake is filed under this installation rather than
+    /// under a seller, so its scope can never match a bearer's principal proof.
+    /// Every send from it fails the same way, which makes the generic retry a
+    /// loop. A later App Attest enrollment or sign-in binds a real principal and
+    /// makes the item sendable, so this stays retryable — it just says which
+    /// thing has to change first.
+    case deviceIdentityUnavailable
 }
 
 struct ItemRunAcceptance: Equatable, Sendable {

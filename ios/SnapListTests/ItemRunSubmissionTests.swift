@@ -1437,8 +1437,12 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertTrue(payloads.isEmpty)
         XCTAssertFalse(host.isSubmitting)
         XCTAssertNil(host.acceptedRun)
-        XCTAssertNil(host.retention)
-        XCTAssertNil(host.pendingPresentationEvent)
+        // #843 item 2. Nothing left the device, so the seller is owed the
+        // answer this row used to assert was absent. The scope assertions above
+        // are unchanged: the departed generation still touches no attempt, no
+        // payload, and no accepted run.
+        XCTAssertEqual(host.retention, .submissionUnavailable)
+        XCTAssertNotNil(host.pendingPresentationEvent)
     }
 
     func testPrincipalSwitchDuringTransportPreservesAttemptAndSuppressesResult()
@@ -4574,6 +4578,136 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
     }
 
+    /// #843 item 2. An App Attest key rotation posts `didChange` while a
+    /// submission is open, which resets the departing submission out from under
+    /// the seller's tap. Before this, the tap produced no message, no error and
+    /// no state change at all.
+    @MainActor
+    func testAPrincipalChangeDuringASubmissionTellsTheSellerInsteadOfGoingSilent()
+        async throws {
+        let departingSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "principal-rotation-departing-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        let arrivingSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "principal-rotation-arriving-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer {
+            try? FileManager.default.removeItem(at: departingSupport)
+            try? FileManager.default.removeItem(at: arrivingSupport)
+        }
+        let photoData = SubmissionIntakeFixture.jpeg(
+            filling: "principal-rotation",
+            repeated: 1
+        )
+        let departing = try await makeNativePrincipalIntake(
+            applicationSupport: departingSupport,
+            verifiedClerkSubject: "user_before_rotation",
+            photoData: photoData
+        )
+        let arriving = try await makeNativePrincipalIntake(
+            applicationSupport: arrivingSupport,
+            verifiedClerkSubject: "user_after_rotation",
+            photoData: photoData
+        )
+        let gate = SubmissionResponseGate()
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: RecordingItemRunSubmitter(outcomes: [.ambiguous]),
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: departing.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof:
+                        ItemRunSubmissionPrincipalScopeProof(
+                            verifiedClerkSubject: "user_before_rotation"
+                        )
+                ) {
+                    await gate.hold()
+                    return "clerk-session-token"
+                },
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: departing.snapshot,
+            intake: departing.intake
+        )
+
+        let listing = Task { @MainActor in
+            await host.startListing(photos: departing.snapshot.photos)
+        }
+        await gate.waitUntilHeld()
+        host.synchronizePrincipal(
+            snapshot: arriving.snapshot,
+            intake: arriving.intake
+        )
+        await gate.release()
+        await listing.value
+
+        XCTAssertEqual(host.retention, .submissionUnavailable)
+        XCTAssertNotNil(host.pendingPresentationEvent)
+        XCTAssertFalse(host.isSubmitting)
+    }
+
+    func testAnAnonymousInstallationScopeSaysSoInsteadOfFailingLikeAnyOtherSend()
+        async throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "anonymous-installation-scope-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: support) }
+        let anonymous = try await makeAnonymousInstallationIntake(
+            applicationSupport: support,
+            photoData: SubmissionIntakeFixture.jpeg(
+                filling: "anonymous-installation",
+                repeated: 1
+            )
+        )
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: anonymous.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof:
+                        ItemRunSubmissionPrincipalScopeProof(
+                            verifiedAppAttestKeyID: "anonymous-scope-key"
+                        )
+                ) {
+                    "guest-capability-token"
+                },
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: anonymous.snapshot,
+            intake: anonymous.intake
+        )
+
+        await host.startListing(photos: anonymous.snapshot.photos)
+
+        // #843 item 3. This scope is bound to the installation, so no bearer
+        // this device can mint will ever match its proof. Naming that keeps the
+        // seller off a `Try again` that is guaranteed to fail the same way.
+        XCTAssertEqual(host.retention, .deviceIdentityUnavailable)
+        let payloads = await submitter.payloads
+        XCTAssertTrue(
+            payloads.isEmpty,
+            "An unbindable scope must be refused before any network call."
+        )
+        XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.acceptedRun)
+    }
+
     private static func fixedVoiceWAV() -> Data {
         Data([
             0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00,
@@ -4583,6 +4717,52 @@ final class ItemRunSubmissionTests: XCTestCase {
             0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61,
             0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
         ])
+    }
+
+    /// A durable intake for a device with neither a Clerk subject nor a
+    /// persisted App Attest key, which is the state production reaches before
+    /// enrollment succeeds. `.installation` matches the production identity
+    /// source, so the bundle survives relaunch rather than staying ephemeral.
+    private func makeAnonymousInstallationIntake(
+        applicationSupport: URL,
+        photoData: Data,
+        fileManager: FileManager = .default
+    ) async throws -> (
+        intake: NativeIntake,
+        snapshot: NativeIntake.Snapshot
+    ) {
+        let intake = NativeIntake(
+            applicationSupportDirectory: applicationSupport,
+            identitySource: NativeIntake.IdentitySource(
+                current: {
+                    NativeIntake.Identity(
+                        verifiedClerkSubject: nil,
+                        persistedAppAttestKeyID: nil
+                    )
+                },
+                changes: { AsyncStream { _ in } },
+                anonymousScopePersistence: .installation
+            ),
+            fileManager: fileManager
+        )
+        let events = await intake.events()
+        var iterator = events.makeAsyncIterator()
+        guard let initialEvent = await iterator.next(),
+              case .snapshot(_) = initialEvent else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        guard await intake.perform(
+            .addPhotos([NativeIntake.PhotoInput { photoData }])
+        ) == .committed else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        while let event = await iterator.next() {
+            if case .snapshot(let snapshot) = event,
+               snapshot.photos.count == 1 {
+                return (intake, snapshot)
+            }
+        }
+        throw CocoaError(.fileReadUnknown)
     }
 
     private func makeNativePrincipalIntake(

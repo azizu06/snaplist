@@ -663,6 +663,24 @@ actor AppAttestClient {
     }
 
     private func enrollNewKey() async -> AppAttestTruth {
+        /// #843 item 5. The pending key is written before attestation is
+        /// attempted so an interrupted enrollment can be resumed rather than
+        /// restarted. That window has to close on the way out: `NativeIntake`
+        /// scopes an intake by whatever key is persisted, with no state filter,
+        /// while the bearer path serves only a `.verified` one. A key left
+        /// behind by a rejected enrollment therefore files the seller's photos
+        /// under an identity no bearer can present.
+        ///
+        /// Only a rejection discards it. Apple or the server refusing this key
+        /// is final — the same key attested again gets the same answer — but an
+        /// outage is not a denial, and `attestInstallation` resumes a stored
+        /// pending key on the next launch. Discarding it there would spend an
+        /// Apple key generation on a dropped connection.
+        var pendingKeyIsPersisted = false
+        func rejected(_ truth: AppAttestTruth) -> AppAttestTruth {
+            if pendingKeyIsPersisted { try? keyStore.remove() }
+            return truth
+        }
         do {
             let challenge = try await server.issueChallenge(kind: .attestation, keyID: nil)
             let keyID = try await service.generateKey()
@@ -671,6 +689,7 @@ actor AppAttestClient {
             } catch {
                 return .invalid(.keyPersistenceFailed)
             }
+            pendingKeyIsPersisted = true
             let hash = Data(SHA256.hash(data: challenge.bytes))
             let object = try await service.attestKey(keyID, clientDataHash: hash)
             let truth = try await server.verifyAttestation(
@@ -678,21 +697,30 @@ actor AppAttestClient {
                 keyID: keyID,
                 attestationObject: object
             )
-            guard case .verified = truth else { return truth }
+            guard case .verified = truth else {
+                // `.unavailable` here is the server declining to answer yet, not
+                // declining this key, so only `.invalid` discards.
+                if case .invalid = truth { return rejected(truth) }
+                return truth
+            }
             do {
                 try keyStore.save(.init(id: keyID, state: .verified))
             } catch {
+                // The key is attested and the server knows it; only the local
+                // state flip failed. The next launch's assertion re-flips it.
                 return .invalid(.keyPersistenceFailed)
             }
             return truth
         } catch let error as AppAttestServerClientError {
-            return Self.truth(for: error)
+            let truth = Self.truth(for: error)
+            if case .invalid = truth { return rejected(truth) }
+            return truth
         } catch let error as DCError where error.code == .serverUnavailable {
             return .unavailable(.appleServiceUnavailable)
         } catch is URLError {
             return .unavailable(.serverUnavailable)
         } catch {
-            return .invalid(.appleRejected)
+            return rejected(.invalid(.appleRejected))
         }
     }
 
@@ -1003,8 +1031,9 @@ struct GuestCapabilityRenewingBearerTokenProvider: BearerTokenProviding {
             // Any other Clerk error remains an account error and propagates.
         }
 
-        guard await renewGuestCapability() == .ready else {
-            throw BearerTokenProviderError.sessionAbsent
+        let renewal = await renewGuestCapability()
+        guard renewal == .ready else {
+            throw Self.error(forFailedRenewal: renewal)
         }
 
         let renewed = try await base.bearerToken()
@@ -1040,8 +1069,9 @@ struct GuestCapabilityRenewingBearerTokenProvider: BearerTokenProviding {
             // Any other Clerk error remains an account error and propagates.
         }
 
-        guard await renewGuestCapability() == .ready else {
-            throw BearerTokenProviderError.sessionAbsent
+        let renewal = await renewGuestCapability()
+        guard renewal == .ready else {
+            throw Self.error(forFailedRenewal: renewal)
         }
 
         let renewed = try await base.itemRunSubmissionScopedBearer()
@@ -1055,6 +1085,41 @@ struct GuestCapabilityRenewingBearerTokenProvider: BearerTokenProviding {
             throw BearerTokenProviderError.sessionAbsent
         }
         return renewed
+    }
+
+    /// #843 item 1. Which renewal failures prove no guest capability can ever
+    /// exist on this installation, and which are true of this attempt only.
+    ///
+    /// Only the first kind may reach `.credentialAbsent` and become the demand
+    /// to make an account. A dropped connection or an Apple service outage says
+    /// nothing at all about whether the seller has one.
+    ///
+    /// `.unsupportedDevice` is grouped with the terminal outcomes even though
+    /// its truth is spelled `.unavailable`: hardware that cannot attest can
+    /// never earn a capability, and a retry there would loop with no way out.
+    private static func error(
+        forFailedRenewal outcome: AppAttestGuestCapabilityEnrollmentOutcome
+    ) -> BearerTokenProviderError {
+        switch outcome {
+        case .ready:
+            return .sessionAbsent
+        case .unavailable(let reason):
+            switch reason {
+            case .serverUnavailable, .appleServiceUnavailable:
+                return .credentialTemporarilyUnavailable
+            case .unsupportedDevice:
+                return .sessionAbsent
+            }
+        case .invalid(let reason):
+            switch reason {
+            // A keychain that would not open is the local storage equivalent of
+            // a dropped connection: the credential was unreachable, not absent.
+            case .keyPersistenceFailed:
+                return .credentialTemporarilyUnavailable
+            case .appleRejected, .missingVerifiedKey, .serverRejected:
+                return .sessionAbsent
+            }
+        }
     }
 
     private func storedBearer(matching token: String) -> GuestCapabilityBearer? {

@@ -64,6 +64,44 @@ final class NativeIntakeTests: XCTestCase {
         let returnedAuthenticated = try await session.nextSnapshot()
         XCTAssertEqual(returnedAuthenticated.photos.count, 1)
     }
+    func testAnAppAttestKeyChangePostedBeforeAnyoneIteratesIsStillDelivered() async {
+        let center = NotificationCenter()
+        let changes = ClerkAuthenticationComposition.appAttestChanges(center: center)
+        // The window this test exists for: composition has handed the stream
+        // back, and nothing has begun consuming it yet. Enrollment finishing
+        // here is ordinary — it races the very launch that started it.
+        center.post(name: KeychainAppAttestKeyIDStore.didChange, object: nil)
+        let delivered = await Self.deliversOneChange(changes)
+        XCTAssertTrue(delivered,
+            "A key change posted before the first await was dropped, so the intake kept the scope it launched with.")
+    }
+    func testAnAppAttestKeyChangePostedWhileIteratingIsDelivered() async {
+        let center = NotificationCenter()
+        let changes = ClerkAuthenticationComposition.appAttestChanges(center: center)
+        let delivery = Task { await Self.deliversOneChange(changes) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        center.post(name: KeychainAppAttestKeyIDStore.didChange, object: nil)
+        let delivered = await delivery.value
+        XCTAssertTrue(delivered,
+            "Control: the ordinary post-while-listening delivery must keep working.")
+    }
+    /// Bounded so a dropped notification fails the assertion instead of hanging
+    /// the suite. The loser of the race is cancelled either way.
+    private static func deliversOneChange(_ changes: AsyncStream<Void>) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                var iterator = changes.makeAsyncIterator()
+                return await iterator.next() != nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+    }
     func testFivePhotoSelectionCommitsAllOrNone() async throws {
         let harness = NativeIntakeHarness(identity: .clerk("user_native_intake_batch"))
         let guardedFiles = NativeIntakeTestFileManager()

@@ -80,6 +80,10 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
     let photos: [StagedCapturePhoto]
     let voice: NativeIntake.Voice?
     let attemptStore: any ItemRunSubmissionAttemptStoring
+    /// #843 item 3. Carried from the snapshot because `scopeProof` is a digest:
+    /// an installation-scoped intake is indistinguishable from a seller-scoped
+    /// one here, and only the first can never match a bearer.
+    let isPrincipalBound: Bool
 
     private let validateFilesystemContext:
         @Sendable () async throws -> Void
@@ -93,6 +97,7 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
         photos: [StagedCapturePhoto],
         voice: NativeIntake.Voice?,
         attemptStore: any ItemRunSubmissionAttemptStoring,
+        isPrincipalBound: Bool,
         validateFilesystemContext:
             @escaping @Sendable () async throws -> Void,
         discardCommittedIntake: @escaping @Sendable () async -> Bool,
@@ -104,6 +109,7 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
         self.photos = photos
         self.voice = voice
         self.attemptStore = attemptStore
+        self.isPrincipalBound = isPrincipalBound
         self.validateFilesystemContext = validateFilesystemContext
         self.discardCommittedIntake = discardCommittedIntake
         self.retireAcceptedPhotosPreservingVoice =
@@ -140,6 +146,7 @@ struct ItemRunSubmissionPrincipalContext: Sendable {
             photos: snapshot.photos,
             voice: snapshot.voice,
             attemptStore: attemptStore,
+            isPrincipalBound: snapshot.isPrincipalBound,
             validateFilesystemContext: {
                 try await attemptStore.validatePrincipalScope()
             },
