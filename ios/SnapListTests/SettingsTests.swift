@@ -79,6 +79,105 @@ final class SettingsTests: XCTestCase {
         )
     }
 
+    /// #844. The ACCOUNT card holds exactly one control, and which one it is
+    /// follows from the identity: a guest is offered the account they do not
+    /// have, a member is offered the way out of the one they do. Before this
+    /// the member branch was a static `valueRow`, so the only way to stop being
+    /// signed in was to delete the account.
+    func testSignOutIsOfferedToAMemberAndNeverToAGuest() {
+        XCTAssertTrue(
+            SettingsSignOutPolicy.isAvailable(
+                for: .member(method: .apple, email: "seller@example.com")
+            )
+        )
+        XCTAssertTrue(
+            SettingsSignOutPolicy.isAvailable(
+                for: .member(method: .emailCode, email: "seller@example.com")
+            )
+        )
+        XCTAssertFalse(SettingsSignOutPolicy.isAvailable(for: .guest))
+    }
+
+    /// #844, acceptance criterion 1, the guest half.
+    ///
+    /// The ACCOUNT card branches on `SettingsAccountEntryPolicy` for the
+    /// account row and on `SettingsSignOutPolicy` for the sign-out row, and
+    /// nothing else. Proving the two are exact complements is therefore proof
+    /// that the card offers exactly one of them per identity — a guest can no
+    /// more reach a sign-out than a member can reach `Create an account`.
+    ///
+    /// Asserted here rather than in a UI test because `--fixture=account` is
+    /// the only launch fixture that opens Settings, and it is a member by
+    /// construction; adding a guest fixture means editing
+    /// `LaunchConfiguration`, which this issue does not own.
+    func testTheAccountCardOffersExactlyOneControlPerIdentity() {
+        let identities: [SettingsIdentity] = [
+            .guest,
+            .member(method: .apple, email: "seller@example.com"),
+            .member(method: .emailCode, email: "seller@example.com"),
+        ]
+
+        for identity in identities {
+            let offersAccountEntry =
+                SettingsAccountEntryPolicy.destination(for: identity) != nil
+            let offersSignOut = SettingsSignOutPolicy.isAvailable(for: identity)
+
+            XCTAssertNotEqual(
+                offersAccountEntry,
+                offersSignOut,
+                "\(identity) is offered both controls or neither"
+            )
+        }
+    }
+
+    /// #844, acceptance criterion 8. The wording must not read as account
+    /// deletion.
+    ///
+    /// Two halves, because either alone is cheap to satisfy. The screen has to
+    /// say the account survives — in words, not by omission — and no string on
+    /// it may be a deletion claim. The second half scans every string the
+    /// screen shows rather than a list restated here, so copy added later is
+    /// covered without anyone remembering to extend this.
+    func testSignOutCopyStatesTheAccountSurvivesAndNeverClaimsDeletion() {
+        XCTAssertTrue(
+            SettingsSignOutCopy.unchanged.contains {
+                $0.contains("This is not account deletion")
+            },
+            "the screen has to deny deletion outright, not merely omit it"
+        )
+        XCTAssertTrue(
+            SettingsSignOutCopy.unchanged.contains {
+                $0.localizedCaseInsensitiveContains("signing back in")
+            },
+            "criterion 6 is a promise the copy has to make, not just a behaviour"
+        )
+        XCTAssertEqual(SettingsSignOutCopy.cancel, "Stay signed in")
+
+        // The only sentence allowed to mention deleting is the one that points
+        // deletion somewhere else.
+        // "delet" catches delete, deleted, deletion and deleting alike;
+        // spelling out "delete" alone missed "Deleting your account".
+        let deletionWords = ["delet", "eras", "permanent", "remove your account"]
+        let deletionClaims = SettingsSignOutCopy.everyString.filter { line in
+            deletionWords.contains { line.localizedCaseInsensitiveContains($0) }
+        }
+        XCTAssertEqual(
+            Set(deletionClaims),
+            [
+                SettingsSignOutCopy.deletionIsElsewhere,
+                "Your account stays. This is not account deletion.",
+            ],
+            "a sign-out screen may point at deletion, never announce one"
+        )
+        // Positive control: the filter above finds deletion words when they are
+        // there, so an empty-but-for-the-two result is a real absence.
+        XCTAssertFalse(
+            SettingsSignOutCopy.everyString.filter {
+                $0.localizedCaseInsensitiveContains("delet")
+            }.isEmpty
+        )
+    }
+
     func testSettingsProofStateDefaultsOff() {
         XCTAssertNil(LaunchConfiguration.standard.settingsProofState)
         XCTAssertNil(
@@ -236,6 +335,231 @@ final class SettingsTests: XCTestCase {
 
         XCTAssertFalse(removed)
         XCTAssertFalse(cachedRemovalCalled)
+    }
+
+    /// #844. Local copies go before the session does, and the order is the
+    /// invariant rather than an implementation detail: `CaptureDraft/` and
+    /// `ListingReview/` are flat directories with no principal in their paths,
+    /// so a guest shell reached before they are gone reads the member's drafts.
+    /// Ending the session first would make that window real whenever the
+    /// removal then failed.
+    func testSignOutRemovesThisDevicesCopiesBeforeItEndsTheSession() async {
+        var order: [String] = []
+
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: {
+                order.append("remove-local-data")
+                return true
+            },
+            endSession: { order.append("end-session") }
+        )
+
+        XCTAssertEqual(outcome, .signedOut)
+        XCTAssertEqual(order, ["remove-local-data", "end-session"])
+    }
+
+    /// #844. A removal that did not happen never becomes a sign-out. The seller
+    /// keeps the session they still have, and their drafts stay where only they
+    /// can reach them, rather than being handed to the guest shell.
+    func testSignOutThatCannotClearThisDeviceLeavesTheSessionAlone() async {
+        var endSessionCalled = false
+
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: { false },
+            endSession: { endSessionCalled = true }
+        )
+
+        XCTAssertEqual(outcome, .localDataNotRemoved)
+        XCTAssertFalse(endSessionCalled)
+    }
+
+    /// #844. Clerk holds the session in its own Keychain item, so a sign-out
+    /// that threw leaves a live credential on the device. Reporting it as a
+    /// sign-out would tell the seller the session is over while it is not —
+    /// the same failure `AccountDeletionCoordinator` refuses to swallow.
+    func testSignOutThatClerkRefusedIsNeverReportedAsAFinishedSignOut() async {
+        struct SessionEndFailure: Error {}
+        var removed = false
+
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: {
+                removed = true
+                return true
+            },
+            endSession: { throw SessionEndFailure() }
+        )
+
+        XCTAssertEqual(outcome, .sessionNotEnded)
+        // The removal is not rolled back, and the copy the seller reads has to
+        // say so: this device's copies are gone whether or not Clerk answered.
+        XCTAssertTrue(removed)
+    }
+
+    /// #844, round-1 review finding. `.sessionNotEnded` means the local
+    /// removal already committed — it is not rolled back, per the test above.
+    /// Reusing `failed`'s "didn't finish" framing for that case tells the
+    /// seller their unsent work is still there when it is already gone, so
+    /// the two outcomes cannot share a string.
+    func testSignOutFailureCopyReflectsWhatAlreadyHappened() {
+        XCTAssertEqual(
+            SettingsSignOutCopy.failureCopy(for: .localDataNotRemoved),
+            SettingsSignOutCopy.failed,
+            "nothing happened yet for this outcome, so the generic failure copy is honest"
+        )
+
+        let sessionNotEndedCopy = SettingsSignOutCopy.failureCopy(for: .sessionNotEnded)
+        XCTAssertNotEqual(
+            sessionNotEndedCopy,
+            SettingsSignOutCopy.failed,
+            "the removal already committed, so this outcome cannot reuse copy that implies nothing happened"
+        )
+        XCTAssertTrue(
+            sessionNotEndedCopy?.localizedCaseInsensitiveContains("already") ?? false,
+            "the copy must say the removal already happened, not merely that it will"
+        )
+
+        XCTAssertNil(SettingsSignOutCopy.failureCopy(for: .signedOut))
+    }
+
+    /// #844, round 2 review finding (P2, two independent reviewers). Round 1's
+    /// `effects[0]` named only unsent photos and a voice note, and
+    /// `unchanged[1]` promised signing back in "brings them back" — but
+    /// `SettingsSignOutTransaction.ownedRoots` also deletes `ListingReview/`,
+    /// this device's copy of an item mid-review, which by construction only
+    /// exists after submission. `effects[0]` excluded it, so `unchanged[1]`'s
+    /// blanket promise was false for it. The sibling local-removal screen
+    /// (`SettingsLocalRemovalView`) already names the item copy in its own
+    /// "what is removed" bullet; this pins sign-out's copy to the same fact
+    /// about the same transaction.
+    func testSignOutCopyNamesTheLocalItemCopyItActuallyDeletes() {
+        XCTAssertTrue(
+            SettingsSignOutCopy.effects[0].contains(
+                "this iPhone's copy of anything it is holding for an item"
+            ),
+            "effects[0] must name the item copy the transaction deletes, not only photos and a voice note"
+        )
+
+        let survivorClaim = SettingsSignOutCopy.unchanged[1]
+        XCTAssertTrue(
+            survivorClaim.localizedCaseInsensitiveContains("stay on your account"),
+            "the true half — server-held items come back — still has to be said"
+        )
+        XCTAssertTrue(
+            survivorClaim.contains("does not"),
+            "the local item copy this transaction deletes must not be promised back, so the bullet needs its carve-out"
+        )
+
+        XCTAssertTrue(
+            SettingsSignOutCopy.sessionNotEnded.contains(
+                "this iPhone's copy of anything it was holding for an item"
+            ),
+            "sessionNotEnded understates the same removal effects[0] now names"
+        )
+    }
+
+    /// #844, acceptance criterion 3, proved against the real stores rather than
+    /// inferred from the session being nil.
+    ///
+    /// `SettingsLocalCachedDataStore.ownedRoots` is `SnapList/CaptureDraft` and
+    /// `SnapList/ListingReview` — two flat directories with no principal in
+    /// their paths. The intake root is `SnapList/NativeIntake/v1-<sha256 of the
+    /// Clerk subject>`, so a guest resolves a different directory and cannot
+    /// reach a member's intake; these two have no such fence, so whatever
+    /// survives sign-out is readable by the guest shell that sign-out lands in.
+    /// The assertion is that a real listing draft, written by the shipped
+    /// persistence, cannot be loaded back afterwards.
+    ///
+    /// The pre-checks are the positive control: they fail if the fixture never
+    /// wrote anything, which would make the post-checks pass by vacuum.
+    func testSignOutLeavesNoDraftOrListingOnTheDeviceForTheGuestShellToRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "settings-sign-out-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listingReview = root
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent("ListingReview", isDirectory: true)
+        let captureDraft = root
+            .appendingPathComponent("SnapList", isDirectory: true)
+            .appendingPathComponent("CaptureDraft", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: listingReview,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: captureDraft,
+            withIntermediateDirectories: true
+        )
+
+        let snapshot = ListingReviewLaunchFixture.review()
+        let persistence = LocalListingReviewDraftPersistence(
+            rootDirectory: listingReview
+        )
+        let token = ListingReviewDraftPersistenceToken(
+            sessionID: UUID(),
+            generation: 0
+        )
+        let activated = await persistence.activate(
+            token,
+            runID: snapshot.binding.runID
+        )
+        XCTAssertTrue(activated)
+        let saved = try await persistence.save(
+            PersistedListingReviewDraft(
+                snapshot: snapshot,
+                draft: ListingReviewDraft(snapshot: snapshot),
+                pendingSave: nil,
+                expiresAt: Date().addingTimeInterval(3_600)
+            ),
+            runID: snapshot.binding.runID,
+            token: token
+        )
+        XCTAssertTrue(saved)
+        try Data("unsent capture".utf8).write(
+            to: captureDraft.appendingPathComponent("manifest.json")
+        )
+
+        let cachedData = SettingsLocalCachedDataStore(
+            applicationSupportDirectory: root
+        )
+        // Positive control: the member's work is genuinely on this device, and
+        // genuinely readable, before anything signs out.
+        XCTAssertTrue(cachedData.hasData)
+        let readableBefore = try await persistence.load(
+            runID: snapshot.binding.runID,
+            token: token
+        )
+        XCTAssertNotNil(readableBefore)
+        XCTAssertEqual(
+            readableBefore?.snapshot.binding.runID,
+            snapshot.binding.runID
+        )
+
+        var intakeDiscarded = false
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: {
+                await SettingsLocalRemovalTransaction.perform(
+                    removeIntake: {
+                        intakeDiscarded = true
+                        return true
+                    },
+                    removeCachedItems: { cachedData.removeAll() }
+                )
+            },
+            endSession: {}
+        )
+
+        XCTAssertEqual(outcome, .signedOut)
+        XCTAssertTrue(intakeDiscarded)
+        XCTAssertFalse(cachedData.hasData)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: listingReview.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: captureDraft.path))
+        let readableAfter = try await persistence.load(
+            runID: snapshot.binding.runID,
+            token: token
+        )
+        XCTAssertNil(readableAfter)
     }
 
     func testGuestSettingsStopsBeforeEntitlementsAndAccountManagement() {
@@ -903,4 +1227,108 @@ extension SettingsTests {
             "every supported size has to be classified, not just the ones listed here"
         )
     }
+
+    /// #844, acceptance criterion 5. Sign-out must not reach the erasure
+    /// endpoint.
+    ///
+    /// Both halves run against the *shipped* dependency struct
+    /// `AccountDeletionComposition.make` builds, over one `URLSession` that
+    /// records every request. The positive control fires `requestErasure` —
+    /// the closure sign-out must never touch — and shows the recorder catching
+    /// a POST to `/v1/account/erasure`. Then the two closures sign-out is
+    /// composed of run against the same recorder and it stays empty. Without
+    /// the control, an empty recorder would prove only that the stub was never
+    /// installed.
+    @MainActor
+    func testSignOutNeverReachesTheAccountErasureEndpoint() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SettingsSignOutURLProtocolRecorder.self]
+        SettingsSignOutURLProtocolRecorder.reset()
+        defer { SettingsSignOutURLProtocolRecorder.reset() }
+
+        let intakeRemoved = SettingsSignOutTestFlag()
+        let cachedItemsRemoved = SettingsSignOutTestFlag()
+        let dependencies = AccountDeletionComposition.make(
+            apiOrigin: URL(string: "https://snaplist.dev")!,
+            session: URLSession(configuration: configuration),
+            signedInUserID: "user_2signed_in_member",
+            mintBearerToken: { _ in "reverified-token" },
+            endSession: {},
+            keyStoreDefaults: try XCTUnwrap(
+                UserDefaults(suiteName: "SettingsTests-sign-out-\(UUID().uuidString)")
+            ),
+            removeIntake: { intakeRemoved.raise(); return true },
+            removeCachedItems: { cachedItemsRemoved.raise(); return true }
+        )
+
+        // Positive control. This is the deletion path, not the sign-out path.
+        _ = await dependencies.requestErasure(
+            "84400000-0000-4000-8000-000000000001"
+        )
+        XCTAssertEqual(
+            SettingsSignOutURLProtocolRecorder.requestedPaths,
+            ["/v1/account/erasure"],
+            "the recorder has to be able to see an erasure before its silence means anything"
+        )
+
+        SettingsSignOutURLProtocolRecorder.reset()
+
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: { await dependencies.clearDeviceState() },
+            endSession: {
+                guard await dependencies.signOut() else {
+                    throw SettingsSignOutTestSessionEndFailure()
+                }
+            }
+        )
+
+        XCTAssertEqual(outcome, .signedOut)
+        XCTAssertTrue(intakeRemoved.isRaised)
+        XCTAssertTrue(cachedItemsRemoved.isRaised)
+        XCTAssertEqual(SettingsSignOutURLProtocolRecorder.requestedPaths, [])
+    }
+}
+
+private struct SettingsSignOutTestSessionEndFailure: Error {}
+
+/// A one-way flag a `@Sendable` closure can set, since a local `var` cannot be
+/// captured by one.
+private final class SettingsSignOutTestFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var raised = false
+
+    var isRaised: Bool { lock.withLock { raised } }
+
+    func raise() { lock.withLock { raised = true } }
+}
+
+/// Records every request that reaches the session it is installed on and
+/// answers nothing, so a path that calls out is visible whether or not it cares
+/// about the reply.
+private final class SettingsSignOutURLProtocolRecorder: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) private static let lock = NSLock()
+    nonisolated(unsafe) private static var paths: [String] = []
+
+    static var requestedPaths: [String] {
+        lock.withLock { paths }
+    }
+
+    static func reset() {
+        lock.withLock { paths = [] }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        if let path = request.url?.path {
+            Self.lock.withLock { Self.paths.append(path) }
+        }
+        client?.urlProtocol(
+            self,
+            didFailWithError: URLError(.notConnectedToInternet)
+        )
+    }
+
+    override func stopLoading() {}
 }

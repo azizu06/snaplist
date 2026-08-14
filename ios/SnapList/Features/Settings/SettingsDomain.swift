@@ -31,6 +31,105 @@ enum SettingsAccountEntryPolicy {
     }
 }
 
+/// Issue #844. Everything the sign-out screens say, kept out of the view so
+/// the wording is assertable rather than only screenshot-able — the same reason
+/// `SettingsGuestBoundaryCopy` exists.
+///
+/// The risk this copy carries is that a seller reads `Sign out` as the end of
+/// their account. So the screen states the opposite in as many words, and the
+/// unsent work it does take is named before the seller commits to it.
+enum SettingsSignOutCopy {
+    static let rowLabel = "Sign out"
+    static let title = "Sign out"
+    static let confirm = "Sign out"
+    static let cancel = "Stay signed in"
+
+    static let effectTitle = "What happens on this iPhone"
+    static let effects = [
+        "Photos and a voice note you have not submitted yet, and this iPhone's copy of anything it is holding for an item, are removed from this iPhone.",
+        "Trophy Wall goes back to the guest view, and your items stop showing here.",
+    ]
+
+    static let unchangedTitle = "What this does not change"
+    static let unchanged = [
+        "Your account stays. This is not account deletion.",
+        "Items you have already sent stay on your account, and signing back in brings them back. This iPhone's copy of anything it is holding for an item does not come back.",
+        "Your subscription is unchanged.",
+    ]
+
+    static let deletionIsElsewhere =
+        "Deleting your account is a separate action in Settings."
+    /// Shown when local removal never ran, so nothing has happened yet.
+    static let failed =
+        "Signing out didn't finish, so you are still signed in. Try again."
+
+    /// Shown when local removal already committed and Clerk then refused to
+    /// end the session. `failed` implies nothing has happened, which is no
+    /// longer true here — the photos, voice note, and item copy the
+    /// `effects` bullet promised are already gone, not merely pending.
+    static let sessionNotEnded =
+        "Your photos and voice note, and this iPhone's copy of anything it was holding for an item, are already removed. Signing out didn't finish, so you are still signed in. Try again to finish."
+
+    /// `nil` for `.signedOut`, which shows no failure text at all.
+    static func failureCopy(for outcome: SettingsSignOutOutcome) -> String? {
+        switch outcome {
+        case .signedOut: nil
+        case .localDataNotRemoved: failed
+        case .sessionNotEnded: sessionNotEnded
+        }
+    }
+
+    /// Every string the sign-out screens can put in front of a seller, so a
+    /// wording rule can be applied to all of them instead of to a list someone
+    /// has to remember to extend.
+    static var everyString: [String] {
+        [rowLabel, title, confirm, cancel, effectTitle, unchangedTitle,
+         deletionIsElsewhere, failed, sessionNotEnded] + effects + unchanged
+    }
+}
+
+/// Issue #844. Whether the ACCOUNT card offers a way out of the session.
+///
+/// The mirror of `SettingsAccountEntryPolicy`: a guest is offered the account
+/// they do not have, a member the end of the session they do. Sign-out is not a
+/// route, so this answers with availability rather than an `AppRoute`.
+enum SettingsSignOutPolicy {
+    static func isAvailable(for identity: SettingsIdentity) -> Bool {
+        if case .member = identity { true } else { false }
+    }
+}
+
+enum SettingsSignOutOutcome: Equatable {
+    case signedOut
+    /// Nothing was removed and nothing was ended. The seller is where they
+    /// started.
+    case localDataNotRemoved
+    /// This device's copies are gone, and Clerk still holds the session. Never
+    /// reported as a sign-out: the credential is still on the device.
+    case sessionNotEnded
+}
+
+/// Issue #844. Ends a member's session and takes this device's copies with it.
+///
+/// The removal runs first. `CaptureDraft/` and `ListingReview/` carry no
+/// principal in their paths, unlike the intake root, so the guest shell a
+/// sign-out lands in can read whatever is still there. Removing first makes
+/// "signed out" imply "removed" rather than leaving a window where it does not.
+enum SettingsSignOutTransaction {
+    static func perform(
+        removeLocalData: () async -> Bool,
+        endSession: () async throws -> Void
+    ) async -> SettingsSignOutOutcome {
+        guard await removeLocalData() else { return .localDataNotRemoved }
+        do {
+            try await endSession()
+        } catch {
+            return .sessionNotEnded
+        }
+        return .signedOut
+    }
+}
+
 struct SettingsFlow: Equatable {
     enum Screen: Equatable {
         case settings

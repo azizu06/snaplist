@@ -17,6 +17,7 @@ struct SettingsView: View {
     private let analyticsClient: any AnalyticsClient
     private let ebayPublishService: any EbayPublishFeatureServing
     private let navigate: (AppRoute) -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var hasLocalData: Bool
     @State private var ebayConnection: EbayConnectionStatus?
     @State private var ebayConnectionLoadPhase =
@@ -109,6 +110,30 @@ struct SettingsView: View {
                             .accessibilityHint("Opens the account entry screen")
                         } else {
                             valueRow("Sign-in method", profile.methodLabel)
+                        }
+                    }
+                    // #844. A member's ACCOUNT card used to hold nothing but a
+                    // static `Sign-in method` value, so the only way to stop
+                    // being signed in on this iPhone was to delete the account.
+                    if SettingsSignOutPolicy.isAvailable(for: profile.identity) {
+                        settingsCardDivider
+                        settingsCardRow {
+                            NavigationLink {
+                                SettingsSignOutView(signOut: signOut)
+                            } label: {
+                                Text(SettingsSignOutCopy.rowLabel)
+                                    // Same `settingsCardRow` fixed-height
+                                    // touch-target gap `LegalLinkRow` and
+                                    // "Create an account" needed (#831).
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        maxHeight: .infinity,
+                                        alignment: .leading
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityIdentifier("settings.sign-out")
+                            .accessibilityHint("Explains what signing out does before it runs")
                         }
                     }
                 }
@@ -611,6 +636,35 @@ struct SettingsView: View {
         )
     }
 
+    /// #844. Removes this device's copies, then ends the Clerk session, then
+    /// pops Settings so the seller lands back in the shell — which reads
+    /// `Clerk.shared.user` and is therefore the guest shell by then.
+    ///
+    /// `removeLocalData` is the same closure the THIS IPHONE row already uses,
+    /// and `signOut()` is the same ClerkKit call the deletion tail makes. The
+    /// ordering and the failure handling live in `SettingsSignOutTransaction`
+    /// so they are provable without a signed-in device.
+    private func signOut() async -> SettingsSignOutOutcome {
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: removeLocalData,
+            endSession: { try await Clerk.shared.auth.signOut() }
+        )
+        switch outcome {
+        case .signedOut:
+            hasLocalData = false
+            dismiss()
+        case .sessionNotEnded:
+            // Removal already committed even though the session did not end
+            // (`SettingsSignOutTransaction.perform`), so the indicator is
+            // stale from this point on regardless of whether sign-out is
+            // retried.
+            hasLocalData = false
+        case .localDataNotRemoved:
+            break
+        }
+        return outcome
+    }
+
     private func settingsCard<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -840,6 +894,7 @@ private struct SettingsLocalRemovalView: View {
                 secondary: "Keep it",
                 destructive: true,
                 disabled: removing,
+                secondaryDisabled: removing,
                 primaryAction: {
                     removing = true
                     Task {
@@ -849,8 +904,88 @@ private struct SettingsLocalRemovalView: View {
                 },
                 secondaryAction: { dismiss() }
             )
+            // This screen is pushed inside the shell that draws the floating
+            // dock, so without the reservation the dock lands on top of
+            // `Keep it`. `isHittable` still answers true in that state
+            // (#730), so the tap goes to the dock and the seller is stuck on
+            // a confirmation they cannot back out of. Same reservation
+            // `SettingsSignOutView` takes.
+            .padding(
+                .bottom,
+                SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+            )
         }
         .accessibilityIdentifier(isGuest ? "settings.state.set-05" : "settings.state.set-06")
+    }
+}
+
+/// #844. Sign-out is confirmed before it runs, because it takes this iPhone's
+/// unsent work with it and a seller who taps `Sign out` is not expecting that.
+///
+/// Modelled on `SettingsLocalRemovalView`: the same explanation page, the same
+/// bottom tray, the same `destructive` treatment. That treatment is not the
+/// account-deletion one — `SettingsActionTray.commitsAccountDeletion` keys on
+/// the literal primary label `Delete account`, so nothing here can borrow it.
+private struct SettingsSignOutView: View {
+    @Environment(\.dismiss) private var dismiss
+    let signOut: () async -> SettingsSignOutOutcome
+    @State private var signingOut = false
+    @State private var failureOutcome: SettingsSignOutOutcome?
+
+    var body: some View {
+        SettingsExplanationPage(title: SettingsSignOutCopy.title) {
+            SettingsFactSection(
+                title: SettingsSignOutCopy.effectTitle,
+                bullets: SettingsSignOutCopy.effects
+            )
+            SettingsFactSection(
+                title: SettingsSignOutCopy.unchangedTitle,
+                bullets: SettingsSignOutCopy.unchanged,
+                usesBullets: false
+            )
+            if let failureCopy = failureOutcome.flatMap(SettingsSignOutCopy.failureCopy(for:)) {
+                Text(failureCopy)
+                    .foregroundStyle(SnapListColorToken.destructiveText.color)
+                    .accessibilityIdentifier("settings.sign-out.failed")
+            }
+            Text(SettingsSignOutCopy.deletionIsElsewhere)
+                .foregroundStyle(.secondary)
+        }
+        .navigationTitle(SettingsSignOutCopy.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            SettingsActionTray(
+                primary: SettingsSignOutCopy.confirm,
+                secondary: SettingsSignOutCopy.cancel,
+                destructive: true,
+                disabled: signingOut,
+                secondaryDisabled: signingOut,
+                primaryAction: {
+                    signingOut = true
+                    failureOutcome = nil
+                    Task {
+                        // Never dismissed on failure: the seller is still
+                        // signed in, and returning them to a Settings screen
+                        // that says otherwise would be the lie.
+                        let outcome = await signOut()
+                        if outcome != .signedOut { failureOutcome = outcome }
+                        signingOut = false
+                    }
+                },
+                secondaryAction: { dismiss() }
+            )
+            // This screen is pushed inside the shell that draws the floating
+            // dock, so without the reservation the dock lands on top of
+            // `Stay signed in`. `isHittable` still answers true in that state
+            // (#730), so the tap goes to the dock and the seller is stuck on a
+            // confirmation they cannot back out of. Same reservation the
+            // deletion screens take.
+            .padding(
+                .bottom,
+                SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+            )
+        }
+        .accessibilityIdentifier("settings.sign-out.confirm")
     }
 }
 
@@ -1700,6 +1835,13 @@ private struct SettingsActionTray<Destination: View>: View {
     let secondary: String?
     let destructive: Bool
     var disabled = false
+    /// Gates the secondary control only. Kept separate from `disabled`
+    /// because the two mean different things: `disabled` is an in-flight
+    /// guard on the primary action, while a caller may need the secondary
+    /// gated on a completely different condition (or not at all). Conflating
+    /// them once meant an in-flight primary and an unfinished-input secondary
+    /// disable had no way to be told apart.
+    var secondaryDisabled = false
     var note: String? = nil
     let primaryAction: () -> Void
     let secondaryAction: () -> Void
@@ -1709,13 +1851,14 @@ private struct SettingsActionTray<Destination: View>: View {
 
     init(
         primary: String, secondary: String?, destructive: Bool,
-        disabled: Bool = false, note: String? = nil,
+        disabled: Bool = false, secondaryDisabled: Bool = false, note: String? = nil,
         primaryAction: @escaping () -> Void,
         secondaryAction: @escaping () -> Void,
         destination: Destination? = nil
     ) {
         self.primary = primary; self.secondary = secondary
-        self.destructive = destructive; self.disabled = disabled; self.note = note
+        self.destructive = destructive; self.disabled = disabled
+        self.secondaryDisabled = secondaryDisabled; self.note = note
         self.primaryAction = primaryAction; self.secondaryAction = secondaryAction
         self.destination = destination
     }
@@ -1737,6 +1880,7 @@ private struct SettingsActionTray<Destination: View>: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .disabled(secondaryDisabled)
                 .background(commitsAccountDeletion ? SnapListColorToken.action.color : SnapListColorToken.neutralFill.color, in: RoundedRectangle(cornerRadius: 18))
                 .foregroundStyle(commitsAccountDeletion ? SnapListColorToken.onDarkSurface.color : .primary)
             }
@@ -1781,13 +1925,14 @@ private struct SettingsActionTray<Destination: View>: View {
 private extension SettingsActionTray where Destination == EmptyView {
     init(
         primary: String, secondary: String?, destructive: Bool,
-        disabled: Bool = false, note: String? = nil,
+        disabled: Bool = false, secondaryDisabled: Bool = false, note: String? = nil,
         primaryAction: @escaping () -> Void,
         secondaryAction: @escaping () -> Void
     ) {
         self.init(
             primary: primary, secondary: secondary, destructive: destructive,
-            disabled: disabled, note: note, primaryAction: primaryAction,
+            disabled: disabled, secondaryDisabled: secondaryDisabled, note: note,
+            primaryAction: primaryAction,
             secondaryAction: secondaryAction, destination: nil
         )
     }
