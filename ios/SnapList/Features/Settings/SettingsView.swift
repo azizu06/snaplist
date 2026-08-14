@@ -907,7 +907,7 @@ private struct SettingsLocalRemovalView: View {
             // This screen is pushed inside the shell that draws the floating
             // dock, so without the reservation the dock lands on top of
             // `Keep it`. `isHittable` still answers true in that state
-            // (#812), so the tap goes to the dock and the seller is stuck on
+            // (#730), so the tap goes to the dock and the seller is stuck on
             // a confirmation they cannot back out of. Same reservation
             // `SettingsSignOutView` takes.
             .padding(
@@ -977,7 +977,7 @@ private struct SettingsSignOutView: View {
             // This screen is pushed inside the shell that draws the floating
             // dock, so without the reservation the dock lands on top of
             // `Stay signed in`. `isHittable` still answers true in that state
-            // (#812), so the tap goes to the dock and the seller is stuck on a
+            // (#730), so the tap goes to the dock and the seller is stuck on a
             // confirmation they cannot back out of. Same reservation the
             // deletion screens take.
             .padding(

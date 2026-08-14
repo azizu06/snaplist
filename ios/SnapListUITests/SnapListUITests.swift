@@ -298,7 +298,7 @@ final class SnapListUITests: XCTestCase {
         let stay = app.buttons["Stay signed in"]
         XCTAssertTrue(stay.exists, app.debugDescription)
         // Asserted as geometry rather than through `isHittable`, which answers
-        // true even when the floating dock covers the control's centre (#812) —
+        // true even when the floating dock covers the control's centre (#730) —
         // the state this test found, where the tap silently went to the dock.
         let dock = app.buttons["dock.scan"]
         XCTAssertTrue(dock.exists, app.debugDescription)
