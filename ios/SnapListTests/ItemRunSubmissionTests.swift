@@ -104,12 +104,26 @@ final class ItemRunSubmissionTests: XCTestCase {
                 .creditDenied(reason: "snaplist-pro-required"),
                 .handoff(.pay01)
             ),
+            // #841: the fence is the App Attest proof that this hardware spent
+            // the included item, and no paid period exists either way, so it
+            // owes the same Pro offer the canonical denial does.
+            (
+                .creditDenied(reason: "device-fence-required"),
+                .handoff(.pay01)
+            ),
             (
                 .creditDenied(reason: "storekit-entitlement-unavailable"),
-                .photoReview(.sub06)
+                .handoff(.subscriptionSettings(.entitlementInactive))
             ),
             (
                 .creditDenied(reason: "monthly-allowance-reached"),
+                .handoff(.subscriptionSettings(.monthlyAllowanceReached))
+            ),
+            // An unshipped or unnamed reason keeps the conservative retry: only
+            // server truth the client can name proves what to send the seller
+            // to do.
+            (
+                .creditDenied(reason: "an-unshipped-server-reason"),
                 .photoReview(.sub06)
             ),
             (.receiptMismatch, .handoff(.pay08)),
@@ -123,7 +137,7 @@ final class ItemRunSubmissionTests: XCTestCase {
             (.sessionRenewalRequired, .photoReview(.sub06)),
         ]
 
-        XCTAssertEqual(cases.count, 14)
+        XCTAssertEqual(cases.count, 16)
 
         for testCase in cases {
             XCTAssertEqual(
@@ -157,7 +171,82 @@ final class ItemRunSubmissionTests: XCTestCase {
         }
         XCTAssertEqual(
             handoffs,
-            [.pay01, .pay08, .accountClaim12aThrough12c]
+            [
+                .pay01,
+                .pay01,
+                .subscriptionSettings(.entitlementInactive),
+                .subscriptionSettings(.monthlyAllowanceReached),
+                .pay08,
+                .accountClaim12aThrough12c,
+            ]
+        )
+    }
+
+    /// #841: the server names four credit denials and the client routed three of
+    /// them to `sub06`, whose only offer is a retry that cannot succeed. A denial
+    /// the server can name has to reach somewhere the seller can act.
+    func testEachServerNamedCreditDenialReachesADestinationThatCanResolveIt() {
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(reason: "device-fence-required")
+            ),
+            .handoff(.pay01)
+        )
+        XCTAssertNotEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(
+                    reason: "storekit-entitlement-unavailable"
+                )
+            ),
+            .photoReview(.sub06)
+        )
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(
+                    reason: "storekit-entitlement-unavailable"
+                )
+            ),
+            .handoff(.subscriptionSettings(.entitlementInactive))
+        )
+        XCTAssertNotEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(reason: "monthly-allowance-reached")
+            ),
+            .photoReview(.sub06)
+        )
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(reason: "monthly-allowance-reached")
+            ),
+            .handoff(.subscriptionSettings(.monthlyAllowanceReached))
+        )
+        // The two subscription denials are one screen with two truths, so the
+        // destination that carries them cannot collapse into one value.
+        XCTAssertNotEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(
+                    reason: "storekit-entitlement-unavailable"
+                )
+            ),
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(reason: "monthly-allowance-reached")
+            )
+        )
+        // The conservative default is this test's control. An unnamed or
+        // unshipped denial has to keep landing on the retry, so none of the
+        // three assertions above can pass by routing every `creditDenied`
+        // somewhere new.
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(reason: "an-unshipped-server-reason")
+            ),
+            .photoReview(.sub06)
+        )
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(
+                retention: .creditDenied(reason: nil)
+            ),
+            .photoReview(.sub06)
         )
     }
 
@@ -175,6 +264,32 @@ final class ItemRunSubmissionTests: XCTestCase {
                 .creditDenied(reason: "snaplist-pro-required"),
                 .pay01,
                 { _ in .creditDenied(reason: "snaplist-pro-required") }
+            ),
+            // #841: the three denials the server can name besides the canonical
+            // one, each carried end to end from the transport outcome to the
+            // handoff the seller actually lands on.
+            (
+                "device-fence",
+                "guestcap_\(String(repeating: "B", count: 43))",
+                .creditDenied(reason: "device-fence-required"),
+                .pay01,
+                { _ in .creditDenied(reason: "device-fence-required") }
+            ),
+            (
+                "entitlement-inactive",
+                "clerk-session-token",
+                .creditDenied(reason: "storekit-entitlement-unavailable"),
+                .subscriptionSettings(.entitlementInactive),
+                { _ in
+                    .creditDenied(reason: "storekit-entitlement-unavailable")
+                }
+            ),
+            (
+                "monthly-allowance",
+                "clerk-session-token",
+                .creditDenied(reason: "monthly-allowance-reached"),
+                .subscriptionSettings(.monthlyAllowanceReached),
+                { _ in .creditDenied(reason: "monthly-allowance-reached") }
             ),
             (
                 "pay-08",
@@ -549,6 +664,101 @@ final class ItemRunSubmissionTests: XCTestCase {
                 eventID: eventID
             ),
             .showInPhotoReview
+        )
+        XCTAssertEqual(
+            AppShellSubmissionHandoffRoute(
+                handoff: .subscriptionSettings(.entitlementInactive),
+                eventID: eventID
+            ),
+            .showInPhotoReview
+        )
+        XCTAssertEqual(
+            AppShellSubmissionHandoffRoute(
+                handoff: .subscriptionSettings(.monthlyAllowanceReached),
+                eventID: eventID
+            ),
+            .showInPhotoReview
+        )
+    }
+
+    /// #841 criteria 2 and 3: both subscription denials are unambiguous server
+    /// truth, so each has to say what actually happened and offer the seller a
+    /// way to resolve it. Neither may read as a transient failure, and neither
+    /// may offer to sell a subscription this seller may already own.
+    func testTheSubscriptionHandoffsNameTheDenialAndOfferARecoverableAction() throws {
+        let eventID = UUID(
+            uuidString: "50300000-0000-4000-8000-000000000091"
+        )!
+        let inactive = PhotoReviewSubmissionPresentation(
+            handoff: .subscriptionSettings(.entitlementInactive),
+            eventID: eventID
+        )
+        let exhausted = PhotoReviewSubmissionPresentation(
+            handoff: .subscriptionSettings(.monthlyAllowanceReached),
+            eventID: eventID
+        )
+
+        XCTAssertEqual(
+            inactive.visibleMessage,
+            """
+            Your SnapList Pro subscription is not active right now. Your item \
+            is still saved on this phone.
+            """
+        )
+        XCTAssertEqual(
+            exhausted.visibleMessage,
+            """
+            You've used all your SnapList Pro listings for this period. More \
+            arrive when the next one starts. Your item is still saved on this \
+            phone.
+            """
+        )
+
+        for presentation in [inactive, exhausted] {
+            XCTAssertNotEqual(presentation, .idle)
+            XCTAssertEqual(
+                presentation.accessibilityAnnouncement,
+                presentation.visibleMessage
+            )
+            // #803: the footer draws a message only alongside a status icon, so
+            // a handoff carrying copy without a `statusKind` renders as nothing.
+            XCTAssertEqual(presentation.statusKind, .warning)
+            XCTAssertEqual(
+                presentation.primaryActionLabel,
+                "Check subscription"
+            )
+            XCTAssertEqual(
+                presentation.primaryActionEvent,
+                .openSubscriptionSettings(eventID: eventID)
+            )
+            XCTAssertEqual(
+                presentation.announcementEvent,
+                .submissionRejected(eventID: eventID)
+            )
+            XCTAssertFalse(presentation.mutationControlsLocked)
+            XCTAssertTrue(presentation.rendersSubmittedMedia)
+
+            let message = try XCTUnwrap(presentation.visibleMessage)
+            // The dead retry these denials used to land on, and the words a
+            // paywall would use. Neither belongs on either message.
+            XCTAssertFalse(
+                message.contains("This didn't go through"),
+                "A named denial must not read as a transient failure."
+            )
+            XCTAssertFalse(message.localizedCaseInsensitiveContains("try again"))
+            XCTAssertFalse(message.localizedCaseInsensitiveContains("upgrade"))
+            XCTAssertFalse(message.localizedCaseInsensitiveContains("subscribe"))
+            XCTAssertFalse(message.contains("—"))
+        }
+
+        XCTAssertNotEqual(inactive, exhausted)
+        XCTAssertNotEqual(
+            inactive,
+            PhotoReviewSubmissionPresentation(handoff: .pay01, eventID: eventID)
+        )
+        XCTAssertNotEqual(
+            exhausted,
+            PhotoReviewSubmissionPresentation(handoff: .pay01, eventID: eventID)
         )
     }
 

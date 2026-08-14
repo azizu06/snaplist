@@ -24,9 +24,19 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
     }
 
     enum Handoff: Equatable, Sendable {
+        /// Which server-named subscription denial sent the seller to Settings.
+        /// Both land on the same screen and need different words: one says the
+        /// plan is not active, the other says this period's listings are spent.
+        /// Neither may offer to sell a subscription the seller already holds.
+        enum SubscriptionDenial: Equatable, Sendable {
+            case entitlementInactive
+            case monthlyAllowanceReached
+        }
+
         case pay01
         case pay08
         case accountClaim12aThrough12c
+        case subscriptionSettings(SubscriptionDenial)
     }
 
     case photoReview(PhotoReview)
@@ -42,12 +52,28 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
             self = .photoReview(.sub03)
         case .conflict:
             self = .photoReview(.sub04)
-        case .creditDenied(reason: "snaplist-pro-required"):
+        case .creditDenied(reason: "snaplist-pro-required"),
+             .creditDenied(reason: "device-fence-required"):
+            // Both denials mean the same thing about this seller: no paid
+            // period exists and the included run is out of reach. The fence is
+            // the App Attest proof that this hardware already spent the
+            // included item, which is the moment the Pro offer is the honest
+            // answer rather than a retry that cannot succeed.
             self = .handoff(.pay01)
+        case .creditDenied(reason: "storekit-entitlement-unavailable"):
+            // A paid period exists and is neither active nor in grace, so the
+            // seller may well own a subscription. Sending them to Settings
+            // names that without offering to sell it to them again.
+            self = .handoff(.subscriptionSettings(.entitlementInactive))
+        case .creditDenied(reason: "monthly-allowance-reached"):
+            // The subscription is working. Nothing about this seller's account
+            // needs buying or fixing, so the only truthful destination is the
+            // one that says the period's listings are spent.
+            self = .handoff(.subscriptionSettings(.monthlyAllowanceReached))
         case .creditDenied:
-            // Only the canonical first-paid-run denial proves this seller owes
-            // the Pro gate. Expired, ambiguous, exhausted, or untyped server
-            // truth must not become an offer to buy again.
+            // Only a denial the server names proves what this seller should be
+            // sent to do. Ambiguous or untyped server truth must not become an
+            // offer to buy, so it keeps the conservative retry.
             self = .photoReview(.sub06)
         case .rateLimited(reason: _):
             self = .photoReview(.sub06)
@@ -1002,6 +1028,34 @@ struct PhotoReviewSubmissionPresentation: Equatable {
                 rendersSubmittedMedia: true,
                 statusKind: .warning
             )
+        case .subscriptionSettings(let denial):
+            // Settings is the one place that answers both denials: it shows the
+            // subscription's real state, the listings left, the date the period
+            // ends, and Restore purchase. Neither message may read as an offer
+            // to buy, because the seller may already own what it would sell.
+            let message = switch denial {
+            case .entitlementInactive:
+                """
+                Your SnapList Pro subscription is not active right now. Your \
+                item is still saved on this phone.
+                """
+            case .monthlyAllowanceReached:
+                """
+                You've used all your SnapList Pro listings for this period. \
+                More arrive when the next one starts. Your item is still saved \
+                on this phone.
+                """
+            }
+            self = PhotoReviewSubmissionPresentation(
+                primaryActionLabel: "Check subscription",
+                primaryActionEvent: .openSubscriptionSettings(eventID: eventID),
+                mutationControlsLocked: false,
+                announcementEvent: .submissionRejected(eventID: eventID),
+                accessibilityAnnouncement: message,
+                visibleMessage: message,
+                rendersSubmittedMedia: true,
+                statusKind: .warning
+            )
         }
     }
 
@@ -1087,6 +1141,7 @@ enum PhotoReviewSubmissionPrimaryActionConsumer {
         case .openVoiceNote,
              .startListing,
              .createAccount,
+             .openSubscriptionSettings,
              .retryReceiptMismatch,
              .retryAmbiguousSubmission:
             return false

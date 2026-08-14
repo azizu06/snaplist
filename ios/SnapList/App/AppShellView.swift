@@ -211,6 +211,7 @@ struct AppShellView: View {
                         switch event {
                         case .startListing,
                              .createAccount,
+                             .openSubscriptionSettings,
                              .retryReceiptMismatch,
                              .retryAmbiguousSubmission:
                             break
@@ -1482,7 +1483,9 @@ enum AppShellSubmissionHandoffRoute: Equatable {
         switch handoff {
         case .pay01:
             self = .presentProGate(eventID: eventID)
-        case .pay08, .accountClaim12aThrough12c:
+        case .pay08, .accountClaim12aThrough12c, .subscriptionSettings:
+            // Photo Review carries the message and the seller taps out of it to
+            // Settings, exactly the way the account handoff already works.
             self = .showInPhotoReview
         }
     }
@@ -1611,7 +1614,30 @@ enum AppShellPhotoReviewSubmissionTransaction {
                   pendingEventID == eventID else {
                 return
             }
-            guard await AppShellAccountEntryPointTransaction.perform(
+            guard await AppShellSettingsEntryPointTransaction.perform(
+                session: session,
+                captureFlow: captureFlow,
+                host: host,
+                router: router,
+                setReturnFocus: setReturnFocus
+            ) else {
+                return
+            }
+            _ = submissionHost.consumeDestinationHandoff(eventID: eventID)
+            return
+        case .openSubscriptionSettings(let eventID):
+            // The same leave-then-open-Settings route the account handoff takes.
+            // The guard is what keeps it typed: only the two subscription
+            // denials can spend this event, so a stale or unrelated pending
+            // event cannot walk the seller out of Photo Review.
+            guard case .destinationHandoff(
+                eventID: let pendingEventID,
+                handoff: .subscriptionSettings
+            )? = submissionHost.pendingPresentationEvent,
+                  pendingEventID == eventID else {
+                return
+            }
+            guard await AppShellSettingsEntryPointTransaction.perform(
                 session: session,
                 captureFlow: captureFlow,
                 host: host,
@@ -1688,13 +1714,13 @@ enum AppShellPhotoReviewSubmissionTransaction {
 }
 
 @MainActor
-enum AppShellAccountEntryPointTransaction {
+enum AppShellSettingsEntryPointTransaction {
     /// Photo Review covers the whole shell, so Settings opened from under it would
     /// never be seen. Leave the way Back leaves — the seller's photos stay committed
-    /// and Scan takes them back — then open the account entry point Settings already
-    /// owns. A rejected commit keeps the seller in Photo Review with the message that
-    /// sent them here, rather than routing them away from photos that never reached
-    /// disk.
+    /// and Scan takes them back — then open Settings, which owns both the account
+    /// entry point and the subscription's real state. A rejected commit keeps the
+    /// seller in Photo Review with the message that sent them here, rather than
+    /// routing them away from photos that never reached disk.
     @discardableResult
     static func perform(
         session: PhotoReviewLiveSession,

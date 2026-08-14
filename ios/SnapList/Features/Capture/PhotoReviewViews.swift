@@ -2281,7 +2281,7 @@ struct PhotoReviewFixtureView: View {
             submissionPresentation = .visualState(.saving)
         case .reviewConflictedSubmission, .reviewSubmission:
             submissionPresentation = .idle
-        case .openVoiceNote, .createAccount:
+        case .openVoiceNote, .createAccount, .openSubscriptionSettings:
             break
         }
     }
@@ -2512,6 +2512,10 @@ enum PhotoReviewBoundaryEvent: Equatable {
     /// The seller was told an account is needed, and asked for the account entry
     /// point. Photo Review covers the shell, so only the shell can honor this.
     case createAccount(eventID: UUID)
+    /// The seller was told their subscription is not active or its listings are
+    /// spent. Settings owns both answers and sits outside Photo Review, so only
+    /// the shell can honor this.
+    case openSubscriptionSettings(eventID: UUID)
     case retryReceiptMismatch(eventID: UUID)
     case retryAmbiguousSubmission(eventID: UUID)
     case reviewSubmission(eventID: UUID)
@@ -4570,6 +4574,7 @@ struct PhotoReviewView: View {
         case .cancelSubmission, .completeSavedSubmission:
             true
         case .openVoiceNote, .startListing, .createAccount,
+             .openSubscriptionSettings,
              .retryReceiptMismatch, .retryAmbiguousSubmission,
              .reviewSubmission, .reviewConflictedSubmission:
             false
