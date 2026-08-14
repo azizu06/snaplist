@@ -325,6 +325,18 @@ final class OnboardingFlowTests: XCTestCase {
             .guest
         )
 
+        // #843 item 1. A renewal that could not reach Apple or the SnapList
+        // server says nothing about whether this caller has an account, so it
+        // must not join `.sessionAbsent` in terminating the bootstrap as a
+        // guest. It is a transient failure, which is what `.unknown` is for.
+        XCTAssertEqual(
+            ActivationAuthenticationPolicy.state(
+                forSessionError: BearerTokenProviderError
+                    .credentialTemporarilyUnavailable
+            ),
+            .unknown
+        )
+
         // .unknown stays reserved for failures where retrying can succeed.
         XCTAssertEqual(
             ActivationAuthenticationPolicy.state(

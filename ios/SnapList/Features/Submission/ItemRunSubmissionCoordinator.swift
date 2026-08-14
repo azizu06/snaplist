@@ -107,7 +107,9 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
     }
 }
 
-enum PhotoReviewSubmissionRejectionFamily: Equatable {
+/// `CaseIterable` so the copy contract can be asserted over every family rather
+/// than over a list a new case can be added without.
+enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
     case cancelled
     case offline
     case ambiguity
@@ -196,9 +198,10 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         case .deviceIdentity:
             // "This phone" is the seller's word for the installation the intake
             // is filed under; scope, principal, and attestation are ours. The
-            // wait is real — enrollment retries on its own — and signing in ends
-            // it immediately, so the copy offers both without ordering them.
-            "This phone isn't ready to send yet. Your item is saved — try again in a moment, or sign in."
+            // wait is real, because enrollment retries on its own, and signing
+            // in ends it immediately, so the copy offers both without ordering
+            // them. Two sentences and no dash, like every other message here.
+            "This phone isn't ready to send yet. Your item is saved, so try again in a moment or sign in."
         }
     }
 
@@ -543,7 +546,7 @@ final class ItemRunSubmissionHost {
         if cancellationRequestedSubmissionID == submissionID {
             cancellationRequestedSubmissionID = nil
             preparationTask = nil
-            if case .ambiguous(let retry) = preparation.outcome {
+            if case .ambiguous(let retry) = preparation {
                 pendingAmbiguousRetry = retry
             } else {
                 pendingAmbiguousRetry = nil
@@ -554,26 +557,38 @@ final class ItemRunSubmissionHost {
         guard activeSubmissionID == submissionID,
               isCurrent(),
               !Task.isCancelled else {
-            // #843 item 2. An App Attest key rotation posts `didChange` mid
-            // submission, `synchronizePrincipal` resets this one, and the tap
-            // used to end here having said nothing at all.
+            // #843 item 2, and why this stays silent rather than publishing.
             //
-            // `activeSubmissionID == nil` is the reset. A different non-nil ID
-            // means a later tap already owns the screen and will answer for
-            // itself, so speaking over it would replace a live submission with
-            // a stale refusal. A cancelled task means nobody is watching. And
-            // a request that already reached the server stays suppressed, since
-            // the seller cannot safely be told to send it again.
-            if activeSubmissionID == nil,
-               !Task.isCancelled,
-               preparation.owesTheSellerAnAnswer {
-                publish(retention: .submissionUnavailable)
-            }
+            // Three shapes reach here. `activeSubmissionID == nil` is a
+            // principal reset; a different non-nil ID means a later tap already
+            // owns the screen and will answer for itself; a cancelled task means
+            // nobody is waiting on this one.
+            //
+            // The reset is the one that strands a seller, and a retention cannot
+            // reach them: every `.photoReview` destination renders through
+            // `PhotoReviewSubmissionPresentation`, and the same generation change
+            // that resets this submission makes `NativeIntake.reconcileIdentity`
+            // publish `.dismissActivePhotoReview`, which the shell turns into
+            // `leaveForDepartedIntake` plus a return to Scan. By the time a
+            // banner could be read, the screen that reads it is gone.
+            //
+            // Publishing anyway would also lie. A changed scope loads a new
+            // empty bundle under a different directory component with no
+            // migration, so "your item is still saved on this phone" is false
+            // exactly when the seller most needs it to be true, and every retry
+            // this family offers would target an empty intake.
+            //
+            // The seller-visible answer therefore belongs on Scan, which has no
+            // notice surface to carry it. That surface and the orphaned bundle
+            // behind it are #855.
+            //
+            // `testAPrincipalChangeDuringASubmissionLeavesNoSurfaceToAnswerOn`
+            // holds this shut: it fails if a retention is published here.
             return
         }
         preparationTask = nil
 
-        switch preparation.outcome {
+        switch preparation {
         case .accepted(let submission):
             pendingAmbiguousRetry = nil
             retention = nil
@@ -642,10 +657,6 @@ final class ItemRunSubmissionHost {
         case .retained(let retention):
             pendingAmbiguousRetry = nil
             publish(retention: retention)
-        case .afterDispatch:
-            // `outcome` strips this marker, so the switch above sees the real
-            // case and this arm exists only to keep the switch exhaustive.
-            break
         }
     }
 
@@ -1323,38 +1334,10 @@ final class ItemRunSubmissionCoordinator {
         fileprivate let intakeCleanup: IntakeCleanup
     }
 
-    fileprivate indirect enum Preparation {
+    fileprivate enum Preparation {
         case accepted(Submission)
         case ambiguous(AmbiguousRetry)
         case retained(ItemRunSubmissionRetention)
-        /// #843 item 2. Marks an outcome produced after the request had already
-        /// left the device. It changes nothing about the outcome itself; it
-        /// only records that the server may already hold this run.
-        case afterDispatch(Preparation)
-
-        /// The outcome with the post-dispatch marker removed.
-        fileprivate var outcome: Preparation {
-            if case .afterDispatch(let inner) = self {
-                return inner.outcome
-            }
-            return self
-        }
-
-        /// Whether a principal that departs mid-submission leaves the seller
-        /// owed a visible outcome, or owed silence.
-        ///
-        /// Silence is right for exactly one shape: the request already reached
-        /// the server. Telling the arriving principal "this didn't go through"
-        /// would invite a duplicate of a run SnapList may already own, and the
-        /// exact idempotency key is retained for a replay instead. Every other
-        /// departed exit stops before dispatch, and a tap that produces nothing
-        /// visible is the silence #843 item 2 exists to remove.
-        fileprivate var owesTheSellerAnAnswer: Bool {
-            if case .afterDispatch = self {
-                return false
-            }
-            return true
-        }
     }
 
     private let submitter: (any ItemRunSubmitting)?
@@ -1426,16 +1409,13 @@ final class ItemRunSubmissionCoordinator {
     }
 
     func submit(photos: [StagedCapturePhoto]) async -> ItemRunSubmissionOutcome {
-        switch await prepareSubmission(photos: photos).outcome {
+        switch await prepareSubmission(photos: photos) {
         case .accepted(let submission):
             return .accepted(await finalize(submission))
         case .ambiguous:
             return .retained(.ambiguous)
         case .retained(let retention):
             return .retained(retention)
-        case .afterDispatch:
-            // Stripped by `outcome`; this arm only keeps the switch exhaustive.
-            return .retained(.submissionUnavailable)
         }
     }
 
@@ -1690,20 +1670,19 @@ final class ItemRunSubmissionCoordinator {
             payload,
             bearerToken: dispatchBearer.token
         )
-        // #843 item 2. Everything below runs with a request the server may
-        // already have committed, so every outcome from here carries the
-        // post-dispatch marker.
-        return .afterDispatch(
-            await resolveAfterDispatch(
-                outcome,
-                context: context,
-                payload: payload,
-                dispatchBearer: dispatchBearer,
-                isCurrent: isCurrent
-            )
+        // Everything below runs with a request the server may already have
+        // committed, which is what `resolveAfterDispatch` is named for.
+        return await resolveAfterDispatch(
+            outcome,
+            context: context,
+            payload: payload,
+            dispatchBearer: dispatchBearer,
+            isCurrent: isCurrent
         )
     }
 
+    /// Resolves a transport outcome for a request that has already left the
+    /// device, so nothing here may treat the run as un-sent.
     private func resolveAfterDispatch(
         _ outcome: ItemRunSubmissionTransportOutcome,
         context: CapturedContext,
@@ -1796,19 +1775,18 @@ final class ItemRunSubmissionCoordinator {
             retry.payload,
             bearerToken: dispatchBearer.token
         )
-        // #843 item 2. As in `prepareSubmission`, the replay has now left the
-        // device, so its outcome carries the post-dispatch marker.
-        return .afterDispatch(
-            await resolveRetryAfterDispatch(
-                outcome,
-                retry: retry,
-                currentPhotos: currentPhotos,
-                dispatchBearer: dispatchBearer,
-                isCurrent: isCurrent
-            )
+        // As in `prepareSubmission`, the replay has now left the device.
+        return await resolveRetryAfterDispatch(
+            outcome,
+            retry: retry,
+            currentPhotos: currentPhotos,
+            dispatchBearer: dispatchBearer,
+            isCurrent: isCurrent
         )
     }
 
+    /// Resolves a replay outcome for a request that has already left the
+    /// device, so nothing here may treat the run as un-sent.
     private func resolveRetryAfterDispatch(
         _ outcome: ItemRunSubmissionTransportOutcome,
         retry: AmbiguousRetry,

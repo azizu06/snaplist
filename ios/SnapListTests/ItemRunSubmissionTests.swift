@@ -72,6 +72,17 @@ final class ItemRunSubmissionTests: XCTestCase {
                 "Your sign-in needs renewing. Your item is still saved on this phone.",
                 .startListing
             ),
+            // #843 item 3. Same retry, and it must not borrow `.tryAgain`'s
+            // words either: this send fails identically every time until the
+            // device earns a principal, so the copy has to name that instead of
+            // describing a send that failed once.
+            (
+                .deviceIdentityUnavailable,
+                .deviceIdentity,
+                "Try again",
+                "This phone isn't ready to send yet. Your item is saved, so try again in a moment or sign in.",
+                .startListing
+            ),
         ]
 
         for testCase in cases {
@@ -85,6 +96,26 @@ final class ItemRunSubmissionTests: XCTestCase {
                 family?.primaryActionEvent(eventID: eventID),
                 testCase.action
             )
+        }
+    }
+
+    /// The SnapList copy contract bans em dashes and en dashes in seller-facing
+    /// strings. Eight of the nine families already obeyed it and the ninth did
+    /// not, which is the kind of drift a per-string review catches only by luck.
+    /// `CaseIterable` makes this cover a family added after today as well.
+    func testNoRejectionCopyUsesADashTheCopyContractBans() {
+        let banned: Set<Character> = ["\u{2014}", "\u{2013}"]
+        for family in PhotoReviewSubmissionRejectionFamily.allCases {
+            for string in [
+                family.message,
+                family.primaryActionLabel,
+                family.accessibilityAnnouncement
+            ] {
+                XCTAssertNil(
+                    string.first(where: banned.contains),
+                    "\(family) ships a banned dash: \(string)"
+                )
+            }
         }
     }
 
@@ -1437,12 +1468,8 @@ final class ItemRunSubmissionTests: XCTestCase {
         XCTAssertTrue(payloads.isEmpty)
         XCTAssertFalse(host.isSubmitting)
         XCTAssertNil(host.acceptedRun)
-        // #843 item 2. Nothing left the device, so the seller is owed the
-        // answer this row used to assert was absent. The scope assertions above
-        // are unchanged: the departed generation still touches no attempt, no
-        // payload, and no accepted run.
-        XCTAssertEqual(host.retention, .submissionUnavailable)
-        XCTAssertNotNil(host.pendingPresentationEvent)
+        XCTAssertNil(host.retention)
+        XCTAssertNil(host.pendingPresentationEvent)
     }
 
     func testPrincipalSwitchDuringTransportPreservesAttemptAndSuppressesResult()
@@ -4578,12 +4605,26 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
     }
 
-    /// #843 item 2. An App Attest key rotation posts `didChange` while a
-    /// submission is open, which resets the departing submission out from under
-    /// the seller's tap. Before this, the tap produced no message, no error and
-    /// no state change at all.
+    /// #843 item 2, and why the departed generation stays silent.
+    ///
+    /// An App Attest key rotation posts `didChange` while a submission is open,
+    /// `synchronizePrincipal` resets the departing submission out from under the
+    /// seller's tap, and the tap produces nothing. The obvious repair is to
+    /// publish a retention from that exit. This row proves it cannot work.
+    ///
+    /// Every `.photoReview` destination renders through
+    /// `PhotoReviewSubmissionPresentation`, which exists only while
+    /// `PhotoReviewLiveHost.session` does. The same generation change drives the
+    /// shell's departed-intake dismissal, which is `leaveForDepartedIntake`, and
+    /// after it there is no session and therefore no renderer. A published
+    /// banner would also claim the item is still saved on this phone while the
+    /// new scope points at an empty bundle in a different directory.
+    ///
+    /// So the assertion is silence at the submission seam plus an absent
+    /// surface at the shell seam. The seller-visible answer belongs on Scan,
+    /// which has no notice surface today; that is #855.
     @MainActor
-    func testAPrincipalChangeDuringASubmissionTellsTheSellerInsteadOfGoingSilent()
+    func testAPrincipalChangeDuringASubmissionLeavesNoSurfaceToAnswerOn()
         async throws {
         let departingSupport = FileManager.default.temporaryDirectory
             .appendingPathComponent(
@@ -4638,6 +4679,20 @@ final class ItemRunSubmissionTests: XCTestCase {
             intake: departing.intake
         )
 
+        // The shell surface the seller tapped Start listing on.
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let reviewHost = PhotoReviewLiveHost()
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: departing.snapshot.photos,
+            opener: .reviewButton
+        )
+        XCTAssertTrue(reviewHost.consume(router.captureBoundaryRequest))
+        XCTAssertNotNil(
+            reviewHost.session,
+            "Without a live session there is no tap for this row to be about."
+        )
+
         let listing = Task { @MainActor in
             await host.startListing(photos: departing.snapshot.photos)
         }
@@ -4646,12 +4701,26 @@ final class ItemRunSubmissionTests: XCTestCase {
             snapshot: arriving.snapshot,
             intake: arriving.intake
         )
+        // What the shell does with the same generation change, via
+        // `AppShellDepartedPhotoReviewTransaction`.
+        XCTAssertTrue(reviewHost.leaveForDepartedIntake(using: router))
         await gate.release()
         await listing.value
 
-        XCTAssertEqual(host.retention, .submissionUnavailable)
-        XCTAssertNotNil(host.pendingPresentationEvent)
         XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(
+            host.retention,
+            """
+            A departed generation published a retention whose only renderer the \
+            shell has already taken away, and whose copy claims an item the new \
+            scope does not hold.
+            """
+        )
+        XCTAssertNil(host.pendingPresentationEvent)
+        XCTAssertNil(
+            reviewHost.session,
+            "Photo Review is the only surface that renders a rejection, and it is gone."
+        )
     }
 
     func testAnAnonymousInstallationScopeSaysSoInsteadOfFailingLikeAnyOtherSend()
