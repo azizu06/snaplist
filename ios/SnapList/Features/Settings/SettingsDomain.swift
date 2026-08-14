@@ -59,16 +59,32 @@ enum SettingsSignOutCopy {
 
     static let deletionIsElsewhere =
         "Deleting your account is a separate action in Settings."
-    /// Shown only when Clerk refused. Says the session survived, because it did.
+    /// Shown when local removal never ran, so nothing has happened yet.
     static let failed =
         "Signing out didn’t finish, so you are still signed in. Try again."
+
+    /// Shown when local removal already committed and Clerk then refused to
+    /// end the session. `failed` implies nothing has happened, which is no
+    /// longer true here — the photos and voice note the `effects` bullet
+    /// promised are already gone, not merely pending.
+    static let sessionNotEnded =
+        "Your photos and voice note on this iPhone are already removed. Signing out didn’t finish, so you are still signed in. Try again to finish."
+
+    /// `nil` for `.signedOut`, which shows no failure text at all.
+    static func failureCopy(for outcome: SettingsSignOutOutcome) -> String? {
+        switch outcome {
+        case .signedOut: nil
+        case .localDataNotRemoved: failed
+        case .sessionNotEnded: sessionNotEnded
+        }
+    }
 
     /// Every string the sign-out screens can put in front of a seller, so a
     /// wording rule can be applied to all of them instead of to a list someone
     /// has to remember to extend.
     static var everyString: [String] {
         [rowLabel, title, confirm, cancel, effectTitle, unchangedTitle,
-         deletionIsElsewhere, failed] + effects + unchanged
+         deletionIsElsewhere, failed, sessionNotEnded] + effects + unchanged
     }
 }
 

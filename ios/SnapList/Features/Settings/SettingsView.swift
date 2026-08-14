@@ -885,6 +885,7 @@ private struct SettingsLocalRemovalView: View {
                 secondary: "Keep it",
                 destructive: true,
                 disabled: removing,
+                secondaryDisabled: removing,
                 primaryAction: {
                     removing = true
                     Task {
@@ -910,7 +911,7 @@ private struct SettingsSignOutView: View {
     @Environment(\.dismiss) private var dismiss
     let signOut: () async -> SettingsSignOutOutcome
     @State private var signingOut = false
-    @State private var showsFailure = false
+    @State private var failureOutcome: SettingsSignOutOutcome?
 
     var body: some View {
         SettingsExplanationPage(title: SettingsSignOutCopy.title) {
@@ -923,8 +924,8 @@ private struct SettingsSignOutView: View {
                 bullets: SettingsSignOutCopy.unchanged,
                 usesBullets: false
             )
-            if showsFailure {
-                Text(SettingsSignOutCopy.failed)
+            if let failureCopy = failureOutcome.flatMap(SettingsSignOutCopy.failureCopy(for:)) {
+                Text(failureCopy)
                     .foregroundStyle(SnapListColorToken.destructiveText.color)
                     .accessibilityIdentifier("settings.sign-out.failed")
             }
@@ -939,14 +940,16 @@ private struct SettingsSignOutView: View {
                 secondary: SettingsSignOutCopy.cancel,
                 destructive: true,
                 disabled: signingOut,
+                secondaryDisabled: signingOut,
                 primaryAction: {
                     signingOut = true
-                    showsFailure = false
+                    failureOutcome = nil
                     Task {
                         // Never dismissed on failure: the seller is still
                         // signed in, and returning them to a Settings screen
                         // that says otherwise would be the lie.
-                        if await signOut() != .signedOut { showsFailure = true }
+                        let outcome = await signOut()
+                        if outcome != .signedOut { failureOutcome = outcome }
                         signingOut = false
                     }
                 },
@@ -1813,6 +1816,13 @@ private struct SettingsActionTray<Destination: View>: View {
     let secondary: String?
     let destructive: Bool
     var disabled = false
+    /// Gates the secondary control only. Kept separate from `disabled`
+    /// because the two mean different things: `disabled` is an in-flight
+    /// guard on the primary action, while a caller may need the secondary
+    /// gated on a completely different condition (or not at all). Conflating
+    /// them once meant an in-flight primary and an unfinished-input secondary
+    /// disable had no way to be told apart.
+    var secondaryDisabled = false
     var note: String? = nil
     let primaryAction: () -> Void
     let secondaryAction: () -> Void
@@ -1822,13 +1832,14 @@ private struct SettingsActionTray<Destination: View>: View {
 
     init(
         primary: String, secondary: String?, destructive: Bool,
-        disabled: Bool = false, note: String? = nil,
+        disabled: Bool = false, secondaryDisabled: Bool = false, note: String? = nil,
         primaryAction: @escaping () -> Void,
         secondaryAction: @escaping () -> Void,
         destination: Destination? = nil
     ) {
         self.primary = primary; self.secondary = secondary
-        self.destructive = destructive; self.disabled = disabled; self.note = note
+        self.destructive = destructive; self.disabled = disabled
+        self.secondaryDisabled = secondaryDisabled; self.note = note
         self.primaryAction = primaryAction; self.secondaryAction = secondaryAction
         self.destination = destination
     }
@@ -1850,6 +1861,7 @@ private struct SettingsActionTray<Destination: View>: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
+                .disabled(secondaryDisabled)
                 .background(commitsAccountDeletion ? SnapListColorToken.action.color : SnapListColorToken.neutralFill.color, in: RoundedRectangle(cornerRadius: 18))
                 .foregroundStyle(commitsAccountDeletion ? SnapListColorToken.onDarkSurface.color : .primary)
             }
@@ -1894,13 +1906,14 @@ private struct SettingsActionTray<Destination: View>: View {
 private extension SettingsActionTray where Destination == EmptyView {
     init(
         primary: String, secondary: String?, destructive: Bool,
-        disabled: Bool = false, note: String? = nil,
+        disabled: Bool = false, secondaryDisabled: Bool = false, note: String? = nil,
         primaryAction: @escaping () -> Void,
         secondaryAction: @escaping () -> Void
     ) {
         self.init(
             primary: primary, secondary: secondary, destructive: destructive,
-            disabled: disabled, note: note, primaryAction: primaryAction,
+            disabled: disabled, secondaryDisabled: secondaryDisabled, note: note,
+            primaryAction: primaryAction,
             secondaryAction: secondaryAction, destination: nil
         )
     }

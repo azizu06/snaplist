@@ -395,6 +395,32 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(removed)
     }
 
+    /// #844, round-1 review finding. `.sessionNotEnded` means the local
+    /// removal already committed — it is not rolled back, per the test above.
+    /// Reusing `failed`'s "didn't finish" framing for that case tells the
+    /// seller their unsent work is still there when it is already gone, so
+    /// the two outcomes cannot share a string.
+    func testSignOutFailureCopyReflectsWhatAlreadyHappened() {
+        XCTAssertEqual(
+            SettingsSignOutCopy.failureCopy(for: .localDataNotRemoved),
+            SettingsSignOutCopy.failed,
+            "nothing happened yet for this outcome, so the generic failure copy is honest"
+        )
+
+        let sessionNotEndedCopy = SettingsSignOutCopy.failureCopy(for: .sessionNotEnded)
+        XCTAssertNotEqual(
+            sessionNotEndedCopy,
+            SettingsSignOutCopy.failed,
+            "the removal already committed, so this outcome cannot reuse copy that implies nothing happened"
+        )
+        XCTAssertTrue(
+            sessionNotEndedCopy?.localizedCaseInsensitiveContains("already") ?? false,
+            "the copy must say the removal already happened, not merely that it will"
+        )
+
+        XCTAssertNil(SettingsSignOutCopy.failureCopy(for: .signedOut))
+    }
+
     /// #844, acceptance criterion 3, proved against the real stores rather than
     /// inferred from the session being nil.
     ///
