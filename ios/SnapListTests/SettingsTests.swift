@@ -421,6 +421,42 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(SettingsSignOutCopy.failureCopy(for: .signedOut))
     }
 
+    /// #844, round 2 review finding (P2, two independent reviewers). Round 1's
+    /// `effects[0]` named only unsent photos and a voice note, and
+    /// `unchanged[1]` promised signing back in "brings them back" — but
+    /// `SettingsSignOutTransaction.ownedRoots` also deletes `ListingReview/`,
+    /// this device's copy of an item mid-review, which by construction only
+    /// exists after submission. `effects[0]` excluded it, so `unchanged[1]`'s
+    /// blanket promise was false for it. The sibling local-removal screen
+    /// (`SettingsLocalRemovalView`) already names the item copy in its own
+    /// "what is removed" bullet; this pins sign-out's copy to the same fact
+    /// about the same transaction.
+    func testSignOutCopyNamesTheLocalItemCopyItActuallyDeletes() {
+        XCTAssertTrue(
+            SettingsSignOutCopy.effects[0].contains(
+                "this iPhone's copy of anything it is holding for an item"
+            ),
+            "effects[0] must name the item copy the transaction deletes, not only photos and a voice note"
+        )
+
+        let survivorClaim = SettingsSignOutCopy.unchanged[1]
+        XCTAssertTrue(
+            survivorClaim.localizedCaseInsensitiveContains("stay on your account"),
+            "the true half — server-held items come back — still has to be said"
+        )
+        XCTAssertTrue(
+            survivorClaim.contains("does not"),
+            "the local item copy this transaction deletes must not be promised back, so the bullet needs its carve-out"
+        )
+
+        XCTAssertTrue(
+            SettingsSignOutCopy.sessionNotEnded.contains(
+                "this iPhone's copy of anything it was holding for an item"
+            ),
+            "sessionNotEnded understates the same removal effects[0] now names"
+        )
+    }
+
     /// #844, acceptance criterion 3, proved against the real stores rather than
     /// inferred from the session being nil.
     ///

@@ -649,9 +649,18 @@ struct SettingsView: View {
             removeLocalData: removeLocalData,
             endSession: { try await Clerk.shared.auth.signOut() }
         )
-        if outcome == .signedOut {
+        switch outcome {
+        case .signedOut:
             hasLocalData = false
             dismiss()
+        case .sessionNotEnded:
+            // Removal already committed even though the session did not end
+            // (`SettingsSignOutTransaction.perform`), so the indicator is
+            // stale from this point on regardless of whether sign-out is
+            // retried.
+            hasLocalData = false
+        case .localDataNotRemoved:
+            break
         }
         return outcome
     }
@@ -894,6 +903,16 @@ private struct SettingsLocalRemovalView: View {
                     }
                 },
                 secondaryAction: { dismiss() }
+            )
+            // This screen is pushed inside the shell that draws the floating
+            // dock, so without the reservation the dock lands on top of
+            // `Keep it`. `isHittable` still answers true in that state
+            // (#812), so the tap goes to the dock and the seller is stuck on
+            // a confirmation they cannot back out of. Same reservation
+            // `SettingsSignOutView` takes.
+            .padding(
+                .bottom,
+                SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
             )
         }
         .accessibilityIdentifier(isGuest ? "settings.state.set-05" : "settings.state.set-06")

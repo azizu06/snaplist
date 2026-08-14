@@ -46,14 +46,14 @@ enum SettingsSignOutCopy {
 
     static let effectTitle = "What happens on this iPhone"
     static let effects = [
-        "Photos and a voice note you have not submitted yet are removed from this iPhone.",
+        "Photos and a voice note you have not submitted yet, and this iPhone's copy of anything it is holding for an item, are removed from this iPhone.",
         "Trophy Wall goes back to the guest view, and your items stop showing here.",
     ]
 
     static let unchangedTitle = "What this does not change"
     static let unchanged = [
         "Your account stays. This is not account deletion.",
-        "Items you have already sent stay on your account, and signing back in brings them back.",
+        "Items you have already sent stay on your account, and signing back in brings them back. This iPhone's copy of anything it is holding for an item does not come back.",
         "Your subscription is unchanged.",
     ]
 
@@ -65,10 +65,10 @@ enum SettingsSignOutCopy {
 
     /// Shown when local removal already committed and Clerk then refused to
     /// end the session. `failed` implies nothing has happened, which is no
-    /// longer true here — the photos and voice note the `effects` bullet
-    /// promised are already gone, not merely pending.
+    /// longer true here — the photos, voice note, and item copy the
+    /// `effects` bullet promised are already gone, not merely pending.
     static let sessionNotEnded =
-        "Your photos and voice note on this iPhone are already removed. Signing out didn’t finish, so you are still signed in. Try again to finish."
+        "Your photos and voice note, and this iPhone's copy of anything it was holding for an item, are already removed. Signing out didn't finish, so you are still signed in. Try again to finish."
 
     /// `nil` for `.signedOut`, which shows no failure text at all.
     static func failureCopy(for outcome: SettingsSignOutOutcome) -> String? {
