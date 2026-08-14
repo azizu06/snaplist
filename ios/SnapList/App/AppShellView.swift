@@ -506,8 +506,13 @@ struct AppShellView: View {
 
     private func reopenProGate() async {
         let store = makeProGateStoreIfNeeded()
-        if await store.prepare() == .fallbackToPhotoReview {
+        switch await store.prepare() {
+        case .presented:
+            break
+        case .fallbackToPhotoReview:
             submissionHost.publishProGatePhotoReviewFallback()
+        case .fallbackToAccountClaim:
+            submissionHost.publishProGateAccountClaim()
         }
     }
 
@@ -1518,6 +1523,9 @@ enum AppShellProGateTransaction {
                 .replaceProGateHandoffWithPhotoReviewFallback(
                     eventID: eventID
                 )
+        case .fallbackToAccountClaim:
+            _ = submissionHost
+                .replaceProGateHandoffWithAccountClaim(eventID: eventID)
         }
     }
 
