@@ -551,6 +551,16 @@ struct TrophyWallProcessingView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.top, 8)
+                        // The dock floats over this scroll view, so without
+                        // slack underneath the card the last row — the
+                        // disclosure button at an accessibility size — stays
+                        // behind the dock however far the seller scrolls
+                        // (#836).
+                        .padding(
+                            .bottom,
+                            SnapListMetrics.dockHeight
+                                + SnapListMetrics.dockBottomInset
+                        )
                     }
                     .scrollIndicators(.hidden)
                 }

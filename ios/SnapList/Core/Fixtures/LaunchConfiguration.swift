@@ -271,6 +271,14 @@ enum SettingsProofState: String, Equatable {
     case deletionConfirmation = "DEL-03"
 }
 
+/// Issue #836. Scripts the eBay answer the Selling section reacts to, so a UI
+/// test can reach the policy hint row. `SET-01` alone always reports a healthy
+/// connection, which leaves the hint — and the policy link inside it — with no
+/// reachable state at any Dynamic Type size.
+enum SettingsSellingFixtureState: String, Equatable {
+    case policyProblem = "policy-problem"
+}
+
 /// Issue #385. Scripts what the erasure endpoint answers, so a UI test can walk
 /// the shipped deletion route without a server and without deleting anything.
 enum AccountErasureFixtureState: String, Equatable {
@@ -324,6 +332,7 @@ struct LaunchConfiguration: Equatable {
     var assistedExportFixture: AssistedExportFixture?
     var proGateFixture: ProGateFixtureState?
     var settingsProofState: SettingsProofState?
+    var settingsSellingFixture: SettingsSellingFixtureState?
     var accountErasureFixture: AccountErasureFixtureState?
     var ebayPublishFixture: EbayPublishFixtureState?
     var guestClaimFixture: GuestClaimFixtureState?
@@ -355,6 +364,7 @@ struct LaunchConfiguration: Equatable {
         assistedExportFixture: nil,
         proGateFixture: nil,
         settingsProofState: nil,
+        settingsSellingFixture: nil,
         accountErasureFixture: nil,
         ebayPublishFixture: nil,
         guestClaimFixture: nil
@@ -387,6 +397,7 @@ struct LaunchConfiguration: Equatable {
         assistedExportFixture: nil,
         proGateFixture: nil,
         settingsProofState: nil,
+        settingsSellingFixture: nil,
         accountErasureFixture: nil,
         ebayPublishFixture: nil,
         guestClaimFixture: nil
@@ -539,6 +550,12 @@ struct LaunchConfiguration: Equatable {
                 )
                 configuration.settingsProofState =
                     SettingsProofState(rawValue: value)
+            } else if argument.hasPrefix("--settings-selling-fixture=") {
+                let value = String(
+                    argument.dropFirst("--settings-selling-fixture=".count)
+                )
+                configuration.settingsSellingFixture =
+                    SettingsSellingFixtureState(rawValue: value)
             } else if argument.hasPrefix("--account-erasure-fixture=") {
                 let value = String(
                     argument.dropFirst("--account-erasure-fixture=".count)

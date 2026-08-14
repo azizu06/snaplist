@@ -7,6 +7,7 @@ import SwiftUI
 struct SettingsView: View {
     private let profile: SettingsProfile
     private let settingsProofState: SettingsProofState?
+    private let settingsSellingFixture: SettingsSellingFixtureState?
     private let settingsProofSafeExit: (() -> Void)?
     private let deletionFlowPresentationChanged: (Bool) -> Void
     private let mobileAPIClient: any MobileAPIClient
@@ -40,6 +41,7 @@ struct SettingsView: View {
     ) {
         profile = .current(configuration: configuration)
         settingsProofState = configuration.settingsProofState
+        settingsSellingFixture = configuration.settingsSellingFixture
         self.settingsProofSafeExit = settingsProofSafeExit
         self.deletionFlowPresentationChanged = deletionFlowPresentationChanged
         self.mobileAPIClient = mobileAPIClient
@@ -323,6 +325,10 @@ struct SettingsView: View {
                     settingsCardDivider
                     settingsCardRow {
                 switch action {
+                // Each label claims the whole row `settingsCardRow` proposes
+                // so the hit target stays at the row height instead of
+                // collapsing to one line of text at the smallest Dynamic
+                // Type size, the same fix the account rows needed (#831).
                 case .manage:
                     Button {
                         managesSubscription = true
@@ -332,17 +338,40 @@ struct SettingsView: View {
                             Spacer()
                             Image(systemName: "arrow.up.right.square")
                         }
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
                     }
                     .foregroundStyle(SnapListColorToken.action.color)
+                    .accessibilityIdentifier("settings.subscription.manage")
                     .accessibilityHint("Opens the App Store")
                 case .restore:
-                    Button("Restore purchase") {
+                    Button {
                         Task { await restoreSubscription() }
+                    } label: {
+                        Text("Restore purchase")
+                            .frame(
+                                maxWidth: .infinity,
+                                maxHeight: .infinity,
+                                alignment: .leading
+                            )
+                            .contentShape(Rectangle())
                     }
+                    .accessibilityIdentifier("settings.subscription.restore")
                     .accessibilityHint("Asks Apple for a purchase on this Apple Account, then waits for the server to confirm it")
                 case .retry:
-                    Button("Try again") { Task { await loadSubscription() } }
-                        .accessibilityHint("Loads your subscription details again")
+                    Button {
+                        Task { await loadSubscription() }
+                    } label: {
+                        Text("Try again")
+                            .frame(
+                                maxWidth: .infinity,
+                                maxHeight: .infinity,
+                                alignment: .leading
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityIdentifier("settings.subscription.retry")
+                    .accessibilityHint("Loads your subscription details again")
                 }
             }
             }
@@ -358,7 +387,6 @@ struct SettingsView: View {
             .padding(.horizontal, 4)
             .padding(.top, 8)
         }
-        .accessibilityIdentifier("settings.subscription.\(presentation.stateID.lowercased())")
         .onChange(of: presentation) { _, reading in
             AccessibilityNotification.Announcement(
                 reading.accessibilityAnnouncement
@@ -423,6 +451,9 @@ struct SettingsView: View {
     }
 
     private var sellingPresentation: SettingsSellingPresentation {
+        if let sellingFixturePresentation {
+            return sellingFixturePresentation
+        }
         if isSettingsHubProof {
             return SettingsSellingPresentation(
                 connection: EbayConnectionStatus(
@@ -451,6 +482,37 @@ struct SettingsView: View {
             state: subscriptionStore.state,
             loadPhase: subscriptionLoadPhase
         )
+    }
+
+    /// The connected-with-a-policy-problem answer, which no other Settings
+    /// fixture can produce: `SET-01` always reports a healthy connection, so
+    /// the hint row and its policy link are unreachable without this (#836).
+    private var sellingFixturePresentation: SettingsSellingPresentation? {
+#if DEBUG
+        guard let settingsSellingFixture else { return nil }
+        switch settingsSellingFixture {
+        case .policyProblem:
+            return SettingsSellingPresentation(
+                connection: EbayConnectionStatus(
+                    connected: true,
+                    ebayUsername: "JordanHale",
+                    policySetup: EbayPolicySetupHint(
+                        state: "setupRequired",
+                        marketplaceID: "EBAY_US",
+                        missing: ["fulfillmentPolicy", "returnPolicy"],
+                        ambiguous: [],
+                        message: "Your eBay account is missing a shipping policy and a return policy. Add them on eBay before you publish.",
+                        helpURL: URL(
+                            string: "https://www.bizpolicy.ebay.com/businesspolicy/manage"
+                        )
+                    )
+                ),
+                loadPhase: .loaded
+            )
+        }
+#else
+        nil
+#endif
     }
 
     private var isSettingsHubProof: Bool {
@@ -482,7 +544,10 @@ struct SettingsView: View {
         Text(title)
             .font(.subheadline.weight(.medium))
             .foregroundStyle(.secondary)
-            .frame(height: 18, alignment: .leading)
+            // A fixed height proposes 18pt but does not clip: at an
+            // accessibility size the label draws ~67pt and the extra glyphs
+            // spill into the card below instead of pushing it down (#836).
+            .frame(minHeight: 18, alignment: .leading)
             .padding(.top, 19)
             .padding(.bottom, 3)
     }
@@ -501,9 +566,16 @@ struct SettingsView: View {
         }
         .font(.subheadline.weight(.medium))
         .foregroundStyle(.secondary)
-        .frame(height: 18)
+        .frame(minHeight: 18)
         .padding(.top, 19)
         .padding(.bottom, 3)
+        // The state ID rides the header rather than the section around it: an
+        // identifier on the enclosing stack is applied after the ones inside
+        // it, so it replaced every action button's own identifier and left
+        // them unaddressable (#836).
+        .accessibilityIdentifier(
+            "settings.subscription.\(presentation.stateID.lowercased())"
+        )
     }
 
     private func settingsCard<Content: View>(
