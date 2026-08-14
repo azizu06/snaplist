@@ -106,6 +106,14 @@ struct SettingsView: View {
                                     )
                                     .contentShape(Rectangle())
                             }
+                            // `.automatic` would let iOS paint its own filled
+                            // capsule behind this row whenever the seller has
+                            // Button Shapes on, on top of the affordance
+                            // `settingsCardRow` already provides (#856). Going
+                            // plain drops the accent tint with it, so the blue
+                            // that marks the row as tappable is stated here.
+                            .buttonStyle(.plain)
+                            .foregroundStyle(SnapListColorToken.action.color)
                             .accessibilityIdentifier("settings.create-account")
                             .accessibilityHint("Opens the account entry screen")
                         } else {
@@ -368,6 +376,7 @@ struct SettingsView: View {
                         .frame(maxHeight: .infinity)
                         .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityIdentifier("settings.subscription.manage")
                     .accessibilityHint("Opens the App Store")
@@ -383,6 +392,8 @@ struct SettingsView: View {
                             )
                             .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityIdentifier("settings.subscription.restore")
                     .accessibilityHint("Asks Apple for a purchase on this Apple Account, then waits for the server to confirm it")
                 case .retry:
@@ -397,6 +408,8 @@ struct SettingsView: View {
                             )
                             .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityIdentifier("settings.subscription.retry")
                     .accessibilityHint("Loads your subscription details again")
                 }

@@ -420,6 +420,10 @@ struct ScanCameraView: View {
         ) {
             ScanLibraryLabel(style: labelStyle)
         }
+        // `PhotosPicker` resolves a button style the same way `Button` does, so
+        // an `.automatic` picker gets a filled shape under Button Shapes on top
+        // of the circle or capsule `ScanLibraryLabel` already draws (#856).
+        .buttonStyle(.plain)
         .disabled(!isLibraryEnabled)
         .accessibilityLabel(labelStyle == .icon ? "Library" : "Choose from library")
         .accessibilityIdentifier(
@@ -575,6 +579,11 @@ private struct ScanReviewButton: View {
 
     var body: some View {
         Button("Review", action: review)
+            // The capsule below is this control's whole affordance. Left on
+            // `.automatic`, iOS paints a second filled shape behind it for a
+            // seller with Button Shapes on, which reads as an overlay sitting
+            // on the label (#856).
+            .buttonStyle(.plain)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(SnapListColorToken.onDarkSurface.color)
             .padding(.horizontal, 18)
