@@ -91,31 +91,7 @@ struct SettingsView: View {
                         ) {
                             // Routed rather than pushed: the account boundary opens
                             // modally, and a NavigationLink would push it (#799).
-                            Button {
-                                navigate(accountEntry)
-                            } label: {
-                                Text("Create an account")
-                                    // `maxHeight: .infinity` claims the full
-                                    // row `settingsCardRow` proposes, not
-                                    // just this text's own line height, the
-                                    // same fix `LegalLinkRow` needed (#831).
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        maxHeight: .infinity,
-                                        alignment: .leading
-                                    )
-                                    .contentShape(Rectangle())
-                            }
-                            // `.automatic` would let iOS paint its own filled
-                            // capsule behind this row whenever the seller has
-                            // Button Shapes on, on top of the affordance
-                            // `settingsCardRow` already provides (#856). Going
-                            // plain drops the accent tint with it, so the blue
-                            // that marks the row as tappable is stated here.
-                            .buttonStyle(.plain)
-                            .foregroundStyle(SnapListColorToken.action.color)
-                            .accessibilityIdentifier("settings.create-account")
-                            .accessibilityHint("Opens the account entry screen")
+                            SettingsCreateAccountRow(open: { navigate(accountEntry) })
                         } else {
                             valueRow("Sign-in method", profile.methodLabel)
                         }
@@ -730,6 +706,37 @@ struct SettingsView: View {
     /// navigate should use a real `Button`, as `LegalLinkRow` does.
     private func valueRow(_ label: String, _ value: String) -> some View {
         SettingsValueRow(label: label, value: value)
+    }
+}
+
+/// The ACCOUNT card's opener into account creation, isolated so a unit test can render
+/// it alone and inspect its resolved button style (#856), the same technique
+/// `LegalLinkRow` uses.
+struct SettingsCreateAccountRow: View {
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            Text("Create an account")
+                // `maxHeight: .infinity` claims the full row `settingsCardRow`
+                // proposes, not just this text's own line height, the same fix
+                // `LegalLinkRow` needed (#831).
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .leading
+                )
+                .contentShape(Rectangle())
+        }
+        // `.automatic` would let iOS paint its own filled capsule behind this
+        // row whenever the seller has Button Shapes on, on top of the
+        // affordance `settingsCardRow` already provides (#856). Going plain
+        // drops the accent tint with it, so the blue that marks the row as
+        // tappable is stated here.
+        .buttonStyle(.plain)
+        .foregroundStyle(SnapListColorToken.action.color)
+        .accessibilityIdentifier("settings.create-account")
+        .accessibilityHint("Opens the account entry screen")
     }
 }
 

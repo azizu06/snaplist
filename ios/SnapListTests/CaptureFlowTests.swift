@@ -1,6 +1,7 @@
 import AVFoundation
 import ImageIO
 import Observation
+import PhotosUI
 import SwiftUI
 import UIKit
 import XCTest
@@ -9420,6 +9421,46 @@ final class CaptureFlowTests: XCTestCase {
             rightColor.setFill()
             context.fill(CGRect(x: 200, y: 0, width: 200, height: 200))
         })
+    }
+
+    // MARK: - Button Shapes (#856)
+
+    /// Left on `.automatic`, iOS paints a second filled shape behind the capsule this
+    /// control already draws for itself whenever a seller has Accessibility > Display &
+    /// Text Size > Button Shapes on.
+    func testScanReviewButtonCarriesAnExplicitNonAutomaticButtonStyle() {
+        let button = ScanReviewButton(
+            photoCount: 1,
+            priority: .live,
+            returnFocus: .constant(nil),
+            review: {}
+        )
+
+        let rendered = String(reflecting: type(of: button.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "scan.review resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
+        )
+    }
+
+    /// `PhotosPicker` resolves a button style the same way `Button` does, so left on
+    /// `.automatic` it gets a second filled shape behind the circle `ScanLibraryLabel`
+    /// already draws whenever a seller has Button Shapes on.
+    func testScanLibraryPickerCarriesAnExplicitNonAutomaticButtonStyle() {
+        let picker = ScanLibraryPicker(
+            style: .icon,
+            selection: .constant([]),
+            maxSelectionCount: 5,
+            isEnabled: true
+        )
+
+        let rendered = String(reflecting: type(of: picker.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "scan.library resolves to .automatic, so Button Shapes doubles its circle: \(rendered)"
+        )
     }
 }
 

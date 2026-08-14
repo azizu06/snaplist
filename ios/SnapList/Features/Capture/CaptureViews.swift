@@ -412,22 +412,11 @@ struct ScanCameraView: View {
                 .recoveryLibrary
             }
 
-        return PhotosPicker(
+        return ScanLibraryPicker(
+            style: labelStyle,
             selection: $libraryItems,
             maxSelectionCount: max(1, 5 - flow.stagedPhotos.count),
-            selectionBehavior: .ordered,
-            matching: .images
-        ) {
-            ScanLibraryLabel(style: labelStyle)
-        }
-        // `PhotosPicker` resolves a button style the same way `Button` does, so
-        // an `.automatic` picker gets a filled shape under Button Shapes on top
-        // of the circle or capsule `ScanLibraryLabel` already draws (#856).
-        .buttonStyle(.plain)
-        .disabled(!isLibraryEnabled)
-        .accessibilityLabel(labelStyle == .icon ? "Library" : "Choose from library")
-        .accessibilityIdentifier(
-            labelStyle == .icon ? "scan.library" : "scan.choose-library"
+            isEnabled: isLibraryEnabled
         )
         .accessibilitySortPriority(60)
         .accessibilityFocused(
@@ -503,9 +492,39 @@ private enum ScanCameraRecoveryMode: Equatable {
     }
 }
 
-private enum ScanLibraryLabelStyle {
+enum ScanLibraryLabelStyle {
     case icon
     case recovery
+}
+
+/// The library opener, isolated from `ScanCameraView`'s focus/state wiring so a unit test
+/// can render it alone and inspect its resolved button style (#856), the same technique
+/// `LegalLinkRow` uses.
+struct ScanLibraryPicker: View {
+    let style: ScanLibraryLabelStyle
+    @Binding var selection: [PhotosPickerItem]
+    let maxSelectionCount: Int
+    let isEnabled: Bool
+
+    var body: some View {
+        PhotosPicker(
+            selection: $selection,
+            maxSelectionCount: maxSelectionCount,
+            selectionBehavior: .ordered,
+            matching: .images
+        ) {
+            ScanLibraryLabel(style: style)
+        }
+        // `PhotosPicker` resolves a button style the same way `Button` does, so
+        // an `.automatic` picker gets a filled shape under Button Shapes on top
+        // of the circle or capsule `ScanLibraryLabel` already draws (#856).
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .accessibilityLabel(style == .icon ? "Library" : "Choose from library")
+        .accessibilityIdentifier(
+            style == .icon ? "scan.library" : "scan.choose-library"
+        )
+    }
 }
 
 private struct ScanLibraryLabel: View {
@@ -569,7 +588,9 @@ private enum ScanReviewFocusTarget: Hashable {
 /// count-sensitive name, the same identifier, and the same accessibility-focus handoff back
 /// from Photo Review. Each surface still supplies its own sort-priority case, which is the one
 /// input that is allowed to differ, even though `.live` and `.recovery` both resolve to 40 today.
-private struct ScanReviewButton: View {
+///
+/// Not `private`: a unit test renders it alone to inspect its resolved button style (#856).
+struct ScanReviewButton: View {
     let photoCount: Int
     let priority: ScanReviewAccessibilityPriority
     @Binding var returnFocus: PhotoReviewScanFocus?
