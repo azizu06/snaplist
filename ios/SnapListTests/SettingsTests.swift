@@ -917,6 +917,21 @@ final class SettingsTests: XCTestCase {
             state.lead(email: "seller@example.com").contains("SnapList sent")
         )
     }
+
+    /// Left on `.automatic`, iOS paints its own filled capsule behind this row whenever
+    /// a seller has Button Shapes on, on top of the affordance `settingsCardRow` already
+    /// provides (#856).
+    @MainActor
+    func testCreateAccountRowCarriesAnExplicitNonAutomaticButtonStyle() {
+        let row = SettingsCreateAccountRow(open: {})
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "settings.create-account resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
+        )
+    }
 }
 
 private final class FailingSettingsAnalyticsClient: AnalyticsClient {

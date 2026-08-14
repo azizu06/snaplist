@@ -1673,6 +1673,21 @@ final class OnboardingFlowTests: XCTestCase {
             guestAllowance: DeferredGuestAllowanceCapability()
         )
     }
+
+    /// The filled capsule this control draws is its whole affordance. Left on
+    /// `.automatic`, iOS paints a second filled shape behind it whenever a seller has
+    /// Button Shapes on, which reads as an overlay sitting on the label (#856).
+    @MainActor
+    func testFirstValueOnboardingContinueButtonCarriesAnExplicitNonAutomaticButtonStyle() {
+        let button = FirstValueOnboardingContinueButton(isFinalScreen: false, action: {})
+
+        let rendered = String(reflecting: type(of: button.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "first-value-onboarding.continue resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
+        )
+    }
 }
 
 private final class CameraAuthorizationStub: CameraAuthorizationProviding {
