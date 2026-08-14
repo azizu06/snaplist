@@ -17,6 +17,7 @@ struct SettingsView: View {
     private let analyticsClient: any AnalyticsClient
     private let ebayPublishService: any EbayPublishFeatureServing
     private let navigate: (AppRoute) -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var hasLocalData: Bool
     @State private var ebayConnection: EbayConnectionStatus?
     @State private var ebayConnectionLoadPhase =
@@ -109,6 +110,30 @@ struct SettingsView: View {
                             .accessibilityHint("Opens the account entry screen")
                         } else {
                             valueRow("Sign-in method", profile.methodLabel)
+                        }
+                    }
+                    // #844. A member's ACCOUNT card used to hold nothing but a
+                    // static `Sign-in method` value, so the only way to stop
+                    // being signed in on this iPhone was to delete the account.
+                    if SettingsSignOutPolicy.isAvailable(for: profile.identity) {
+                        settingsCardDivider
+                        settingsCardRow {
+                            NavigationLink {
+                                SettingsSignOutView(signOut: signOut)
+                            } label: {
+                                Text(SettingsSignOutCopy.rowLabel)
+                                    // Same `settingsCardRow` fixed-height
+                                    // touch-target gap `LegalLinkRow` and
+                                    // "Create an account" needed (#831).
+                                    .frame(
+                                        maxWidth: .infinity,
+                                        maxHeight: .infinity,
+                                        alignment: .leading
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityIdentifier("settings.sign-out")
+                            .accessibilityHint("Explains what signing out does before it runs")
                         }
                     }
                 }
@@ -611,6 +636,26 @@ struct SettingsView: View {
         )
     }
 
+    /// #844. Removes this device's copies, then ends the Clerk session, then
+    /// pops Settings so the seller lands back in the shell — which reads
+    /// `Clerk.shared.user` and is therefore the guest shell by then.
+    ///
+    /// `removeLocalData` is the same closure the THIS IPHONE row already uses,
+    /// and `signOut()` is the same ClerkKit call the deletion tail makes. The
+    /// ordering and the failure handling live in `SettingsSignOutTransaction`
+    /// so they are provable without a signed-in device.
+    private func signOut() async -> SettingsSignOutOutcome {
+        let outcome = await SettingsSignOutTransaction.perform(
+            removeLocalData: removeLocalData,
+            endSession: { try await Clerk.shared.auth.signOut() }
+        )
+        if outcome == .signedOut {
+            hasLocalData = false
+            dismiss()
+        }
+        return outcome
+    }
+
     private func settingsCard<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -851,6 +896,74 @@ private struct SettingsLocalRemovalView: View {
             )
         }
         .accessibilityIdentifier(isGuest ? "settings.state.set-05" : "settings.state.set-06")
+    }
+}
+
+/// #844. Sign-out is confirmed before it runs, because it takes this iPhone's
+/// unsent work with it and a seller who taps `Sign out` is not expecting that.
+///
+/// Modelled on `SettingsLocalRemovalView`: the same explanation page, the same
+/// bottom tray, the same `destructive` treatment. That treatment is not the
+/// account-deletion one — `SettingsActionTray.commitsAccountDeletion` keys on
+/// the literal primary label `Delete account`, so nothing here can borrow it.
+private struct SettingsSignOutView: View {
+    @Environment(\.dismiss) private var dismiss
+    let signOut: () async -> SettingsSignOutOutcome
+    @State private var signingOut = false
+    @State private var showsFailure = false
+
+    var body: some View {
+        SettingsExplanationPage(title: SettingsSignOutCopy.title) {
+            SettingsFactSection(
+                title: SettingsSignOutCopy.effectTitle,
+                bullets: SettingsSignOutCopy.effects
+            )
+            SettingsFactSection(
+                title: SettingsSignOutCopy.unchangedTitle,
+                bullets: SettingsSignOutCopy.unchanged,
+                usesBullets: false
+            )
+            if showsFailure {
+                Text(SettingsSignOutCopy.failed)
+                    .foregroundStyle(SnapListColorToken.destructiveText.color)
+                    .accessibilityIdentifier("settings.sign-out.failed")
+            }
+            Text(SettingsSignOutCopy.deletionIsElsewhere)
+                .foregroundStyle(.secondary)
+        }
+        .navigationTitle(SettingsSignOutCopy.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            SettingsActionTray(
+                primary: SettingsSignOutCopy.confirm,
+                secondary: SettingsSignOutCopy.cancel,
+                destructive: true,
+                disabled: signingOut,
+                primaryAction: {
+                    signingOut = true
+                    showsFailure = false
+                    Task {
+                        // Never dismissed on failure: the seller is still
+                        // signed in, and returning them to a Settings screen
+                        // that says otherwise would be the lie.
+                        if await signOut() != .signedOut { showsFailure = true }
+                        signingOut = false
+                    }
+                },
+                secondaryAction: { dismiss() }
+            )
+            // This screen is pushed inside the shell that draws the floating
+            // dock, so without the reservation the dock lands on top of
+            // `Stay signed in`. `isHittable` still answers true in that state
+            // (#812), so the tap goes to the dock and the seller is stuck on a
+            // confirmation they cannot back out of. Same reservation the
+            // deletion screens take.
+            .padding(
+                .bottom,
+                SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+            )
+        }
+        .accessibilityIdentifier("settings.sign-out.confirm")
     }
 }
 

@@ -1644,6 +1644,83 @@ final class TrophyWallDomainTests: XCTestCase {
         XCTAssertTrue(store.settledTiles.isEmpty)
     }
 
+    /// #844, acceptance criterion 3, the half that lives in memory rather than
+    /// on disk.
+    ///
+    /// Trophy Wall cards are never written to disk — they come from a live
+    /// history fetch or from an in-session `ingest`. So what has to hold after a
+    /// sign-out is that the principal the shell fences on actually changes when
+    /// the session ends. `TrophyWallPrincipalFence` and
+    /// `resetForPrincipalTransition` already existed; what nothing asserted is
+    /// that a sign-out is a transition at all. A member's proof is a digest over
+    /// their Clerk subject and a guest's is a digest over the App Attest key, so
+    /// the two can never collide, and the fence therefore fires.
+    func testSignOutIsAPrincipalTransitionSoAMembersCardsCannotSurviveIt() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        // Positive control: the member's wall is genuinely populated first, so
+        // the emptiness below cannot be the fixture never having any cards.
+        XCTAssertFalse(store.cards.isEmpty)
+
+        let member = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "user_2signed_in_member"
+            )
+        )
+        let guestAfterSignOut = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedAppAttestKeyID: "app-attest-key-id-after-sign-out"
+            )
+        )
+        XCTAssertNotEqual(member, guestAfterSignOut)
+
+        var refreshState = TrophyWallCollectionRefreshState()
+        // A cold launch observing the member for the first time is not a
+        // transition, and neither is observing them again. Only the sign-out
+        // is, which is what makes the `true` below discriminating rather than
+        // just "the second observation".
+        XCTAssertFalse(refreshState.observePrincipal(member))
+        XCTAssertFalse(refreshState.observePrincipal(member))
+        XCTAssertTrue(refreshState.observePrincipal(guestAfterSignOut))
+
+        store.resetForPrincipalTransition()
+
+        XCTAssertTrue(store.cards.isEmpty)
+        XCTAssertTrue(store.processingRows.isEmpty)
+        XCTAssertTrue(store.settledTiles.isEmpty)
+        XCTAssertEqual(store.collectionOutcome, .unknown)
+    }
+
+    /// #844, acceptance criterion 6. Sign-out removes this device's copies and
+    /// nothing else, so the wall a returning member sees is rebuilt from the
+    /// server's own history rather than from anything that had to survive on the
+    /// device.
+    func testSigningBackInRebuildsTheWallFromServerOwnedHistory() async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: fixture.processingInitialCards)
+        store.resetForPrincipalTransition()
+        XCTAssertTrue(store.cards.isEmpty)
+
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [
+                .page(
+                    try fixture.historyPage(
+                        listingID: fixture.listingID,
+                        status: .succeeded,
+                        stage: .completed,
+                        terminalOutcome: .succeeded
+                    )
+                ),
+            ]
+        )
+
+        await store.refreshCollection(using: repository)
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        XCTAssertFalse(store.cards.isEmpty)
+        XCTAssertEqual(repository.requestedPages.count, 1)
+    }
+
     func testPendingCardRecoveryDropsAResultFromADepartedPrincipal() async {
         let fixture = TrophyWallTestFixture()
         let entered = RefreshGate()

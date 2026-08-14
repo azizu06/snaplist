@@ -266,6 +266,96 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(helpRow.frame.height, 44, frameReceipt)
     }
 
+    /// #844, acceptance criteria 1, 2 and 4. A member's ACCOUNT card offers a
+    /// sign-out, and it explains itself before it runs.
+    ///
+    /// The confirmation is the whole point of the test: `Stay signed in` has to
+    /// return the seller to a Settings screen that still offers the control,
+    /// which is only true if tapping the row did not already end the session.
+    func testMemberSettingsOffersSignOutAndConfirmsBeforeItRuns() {
+        let app = launch(extraArguments: ["--fixture=account"])
+        let settingsScreen = app.descendants(matching: .any)["settings.screen"]
+        XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
+
+        let signOut = app.buttons["settings.sign-out"]
+        for _ in 0..<4 where !signOut.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(signOut.exists, app.debugDescription)
+        XCTAssertTrue(signOut.isHittable, app.debugDescription)
+        XCTAssertEqual(signOut.label, "Sign out", app.debugDescription)
+        signOut.tap()
+
+        let confirmation = app.descendants(matching: .any)["settings.sign-out.confirm"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 3), app.debugDescription)
+        // The seller is told the account survives before they commit, not after.
+        XCTAssertTrue(
+            app.staticTexts["Your account stays. This is not account deletion."]
+                .waitForExistence(timeout: 3),
+            app.debugDescription
+        )
+
+        let stay = app.buttons["Stay signed in"]
+        XCTAssertTrue(stay.exists, app.debugDescription)
+        // Asserted as geometry rather than through `isHittable`, which answers
+        // true even when the floating dock covers the control's centre (#812) —
+        // the state this test found, where the tap silently went to the dock.
+        let dock = app.buttons["dock.scan"]
+        XCTAssertTrue(dock.exists, app.debugDescription)
+        XCTAssertLessThanOrEqual(
+            stay.frame.maxY,
+            dock.frame.minY,
+            "stay=\(stay.frame), dock=\(dock.frame)"
+        )
+        stay.tap()
+
+        XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
+        for _ in 0..<4 where !signOut.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            signOut.exists,
+            "backing out of the confirmation must leave the session alone: "
+                + app.debugDescription
+        )
+    }
+
+    /// #844, acceptance criterion 7, at both ends of the Dynamic Type range.
+    ///
+    /// `xSmall` is where a target sized from text height rather than the row's
+    /// 52pt floor is thinnest, which is the failure `LegalLinkRow` and
+    /// `Create an account` both had (#831). `accessibility5` is the size the
+    /// criterion names, and the one where a row that grows past its container
+    /// stops being fully hittable. The `Button` is measured rather than a
+    /// `valueRow` for the reason `testAboutRowMeetsTouchTargetFloorAtSmallest\
+    /// DynamicTypeSize` gives: a value row is not a control.
+    func testSignOutRowMeetsTheTouchTargetFloorAcrossDynamicTypeSizes() {
+        for size in ["xSmall", "accessibility5"] {
+            let app = launch(extraArguments: [
+                "--fixture=account",
+                "--dynamic-type=\(size)",
+            ])
+            XCTAssertTrue(
+                app.descendants(matching: .any)["settings.screen"]
+                    .waitForExistence(timeout: 5),
+                "\(size): \(app.debugDescription)"
+            )
+
+            let signOut = app.buttons["settings.sign-out"]
+            for _ in 0..<6 where !signOut.exists {
+                app.swipeUp()
+            }
+            XCTAssertTrue(
+                signOut.waitForExistence(timeout: 3),
+                "\(size): \(app.debugDescription)"
+            )
+            let receipt = "\(size): row.frame=\(signOut.frame)"
+            XCTAssertGreaterThanOrEqual(signOut.frame.height, 44, receipt)
+            XCTAssertGreaterThanOrEqual(signOut.frame.width, 44, receipt)
+            app.terminate()
+        }
+    }
+
     func testSettingsMemberReauthenticationCancelReturnsToDeletionConsequences() {
         let app = launch(extraArguments: ["--fixture=account"])
         let settingsScreen = app.descendants(matching: .any)["settings.screen"]
