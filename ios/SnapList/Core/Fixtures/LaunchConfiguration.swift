@@ -279,6 +279,15 @@ enum SettingsSellingFixtureState: String, Equatable {
     case policyProblem = "policy-problem"
 }
 
+/// Issue #839. Scripts the subscription reading the Settings hub renders.
+/// `SET-01` reports a verified active subscription and short-circuits
+/// `loadSubscription()` entirely, so nothing could reach the failed load that
+/// draws `SUB-15` — the one state offering `settings.subscription.retry`, and
+/// therefore the one subscription action whose 44pt floor went unproved.
+enum SettingsSubscriptionFixtureState: String, Equatable {
+    case loadFailed = "load-failed"
+}
+
 /// Issue #385. Scripts what the erasure endpoint answers, so a UI test can walk
 /// the shipped deletion route without a server and without deleting anything.
 enum AccountErasureFixtureState: String, Equatable {
@@ -333,6 +342,7 @@ struct LaunchConfiguration: Equatable {
     var proGateFixture: ProGateFixtureState?
     var settingsProofState: SettingsProofState?
     var settingsSellingFixture: SettingsSellingFixtureState?
+    var settingsSubscriptionFixture: SettingsSubscriptionFixtureState?
     var accountErasureFixture: AccountErasureFixtureState?
     var ebayPublishFixture: EbayPublishFixtureState?
     var guestClaimFixture: GuestClaimFixtureState?
@@ -365,6 +375,7 @@ struct LaunchConfiguration: Equatable {
         proGateFixture: nil,
         settingsProofState: nil,
         settingsSellingFixture: nil,
+        settingsSubscriptionFixture: nil,
         accountErasureFixture: nil,
         ebayPublishFixture: nil,
         guestClaimFixture: nil
@@ -398,6 +409,7 @@ struct LaunchConfiguration: Equatable {
         proGateFixture: nil,
         settingsProofState: nil,
         settingsSellingFixture: nil,
+        settingsSubscriptionFixture: nil,
         accountErasureFixture: nil,
         ebayPublishFixture: nil,
         guestClaimFixture: nil
@@ -556,6 +568,12 @@ struct LaunchConfiguration: Equatable {
                 )
                 configuration.settingsSellingFixture =
                     SettingsSellingFixtureState(rawValue: value)
+            } else if argument.hasPrefix("--settings-subscription-fixture=") {
+                let value = String(
+                    argument.dropFirst("--settings-subscription-fixture=".count)
+                )
+                configuration.settingsSubscriptionFixture =
+                    SettingsSubscriptionFixtureState(rawValue: value)
             } else if argument.hasPrefix("--account-erasure-fixture=") {
                 let value = String(
                     argument.dropFirst("--account-erasure-fixture=".count)

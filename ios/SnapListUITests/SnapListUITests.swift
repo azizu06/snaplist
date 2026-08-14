@@ -426,12 +426,61 @@ final class SnapListUITests: XCTestCase {
             XCTAssertTrue(firstRow.exists, app.debugDescription)
             let receipt =
                 "arguments=\(arguments), header=\(header.frame), firstRow=\(firstRow.frame)"
-            addScreenshot(
-                named: "AX5-SETTINGS-SECTION-HEADERS-\(arguments.isEmpty ? "default" : "accessibility5")-402x874.png"
-            )
             let label = arguments.isEmpty ? "default" : "accessibility5"
             addScreenshot(named: "AX5-SETTINGS-SECTION-HEADERS-\(label)-402x874.png")
             XCTAssertLessThanOrEqual(header.frame.maxY, firstRow.frame.minY, receipt)
+            app.terminate()
+        }
+    }
+
+    /// `SettingsDeletionHeader` drew the centred title and the leading back
+    /// control in one `ZStack` inside `.frame(height: 56)` (#839). The fixed
+    /// height is the defect the section headers above were fixed for, but the
+    /// axis that fails first on this bar is the other one: at `accessibility5`
+    /// neither the title nor the back control shrinks, so the two overprint.
+    /// Measured on `520f696ec` at 402x874: `Delete account` reported
+    /// `(22.17, 52.67, 357.67, 74.67)` and `Settings` `(20.0, 52.67, 228.33,
+    /// 74.67)` — the same 74.67pt band, overlapping across 226pt of a 402pt
+    /// screen, which the attached `accessibility5` image shows as one word
+    /// drawn through the other. That 74.67pt is also more than the 56pt the
+    /// bar proposed, so the fixed height was over-run in the same reading;
+    /// it did not reach the page below because that page starts at 148.0.
+    ///
+    /// Both sizes run: a bar that stacked at every size would pass the overlap
+    /// check while destroying the default layout, so the default size asserts
+    /// the opposite arrangement — back control and title sharing one row, with
+    /// the title still inside the bar and above the page beneath it.
+    func testDeletionHeaderTitleAndBackControlDoNotOverprintAtLargestAccessibilitySize() {
+        for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--settings-proof=DEL-01"] + arguments
+            app.launchAfterRetiringPriorInstance()
+            XCTAssertTrue(
+                app.descendants(matching: .any)["settings.state.del-01"]
+                    .waitForExistence(timeout: 10),
+                app.debugDescription
+            )
+
+            let title = app.staticTexts["Delete account"]
+            let back = app.buttons["Settings"]
+            let pageTitle = app.staticTexts["Delete your SnapList account"]
+            XCTAssertTrue(title.waitForExistence(timeout: 3), app.debugDescription)
+            XCTAssertTrue(back.exists, app.debugDescription)
+            XCTAssertTrue(pageTitle.exists, app.debugDescription)
+            let label = arguments.isEmpty ? "default" : "accessibility5"
+            let receipt = """
+            arguments=\(arguments), title=\(title.frame), back=\(back.frame), \
+            pageTitle=\(pageTitle.frame)
+            """
+            addScreenshot(named: "AX5-SETTINGS-DELETION-HEADER-\(label)-402x874.png")
+            XCTAssertFalse(title.frame.intersects(back.frame), receipt)
+            // The bar has to have grown around both of them rather than letting
+            // either one spill onto the page it sits above.
+            XCTAssertLessThanOrEqual(title.frame.maxY, pageTitle.frame.minY, receipt)
+            XCTAssertLessThanOrEqual(back.frame.maxY, pageTitle.frame.minY, receipt)
+            if arguments.isEmpty {
+                XCTAssertLessThanOrEqual(back.frame.maxX, title.frame.minX, receipt)
+            }
             app.terminate()
         }
     }
@@ -559,6 +608,148 @@ final class SnapListUITests: XCTestCase {
                 "identifier=\(identifier), frame=\(button.frame)"
             )
         }
+    }
+
+    /// `settings.subscription.retry` came out of #836 with an identifier and no
+    /// assertion, because `SET-01` reports a verified subscription and skips
+    /// `loadSubscription()` entirely, so nothing reached `SUB-15` and the 44pt
+    /// floor the other two actions were given went unproved on this one (#839).
+    /// `--settings-subscription-fixture=load-failed` reaches it.
+    ///
+    /// The assertion is load-bearing rather than satisfied by the identifier
+    /// existing: dropping `maxHeight: .infinity` from the `Try again` label
+    /// reports `(37.0, 602.0, 328.0, 20.33)` and reddens this line.
+    ///
+    /// Smallest Dynamic Type for the same reason as the sibling test above: a
+    /// target sized from text height rather than the row's is thinnest there.
+    /// `manage` rides along because `SUB-15` offers both, and a fixture that
+    /// silently produced some other state would still satisfy a retry-only
+    /// check by never rendering the button it was asked about.
+    func testSubscriptionRetryMeetsTheTouchTargetFloorAtSmallestDynamicTypeSize() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--settings-proof=SET-01",
+            "--settings-subscription-fixture=load-failed",
+            "--dynamic-type=xSmall",
+        ]
+        app.launchAfterRetiringPriorInstance()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["settings.screen"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["settings.subscription.sub-15"]
+                .waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+
+        // An identifier on a stack with no explicit container reaches every
+        // leaf inside it: both header `Text`s answered to
+        // `settings.subscription.sub-15`, so the query matched two elements and
+        // reading a frame from it was ambiguous. `.accessibilityElement(children:
+        // .contain)` collapses that to the one container the identifier names
+        // (#839).
+        XCTAssertEqual(
+            app.descendants(matching: .any)
+                .matching(identifier: "settings.subscription.sub-15")
+                .count,
+            1,
+            app.debugDescription
+        )
+
+        for identifier in [
+            "settings.subscription.retry",
+            "settings.subscription.manage",
+        ] {
+            let button = app.buttons[identifier]
+            for _ in 0..<6 where !button.exists {
+                app.swipeUp()
+            }
+            XCTAssertTrue(button.waitForExistence(timeout: 3), app.debugDescription)
+            XCTAssertGreaterThanOrEqual(
+                button.frame.height,
+                44,
+                "identifier=\(identifier), frame=\(button.frame)"
+            )
+        }
+    }
+
+    /// #836 asserted the info caption underneath `CaptureOptionRow` wraps and
+    /// left the row's own title and subtitle — the two labels the card exists
+    /// to show — with a containment check and no wrap check (#839).
+    ///
+    /// Wrap is the observable, not the ellipsis: XCUITest reports the full
+    /// source string as an element's label whether or not it was drawn with a
+    /// trailing ellipsis, so a truncated title and a wrapped one differ only in
+    /// height. One ellipsized line at `accessibility5` is one line's worth of
+    /// the larger font; a wrapped one is several times that, and both are
+    /// measured in the same run rather than against a constant so a title that
+    /// froze at some other single size cannot pass.
+    /// Measured on iPhone 17 Pro / iOS 26.5. Wrapped, as shipped: title
+    /// `16.643 → 145.630` (8.75×), subtitle `15.043 → 175.076` (11.64×). Held
+    /// to one line with a temporary `.lineLimit(1)` on both labels: title
+    /// `16.643 → 48.650` (2.92×), subtitle `15.043 → 58.572` (3.89×). The 4×
+    /// and 5× floors sit between the two, so the assertions redden the moment
+    /// either label goes back to a single ellipsized line.
+    func testCaptureOptionRowTitleAndSubtitleWrapRatherThanTruncateAtLargestAccessibilitySize() {
+        var titleHeights: [String: CGFloat] = [:]
+        var subtitleHeights: [String: CGFloat] = [:]
+
+        for size in ["medium", "accessibility5"] {
+            let app = launchCaptureSheet(dynamicType: size)
+            let title = app.staticTexts["Take one item"]
+            let subtitle = app.staticTexts["Snap one thing and get help listing it."]
+            XCTAssertTrue(title.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(subtitle.exists, app.debugDescription)
+            titleHeights[size] = title.frame.height
+            subtitleHeights[size] = subtitle.frame.height
+            app.terminate()
+        }
+
+        let receipt = "titleHeights=\(titleHeights), subtitleHeights=\(subtitleHeights)"
+        guard let mediumTitle = titleHeights["medium"],
+              let accessibility5Title = titleHeights["accessibility5"],
+              let mediumSubtitle = subtitleHeights["medium"],
+              let accessibility5Subtitle = subtitleHeights["accessibility5"] else {
+            return XCTFail(receipt)
+        }
+        XCTAssertGreaterThan(mediumTitle, 0, receipt)
+        XCTAssertGreaterThan(mediumSubtitle, 0, receipt)
+        XCTAssertGreaterThan(accessibility5Title, mediumTitle * 4, receipt)
+        XCTAssertGreaterThan(accessibility5Subtitle, mediumSubtitle * 5, receipt)
+    }
+
+    /// The rendered half of `SettingsTests.testValueRowsStackOnlyAtAccessibilitySizes`.
+    ///
+    /// A drawn hyphen is invisible to XCUITest: `Connected marketplaces` is the
+    /// element's label whether the glyphs came out whole or as `Con-nected`, so
+    /// the only proof that the word survived is the image (#839). What can be
+    /// asserted from here is that the row is on screen, hit-testable and inside
+    /// the window at the size where the break happened, so the attachment is of
+    /// the row rather than of a row that scrolled somewhere else.
+    func testSettingsValueRowsKeepWholeWordsAtLargestAccessibilitySize() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--settings-proof=SET-01",
+            "--dynamic-type=accessibility5",
+        ]
+        app.launchAfterRetiringPriorInstance()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["settings.screen"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+
+        let row = app.descendants(matching: .any)["settings.selling.marketplaces"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        let window = app.windows.firstMatch
+        for _ in 0..<8 where row.frame.maxY > window.frame.maxY {
+            app.swipeUp()
+        }
+        let receipt = "row=\(row.frame), window=\(window.frame)"
+        XCTAssertTrue(row.isHittable, receipt)
+        XCTAssertGreaterThanOrEqual(row.frame.minX, window.frame.minX, receipt)
+        XCTAssertLessThanOrEqual(row.frame.maxX, window.frame.maxX, receipt)
+        addScreenshot(named: "AX5-SETTINGS-VALUE-ROWS-accessibility5-402x874.png")
     }
 
     private func launchCaptureSheet(dynamicType: String) -> XCUIApplication {

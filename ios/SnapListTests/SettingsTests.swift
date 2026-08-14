@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import SnapList
 
@@ -860,6 +861,46 @@ extension SettingsTests {
         XCTAssertTrue(
             rendered.contains("Button"),
             "The legal link row is not wrapped in a Button: \(rendered)"
+        )
+    }
+}
+
+// MARK: - Label/value row layout (#839)
+
+extension SettingsTests {
+    /// `Connected marketplaces` rendered as `Con-nected` at an accessibility
+    /// size: the `HStack` split the row between the label and the value, and a
+    /// word wider than its share was broken mid-word rather than wrapped.
+    ///
+    /// Asserted on the decision rather than the render because a drawn hyphen
+    /// is invisible to XCUITest — an element's label is the source string
+    /// whether or not the glyphs it produced were broken — so the observable
+    /// difference is which layout the row chose. The rendered result is
+    /// attached as an image by
+    /// `SnapListUITests.testSettingsValueRowsKeepWholeWordsAtLargestAccessibilitySize`.
+    ///
+    /// Enumerated over every case rather than restating the implementation:
+    /// the boundary between `xxxLarge` and `accessibility1` is the claim, and
+    /// it survives a rewrite of the expression that produces it.
+    func testValueRowsStackOnlyAtAccessibilitySizes() {
+        let stacking: [DynamicTypeSize] = [
+            .accessibility1, .accessibility2, .accessibility3,
+            .accessibility4, .accessibility5,
+        ]
+        let inline: [DynamicTypeSize] = [
+            .xSmall, .small, .medium, .large, .xLarge, .xxLarge, .xxxLarge,
+        ]
+
+        for size in stacking {
+            XCTAssertTrue(SettingsValueRowLayout.stacks(at: size), "\(size)")
+        }
+        for size in inline {
+            XCTAssertFalse(SettingsValueRowLayout.stacks(at: size), "\(size)")
+        }
+        XCTAssertEqual(
+            stacking.count + inline.count,
+            DynamicTypeSize.allCases.count,
+            "every supported size has to be classified, not just the ones listed here"
         )
     }
 }
