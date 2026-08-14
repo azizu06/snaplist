@@ -61,7 +61,7 @@ enum SettingsSignOutCopy {
         "Deleting your account is a separate action in Settings."
     /// Shown when local removal never ran, so nothing has happened yet.
     static let failed =
-        "Signing out didn’t finish, so you are still signed in. Try again."
+        "Signing out didn't finish, so you are still signed in. Try again."
 
     /// Shown when local removal already committed and Clerk then refused to
     /// end the session. `failed` implies nothing has happened, which is no
