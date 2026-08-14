@@ -1790,6 +1790,34 @@ final class CaptureFlowModel {
         activeIntakeActivationID = nil
     }
 
+    /// Removes one photo from the thumbnail strip on the camera screen itself, distinct
+    /// from `removePhotoReviewPhoto`, which only Photo Review's own delete path uses.
+    func removeStagedPhoto(id: StagedCapturePhoto.ID) async {
+        guard stagedPhotos.contains(where: { $0.id == id }) else { return }
+        if let intake {
+            guard let expectedActivationID = intakeSnapshot?.version.activationID else {
+                return
+            }
+            _ = await committedSnapshot(
+                for: .removePhoto(id: id),
+                using: intake,
+                expectedActivationID: expectedActivationID
+            )
+            return
+        }
+        guard let store else { return }
+        let remaining = stagedPhotos.filter { $0.id != id }
+        do {
+            try await store.replacePhotos(with: remaining)
+            stagedPhotos = remaining
+            if ![.camera, .denied, .unavailable].contains(phase) {
+                phase = remaining.isEmpty ? .idle : .captured
+            }
+        } catch {
+            // The durable draft remains the recovery authority until the write succeeds.
+        }
+    }
+
     func addPhotoReviewPhotos<Photo: CaptureLibraryPhotoLoading>(
         _ photos: [Photo],
         expectedActivationID: UUID,

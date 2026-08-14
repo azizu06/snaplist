@@ -2183,6 +2183,93 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(dockTrophy.isSelected)
     }
 
+    /// Issue #842: each camera-screen thumbnail carries a remove affordance. Removing
+    /// one photo must update the strip, the count, and the durable draft, keep the
+    /// surviving photo, and removing the last remaining photo must leave the capture
+    /// surface in its zero-photo state rather than navigating away from it.
+    func testIssue842RemovingAStagedPhotoOnTheCameraScreenKeepsTheSurvivingPhotoAndReachesZeroState() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--fixture-staged-library-photos=2"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3), app.debugDescription)
+        resume.tap()
+
+        let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
+        let secondPhoto = app.descendants(matching: .any)["scan.photo-2"]
+        let photoCount = app.staticTexts["scan.photo-count"]
+        let shutter = app.buttons["scan.shutter"]
+        let removeSecond = app.buttons["scan.photo-2.remove"]
+
+        XCTAssertTrue(firstPhoto.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(secondPhoto.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(photoCount.label, "2 of 5")
+        XCTAssertTrue(removeSecond.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(removeSecond.label, "Remove photo 2")
+        XCTAssertGreaterThanOrEqual(removeSecond.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(removeSecond.frame.height, 44)
+
+        removeSecond.tap()
+
+        let oneRemaining = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "1 of 5"),
+            object: photoCount
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [oneRemaining], timeout: 3),
+            .completed,
+            "Removing photo 2 must update the durable count to 1 of 5."
+        )
+        XCTAssertTrue(firstPhoto.exists, "The surviving photo must be the one that was kept.")
+        XCTAssertFalse(secondPhoto.exists)
+        XCTAssertFalse(app.buttons["scan.photo-2.remove"].exists)
+
+        let removeFirst = app.buttons["scan.photo-1.remove"]
+        XCTAssertTrue(removeFirst.waitForExistence(timeout: 3), app.debugDescription)
+        removeFirst.tap()
+
+        let zeroPhotos = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: firstPhoto
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [zeroPhotos], timeout: 3),
+            .completed,
+            "Removing the last photo must clear the strip."
+        )
+        XCTAssertFalse(app.staticTexts["scan.photo-count"].exists)
+        XCTAssertFalse(app.buttons["scan.review"].exists)
+        XCTAssertTrue(
+            shutter.waitForExistence(timeout: 3),
+            "The capture surface must remain, ready for another photo."
+        )
+    }
+
+    /// Issue #842 AC#5: the remove control's touch target must stay at least 44x44
+    /// points at the largest Dynamic Type size, not just the default.
+    func testIssue842RemovePhotoTouchTargetStaysAtLeast44PointsAtAccessibility5() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--fixture-staged-library-photos=2",
+            "--dynamic-type=accessibility5"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3), app.debugDescription)
+        resume.tap()
+
+        let removeSecond = app.buttons["scan.photo-2.remove"]
+        XCTAssertTrue(removeSecond.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertGreaterThanOrEqual(removeSecond.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(removeSecond.frame.height, 44)
+    }
+
     func testApprovedScanCameraFixtureStatesThatItIsNotALiveCameraFeed() {
         let app = launch(extraArguments: ["--visual-state=CAM-01", "--reduced-motion"])
         let fixturePreview = app.otherElements["scan.fixture-preview"]
