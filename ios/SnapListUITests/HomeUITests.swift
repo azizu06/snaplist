@@ -335,13 +335,24 @@ final class HomeUITests: XCTestCase {
 
         let disclosure = app.buttons["trophy.processing.disclosure"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
-        XCTAssertEqual(disclosure.label, "Show 2 more items")
+        // Six seeded rows, three visible: the sixth is the accepted row that
+        // carries a staged photo, so the disclosure counts three hidden items
+        // and drops the exact-count wording.
+        XCTAssertEqual(disclosure.label, "Show more items")
         XCTAssertEqual(disclosure.value as? String, "Collapsed")
         XCTAssertGreaterThanOrEqual(disclosure.frame.height, 44)
         disclosure.tap()
 
         XCTAssertTrue(rows[3].waitForExistence(timeout: 3))
         XCTAssertTrue(rows[4].waitForExistence(timeout: 3))
+        // The sixth seeded row is the accepted card carrying the seller's own
+        // photo. Before it existed no UI run reached a processing row with a
+        // photo at all, which is why the empty slot survived every suite.
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "trophy.processing.row.run.37500000-0000-4000-8000-000000000011"
+            ].waitForExistence(timeout: 3)
+        )
         for (earlier, later) in zip(rows, rows.dropFirst()) {
             XCTAssertLessThan(earlier.frame.minY, later.frame.minY)
         }

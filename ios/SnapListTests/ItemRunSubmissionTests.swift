@@ -1166,6 +1166,166 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Ambiguous outcome and exact retry
 
+    /// The ordinary path — stage, Start listing, accepted — never produces a
+    /// local pending card, because a pending card needs a stored attempt that
+    /// still matches staged photos and no intake mutation happens between
+    /// saving the attempt and clearing it. So the acceptance itself is the only
+    /// carrier for the seller's own photo on the flow the defect was seen on.
+    func testAcceptedHandoffCarriesTheStagedCoverPhotoOnAnOrdinarySubmission()
+        async throws {
+        let staged = SubmissionIntakeFixture.renderedJPEG(sidePixels: 400)
+        let intake = SubmissionIntakeFixture(
+            photoCount: 1,
+            seed: "ordinary-cover",
+            thumbnailData: staged
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                submitter: RecordingItemRunSubmitter(
+                    outcomes: [.created(intake.receipt)]
+                ),
+                draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+                keys: [Self.firstKey]
+            )
+        )
+
+        let submission = Task { await host.startListing(photos: intake.photos) }
+        defer { submission.cancel() }
+        var saved: AcceptedItemRunHandoff?
+        for _ in 0..<300 {
+            if case .itemSaved(_, let handoff)? = host.pendingPresentationEvent {
+                saved = handoff
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let handoff = try XCTUnwrap(
+            saved,
+            "An accepted submission must publish one saved event."
+        )
+        let carried = try XCTUnwrap(
+            handoff.localCoverPhotoData,
+            "The acceptance must carry the seller's own photo off the device."
+        )
+
+        // Reduced to what the slot draws, not the capture the seller took: the
+        // staged file is a byte copy of that capture and can be sensor-sized.
+        let decoded = try XCTUnwrap(UIImage(data: carried))
+        XCTAssertLessThanOrEqual(
+            max(decoded.size.width, decoded.size.height),
+            CGFloat(TrophyWallProcessingPhotoMetrics.maximumPixelSize)
+        )
+        XCTAssertLessThan(carried.count, staged.count)
+
+        // Read it back the only way the seller can, through the row the wall
+        // draws from the accepted run.
+        let principalScope = TrophyWallPrincipalScope(
+            opaqueValue: "ordinary-cover-photo-test"
+        )
+        let store = TrophyWallStore(
+            principalScope: principalScope,
+            repository: EmptyTrophyWallRepository()
+        )
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principalScope,
+                runID: handoff.acceptedRun.runID,
+                linkedLogicalIdentity: TrophyWallLogicalIdentity(
+                    idempotencyKey: handoff.idempotencyKey
+                ),
+                state: .accepted,
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 100),
+                itemName: "White leather sneaker",
+                localCoverPhotoData: handoff.localCoverPhotoData
+            )
+        )
+        XCTAssertEqual(
+            store.processingRows.first?.localCoverPhotoData,
+            carried
+        )
+    }
+
+    /// The recovery path reaches the wall through a local pending card instead,
+    /// and it has the same one chance to read the intake before acceptance
+    /// deletes it.
+    func testPendingTrophyWallProjectionCarriesTheStagedCoverPhoto()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pending-cover-photo-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: applicationSupport,
+            verifiedClerkSubject: "user_pending_cover_photo",
+            photoData: SubmissionIntakeFixture.renderedJPEG(sidePixels: 400)
+        )
+        let principalRoot = native.snapshot.photos[0].photoURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let snapshot = try ItemRunSubmissionSnapshot.make(
+            for: native.snapshot.photos,
+            readData: { try Data(contentsOf: $0) }
+        )
+        try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: principalRoot
+        ).saveAttempt(
+            ItemRunSubmissionAttempt(
+                idempotencyKey: Self.firstKey,
+                photos: snapshot.photos
+            )
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: nil,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider {
+                    "clerk-session-token"
+                },
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        let principalScope = TrophyWallPrincipalScope(
+            opaqueValue: "pending-cover-photo-test"
+        )
+
+        let recovered = await host.recoverableTrophyWallPendingCard(
+            principalScope: principalScope
+        )
+        let card = try XCTUnwrap(recovered)
+
+        // The card's bytes are private to the wall, so read them back the only
+        // way the seller can: through the row the wall renders.
+        let store = TrophyWallStore(
+            principalScope: principalScope,
+            repository: EmptyTrophyWallRepository()
+        )
+        store.ingest(card)
+        let carried = try XCTUnwrap(
+            store.processingRows.first?.localCoverPhotoData
+        )
+        let staged = try Data(
+            contentsOf: native.snapshot.photos[0].thumbnailURL
+        )
+        let decoded = try XCTUnwrap(UIImage(data: carried))
+        XCTAssertLessThanOrEqual(
+            max(decoded.size.width, decoded.size.height),
+            CGFloat(TrophyWallProcessingPhotoMetrics.maximumPixelSize)
+        )
+        XCTAssertLessThan(carried.count, staged.count)
+    }
+
     func testPendingTrophyWallProjectionRejectsAStoredAttemptForChangedPhotos()
         async throws {
         let applicationSupport = FileManager.default.temporaryDirectory
@@ -4933,7 +5093,7 @@ struct SubmissionIntakeFixture: Sendable {
     let photos: [StagedCapturePhoto]
     private let dataByPath: [String: Data]
 
-    init(photoCount: Int, seed: String = "a") {
+    init(photoCount: Int, seed: String = "a", thumbnailData: Data? = nil) {
         var photos: [StagedCapturePhoto] = []
         var dataByPath: [String: Data] = [:]
         for index in 0..<photoCount {
@@ -4955,6 +5115,11 @@ struct SubmissionIntakeFixture: Sendable {
                 filling: "\(seed)-\(index)",
                 repeated: index + 1
             )
+            // Staging writes the capture's own bytes to both names, so a test
+            // that needs the thumbnail to decode supplies a real image here.
+            if let thumbnailData {
+                dataByPath[photos[index].thumbnailURL.path] = thumbnailData
+            }
         }
         self.photos = photos
         self.dataByPath = dataByPath
@@ -5036,6 +5201,25 @@ struct SubmissionIntakeFixture: Sendable {
                 byteLength: data.count,
                 mediaType: "image/jpeg"
             )
+        }
+    }
+
+    /// A real, decodable JPEG. `jpeg(filling:repeated:)` only fakes the magic
+    /// bytes, which is enough for a transport fixture but not for anything that
+    /// has to decode the photo.
+    @MainActor
+    static func renderedJPEG(sidePixels: Int) -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let side = CGFloat(sidePixels)
+        return UIGraphicsImageRenderer(
+            size: CGSize(width: side, height: side),
+            format: format
+        ).jpegData(withCompressionQuality: 0.9) { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side / 2, height: side / 2))
         }
     }
 
@@ -5531,5 +5715,13 @@ actor RecordingCaptureDraftStore: CaptureDraftStoring {
         guard self.photos == photos else { return false }
         try await discard()
         return true
+    }
+}
+
+private struct EmptyTrophyWallRepository: TrophyWallRepository {
+    func initialCards(
+        for principalScope: TrophyWallPrincipalScope
+    ) -> [TrophyWallCard] {
+        []
     }
 }
