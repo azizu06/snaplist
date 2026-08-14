@@ -351,6 +351,7 @@ struct ScanCameraView: View {
     private var liveSurface: some View {
         LiveScanCameraSurface(
             thumbnailURLs: flow.stagedPhotos.map { Optional($0.thumbnailURL) },
+            photoIDs: flow.stagedPhotos.map(\.id),
             isShutterEnabled: flow.canTakePhoto,
             isLibraryEnabled: flow.canOpenLibrary,
             isFlashAvailable: flow.isFlashAvailable,
@@ -372,7 +373,8 @@ struct ScanCameraView: View {
             },
             close: closeLiveCameraPreview,
             returnFocus: $returnFocus,
-            review: { open(.photoReview, opener: .reviewButton) }
+            review: { open(.photoReview, opener: .reviewButton) },
+            removePhoto: { id in Task { await flow.removeStagedPhoto(id: id) } }
         )
     }
 
@@ -385,6 +387,7 @@ struct ScanCameraView: View {
         RecoveryScanCameraSurface(
             mode: mode,
             thumbnailURLs: flow.stagedPhotos.map { Optional($0.thumbnailURL) },
+            photoIDs: flow.stagedPhotos.map(\.id),
             reduceMotion: reduceMotion,
             libraryControl: { libraryPicker(labelStyle: .recovery) },
             returnFocus: $returnFocus,
@@ -394,7 +397,8 @@ struct ScanCameraView: View {
                     return
                 }
                 openURL(settingsURL)
-            }
+            },
+            removePhoto: { id in Task { await flow.removeStagedPhoto(id: id) } }
         )
     }
 
@@ -632,6 +636,7 @@ enum ScanReturnFocusPolicy {
 
 private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View {
     let thumbnailURLs: [URL?]
+    let photoIDs: [StagedCapturePhoto.ID]
     let isShutterEnabled: Bool
     let isLibraryEnabled: Bool
     let isFlashAvailable: Bool
@@ -646,6 +651,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     let close: () -> Void
     @Binding var returnFocus: PhotoReviewScanFocus?
     let review: () -> Void
+    let removePhoto: (StagedCapturePhoto.ID) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -749,7 +755,11 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     }
 
     private var photoProgress: some View {
-        ScanPhotoProgressRow(thumbnailURLs: thumbnailURLs)
+        ScanPhotoProgressRow(
+            thumbnailURLs: thumbnailURLs,
+            photoIDs: photoIDs,
+            removePhoto: removePhoto
+        )
     }
 
     private var cameraControls: some View {
@@ -806,11 +816,13 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
 private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
     let mode: ScanCameraRecoveryMode
     let thumbnailURLs: [URL?]
+    let photoIDs: [StagedCapturePhoto.ID]
     let reduceMotion: Bool
     @ViewBuilder let libraryControl: () -> LibraryControl
     @Binding var returnFocus: PhotoReviewScanFocus?
     let review: () -> Void
     let openSettings: () -> Void
+    let removePhoto: (StagedCapturePhoto.ID) -> Void
 
     var body: some View {
         ZStack {
@@ -857,7 +869,11 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
                 Spacer()
                 if !thumbnailURLs.isEmpty {
                     VStack(spacing: 10) {
-                        ScanPhotoProgressRow(thumbnailURLs: thumbnailURLs)
+                        ScanPhotoProgressRow(
+                            thumbnailURLs: thumbnailURLs,
+                            photoIDs: photoIDs,
+                            removePhoto: removePhoto
+                        )
                         ScanReviewButton(
                             photoCount: thumbnailURLs.count,
                             priority: .recovery,
@@ -884,12 +900,22 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
 
 private struct ScanPhotoProgressRow: View {
     let thumbnailURLs: [URL?]
+    let photoIDs: [StagedCapturePhoto.ID]
+    let removePhoto: (StagedCapturePhoto.ID) -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             HStack(spacing: 11) {
                 ForEach(Array(thumbnailURLs.enumerated()), id: \.offset) { index, url in
-                    ScanPhotoThumbnail(url: url, index: index, count: thumbnailURLs.count)
+                    ScanPhotoThumbnail(
+                        url: url,
+                        index: index,
+                        count: thumbnailURLs.count,
+                        remove: {
+                            guard photoIDs.indices.contains(index) else { return }
+                            removePhoto(photoIDs[index])
+                        }
+                    )
                 }
             }
             Spacer(minLength: 8)
@@ -911,6 +937,7 @@ private struct ScanPhotoThumbnail: View {
     let url: URL?
     let index: Int
     let count: Int
+    let remove: () -> Void
 
     var body: some View {
         Group {
@@ -928,8 +955,29 @@ private struct ScanPhotoThumbnail: View {
         .accessibilityIdentifier("scan.photo-\(index + 1)")
         .accessibilityLabel("Photo \(index + 1) of \(count)")
         .accessibilitySortPriority(70)
+        .overlay(alignment: .topTrailing) {
+            removeButton.offset(x: 10, y: -10)
+        }
     }
 
+    private var removeButton: some View {
+        Button(action: remove) {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                .frame(width: 18, height: 18)
+                .background(SnapListColorToken.inkPrimary.color)
+                .overlay { Circle().stroke(SnapListColorToken.onDarkSurface.color.opacity(0.9), lineWidth: 1) }
+                .clipShape(.circle)
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .contentShape(.circle)
+        .accessibilityLabel("Remove photo \(index + 1)")
+        .accessibilityIdentifier("scan.photo-\(index + 1).remove")
+        .accessibilitySortPriority(71)
+    }
 }
 
 private struct ScanPhotoPlaceholder: View {
@@ -990,6 +1038,7 @@ struct ScanCameraVisualStateView: View {
             RecoveryScanCameraSurface(
                 mode: .unavailable,
                 thumbnailURLs: [],
+                photoIDs: [],
                 reduceMotion: reduceMotion,
                 libraryControl: {
                     Button(action: {}) { ScanLibraryLabel(style: .recovery) }
@@ -998,11 +1047,13 @@ struct ScanCameraVisualStateView: View {
                 returnFocus: .constant(nil),
                 review: {},
                 openSettings: {},
+                removePhoto: { _ in },
             )
         case .scanCameraDenied:
             RecoveryScanCameraSurface(
                 mode: .denied,
                 thumbnailURLs: [],
+                photoIDs: [],
                 reduceMotion: reduceMotion,
                 libraryControl: {
                     Button(action: {}) { ScanLibraryLabel(style: .recovery) }
@@ -1011,10 +1062,12 @@ struct ScanCameraVisualStateView: View {
                 returnFocus: .constant(nil),
                 review: {},
                 openSettings: {},
+                removePhoto: { _ in },
             )
         default:
             LiveScanCameraSurface(
                 thumbnailURLs: Array(repeating: nil, count: fixturePhotoCount),
+                photoIDs: [],
                 isShutterEnabled: fixturePhotoCount < 5,
                 isLibraryEnabled: fixturePhotoCount < 5,
                 isFlashAvailable: true,
@@ -1032,6 +1085,7 @@ struct ScanCameraVisualStateView: View {
                 close: {},
                 returnFocus: .constant(nil),
                 review: {},
+                removePhoto: { _ in },
             )
         }
     }

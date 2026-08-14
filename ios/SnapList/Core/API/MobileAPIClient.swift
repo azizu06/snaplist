@@ -817,12 +817,13 @@ extension AppDependencies {
                 UIColor(red: 0.23, green: 0.31, blue: 0.37, alpha: 1)
             )
         ]
-        let fixturePhotoCount = usesVoiceDesignFixture ? 3 : 1
+        let fixturePhotoCount = configuration.stagedLibraryPhotoFixtureCount
+            ?? (usesVoiceDesignFixture ? 3 : 1)
         let photoData = (0..<fixturePhotoCount).map { index in
             let renderer = UIGraphicsImageRenderer(
                 size: CGSize(width: 16, height: 16)
             )
-            let colors = fixtureColors[index]
+            let colors = fixtureColors[index % fixtureColors.count]
             return renderer.jpegData(
                 withCompressionQuality: 0.9
             ) { context in

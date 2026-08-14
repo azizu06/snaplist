@@ -9311,6 +9311,79 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(reviewStore.activePickerRequest)
     }
 
+    // MARK: - Issue #842: remove a staged photo from the camera screen
+
+    func testRemoveStagedPhotoKeepsTheSurvivingPhotoAndPersistsThroughTheStore() async throws {
+        let store = TestCaptureStore()
+        let photoA = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/842-a.jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/842-a-thumb.jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: nil
+        )
+        let photoB = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/842-b.jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/842-b-thumb.jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: nil
+        )
+        store.stagedPhotos = [photoA, photoB]
+        let flow = makeModel(store: store)
+        _ = await flow.restore()
+
+        await flow.removeStagedPhoto(id: photoB.id)
+
+        XCTAssertEqual(flow.stagedPhotos, [photoA])
+        XCTAssertEqual(store.stagedPhotos, [photoA])
+        XCTAssertEqual(flow.phase, .captured)
+    }
+
+    func testRemoveStagedPhotoOnTheLastPhotoReachesTheIdleZeroPhotoState() async throws {
+        let store = TestCaptureStore()
+        let photoA = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/842-only.jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/842-only-thumb.jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: nil
+        )
+        store.stagedPhotos = [photoA]
+        let flow = makeModel(store: store)
+        _ = await flow.restore()
+
+        await flow.removeStagedPhoto(id: photoA.id)
+
+        XCTAssertEqual(flow.stagedPhotos, [])
+        XCTAssertEqual(flow.phase, .idle)
+    }
+
+    func testRemoveStagedPhotoFailureKeepsThePriorStagedPhotosAsTheRecoveryAuthority() async throws {
+        let store = TestCaptureStore(replacePhotosError: CaptureDraftStoreError.invalidManifest)
+        let photoA = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/842-fail-a.jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/842-fail-a-thumb.jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: nil
+        )
+        let photoB = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/842-fail-b.jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/842-fail-b-thumb.jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: nil
+        )
+        store.stagedPhotos = [photoA, photoB]
+        let flow = makeModel(store: store)
+        _ = await flow.restore()
+
+        await flow.removeStagedPhoto(id: photoB.id)
+
+        XCTAssertEqual(flow.stagedPhotos, [photoA, photoB])
+    }
+
     private func makeModel(
         camera: TestCaptureCamera = TestCaptureCamera(
             isAvailable: true,
