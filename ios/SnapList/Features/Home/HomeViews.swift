@@ -825,10 +825,13 @@ struct TrophyWallCollectionMessageView: View {
 /// resolving when that digest changes (#855). Bytes that are absent or no longer
 /// decode leave the slot exactly as the wall drew it before.
 struct TrophyWallProcessingRowPhoto: View {
-    static let sidePoints: CGFloat = 44
-    static let cornerRadiusPoints: CGFloat = 10
+    static let sidePoints = TrophyWallProcessingPhotoMetrics.sidePoints
+    static let cornerRadiusPoints = TrophyWallProcessingPhotoMetrics
+        .cornerRadiusPoints
 
-    enum Content: Equatable {
+    /// Deliberately not `Equatable`: comparing two `.staged` values would rest
+    /// on `UIImage.isEqual:`, which is not a documented value comparison.
+    enum Content {
         case staged(UIImage)
         case placeholder
     }

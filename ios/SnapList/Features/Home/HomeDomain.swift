@@ -27,6 +27,19 @@ enum TrophyWallEmptyMetrics {
     static let bottomPadding: CGFloat = 48
 }
 
+/// The leading slot on a processing row. The numbers live here for the same
+/// reason the grid's do, and `maximumPixelSize` is the one that costs something
+/// if it is wrong: the staged file this photo comes from is a byte-identical
+/// copy of the capture, not a thumbnail (`NativeIntake.stagePhotos`), so a
+/// sub-budget capture is still sensor-sized. Three times the slot's edge covers
+/// @3x, and the bytes are reduced to it once, off the main thread, before the
+/// wall ever holds them.
+enum TrophyWallProcessingPhotoMetrics {
+    static let sidePoints: CGFloat = 44
+    static let cornerRadiusPoints: CGFloat = 10
+    static let maximumPixelSize = 132
+}
+
 /// Presentation-only framing for a cleared bundled fixture photo. It does not
 /// alter the run identity or claim a different underlying product.
 enum TrophyWallPhotoCrop: String, Hashable, Sendable {
@@ -353,6 +366,10 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
     let itemName: String?
     let listingID: UUID?
     let coverPhotoURL: URL?
+    /// Carried only by the acceptance that created this run, where the seller's
+    /// own photo was still on disk. Server-sourced projections leave it nil and
+    /// the card keeps whatever it already had.
+    let localCoverPhotoData: Data?
 
     init(
         principalScope: TrophyWallPrincipalScope,
@@ -363,7 +380,8 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         historyOrderKey: TrophyWallOrderKey? = nil,
         itemName: String? = nil,
         listingID: UUID? = nil,
-        coverPhotoURL: URL? = nil
+        coverPhotoURL: URL? = nil,
+        localCoverPhotoData: Data? = nil
     ) {
         self.principalScope = principalScope
         self.runID = runID
@@ -374,6 +392,7 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         self.itemName = itemName
         self.listingID = listingID
         self.coverPhotoURL = coverPhotoURL
+        self.localCoverPhotoData = localCoverPhotoData
     }
 }
 
@@ -725,10 +744,12 @@ final class TrophyWallStore {
             itemName: linkedItemName ?? existingCanonicalCard?.itemName ?? acceptedRun.itemName,
             coverPhotoURL: acceptedRun.coverPhotoURL
                 ?? existingCanonicalCard?.coverPhotoURL,
-            // The local card is dropped below, so its staged bytes have to move
-            // here or the seller watches their own item process behind a blank
-            // slot.
+            // Three sources, in the order they can be trusted: a local card
+            // still on the wall, the acceptance that carried the photo off the
+            // device, then whatever this run already had. A later server
+            // projection carries none, so it must not blank the slot.
             localCoverPhotoData: linkedLocalCard?.localCoverPhotoData
+                ?? acceptedRun.localCoverPhotoData
                 ?? existingCanonicalCard?.localCoverPhotoData,
             lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt,
             orderKey: acceptedRun.historyOrderKey
@@ -767,7 +788,10 @@ final class TrophyWallStore {
             state: .publishedToEbay,
             itemName: card.itemName,
             coverPhotoURL: card.coverPhotoURL,
-            localCoverPhotoData: card.localCoverPhotoData,
+            // A published card is a settled tile, which draws the server's photo
+            // and never reads these bytes. Dropping them here is what releases
+            // them; nothing else on the wall does.
+            localCoverPhotoData: nil,
             lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
             orderKey: card.orderKey
         )
@@ -847,7 +871,8 @@ final class TrophyWallStore {
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 itemName: runDetail.item?.title,
                 listingID: runDetail.listingID,
-                coverPhotoURL: runDetail.delivery?.coverPhotoURL
+                coverPhotoURL: runDetail.delivery?.coverPhotoURL,
+                localCoverPhotoData: acceptedHandoff.localCoverPhotoData
             )
         )
     }

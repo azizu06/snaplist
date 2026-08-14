@@ -345,6 +345,14 @@ final class HomeUITests: XCTestCase {
 
         XCTAssertTrue(rows[3].waitForExistence(timeout: 3))
         XCTAssertTrue(rows[4].waitForExistence(timeout: 3))
+        // The sixth seeded row is the accepted card carrying the seller's own
+        // photo. Before it existed no UI run reached a processing row with a
+        // photo at all, which is why the empty slot survived every suite.
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "trophy.processing.row.run.37500000-0000-4000-8000-000000000011"
+            ].waitForExistence(timeout: 3)
+        )
         for (earlier, later) in zip(rows, rows.dropFirst()) {
             XCTAssertLessThan(earlier.frame.minY, later.frame.minY)
         }

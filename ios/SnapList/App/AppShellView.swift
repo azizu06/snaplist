@@ -345,7 +345,8 @@ struct AppShellView: View {
                             idempotencyKey: handoff.idempotencyKey
                         ),
                         state: .accepted,
-                        lastMeaningfulUpdateAt: Date()
+                        lastMeaningfulUpdateAt: Date(),
+                        localCoverPhotoData: handoff.localCoverPhotoData
                     )
                 )
             case nil, .submissionRejected?:

@@ -972,26 +972,106 @@ final class TrophyWallDomainTests: XCTestCase {
     /// draws instead of an empty image well.
     func testProcessingRowSlotKeepsTodaysPlaceholderWhenNoPhotoIsAvailable() throws {
         let absent = try makeAcceptedProcessingRow(localCoverPhotoData: nil)
-        XCTAssertEqual(
-            TrophyWallProcessingRowPhoto.content(for: absent),
-            .placeholder
-        )
+        guard case .placeholder = TrophyWallProcessingRowPhoto
+            .content(for: absent) else {
+            return XCTFail("Absent bytes must keep the existing slot.")
+        }
 
         let unreadable = try makeAcceptedProcessingRow(
             localCoverPhotoData: Data("not an image".utf8)
         )
-        XCTAssertEqual(
-            TrophyWallProcessingRowPhoto.content(for: unreadable),
-            .placeholder
+        guard case .placeholder = TrophyWallProcessingRowPhoto
+            .content(for: unreadable) else {
+            return XCTFail("Undecodable bytes must keep the existing slot.")
+        }
+    }
+
+    /// Everything above this asserts what the slot is told to draw. This asserts
+    /// what it actually draws, by rendering the view and reading the pixel in
+    /// the middle of the slot: the seller's own photo when there are bytes, and
+    /// the same flat fill as before when there are not.
+    func testProcessingRowSlotRendersThePhotoIntoItsUnchangedSquare() throws {
+        let staged = try renderedSlot(
+            localCoverPhotoData: TrophyWallTestFixture.stagedCoverPhotoData()
+        )
+        let placeholder = try renderedSlot(localCoverPhotoData: nil)
+
+        // The slot the photo draws into is the one the row already laid out.
+        for rendered in [staged, placeholder] {
+            XCTAssertEqual(
+                rendered.size,
+                CGSize(
+                    width: TrophyWallProcessingPhotoMetrics.sidePoints,
+                    height: TrophyWallProcessingPhotoMetrics.sidePoints
+                )
+            )
+        }
+
+        // A 10pt radius on a 44pt square leaves the very corner outside the
+        // shape, so a photo that ignored the clip would paint it opaque.
+        for rendered in [staged, placeholder] {
+            XCTAssertEqual(try pixel(of: rendered, x: 0, y: 0).alpha, 0)
+        }
+
+        let stagedCenter = try pixel(of: staged, x: nil, y: nil)
+        let placeholderCenter = try pixel(of: placeholder, x: nil, y: nil)
+        // The fixture photo is systemTeal, so the drawn pixel is blue-green and
+        // clearly not the neutral hairline the empty slot fills with.
+        XCTAssertGreaterThan(stagedCenter.blue, stagedCenter.red)
+        XCTAssertGreaterThan(stagedCenter.green, stagedCenter.red)
+        XCTAssertGreaterThan(
+            Int(stagedCenter.blue) - Int(stagedCenter.red),
+            40
+        )
+        XCTAssertLessThanOrEqual(
+            Int(placeholderCenter.blue) - Int(placeholderCenter.red),
+            40
         )
     }
 
-    /// The slot's geometry is the row's layout contract: the leading 44pt square
-    /// with a 10pt radius existed before the photo did, and drawing into it may
-    /// not move it.
-    func testProcessingRowSlotKeepsItsExistingFrameAndCornerRadius() {
-        XCTAssertEqual(TrophyWallProcessingRowPhoto.sidePoints, 44)
-        XCTAssertEqual(TrophyWallProcessingRowPhoto.cornerRadiusPoints, 10)
+    @MainActor
+    private func renderedSlot(localCoverPhotoData: Data?) throws -> UIImage {
+        let row = try makeAcceptedProcessingRow(
+            localCoverPhotoData: localCoverPhotoData
+        )
+        let renderer = ImageRenderer(
+            content: TrophyWallProcessingRowPhoto(row: row)
+        )
+        renderer.scale = 1
+        return try XCTUnwrap(renderer.uiImage)
+    }
+
+    /// One pixel of a rendered view. `nil` coordinates read the middle.
+    private func pixel(
+        of image: UIImage,
+        x: Int?,
+        y: Int?
+    ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8) {
+        let source = try XCTUnwrap(image.cgImage)
+        let center = try XCTUnwrap(
+            source.cropping(
+                to: CGRect(
+                    x: x ?? source.width / 2,
+                    y: y ?? source.height / 2,
+                    width: 1,
+                    height: 1
+                )
+            )
+        )
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(
+            CGContext(
+                data: &pixel,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+        context.draw(center, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return (pixel[0], pixel[1], pixel[2], pixel[3])
     }
 
     /// No fixture route reached an accepted or analyzing row carrying a photo,
