@@ -599,12 +599,17 @@ describe("feature explorer semantics", () => {
     expect($(`#${labelledBy}`).attr("role")).toBe("tab");
   });
 
-  it("keeps includes cards free of design-stage labels and uses a neutral hero phone", () => {
+  it("keeps includes cards free of design-stage labels and shows the real camera in the hero", () => {
     const $ = load(renderToStaticMarkup(<LandingPage />));
 
     expect($(".mkt-tab .mkt-chip, .mkt-explorer__device .mkt-phone__chip").length).toBe(0);
     expect($(".mkt-hero__minimal-phone").length).toBe(1);
-    expect($(".mkt-hero__minimal-phone .mkt-hero__neutral-screen").length).toBe(1);
+    // The hero screen is a capture of the shipping camera, not a drawing. An
+    // empty device here is the state this replaced, so the assertion is that a
+    // shot is present and described, not merely that the frame rendered.
+    const hero = $(".mkt-hero__minimal-phone .mkt-phone__screen img.mkt-scr__shot");
+    expect(hero.length).toBe(1);
+    expect(hero.attr("alt")).toBeTruthy();
     expect($(".mkt-hero__sbar, .mkt-hero__lbar, .mkt-hero__lbody").length).toBe(0);
     expect($("body").text()).not.toMatch(/\b(?:candidate|illustrative)\b/i);
     expect($("body").text()).not.toMatch(/\b(?:crop|rotate)\b/i);

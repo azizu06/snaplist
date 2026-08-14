@@ -1,24 +1,27 @@
+import { ScanScreen } from "@/components/marketing/phone-screens";
+
 /**
  * Hero illustration.
  *
- * The phone is a neutral, decorative device treatment. Product details remain in
- * the feature explorer instead of turning the hero into an invented app screen.
+ * This used to be a blank drawn device, with a note to swap in a real image of
+ * the scanning feature once one existed. That image exists now, so the hero
+ * shows the camera the app actually opens on rather than an empty rectangle.
+ *
+ * The device is still a drawing and the screen is still the only real part. The
+ * frame no longer draws a notch: every shot is cropped just below the status bar
+ * and fills the screen edge to edge, so a drawn notch would land on top of app
+ * content rather than in empty status-bar space. It sat on the Trophy Wall title.
  */
 export function HeroArt({ children }: { children?: React.ReactNode }) {
-  return (
-    <div className="mkt-hero__art">
-      {/* Placeholder seam: replace this drawing with an approved iPhone image
-          that shows the in-app scanning feature when that asset is ready. */}
-      {children ?? <HeroArtPlaceholder />}
-    </div>
-  );
+  return <div className="mkt-hero__art">{children ?? <HeroArtDevice />}</div>;
 }
 
-function HeroArtPlaceholder() {
+function HeroArtDevice() {
   return (
-    <div className="mkt-phone mkt-hero__minimal-phone" aria-hidden="true">
-      <span className="mkt-phone__notch" />
-      <div className="mkt-phone__screen mkt-hero__neutral-screen" />
+    <div className="mkt-phone mkt-hero__minimal-phone">
+      <div className="mkt-phone__screen">
+        <ScanScreen priority />
+      </div>
     </div>
   );
 }

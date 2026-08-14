@@ -92,13 +92,13 @@ export const FEATURE_STEPS = [
     id: "scan",
     title: "Scan",
     body:
-      "Add 1 to 5 photos, then record one optional voice note up to 15 seconds before you start a draft.",
+      "Add 1 to 5 photos of the item, then start a draft. SnapList keeps working while you scan the next one.",
   },
   {
     id: "photo-review",
     title: "Photo Review",
     body:
-      "Reorder, replace, or remove photos before SnapList drafts the listing, then choose the final order for the item.",
+      "Reorder, replace, or remove photos, and record one optional voice note up to 15 seconds, before the draft.",
   },
   {
     id: "listing-review",
