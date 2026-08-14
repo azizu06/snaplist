@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import SnapList
 
@@ -5,6 +6,36 @@ final class AccessibilityFoundationTests: XCTestCase {
     func testFoundationTouchTargetsAreAtLeastFortyFourPoints() {
         XCTAssertGreaterThanOrEqual(SnapListMetrics.minimumTouchTarget, 44)
         XCTAssertGreaterThanOrEqual(SnapListMetrics.primaryButtonHeight, 44)
+    }
+
+    /// The fixture override pair was hand-applied at four call sites, and the
+    /// fifth — the capture sheet — shipped with neither, which made every Scan
+    /// measurement taken through that route a default-size measurement (#836).
+    /// `fixtureAccessibilityOverrides` is the single seam that replaced them,
+    /// so what has to hold is that it carries both halves: a version that
+    /// applied only Dynamic Type would leave `--bold-text` inert everywhere at
+    /// once, and would do it silently (#839).
+    ///
+    /// Asserted on the composed view's type rather than by rendering, because
+    /// both modifiers resolve to an environment write that no XCUITest query
+    /// can observe. Dropping either `.modifier(...)` from the extension
+    /// removes its name from this string and reddens the matching line.
+    func testFixtureAccessibilityOverridesCarryBothHalvesOfThePair() {
+        let composed = Color.clear.fixtureAccessibilityOverrides(
+            LaunchConfiguration.parse(
+                arguments: ["--dynamic-type=accessibility5", "--bold-text"]
+            )
+        )
+        let rendered = String(reflecting: type(of: composed))
+
+        XCTAssertTrue(
+            rendered.contains("OptionalDynamicTypeModifier"),
+            rendered
+        )
+        XCTAssertTrue(
+            rendered.contains("OptionalBoldTextModifier"),
+            rendered
+        )
     }
 
     func testEveryTypographyRoleStartsAtTwelvePointsOrLarger() {

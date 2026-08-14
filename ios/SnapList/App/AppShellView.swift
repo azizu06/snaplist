@@ -245,8 +245,7 @@ struct AppShellView: View {
                 shell
             }
         }
-        .modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
-        .modifier(OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled))
+        .fixtureAccessibilityOverrides(configuration)
         .overlay(alignment: .bottom) {
             if router.presentedSheet == nil {
                 activationGuidanceOverlay
@@ -256,10 +255,7 @@ struct AppShellView: View {
         // reach the same surface, whichever host is on screen.
         .sheet(isPresented: $router.presentedAccountEntry) {
             accountEntrySurface
-                .modifier(
-                    OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize)
-                )
-                .modifier(OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled))
+                .fixtureAccessibilityOverrides(configuration)
         }
         .sheet(
             isPresented: proGatePresentationBinding,
@@ -272,12 +268,7 @@ struct AppShellView: View {
                     startListing: resumeProGatedListing,
                     fallbackToPhotoReview: fallbackFromPresentedProGate
                 )
-                .modifier(
-                    OptionalDynamicTypeModifier(
-                        size: configuration.dynamicTypeSize
-                    )
-                )
-                .modifier(OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled))
+                .fixtureAccessibilityOverrides(configuration)
             }
         }
         .onOpenURL { url in
@@ -607,12 +598,7 @@ struct AppShellView: View {
                 // content. Without re-attaching them here `--dynamic-type=`
                 // silently does nothing to Scan and no capture layout can be
                 // measured at an accessibility size (#836).
-                .modifier(
-                    OptionalDynamicTypeModifier(
-                        size: configuration.dynamicTypeSize
-                    )
-                )
-                .modifier(OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled))
+                .fixtureAccessibilityOverrides(configuration)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -1920,6 +1906,26 @@ private struct OnboardingCaptureRouteID: Hashable {
 private enum PendingCapturePresentation {
     case camera
     case stagedPhoto
+}
+
+extension View {
+    /// The pair of fixture accessibility overrides, applied as one unit.
+    ///
+    /// They were hand-applied at four separate call sites, and the fifth one —
+    /// the capture sheet — was added without them. A SwiftUI sheet builds its
+    /// own environment, so the pair attached to the shell never reached that
+    /// content, `--dynamic-type=` did nothing to Scan, and every Scan
+    /// measurement taken through that route was of the default size (#836).
+    /// One entry point makes the next sheet unable to repeat it: there is no
+    /// longer a way to attach one override and forget the other (#839).
+    func fixtureAccessibilityOverrides(
+        _ configuration: LaunchConfiguration
+    ) -> some View {
+        modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
+            .modifier(
+                OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled)
+            )
+    }
 }
 
 private struct OptionalDynamicTypeModifier: ViewModifier {
