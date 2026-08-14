@@ -70,7 +70,6 @@ export function FeatureExplorer() {
           <div className="mkt-explorer__frame">
             <div className="mkt-explorer__scale">
               <div className="mkt-explorer__device">
-                <span aria-hidden="true" className="mkt-phone__notch" />
                 <div className="mkt-phone__screen">
                   {SCREENS.map((Screen, index) => (
                     <div
