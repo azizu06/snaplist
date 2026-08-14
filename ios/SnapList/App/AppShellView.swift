@@ -602,6 +602,17 @@ struct AppShellView: View {
                 .overlay(alignment: .bottom) {
                     activationGuidanceOverlay
                 }
+                // A sheet builds its own environment, so the accessibility
+                // overrides attached to the shell above never reach this
+                // content. Without re-attaching them here `--dynamic-type=`
+                // silently does nothing to Scan and no capture layout can be
+                // measured at an accessibility size (#836).
+                .modifier(
+                    OptionalDynamicTypeModifier(
+                        size: configuration.dynamicTypeSize
+                    )
+                )
+                .modifier(OptionalBoldTextModifier(isEnabled: configuration.boldTextEnabled))
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in

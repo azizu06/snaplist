@@ -310,6 +310,272 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Verify"].exists)
     }
 
+    /// `--dynamic-type=` reaches `AppShellView` through the outer
+    /// `OptionalDynamicTypeModifier`, and a SwiftUI sheet builds its own
+    /// environment instead of inheriting that one — which is why the account
+    /// entry and Pro gate sheets already re-attach the modifier to their own
+    /// content. The capture sheet did not, so the whole `--fixture=capture`
+    /// route was blind to the argument (#836). Measured on `e1e084b1e`:
+    /// `Take one item` reported `(88.66, 281.08, 92.18, 17.28)` at the default
+    /// size and the same to the decimal at `accessibility5`, while `Camera is
+    /// not available` — in the presenting hierarchy rather than the sheet —
+    /// grew from 28.0pt to 151.67pt.
+    ///
+    /// Both sizes are measured in one run rather than one being asserted
+    /// against a constant: a fixed threshold would still pass if the sheet
+    /// froze at some other single size.
+    func testCaptureSheetAppliesTheDynamicTypeFixtureArgument() {
+        var titleHeights: [String: CGFloat] = [:]
+        for size in ["medium", "accessibility5"] {
+            let app = launchCaptureSheet(dynamicType: size)
+            let title = app.staticTexts["Take one item"]
+            XCTAssertTrue(title.waitForExistence(timeout: 5), app.debugDescription)
+            titleHeights[size] = title.frame.height
+            app.terminate()
+        }
+
+        let receipt = "titleHeights=\(titleHeights)"
+        guard let medium = titleHeights["medium"],
+              let accessibility5 = titleHeights["accessibility5"] else {
+            return XCTFail(receipt)
+        }
+        XCTAssertGreaterThan(medium, 0, receipt)
+        XCTAssertGreaterThan(accessibility5, medium * 1.5, receipt)
+    }
+
+    /// `CaptureOptionRow` sizes itself with `minHeight`, so its card is
+    /// supposed to grow around whatever the title and subtitle need. This
+    /// asserts that by containment rather than by height: every glyph of both
+    /// labels has to sit inside the row's own frame, which is where the card
+    /// border and its `clipShape` are, so a label the card cuts off fails even
+    /// though the label's own frame stayed intact.
+    ///
+    /// The info caption underneath is checked by wrap instead. XCUITest reports
+    /// the full string as an element's label whether or not it was drawn with a
+    /// trailing ellipsis, so the only observable difference between a wrapped
+    /// caption and a truncated one is height: one line at `accessibility5` is
+    /// roughly what one line is at the default size, and a wrapped one is
+    /// several times that. Depends on
+    /// `testCaptureSheetAppliesTheDynamicTypeFixtureArgument`: before that seam
+    /// existed this route never rendered a large type size at all (#836).
+    func testCaptureOptionRowShowsItsFullTextAtLargestAccessibilitySize() {
+        let caption = "Capture and organize photos before choosing what to list."
+        var captionHeights: [String: CGFloat] = [:]
+
+        for size in ["medium", "accessibility5"] {
+            let app = launchCaptureSheet(dynamicType: size)
+            let row = app.descendants(matching: .any)["capture.take-one-item"]
+            XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+
+            let title = app.staticTexts["Take one item"]
+            let subtitle = app.staticTexts["Snap one thing and get help listing it."]
+            let receipt = """
+            size=\(size), row=\(row.frame), title=\(title.frame), \
+            subtitle=\(subtitle.frame)
+            """
+            XCTAssertTrue(title.exists, receipt)
+            XCTAssertTrue(subtitle.exists, receipt)
+            XCTAssertGreaterThanOrEqual(title.frame.minY, row.frame.minY, receipt)
+            XCTAssertLessThanOrEqual(subtitle.frame.maxY, row.frame.maxY, receipt)
+            XCTAssertGreaterThanOrEqual(title.frame.minX, row.frame.minX, receipt)
+            XCTAssertLessThanOrEqual(title.frame.maxX, row.frame.maxX, receipt)
+
+            let info = app.staticTexts[caption]
+            XCTAssertTrue(info.exists, app.debugDescription)
+            captionHeights[size] = info.frame.height
+            // Frames prove the text participates in the row's layout; only the
+            // image proves no glyph was clipped by the card border.
+            addScreenshot(named: "AX5-CAPTURE-OPTION-ROWS-\(size)-402x874.png")
+            // The caption starts below the fold at this size, so its own
+            // screenshot needs the sheet scrolled to it.
+            for _ in 0..<4 where !info.isHittable {
+                app.swipeUp()
+            }
+            addScreenshot(named: "AX5-CAPTURE-INFO-CAPTION-\(size)-402x874.png")
+            app.terminate()
+        }
+
+        let receipt = "captionHeights=\(captionHeights)"
+        guard let medium = captionHeights["medium"],
+              let accessibility5 = captionHeights["accessibility5"] else {
+            return XCTFail(receipt)
+        }
+        XCTAssertGreaterThan(accessibility5, medium * 2, receipt)
+    }
+
+    /// `settingsSectionHeader` pinned itself to `.frame(height: 18)`, so at
+    /// `accessibility5` its glyphs drew outside the 18pt the layout gave it and
+    /// the opaque card below covered the bottom third of them (#836). Measured
+    /// on `e1e084b1e`: `SELLING` ran to 753.0 while the row beneath it started
+    /// at 731.33, and `ACCOUNT` overlapped the same 21.7pt. Frames prove
+    /// layout participation and not z-order, but this pair is exactly the
+    /// overlap the screenshot showed, in the order the two views are drawn.
+    func testSettingsSectionHeadersAreNotCoveredByTheCardBelowAtLargestAccessibilitySize() {
+        for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--settings-proof=SET-01"] + arguments
+            app.launchAfterRetiringPriorInstance()
+            XCTAssertTrue(
+                app.descendants(matching: .any)["settings.screen"].waitForExistence(timeout: 5),
+                app.debugDescription
+            )
+
+            let header = app.staticTexts["SELLING"]
+            let firstRow = app.descendants(matching: .any)["settings.selling.marketplaces"]
+            XCTAssertTrue(header.waitForExistence(timeout: 3), app.debugDescription)
+            XCTAssertTrue(firstRow.exists, app.debugDescription)
+            let receipt =
+                "arguments=\(arguments), header=\(header.frame), firstRow=\(firstRow.frame)"
+            addScreenshot(
+                named: "AX5-SETTINGS-SECTION-HEADERS-\(arguments.isEmpty ? "default" : "accessibility5")-402x874.png"
+            )
+            let label = arguments.isEmpty ? "default" : "accessibility5"
+            addScreenshot(named: "AX5-SETTINGS-SECTION-HEADERS-\(label)-402x874.png")
+            XCTAssertLessThanOrEqual(header.frame.maxY, firstRow.frame.minY, receipt)
+            app.terminate()
+        }
+    }
+
+    /// The floating dock is a `safeAreaInset`, so content scrolls behind it on
+    /// the way past — what must hold is that a seller can always bring a row
+    /// out from under it. Settings reserves the room in its own bottom padding;
+    /// `TrophyWallProcessingView` reserved nothing, so its disclosure control
+    /// stopped at `(14.0, 792.0, 374.33, 48.0)` under a dock at
+    /// `(204.0, 782.0, 52.0, 52.0)` with the scroll already at its end (#836).
+    ///
+    /// The swipe loop is the assertion's own escape: it stops the moment the
+    /// last row clears the dock, and when the screen cannot reserve the room it
+    /// runs out and the comparison fails on the frames it actually observed.
+    func testFloatingDockDoesNotCoverTheLastRowOfSettingsOrTrophyProcessing() {
+        for (arguments, identifier, expandsFirst) in [
+            (["--settings-proof=SET-01"], "settings.delete-account", false),
+            (
+                ["--fixture=trophy-processing", "--zero-network-fixtures"],
+                "trophy.processing.disclosure",
+                true
+            ),
+        ] {
+            let app = XCUIApplication()
+            app.launchArguments = arguments + ["--dynamic-type=accessibility5"]
+            app.launchAfterRetiringPriorInstance()
+
+            let dock = app.buttons["dock.trophy-wall"]
+            XCTAssertTrue(dock.waitForExistence(timeout: 5), app.debugDescription)
+            let last = app.descendants(matching: .any)[identifier]
+            // Settings builds its rows lazily, so the last card does not exist
+            // until it has been scrolled near.
+            for _ in 0..<12 where !last.exists {
+                app.swipeUp()
+            }
+            XCTAssertTrue(last.waitForExistence(timeout: 5), app.debugDescription)
+            // Collapsed, the processing list is short enough to clear the dock
+            // on its own; the row that was covered is the one the expanded list
+            // ends with.
+            if expandsFirst {
+                last.tap()
+            }
+
+            for _ in 0..<12 where last.frame.maxY > dock.frame.minY {
+                app.swipeUp()
+            }
+            let receipt =
+                "identifier=\(identifier), last=\(last.frame), dock=\(dock.frame)"
+            addScreenshot(named: "AX5-DOCK-CLEARANCE-\(identifier)-402x874.png")
+            XCTAssertLessThanOrEqual(last.frame.maxY, dock.frame.minY, receipt)
+            app.terminate()
+        }
+    }
+
+    /// `SettingsSellingHintRow` renders only when the server reports an eBay
+    /// policy problem, and no fixture produced that state, so #831 proved its
+    /// container through `settings.selling.marketplaces` and left the row
+    /// itself unbuilt in every test. `--settings-selling-fixture=policy-problem`
+    /// builds it (#836).
+    ///
+    /// The row combines its children for VoiceOver, which deletes the `Link`
+    /// from the accessibility tree, so the link has no element of its own to
+    /// measure — `SettingsTests.testPolicyHintOffersTheEbayLinkAsAnActionOnTheCombinedElement`
+    /// covers that seam at the rendered body type. What XCUITest can see is
+    /// whether the combined row is tall enough to still contain the link's
+    /// 44pt hit area under its message, which is precisely what the old
+    /// `maxHeight: 52` cap took away, and whether it is on screen and
+    /// hit-testable at both extremes of Dynamic Type.
+    func testSettingsPolicyHintRowKeepsRoomForItsPolicyLinkAtBothTypeSizes() {
+        for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "--settings-proof=SET-01",
+                "--settings-selling-fixture=policy-problem",
+            ] + arguments
+            app.launchAfterRetiringPriorInstance()
+
+            let hint = app.descendants(matching: .any)["settings.ebay-policy-hint"]
+            XCTAssertTrue(hint.waitForExistence(timeout: 5), app.debugDescription)
+
+            let window = app.windows.firstMatch
+            for _ in 0..<8 where hint.frame.maxY > window.frame.maxY {
+                app.swipeUp()
+            }
+            let receipt =
+                "arguments=\(arguments), hint=\(hint.frame), window=\(window.frame)"
+            XCTAssertTrue(hint.isHittable, receipt)
+            XCTAssertGreaterThanOrEqual(hint.frame.minX, window.frame.minX, receipt)
+            XCTAssertLessThanOrEqual(hint.frame.maxX, window.frame.maxX, receipt)
+            XCTAssertLessThanOrEqual(hint.frame.maxY, window.frame.maxY, receipt)
+            // The message occupies at least one footnote line above the link,
+            // so a row that still fits the old 52pt cap cannot be showing both.
+            XCTAssertGreaterThan(hint.frame.height, 52, receipt)
+            app.terminate()
+        }
+    }
+
+    /// The subscription actions are plain buttons inside `settingsCardRow`, the
+    /// same shape `LegalLinkRow` had before #831 gave it the row's full height,
+    /// and none of them carried an identifier a test could name (#836). A touch
+    /// target that comes from text height rather than the 44pt floor is
+    /// thinnest at the smallest Dynamic Type size, which is where this checks —
+    /// the opposite direction from the accessibility-size checks above.
+    func testSubscriptionActionButtonsMeetTheTouchTargetFloorAtSmallestDynamicTypeSize() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--settings-proof=SET-01", "--dynamic-type=xSmall"]
+        app.launchAfterRetiringPriorInstance()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["settings.screen"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+
+        for identifier in [
+            "settings.subscription.manage",
+            "settings.subscription.restore",
+        ] {
+            let button = app.buttons[identifier]
+            for _ in 0..<6 where !button.exists {
+                app.swipeUp()
+            }
+            XCTAssertTrue(button.waitForExistence(timeout: 3), app.debugDescription)
+            XCTAssertGreaterThanOrEqual(
+                button.frame.height,
+                44,
+                "identifier=\(identifier), frame=\(button.frame)"
+            )
+        }
+    }
+
+    private func launchCaptureSheet(dynamicType: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=capture",
+            "--zero-network-fixtures",
+            "--dynamic-type=\(dynamicType)",
+        ]
+        app.launchAfterRetiringPriorInstance()
+        XCTAssertTrue(
+            app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 10),
+            app.debugDescription
+        )
+        return app
+    }
+
     /// Issue #812: each ABOUT row used to be a bare `HStack` with a chevron
     /// that promised navigation and delivered nothing. Tapping a real
     /// `openURL` hands the system off to Safari, which backgrounds this app —
