@@ -8,6 +8,7 @@ struct SettingsView: View {
     private let profile: SettingsProfile
     private let settingsProofState: SettingsProofState?
     private let settingsSellingFixture: SettingsSellingFixtureState?
+    private let settingsSubscriptionFixture: SettingsSubscriptionFixtureState?
     private let settingsProofSafeExit: (() -> Void)?
     private let deletionFlowPresentationChanged: (Bool) -> Void
     private let mobileAPIClient: any MobileAPIClient
@@ -42,6 +43,7 @@ struct SettingsView: View {
         profile = .current(configuration: configuration)
         settingsProofState = configuration.settingsProofState
         settingsSellingFixture = configuration.settingsSellingFixture
+        settingsSubscriptionFixture = configuration.settingsSubscriptionFixture
         self.settingsProofSafeExit = settingsProofSafeExit
         self.deletionFlowPresentationChanged = deletionFlowPresentationChanged
         self.mobileAPIClient = mobileAPIClient
@@ -471,6 +473,9 @@ struct SettingsView: View {
     }
 
     private var subscriptionPresentation: SettingsSubscriptionPresentation {
+        if let subscriptionFixturePresentation {
+            return subscriptionFixturePresentation
+        }
         if isSettingsHubProof {
             return SettingsSubscriptionPresentation(
                 state: .verified(Self.settingsHubProofSubscription),
@@ -508,6 +513,27 @@ struct SettingsView: View {
                     )
                 ),
                 loadPhase: .loaded
+            )
+        }
+#else
+        nil
+#endif
+    }
+
+    /// The failed-load answer, which no other Settings fixture can produce:
+    /// `SET-01` reports a verified subscription and short-circuits
+    /// `loadSubscription()`, so `SUB-15` — and the `Try again` control that is
+    /// the only place `settings.subscription.retry` is drawn — was unreachable
+    /// at every Dynamic Type size (#839).
+    private var subscriptionFixturePresentation: SettingsSubscriptionPresentation? {
+#if DEBUG
+        guard let settingsSubscriptionFixture else { return nil }
+        switch settingsSubscriptionFixture {
+        case .loadFailed:
+            return SettingsSubscriptionPresentation(
+                state: .unconfigured,
+                loadPhase: .failed,
+                locale: Locale(identifier: "en_US")
             )
         }
 #else
@@ -573,6 +599,13 @@ struct SettingsView: View {
         // identifier on the enclosing stack is applied after the ones inside
         // it, so it replaced every action button's own identifier and left
         // them unaddressable (#836).
+        //
+        // `.contain` makes this stack one addressable container instead of
+        // letting the identifier reach each `Text` inside it: without it both
+        // leaves answered to `settings.subscription.<state>`, so the query
+        // matched two elements and reading a frame from it was ambiguous
+        // (#839).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(
             "settings.subscription.\(presentation.stateID.lowercased())"
         )
@@ -629,12 +662,43 @@ struct SettingsView: View {
     /// navigates, so there is nothing for it to promise. A row that does
     /// navigate should use a real `Button`, as `LegalLinkRow` does.
     private func valueRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            Text(value).foregroundStyle(.secondary)
+        SettingsValueRow(label: label, value: value)
+    }
+}
+
+/// A label and the value it reads, side by side until they cannot be.
+///
+/// The `HStack` splits the row's width between the two, and a single word wider
+/// than its share is broken mid-word rather than wrapped: `Connected
+/// marketplaces` rendered as `Con-nected` at an accessibility size (#839).
+/// Above the accessibility threshold the two take their own lines, where each
+/// one has the whole row to lay out in and no word has to be cut in half.
+private struct SettingsValueRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let label: String
+    let value: String
+
+    var body: some View {
+        Group {
+            if SettingsValueRowLayout.stacks(at: dynamicTypeSize) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                    valueText
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack {
+                    Text(label)
+                    Spacer()
+                    valueText
+                }
+            }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var valueText: some View {
+        Text(value).foregroundStyle(.secondary)
     }
 }
 
@@ -791,32 +855,65 @@ private struct SettingsLocalRemovalView: View {
 }
 
 private struct SettingsDeletionHeader: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let back: () -> Void
 
     var body: some View {
-        ZStack {
-            Text("Delete account")
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-            HStack {
-                Button(action: back) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                        Text("Settings")
-                    }
-                    .frame(minHeight: 44)
-                    .contentShape(.rect)
+        Group {
+            // A `ZStack` draws the centred title and the leading back control
+            // in the same 56pt band, and at an accessibility size neither one
+            // gives way: `Delete account` and `Settings` overprinted each other
+            // across the whole bar (#839). Above the accessibility threshold
+            // the two take their own rows instead, which is also the only
+            // layout where the title has the width to stay one readable line.
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) {
+                    backButton
+                    title
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(SnapListColorToken.action.color)
-                .accessibilityLabel("Settings")
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ZStack {
+                    title
+                    HStack {
+                        backButton
+                        Spacer()
+                    }
+                }
             }
         }
         .padding(.horizontal, 20)
-        .frame(height: 56)
+        // Absorbed by the 56pt floor at every non-accessibility size, so this
+        // costs the shipped bar nothing; above the threshold it is what keeps
+        // the grown title off the divider it would otherwise sit on.
+        .padding(.vertical, 6)
+        // 56pt is the floor the bar asks for, not a ceiling it clips its own
+        // content to: a fixed height proposes a size without clipping, so any
+        // content taller than the proposal draws outside the background and
+        // the divider that are supposed to contain it (#839).
+        .frame(minHeight: 56)
         .background(SnapListColorToken.canvas.color)
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var title: some View {
+        Text("Delete account")
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private var backButton: some View {
+        Button(action: back) {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.left")
+                Text("Settings")
+            }
+            .frame(minHeight: 44)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(SnapListColorToken.action.color)
+        .accessibilityLabel("Settings")
     }
 }
 

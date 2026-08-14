@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum SettingsAuthenticationMethod: Equatable {
     case apple
@@ -343,6 +344,19 @@ struct SettingsSellingPresentation: Equatable {
             return
         }
         hint = Hint(message: message, helpURL: setup.helpURL)
+    }
+}
+
+/// Whether a Settings label/value row lays its two halves side by side.
+///
+/// Side by side, the row's width is split between them, and a word wider than
+/// its share is broken mid-word instead of wrapped — `Connected marketplaces`
+/// rendered as `Con-nected` (#839). The threshold is the accessibility one
+/// because that is where a label long enough to need the whole row first
+/// appears; below it, every shipped label still fits its share.
+enum SettingsValueRowLayout {
+    static func stacks(at size: DynamicTypeSize) -> Bool {
+        size.isAccessibilitySize
     }
 }
 
