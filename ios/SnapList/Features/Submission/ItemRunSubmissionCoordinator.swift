@@ -401,8 +401,17 @@ final class ItemRunSubmissionHost {
               let coordinator,
               let attempt = await coordinator.recoverableAttempt(
                   for: context
-              ),
-              activePrincipalContext?.generation == context.generation else {
+              ) else {
+            return nil
+        }
+        // Read while the intake is still staged. Acceptance deletes the bundle,
+        // so this is the only window in which the seller's own photo can be
+        // captured for the wall, and the generation check below still has the
+        // last word on whether the bytes belong to the current principal.
+        let coverPhotoData = await coordinator.stagedCoverPhotoData(
+            for: context
+        )
+        guard activePrincipalContext?.generation == context.generation else {
             return nil
         }
         return TrophyWallCard.pending(
@@ -411,6 +420,7 @@ final class ItemRunSubmissionHost {
                 idempotencyKey: attempt.idempotencyKey
             ),
             itemName: "Local item",
+            localCoverPhotoData: coverPhotoData,
             lastMeaningfulUpdateAt: context.photos.map(\.createdAt).max() ?? Date()
         )
     }
@@ -1339,6 +1349,24 @@ final class ItemRunSubmissionCoordinator {
             return nil
         }
         return attempt
+    }
+
+    /// The seller's first staged photo, as the thumbnail bytes the capture draft
+    /// store already wrote beside it. Bytes rather than a path: the staged path
+    /// stops resolving once the resolved scope digest changes (#855) and the
+    /// bundle itself is deleted at acceptance. A photo that cannot be read is
+    /// not a failure — the wall keeps its existing slot.
+    fileprivate func stagedCoverPhotoData(
+        for context: ItemRunSubmissionPrincipalContext
+    ) async -> Data? {
+        guard let cover = context.photos.first else {
+            return nil
+        }
+        let readData = readData
+        let thumbnailURL = cover.thumbnailURL
+        return await Task.detached(priority: .userInitiated) {
+            try? readData(thumbnailURL)
+        }.value
     }
 
     func submit(photos: [StagedCapturePhoto]) async -> ItemRunSubmissionOutcome {

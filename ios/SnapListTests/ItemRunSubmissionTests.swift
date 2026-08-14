@@ -1166,6 +1166,80 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Ambiguous outcome and exact retry
 
+    /// The wall's processing row can only ever show a photo the phone already
+    /// holds, so the pending projection has to carry the staged cover thumbnail
+    /// out of the intake bundle before acceptance deletes it.
+    func testPendingTrophyWallProjectionCarriesTheStagedCoverPhoto()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pending-cover-photo-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: applicationSupport,
+            verifiedClerkSubject: "user_pending_cover_photo",
+            photoData: SubmissionIntakeFixture.jpeg(
+                filling: "cover-intake",
+                repeated: 1
+            )
+        )
+        let principalRoot = native.snapshot.photos[0].photoURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let snapshot = try ItemRunSubmissionSnapshot.make(
+            for: native.snapshot.photos,
+            readData: { try Data(contentsOf: $0) }
+        )
+        try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: principalRoot
+        ).saveAttempt(
+            ItemRunSubmissionAttempt(
+                idempotencyKey: Self.firstKey,
+                photos: snapshot.photos
+            )
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: nil,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider {
+                    "clerk-session-token"
+                },
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        let principalScope = TrophyWallPrincipalScope(
+            opaqueValue: "pending-cover-photo-test"
+        )
+
+        let recovered = await host.recoverableTrophyWallPendingCard(
+            principalScope: principalScope
+        )
+        let card = try XCTUnwrap(recovered)
+
+        // The card's bytes are private to the wall, so read them back the only
+        // way the seller can: through the row the wall renders.
+        let store = TrophyWallStore(
+            principalScope: principalScope,
+            repository: EmptyTrophyWallRepository()
+        )
+        store.ingest(card)
+        XCTAssertEqual(
+            store.processingRows.first?.localCoverPhotoData,
+            try Data(contentsOf: native.snapshot.photos[0].thumbnailURL)
+        )
+    }
+
     func testPendingTrophyWallProjectionRejectsAStoredAttemptForChangedPhotos()
         async throws {
         let applicationSupport = FileManager.default.temporaryDirectory
@@ -5531,5 +5605,13 @@ actor RecordingCaptureDraftStore: CaptureDraftStoring {
         guard self.photos == photos else { return false }
         try await discard()
         return true
+    }
+}
+
+private struct EmptyTrophyWallRepository: TrophyWallRepository {
+    func initialCards(
+        for principalScope: TrophyWallPrincipalScope
+    ) -> [TrophyWallCard] {
+        []
     }
 }

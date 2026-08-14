@@ -817,6 +817,59 @@ struct TrophyWallCollectionMessageView: View {
     }
 }
 
+/// The leading slot on a processing row. Until the run reaches delivery the
+/// server has no cover photo to hand back, so the only photo of this item that
+/// exists anywhere is the one the seller staged on this phone; the row carries
+/// those bytes rather than a staged path, because the intake is deleted the
+/// moment the run is accepted and a path under the scope-digest directory stops
+/// resolving when that digest changes (#855). Bytes that are absent or no longer
+/// decode leave the slot exactly as the wall drew it before.
+struct TrophyWallProcessingRowPhoto: View {
+    static let sidePoints: CGFloat = 44
+    static let cornerRadiusPoints: CGFloat = 10
+
+    enum Content: Equatable {
+        case staged(UIImage)
+        case placeholder
+    }
+
+    let row: TrophyWallProcessingRow
+
+    static func content(for row: TrophyWallProcessingRow) -> Content {
+        guard let data = row.localCoverPhotoData,
+              let image = UIImage(data: data) else {
+            return .placeholder
+        }
+        return .staged(image)
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Self.cornerRadiusPoints)
+            .fill(SnapListColorToken.hairline.color)
+            .frame(width: Self.sidePoints, height: Self.sidePoints)
+            .overlay {
+                switch Self.content(for: row) {
+                case .staged(let image):
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(
+                            width: Self.sidePoints,
+                            height: Self.sidePoints
+                        )
+                        .clipShape(
+                            .rect(cornerRadius: Self.cornerRadiusPoints)
+                        )
+                case .placeholder:
+                    EmptyView()
+                }
+            }
+            // The row already speaks its own name and state. The photo is
+            // decoration beside that sentence, so it stays out of the label.
+            .accessibilityHidden(true)
+    }
+}
+
 private struct TrophyWallProcessingRowView: View {
     let row: TrophyWallProcessingRow
     let openRoute: (HomeRoute) -> Void
@@ -877,10 +930,7 @@ private struct TrophyWallProcessingRowView: View {
 
     private var content: some View {
         HStack(spacing: 11) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(SnapListColorToken.hairline.color)
-                .frame(width: 44, height: 44)
-                .accessibilityHidden(true)
+            TrophyWallProcessingRowPhoto(row: row)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.itemName)

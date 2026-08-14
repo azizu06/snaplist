@@ -126,12 +126,20 @@ struct TrophyWallCard: Hashable, Sendable {
     fileprivate let coverPhotoURL: URL?
     fileprivate let coverPhotoAssetName: String?
     fileprivate let coverPhotoCrop: TrophyWallPhotoCrop
+    /// The seller's own first staged photo, read out of the intake bundle while
+    /// it was still staged and carried as bytes from then on. It is bytes rather
+    /// than a path because the intake is deleted the moment the server accepts
+    /// the run, and because a path under the scope-digest directory stops
+    /// resolving when the digest changes (#855). Bytes also die with `cards`, so
+    /// a principal transition cannot leak one seller's photo to the next.
+    fileprivate let localCoverPhotoData: Data?
     let orderKey: TrophyWallOrderKey
 
     static func pending(
         principalScope: TrophyWallPrincipalScope,
         logicalIdentity: TrophyWallLogicalIdentity,
         itemName: String,
+        localCoverPhotoData: Data? = nil,
         lastMeaningfulUpdateAt: Date
     ) -> TrophyWallCard {
         precondition(!itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -143,6 +151,7 @@ struct TrophyWallCard: Hashable, Sendable {
             coverPhotoURL: nil,
             coverPhotoAssetName: nil,
             coverPhotoCrop: .full,
+            localCoverPhotoData: localCoverPhotoData,
             orderKey: TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: logicalIdentity.persistedKey
@@ -158,6 +167,7 @@ struct TrophyWallCard: Hashable, Sendable {
         coverPhotoURL: URL? = nil,
         coverPhotoAssetName: String? = nil,
         coverPhotoCrop: TrophyWallPhotoCrop = .full,
+        localCoverPhotoData: Data? = nil,
         lastMeaningfulUpdateAt: Date,
         orderKey: TrophyWallOrderKey? = nil
     ) -> TrophyWallCard {
@@ -172,6 +182,7 @@ struct TrophyWallCard: Hashable, Sendable {
             coverPhotoURL: coverPhotoURL,
             coverPhotoAssetName: coverPhotoAssetName,
             coverPhotoCrop: coverPhotoCrop,
+            localCoverPhotoData: localCoverPhotoData,
             orderKey: orderKey ?? TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: runID.uuidString.lowercased()
@@ -192,6 +203,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
     let stateLabel: String
     let destination: HomeRoute?
     let action: TrophyWallProcessingAction?
+    let localCoverPhotoData: Data?
     let accessibilityLabel: String
     let accessibilityIdentifier: String
 
@@ -202,6 +214,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
 
         id = card.identity
         self.itemName = itemName
+        localCoverPhotoData = card.localCoverPhotoData
 
         switch card.state {
         case .pendingUpload:
@@ -685,12 +698,13 @@ final class TrophyWallStore {
             return
         }
 
-        let linkedItemName = acceptedRun.linkedLogicalIdentity.flatMap {
+        let linkedLocalCard = acceptedRun.linkedLogicalIdentity.flatMap {
             linkedLogicalIdentity in
             cards.first {
                 $0.identity == .local(linkedLogicalIdentity)
-            }?.itemName
+            }
         }
+        let linkedItemName = linkedLocalCard?.itemName
         let existingCanonicalCard = cards.first {
             $0.identity == .run(acceptedRun.runID)
         }
@@ -711,6 +725,11 @@ final class TrophyWallStore {
             itemName: linkedItemName ?? existingCanonicalCard?.itemName ?? acceptedRun.itemName,
             coverPhotoURL: acceptedRun.coverPhotoURL
                 ?? existingCanonicalCard?.coverPhotoURL,
+            // The local card is dropped below, so its staged bytes have to move
+            // here or the seller watches their own item process behind a blank
+            // slot.
+            localCoverPhotoData: linkedLocalCard?.localCoverPhotoData
+                ?? existingCanonicalCard?.localCoverPhotoData,
             lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt,
             orderKey: acceptedRun.historyOrderKey
         )
@@ -748,6 +767,7 @@ final class TrophyWallStore {
             state: .publishedToEbay,
             itemName: card.itemName,
             coverPhotoURL: card.coverPhotoURL,
+            localCoverPhotoData: card.localCoverPhotoData,
             lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
             orderKey: card.orderKey
         )
@@ -855,6 +875,7 @@ final class TrophyWallStore {
             coverPhotoURL: card.coverPhotoURL,
             coverPhotoAssetName: card.coverPhotoAssetName,
             coverPhotoCrop: card.coverPhotoCrop,
+            localCoverPhotoData: card.localCoverPhotoData,
             lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
             orderKey: card.orderKey
         )

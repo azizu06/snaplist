@@ -335,7 +335,10 @@ final class HomeUITests: XCTestCase {
 
         let disclosure = app.buttons["trophy.processing.disclosure"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 3))
-        XCTAssertEqual(disclosure.label, "Show 2 more items")
+        // Six seeded rows, three visible: the sixth is the accepted row that
+        // carries a staged photo, so the disclosure counts three hidden items
+        // and drops the exact-count wording.
+        XCTAssertEqual(disclosure.label, "Show more items")
         XCTAssertEqual(disclosure.value as? String, "Collapsed")
         XCTAssertGreaterThanOrEqual(disclosure.frame.height, 44)
         disclosure.tap()

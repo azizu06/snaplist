@@ -1360,10 +1360,17 @@ struct AppShellView: View {
 
 #if DEBUG
 @MainActor
-private enum TrophyWallProcessingLaunchFixture {
+enum TrophyWallProcessingLaunchFixture {
     private static let principal = TrophyWallPrincipalScope(
         opaqueValue: "trophy-processing-fixture"
     )
+
+    /// Stands in for the thumbnail the capture draft store writes beside a
+    /// staged photo. Without it no fixture route reaches a processing row that
+    /// carries the seller's own photo, so the suite could not see this state.
+    private static let stagedCoverPhoto: Data? = UIImage(
+        named: "FirstValueSneaker"
+    )?.jpegData(compressionQuality: 0.84)
 
     static let store = TrophyWallStore(
             principalScope: principal,
@@ -1419,6 +1426,16 @@ private enum TrophyWallProcessingLaunchFixture {
                         ),
                         itemName: "Polaroid camera",
                         lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 10)
+                    ),
+                    .accepted(
+                        principalScope: principal,
+                        runID: UUID(
+                            uuidString: "37500000-0000-4000-8000-000000000011"
+                        )!,
+                        state: .accepted,
+                        itemName: "White leather sneaker",
+                        localCoverPhotoData: stagedCoverPhoto,
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 5)
                     ),
                 ]
             )
