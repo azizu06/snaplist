@@ -376,6 +376,76 @@ enum ClerkAuthenticationComposition {
         )
     }
 
+    /// Starts included-offer redemption for whoever is signed in, and for
+    /// whoever signs in later.
+    ///
+    /// It lives beside the Clerk session rather than on a screen because the
+    /// trigger is the verified principal itself; see
+    /// `IncludedOfferRedemptionComposition` for the sign-in paths a
+    /// screen-shaped trigger silently misses.
+    @MainActor
+    @discardableResult
+    static func beginIncludedOfferRedemption(
+        apiOrigin: URL,
+        tokenProvider: any BearerTokenProviding,
+        session: URLSession = .shared
+    ) -> Task<Void, Never> {
+        // Its own client, sharing the Keychain-backed attested key with the
+        // guest-side one by default. The two cannot race: guest enrollment runs
+        // only on a confirmed signed-out installation, and redemption runs only
+        // once a Clerk principal exists.
+        let attest = AppAttestClient(
+            appID: AppAttestGuestCapabilityComposition.appID,
+            environment: .production,
+            server: URLSessionAppAttestServerClient(
+                apiOrigin: apiOrigin,
+                session: session
+            )
+        )
+        let api = URLSessionMobileAPIClient(
+            baseURL: apiOrigin,
+            tokenProvider: tokenProvider,
+            session: session
+        )
+        let principals = liveClerkPrincipals()
+        return Task {
+            await IncludedOfferRedemptionComposition.drive(
+                principals: principals,
+                redeem: { userID in
+                    _ = await IncludedOfferRedemptionCoordinator(
+                        redemption: IncludedOfferRedemption(
+                            attest: attest,
+                            client: api,
+                            userID: userID
+                        ),
+                        store: IncludedOfferRedemptionStore(userID: userID)
+                    ).redeem()
+                }
+            )
+        }
+    }
+
+    /// The signed-in principal now, and again on every Clerk auth event.
+    ///
+    /// The current value is yielded before any event because Clerk restores a
+    /// session from its own Keychain at launch without emitting one. A seller
+    /// whose first redemption failed while they had no signal is already signed
+    /// in on every later launch, with no sign-in left to observe.
+    @MainActor
+    private static func liveClerkPrincipals() -> AsyncStream<String?> {
+        let changes = liveClerkChanges()
+        return AsyncStream { continuation in
+            let task = Task { @MainActor in
+                continuation.yield(Clerk.shared.user?.id)
+                for await _ in changes {
+                    continuation.yield(Clerk.shared.user?.id)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     @MainActor
     static func makeNativeIntakeIdentitySource(
         keyStore: any AppAttestKeyIDStoring = KeychainAppAttestKeyIDStore(),

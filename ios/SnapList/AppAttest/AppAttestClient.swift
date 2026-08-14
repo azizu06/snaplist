@@ -1072,7 +1072,10 @@ struct GuestCapabilityRenewingBearerTokenProvider: BearerTokenProviding {
 
 /** Launch-owned App Attest work and the bearer provider it refreshes. */
 struct AppAttestGuestCapabilityComposition: Sendable {
-    private static let appID = "35YFS8XJRQ.dev.snaplist.ios"
+    /// The one place the App Attest app identity is written down. Included-offer
+    /// redemption needs the same identity to produce assertions Apple will
+    /// verify, and a second literal would be a second thing to change.
+    static let appID = "35YFS8XJRQ.dev.snaplist.ios"
 
     let tokenProvider: any BearerTokenProviding
 

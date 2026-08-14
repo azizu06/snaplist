@@ -37,6 +37,7 @@ ios/SnapList/App/SnapListApp.swift
 ios/SnapList/AppAttest/AppAttestClient.swift
 ios/SnapList/Core/API/AccountErasureClient.swift
 ios/SnapList/Core/API/ClerkAuthentication.swift
+ios/SnapList/Core/API/IncludedOfferRedemptionCoordinator.swift
 ios/SnapList/Core/API/MobileAPIClient.swift
 ios/SnapList/Core/API/MobileAPIModels.swift
 ios/SnapList/Core/Analytics/AnalyticsClient.swift

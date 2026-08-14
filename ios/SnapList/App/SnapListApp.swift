@@ -16,6 +16,7 @@ struct SnapListApp: App {
     private let guestCapabilityComposition:
         AppAttestGuestCapabilityComposition?
     private let trophyWallHistoryRepository: any TrophyWallRunHistoryRepository
+    private let startIncludedOfferRedemption: @MainActor @Sendable () -> Void
 
     init() {
         // First statement in the real app entry point so a crash while the
@@ -77,6 +78,20 @@ struct SnapListApp: App {
     ) {
         self.configuration = configuration
         self.guestCapabilityComposition = guestCapabilityComposition
+        if let apiOrigin, !configuration.usesZeroNetworkFixtures {
+            startIncludedOfferRedemption = {
+                ClerkAuthenticationComposition.beginIncludedOfferRedemption(
+                    apiOrigin: apiOrigin,
+                    tokenProvider: tokenProvider,
+                    session: urlSession
+                )
+            }
+        } else {
+            // Gated the way the guest-side capability is: a fixture launch has
+            // no network to reach the fence with and no real account to redeem
+            // for.
+            startIncludedOfferRedemption = {}
+        }
         self.dependencies = AppDependencies.make(
             configuration: configuration,
             apiOrigin: apiOrigin,
@@ -208,6 +223,7 @@ struct SnapListApp: App {
                 .environment(\.appDependencies, dependencies)
                 .task {
                     guestCapabilityComposition?.beginLaunchEnrollment()
+                    startIncludedOfferRedemption()
 #if DEBUG
                     await dependencies
                         .seedRestoredCaptureFixtureIfNeeded(
