@@ -101,22 +101,10 @@ struct CaptureLauncherSheet: View {
             }
             .accessibilityHint("Returns to the staged photo without replacing it")
 
-            // `Label(_:systemImage:)`'s internal icon+text composition still
-            // truncated this text to a single ellipsized line at AX5 even
-            // with `.frame(maxWidth: .infinity)` and `.fixedSize(horizontal:
-            // false, vertical: true)` applied — a plain `Text` right above in
-            // `CaptureOptionRow.subtitle` wraps correctly at the identical
-            // width in the identical `ScrollView`, so the constraint is
-            // internal to `Label`, not the surrounding layout (#831). Manually
-            // composing icon + `Text`, the same technique `CaptureOptionRow`
-            // already uses instead of `Label`, sidesteps it.
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "clock")
-                Text("This photo stays on this device for up to 24 hours.")
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .font(.caption)
-            .foregroundStyle(SnapListColorToken.textTertiary.color)
+            CaptureIconCaption(
+                systemImage: "clock",
+                text: "This photo stays on this device for up to 24 hours."
+            )
         }
         .padding(.horizontal, SnapListMetrics.screenGutter)
         .padding(.top, 18)
@@ -151,15 +139,10 @@ struct CaptureLauncherSheet: View {
                 .accessibilityIdentifier(CaptureEntryPoint.chooseFromLibrary.identifier)
             }
 
-            // Same `Label` AX5 truncation as `restoredDraft`'s clock label
-            // above; same manual icon+`Text` fix (#831).
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "info.circle")
-                Text("Capture and organize photos before choosing what to list.")
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .font(.caption)
-            .foregroundStyle(SnapListColorToken.textTertiary.color)
+            CaptureIconCaption(
+                systemImage: "info.circle",
+                text: "Capture and organize photos before choosing what to list."
+            )
         }
         .padding(.horizontal, SnapListMetrics.screenGutter)
         .padding(.top, 10)
@@ -202,6 +185,30 @@ enum CaptureEntryPoint: String, CaseIterable, Identifiable {
         case .takeOneItem: "camera"
         case .chooseFromLibrary: "photo"
         }
+    }
+}
+
+/// An icon and a caption, composed by hand rather than through
+/// `Label(_:systemImage:)`.
+///
+/// `Label`'s internal composition truncated the caption to a single ellipsized
+/// line at AX5 even with `.frame(maxWidth: .infinity)` and `.fixedSize` applied
+/// — a plain `Text` wraps correctly at the identical width in the identical
+/// `ScrollView`, so the constraint is internal to `Label` rather than the
+/// surrounding layout (#831). Three sites had their own copy of the
+/// replacement and the CAP-01 fixture still had the `Label` (#839).
+struct CaptureIconCaption: View {
+    let systemImage: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: systemImage)
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption)
+        .foregroundStyle(SnapListColorToken.textTertiary.color)
     }
 }
 
@@ -1247,17 +1254,24 @@ private struct CaptureLauncherFixture: View {
                 CaptureOptionRow(entryPoint: entryPoint)
                     .padding(.horizontal, 20)
             }
-            Label(
-                "Capture and organize photos before choosing what to list.",
-                systemImage: "info.circle"
+            // The production sheet's own caption, not a `Label` restatement of
+            // it: `Label`'s internal icon+text composition truncates to one
+            // ellipsized line at an accessibility size, which is exactly the
+            // defect #831 removed from the shipped surface and this fixture
+            // then kept standing in for it (#839).
+            CaptureIconCaption(
+                systemImage: "info.circle",
+                text: "Capture and organize photos before choosing what to list."
             )
-            .font(.caption)
-            .foregroundStyle(SnapListColorToken.textTertiary.color)
             .padding(.horizontal, 20)
             .padding(.top, 6)
             .padding(.bottom, 14)
         }
-        .frame(height: 680, alignment: .top)
+        // 680pt is the sheet's resting height, not a box its content is
+        // clipped into: a fixed height proposes a size without clipping, so at
+        // an accessibility size the rows drew past it and the fixture stopped
+        // standing for the row it exists to show (#839).
+        .frame(minHeight: 680, alignment: .top)
         .background(SnapListColorToken.canvas.color)
         .clipShape(.rect(topLeadingRadius: 26, topTrailingRadius: 26))
         .accessibilityIdentifier("visual-state.CAP-01")

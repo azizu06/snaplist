@@ -430,6 +430,38 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertNil(barcode.visualState)
     }
 
+    /// `--settings-selling-fixture=` shipped in #836 with a UI test that reads
+    /// its effect and nothing that reads the parse, so a typo in the prefix or
+    /// the raw value would have degraded to the healthy `SET-01` connection and
+    /// passed as an ordinary missing hint row (#839). The rejected value is
+    /// half the point: an unknown fixture has to stay `nil` rather than
+    /// resolving to whichever case happens to be first.
+    func testSettingsFixtureArgumentsAreTypedAndUnknownValuesStayInert() {
+        let selling = LaunchConfiguration.parse(
+            arguments: ["--settings-selling-fixture=policy-problem"]
+        )
+        let unknownSelling = LaunchConfiguration.parse(
+            arguments: ["--settings-selling-fixture=policy-ok"]
+        )
+        XCTAssertEqual(selling.settingsSellingFixture, .policyProblem)
+        XCTAssertNil(unknownSelling.settingsSellingFixture)
+
+        let subscription = LaunchConfiguration.parse(
+            arguments: ["--settings-subscription-fixture=load-failed"]
+        )
+        let unknownSubscription = LaunchConfiguration.parse(
+            arguments: ["--settings-subscription-fixture=failed"]
+        )
+        XCTAssertEqual(subscription.settingsSubscriptionFixture, .loadFailed)
+        XCTAssertNil(unknownSubscription.settingsSubscriptionFixture)
+
+        // Neither one is a network fixture: both script a reading the Settings
+        // hub already holds, and flipping `usesZeroNetworkFixtures` here would
+        // silently change what the rest of the launch does.
+        XCTAssertFalse(selling.usesZeroNetworkFixtures)
+        XCTAssertFalse(subscription.usesZeroNetworkFixtures)
+    }
+
     func testRestoredCaptureFixtureIsExplicitAndZeroNetworkOnly() {
         let configuration = LaunchConfiguration.parse(
             arguments: ["--restored-capture-fixture"]
