@@ -381,7 +381,9 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(description.waitForExistence(timeout: 3))
         description.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        XCTAssertFalse(app.textViews["listing-review.editor.description"].exists)
+        XCTAssertFalse(
+            anyElement("listing-review.editor.description", in: app).exists
+        )
         description.typeText(" Boxed.")
         app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
@@ -442,7 +444,7 @@ final class ListingReviewUITests: XCTestCase {
         let price = app.textFields["listing-review.price"]
         XCTAssertTrue(price.waitForExistence(timeout: 3))
         XCTAssertFalse(
-            app.buttons["listing-review.price.apply"].exists,
+            anyElement("listing-review.price.apply", in: app).exists,
             "The two-step price editor is retired; the box is the field."
         )
         for _ in 0..<4 where !price.isHittable {
@@ -512,8 +514,8 @@ final class ListingReviewUITests: XCTestCase {
         // The two-step editor is gone, so there is no second control left to
         // squeeze. What has to hold is that the one field is still typable
         // and still inside the window at this size.
-        XCTAssertFalse(app.textFields["listing-review.price.field"].exists)
-        XCTAssertFalse(app.buttons["listing-review.price.apply"].exists)
+        XCTAssertFalse(anyElement("listing-review.price.field", in: app).exists)
+        XCTAssertFalse(anyElement("listing-review.price.apply", in: app).exists)
 
         let frameReceipt =
             "price.frame=\(price.frame), window.frame=\(window.frame)"
@@ -620,7 +622,9 @@ final class ListingReviewUITests: XCTestCase {
         // Nothing pushed. The seller is still on Item specifics and the
         // retired one-field screen and its helper paragraph are both gone.
         XCTAssertTrue(app.navigationBars["Item specifics"].exists)
-        XCTAssertFalse(app.textFields["listing-review.specific.field"].exists)
+        XCTAssertFalse(
+            anyElement("listing-review.specific.field", in: app).exists
+        )
         XCTAssertFalse(
             app.staticTexts[
                 "Saved on this phone when you tap Done. Editing a specific never spends another AI item."
