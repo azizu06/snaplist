@@ -916,6 +916,13 @@ final class SnapListUITests: XCTestCase {
     /// argument at all, so these three SELLING rows cannot render one — this
     /// confirms the rows still exist (not silently dropped) and are exactly
     /// what they claim to be: non-navigating, so not `XCUIElementTypeButton`.
+    ///
+    /// `--fixture=account` never reaches a confirmed eBay connection (the
+    /// real `ebayPublishService` is unavailable under zero-network
+    /// fixtures), so `settings.selling.marketplaces` stays this non-button
+    /// value row here. Issue #865 makes that same row a real destination
+    /// once connected — see `EbayPublishUITests` for that state, proved
+    /// through `--settings-proof=SET-01`.
     func testSettingsSellingValueRowsAreNotButtons() {
         let app = launch(extraArguments: ["--fixture=account"])
         let settingsScreen = app.descendants(matching: .any)["settings.screen"]
