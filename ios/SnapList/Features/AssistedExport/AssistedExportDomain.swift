@@ -435,7 +435,6 @@ enum AssistedExportCopy {
     static let retry = "Retry"
     static let actionFailed = "Couldn’t complete that action. Try again."
     static let entryTitle = "Share to other marketplaces"
-    static let entryDetail = "Prepared for Facebook Marketplace, Mercari, and Depop"
     static let saveBeforeSharing = "Save your changes before sharing."
 
     static func savePhotos(count: Int) -> String {
@@ -492,7 +491,6 @@ enum AssistedExportCopy {
         retry,
         actionFailed,
         entryTitle,
-        entryDetail,
         saveBeforeSharing,
         savePhotos(count: 8),
         savePhotos(count: 1),

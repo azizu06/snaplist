@@ -13,18 +13,12 @@ enum PhotoReviewV5VisualContract {
     // inside the scrollable region above the pinned Start Listing footer.
     static let heroHeight: CGFloat = 380
     static let heroRadius: CGFloat = 16
-    // #883: the hero's page indicator, measured off
-    // `facebook-page-dots-reference.png` — a small scrim capsule of dots sitting
-    // on the photo just above its bottom edge, centered on its horizontal axis.
-    // The dots are deliberately smaller than a `UIPageControl`'s: the reference
-    // reads as a quiet marker on the photo, not a control competing with it.
-    static let heroPageIndicatorDotSize: CGFloat = 6
-    static let heroPageIndicatorDotSpacing: CGFloat = 4
-    static let heroPageIndicatorHorizontalPadding: CGFloat = 7
-    static let heroPageIndicatorVerticalPadding: CGFloat = 5
-    static let heroPageIndicatorBottomInset: CGFloat = 12
-    static let heroPageIndicatorFillOpacity: Double = 0.55
-    static let heroPageIndicatorInactiveDotOpacity: Double = 0.45
+    // #883 measured the hero's page indicator off
+    // `facebook-page-dots-reference.png`. #896 extracted it to
+    // `SnapListPageDots` so Listing Review's pager counts photos the same way,
+    // and the geometry moved with it. This forwards rather than restates it:
+    // the inset is the one number this file still places.
+    static let heroPageIndicatorBottomInset = SnapListPageDots.Metrics.bottomInset
     static let thumbnailSize: CGFloat = 64
     static let thumbnailRadius: CGFloat = 12
     static let thumbnailGap: CGFloat = 10
@@ -4023,58 +4017,28 @@ struct PhotoReviewView: View {
         }
     }
 
-    // #883: the page indicator, built to `facebook-page-dots-reference.png` — a
-    // scrim capsule of dots sitting on the photo just above its bottom edge,
-    // centered. It is a marker, not a control: `allowsHitTesting(false)` keeps
-    // the hero's own tap and swipe working straight through it, and VoiceOver
-    // reads the position off the label rather than counting dots.
+    // #883 built this indicator here; #896 moved it to `SnapListPageDots` so
+    // Listing Review's pager counts photos the same way instead of growing a
+    // second one. The shared view owns the dots, the scrim capsule, and the
+    // marker semantics — it never hit-tests, so the hero's own tap and swipe
+    // pass straight through. What stays here is what is the hero's own: the
+    // navigation guard, the spoken position, the identifier, the landmark, and
+    // where the row sits.
     @ViewBuilder
     private func heroPageIndicator(selectedIndex: Int) -> some View {
         if PhotoReviewHeroNavigationPolicy.hasSomewhereToGo(
             photoCount: store.photos.count
         ) {
-            HStack(
-                spacing: PhotoReviewV5VisualContract.heroPageIndicatorDotSpacing
-            ) {
-                ForEach(store.photos.indices, id: \.self) { index in
-                    Circle()
-                        .fill(
-                            SnapListColorToken.onDarkSurface.color.opacity(
-                                index == selectedIndex
-                                    ? 1
-                                    : PhotoReviewV5VisualContract
-                                        .heroPageIndicatorInactiveDotOpacity
-                            )
-                        )
-                        .frame(
-                            width: PhotoReviewV5VisualContract
-                                .heroPageIndicatorDotSize,
-                            height: PhotoReviewV5VisualContract
-                                .heroPageIndicatorDotSize
-                        )
-                }
-            }
-            .padding(
-                .horizontal,
-                PhotoReviewV5VisualContract.heroPageIndicatorHorizontalPadding
-            )
-            .padding(
-                .vertical,
-                PhotoReviewV5VisualContract.heroPageIndicatorVerticalPadding
-            )
-            .background(
-                SnapListColorToken.scrimOverlay.color.opacity(
-                    PhotoReviewV5VisualContract.heroPageIndicatorFillOpacity
-                ),
-                in: Capsule()
-            )
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                PhotoReviewHeroNavigationPolicy.pageIndicatorAccessibilityLabel(
-                    selectedIndex: selectedIndex,
-                    photoCount: store.photos.count
-                )
+            SnapListPageDots(
+                pageCount: store.photos.count,
+                selectedIndex: selectedIndex,
+                // The hero does not label its photos individually, so VoiceOver
+                // reads the position off this row rather than counting dots.
+                accessibilityLabel: PhotoReviewHeroNavigationPolicy
+                    .pageIndicatorAccessibilityLabel(
+                        selectedIndex: selectedIndex,
+                        photoCount: store.photos.count
+                    )
             )
             .accessibilityIdentifier("photo-review.hero.page-indicator")
             .photoReviewLayoutLandmark(.heroPageIndicator)

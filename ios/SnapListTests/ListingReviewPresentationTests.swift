@@ -59,6 +59,44 @@ final class ListingReviewPresentationTests: XCTestCase {
         )
     }
 
+    func testPageDotsDrawOneDotPerPhotoAndFillOnlyTheCurrentOne() {
+        XCTAssertEqual(
+            SnapListPageDots.filledStates(pageCount: 2, selectedIndex: 0),
+            [true, false]
+        )
+        XCTAssertEqual(
+            SnapListPageDots.filledStates(pageCount: 2, selectedIndex: 1),
+            [false, true]
+        )
+        XCTAssertEqual(
+            SnapListPageDots.filledStates(pageCount: 5, selectedIndex: 3),
+            [false, false, false, true, false]
+        )
+    }
+
+    func testPageDotsSurviveASelectionThatIsNotOnThePage() {
+        // The pager owns the selection and this view only reports it, so an
+        // index the page count cannot hold must still draw the right number of
+        // dots rather than trapping or filling nothing the seller can see.
+        XCTAssertEqual(
+            SnapListPageDots.filledStates(pageCount: 3, selectedIndex: 9),
+            [false, false, false]
+        )
+        XCTAssertEqual(
+            SnapListPageDots.filledStates(pageCount: 3, selectedIndex: -1),
+            [false, false, false]
+        )
+    }
+
+    func testPageDotsStayHiddenWhenThereIsOnlyOnePlaceToBe() {
+        // #883's marker semantics: dots report which of several photos is up.
+        // A lone dot over a single photo is decoration, so the row withholds
+        // itself exactly where the hero has nowhere to go.
+        XCTAssertFalse(SnapListPageDots.isVisible(pageCount: 1))
+        XCTAssertFalse(SnapListPageDots.isVisible(pageCount: 0))
+        XCTAssertTrue(SnapListPageDots.isVisible(pageCount: 2))
+    }
+
     private func soldMatches(
         _ facts: [(Int, String)]
     ) throws -> [ListingReviewSoldMatch] {
