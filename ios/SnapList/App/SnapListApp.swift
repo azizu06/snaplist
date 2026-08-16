@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if DEBUG
+import UIKit
+#endif
 
 @main
 struct SnapListApp: App {
@@ -118,8 +121,7 @@ struct SnapListApp: App {
         _router = State(
             initialValue: AppRouter(
                 initialTab: configuration.initialTab,
-                initialRoute: configuration.initialRoute,
-                initialSheet: configuration.fixture.initialSheet
+                initialRoute: configuration.initialRoute
             )
         )
         let onboardingModel = OnboardingFlowModel(
@@ -143,7 +145,14 @@ struct SnapListApp: App {
             }
         }
         if let count = configuration.stagedLibraryPhotoFixtureCount, count > 0 {
-            let photos = (0..<count).map { Data("fixture-photo-\($0)".utf8) }
+            // Real, decodable JPEG bytes, not placeholder text (#864): the
+            // eventual capture handoff decodes this data as an image
+            // (`captureFlow.stageLibraryPhoto`), so non-image bytes silently
+            // fail to stage and a relaunch that should land the seller on
+            // their staged photo instead reaches an empty camera. Matches the
+            // fixture image already generated for `--restored-capture-fixture`
+            // in `AppDependencies.seedRestoredCaptureFixtureIfNeeded`.
+            let photos = Self.stagedLibraryPhotoFixtureImages(count: count)
             onboardingModel.didStageLibraryPhotos(photos)
         } else if configuration.visualState == nil && !configuration.usesZeroNetworkFixtures {
             onboardingModel.restorePersistedProgress()
@@ -206,6 +215,44 @@ struct SnapListApp: App {
 #endif
     }
 
+    /// `count` real, decodable JPEG images for `--fixture-staged-library-photos=`.
+    ///
+    /// `stagedLibraryPhotoFixtureCount` only ever comes from a DEBUG-only launch
+    /// argument (`LaunchConfiguration.parse` is itself `#if DEBUG`), so this
+    /// path never runs in a release build.
+    private static func stagedLibraryPhotoFixtureImages(count: Int) -> [Data] {
+#if DEBUG
+        let fixtureColors: [(background: UIColor, subject: UIColor)] = [
+            (
+                UIColor(red: 0.91, green: 0.90, blue: 0.88, alpha: 1),
+                UIColor(red: 0.76, green: 0.74, blue: 0.70, alpha: 1)
+            ),
+            (
+                UIColor(red: 0.84, green: 0.82, blue: 0.78, alpha: 1),
+                UIColor(red: 0.58, green: 0.55, blue: 0.50, alpha: 1)
+            ),
+            (
+                UIColor(red: 0.45, green: 0.56, blue: 0.64, alpha: 1),
+                UIColor(red: 0.23, green: 0.31, blue: 0.37, alpha: 1)
+            )
+        ]
+        return (0..<count).compactMap { index -> Data? in
+            let renderer = UIGraphicsImageRenderer(
+                size: CGSize(width: 16, height: 16)
+            )
+            let colors = fixtureColors[index % fixtureColors.count]
+            return renderer.jpegData(withCompressionQuality: 0.9) { context in
+                colors.background.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+                colors.subject.setFill()
+                context.fill(CGRect(x: 4, y: 3, width: 8, height: 10))
+            }
+        }
+#else
+        []
+#endif
+    }
+
     var body: some Scene {
         WindowGroup {
             AppShellView(
@@ -229,12 +276,34 @@ struct SnapListApp: App {
                         .seedRestoredCaptureFixtureIfNeeded(
                             configuration: configuration
                         )
+                    if configuration.resetCaptureDraft {
+                        // Both `LocalCaptureDraftStore` and `NativeIntake` are
+                        // deliberately durable across relaunches (the
+                        // seller's staged photo must survive one), so a UI
+                        // test that reaches the camera through either real,
+                        // file-backed store otherwise inherits whatever an
+                        // earlier test in the same shard invocation staged
+                        // and never tore down. `CaptureFlowModel.restore()`
+                        // reads from `NativeIntake` whenever intake is
+                        // non-nil, which it always is outside the isolated
+                        // `--restored-capture-fixture` store (#864).
+                        try? await dependencies.captureDraftStore.discard()
+                        await dependencies.nativeIntake.discardAllForTesting()
+                    }
 #endif
                     let restoration = await captureFlow.restore()
                     if restoration == .stagedPhoto {
                         firstValueOnboardingModel.reconcileExistingProgress()
                     }
                     router.handleCaptureRestoration(restoration)
+                    if restoration == .stagedPhoto {
+                        // `restore()` lands a staged photo on `.captured`, not a
+                        // live session (there is no more launcher sheet whose
+                        // dismiss handler used to start it). Start it here, or a
+                        // seller who removes the last photo after relaunching is
+                        // stuck on "Preparing camera" with no recovery (#864).
+                        await captureFlow.startCamera()
+                    }
                 }
         }
     }

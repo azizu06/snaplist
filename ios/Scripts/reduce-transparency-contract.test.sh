@@ -11,10 +11,10 @@ snaplist_directory=${ios_directory}/SnapList
   exit 1
 }
 
-# CaptureViews.swift's CameraFixtureSurface, CaptureFixtureHomeBackdrop,
-# CaptureLauncherFixture, FixtureItemScene and CaptureHandoffFixture are
-# private structs that only the visual-state fixture route builds. They
-# never render to a seller, so Reduce Transparency owes them nothing (#831).
+# CaptureViews.swift's CameraFixtureSurface, FixtureItemScene and
+# CaptureHandoffFixture are private structs that only the visual-state
+# fixture route builds. They never render to a seller, so Reduce
+# Transparency owes them nothing (#831).
 excluded_file=${snaplist_directory}/Features/Capture/CaptureViews.swift
 
 # Every SwiftUI spelling of a translucent system material or fill. A surface

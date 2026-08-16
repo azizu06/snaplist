@@ -249,17 +249,19 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.settings])
     }
 
-    /// Capture is still a sheet, but the dock no longer opens it. Restoration is
-    /// the surviving entry, and it must not move the seller off the tab they are
-    /// standing on.
+    /// Scan opens directly into the camera preview (#864): there is no more
+    /// launcher sheet to stand the seller up in, so a relaunch that restores a
+    /// staged photo has to move the seller onto the Scan tab itself, where
+    /// `ScanCameraView` is mounted, rather than presenting anything over
+    /// whichever tab they happened to be on.
     @MainActor
-    func testRestoredCaptureIsASheetAndDoesNotReplaceTheSelectedTab() {
+    func testRestoredCaptureLandsDirectlyOnScan() {
         let router = AppRouter(initialTab: .trophyWall)
 
         router.handleCaptureRestoration(.stagedPhoto)
 
-        XCTAssertEqual(router.selectedTab, .trophyWall)
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
     @MainActor
@@ -622,12 +624,10 @@ final class AppNavigationTests: XCTestCase {
         for fixture in FoundationFixture.allCases {
             let router = AppRouter(
                 initialTab: fixture.initialTab,
-                initialRoute: fixture.initialRoute,
-                initialSheet: fixture.initialSheet
+                initialRoute: fixture.initialRoute
             )
 
             XCTAssertEqual(router.selectedTab, fixture.initialTab)
-            XCTAssertEqual(router.presentedSheet, fixture.initialSheet)
             XCTAssertEqual(
                 router.pathBinding(for: fixture.initialTab).wrappedValue,
                 fixture.initialRoute.map { [$0] } ?? []

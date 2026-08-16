@@ -94,11 +94,10 @@ enum FoundationFixture: String, CaseIterable {
     case trophyProcessing = "trophy-processing"
     case trophyWall = "trophy-wall"
     case account
-    case capture
 
     var initialTab: PrimaryTab {
         switch self {
-        case .onboarding, .scan, .capture: .scan
+        case .onboarding, .scan: .scan
         case .trophyProcessing, .trophyWall, .account: .trophyWall
         }
     }
@@ -106,13 +105,9 @@ enum FoundationFixture: String, CaseIterable {
     var initialRoute: AppRoute? {
         switch self {
         case .account: .settings
-        case .onboarding, .scan, .trophyProcessing, .trophyWall, .capture:
+        case .onboarding, .scan, .trophyProcessing, .trophyWall:
             nil
         }
-    }
-
-    var initialSheet: AppSheet? {
-        self == .capture ? .capture : nil
     }
 }
 
@@ -331,6 +326,14 @@ struct LaunchConfiguration: Equatable {
     var activationGuidanceFixtureState: ActivationGuidanceState?
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
+    /// Clears any real staged capture draft (`LocalCaptureDraftStore`'s
+    /// on-disk manifest) before restore runs. A UI test that reaches the
+    /// camera through the real, file-backed store — rather than the
+    /// isolated `--restored-capture-fixture` one — otherwise inherits
+    /// whatever an earlier test in the same shard invocation staged and
+    /// never tore down, since `LocalCaptureDraftStore` is deliberately
+    /// durable across relaunches (#864).
+    var resetCaptureDraft: Bool
     var submissionFixture: SubmissionFixture?
     var submissionVisualState: PhotoReviewSubmissionVisualStateID?
     var submissionAcknowledgmentNotification:
@@ -365,6 +368,7 @@ struct LaunchConfiguration: Equatable {
         activationGuidanceFixtureState: nil,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
+        resetCaptureDraft: false,
         submissionFixture: nil,
         submissionVisualState: nil,
         submissionAcknowledgmentNotification: nil,
@@ -399,6 +403,7 @@ struct LaunchConfiguration: Equatable {
         activationGuidanceFixtureState: nil,
         stagedLibraryPhotoFixtureCount: nil,
         usesRestoredCaptureFixture: false,
+        resetCaptureDraft: false,
         submissionFixture: nil,
         submissionVisualState: nil,
         submissionAcknowledgmentNotification: nil,
@@ -430,6 +435,8 @@ struct LaunchConfiguration: Equatable {
                 configuration.usesZeroNetworkFixtures = true
             } else if argument == "--reset-onboarding-progress" {
                 configuration.resetOnboardingProgress = true
+            } else if argument == "--reset-capture-draft" {
+                configuration.resetCaptureDraft = true
             } else if argument == "--activation-onboarded-fixture" {
                 configuration.activationOnboardedFixture = true
                 configuration.usesZeroNetworkFixtures = true
