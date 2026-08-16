@@ -16,9 +16,22 @@ import Image from "next/image";
  * reading path.
  */
 
-/** Captured at 1560x3380 and shipped at 620 wide, which is 2x the drawn frame. */
-const SHOT_WIDTH = 620;
-const SHOT_HEIGHT = 1343;
+/**
+ * Captured at 1560x3376 and shipped at 1240 wide. The previous 620x1255 files
+ * were both the wrong shape and too small: 219px had been cropped off the top,
+ * which made them 0.494 rather than a real iPhone's 0.462, and 620 was under
+ * half the pixels a Retina screen asks for at this size.
+ */
+const SHOT_WIDTH = 1240;
+const SHOT_HEIGHT = 2683;
+
+/**
+ * The explorer screen renders at 268px scaled by --phone-scale, so it is 327px
+ * under 880 and 357px above it. The old "288px" hint understated that, and Next
+ * served a 279px file into a 357px box which the browser upscaled again for
+ * Retina. Every screen on the page was soft.
+ */
+const SHOT_SIZES = "(max-width: 879px) 330px, 360px";
 
 function Shot({ src, alt, priority = false }: { src: string; alt: string; priority?: boolean }) {
   return (
@@ -28,7 +41,7 @@ function Shot({ src, alt, priority = false }: { src: string; alt: string; priori
       alt={alt}
       width={SHOT_WIDTH}
       height={SHOT_HEIGHT}
-      sizes="(max-width: 879px) 60vw, 288px"
+      sizes={SHOT_SIZES}
       priority={priority}
     />
   );
@@ -48,7 +61,7 @@ export function PhotoReviewScreen() {
   return (
     <Shot
       src="/marketing/screens/photo-review.webp"
-      alt="Photo review showing three of five photos with a cover marker, and a voice note of twelve seconds ready to play."
+      alt="Photo review showing three of five photos of a sneaker, the first marked Cover, a tile for adding another, and an empty voice note row offering to add details the photos might miss."
     />
   );
 }

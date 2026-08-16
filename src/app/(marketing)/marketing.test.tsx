@@ -605,14 +605,79 @@ describe("feature explorer semantics", () => {
     expect($(".mkt-tab .mkt-chip, .mkt-explorer__device .mkt-phone__chip").length).toBe(0);
     expect($(".mkt-hero__minimal-phone").length).toBe(1);
     // The hero screen is a capture of the shipping camera, not a drawing. An
-    // empty device here is the state this replaced, so the assertion is that a
-    // shot is present and described, not merely that the frame rendered.
-    const hero = $(".mkt-hero__minimal-phone .mkt-phone__screen img.mkt-scr__shot");
-    expect(hero.length).toBe(1);
-    expect(hero.attr("alt")).toBeTruthy();
+    // empty device here is the state this replaced, so the assertion is that
+    // the loop is present and described, not merely that the frame rendered.
+    const loop = $(".mkt-hero__minimal-phone .mkt-phone__screen .mkt-scanloop");
+    expect(loop.length).toBe(1);
+    expect(loop.attr("role")).toBe("img");
+    expect(loop.attr("aria-label")).toBeTruthy();
     expect($(".mkt-hero__sbar, .mkt-hero__lbar, .mkt-hero__lbody").length).toBe(0);
     expect($("body").text()).not.toMatch(/\b(?:candidate|illustrative)\b/i);
     expect($("body").text()).not.toMatch(/\b(?:crop|rotate)\b/i);
+  });
+
+  it("loops five branded items behind one set of captured camera chrome", async () => {
+    const $ = load(renderToStaticMarkup(<LandingPage />));
+
+    const items = $(".mkt-scanloop .mkt-scanloop__item");
+    expect(items.length).toBe(5);
+    // Exactly one item is visible at a time, and the server renders the first.
+    expect(items.filter('[data-active="true"]').length).toBe(1);
+    expect(items.eq(0).attr("data-active")).toBe("true");
+    // Five stacked frames of one animation are one image, not five, so the
+    // container carries the description and the frames are silent.
+    items.each((_, node) => expect($(node).attr("alt")).toBe(""));
+    expect($(".mkt-scanloop").attr("aria-label")).toMatch(/Fender|Nike|Rolex|Sony|Nintendo/);
+
+    // The camera chrome is a knockout of the shipping capture rather than a
+    // redrawing of it. Losing this layer is how the hero would start claiming
+    // interface the app does not have (Apple guideline 2.3.3).
+    expect($(".mkt-scanloop .mkt-scanloop__chrome").length).toBe(1);
+    expect($(".mkt-scanloop .mkt-scanloop__shutter").length).toBe(1);
+    const chrome = await sharp(resolve("public/marketing/hero/chrome.webp")).metadata();
+    expect(chrome.hasAlpha).toBe(true);
+  });
+
+  it("keeps every phone screen at a real iPhone aspect and asks for enough pixels", async () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const screens = [
+      "scan",
+      "photo-review",
+      "listing-review",
+      "publish",
+      "trophy-wall",
+    ].map((name) => `public/marketing/screens/${name}.webp`);
+    const heroFrames = ["fender", "nikedunk", "rolex", "sony", "nintendo"].map(
+      (name) => `public/marketing/hero/${name}.webp`,
+    );
+
+    // An iPhone screen is 0.460 wide over tall. The shots shipped at 0.494 for
+    // a while, because 219px had been cropped off the top, and every frame
+    // built to hold them was squat to match.
+    for (const file of [...screens, ...heroFrames]) {
+      const { width = 0, height = 0 } = await sharp(resolve(file)).metadata();
+      expect(width / height).toBeCloseTo(0.462, 3);
+      expect(width).toBeGreaterThanOrEqual(744);
+    }
+
+    // The drawn frames have to agree with that aspect, or `cover` trims the
+    // capture and the trim lands on real controls.
+    expect(css).toMatch(/\.mkt-explorer__device\s*\{[\s\S]*?height:\s*600px/);
+    expect(css).toMatch(/--phone-h:\s*calc\(var\(--phone-w\) \* 600 \/ 288\)/);
+    expect(css).toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*aspect-ratio:\s*360 \/ 756/);
+    // A rotated frame shears the captured chrome inside it.
+    expect(css).not.toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*rotate\(/);
+  });
+
+  it("stops the scanning loop under reduced motion without losing the screen", () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)", 1000));
+
+    for (const selector of [".mkt-scanloop__shutter", ".mkt-scanloop__flash", ".mkt-scanloop__sweep"]) {
+      expect(reduced).toContain(selector);
+    }
+    expect(reduced).toMatch(/\.mkt-scanloop__sweep\s*\{[^}]*animation:\s*none !important/);
+    expect(reduced).toMatch(/\.mkt-scanloop__item\[data-active="true"\][^{]*\{[^}]*transition:\s*none !important/);
   });
 
   it("keeps five truthful two-line descriptions, including one optional bounded voice note", () => {
