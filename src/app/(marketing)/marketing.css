@@ -549,12 +549,18 @@ html:has(.mkt) {
 
 /* -------------------------------------------------------------- phone frame */
 
+/* Same hardware as the explorer device, scaled to the hero's 400px body: 3.83%
+   of that is 15px of frame, split 4 rail and 11 bezel, and 16.8% of it is a 67px
+   radius. See the "realistic hardware" block below the explorer device for where
+   those three ratios come from. */
 .mkt-phone {
   position: relative;
-  background: var(--ink);
-  padding: 10px;
-  border-radius: 44px;
-  box-shadow: 0 26px 60px rgba(16, 24, 40, 0.22);
+  padding: 15px;
+  border-radius: 67px;
+  box-shadow:
+    inset 0 0 0 11px var(--device-bezel),
+    0 26px 60px rgba(16, 24, 40, 0.22);
+  background: var(--device-rail);
 }
 
 
@@ -563,7 +569,7 @@ html:has(.mkt) {
   width: 100%;
   height: 100%;
   background: var(--canvas);
-  border-radius: 34px;
+  border-radius: 52px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -581,10 +587,14 @@ html:has(.mkt) {
 
    It is deliberately larger than the explorer device at 384. The hero phone is
    the lead visual and the only animated one on the page, so it should outweigh a
-   phone that sits beside step copy. It used to be 360, which inverted that. */
+   phone that sits beside step copy. It used to be 360, which inverted that.
+
+   400 / 831 rather than 400 / 840: the frame is 15px a side now rather than 10,
+   so the screen is 370 wide and 370 / 0.46216 is 801, and 801 + 30 is 831. The
+   old pair left the screen at 0.4634 and `cover` trimming a couple of pixels. */
 .mkt-hero__minimal-phone {
   width: min(400px, 86vw);
-  aspect-ratio: 400 / 840;
+  aspect-ratio: 400 / 831;
 }
 
 /* Screen contents. Every screen is now a capture of the shipping app rather
@@ -976,7 +986,7 @@ html:has(.mkt) {
 .mkt-explorer {
   --phone-w: 384px;
   --phone-scale: 1.33333;
-  --phone-h: calc(var(--phone-w) * 600 / 288);
+  --phone-h: calc(var(--phone-w) * 598 / 288);
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1056,21 +1066,109 @@ html:has(.mkt) {
 .mkt-explorer__device {
   position: relative;
   width: 288px;
-  /* 600 rather than 562.5: the screen inside the 10px padding is then 268 x 580,
+  /* 598 rather than 562.5: the screen inside the 11px frame is then 266 x 576,
      which is the 1240 x 2683 aspect of every shot and also a real iPhone screen
      aspect, so `cover` has nothing to trim. 562.5 matched the old 620 x 1255
      shots, but those had 219px cropped off the top and were squat at 0.494, so
      the frame built to fit them was squat too and the screens inside it looked
      shrunken. */
-  height: 600px;
-  background: var(--ink);
-  border-radius: 46px;
-  padding: 10px;
-  box-shadow: 0 24px 56px rgba(16, 24, 40, 0.2);
+  height: 598px;
+  border-radius: 48px;
+  padding: 11px;
+  box-shadow:
+    inset 0 0 0 8px var(--device-bezel),
+    0 24px 56px rgba(16, 24, 40, 0.2);
+  background: var(--device-rail);
 }
 
 .mkt-explorer__device .mkt-phone__screen {
-  border-radius: 36px;
+  border-radius: 37px;
+}
+
+/* ------------------------------------------------------- realistic hardware */
+
+/* The frame used to be a flat 10px slab of `--ink` with a 46px radius, which
+   reads as a rounded rectangle rather than a phone. Every number below is
+   measured off Cal AI's `analyzed.webp`, which Aziz gave as the reference: a
+   1275 x 2600 alpha-cut render whose body is 1253 x 2599.
+
+   Frame thickness there is 48px of 1253, so 3.83% of body width, and it is two
+   tones rather than one: 13px of light titanium rail on the outside and 35px of
+   near-black bezel inside it. That is the whole trick. A single dark band at any
+   thickness stays flat, because a real phone edge catches light on its rail and
+   goes black at the glass. At our 288px design width 3.83% is 11px, split 3 and
+   8, so the black arrives as an inset ring and the 3px that shows outside it is
+   the gradient below.
+
+   Corner radius is 16.8% of body width, hence 48px here against the old 46px.
+   The screen radius is the difference, 48 - 11 = 37, so the two curves stay
+   concentric. Get that wrong and the corners read as a sticker on a slab.
+
+   No notch and no Dynamic Island are drawn, which matches Cal AI and is also
+   forced: our shots carry the app's own status bar, so anything drawn on top of
+   them would cover app content. It landed on the Trophy Wall title once. */
+:root {
+  --device-bezel: #05070a;
+  /* Off-axis so the highlight falls left of centre, the way a rail lit from the
+     page's top left would. Flat grey here loses the metal immediately. */
+  --device-rail: linear-gradient(
+    96deg,
+    #8f9298 0%,
+    #5d6167 14%,
+    #3c4046 32%,
+    #33373c 68%,
+    #5b5f65 88%,
+    #8f9298 100%
+  );
+  --device-button: linear-gradient(96deg, #2f3338 0%, #23262a 55%, #3a3e44 100%);
+}
+
+/* Side hardware. Cal AI's render carries three: a short action button and a
+   longer volume bar on the left, and a longer power button on the right, each
+   protruding about 0.7% of body width past the rail. They are what stop the
+   frame reading as CSS, and they cost one element, because two of the three are
+   pseudo-elements on the device itself.
+
+   Percentages of the frame's height rather than pixels, so they survive the
+   `--phone-scale` steps and the hero's larger frame without being restated. */
+.mkt-explorer__device::before,
+.mkt-explorer__device::after,
+.mkt-phone::before,
+.mkt-phone::after,
+.mkt-phone__action {
+  content: "";
+  position: absolute;
+  width: 5px;
+  background: var(--device-button);
+  pointer-events: none;
+}
+
+/* Left: action button, then the volume bar under it. */
+.mkt-phone__action,
+.mkt-explorer__device::before,
+.mkt-phone::before {
+  left: -2px;
+  border-radius: 2px 1px 1px 2px;
+}
+
+.mkt-phone__action {
+  top: 19.1%;
+  height: 4.2%;
+}
+
+.mkt-explorer__device::before,
+.mkt-phone::before {
+  top: 26.6%;
+  height: 6.7%;
+}
+
+/* Right: power. Slightly less proud than the left pair, as measured. */
+.mkt-explorer__device::after,
+.mkt-phone::after {
+  right: -2px;
+  top: 28.9%;
+  height: 11%;
+  border-radius: 1px 2px 2px 1px;
 }
 
 .mkt-explorer__slide {

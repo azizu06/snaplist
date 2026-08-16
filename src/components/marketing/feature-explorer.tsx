@@ -70,6 +70,9 @@ export function FeatureExplorer() {
           <div className="mkt-explorer__frame">
             <div className="mkt-explorer__scale">
               <div className="mkt-explorer__device">
+                {/* The device draws its own volume and power buttons as
+                    pseudo-elements; this is the third, the action button. */}
+                <span className="mkt-phone__action" aria-hidden="true" />
                 <div className="mkt-phone__screen">
                   {SCREENS.map((Screen, index) => (
                     <div

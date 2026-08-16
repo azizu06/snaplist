@@ -12,7 +12,7 @@ of it from the binaries.
 | --- | --- | --- |
 | `screens/scan.webp` | Scan | camera view framing Aziz's Air Jordan 3 on its box, with the framing brackets removed. Why they are removed is in "Whose shoes these are" below |
 | `screens/photo-review.webp` | Photo Review | four-photo strip of Aziz's Air Jordan 3, one frame per source photograph, a Cover marker, an Add tile, and the voice note row in its empty state |
-| `screens/listing-review.webp` | Listing Review | the same four photos, title, condition, price recommendation, and three Air Jordan 3 sold matches |
+| `screens/listing-review.webp` | Listing Review | the same four photos, the item identified as an Air Jordan 3 Retro in summit white, the price recommendation, and three item-only Air Jordan 3 sold matches |
 | `screens/publish.webp` | Publish | assisted export and share for the same item, second-half publish screen |
 | `screens/trophy-wall.webp` | Trophy Wall | chronological item states, with Aziz's Air Jordan 3 leading the wall |
 
@@ -31,6 +31,16 @@ the App Store panels come from, at a 4x device scale, and writes about 1560x3380
 There is no top crop, and that matters more than it sounds: 1240x2683 is 0.462, a real iPhone
 screen, and the frames in `marketing.css` are built to that number so `object-fit: cover` has
 nothing to trim.
+
+All five have the OS status bar and, where the canvas draws one, the Dynamic Island removed before
+capture, so app content starts at the very top edge of the glass. Aziz asked for this after putting
+the page next to Cal AI, whose device render carries neither: "use that extra space instead of the
+dynamic notch for room." Scan gained the most, because its status bar was white text sitting on a
+white wall and its island was a black pill over the viewfinder; both are simply gone now rather than
+faint. The removal is structural rather than another `data-dc-tpl` list, because only `scanfix` is
+plain markup and the other four build their phones from templates where the row has no stable
+attribute until the board renders. It runs against the already-resolved live screen and throws if it
+cannot find a status bar, so a silent miss cannot ship a screen that disagrees with the other four.
 
 Three of the five need the page put into a particular state first, and the script asserts each one
 rather than trusting it. Publish clicks its first row. Trophy Wall substitutes a settled-wall state
@@ -174,6 +184,18 @@ wrong match set. They are now five genuine Air Jordan 3 photographs, cut by
 `scripts/comp-jordan3-crops.mjs` from `source/fx/comp3/` at 4:3, which is the aspect the rail card
 paints.
 
+Two of those five contain a person: `comp-02` is the shoe worn with jeans and `comp-04` is a hand
+holding one. The screen shows the first three, so the worn pair sat directly under the words
+"Verified sold matches", which is the wrong thing for that heading to be pointing at. Aziz: "I think
+it is better to put verified sold matches as the item itself, not someone wearing them." Unsplash
+has exactly three Air Jordan 3 photographs in total and two of them are already in this set, so
+there was no replacement to license. `comp-02` and `comp-05` are swapped at capture time instead,
+which puts the tagged pair, the pair on its box and the pair on the blanket on screen and drops both
+photographs with people in them to positions four and five. Each entry keeps its own price, date,
+condition and size, so no figure is attached to the wrong photograph, and the range line reads the
+shown three so it moved from $104-$135 to $98-$135 by itself. The order is not chronological either
+way, because the rail is ranked by match quality rather than by sale date.
+
 The source is Unsplash, the same place the Air Jordan 1 set came from. The Unsplash License permits
 commercial use with no permission and no attribution required; the photographers are Jay Nuetey,
 Taru Goyal, Daniel Cheney, Joel Muniz and Sysoda Chau, credited here anyway. Adobe Stock was checked
@@ -183,6 +205,51 @@ marketing use.
 Always render a candidate before trusting its identification. One Unsplash photograph read as an Air
 Jordan 3 in a square-cropped contact sheet and showed its Air Jordan 4 wing panel once the sheet
 preserved the original aspect. Contact sheets that crop are not evidence of what a photograph shows.
+
+### The identity line, and why the shot does not open on the corrected state
+
+The Listing Review canvas starts on a deliberately weak identity, "Casual Sneaker · Mid top", and
+keeps the good one, "Air Jordan 3 Retro · Summit white", behind the guided correction. That is right
+for the package, whose job on that screen is to demonstrate the correction, and it needs something
+wrong for the seller to fix. It is wrong for a marketing shot, where it read as the product failing
+to recognise a shoe whose full name was already printed in the title directly above it. Aziz caught
+it: "the title of the item is the actual thing ... but in the listing review, you just have casual
+sneaker mid top."
+
+The capture now opens on the identity the canvas itself calls correct. Only that one string moves.
+Price, range, confidence and the sold matches are untouched, because they are keyed to the comps on
+screen rather than to this line, and the canvas keeps both states so the correction flow still has
+something to correct.
+
+## The device frame
+
+The frame is a drawing in `marketing.css`, and until Aziz put the page beside Cal AI it was a flat
+10px slab of `--ink` with a 46px radius, which reads as a rounded rectangle. Their phone is one
+`analyzed.webp`, a 1275 x 2600 alpha-cut render whose body measures 1253 x 2599. Three ratios were
+taken off it and every number in the frame rules is derived from them:
+
+| Measured | Of body width | At our 288px design width |
+| --- | --- | --- |
+| frame thickness | 3.83% | 11px, split 3 rail and 8 bezel |
+| corner radius | 16.8% | 48px, screen radius 37 |
+| button protrusion | 0.7% | 2px |
+
+The part that matters is that the frame is **two tones**, not one: light titanium rail on the
+outside, near-black bezel inside it. A single dark band stays flat at any thickness, because a real
+phone edge catches light on its rail and goes black at the glass. It costs no extra element: the
+bezel is an inset `box-shadow` and the rail is the gradient underneath it.
+
+The three side buttons are what stop it reading as CSS. Two are pseudo-elements on the device and
+the third is a single `span`, and their offsets are percentages of frame height so they survive the
+`--phone-scale` steps and the hero's larger frame without being restated.
+
+Neither frame draws a notch or an island. That matches Cal AI and is also forced: the shots carry
+the app's own chrome, so anything drawn over them lands on app content. It sat on the Trophy Wall
+title once.
+
+Their phone renders at 300px wide, 350 at their large breakpoint. Ours renders 340 to 384. Close
+enough to Aziz's "approximately the same size", and the explorer device is deliberately the smaller
+of our two so the hero stays the lead visual.
 
 ## Known honesty gap
 
