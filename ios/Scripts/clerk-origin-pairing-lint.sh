@@ -24,10 +24,13 @@ key_frontend_domain() {
   print -r -- "${decoded%\$}"
 }
 
-# Release builds receive their key from protected build settings and have no
-# committed fallback, so an absent or unexpanded key is release-config-lint.sh's
-# contract rather than an inconsistent pairing.
+# Debug and direct script calls can have no resolved key. A Release build cannot:
+# the resolved value is what lands in Info.plist and what SnapList reads at launch.
 if [[ -z $clerk_key || $clerk_key == *'$('* ]]; then
+  if [[ ${CONFIGURATION:-} == Release ]]; then
+    print -u2 -r -- "error: Release requires SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY to resolve to a concrete Clerk publishable key."
+    exit 65
+  fi
   exit 0
 fi
 

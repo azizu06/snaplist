@@ -17,23 +17,37 @@ if [[ ${CONFIGURATION:-} != "Release" ]]; then
   exit 0
 fi
 
-if [[ -z ${DWARF_DSYM_FOLDER_PATH:-} ]]; then
-  print -u2 -r -- "warning: DWARF_DSYM_FOLDER_PATH is unset; skipping upload."
+is_archive=0
+# Simulator Release builds use SKIP_INSTALL=NO too; ACTION=install remains the
+# archive signal there, while device products with SKIP_INSTALL=NO must upload.
+if [[ ${ACTION:-} == install ]] || {
+  [[ ${SKIP_INSTALL:-} == NO ]] && [[ ${PLATFORM_NAME:-} != iphonesimulator ]]
+}; then
+  is_archive=1
+fi
+
+cannot_upload() {
+  local message=$1
+
+  if (( is_archive )); then
+    print -u2 -r -- "error: ${message}"
+    exit 65
+  fi
+
+  print -u2 -r -- "warning: ${message}"
   exit 0
+}
+
+if [[ -z ${DWARF_DSYM_FOLDER_PATH:-} ]]; then
+  cannot_upload "DWARF_DSYM_FOLDER_PATH is unset; Sentry cannot symbolicate this build."
 fi
 
 if ! command -v sentry-cli >/dev/null 2>&1; then
-  print -u2 -r -- \
-    "warning: sentry-cli is not installed, so Sentry cannot symbolicate this" \
-    "build. Install it with 'brew install getsentry/tools/sentry-cli'."
-  exit 0
+  cannot_upload "sentry-cli is not installed, so Sentry cannot symbolicate this build. Install it with 'brew install getsentry/tools/sentry-cli'."
 fi
 
 if [[ -z ${SENTRY_AUTH_TOKEN:-} ]] && [[ ! -f ${HOME}/.sentryclirc ]]; then
-  print -u2 -r -- \
-    "warning: no Sentry auth token configured, so Sentry cannot symbolicate" \
-    "this build. Set SENTRY_AUTH_TOKEN or run 'sentry-cli login'."
-  exit 0
+  cannot_upload "no Sentry auth token configured, so Sentry cannot symbolicate this build. Set SENTRY_AUTH_TOKEN or run 'sentry-cli login'."
 fi
 
 # Auth is configured, so a failure here is a real one: a Release build whose
