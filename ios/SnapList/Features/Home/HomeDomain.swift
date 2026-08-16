@@ -14,6 +14,8 @@ enum TrophyWallGridMetrics {
     static let gutterPoints: CGFloat = 12
     static let tileCornerRadiusPoints: CGFloat = 12
     static let bottomPaddingPoints: CGFloat = 132
+    /// Between a tile's photo and the date caption under it.
+    static let tileCaptionSpacingPoints: CGFloat = 6
 }
 
 /// The approved empty wall uses a small optical overlap below Scout so the
@@ -210,15 +212,64 @@ enum TrophyWallProcessingAction: Hashable {
     case scan(runID: UUID)
 }
 
+/// Whether the seller's own refresh request is still in flight.
+enum TrophyWallProcessingRefreshState: Hashable {
+    case idle
+    case refreshing
+}
+
+/// Owns the one thing Processing does on the seller's initiative. Nothing here
+/// polls: the screen re-reads the server when the seller asks and not
+/// otherwise, which is why this holds a state rather than a timer.
+@MainActor
+@Observable
+final class TrophyWallProcessingRefreshHost {
+    private(set) var state: TrophyWallProcessingRefreshState = .idle
+
+    /// Drops an ask made while one is already running, so a second tap on a
+    /// slow refresh cannot become a second round trip.
+    func refresh(_ perform: () async -> Void) async {
+        guard state == .idle else {
+            return
+        }
+        state = .refreshing
+        await perform()
+        state = .idle
+    }
+}
+
+/// What tapping the body of a processing row does. Route and action used to be
+/// two independent properties, and a ready row carried both: its pill ran the
+/// review while the rest of the row pushed Run Detail, so the same item took
+/// one or two taps depending on where the seller's thumb landed (#897). One
+/// value cannot hold both answers at once.
+enum TrophyWallProcessingRowActivation: Hashable {
+    case route(HomeRoute)
+    case action(TrophyWallProcessingAction)
+}
+
 struct TrophyWallProcessingRow: Identifiable, Hashable {
     let id: TrophyWallCardIdentity
     let itemName: String
     let stateLabel: String
-    let destination: HomeRoute?
+    /// Not optional. Every state this initializer accepts has somewhere for the
+    /// row body to go, and a state that does not fails the initializer outright
+    /// rather than producing a row that answers nothing.
+    let activation: TrophyWallProcessingRowActivation
     let action: TrophyWallProcessingAction?
     let localCoverPhotoData: Data?
     let accessibilityLabel: String
     let accessibilityIdentifier: String
+
+    /// The typed route this row's body pushes, for the states whose body still
+    /// pushes one. A ready row activates its review action instead, so it has
+    /// no destination at all rather than one the seller never wants.
+    var destination: HomeRoute? {
+        guard case .route(let route) = activation else {
+            return nil
+        }
+        return route
+    }
 
     fileprivate init?(card: TrophyWallCard) {
         guard let itemName = card.itemName else {
@@ -238,7 +289,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             }
             // The destination names this exact local item so recovery can refuse
             // an intake that is no longer the one behind the card.
-            destination = .localRecovery(logicalIdentity)
+            activation = .route(.localRecovery(logicalIdentity))
             accessibilityIdentifier =
                 "trophy.processing.row.local."
                 + logicalIdentity.persistedKey.lowercased()
@@ -260,7 +311,12 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             guard case .run(let runID) = card.identity else {
                 return nil
             }
-            destination = .run(runID)
+            // Run Detail is the default body destination because it is the
+            // screen that explains a run the seller cannot finish yet. A state
+            // that has somewhere better to go replaces this below.
+            var runActivation = TrophyWallProcessingRowActivation.route(
+                .run(runID)
+            )
             accessibilityIdentifier =
                 "trophy.processing.row.run.\(runID.uuidString.lowercased())"
 
@@ -292,6 +348,10 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             case .readyToReview:
                 stateLabel = "Ready to review"
                 action = .review(runID: runID)
+                // The whole row reaches Listing Review, not just the pill. Run
+                // Detail would only repeat the state the seller has read and
+                // offer the same Review button again (#897).
+                runActivation = .action(.review(runID: runID))
                 accessibilityLabel = "\(itemName), ready to review."
             case .readyToReviewLocked:
                 stateLabel = "Ready to review"
@@ -313,6 +373,8 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
             case .pendingUpload, .publishedToEbay, .exportPrepared:
                 return nil
             }
+
+            activation = runActivation
         }
     }
 }
@@ -362,6 +424,14 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
             return nil
         }
         return "trophy.wall.tile.run.\(runID.uuidString.lowercased())"
+    }
+
+    /// When this item went up, drawn from the `historyOrderAt` the tile already
+    /// carries. The wall is photo-first, so the caption stays as short as a
+    /// date can be and names no year, which is the same claim the spoken label
+    /// has always made.
+    var publishedDateLabel: String {
+        historyOrderAt.formatted(.dateTime.month(.abbreviated).day())
     }
 
     var accessibilityLabel: String {

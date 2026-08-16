@@ -670,6 +670,12 @@ struct AppShellView: View {
                     router.selectedTab = .trophyWall
                 },
                 onTryAgain: {},
+                // The fixture has no boundary to re-read, so it stands in for
+                // the round trip. Without a duration the refresh state would
+                // never be observable on this route.
+                onRefresh: {
+                    try? await Task.sleep(for: .milliseconds(1200))
+                },
                 runStore: runStore,
                 listingReviewStore: listingReviewStore,
                 correctionAvailable: configuration.listingReviewCorrectionAvailable,
@@ -2148,6 +2154,10 @@ private struct TrophyWallProcessingDestinationView: View {
             onTryAgain: {
                 Task { await store.recoverCollection(using: repository) }
             },
+            // One ask, one request. `recoverCollection` belongs to the failure
+            // path, where the client keeps trying on its own; a seller asking
+            // for fresh status gets exactly the request they asked for (#897).
+            onRefresh: { await store.refreshCollection(using: repository) },
             runStore: runStore,
             listingReviewStore: listingReviewStore,
             correctionAvailable: correctionAvailable,
@@ -2172,6 +2182,7 @@ private struct ProcessingListingReviewSurface: View {
     let onScan: () -> Void
     let goToTrophyWall: () -> Void
     let onTryAgain: () -> Void
+    let onRefresh: () async -> Void
     @Bindable var runStore: RunDetailStore
     @Bindable var listingReviewStore: ListingReviewStore
     let correctionAvailable: Bool
@@ -2214,7 +2225,8 @@ private struct ProcessingListingReviewSurface: View {
                 }
             },
             onScan: onScan,
-            onTryAgain: onTryAgain
+            onTryAgain: onTryAgain,
+            onRefresh: onRefresh
         )
         .navigationDestination(
             isPresented: Binding(

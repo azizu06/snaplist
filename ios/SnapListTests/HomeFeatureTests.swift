@@ -401,7 +401,14 @@ final class TrophyWallDomainTests: XCTestCase {
         try assertLockedCanonicalProjection(.readyToReview)
     }
 
-    func testReadyProcessingRowOffersReviewWithoutChangingExactRunDestination() {
+    /// This test used to be named
+    /// `testReadyProcessingRowOffersReviewWithoutChangingExactRunDestination`
+    /// and asserted the row body kept `.run(runID)`. That was the defect (#897):
+    /// the pill reached Listing Review while the rest of the row pushed Run
+    /// Detail, so the same ready item took one or two taps depending on where
+    /// the seller's thumb landed. The row body now carries the review action
+    /// itself, which is the exact route the pill already ran.
+    func testReadyProcessingRowActivatesReviewWithoutPushingRunDetail() {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore()
 
@@ -417,8 +424,31 @@ final class TrophyWallDomainTests: XCTestCase {
         )
 
         let row = store.processingRows.last
-        XCTAssertEqual(row?.destination, .run(fixture.runID))
+        XCTAssertEqual(row?.activation, .action(.review(runID: fixture.runID)))
+        XCTAssertNil(row?.destination)
         XCTAssertEqual(row?.action, .review(runID: fixture.runID))
+    }
+
+    /// The states that are not ready keep reaching Run Detail from the row
+    /// body, because that is the screen that explains a failure and offers the
+    /// recovery. Only the ready row changed.
+    func testUnreadyProcessingRowsKeepActivatingTheirExactRunDestination() throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore()
+
+        store.ingest(
+            historyPage: try fixture.historyPage(
+                status: .failed,
+                stage: .pricing,
+                terminalOutcome: .failed,
+                retryTruth: (canRetry: true, workPreserved: true)
+            ),
+            principalScope: fixture.principal
+        )
+
+        let row = store.processingRows.last
+        XCTAssertEqual(row?.activation, .route(.run(fixture.runID)))
+        XCTAssertEqual(row?.destination, .run(fixture.runID))
     }
 
     func testStoreProjectsFailedRunWithoutRetryClientAsLockedNeedsRetryCard() throws {
@@ -1433,6 +1463,93 @@ final class TrophyWallDomainTests: XCTestCase {
             XCTAssertEqual(
                 recollapsed.visibleRows.map(\.accessibilityIdentifier),
                 scenario.collapsedRowIdentifiers
+            )
+        }
+    }
+
+    /// A settled tile already carried `historyOrderAt`, but it only ever
+    /// reached the accessibility label, so a seller looking at the wall could
+    /// not see when anything went up (#897). The visible caption is drawn from
+    /// that same date. Nothing new is invented and nothing new is fetched.
+    func testSettledTileShowsTheSameDateItsAccessibilityLabelAlreadySpoke() {
+        let runID = UUID(uuidString: "5A100000-0000-4000-8000-000000000001")!
+        let published = Date(timeIntervalSince1970: 1_755_000_000)
+        let tile = TrophyWallSettledTile(
+            id: .run(runID),
+            itemName: "White leather sneaker",
+            stateLabel: "Published to eBay",
+            historyOrderAt: published
+        )
+
+        let calendar = Calendar.current
+        XCTAssertTrue(
+            tile.publishedDateLabel.contains(
+                "\(calendar.component(.day, from: published))"
+            ),
+            tile.publishedDateLabel
+        )
+        // The spoken label has never named a year, so the caption beside the
+        // photo does not start naming one either.
+        XCTAssertFalse(
+            tile.publishedDateLabel.contains(
+                "\(calendar.component(.year, from: published))"
+            ),
+            tile.publishedDateLabel
+        )
+
+        let older = TrophyWallSettledTile(
+            id: .run(runID),
+            itemName: "White leather sneaker",
+            stateLabel: "Published to eBay",
+            historyOrderAt: published.addingTimeInterval(-60 * 60 * 24 * 40)
+        )
+        XCTAssertNotEqual(tile.publishedDateLabel, older.publishedDateLabel)
+    }
+
+    /// Nothing on Processing re-read the server on its own initiative, so a
+    /// seller watching an item finish had no way to ask (#897). The refresh is
+    /// something the seller asks for: it reports while it works, and a second
+    /// ask during that window does not become a second round trip.
+    @MainActor
+    func testProcessingRefreshRunsOneRequestPerAskAndReportsWhileItWorks() async {
+        let host = TrophyWallProcessingRefreshHost()
+        var requestCount = 0
+        var stateDuringRequest: TrophyWallProcessingRefreshState?
+
+        XCTAssertEqual(host.state, .idle)
+
+        await host.refresh {
+            requestCount += 1
+            stateDuringRequest = host.state
+            // The seller taps again while the first ask is still in flight.
+            await host.refresh { requestCount += 1 }
+        }
+
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(stateDuringRequest, .refreshing)
+        XCTAssertEqual(host.state, .idle)
+    }
+
+    /// The name and the action shared one horizontal line at every type size,
+    /// separated only by the row's own trailing padding. At an accessibility
+    /// size the pill takes most of the row, so the name column collapsed until
+    /// a single word broke across two lines against the pill (#897). Past that
+    /// point the action belongs under the name, where the name has the full
+    /// row width to wrap into.
+    func testProcessingRowMovesItsActionUnderTheNameOnlyAtAccessibilityType() {
+        for size in [DynamicTypeSize.xSmall, .large, .xxxLarge] {
+            XCTAssertEqual(
+                TrophyWallProcessingRowMetrics.layout(for: size),
+                .sideBySide,
+                "\(size)"
+            )
+        }
+
+        for size in [DynamicTypeSize.accessibility1, .accessibility5] {
+            XCTAssertEqual(
+                TrophyWallProcessingRowMetrics.layout(for: size),
+                .actionBelowName,
+                "\(size)"
             )
         }
     }
