@@ -74,12 +74,12 @@ enum TrophyWallStoreFactory {
         assetName: String,
         crop: TrophyWallPhotoCrop
     )] = [
-        ("White leather sneaker", "FirstValueSneaker", .full),
-        ("Vintage denim jacket", "FirstValueJacket", .full),
-        ("White desk lamp", "FirstValueLamp", .full),
-        ("White leather sneaker, second pair", "FirstValueSneaker", .detailTrailing),
-        ("Vintage denim jacket, second item", "FirstValueJacket", .detailLeading),
-        ("White desk lamp, second item", "FirstValueLamp", .detailTop),
+        ("DualSense controller", "FirstValueController", .full),
+        ("AirPods Max", "FirstValueHeadphones", .full),
+        ("Charizard card", "FirstValueTradingCard", .full),
+        ("DualSense controller, second one", "FirstValueController", .detailTrailing),
+        ("AirPods Max, second pair", "FirstValueHeadphones", .detailLeading),
+        ("Charizard card, second copy", "FirstValueTradingCard", .detailTop),
     ]
 #endif
 

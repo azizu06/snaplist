@@ -13,6 +13,24 @@ enum FirstValueOnboardingHeaderMetrics {
 
 enum FirstValueOnboardingLayoutMetrics {
     static let draftScoutTopPadding: CGFloat = 8
+
+    /// ONB-02 puts two stacked photos beside one tall photo. The tall one has to absorb
+    /// the caption row the stacked column spends between its two photos, or the bottom
+    /// caption on each side sits at a different height.
+    static let contextShortPhotoHeight: CGFloat = 174
+    static let contextTallPhotoHeight: CGFloat = 384
+    static let contextColumnSpacing: CGFloat = 10
+    /// One caption row plus the gap between it and the photo it labels.
+    static let contextCaptionBlockHeight: CGFloat = 26
+    static let contextCaptionSpacing: CGFloat = 6
+
+    /// ONB-06's hero card sat its price row 12 points below the title and roughly 7 above
+    /// the card's own edge, so the band read as bottom-cropped. The two paddings match now,
+    /// and the height is a floor rather than a lid: a title that wraps grows the card
+    /// instead of being clipped by it.
+    static let includedCardTextTopPadding: CGFloat = 12
+    static let includedCardTextBottomPadding: CGFloat = 12
+    static let includedCardTextMinHeight: CGFloat = 79
 }
 
 @MainActor
@@ -179,7 +197,7 @@ struct FirstValueOnboardingView: View {
             case .onb02:
                 highlightedTitle("A few angles,\n", "then say the rest.")
             case .onb03:
-                highlightedTitle("Priced from jackets that\n", "actually sold.")
+                highlightedTitle("Priced from controllers\n", "that actually sold.")
             case .onb04:
                 highlightedTitle("Written for you.\n", "Yours to change.")
             case .onb05:
@@ -226,18 +244,18 @@ struct FirstValueOnboardingView: View {
                 let tileWidth = (proxy.size.width - 16) / 3
                 HStack(spacing: 8) {
                     photographTile(
-                        "FirstValueSneaker",
-                        label: "A worn sneaker photographed on a plain surface",
+                        "FirstValueHeadphones",
+                        label: "A pair of over-ear headphones on a plain surface",
                         width: tileWidth
                     )
                     photographTile(
-                        "FirstValueJacket",
-                        label: "A folded medium wash denim jacket",
+                        "FirstValueController",
+                        label: "A white game controller on a red surface",
                         width: tileWidth
                     )
                     photographTile(
-                        "FirstValueLamp",
-                        label: "A desk lamp photographed on a plain surface",
+                        "FirstValueTradingCard",
+                        label: "A holographic trading card on gray cloth",
                         width: tileWidth
                     )
                 }
@@ -274,7 +292,7 @@ struct FirstValueOnboardingView: View {
 
     private var photographListingProjection: some View {
         HStack(spacing: 12) {
-            Image("FirstValueJacket")
+            Image("FirstValueController")
                 .resizable()
                 .scaledToFill()
                 .frame(width: 54, height: 54)
@@ -282,7 +300,7 @@ struct FirstValueOnboardingView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 11))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Denim trucker jacket, size M")
+                Text(FirstValueOnboardingCopy.shortListingTitle)
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.9)
@@ -315,34 +333,35 @@ struct FirstValueOnboardingView: View {
     private var contextScreen: some View {
         VStack(spacing: 0) {
             GeometryReader { proxy in
-                let columnWidth = (proxy.size.width - 10) / 2
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(spacing: 10) {
+                let metrics = FirstValueOnboardingLayoutMetrics.self
+                let columnWidth = (proxy.size.width - metrics.contextColumnSpacing) / 2
+                HStack(alignment: .top, spacing: metrics.contextColumnSpacing) {
+                    VStack(spacing: metrics.contextColumnSpacing) {
                         contextPhoto(
                             crop: .whole,
-                            caption: "The whole thing",
-                            height: 174,
+                            caption: FirstValueOnboardingCopy.contextCaptions[0],
+                            height: metrics.contextShortPhotoHeight,
                             width: columnWidth
                         )
                         .accessibilitySortPriority(3)
                         contextPhoto(
                             crop: .flaw,
-                            caption: "Any flaws",
-                            height: 174,
+                            caption: FirstValueOnboardingCopy.contextCaptions[1],
+                            height: metrics.contextShortPhotoHeight,
                             width: columnWidth
                         )
                         .accessibilitySortPriority(2)
                     }
                     contextPhoto(
                         crop: .details,
-                        caption: "The details",
-                        height: 382,
+                        caption: FirstValueOnboardingCopy.contextCaptions[2],
+                        height: metrics.contextTallPhotoHeight,
                         width: columnWidth
                     )
                     .accessibilitySortPriority(1)
                 }
             }
-            .frame(height: 410)
+            .frame(height: 412)
             Divider()
                 .padding(.top, 14)
                 .padding(.bottom, 16)
@@ -367,13 +386,13 @@ struct FirstValueOnboardingView: View {
                             .foregroundStyle(SnapListColorToken.textSecondary.color)
                             .fixedSize()
                     }
-                    Text("“Small mark on the left cuff. Bought it in Tokyo in 2019.”")
+                    Text("“\(FirstValueOnboardingCopy.voiceNoteQuote)”")
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Optional. Voice note, 9 seconds of a possible 15. Play. Small mark on the left cuff. Bought it in Tokyo in 2019.")
+            .accessibilityLabel("Optional. Voice note, 9 seconds of a possible 15. Play. \(FirstValueOnboardingCopy.voiceNoteQuote)")
         }
     }
 
@@ -416,10 +435,9 @@ struct FirstValueOnboardingView: View {
                 .padding(.leading, 34)
                 .padding(.bottom, 6)
                 VStack(spacing: 0) {
-                    soldRow("Excellent, barely worn", "4 days ago", "$66", scale: 1.5, offset: CGSize(width: 2, height: -2))
-                    soldRow("Good, light wear", "6 days ago", "$62", scale: 1.6, offset: CGSize(width: -2, height: -3))
-                    soldRow("Very good", "2 weeks ago", "$55", scale: 1.9, offset: CGSize(width: 3, height: 2))
-                    soldRow("Good, small marks", "3 weeks ago", "$49", scale: 1.4, offset: CGSize(width: -3, height: 3))
+                    ForEach(FirstValueOnboardingCopy.soldComparisonRows, id: \.self) { row in
+                        soldRow(row)
+                    }
                 }
             }
             Divider()
@@ -441,7 +459,7 @@ struct FirstValueOnboardingView: View {
     private var draftScreen: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                itemImage("FirstValueJacket", label: "The jacket in its finished listing")
+                itemImage("FirstValueController", label: "The controller in its finished listing")
                     .frame(width: 96, height: 96)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                 VStack(alignment: .leading, spacing: 4) {
@@ -459,12 +477,12 @@ struct FirstValueOnboardingView: View {
             VStack(spacing: 0) {
                 draftEditableRow(
                     "Title",
-                    "Medium wash denim trucker jacket, size M",
+                    FirstValueOnboardingCopy.listingTitle,
                     showsTopDivider: false
                 )
                 draftEditableRow(
                     "Condition",
-                    "Good, small mark on left cuff"
+                    FirstValueOnboardingCopy.listingCondition
                 )
                 draftPriceRow
                 draftEditableRow("Description", "Four paragraphs")
@@ -565,7 +583,7 @@ struct FirstValueOnboardingView: View {
                 reduceMotion: reduceMotion,
                 usesStaticRendering: usesStaticScoutRendering
             ) {
-                Text("No account needed, and you edit every field before anything leaves the app.")
+                Text(FirstValueOnboardingCopy.includedScoutLine)
                     .font(.system(size: 13))
                     .foregroundStyle(SnapListColorToken.mutedHeadlineText.color)
                     .padding(.leading, 12)
@@ -577,7 +595,7 @@ struct FirstValueOnboardingView: View {
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
                 ZStack(alignment: .topLeading) {
-                    Image("FirstValueJacket")
+                    Image("FirstValueController")
                         .resizable()
                         .scaledToFill()
                         .frame(maxWidth: .infinity)
@@ -598,7 +616,7 @@ struct FirstValueOnboardingView: View {
                     .frame(height: 254)
                     .contentShape(Rectangle())
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("The finished listing for the denim jacket")
+                    .accessibilityLabel("The finished listing for the DualSense controller")
                     .accessibilityIdentifier("first-value-onboarding.included-photo-preview")
             }
             .frame(maxWidth: .infinity)
@@ -606,7 +624,7 @@ struct FirstValueOnboardingView: View {
             .clipped()
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Medium wash denim trucker jacket, size M")
+                Text(FirstValueOnboardingCopy.listingTitle)
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if dynamicTypeSize.isAccessibilitySize {
@@ -627,10 +645,20 @@ struct FirstValueOnboardingView: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 14 : 0)
+            .padding(.top, FirstValueOnboardingLayoutMetrics.includedCardTextTopPadding)
+            .padding(
+                .bottom,
+                dynamicTypeSize.isAccessibilitySize
+                    ? 14
+                    : FirstValueOnboardingLayoutMetrics.includedCardTextBottomPadding
+            )
             .frame(maxWidth: .infinity, alignment: .top)
-            .frame(height: dynamicTypeSize.isAccessibilitySize ? nil : 67, alignment: .top)
+            .frame(
+                minHeight: dynamicTypeSize.isAccessibilitySize
+                    ? nil
+                    : FirstValueOnboardingLayoutMetrics.includedCardTextMinHeight,
+                alignment: .top
+            )
         }
         .background(SnapListColorToken.canvas.color)
         .clipShape(RoundedRectangle(cornerRadius: 18))
@@ -668,46 +696,58 @@ struct FirstValueOnboardingView: View {
         if let outcome = model.outcome { didFinish(outcome) }
     }
 
-    private enum JacketCrop: Equatable { case whole, flaw, details }
+    private enum ItemCrop: Equatable { case whole, flaw, details }
 
     private func contextPhoto(
-        crop: JacketCrop,
+        crop: ItemCrop,
         caption: String,
         height: CGFloat,
         width: CGFloat
     ) -> some View {
-        VStack(spacing: 6) {
-            jacketImage(crop)
+        VStack(spacing: FirstValueOnboardingLayoutMetrics.contextCaptionSpacing) {
+            itemCropImage(crop)
                 .frame(width: width, height: height)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             HStack(spacing: 5) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(SnapListColorToken.action.color)
-                Text(caption).font(.subheadline.weight(.semibold))
+                Text(caption)
             }
+            // Set on the row, not on the label alone. Left to the environment, the
+            // checkmark resolved a size larger than the caption beside it.
+            .font(.subheadline.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
         }
         .frame(width: width)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(caption). \(contextAlt(crop))")
     }
 
+    /// Three views of the seller's own item, which is one photograph. The scale and anchor
+    /// are what make them three different views rather than the same frame three times.
     @ViewBuilder
-    private func jacketImage(_ crop: JacketCrop) -> some View {
-        if crop == .flaw {
-            Image("FirstValueJacket")
+    private func itemCropImage(_ crop: ItemCrop) -> some View {
+        switch crop {
+        case .whole:
+            Image("FirstValueController").resizable().scaledToFill()
+        case .flaw:
+            Image("FirstValueController")
                 .resizable().scaledToFill()
                 .scaleEffect(3, anchor: .bottomLeading)
-        } else {
-            Image("FirstValueJacket").resizable().scaledToFill()
+        case .details:
+            Image("FirstValueController")
+                .resizable().scaledToFill()
+                .scaleEffect(1.9, anchor: .top)
         }
     }
 
-    private func contextAlt(_ crop: JacketCrop) -> String {
+    private func contextAlt(_ crop: ItemCrop) -> String {
         switch crop {
-        case .whole: "The whole jacket, folded and photographed on a plain surface"
-        case .flaw: "Close view of the mark on the left cuff"
-        case .details: "Close view of the collar, seams and buttons"
+        case .whole: "The whole controller photographed on a plain surface"
+        case .flaw: "Close view of the scuff on the left grip"
+        case .details: "Close view of the buttons and thumbsticks"
         }
     }
 
@@ -715,22 +755,22 @@ struct FirstValueOnboardingView: View {
         Image(name).resizable().scaledToFit().accessibilityLabel(label)
     }
 
-    private func soldRow(_ title: String, _ subtitle: String, _ price: String, scale: CGFloat, offset: CGSize) -> some View {
+    private func soldRow(_ row: SoldComparisonRow) -> some View {
         HStack(spacing: 11) {
-            ZStack {
-                Image("FirstValueJacket").resizable().scaledToFill()
-                    .scaleEffect(scale).offset(offset)
-            }
-            .frame(width: 36, height: 36).clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .accessibilityHidden(true)
+            Image(row.imageName)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 36, height: 36)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text("Sold \(subtitle)").font(.caption)
+                Text(row.condition).font(.subheadline.weight(.semibold))
+                Text("Sold \(row.soldAgo)").font(.caption)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
             }
             Spacer()
-            Text(price).font(.body.bold())
+            Text(row.price).font(.body.bold())
         }
         .padding(.vertical, 7)
         .overlay(alignment: .top) { Divider() }

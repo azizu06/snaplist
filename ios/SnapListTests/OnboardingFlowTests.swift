@@ -1440,7 +1440,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(FirstValueOnboardingCopy.backgroundExampleRows.count, 3)
         XCTAssertEqual(
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.item),
-            ["Denim trucker jacket", "Desk lamp", "White sneakers"]
+            ["DualSense controller", "AirPods Max", "Charizard card"]
         )
         XCTAssertEqual(
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.state),
@@ -1448,9 +1448,110 @@ final class OnboardingFlowTests: XCTestCase {
         )
         XCTAssertEqual(
             FirstValueOnboardingCopy.backgroundExampleRows.map(\.imageName),
-            ["FirstValueJacket", "FirstValueLamp", "FirstValueSneaker"],
+            ["FirstValueController", "FirstValueHeadphones", "FirstValueTradingCard"],
             "Each row carries its own asset, so a new row cannot outrun the image list."
         )
+    }
+
+    /// A seller recognizes the item onboarding is selling, or the screens are selling
+    /// nothing. The desk lamp, denim jacket, and plain white sneaker went with #887, and
+    /// nothing in the flow may name them again.
+    func testOnboardingItemCopyNamesTheBrandedItem() {
+        let strings = FirstValueOnboardingCopy.backgroundExampleRows.map(\.item)
+            + FirstValueOnboardingCopy.soldComparisonRows.map(\.imageName)
+            + FirstValueOnboardingCopy.contextCaptions
+            + [FirstValueOnboardingCopy.includedScoutLine,
+               FirstValueOnboardingCopy.listingTitle,
+               FirstValueOnboardingCopy.shortListingTitle,
+               FirstValueOnboardingCopy.listingCondition,
+               FirstValueOnboardingCopy.voiceNoteQuote]
+
+        for retired in ["jacket", "lamp", "sneaker", "denim"] {
+            for string in strings {
+                XCTAssertFalse(
+                    string.lowercased().contains(retired),
+                    "\(string) still sells a \(retired)."
+                )
+            }
+        }
+    }
+
+    /// ONB-06's reassurance ran to one long line and one short one. It also promised
+    /// something onboarding cannot promise, so the wording moved with the break.
+    func testIncludedScoutLineStatesTheAccountTruthWithoutTheVagueWord() {
+        let line = FirstValueOnboardingCopy.includedScoutLine
+
+        XCTAssertEqual(
+            line,
+            "No account needed to start. You edit every field before you publish."
+        )
+        XCTAssertFalse(line.lowercased().contains("anything"))
+    }
+
+    /// The item on ONB-04 and ONB-06 is the one the seller just watched get photographed
+    /// and priced, so its title and condition have to describe that same controller.
+    func testDraftCopyDescribesThePhotographedController() {
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.listingTitle,
+            "Sony DualSense wireless controller, white"
+        )
+        XCTAssertEqual(
+            FirstValueOnboardingCopy.listingCondition,
+            "Good, small scuff on the left grip"
+        )
+    }
+
+    /// ONB-03 used to draw one jacket photograph four times, each row separated only by
+    /// its own `.scaleEffect` and `.offset`, so four sold listings were one photograph
+    /// zoomed four ways. Each comp now carries the asset it shows (#887).
+    func testSoldComparisonRowsShowFourSeparatePhotographs() {
+        let rows = FirstValueOnboardingCopy.soldComparisonRows
+
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertEqual(
+            Set(rows.map(\.imageName)).count,
+            4,
+            "Two comps share a photograph, so the row reads as one listing repeated."
+        )
+    }
+
+    /// "The whole thing" and "The details" named nothing a seller could act on, and
+    /// "thing" is the word the copy contract keeps out of product strings (#887).
+    func testContextCaptionsNameWhatThePhotographShows() {
+        let captions = FirstValueOnboardingCopy.contextCaptions
+
+        XCTAssertEqual(captions, ["Whole item", "Any damage", "Close details"])
+        for caption in captions {
+            XCTAssertFalse(
+                caption.lowercased().contains("thing"),
+                "\(caption) still leans on \"thing\"."
+            )
+        }
+    }
+
+    /// The tall right-hand photo stands beside two stacked photos and their caption rows.
+    /// When its height stops matching that column, the bottom caption on each side lands
+    /// on a different baseline, which is what made the row look hand-placed.
+    func testContextTallPhotoMatchesTheStackedColumnItStandsBeside() {
+        let metrics = FirstValueOnboardingLayoutMetrics.self
+
+        XCTAssertEqual(
+            metrics.contextTallPhotoHeight,
+            metrics.contextShortPhotoHeight * 2
+                + metrics.contextColumnSpacing
+                + metrics.contextCaptionBlockHeight
+        )
+    }
+
+    /// A comp naming an asset the catalog does not carry draws an empty tile, which the
+    /// copy assertions above cannot see.
+    func testSoldComparisonRowsNameBundledAssets() {
+        for row in FirstValueOnboardingCopy.soldComparisonRows {
+            XCTAssertNotNil(
+                UIImage(named: row.imageName),
+                "\(row.imageName) is not in the asset catalog."
+            )
+        }
     }
 
     @MainActor
