@@ -127,11 +127,21 @@ struct SettingsView: View {
                                     }
                                 }
                             } label: {
-                                valueRow(
-                                    "Connected marketplaces",
-                                    sellingPresentation.marketplaceValue
-                                )
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                // A plain trailing chevron beside `valueRow`,
+                                // not folded into it: `valueRow` has no
+                                // chevron parameter on purpose (#812) because
+                                // most of its callers are dead ends. This is
+                                // the one caller with a real destination, so
+                                // the chevron is composed here instead.
+                                HStack {
+                                    valueRow(
+                                        "Connected marketplaces",
+                                        sellingPresentation.marketplaceValue
+                                    )
+                                    Image(systemName: "chevron.right")
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -255,8 +265,15 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 21)
             .padding(.top, 16)
-            .padding(.bottom, 100)
+            .padding(.bottom, 24)
         }
+        // Settings is always reached with the Trophy Wall tab selected, and the
+        // floating dock stays up while its rows scroll underneath — nothing on
+        // this screen presents the sheets that hide it. Without this the
+        // scroll view's own bottom edge ignores the dock's footprint, so the
+        // last visible row (the subscription ownership note, or the version
+        // line for a seller without one) rests behind it instead of above it.
+        .safeAreaPadding(.bottom, FloatingDockMetrics.containerHeight(for: .trophyWall))
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .background(SnapListColorToken.mutedSurface.color)
@@ -383,6 +400,7 @@ struct SettingsView: View {
                 if let note = presentation.note { Text(note) }
                 if presentation.showsOwnershipNote {
                     Text("Apple bills and cancels SnapList Pro. SnapList cannot cancel it for you.")
+                        .accessibilityIdentifier("settings.subscription.ownership-note")
                 }
             }
             .font(.footnote)
@@ -692,9 +710,11 @@ struct SettingsView: View {
         }
     }
 
-    /// No `chevron` parameter on purpose (issue #812): a value row here never
-    /// navigates, so there is nothing for it to promise. A row that does
-    /// navigate should use a real `Button`, as `LegalLinkRow` does.
+    /// No `chevron` parameter on purpose (issue #812): most calls here never
+    /// navigate, so there is nothing for a chevron to promise. The one caller
+    /// that does navigate (`Connected marketplaces`, once connected) wraps
+    /// this in a real `NavigationLink` and composes its own trailing chevron
+    /// alongside it, rather than teaching this helper to sometimes navigate.
     private func valueRow(_ label: String, _ value: String) -> some View {
         SettingsValueRow(label: label, value: value)
     }
@@ -771,11 +791,14 @@ struct SettingsCreateAccountRow: View {
 /// `NavigationLink` rows were left off #856's original `Button`-only sweep).
 ///
 /// Unlike the four `Button` rows #861 fixed, this row was never accent-
-/// tinted: a bare `NavigationLink` label renders `.primary` by default
-/// (the classic disclosure-row look — black text, grey chevron), not the
-/// `accentColor` text a `Button` on `.automatic` gets. `.buttonStyle(.plain)`
-/// only removes the filled shape Button Shapes paints behind it; there is no
-/// tint to restate.
+/// tinted: a bare `NavigationLink` label renders `.primary` by default, not
+/// the `accentColor` text a `Button` on `.automatic` gets.
+/// `.buttonStyle(.plain)` only removes the filled shape Button Shapes paints
+/// behind it; there is no tint to restate. Outside a `List`, neither
+/// `NavigationLink` nor `Button` draws a disclosure chevron on its own — the
+/// trailing `chevron.right` below is what actually marks this row as a push,
+/// the same manual chevron `LegalLinkRow` and the connected-marketplaces row
+/// use.
 struct SettingsSignOutRow: View {
     let signOut: () async -> SettingsSignOutOutcome
 
@@ -783,15 +806,19 @@ struct SettingsSignOutRow: View {
         NavigationLink {
             SettingsSignOutView(signOut: signOut)
         } label: {
-            Text(SettingsSignOutCopy.rowLabel)
-                // Same `settingsCardRow` fixed-height touch-target gap
-                // `LegalLinkRow` and "Create an account" needed (#831).
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity,
-                    alignment: .leading
-                )
-                .contentShape(Rectangle())
+            HStack {
+                Text(SettingsSignOutCopy.rowLabel)
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            // Same `settingsCardRow` fixed-height touch-target gap
+            // `LegalLinkRow` and "Create an account" needed (#831).
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .leading
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("settings.sign-out")
@@ -800,7 +827,8 @@ struct SettingsSignOutRow: View {
 }
 
 /// THIS IPHONE card's local-removal opener. See `SettingsSignOutRow` for why
-/// no `foregroundStyle` restatement is needed here.
+/// no `foregroundStyle` restatement is needed here, and for why the chevron
+/// is drawn by hand.
 struct SettingsLocalRemovalRow: View {
     let isGuest: Bool
     let remove: () async -> Bool
@@ -809,13 +837,17 @@ struct SettingsLocalRemovalRow: View {
         NavigationLink {
             SettingsLocalRemovalView(isGuest: isGuest, remove: remove)
         } label: {
-            Text("Remove unsent photos and voice notes")
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity,
-                    alignment: .leading
-                )
-                .contentShape(Rectangle())
+            HStack {
+                Text("Remove unsent photos and voice notes")
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .leading
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("settings.local-removal")
@@ -824,7 +856,8 @@ struct SettingsLocalRemovalRow: View {
 }
 
 /// ACCOUNT MANAGEMENT card's deletion opener. See `SettingsSignOutRow` for
-/// why no `foregroundStyle` restatement is needed here.
+/// why no `foregroundStyle` restatement is needed here, and for why the
+/// chevron is drawn by hand.
 struct SettingsDeleteAccountRow: View {
     let profile: SettingsProfile
     let subscriptionTruth: SettingsDeletionSubscriptionTruth
@@ -840,15 +873,19 @@ struct SettingsDeleteAccountRow: View {
                 deletionFlowPresentationChanged: deletionFlowPresentationChanged
             )
         } label: {
-            Text("Delete account")
-                // Same `settingsCardRow` fixed-height touch-target gap
-                // `LegalLinkRow` and "Create an account" needed (#831).
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity,
-                    alignment: .leading
-                )
-                .contentShape(Rectangle())
+            HStack {
+                Text("Delete account")
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            // Same `settingsCardRow` fixed-height touch-target gap
+            // `LegalLinkRow` and "Create an account" needed (#831).
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .leading
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("settings.delete-account")

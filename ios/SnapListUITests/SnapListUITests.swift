@@ -736,15 +736,19 @@ final class SnapListUITests: XCTestCase {
             XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
 
             let row = app.buttons[identifier]
-            for _ in 0..<4 where !row.isHittable {
-                app.swipeUp()
-            }
             XCTAssertTrue(row.exists, "\(identifier): \(app.debugDescription)")
             // `row.isHittable` is true even when the dock covers only the
             // row's frame center (issue #812's dock-overlap finding) — the
             // element underneath the tap is the label, so that is what must
-            // actually be hittable.
+            // actually be hittable. Swiping on `row.isHittable` was worse
+            // than just unreliable: it can report true before the row has
+            // been scrolled anywhere near the dock, which stopped the loop
+            // at zero swipes and left the label off screen. The loop has to
+            // keep going until the element being asserted on agrees.
             let label = row.staticTexts.firstMatch
+            for _ in 0..<6 where !label.isHittable {
+                app.swipeUp()
+            }
             XCTAssertTrue(label.isHittable, "\(identifier): \(app.debugDescription)")
 
             label.tap()
@@ -787,6 +791,39 @@ final class SnapListUITests: XCTestCase {
             XCTAssertTrue(row.exists, "\(identifier): \(app.debugDescription)")
             XCTAssertFalse(app.buttons[identifier].exists, "\(identifier): \(app.debugDescription)")
         }
+    }
+
+    /// Aziz found the subscription ownership note ("Apple bills and
+    /// cancels…") resting behind the floating Scan/Trophy Wall dock instead
+    /// of above it — the same "not dock-aware on this screen" gap
+    /// `testSettingsAboutRowsOpenTheirLiveLegalDestinations` already
+    /// documented for the ABOUT rows. `isHittable` reports true even when
+    /// the dock visually covers an element's center (#730), so this checks
+    /// geometry instead: the note's bottom edge against the dock's top edge.
+    func testSettingsSubscriptionOwnershipNoteClearsTheFloatingDock() {
+        let app = launch(extraArguments: ["--settings-proof=SET-01"])
+        let settingsScreen = app.descendants(matching: .any)["settings.screen"]
+        XCTAssertTrue(settingsScreen.waitForExistence(timeout: 3), app.debugDescription)
+
+        let note = app.descendants(matching: .any)["settings.subscription.ownership-note"]
+        let dock = app.buttons["dock.trophy-wall"]
+        XCTAssertTrue(dock.exists, app.debugDescription)
+
+        // Stopping the swipe as soon as the note merely exists caught it
+        // the moment it entered the bottom edge — still well below the
+        // dock's top, not yet clear of it. Keep swiping until it has
+        // actually cleared, the same fix
+        // `testSettingsAboutRowsOpenTheirLiveLegalDestinations` needed for
+        // its own swipe loop.
+        for _ in 0..<10 where !(note.exists && note.frame.maxY <= dock.frame.minY) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(note.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertLessThanOrEqual(
+            note.frame.maxY,
+            dock.frame.minY,
+            "note=\(note.frame), dock=\(dock.frame)"
+        )
     }
 
     func testActivationCompletionSuppressesTheCoachMarkAcrossRelaunch() {

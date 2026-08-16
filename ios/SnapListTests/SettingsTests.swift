@@ -984,6 +984,75 @@ final class SettingsTests: XCTestCase {
             "settings.delete-account resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
         )
     }
+
+    /// Aziz found rows that push to another screen looking identical to rows
+    /// that merely display a value — nothing marked the three `NavigationLink`
+    /// rows below as disclosure rows the way `LegalLinkRow` already is. Same
+    /// reflection technique as `testLegalLinkRowWiresItsRowToAnOpenAction`:
+    /// it proves the rendered label actually composes an `Image`, not just
+    /// that one was typed into the source.
+    @MainActor
+    func testSignOutRowCarriesADisclosureChevron() {
+        let row = SettingsSignOutRow(signOut: { .signedOut })
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("Image"),
+            "settings.sign-out is missing its disclosure chevron: \(rendered)"
+        )
+    }
+
+    @MainActor
+    func testLocalRemovalRowCarriesADisclosureChevron() {
+        let row = SettingsLocalRemovalRow(isGuest: false, remove: { true })
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("Image"),
+            "settings.local-removal is missing its disclosure chevron: \(rendered)"
+        )
+    }
+
+    @MainActor
+    func testDeleteAccountRowCarriesADisclosureChevron() {
+        let row = SettingsDeleteAccountRow(
+            profile: SettingsProfile(
+                isGuest: false,
+                name: "Jordan Hale",
+                email: "jordan.hale@icloud.com",
+                emailAddressID: "fixture-primary-email",
+                initials: "JH",
+                method: .apple
+            ),
+            subscriptionTruth: SettingsDeletionSubscriptionTruth(state: .available([])),
+            deletionFlowPresentationChanged: { _ in }
+        )
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("Image"),
+            "settings.delete-account is missing its disclosure chevron: \(rendered)"
+        )
+    }
+
+    /// `SettingsCreateAccountRow` opens the account boundary modally rather
+    /// than pushing it — a `NavigationLink` there would push it instead
+    /// (#799) — so it deliberately stays without a chevron: the chevron
+    /// promises a push, and this row does not perform one.
+    @MainActor
+    func testCreateAccountRowStaysWithoutADisclosureChevron() {
+        let row = SettingsCreateAccountRow(open: {})
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertFalse(
+            rendered.contains("Image"),
+            "settings.create-account opens modally, not by push, and should not promise one: \(rendered)"
+        )
+    }
 }
 
 private final class FailingSettingsAnalyticsClient: AnalyticsClient {
