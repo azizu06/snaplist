@@ -61,22 +61,34 @@ final class EbayPublishUITests: XCTestCase {
             ].exists
         )
         XCTAssertTrue(confirmation.staticTexts["Used, good"].exists)
+        // #893. A single-line value must keep sitting to the right of its
+        // label — proves `ViewThatFits` still picks the trailing candidate
+        // when nothing needs to wrap, not just that the wrap fallback works.
+        XCTAssertGreaterThan(
+            confirmation.staticTexts["Used, good"].frame.minX,
+            confirmation.staticTexts["Condition"].frame.maxX,
+            confirmation.debugDescription
+        )
         XCTAssertTrue(confirmation.staticTexts["4 photos, in this order"].exists)
         XCTAssertTrue(confirmation.staticTexts["$58.00"].exists)
-        XCTAssertTrue(
-            marker("ebay-publish.confirmation.consent", in: confirmation)
-                .label.contains(
-                    "This posts a live listing to eBay under your account, azizu."
-                )
+        // #893. `state == .ready` no longer draws the ordinary consent line:
+        // the destination card above already says "eBay US, as azizu" once.
+        XCTAssertFalse(
+            marker("ebay-publish.confirmation.consent", in: confirmation).exists,
+            "state == .ready must not draw the ordinary consent line.\n\(confirmation.debugDescription)"
         )
+        XCTAssertFalse(confirmation.staticTexts["GOES TO"].exists)
         assertHittableButton(
             "button.primary.post-to-ebay",
             in: confirmation
         )
-        assertHittableButton(
-            "button.secondary.back-to-my-listing",
-            in: confirmation
+        // #893. The confirm screen offers one way back — the toolbar arrow —
+        // not a second "Back to my listing" button under the primary.
+        XCTAssertFalse(
+            confirmation.buttons["button.secondary.back-to-my-listing"].exists,
+            "The confirm screen must not offer a second way back.\n\(confirmation.debugDescription)"
         )
+        assertHittableButton("ebay-publish.back", in: confirmation)
         attachEvidence(for: "confirmation", app: confirmation)
 
         let published = launch(
@@ -186,6 +198,106 @@ final class EbayPublishUITests: XCTestCase {
             actionLabels: ["Go to Trophy Wall"]
         )
         attachEvidence(for: "outcome-unknown-accessibility3", app: unknown)
+    }
+
+    /// #893. Removing the confirm screen's secondary "Back to my listing"
+    /// button must not strand a seller: the toolbar back arrow (`ebay-publish
+    /// .back`, wired to the same `backToListing` action) must still be there
+    /// and hittable, and it must be the only way back offered.
+    func testConfirmationScreenHasExactlyOneWayBackAfterSecondaryButtonRemoved() {
+        let confirmation = launch(
+            fixture: "confirmation",
+            extraArguments: ["--reduced-motion"]
+        )
+        assertScreen("ebay-publish.confirmation", in: confirmation)
+
+        XCTAssertFalse(
+            confirmation.buttons["button.secondary.back-to-my-listing"].exists,
+            confirmation.debugDescription
+        )
+        assertHittableButton("ebay-publish.back", in: confirmation)
+    }
+
+    /// #893. `EbayValueRow` used `.multilineTextAlignment(.trailing)`, so a
+    /// title long enough to wrap read with a ragged left edge, as if it were
+    /// cut off. The fixed row instead lets a wrapping value fall back to a
+    /// left-aligned block under its own label. "Condition" (`Used, good`)
+    /// never wraps and shares the row's typography, so its single-line
+    /// height is this screen's true one-line baseline; the title must clear
+    /// a multiple of it to prove it wrapped, and its left edge must land on
+    /// its label's left edge to prove it did not stay trailing-aligned.
+    func testConfirmationLongTitleWrapsLeftAlignedInsteadOfRaggedTrailing() {
+        let confirmation = launch(
+            fixture: "confirmation",
+            extraArguments: ["--reduced-motion", "--dynamic-type=accessibility3"]
+        )
+        let titleLabel = confirmation.staticTexts["Title"]
+        let titleValue = confirmation.staticTexts[
+            "Medium wash denim trucker jacket, size M"
+        ]
+        let conditionValue = confirmation.staticTexts["Used, good"]
+        XCTAssertTrue(titleLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(titleValue.waitForExistence(timeout: 5))
+        XCTAssertTrue(conditionValue.waitForExistence(timeout: 5))
+
+        let receipt =
+            "titleLabel.frame=\(titleLabel.frame), titleValue.frame=\(titleValue.frame), conditionValue.frame=\(conditionValue.frame)"
+
+        XCTAssertGreaterThan(
+            titleValue.frame.height,
+            conditionValue.frame.height * 1.6,
+            receipt
+        )
+        XCTAssertEqual(
+            titleValue.frame.minX,
+            titleLabel.frame.minX,
+            accuracy: 2,
+            receipt
+        )
+    }
+
+    /// #893. Inside the expanded "Item specifics and description" disclosure,
+    /// every item-specifics row sat one uniform gap apart, and DESCRIPTION
+    /// used that identical gap before its own label — so it read as just
+    /// another row rather than the start of a new block. The fixed row adds
+    /// extra top padding to the DESCRIPTION label; this proves the resulting
+    /// gap clears a margin over the ordinary row-to-row gap (averaged across
+    /// Brand→Color and Color→Size) instead of matching it.
+    func testItemSpecificsAndDescriptionReadAsTwoDistinctBlocksWhenExpanded() {
+        let confirmation = launch(
+            fixture: "confirmation",
+            extraArguments: ["--reduced-motion"]
+        )
+        let disclosure = confirmation.buttons["Item specifics and description"]
+        XCTAssertTrue(
+            disclosure.waitForExistence(timeout: 10),
+            confirmation.debugDescription
+        )
+        disclosure.tap()
+
+        let brand = confirmation.staticTexts["Brand"]
+        let color = confirmation.staticTexts["Color"]
+        let size = confirmation.staticTexts["Size"]
+        let description = confirmation.staticTexts["DESCRIPTION"]
+        for element in [brand, color, size, description] {
+            XCTAssertTrue(
+                element.waitForExistence(timeout: 5),
+                confirmation.debugDescription
+            )
+        }
+
+        let receipt =
+            "brand=\(brand.frame), color=\(color.frame), size=\(size.frame), description=\(description.frame)"
+        let rowGap =
+            ((color.frame.minY - brand.frame.maxY)
+                + (size.frame.minY - color.frame.maxY)) / 2
+        let sectionGap = description.frame.minY - size.frame.maxY
+
+        XCTAssertGreaterThan(
+            sectionGap,
+            rowGap * 1.3,
+            "DESCRIPTION must read as a new block, not another item-specifics row.\n\(receipt)"
+        )
     }
 
     /// #865. Before this, the account/disconnect screen was reachable only

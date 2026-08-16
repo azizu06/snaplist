@@ -349,10 +349,6 @@ struct EbayPublishView: View {
                         ) { Task { await store.confirmPublish() } }
                     }
                 }
-                SnapListSecondaryButton(
-                    title: "Back to my listing",
-                    action: backToListing
-                )
             }
             .padding(.horizontal, SnapListMetrics.screenGutter)
             .padding(.vertical, 10)
@@ -369,9 +365,6 @@ struct EbayPublishView: View {
                 .frame(width: 52, height: 52)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 3) {
-                Text("GOES TO")
-                    .snapListTypography(.metadata)
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
                 Text(
                     "\(EbayPublishPresentation.marketplace(preflight.marketplace)), as \(accountName)"
                 )
@@ -475,6 +468,7 @@ struct EbayPublishView: View {
                 Text("DESCRIPTION")
                     .snapListTypography(.metadata)
                     .foregroundStyle(SnapListColorToken.textTertiary.color)
+                    .padding(.top, 24)
                 Text(preflight.description)
                     .foregroundStyle(SnapListColorToken.textSecondary.color)
                     .textSelection(.enabled)
@@ -483,18 +477,23 @@ struct EbayPublishView: View {
         .ebayCard()
     }
 
+    @ViewBuilder
     private func consent(_ state: EbayConfirmationViewState) -> some View {
-        Text(
-            state == .missingFields
-                ? "Nothing is posted from this screen."
-                : state == .accountChanged
-                    ? "This posts a live listing to eBay under \(accountName), not \(store.preparedUsername ?? "the previous account")."
-                    : "This posts a live listing to eBay under your account, \(accountName)."
-        )
-        .snapListTypography(.status)
-        .foregroundStyle(SnapListColorToken.textSecondary.color)
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityIdentifier("ebay-publish.confirmation.consent")
+        if state == .missingFields {
+            consentText("Nothing is posted from this screen.")
+        } else if state == .accountChanged {
+            consentText(
+                "This posts a live listing to eBay under \(accountName), not \(store.preparedUsername ?? "the previous account")."
+            )
+        }
+    }
+
+    private func consentText(_ text: String) -> some View {
+        Text(text)
+            .snapListTypography(.status)
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("ebay-publish.confirmation.consent")
     }
 
     private func result(_ state: EbayResultViewState) -> some View {
@@ -613,8 +612,11 @@ struct EbayAccountScreenView: View {
                 )
                 Text("Payment, shipping and returns are set on your eBay account.")
                     .snapListTypography(.body)
-                    .ebayCard()
-                SnapListSecondaryButton(title: "Disconnect eBay account") {
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(SnapListColorToken.actionTint.color)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                SnapListDestructiveButton(title: "Disconnect eBay account") {
                     showsDisconnectConfirmation = true
                 }
                 .accessibilityIdentifier("ebay-account.disconnect")
@@ -1786,17 +1788,29 @@ private struct EbayValueRow: View {
     let value: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .snapListTypography(.status)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-            Spacer(minLength: 8)
-            Text(value)
-                .snapListTypography(.rowTitle)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                labelText
+                Spacer(minLength: 8)
+                Text(value)
+                    .snapListTypography(.rowTitle)
+                    .lineLimit(1)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                labelText
+                Text(value)
+                    .snapListTypography(.rowTitle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.vertical, 11)
+    }
+
+    private var labelText: some View {
+        Text(label)
+            .snapListTypography(.status)
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
     }
 }
 
