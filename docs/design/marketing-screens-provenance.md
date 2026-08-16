@@ -46,8 +46,26 @@ Three of the five need the page put into a particular state first, and the scrip
 rather than trusting it. Publish clicks its first row. Trophy Wall substitutes a settled-wall state
 string and throws if that string is not in the canvas. Listing review scrolls 38px so the sold-match
 row ends on the screen edge instead of slicing the price, and throws if the scroll lands anywhere
-else. Trophy Wall keeps its partial bottom row deliberately, because that reads as a grid that
-continues and scrolling it would cut the top row instead.
+else. Trophy Wall drops its fourth tile row entirely, which reverses an earlier decision recorded
+here.
+
+That earlier reasoning was that a partial bottom row reads as a grid that continues, and that
+scrolling to hide it would only slice the top row and the header instead. Both halves are true in
+the app. Neither survives the marketing page, because the phone renders at roughly a third of life
+size and the wall is a fixed 390x844 capture scaled down with it. The fourth row began at y=808 in
+an 844-tall screen, so 35px of a 216px row showed, with the floating dock sitting over the sliver.
+At full size that is a grid that continues; at 370px wide it is a row of clipped thumbnails against
+the bottom bezel, which is what Aziz saw: "the trophy wall, the edges are cut off ... it's not
+aligned correctly."
+
+Scrolling could not fix it, since four rows of 228 against a 732 viewport always cut something.
+Growing the phone could not either, because the capture is a fixed screen that scales
+proportionally and takes the sliver with it. So `TRIM_ROW` removes the last row at capture time and
+asserts its way there: eight tiles, four distinct row tops, exactly two hidden, and the remaining
+grid must end above the screen edge or it throws. With the status bar already stripped the content
+sits ~54px higher, so the last surviving row ends at 743 of 844 and leaves clearance under it for
+the dock. Three complete rows ship. The horizontal gutters were never the problem and measure
+symmetric at 16px in the canvas and 13 to 14px in the rendered frame.
 
 **The App Store panel set is not touched.** `captures/appstore-sb/` stays exactly as approved. This
 pipeline is marketing only.
