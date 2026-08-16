@@ -85,16 +85,16 @@ final class AssistedExportUITests: XCTestCase {
         // would also pass if the identifier were simply wrong. The sheet is the
         // button's only host, so the assertion above already covers it.
 
-        // Assert what the row must say, not what it must avoid. `shared` is a
-        // substring of `not shared`, so a negative check on it fails against
-        // the correct label; and a row that had been confirmed would read
-        // `shared jul 25`, which does not contain `not shared`. The positive
-        // form is both accurate here and still able to fail.
+        // The replacement pack carries a new content revision, which retires
+        // the earlier handoff along with the claim (the same rule proven in
+        // `testANewPackTextRetiresTheSharedClaimThatBelongedToTheOldOne`), so
+        // the row goes back to saying nothing rather than "not shared".
         let label = row.label
-        XCTAssertTrue(
-            label.localizedCaseInsensitiveContains("not shared"),
-            "Nothing was confirmed, so the row still reads not shared. Was: "
-                + "\"\(label)\""
+        XCTAssertFalse(
+            label.localizedCaseInsensitiveContains("shared"),
+            "Nothing was confirmed and the new pack retired the earlier "
+                + "handoff too, so the row must not claim any share state. "
+                + "Was: \"\(label)\""
         )
         // The replacement pack restores the workspace only after the stale
         // confirmation sheet has been dismissed.
@@ -196,7 +196,9 @@ final class AssistedExportUITests: XCTestCase {
             facebook.label.localizedCaseInsensitiveContains("not shared")
         )
         XCTAssertTrue(mercari.label.localizedCaseInsensitiveContains("not shared"))
-        XCTAssertTrue(depop.label.localizedCaseInsensitiveContains("not shared"))
+        // Depop has no receipt at all in this fixture: nobody has handed it
+        // off, so the row says nothing about sharing yet, not "not shared".
+        XCTAssertFalse(depop.label.localizedCaseInsensitiveContains("not shared"))
 
         mercari.tap()
         XCTAssertTrue(
@@ -207,7 +209,7 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(
             marker("assisted-export.workspace.mercari", in: app)
                 .label.localizedCaseInsensitiveContains(
-                    "you post it in mercari"
+                    "you finish this in mercari"
                 )
         )
 

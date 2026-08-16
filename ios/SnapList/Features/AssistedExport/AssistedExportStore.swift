@@ -56,6 +56,10 @@ final class AssistedExportStore {
     }
 
     func toggle(_ destination: AssistedExportDestination) {
+        // Opening or closing a row is navigation, not a retry. A failure
+        // message left over from a previous row or a previous attempt on this
+        // one is not a fact about the row the seller is looking at now.
+        actionMessage = nil
         domain.toggle(destination)
     }
 

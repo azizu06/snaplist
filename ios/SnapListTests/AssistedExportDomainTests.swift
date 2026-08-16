@@ -93,7 +93,10 @@ final class AssistedExportDomainTests: XCTestCase {
         )
         for destination in domain.destinations {
             XCTAssertEqual(domain.handoff(for: destination), .prepared)
-            XCTAssertEqual(domain.statusText(for: destination), "Not shared")
+            XCTAssertNil(
+                domain.statusText(for: destination),
+                "A row nobody has touched says nothing, not Not shared."
+            )
         }
         XCTAssertNil(domain.confirmSheet)
     }
@@ -282,12 +285,11 @@ final class AssistedExportDomainTests: XCTestCase {
 
         for destination in AssistedExportDestination.allCases {
             var domain = AssistedExportDomain(pack: .fixture())
-            strings.append(domain.statusText(for: destination))
+            strings.append(domain.statusText(for: destination) ?? "")
 
             domain.toggle(destination)
             strings.append(domain.primaryActionLabel(for: destination))
             strings.append(domain.leadText(for: destination))
-            strings.append(domain.whatHappensNextText(for: destination))
             strings.append(domain.confirmQuestion(for: destination))
             strings.append(domain.accessibilityLabel(for: destination))
 
@@ -298,11 +300,11 @@ final class AssistedExportDomainTests: XCTestCase {
 
             domain.presentConfirmSheet(for: destination)
             domain.confirmShared(at: Self.julyTwentyFifth)
-            strings.append(domain.statusText(for: destination))
+            strings.append(domain.statusText(for: destination) ?? "")
             strings.append(domain.accessibilityLabel(for: destination))
 
             domain.listingRevisionChanged(to: Self.editedReviewRevision)
-            strings.append(domain.statusText(for: destination))
+            strings.append(domain.statusText(for: destination) ?? "")
         }
 
         for string in strings {
@@ -388,13 +390,11 @@ final class AssistedExportDomainTests: XCTestCase {
         XCTAssertEqual(AssistedExportCopy.confirmNotYet, "Not yet")
         XCTAssertEqual(
             AssistedExportCopy.markAsSharedSupport,
-            "Only you can confirm this. SnapList won't mark it for you."
+            "SnapList can't see whether this posted. Only you can confirm it here."
         )
         XCTAssertEqual(
-            domain.whatHappensNextText(for: .mercari),
-            "Paste the text and add the photos in Mercari. SnapList can't see "
-                + "whether the listing goes up. When you've posted it, mark it "
-                + "shared here."
+            domain.leadText(for: .mercari),
+            "You finish this in Mercari."
         )
     }
 
@@ -438,10 +438,9 @@ final class AssistedExportDomainTests: XCTestCase {
             "There is no pre-flight. Before an attempt SnapList knows nothing "
                 + "about what is installed, and says nothing."
         )
-        XCTAssertEqual(
+        XCTAssertNil(
             domain.statusText(for: .facebookMarketplace),
-            "Not shared",
-            "The row status never reports device or destination availability."
+            "A row nobody has handed off to says nothing at all, not Not shared."
         )
     }
 
@@ -790,7 +789,11 @@ final class AssistedExportDomainTests: XCTestCase {
             "The seller said they posted the old text. The new text is not "
                 + "something they have said anything about."
         )
-        XCTAssertEqual(domain.statusText(for: .mercari), "Not shared")
+        XCTAssertNil(
+            domain.statusText(for: .mercari),
+            "A new pack text retires the old handoff along with the claim, so "
+                + "the row goes back to saying nothing."
+        )
         XCTAssertEqual(
             domain.state,
             .workspaceOpen(.mercari),
@@ -799,7 +802,9 @@ final class AssistedExportDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             domain.accessibilityLabel(for: .mercari),
-            "Mercari, not shared, open"
+            "Mercari, open",
+            "The new pack text retired the handoff too, so a sighted seller "
+                + "and a VoiceOver seller must agree the row says nothing yet."
         )
     }
 

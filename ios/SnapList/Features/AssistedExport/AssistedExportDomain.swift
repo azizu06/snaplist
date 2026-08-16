@@ -256,10 +256,6 @@ struct AssistedExportDomain: Equatable, Sendable {
         AssistedExportCopy.lead(destination)
     }
 
-    func whatHappensNextText(for destination: AssistedExportDestination) -> String {
-        AssistedExportCopy.whatHappensNext(destination)
-    }
-
     func confirmQuestion(for destination: AssistedExportDestination) -> String {
         AssistedExportCopy.confirmQuestion(destination)
     }
@@ -282,14 +278,13 @@ struct AssistedExportDomain: Equatable, Sendable {
     }
 
     func accessibilityLabel(for destination: AssistedExportDestination) -> String {
-        let status: String
-        switch handoff(for: destination) {
-        case .prepared:
-            status = "not shared"
-        case let .shared(at: date):
-            status = AssistedExportCopy.sharedStatus(on: date).lowercased()
-        }
         let disclosure = isWorkspaceOpen(destination) ? "open" : "closed"
+        // Routed through `statusText` rather than re-deriving the same
+        // status: a sighted seller and a VoiceOver seller must agree on
+        // whether an untouched row says anything at all.
+        guard let status = statusText(for: destination)?.lowercased() else {
+            return "\(destination.displayName), \(disclosure)"
+        }
         return "\(destination.displayName), \(status), \(disclosure)"
     }
 
@@ -387,10 +382,15 @@ struct AssistedExportDomain: Equatable, Sendable {
         currentReviewRevision = pack.reviewRevision
     }
 
-    func statusText(for destination: AssistedExportDestination) -> String {
+    /// The collapsed row's status line, or nil to say nothing. A destination
+    /// the seller has not touched at all is not yet "not shared" in any sense
+    /// worth reporting — that reads as a status when there is none. The line
+    /// appears once the seller has handed the pack over on this device, or
+    /// once they have made the explicit Shared claim.
+    func statusText(for destination: AssistedExportDestination) -> String? {
         switch handoff(for: destination) {
         case .prepared:
-            return AssistedExportCopy.notShared
+            return hasHandedOff(to: destination) ? AssistedExportCopy.notShared : nil
         case let .shared(at: date):
             return AssistedExportCopy.sharedStatus(on: date)
         }
@@ -417,10 +417,11 @@ enum AssistedExportCopy {
     static let copyListingTextDone = "Copied"
     static let savedPhotosDone = "Saved to Photos"
     static let shareAnotherWay = "Share another way"
-    static let whatHappensNextTitle = "What happens next"
     static let markAsShared = "Mark as shared"
+    /// The one fact this family must not hide: SnapList cannot see any of
+    /// these destinations, so only the seller's own tap here is evidence.
     static let markAsSharedSupport =
-        "Only you can confirm this. SnapList won't mark it for you."
+        "SnapList can't see whether this posted. Only you can confirm it here."
     static let confirmShared = "Yes, mark as shared"
     static let confirmNotYet = "Not yet"
     static let markedAsShared = "Marked as shared."
@@ -434,6 +435,13 @@ enum AssistedExportCopy {
     static let loadFailedDetail = "Check your connection and try again."
     static let retry = "Retry"
     static let actionFailed = "Couldn’t complete that action. Try again."
+    // `entryTitle`/`entryDetail` (Listing review's entry-row headline and
+    // "Prepared for Facebook Marketplace, Mercari, and Depop" subtitle) are
+    // retired by #896, which owns and is actively editing the one call site
+    // in `ListingReviewView.swift`. Deleting them here before that lands
+    // would break this branch's own build against the current
+    // `ListingReviewView.swift`; #896 should drop them from this file in the
+    // same change that removes their last render.
     static let entryTitle = "Share to other marketplaces"
     static let entryDetail = "Prepared for Facebook Marketplace, Mercari, and Depop"
     static let saveBeforeSharing = "Save your changes before sharing."
@@ -453,13 +461,7 @@ enum AssistedExportCopy {
     }
 
     static func lead(_ destination: AssistedExportDestination) -> String {
-        "SnapList prepared the listing. You post it in \(destination.displayName)."
-    }
-
-    static func whatHappensNext(_ destination: AssistedExportDestination) -> String {
-        "Paste the text and add the photos in \(destination.displayName). "
-            + "SnapList can't see whether the listing goes up. When you've "
-            + "posted it, mark it shared here."
+        "You finish this in \(destination.displayName)."
     }
 
     static func confirmQuestion(_ destination: AssistedExportDestination) -> String {
@@ -477,7 +479,6 @@ enum AssistedExportCopy {
         copyListingTextDone,
         savedPhotosDone,
         shareAnotherWay,
-        whatHappensNextTitle,
         markAsShared,
         markAsSharedSupport,
         confirmShared,

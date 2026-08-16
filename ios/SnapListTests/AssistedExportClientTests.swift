@@ -228,6 +228,36 @@ final class AssistedExportClientTests: XCTestCase {
         XCTAssertTrue(store.domain.hasHandedOff(to: .facebookMarketplace))
     }
 
+    /// Issue #898: the failure banner was still on screen for a row nothing
+    /// had gone wrong on, because closing the failed row and opening a
+    /// different one never cleared the previous attempt's message. Toggling
+    /// is navigation, not a retry, so it must retire a stale failure the same
+    /// way opening a new workspace already retires a stale confirm sheet.
+    func testOpeningADifferentDestinationClearsAStaleFailureMessage() async {
+        let recorder = AssistedExportSaveRecorder()
+        let service = AssistedExportFlakyHandoffService()
+        let store = AssistedExportStore(
+            pack: .fixture(),
+            service: service
+        )
+        await store.load()
+        store.toggle(.facebookMarketplace)
+
+        await store.savePhotos(for: .facebookMarketplace) {
+            try await recorder.writePhotos()
+        }
+        XCTAssertEqual(store.actionMessage, AssistedExportCopy.actionFailed)
+
+        store.toggle(.facebookMarketplace)
+        store.toggle(.mercari)
+
+        XCTAssertNil(
+            store.actionMessage,
+            "Opening Mercari, which nothing has failed on, must not still "
+                + "show Facebook Marketplace's earlier failure."
+        )
+    }
+
     func testDelayedHandoffCannotAttachToAReplacementPack() async {
         let recorder = AssistedExportSaveRecorder()
         let original = AssistedExportPack.fixture()
