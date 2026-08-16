@@ -252,7 +252,10 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
     let id: TrophyWallCardIdentity
     let itemName: String
     let stateLabel: String
-    let activation: TrophyWallProcessingRowActivation?
+    /// Not optional. Every state this initializer accepts has somewhere for the
+    /// row body to go, and a state that does not fails the initializer outright
+    /// rather than producing a row that answers nothing.
+    let activation: TrophyWallProcessingRowActivation
     let action: TrophyWallProcessingAction?
     let localCoverPhotoData: Data?
     let accessibilityLabel: String

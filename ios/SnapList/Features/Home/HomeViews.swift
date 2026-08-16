@@ -227,12 +227,13 @@ private struct TrophyWallSettledTileView: View {
             // The rounded fill does not reach the corners of its cell, so
             // without this the tap dies in the gap the grid leaves around it.
             .contentShape(.rect)
-            // `.accessibilityElement(children: .ignore)` used to sit here. On a
-            // button it publishes a fresh element and the label and identifier
-            // land on that one, leaving the button itself nameless and
-            // unaddressable, which is why every test that reaches a tile by id
-            // stopped finding one. The tile's contents are decoration and hide
-            // themselves, so the button needs nothing but its own two facts.
+            // `.accessibilityElement(children: .ignore)` used to sit here.
+            // Measured on iOS 26.5: with it, the tile buttons are published
+            // with neither label nor identifier, so every test that reaches a
+            // tile by id finds nothing; without it they carry both. Why the
+            // modifier swallows them is not established here, only that it
+            // does. The tile's contents are decoration and hide themselves, so
+            // the button needs nothing but its own two facts.
             .accessibilityLabel(tile.accessibilityLabel)
             .accessibilityIdentifier(identifier)
         } else {
@@ -1028,8 +1029,8 @@ private struct TrophyWallProcessingRowView: View {
             HStack(spacing: 0) {
                 activatableContent
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if row.action != nil {
-                    actionControl
+                if let action = row.action {
+                    actionControl(for: action)
                         // The row's own trailing padding was the only thing
                         // between a wrapped name and the pill, so the two read
                         // as one crowded block (#897).
@@ -1054,8 +1055,8 @@ private struct TrophyWallProcessingRowView: View {
             ) {
                 activatableContent
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if row.action != nil {
-                    actionControl
+                if let action = row.action {
+                    actionControl(for: action)
                         // Lined up with the name above it and the row divider
                         // below, rather than with the row's own edge.
                         .padding(
@@ -1077,58 +1078,48 @@ private struct TrophyWallProcessingRowView: View {
     }
 
     private var activatableContent: some View {
-        Group {
-            if let activation = row.activation {
-                Button {
-                    switch activation {
-                    case .route(let destination):
-                        openRoute(destination)
-                    case .action(let action):
-                        onAction(action)
-                    }
-                } label: {
-                    content
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(row.accessibilityLabel)
-                .accessibilityIdentifier(row.accessibilityIdentifier)
-            } else {
-                content
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(row.accessibilityLabel)
-                    .accessibilityIdentifier(row.accessibilityIdentifier)
+        Button {
+            switch row.activation {
+            case .route(let destination):
+                openRoute(destination)
+            case .action(let action):
+                onAction(action)
             }
+        } label: {
+            content
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(row.accessibilityLabel)
+        .accessibilityIdentifier(row.accessibilityIdentifier)
     }
 
-    @ViewBuilder
-    private var actionControl: some View {
-        if let action = row.action {
-            Button {
-                onAction(action)
-            } label: {
-                Text(action.label)
-                    .snapListTypography(.status)
-                    .foregroundStyle(action.foregroundColor)
-                    .frame(minWidth: SnapListMetrics.minimumTouchTarget)
-                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                    .padding(.horizontal, 10)
-                    .background(action.backgroundColor)
-                    .clipShape(.rect(cornerRadius: 12))
-                    .overlay {
-                        if action.showsBorder {
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(
-                                    SnapListColorToken.hairline.color,
-                                    lineWidth: 1
-                                )
-                        }
+    private func actionControl(
+        for action: TrophyWallProcessingAction
+    ) -> some View {
+        Button {
+            onAction(action)
+        } label: {
+            Text(action.label)
+                .snapListTypography(.status)
+                .foregroundStyle(action.foregroundColor)
+                .frame(minWidth: SnapListMetrics.minimumTouchTarget)
+                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                .padding(.horizontal, 10)
+                .background(action.backgroundColor)
+                .clipShape(.rect(cornerRadius: 12))
+                .overlay {
+                    if action.showsBorder {
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(
+                                SnapListColorToken.hairline.color,
+                                lineWidth: 1
+                            )
                     }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(action.accessibilityLabel(for: row.itemName))
-            .accessibilityIdentifier(action.accessibilityIdentifier)
+                }
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(action.accessibilityLabel(for: row.itemName))
+        .accessibilityIdentifier(action.accessibilityIdentifier)
     }
 
     private var content: some View {
@@ -1145,11 +1136,10 @@ private struct TrophyWallProcessingRowView: View {
                 if row.action == nil {
                     Text(row.stateLabel)
                         .snapListTypography(.status)
-                        .foregroundStyle(
-                            row.activation == nil
-                                ? SnapListColorToken.textSecondary.color
-                                : SnapListColorToken.inkPrimary.color
-                        )
+                        // This used to dim for a row with nowhere to go. No
+                        // such row is constructible, here or before this
+                        // change, so the dim branch had never once rendered.
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                         .fixedSize(horizontal: false, vertical: true)
                 }
