@@ -70,6 +70,30 @@ struct SnapListSecondaryButton: View {
     }
 }
 
+struct SnapListDestructiveButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .snapListTypography(.rowTitle)
+                .foregroundStyle(SnapListColorToken.destructiveText.color)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 50)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .background(SnapListColorToken.canvas.color)
+        .clipShape(.rect(cornerRadius: 25))
+        .overlay {
+            RoundedRectangle(cornerRadius: 25)
+                .stroke(SnapListColorToken.destructiveBorder.color, lineWidth: 1)
+        }
+        .accessibilityIdentifier("button.destructive.\(title.accessibilitySlug)")
+    }
+}
+
 enum SnapListChipVariant {
     case info
     case evidenceStrong
@@ -225,8 +249,9 @@ struct SnapListSheetContainer<Content: View>: View {
     }
 }
 
-/// The only shared destructive styling approved by the resolved contracts.
-/// Family screens must use the platform role instead of introducing a permanent red token.
+/// Destructive styling for a `.confirmationDialog` action. Uses the platform
+/// `role: .destructive` instead of a permanent red token. For a standalone
+/// destructive button outside a confirmation dialog, use `SnapListDestructiveButton`.
 struct SnapListDestructiveConfirmationButton: View {
     let title: String
     let action: () -> Void
