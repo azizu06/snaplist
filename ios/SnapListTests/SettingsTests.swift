@@ -569,9 +569,10 @@ final class SettingsTests: XCTestCase {
 
         XCTAssertEqual(flow.stateID, "SET-01")
         XCTAssertFalse(flow.isMember)
-        XCTAssertEqual(SettingsGuestBoundaryCopy.title, "Guest Settings stops here")
-        XCTAssertTrue(SettingsGuestBoundaryCopy.body.contains("both absent rather than empty"))
-        XCTAssertTrue(SettingsGuestBoundaryCopy.body.contains("within 24 hours of acceptance"))
+        XCTAssertEqual(
+            SettingsGuestBoundaryCopy.body,
+            "Create an account to manage your data and your subscription."
+        )
     }
 
     func testDeletionRouteStopsAtTheApprovedFinalConfirm() {
