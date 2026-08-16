@@ -33,6 +33,7 @@ ios/SnapList.xcodeproj/project.pbxproj
 ios/SnapList/App/AppDependenciesEnvironment.swift
 ios/SnapList/App/AppShellView.swift
 ios/SnapList/App/FloatingDock.swift
+ios/SnapList/App/PushRegistrationAppDelegate.swift
 ios/SnapList/App/SnapListApp.swift
 ios/SnapList/AppAttest/AppAttestClient.swift
 ios/SnapList/Core/API/AccountErasureClient.swift
@@ -40,6 +41,7 @@ ios/SnapList/Core/API/ClerkAuthentication.swift
 ios/SnapList/Core/API/IncludedOfferRedemptionCoordinator.swift
 ios/SnapList/Core/API/MobileAPIClient.swift
 ios/SnapList/Core/API/MobileAPIModels.swift
+ios/SnapList/Core/API/PushDeviceTokenClient.swift
 ios/SnapList/Core/Analytics/AnalyticsClient.swift
 ios/SnapList/Core/Analytics/AnalyticsContracts.swift
 ios/SnapList/Core/Analytics/AnalyticsPersistence.swift
@@ -106,6 +108,8 @@ ios/SnapList/Features/Onboarding/OnboardingDomain.swift
 ios/SnapList/Features/Onboarding/OnboardingFlowView.swift
 ios/SnapList/Features/ProGate/ProGateStore.swift
 ios/SnapList/Features/ProGate/ProGateView.swift
+ios/SnapList/Features/PushRegistration/PushRegistrationComposition.swift
+ios/SnapList/Features/PushRegistration/PushRegistrationDomain.swift
 ios/SnapList/Features/Runs/RunAPIClient.swift
 ios/SnapList/Features/Runs/RunDetailView.swift
 ios/SnapList/Features/Runs/RunModels.swift
@@ -141,6 +145,7 @@ src/app/v1/account/erasure/handler.ts
 src/app/v1/account/erasure/route.ts
 src/app/v1/activation-guidance/route.ts
 src/app/v1/billing/revenuecat/identity/route.ts
+src/app/v1/device-tokens/route.ts
 src/app/v1/ebay/connection/route.ts
 src/app/v1/ebay/oauth/callback/route.ts
 src/app/v1/ebay/oauth/handler.ts
@@ -376,6 +381,7 @@ src/lib/provider-usage/post-completion.ts
 src/lib/provider-usage/record.ts
 src/lib/provider-usage/schema.ts
 src/lib/public-origin.ts
+src/lib/push-device-tokens/store.ts
 src/lib/rag/corpus-data.ts
 src/lib/rag/embedding.ts
 src/lib/rag/harvest.ts
@@ -525,6 +531,7 @@ supabase/migrations/20260811120000_durable_seller_voice_context.sql
 supabase/migrations/20260811123000_reconcile_durable_seller_voice_context.sql
 supabase/migrations/20260812140000_guest_recovery_envelope_mime.sql
 supabase/migrations/20260813030000_post_completion_provider_usage.sql
+supabase/migrations/20260816180000_push_device_tokens.sql
 tsconfig.json
 vercel.json
 vitest.config.ts

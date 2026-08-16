@@ -20,6 +20,12 @@ struct SnapListApp: App {
         AppAttestGuestCapabilityComposition?
     private let trophyWallHistoryRepository: any TrophyWallRunHistoryRepository
     private let startIncludedOfferRedemption: @MainActor @Sendable () -> Void
+    /// Composes the #890 push-registration coordinator. Started here, like the
+    /// included-offer redemption, because the APNs token arrives at the app
+    /// delegate rather than at any view.
+    private let startPushRegistration: @MainActor @Sendable () -> Void
+    @UIApplicationDelegateAdaptor(PushRegistrationAppDelegate.self)
+    private var pushRegistrationDelegate
 
     init() {
         // First statement in the real app entry point so a crash while the
@@ -89,11 +95,22 @@ struct SnapListApp: App {
                     session: urlSession
                 )
             }
+            startPushRegistration = {
+                PushRegistrationComposition.start(
+                    apiOrigin: apiOrigin,
+                    tokenProvider: tokenProvider,
+                    session: urlSession
+                )
+            }
         } else {
             // Gated the way the guest-side capability is: a fixture launch has
             // no network to reach the fence with and no real account to redeem
             // for.
             startIncludedOfferRedemption = {}
+            // A fixture launch must never show a system permission prompt: it
+            // would block a UI test on an alert no test can dismiss, and there
+            // is no server to register the device with.
+            startPushRegistration = {}
         }
         self.dependencies = AppDependencies.make(
             configuration: configuration,
@@ -271,6 +288,7 @@ struct SnapListApp: App {
                 .task {
                     guestCapabilityComposition?.beginLaunchEnrollment()
                     startIncludedOfferRedemption()
+                    startPushRegistration()
 #if DEBUG
                     await dependencies
                         .seedRestoredCaptureFixtureIfNeeded(

@@ -14,3 +14,9 @@
 // and fails it if this key and SNAPLIST_API_ORIGIN ever disagree again.
 SNAPLIST_CLERK_PUBLISHABLE_KEY = pk_live_Y2xlcmsuc25hcGxpc3QuZGV2JA
 SNAPLIST_CLERK_FRONTEND_DOMAIN = clerk.snaplist.dev
+
+// #890. A development build registers against Apple's sandbox APNs gateway.
+// This is the one entitlement value that must differ between Debug and Release:
+// a token minted under the sandbox environment is rejected by the production
+// gateway and vice versa, and the failure is silent on the device.
+SNAPLIST_APS_ENVIRONMENT = development

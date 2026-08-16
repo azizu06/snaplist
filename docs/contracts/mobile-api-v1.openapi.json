@@ -56,6 +56,21 @@
         }
       }
     },
+    "/v1/device-tokens": {
+      "post": {
+        "operationId": "registerDeviceToken",
+        "x-owner-issue": 890,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }, { "GuestBearer": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTokenRegistration" } } } },
+        "responses": {
+          "200": { "description": "The device is registered to the identity the bearer proved. Re-registering the same device updates the existing row.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeviceTokenEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
     "/v1/home": {
       "get": {
         "operationId": "getHome",
@@ -377,6 +392,8 @@
       "HealthEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["apiVersion", "status"], "properties": { "apiVersion": { "const": "v1" }, "status": { "const": "ok" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "SessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "string" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "ActivationGuidanceEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "type": "object", "additionalProperties": false, "required": ["completed"], "properties": { "completed": { "type": "boolean" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "DeviceTokenRegistration": { "type": "object", "additionalProperties": false, "required": ["platform", "token"], "properties": { "platform": { "type": "string", "enum": ["ios"] }, "token": { "type": "string", "pattern": "^[0-9a-f]{64,512}$", "description": "Lowercase hex APNs device token. No account field: the owner is the identity the bearer proved." } } },
+      "DeviceTokenEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "type": "object", "additionalProperties": false, "required": ["registered"], "properties": { "registered": { "type": "boolean" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "HomeEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/HomeProjection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "HomeProjection": { "type": "object", "additionalProperties": false, "required": ["revision", "sellerState", "unreadNotificationCount", "summary", "attention", "currentRun", "readyToFinish", "listings", "recentSearches"], "properties": { "revision": { "type": "integer", "minimum": 0 }, "sellerState": { "type": "string", "enum": ["active", "newSeller"] }, "unreadNotificationCount": { "type": "integer", "minimum": 0 }, "summary": { "$ref": "#/components/schemas/HomeSummary" }, "attention": { "type": "array", "items": { "$ref": "#/components/schemas/HomeAttentionTask" } }, "currentRun": { "oneOf": [{ "$ref": "#/components/schemas/HomeCurrentRun" }, { "type": "null" }] }, "readyToFinish": { "type": "array", "items": { "$ref": "#/components/schemas/HomeFinishItem" } }, "listings": { "type": "array", "items": { "$ref": "#/components/schemas/HomeListing" } }, "recentSearches": { "type": "array", "items": { "type": "string", "minLength": 1 } } } },
       "HomeSummary": { "type": "object", "additionalProperties": false, "required": ["active", "drafts", "orders"], "properties": { "active": { "type": "integer", "minimum": 0 }, "drafts": { "type": "integer", "minimum": 0 }, "orders": { "type": ["integer", "null"], "minimum": 0 } } },

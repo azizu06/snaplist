@@ -341,6 +341,10 @@ struct AppShellView: View {
                 }
             case .itemSaved(_, let handoff)?:
                 trophyWallStore.ingestAcceptance(handoff)
+                // #890's one prompt moment: the server has accepted an item, so
+                // "we'll tell you when it's ready" is now true. Fire-and-forget
+                // by design — nothing about the submission may wait on it.
+                PushRegistrationComposition.itemSubmitted()
             case nil, .submissionRejected?:
                 break
             }

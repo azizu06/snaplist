@@ -79,6 +79,33 @@ if grep -Fq 'pk_' "$release_config"; then
 fi
 grep -Fq 'webcredentials:$(SNAPLIST_CLERK_FRONTEND_DOMAIN)' "$entitlements"
 
+# #890. The CI Release job builds -sdk iphonesimulator with code signing off,
+# which never processes entitlements, so a missing or unexpanded
+# aps-environment would ship green. These assertions are the only thing
+# standing between that and a build that silently cannot receive a push.
+if ! grep -Fq '<key>aps-environment</key>' "$entitlements"; then
+  print -u2 -r -- "entitlements are missing aps-environment; the app cannot receive a push"
+  exit 1
+fi
+if ! grep -Fq '<string>$(SNAPLIST_APS_ENVIRONMENT)</string>' "$entitlements"; then
+  print -u2 -r -- "aps-environment must resolve through SNAPLIST_APS_ENVIRONMENT, not a literal"
+  exit 1
+fi
+# Both configurations must define it, or the entitlement expands to empty and
+# the archive carries an invalid value rather than failing loudly.
+if ! grep -Eq '^SNAPLIST_APS_ENVIRONMENT = development$' "$debug_config"; then
+  print -u2 -r -- "Debug configuration must set SNAPLIST_APS_ENVIRONMENT = development"
+  exit 1
+fi
+# The one value that must differ between configurations. A token minted under
+# the sandbox gateway is rejected by the production gateway and the failure is
+# silent on the device, so a Release build carrying "development" is worse than
+# one that does not build at all.
+if ! grep -Eq '^SNAPLIST_APS_ENVIRONMENT = production$' "$release_config"; then
+  print -u2 -r -- "Release configuration must set SNAPLIST_APS_ENVIRONMENT = production"
+  exit 1
+fi
+
 assert_rejected_with 'SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY' env \
   CONFIGURATION=Release \
   SNAPLIST_CLERK_PUBLISHABLE_KEY= \

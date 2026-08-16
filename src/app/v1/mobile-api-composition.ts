@@ -2,6 +2,8 @@ import { verifyToken } from "@clerk/nextjs/server";
 import { logServerError } from "@/lib/api/errors";
 import { createConfiguredGuestClaimHandoff } from "@/lib/app-attest/configured-guest-handoff";
 import { getClerkAuthorizedParties } from "@/lib/env";
+import { createConfiguredVerifiedGuestPrincipalResolver } from "@/lib/guest-capability/configured";
+import { GUEST_CAPABILITY_TOKEN_PREFIX } from "@/lib/guest-capability/token-prefix";
 import {
   createSupabaseNativeSubscriptionBridge,
   resolveRevenueCatServerConfig,
@@ -39,6 +41,40 @@ export async function clerkPrincipal(token: string): Promise<MobileApiPrincipal>
   const userId = verified.sub?.trim();
   if (!userId) throw new Error("The verified Clerk token has no subject.");
   return { kind: "clerk" as const, userId };
+}
+
+/**
+ * Resolves either kind of native caller (#890).
+ *
+ * A guest bearer is an App Attest capability, not a project JWT, so the
+ * resolver hands back a principal that can mint one operation token per RLS
+ * write. Routes that a guest must be able to reach compose this instead of
+ * `clerkPrincipal`, which would reject the guest's bearer as an unverifiable
+ * Clerk token.
+ */
+export async function guestOrClerkPrincipal(
+  token: string,
+): Promise<MobileApiPrincipal> {
+  if (!token.startsWith(GUEST_CAPABILITY_TOKEN_PREFIX)) {
+    return clerkPrincipal(token);
+  }
+  const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const secretKey =
+    process.env.SUPABASE_SECRET_KEY?.trim()
+    || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const keyId = process.env.SUPABASE_GUEST_JWT_KEY_ID?.trim();
+  const privateKeyPem = process.env.SUPABASE_GUEST_JWT_PRIVATE_KEY_PEM?.trim();
+  if (!supabaseURL || !secretKey || !keyId || !privateKeyPem) {
+    throw new Error(
+      "The verified guest authentication boundary is not configured.",
+    );
+  }
+  return createConfiguredVerifiedGuestPrincipalResolver({
+    keyId,
+    privateKeyPem,
+    secretKey,
+    supabaseURL,
+  }).resolve(token);
 }
 
 /** Concrete #610 dependency for the #593 guest-claim route composition. */

@@ -4,3 +4,10 @@
 // settings. They intentionally have no committed fallback.
 SNAPLIST_CLERK_PUBLISHABLE_KEY = $(SNAPLIST_RELEASE_CLERK_PUBLISHABLE_KEY)
 SNAPLIST_CLERK_FRONTEND_DOMAIN = $(SNAPLIST_RELEASE_CLERK_FRONTEND_DOMAIN)
+
+// #890. Archive and App Store builds register against the production APNs
+// gateway. Unlike the Clerk values this one has a committed literal: it is not
+// a credential, it is which Apple gateway the build belongs to, and leaving it
+// to a protected setting would let an archive ship with an unexpanded — and
+// therefore invalid — entitlement.
+SNAPLIST_APS_ENVIRONMENT = production
