@@ -2247,45 +2247,103 @@ final class SnapListUITests: XCTestCase {
         )
     }
 
-    // #858: direct hero navigation. REV-03 stages five photos so both chevrons
-    // are reachable mid-strip, and this is real `XCUIElement.tap()` — the one
-    // seam that actually proves the button's action wires through to the
-    // store and that the thumbnail strip stays in sync, which cannot be
-    // proved below the UI layer.
-    func testPhotoReviewHeroNavigationButtonsAdvanceSelectionAndStayInSyncWithTheThumbnailStrip() {
+    // #883: the swipe is the seller's own path between photos, and the chevrons
+    // that used to prove this wiring are gone. REV-03 stages five photos so a
+    // move in either direction is available mid-strip. This is the one seam that
+    // proves the gesture reaches the store and that the thumbnail strip stays in
+    // sync, which cannot be proved below the UI layer.
+    func testPhotoReviewHeroSwipeMovesSelectionOnePhotoAtATimeAndStopsAtTheEnds() {
         let app = launch(extraArguments: ["--photo-review-state=REV-03"])
         let hero = app.buttons["photo-review.hero"]
-        let next = app.buttons["photo-review.hero.next"]
-        let previous = app.buttons["photo-review.hero.previous"]
         let firstThumbnail = app.buttons["photo-review.thumbnail.1"]
         let secondThumbnail = app.buttons["photo-review.thumbnail.2"]
         let thirdThumbnail = app.buttons["photo-review.thumbnail.3"]
 
         XCTAssertTrue(hero.waitForExistence(timeout: 3))
-        XCTAssertTrue(next.exists)
-        XCTAssertEqual(next.label, "Next photo")
-        XCTAssertTrue(previous.exists)
-        XCTAssertEqual(previous.label, "Previous photo")
+        XCTAssertFalse(
+            app.buttons["photo-review.hero.next"].exists,
+            "#883 retired the hero chevrons; the swipe is the visible path."
+        )
+        XCTAssertFalse(app.buttons["photo-review.hero.previous"].exists)
         XCTAssertTrue(firstThumbnail.isSelected)
-        XCTAssertFalse(secondThumbnail.isSelected)
 
-        next.tap()
+        dragHorizontally(hero, towardsLeading: false)
 
-        XCTAssertTrue(secondThumbnail.isSelected)
+        XCTAssertTrue(
+            firstThumbnail.isSelected,
+            "The first photo has nothing before it."
+        )
+        XCTAssertTrue(hero.label.hasPrefix("Photo 1 of 5"))
+
+        dragHorizontally(hero, towardsLeading: true)
+
+        waitFor(
+            secondThumbnail,
+            toSatisfy: "isSelected == true",
+            "A leading drag moves selection forward one photo."
+        )
         XCTAssertFalse(firstThumbnail.isSelected)
         XCTAssertTrue(hero.label.hasPrefix("Photo 2 of 5"))
 
-        next.tap()
+        dragHorizontally(hero, towardsLeading: true)
 
-        XCTAssertTrue(thirdThumbnail.isSelected)
+        waitFor(
+            thirdThumbnail,
+            toSatisfy: "isSelected == true",
+            "One drag moves one photo, not several."
+        )
         XCTAssertFalse(secondThumbnail.isSelected)
         XCTAssertTrue(hero.label.hasPrefix("Photo 3 of 5"))
 
-        previous.tap()
+        dragHorizontally(hero, towardsLeading: false)
 
-        XCTAssertTrue(secondThumbnail.isSelected)
+        waitFor(
+            secondThumbnail,
+            toSatisfy: "isSelected == true",
+            "A trailing drag moves selection back one photo."
+        )
         XCTAssertFalse(thirdThumbnail.isSelected)
         XCTAssertTrue(hero.label.hasPrefix("Photo 2 of 5"))
+    }
+
+    // #883: the indicator is what tells the seller where they are once the
+    // chevrons are gone, and its label is what tells VoiceOver the same thing
+    // without reading the dots. It has to answer to both ways of moving.
+    func testPhotoReviewHeroPageIndicatorTracksTheSelectedPhotoOnSwipeAndOnThumbnailTap() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-03"])
+        let hero = app.buttons["photo-review.hero"]
+        let indicator = app.otherElements["photo-review.hero.page-indicator"]
+
+        XCTAssertTrue(hero.waitForExistence(timeout: 3))
+        XCTAssertTrue(indicator.waitForExistence(timeout: 3))
+        XCTAssertEqual(indicator.label, "Photo 1 of 5")
+        XCTAssertTrue(
+            hero.frame.contains(indicator.frame),
+            "The indicator sits on the photo: indicator=\(indicator.frame) hero=\(hero.frame)"
+        )
+        XCTAssertEqual(
+            indicator.frame.midX,
+            hero.frame.midX,
+            accuracy: 1,
+            "facebook-page-dots-reference.png centers it on the photo."
+        )
+
+        dragHorizontally(hero, towardsLeading: true)
+
+        waitFor(
+            indicator,
+            toSatisfy: "label == 'Photo 2 of 5'",
+            "The indicator must follow the swipe."
+        )
+
+        app.buttons["photo-review.thumbnail.4"].tap()
+
+        waitFor(
+            indicator,
+            toSatisfy: "label == 'Photo 4 of 5'",
+            "The indicator must follow a thumbnail tap too."
+        )
+        addScreenshot(named: "PHOTO-REVIEW-883-REV-03-PAGE-INDICATOR-402x874.png")
     }
 
     func testPhotoReviewHeroNavigationHidesAtOnePhotoAndDoesNotOpenActionsRow() {
@@ -2295,9 +2353,13 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(hero.waitForExistence(timeout: 3))
         XCTAssertFalse(
             app.buttons["photo-review.hero.next"].exists,
-            "A single staged photo has nothing to navigate to."
+            "#883 retired the hero chevrons."
         )
         XCTAssertFalse(app.buttons["photo-review.hero.previous"].exists)
+        XCTAssertFalse(
+            app.otherElements["photo-review.hero.page-indicator"].exists,
+            "A single staged photo has no pages to indicate."
+        )
         XCTAssertFalse(
             app.buttons["photo-review.delete"].exists,
             "Navigation must not open the Replace/Delete actions row by itself."
@@ -4031,6 +4093,56 @@ final class SnapListUITests: XCTestCase {
             thenDragTo: destination,
             withVelocity: 1_000,
             thenHoldForDuration: 0
+        )
+    }
+
+    /// #883: a momentum-free horizontal drag across `element`. `swipeLeft()`
+    /// synthesizes a velocity flick that the hero's `DragGesture` inside the
+    /// review's vertical scroll view does not see; a pressed drag does, and it
+    /// mirrors `ListingReviewUITests.scrollUntilClearOfFooter`, which exists for
+    /// the same class of problem.
+    private func dragHorizontally(
+        _ element: XCUIElement,
+        towardsLeading: Bool
+    ) {
+        let startX = towardsLeading ? 0.85 : 0.15
+        let endX = towardsLeading ? 0.15 : 0.85
+        let start = element.coordinate(
+            withNormalizedOffset: CGVector(dx: startX, dy: 0.5)
+        )
+        let end = element.coordinate(
+            withNormalizedOffset: CGVector(dx: endX, dy: 0.5)
+        )
+        // The velocity-and-hold overload is the one that interpolates
+        // intermediate touch points. `swipeLeft()` and the two-point
+        // `press(forDuration:thenDragTo:)` both deliver a jump the hero's
+        // `DragGesture` never sees as movement.
+        start.press(
+            forDuration: 0.05,
+            thenDragTo: end,
+            withVelocity: .default,
+            thenHoldForDuration: 0.05
+        )
+    }
+
+    private func waitFor(
+        _ element: XCUIElement,
+        toSatisfy format: String,
+        _ message: String,
+        timeout: TimeInterval = 3,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: format),
+            object: element
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [expectation], timeout: timeout),
+            .completed,
+            message,
+            file: file,
+            line: line
         )
     }
 

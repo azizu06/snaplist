@@ -9811,7 +9811,150 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
-    func testPhotoReviewHeroNavigationButtonsHoldTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
+    // #883: with the chevrons gone, the hero's own record of where the seller
+    // is has to be the page indicator. `facebook-page-dots-reference.png` puts
+    // it centered on the photo's horizontal axis and just above its bottom
+    // edge — on the photo, not below it.
+    func testPhotoReviewHeroPageIndicatorSitsCenteredNearTheBottomOfTheHero() async {
+        let photos = makeHeroNavigationPhotos(count: 5)
+        let store = PhotoReviewStore(photos: photos)
+        store.selectPhotoForActions(id: photos[1].id)
+        let host = HostedPhotoReviewTestWindow(store: store)
+        await host.settle()
+
+        let hero = host.observation.frame(for: .hero)
+        let indicator = host.observation.frame(for: .heroPageIndicator)
+
+        XCTAssertNotEqual(
+            indicator,
+            .zero,
+            "The page indicator must actually render on a multi-photo hero."
+        )
+        XCTAssertEqual(
+            indicator.midX,
+            hero.midX,
+            accuracy: 1,
+            "Centered on the hero: indicator=\(indicator) hero=\(hero)"
+        )
+        XCTAssertTrue(
+            hero.contains(indicator),
+            "The indicator sits on the photo: indicator=\(indicator) hero=\(hero)"
+        )
+        XCTAssertEqual(
+            hero.maxY - indicator.maxY,
+            PhotoReviewV5VisualContract.heroPageIndicatorBottomInset,
+            accuracy: 1,
+            "Near the bottom edge, by the contract's inset."
+        )
+        host.close()
+    }
+
+    func testPhotoReviewHeroPageIndicatorHidesWhenOnlyOnePhotoIsStaged() async {
+        let staged = PhotoReviewStore(photos: makeHeroNavigationPhotos(count: 3))
+        let stagedHost = HostedPhotoReviewTestWindow(store: staged)
+        await stagedHost.settle()
+
+        XCTAssertNotEqual(
+            stagedHost.observation.frame(for: .heroPageIndicator),
+            .zero,
+            "Three photos have pages to indicate."
+        )
+        stagedHost.close()
+
+        let single = PhotoReviewStore(photos: makeHeroNavigationPhotos(count: 1))
+        let singleHost = HostedPhotoReviewTestWindow(store: single)
+        await singleHost.settle()
+
+        XCTAssertEqual(
+            singleHost.observation.frame(for: .heroPageIndicator),
+            .zero,
+            "One photo has no pages to indicate."
+        )
+        singleHost.close()
+    }
+
+    // #883: the chevrons were the affordance VoiceOver and Switch Control could
+    // reach without a swipe. Removing them may not remove that path, so the same
+    // two named moves survive as accessibility actions on the hero. This is the
+    // policy those actions are built from; `SnapListUITests` proves they reach
+    // VoiceOver, and the swipe proof covers the move each one performs.
+    func testPhotoReviewHeroAccessibilityActionsNameBothMovesOnlyWhenThereIsSomewhereToGo() {
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.accessibilityActionLabels(
+                photoCount: 1
+            ),
+            [],
+            "One photo has nowhere to move."
+        )
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.accessibilityActionLabels(
+                photoCount: 2
+            ),
+            ["Previous photo", "Next photo"],
+            "Both named moves survive the chevrons they replace."
+        )
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.accessibilityActionLabels(
+                photoCount: 5
+            ),
+            ["Previous photo", "Next photo"]
+        )
+    }
+
+    func testPhotoReviewHeroPageIndicatorNamesThePositionAndTheTotalForVoiceOver() {
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.pageIndicatorAccessibilityLabel(
+                selectedIndex: 2,
+                photoCount: 5
+            ),
+            "Photo 3 of 5",
+            "VoiceOver must not have to read the dots to know the position."
+        )
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.pageIndicatorAccessibilityLabel(
+                selectedIndex: 0,
+                photoCount: 2
+            ),
+            "Photo 1 of 2"
+        )
+    }
+
+    // #883: `replace-delete-reference.png` shows one equal-width pair of tiles
+    // on a single row, Replace leading.
+    func testPhotoReviewReplaceAndDeleteRenderAsAnEqualWidthPairOnOneRow() async {
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+        store.selectPhotoForActions(id: photos[1].id)
+        let host = HostedPhotoReviewTestWindow(store: store)
+        await host.settle()
+
+        let replace = host.observation.frame(for: .replaceControl)
+        let delete = host.observation.frame(for: .deleteControl)
+
+        XCTAssertNotEqual(replace, .zero, "Replace must carry its own landmark.")
+        XCTAssertNotEqual(delete, .zero)
+        XCTAssertEqual(
+            replace.width,
+            delete.width,
+            accuracy: 1,
+            "The reference splits the row evenly: replace=\(replace) delete=\(delete)"
+        )
+        XCTAssertEqual(
+            replace.midY,
+            delete.midY,
+            accuracy: 1,
+            "Both sit on one row."
+        )
+        XCTAssertEqual(
+            delete.minX - replace.maxX,
+            PhotoReviewV5VisualContract.actionRowGap,
+            accuracy: 1,
+            "Replace leads, Delete follows, one contract gap apart."
+        )
+        host.close()
+    }
+
+    func testPhotoReviewReplaceControlHoldsTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
         for dynamicTypeSize: DynamicTypeSize in [.xSmall, .large, .accessibility5] {
             let photos = makeHeroNavigationPhotos(count: 3)
             let store = PhotoReviewStore(photos: photos)
@@ -9822,60 +9965,51 @@ final class CaptureFlowTests: XCTestCase {
             )
             await host.settle()
 
-            for landmark in [
-                PhotoReviewLayoutLandmark.heroPrevious,
-                PhotoReviewLayoutLandmark.heroNext
-            ] {
-                let frame = host.observation.frame(for: landmark)
-                XCTAssertGreaterThanOrEqual(
-                    frame.width,
-                    44,
-                    "\(landmark) width at \(dynamicTypeSize)"
-                )
-                XCTAssertGreaterThanOrEqual(
-                    frame.height,
-                    44,
-                    "\(landmark) height at \(dynamicTypeSize)"
-                )
-            }
+            let replace = host.observation.frame(for: .replaceControl)
+            XCTAssertGreaterThanOrEqual(
+                replace.width,
+                44,
+                "photo-review.replace width at \(dynamicTypeSize)"
+            )
+            XCTAssertGreaterThanOrEqual(
+                replace.height,
+                44,
+                "photo-review.replace height at \(dynamicTypeSize)"
+            )
             host.close()
         }
     }
 
-    func testPhotoReviewHeroNavigationButtonsExistWithAccessibleIdentifiersRegardlessOfBoundary() async {
-        let photos = makeHeroNavigationPhotos(count: 3)
-        let store = PhotoReviewStore(photos: photos)
-        store.selectPhotoForActions(id: photos[1].id)
-        let host = HostedPhotoReviewTestWindow(store: store)
-        await host.settle()
-
-        XCTAssertNotEqual(
-            host.observation.frame(for: .heroPrevious),
-            .zero,
-            "Previous must be reachable by VoiceOver/Switch Control, not swipe alone."
-        )
-        XCTAssertNotEqual(
-            host.observation.frame(for: .heroNext),
-            .zero,
-            "Next must be reachable by VoiceOver/Switch Control, not swipe alone."
-        )
-        host.close()
-    }
-
-    func testPhotoReviewHeroNavigationHidesWhenOnlyOnePhotoIsStaged() async {
-        let photos = makeHeroNavigationPhotos(count: 1)
-        let store = PhotoReviewStore(photos: photos)
-        store.selectPhotoForActions(id: photos[0].id)
-        let host = HostedPhotoReviewTestWindow(store: store)
-        await host.settle()
+    // #883: a row whose height is pinned to 44 clips its own labels once
+    // Dynamic Type passes the size that fits. The 44 is a floor, not a cap.
+    func testPhotoReviewActionRowGrowsWithAccessibilityDynamicTypeRatherThanClippingItsLabels() async {
+        var heights: [DynamicTypeSize: CGFloat] = [:]
+        for dynamicTypeSize: DynamicTypeSize in [.large, .accessibility5] {
+            let photos = makeHeroNavigationPhotos(count: 3)
+            let store = PhotoReviewStore(photos: photos)
+            store.selectPhotoForActions(id: photos[1].id)
+            let host = HostedPhotoReviewTestWindow(
+                store: store,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            await host.settle()
+            heights[dynamicTypeSize] = host.observation
+                .frame(for: .deleteControl)
+                .height
+            host.close()
+        }
 
         XCTAssertEqual(
-            host.observation.frame(for: .heroPrevious),
-            .zero,
-            "A single staged photo has nothing to navigate to."
+            heights[.large] ?? 0,
+            PhotoReviewV5VisualContract.actionRowHeight,
+            accuracy: 1,
+            "At the default size the row is exactly the contract height."
         )
-        XCTAssertEqual(host.observation.frame(for: .heroNext), .zero)
-        host.close()
+        XCTAssertGreaterThan(
+            heights[.accessibility5] ?? 0,
+            heights[.large] ?? 0,
+            "At AX5 the row must grow instead of squeezing its labels."
+        )
     }
 
     func testSelectPhotoForNavigationAtTheFirstAndLastPhotoStaysPinnedToTheBoundary() {
