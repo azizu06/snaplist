@@ -27,6 +27,19 @@ enum TrophyWallEmptyMetrics {
     static let bottomPadding: CGFloat = 48
 }
 
+/// The leading slot on a processing row. The numbers live here for the same
+/// reason the grid's do, and `maximumPixelSize` is the one that costs something
+/// if it is wrong: the staged file this photo comes from is a byte-identical
+/// copy of the capture, not a thumbnail (`NativeIntake.stagePhotos`), so a
+/// sub-budget capture is still sensor-sized. Three times the slot's edge covers
+/// @3x, and the bytes are reduced to it once, off the main thread, before the
+/// wall ever holds them.
+enum TrophyWallProcessingPhotoMetrics {
+    static let sidePoints: CGFloat = 44
+    static let cornerRadiusPoints: CGFloat = 10
+    static let maximumPixelSize = 132
+}
+
 /// Presentation-only framing for a cleared bundled fixture photo. It does not
 /// alter the run identity or claim a different underlying product.
 enum TrophyWallPhotoCrop: String, Hashable, Sendable {
@@ -126,12 +139,20 @@ struct TrophyWallCard: Hashable, Sendable {
     fileprivate let coverPhotoURL: URL?
     fileprivate let coverPhotoAssetName: String?
     fileprivate let coverPhotoCrop: TrophyWallPhotoCrop
+    /// The seller's own first staged photo, read out of the intake bundle while
+    /// it was still staged and carried as bytes from then on. It is bytes rather
+    /// than a path because the intake is deleted the moment the server accepts
+    /// the run, and because a path under the scope-digest directory stops
+    /// resolving when the digest changes (#855). Bytes also die with `cards`, so
+    /// a principal transition cannot leak one seller's photo to the next.
+    fileprivate let localCoverPhotoData: Data?
     let orderKey: TrophyWallOrderKey
 
     static func pending(
         principalScope: TrophyWallPrincipalScope,
         logicalIdentity: TrophyWallLogicalIdentity,
         itemName: String,
+        localCoverPhotoData: Data? = nil,
         lastMeaningfulUpdateAt: Date
     ) -> TrophyWallCard {
         precondition(!itemName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -143,6 +164,7 @@ struct TrophyWallCard: Hashable, Sendable {
             coverPhotoURL: nil,
             coverPhotoAssetName: nil,
             coverPhotoCrop: .full,
+            localCoverPhotoData: localCoverPhotoData,
             orderKey: TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: logicalIdentity.persistedKey
@@ -158,6 +180,7 @@ struct TrophyWallCard: Hashable, Sendable {
         coverPhotoURL: URL? = nil,
         coverPhotoAssetName: String? = nil,
         coverPhotoCrop: TrophyWallPhotoCrop = .full,
+        localCoverPhotoData: Data? = nil,
         lastMeaningfulUpdateAt: Date,
         orderKey: TrophyWallOrderKey? = nil
     ) -> TrophyWallCard {
@@ -172,6 +195,7 @@ struct TrophyWallCard: Hashable, Sendable {
             coverPhotoURL: coverPhotoURL,
             coverPhotoAssetName: coverPhotoAssetName,
             coverPhotoCrop: coverPhotoCrop,
+            localCoverPhotoData: localCoverPhotoData,
             orderKey: orderKey ?? TrophyWallOrderKey(
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 stableIdentity: runID.uuidString.lowercased()
@@ -192,6 +216,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
     let stateLabel: String
     let destination: HomeRoute?
     let action: TrophyWallProcessingAction?
+    let localCoverPhotoData: Data?
     let accessibilityLabel: String
     let accessibilityIdentifier: String
 
@@ -202,6 +227,7 @@ struct TrophyWallProcessingRow: Identifiable, Hashable {
 
         id = card.identity
         self.itemName = itemName
+        localCoverPhotoData = card.localCoverPhotoData
 
         switch card.state {
         case .pendingUpload:
@@ -318,6 +344,26 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
         self.historyOrderAt = historyOrderAt
     }
 
+    /// Where this tile opens. Trophy Wall is the seller's one return
+    /// destination, so the tile is how they reach the listing their photos
+    /// produced. A tile the client cannot resolve to a run opens nothing rather
+    /// than guessing at one.
+    var destination: HomeRoute? {
+        guard case .run(let runID) = id else {
+            return nil
+        }
+        return .run(runID)
+    }
+
+    /// Present only for a tile that actually opens something, so a tile with no
+    /// destination cannot be published as a control.
+    var accessibilityIdentifier: String? {
+        guard case .run(let runID) = id else {
+            return nil
+        }
+        return "trophy.wall.tile.run.\(runID.uuidString.lowercased())"
+    }
+
     var accessibilityLabel: String {
         let identity = coverPhotoURL == nil && coverPhotoAssetName == nil
             ? "\(itemName), photo unavailable"
@@ -340,6 +386,10 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
     let itemName: String?
     let listingID: UUID?
     let coverPhotoURL: URL?
+    /// Carried only by the acceptance that created this run, where the seller's
+    /// own photo was still on disk. Server-sourced projections leave it nil and
+    /// the card keeps whatever it already had.
+    let localCoverPhotoData: Data?
 
     init(
         principalScope: TrophyWallPrincipalScope,
@@ -350,7 +400,8 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         historyOrderKey: TrophyWallOrderKey? = nil,
         itemName: String? = nil,
         listingID: UUID? = nil,
-        coverPhotoURL: URL? = nil
+        coverPhotoURL: URL? = nil,
+        localCoverPhotoData: Data? = nil
     ) {
         self.principalScope = principalScope
         self.runID = runID
@@ -361,6 +412,7 @@ struct TrophyWallCanonicalAcceptedRun: Hashable, Sendable {
         self.itemName = itemName
         self.listingID = listingID
         self.coverPhotoURL = coverPhotoURL
+        self.localCoverPhotoData = localCoverPhotoData
     }
 }
 
@@ -685,12 +737,13 @@ final class TrophyWallStore {
             return
         }
 
-        let linkedItemName = acceptedRun.linkedLogicalIdentity.flatMap {
+        let linkedLocalCard = acceptedRun.linkedLogicalIdentity.flatMap {
             linkedLogicalIdentity in
             cards.first {
                 $0.identity == .local(linkedLogicalIdentity)
-            }?.itemName
+            }
         }
+        let linkedItemName = linkedLocalCard?.itemName
         let existingCanonicalCard = cards.first {
             $0.identity == .run(acceptedRun.runID)
         }
@@ -711,6 +764,13 @@ final class TrophyWallStore {
             itemName: linkedItemName ?? existingCanonicalCard?.itemName ?? acceptedRun.itemName,
             coverPhotoURL: acceptedRun.coverPhotoURL
                 ?? existingCanonicalCard?.coverPhotoURL,
+            // Three sources, in the order they can be trusted: a local card
+            // still on the wall, the acceptance that carried the photo off the
+            // device, then whatever this run already had. A later server
+            // projection carries none, so it must not blank the slot.
+            localCoverPhotoData: linkedLocalCard?.localCoverPhotoData
+                ?? acceptedRun.localCoverPhotoData
+                ?? existingCanonicalCard?.localCoverPhotoData,
             lastMeaningfulUpdateAt: acceptedRun.lastMeaningfulUpdateAt,
             orderKey: acceptedRun.historyOrderKey
         )
@@ -748,6 +808,10 @@ final class TrophyWallStore {
             state: .publishedToEbay,
             itemName: card.itemName,
             coverPhotoURL: card.coverPhotoURL,
+            // A published card is a settled tile, which draws the server's photo
+            // and never reads these bytes. Dropping them here is what releases
+            // them; nothing else on the wall does.
+            localCoverPhotoData: nil,
             lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
             orderKey: card.orderKey
         )
@@ -800,6 +864,29 @@ final class TrophyWallStore {
         }
     }
 
+    /// The one ingest the shell performs when a submission is accepted. It is a
+    /// named seam rather than a call site inlined in `AppShellView` so a test
+    /// can drive the wiring the product uses. The hand-written equivalent that
+    /// stood in for it would still have passed if the shell dropped the
+    /// seller's photo (#867).
+    func ingestAcceptance(
+        _ handoff: AcceptedItemRunHandoff,
+        acceptedAt: Date = Date()
+    ) {
+        ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principalScope,
+                runID: handoff.acceptedRun.runID,
+                linkedLogicalIdentity: TrophyWallLogicalIdentity(
+                    idempotencyKey: handoff.idempotencyKey
+                ),
+                state: .accepted,
+                lastMeaningfulUpdateAt: acceptedAt,
+                localCoverPhotoData: handoff.localCoverPhotoData
+            )
+        )
+    }
+
     func ingest(
         acceptedHandoff: AcceptedItemRunHandoff,
         runDetail: DurableRun,
@@ -827,7 +914,8 @@ final class TrophyWallStore {
                 lastMeaningfulUpdateAt: lastMeaningfulUpdateAt,
                 itemName: runDetail.item?.title,
                 listingID: runDetail.listingID,
-                coverPhotoURL: runDetail.delivery?.coverPhotoURL
+                coverPhotoURL: runDetail.delivery?.coverPhotoURL,
+                localCoverPhotoData: acceptedHandoff.localCoverPhotoData
             )
         )
     }
@@ -855,6 +943,7 @@ final class TrophyWallStore {
             coverPhotoURL: card.coverPhotoURL,
             coverPhotoAssetName: card.coverPhotoAssetName,
             coverPhotoCrop: card.coverPhotoCrop,
+            localCoverPhotoData: card.localCoverPhotoData,
             lastMeaningfulUpdateAt: card.orderKey.lastMeaningfulUpdateAt,
             orderKey: card.orderKey
         )

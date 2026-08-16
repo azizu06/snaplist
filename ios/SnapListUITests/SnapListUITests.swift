@@ -400,99 +400,6 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Verify"].exists)
     }
 
-    /// `--dynamic-type=` reaches `AppShellView` through the outer
-    /// `OptionalDynamicTypeModifier`, and a SwiftUI sheet builds its own
-    /// environment instead of inheriting that one — which is why the account
-    /// entry and Pro gate sheets already re-attach the modifier to their own
-    /// content. The capture sheet did not, so the whole `--fixture=capture`
-    /// route was blind to the argument (#836). Measured on `e1e084b1e`:
-    /// `Take one item` reported `(88.66, 281.08, 92.18, 17.28)` at the default
-    /// size and the same to the decimal at `accessibility5`, while `Camera is
-    /// not available` — in the presenting hierarchy rather than the sheet —
-    /// grew from 28.0pt to 151.67pt.
-    ///
-    /// Both sizes are measured in one run rather than one being asserted
-    /// against a constant: a fixed threshold would still pass if the sheet
-    /// froze at some other single size.
-    func testCaptureSheetAppliesTheDynamicTypeFixtureArgument() {
-        var titleHeights: [String: CGFloat] = [:]
-        for size in ["medium", "accessibility5"] {
-            let app = launchCaptureSheet(dynamicType: size)
-            let title = app.staticTexts["Take one item"]
-            XCTAssertTrue(title.waitForExistence(timeout: 5), app.debugDescription)
-            titleHeights[size] = title.frame.height
-            app.terminate()
-        }
-
-        let receipt = "titleHeights=\(titleHeights)"
-        guard let medium = titleHeights["medium"],
-              let accessibility5 = titleHeights["accessibility5"] else {
-            return XCTFail(receipt)
-        }
-        XCTAssertGreaterThan(medium, 0, receipt)
-        XCTAssertGreaterThan(accessibility5, medium * 1.5, receipt)
-    }
-
-    /// `CaptureOptionRow` sizes itself with `minHeight`, so its card is
-    /// supposed to grow around whatever the title and subtitle need. This
-    /// asserts that by containment rather than by height: every glyph of both
-    /// labels has to sit inside the row's own frame, which is where the card
-    /// border and its `clipShape` are, so a label the card cuts off fails even
-    /// though the label's own frame stayed intact.
-    ///
-    /// The info caption underneath is checked by wrap instead. XCUITest reports
-    /// the full string as an element's label whether or not it was drawn with a
-    /// trailing ellipsis, so the only observable difference between a wrapped
-    /// caption and a truncated one is height: one line at `accessibility5` is
-    /// roughly what one line is at the default size, and a wrapped one is
-    /// several times that. Depends on
-    /// `testCaptureSheetAppliesTheDynamicTypeFixtureArgument`: before that seam
-    /// existed this route never rendered a large type size at all (#836).
-    func testCaptureOptionRowShowsItsFullTextAtLargestAccessibilitySize() {
-        let caption = "Capture and organize photos before choosing what to list."
-        var captionHeights: [String: CGFloat] = [:]
-
-        for size in ["medium", "accessibility5"] {
-            let app = launchCaptureSheet(dynamicType: size)
-            let row = app.descendants(matching: .any)["capture.take-one-item"]
-            XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-
-            let title = app.staticTexts["Take one item"]
-            let subtitle = app.staticTexts["Snap one thing and get help listing it."]
-            let receipt = """
-            size=\(size), row=\(row.frame), title=\(title.frame), \
-            subtitle=\(subtitle.frame)
-            """
-            XCTAssertTrue(title.exists, receipt)
-            XCTAssertTrue(subtitle.exists, receipt)
-            XCTAssertGreaterThanOrEqual(title.frame.minY, row.frame.minY, receipt)
-            XCTAssertLessThanOrEqual(subtitle.frame.maxY, row.frame.maxY, receipt)
-            XCTAssertGreaterThanOrEqual(title.frame.minX, row.frame.minX, receipt)
-            XCTAssertLessThanOrEqual(title.frame.maxX, row.frame.maxX, receipt)
-
-            let info = app.staticTexts[caption]
-            XCTAssertTrue(info.exists, app.debugDescription)
-            captionHeights[size] = info.frame.height
-            // Frames prove the text participates in the row's layout; only the
-            // image proves no glyph was clipped by the card border.
-            addScreenshot(named: "AX5-CAPTURE-OPTION-ROWS-\(size)-402x874.png")
-            // The caption starts below the fold at this size, so its own
-            // screenshot needs the sheet scrolled to it.
-            for _ in 0..<4 where !info.isHittable {
-                app.swipeUp()
-            }
-            addScreenshot(named: "AX5-CAPTURE-INFO-CAPTION-\(size)-402x874.png")
-            app.terminate()
-        }
-
-        let receipt = "captionHeights=\(captionHeights)"
-        guard let medium = captionHeights["medium"],
-              let accessibility5 = captionHeights["accessibility5"] else {
-            return XCTFail(receipt)
-        }
-        XCTAssertGreaterThan(accessibility5, medium * 2, receipt)
-    }
-
     /// `settingsSectionHeader` pinned itself to `.frame(height: 18)`, so at
     /// `accessibility5` its glyphs drew outside the 18pt the layout gave it and
     /// the opaque card below covered the bottom third of them (#836). Measured
@@ -764,51 +671,6 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
-    /// #836 asserted the info caption underneath `CaptureOptionRow` wraps and
-    /// left the row's own title and subtitle — the two labels the card exists
-    /// to show — with a containment check and no wrap check (#839).
-    ///
-    /// Wrap is the observable, not the ellipsis: XCUITest reports the full
-    /// source string as an element's label whether or not it was drawn with a
-    /// trailing ellipsis, so a truncated title and a wrapped one differ only in
-    /// height. One ellipsized line at `accessibility5` is one line's worth of
-    /// the larger font; a wrapped one is several times that, and both are
-    /// measured in the same run rather than against a constant so a title that
-    /// froze at some other single size cannot pass.
-    /// Measured on iPhone 17 Pro / iOS 26.5. Wrapped, as shipped: title
-    /// `16.643 → 145.630` (8.75×), subtitle `15.043 → 175.076` (11.64×). Held
-    /// to one line with a temporary `.lineLimit(1)` on both labels: title
-    /// `16.643 → 48.650` (2.92×), subtitle `15.043 → 58.572` (3.89×). The 4×
-    /// and 5× floors sit between the two, so the assertions redden the moment
-    /// either label goes back to a single ellipsized line.
-    func testCaptureOptionRowTitleAndSubtitleWrapRatherThanTruncateAtLargestAccessibilitySize() {
-        var titleHeights: [String: CGFloat] = [:]
-        var subtitleHeights: [String: CGFloat] = [:]
-
-        for size in ["medium", "accessibility5"] {
-            let app = launchCaptureSheet(dynamicType: size)
-            let title = app.staticTexts["Take one item"]
-            let subtitle = app.staticTexts["Snap one thing and get help listing it."]
-            XCTAssertTrue(title.waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(subtitle.exists, app.debugDescription)
-            titleHeights[size] = title.frame.height
-            subtitleHeights[size] = subtitle.frame.height
-            app.terminate()
-        }
-
-        let receipt = "titleHeights=\(titleHeights), subtitleHeights=\(subtitleHeights)"
-        guard let mediumTitle = titleHeights["medium"],
-              let accessibility5Title = titleHeights["accessibility5"],
-              let mediumSubtitle = subtitleHeights["medium"],
-              let accessibility5Subtitle = subtitleHeights["accessibility5"] else {
-            return XCTFail(receipt)
-        }
-        XCTAssertGreaterThan(mediumTitle, 0, receipt)
-        XCTAssertGreaterThan(mediumSubtitle, 0, receipt)
-        XCTAssertGreaterThan(accessibility5Title, mediumTitle * 4, receipt)
-        XCTAssertGreaterThan(accessibility5Subtitle, mediumSubtitle * 5, receipt)
-    }
-
     /// The rendered half of `SettingsTests.testValueRowsStackOnlyAtAccessibilitySizes`.
     ///
     /// A drawn hyphen is invisible to XCUITest: `Connected marketplaces` is the
@@ -840,21 +702,6 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(row.frame.minX, window.frame.minX, receipt)
         XCTAssertLessThanOrEqual(row.frame.maxX, window.frame.maxX, receipt)
         addScreenshot(named: "AX5-SETTINGS-VALUE-ROWS-accessibility5-402x874.png")
-    }
-
-    private func launchCaptureSheet(dynamicType: String) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = [
-            "--fixture=capture",
-            "--zero-network-fixtures",
-            "--dynamic-type=\(dynamicType)",
-        ]
-        app.launchAfterRetiringPriorInstance()
-        XCTAssertTrue(
-            app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 10),
-            app.debugDescription
-        )
-        return app
     }
 
     /// Issue #812: each ABOUT row used to be a bare `HStack` with a chevron
@@ -916,6 +763,13 @@ final class SnapListUITests: XCTestCase {
     /// argument at all, so these three SELLING rows cannot render one — this
     /// confirms the rows still exist (not silently dropped) and are exactly
     /// what they claim to be: non-navigating, so not `XCUIElementTypeButton`.
+    ///
+    /// `--fixture=account` never reaches a confirmed eBay connection (the
+    /// real `ebayPublishService` is unavailable under zero-network
+    /// fixtures), so `settings.selling.marketplaces` stays this non-button
+    /// value row here. Issue #865 makes that same row a real destination
+    /// once connected — see `EbayPublishUITests` for that state, proved
+    /// through `--settings-proof=SET-01`.
     func testSettingsSellingValueRowsAreNotButtons() {
         let app = launch(extraArguments: ["--fixture=account"])
         let settingsScreen = app.descendants(matching: .any)["settings.screen"]
@@ -1048,36 +902,23 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
-    func testCapturePresentsAndDismissesAnItemDrivenSheet() {
-        let app = launchCaptureLauncherSheet()
-
-        for control in [
-            app.buttons["capture.close"],
-            app.buttons["capture.take-one-item"],
-            app.buttons["capture.choose-library"]
-        ] {
-            XCTAssertTrue(control.exists)
-            XCTAssertGreaterThanOrEqual(
-                control.frame.width,
-                44,
-                "\(control.identifier) width"
-            )
-            XCTAssertGreaterThanOrEqual(
-                control.frame.height,
-                44,
-                "\(control.identifier) height"
-            )
-        }
-
-        app.buttons["capture.close"].tap()
-        XCTAssertFalse(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 1))
-    }
-
+    /// Scan opens directly into the camera preview (#864): there is no more
+    /// launcher sheet standing between the tab and `ScanCameraView`, so its own
+    /// camera-unavailable recovery state is reached by launching straight into
+    /// Scan rather than by tapping a `capture.take-one-item` control that no
+    /// longer exists.
+    ///
+    /// `--reset-capture-draft` guarantees a clean starting draft: this test's
+    /// camera surface uses the real, file-backed `LocalCaptureDraftStore`
+    /// (deliberately durable across relaunches so a seller's staged photo
+    /// survives one), which without a reset would inherit a stray staged
+    /// photo left behind by an earlier test sharing the same shard invocation
+    /// and app container.
     func testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable() {
-        let app = launchCaptureLauncherSheet()
-
-        XCTAssertTrue(app.buttons["capture.take-one-item"].waitForExistence(timeout: 2))
-        app.buttons["capture.take-one-item"].tap()
+        let app = launch(extraArguments: [
+            "--camera-status=authorized",
+            "--reset-capture-draft"
+        ])
 
         XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
         addScreenshot(named: "CAPTURE-CAMERA-UNAVAILABLE.png")
@@ -1099,14 +940,6 @@ final class SnapListUITests: XCTestCase {
         app.launchArguments = ["--restored-capture-fixture"]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["capture.take-one-item"].exists)
-        XCTAssertFalse(app.buttons["capture.choose-library"].exists)
-        XCTAssertGreaterThanOrEqual(resume.frame.width, 44)
-        XCTAssertGreaterThanOrEqual(resume.frame.height, 44)
-        resume.tap()
-
         let photoCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
         XCTAssertEqual(
@@ -1116,6 +949,8 @@ final class SnapListUITests: XCTestCase {
         )
         XCTAssertEqual(photoCount.label, "1 of 5")
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
+        XCTAssertFalse(app.buttons["capture.take-one-item"].exists)
+        XCTAssertFalse(app.buttons["capture.choose-library"].exists)
         addScreenshot(named: "CAPTURE-RESTORED-DRAFT.png")
 
         let reviewButton = app.buttons["scan.review"]
@@ -1138,10 +973,6 @@ final class SnapListUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
         app.launchAfterRetiringPriorInstance()
-
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
 
         let scanCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(scanCount.waitForExistence(timeout: 3))
@@ -1183,10 +1014,6 @@ final class SnapListUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
         app.launchAfterRetiringPriorInstance()
-
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
 
         let initialCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(initialCount.waitForExistence(timeout: 3))
@@ -1238,10 +1065,6 @@ final class SnapListUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--restored-capture-fixture"]
         app.launchAfterRetiringPriorInstance()
-
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
 
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
@@ -1347,10 +1170,6 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
-
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
         review.tap()
@@ -1411,10 +1230,6 @@ final class SnapListUITests: XCTestCase {
             "--voice-note-take-ready-fixture"
         ]
         app.launchAfterRetiringPriorInstance()
-
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
 
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
@@ -1625,10 +1440,6 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
-
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
         review.tap()
@@ -1686,10 +1497,6 @@ final class SnapListUITests: XCTestCase {
             "--submission-fixture=rate-limited"
         ]
         app.launchAfterRetiringPriorInstance()
-
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
 
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
@@ -1772,10 +1579,6 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
-
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
         review.tap()
@@ -1845,10 +1648,6 @@ final class SnapListUITests: XCTestCase {
             "--submission-acknowledgment-notification=\(acknowledgmentNotification)"
         ]
         app.launchAfterRetiringPriorInstance()
-
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
 
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
@@ -1961,10 +1760,6 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 5))
-        resume.tap()
-
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 5))
         review.tap()
@@ -2029,10 +1824,6 @@ final class SnapListUITests: XCTestCase {
         app.launchArguments = ["--restored-capture-fixture"]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
-
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
         review.tap()
@@ -2082,10 +1873,6 @@ final class SnapListUITests: XCTestCase {
                 "--dynamic-type=\(typeSize)"
             ]
             app.launchAfterRetiringPriorInstance()
-
-            let resume = app.buttons["button.primary.resume-captured-photo"]
-            XCTAssertTrue(resume.waitForExistence(timeout: 5), typeSize)
-            resume.tap()
 
             let review = app.buttons["scan.review"]
             XCTAssertTrue(review.waitForExistence(timeout: 5), typeSize)
@@ -2145,9 +1932,13 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
+    /// CAP-01 previewed the now-deleted `CaptureLauncherSheet` (#864). It stays
+    /// in `ApprovedVisualStateID` for manifest safety but its route now falls
+    /// through to `VisualStateBoundaryPlaceholder`, same as any other retired
+    /// design-catalog state (HOME-03/HOME-04 precedent), so it is no longer
+    /// exercised here.
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {
         let expectedTextByState = [
-            ("CAP-01", "Add an item"),
             ("CAP-02a", "Start with one clear photo."),
             ("CAP-02b1", "Move closer"),
             ("CAP-02b2", "Whole item is in frame"),
@@ -2221,10 +2012,6 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3), app.debugDescription)
-        resume.tap()
-
         let window = app.windows.firstMatch
         let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
         let photoCount = app.staticTexts["scan.photo-count"]
@@ -2273,6 +2060,48 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(dockTrophy.isSelected)
     }
 
+    /// #864: with `CaptureLauncherSheet` deleted, a relaunch that restores a
+    /// staged photo lands directly on these live camera controls with nothing
+    /// covering them. On the parent commit this same launch left
+    /// `scan.close`/`scan.library`/`scan.shutter`/`scan.review` behind
+    /// `sheet.capture` until "Resume" was tapped, so this waitForExistence at
+    /// the largest accessibility Dynamic Type size would time out there; here
+    /// it also proves none of the reflowed controls clip past the window or
+    /// overlap one another, mirroring the default-size clipping proof in
+    /// `testIssue775RealAppShellRemovesDockFromLiveCameraPreviewAt402x874`.
+    func testRestoredCaptureCameraControlsStayOnscreenAtLargestAccessibilitySize() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--restored-capture-fixture",
+            "--dynamic-type=accessibility5"
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let window = app.windows.firstMatch
+        let closeButton = app.buttons["scan.close"]
+        let library = app.buttons["scan.library"]
+        let shutter = app.buttons["scan.shutter"]
+        let review = app.buttons["scan.review"]
+
+        XCTAssertTrue(window.waitForExistence(timeout: 3), app.debugDescription)
+        for control in [closeButton, library, shutter, review] {
+            XCTAssertTrue(control.waitForExistence(timeout: 3), control.identifier)
+        }
+
+        let frameReceipt = "window=\(window.frame), close=\(closeButton.frame), " +
+            "library=\(library.frame), shutter=\(shutter.frame), review=\(review.frame)"
+        for control in [closeButton, library, shutter, review] {
+            XCTAssertGreaterThanOrEqual(control.frame.minX, window.frame.minX, frameReceipt)
+            XCTAssertLessThanOrEqual(control.frame.maxX, window.frame.maxX, frameReceipt)
+            XCTAssertGreaterThanOrEqual(control.frame.minY, window.frame.minY, frameReceipt)
+            XCTAssertLessThanOrEqual(control.frame.maxY, window.frame.maxY, frameReceipt)
+        }
+
+        XCTAssertFalse(shutter.frame.intersects(library.frame), frameReceipt)
+        XCTAssertFalse(shutter.frame.intersects(review.frame), frameReceipt)
+        XCTAssertFalse(library.frame.intersects(review.frame), frameReceipt)
+    }
+
     /// Issue #842: each camera-screen thumbnail carries a remove affordance. Removing
     /// one photo must update the strip, the count, and the durable draft, keep the
     /// surviving photo, and removing the last remaining photo must leave the capture
@@ -2284,10 +2113,6 @@ final class SnapListUITests: XCTestCase {
             "--fixture-staged-library-photos=2"
         ]
         app.launchAfterRetiringPriorInstance()
-
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3), app.debugDescription)
-        resume.tap()
 
         let firstPhoto = app.descendants(matching: .any)["scan.photo-1"]
         let secondPhoto = app.descendants(matching: .any)["scan.photo-2"]
@@ -2350,10 +2175,6 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3), app.debugDescription)
-        resume.tap()
-
         let removeSecond = app.buttons["scan.photo-2.remove"]
         XCTAssertTrue(removeSecond.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertGreaterThanOrEqual(removeSecond.frame.width, 44)
@@ -2409,7 +2230,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(recoveryLibrary.label, "Choose from library")
     }
 
-    func testPhotoReviewREV02UsesLive300PointHeroAt402x874() {
+    func testPhotoReviewREV02UsesTallerThreeEightyPointHeroAt402x874() {
         let app = launch(extraArguments: ["--photo-review-state=REV-02"])
         let window = app.windows.firstMatch
         let hero = app.buttons["photo-review.hero"]
@@ -2420,9 +2241,128 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(hero.waitForExistence(timeout: 3))
         XCTAssertEqual(
             hero.frame.height,
-            300,
+            380,
             accuracy: 1,
-            "Live Photo Review v5 fixes the hero at 300 points."
+            "#858: Photo Review v5's hero grew from 300 to 380 points."
+        )
+    }
+
+    // #883: the swipe is the seller's own path between photos, and the chevrons
+    // that used to prove this wiring are gone. REV-03 stages five photos so a
+    // move in either direction is available mid-strip. This is the one seam that
+    // proves the gesture reaches the store and that the thumbnail strip stays in
+    // sync, which cannot be proved below the UI layer.
+    func testPhotoReviewHeroSwipeMovesSelectionOnePhotoAtATimeAndStopsAtTheEnds() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-03"])
+        let hero = app.buttons["photo-review.hero"]
+        let firstThumbnail = app.buttons["photo-review.thumbnail.1"]
+        let secondThumbnail = app.buttons["photo-review.thumbnail.2"]
+        let thirdThumbnail = app.buttons["photo-review.thumbnail.3"]
+
+        XCTAssertTrue(hero.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            app.buttons["photo-review.hero.next"].exists,
+            "#883 retired the hero chevrons; the swipe is the visible path."
+        )
+        XCTAssertFalse(app.buttons["photo-review.hero.previous"].exists)
+        XCTAssertTrue(firstThumbnail.isSelected)
+
+        dragHorizontally(hero, towardsLeading: false)
+
+        XCTAssertTrue(
+            firstThumbnail.isSelected,
+            "The first photo has nothing before it."
+        )
+        XCTAssertTrue(hero.label.hasPrefix("Photo 1 of 5"))
+
+        dragHorizontally(hero, towardsLeading: true)
+
+        waitFor(
+            secondThumbnail,
+            toSatisfy: "isSelected == true",
+            "A leading drag moves selection forward one photo."
+        )
+        XCTAssertFalse(firstThumbnail.isSelected)
+        XCTAssertTrue(hero.label.hasPrefix("Photo 2 of 5"))
+
+        dragHorizontally(hero, towardsLeading: true)
+
+        waitFor(
+            thirdThumbnail,
+            toSatisfy: "isSelected == true",
+            "One drag moves one photo, not several."
+        )
+        XCTAssertFalse(secondThumbnail.isSelected)
+        XCTAssertTrue(hero.label.hasPrefix("Photo 3 of 5"))
+
+        dragHorizontally(hero, towardsLeading: false)
+
+        waitFor(
+            secondThumbnail,
+            toSatisfy: "isSelected == true",
+            "A trailing drag moves selection back one photo."
+        )
+        XCTAssertFalse(thirdThumbnail.isSelected)
+        XCTAssertTrue(hero.label.hasPrefix("Photo 2 of 5"))
+    }
+
+    // #883: the indicator is what tells the seller where they are once the
+    // chevrons are gone, and its label is what tells VoiceOver the same thing
+    // without reading the dots. It has to answer to both ways of moving.
+    func testPhotoReviewHeroPageIndicatorTracksTheSelectedPhotoOnSwipeAndOnThumbnailTap() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-03"])
+        let hero = app.buttons["photo-review.hero"]
+        let indicator = app.otherElements["photo-review.hero.page-indicator"]
+
+        XCTAssertTrue(hero.waitForExistence(timeout: 3))
+        XCTAssertTrue(indicator.waitForExistence(timeout: 3))
+        XCTAssertEqual(indicator.label, "Photo 1 of 5")
+        XCTAssertTrue(
+            hero.frame.contains(indicator.frame),
+            "The indicator sits on the photo: indicator=\(indicator.frame) hero=\(hero.frame)"
+        )
+        XCTAssertEqual(
+            indicator.frame.midX,
+            hero.frame.midX,
+            accuracy: 1,
+            "facebook-page-dots-reference.png centers it on the photo."
+        )
+
+        dragHorizontally(hero, towardsLeading: true)
+
+        waitFor(
+            indicator,
+            toSatisfy: "label == 'Photo 2 of 5'",
+            "The indicator must follow the swipe."
+        )
+
+        app.buttons["photo-review.thumbnail.4"].tap()
+
+        waitFor(
+            indicator,
+            toSatisfy: "label == 'Photo 4 of 5'",
+            "The indicator must follow a thumbnail tap too."
+        )
+        addScreenshot(named: "PHOTO-REVIEW-883-REV-03-PAGE-INDICATOR-402x874.png")
+    }
+
+    func testPhotoReviewHeroNavigationHidesAtOnePhotoAndDoesNotOpenActionsRow() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-01"])
+        let hero = app.buttons["photo-review.hero"]
+
+        XCTAssertTrue(hero.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            app.buttons["photo-review.hero.next"].exists,
+            "#883 retired the hero chevrons."
+        )
+        XCTAssertFalse(app.buttons["photo-review.hero.previous"].exists)
+        XCTAssertFalse(
+            app.otherElements["photo-review.hero.page-indicator"].exists,
+            "A single staged photo has no pages to indicate."
+        )
+        XCTAssertFalse(
+            app.buttons["photo-review.delete"].exists,
+            "Navigation must not open the Replace/Delete actions row by itself."
         )
     }
 
@@ -2964,20 +2904,6 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(flash.waitForExistence(timeout: 2))
         XCTAssertEqual(flash.frame.width, 48, accuracy: 0.5)
         XCTAssertEqual(flash.frame.height, 48, accuracy: 0.5)
-    }
-
-    func testCaptureLauncherSurvivesAccessibilityTypeAndReducedMotion() {
-        let app = launch(extraArguments: [
-            "--visual-state=CAP-01",
-            "--dynamic-type=accessibility3",
-            "--reduce-motion"
-        ])
-
-        XCTAssertTrue(app.staticTexts["Add an item"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Choose from library"].exists)
-        XCTAssertGreaterThan(app.staticTexts["Choose from library"].frame.maxY, 0)
-        XCTAssertLessThan(app.staticTexts["Choose from library"].frame.maxY, app.windows.firstMatch.frame.maxY)
-        addScreenshot(named: "CAP-01-AX3-REDUCED-MOTION.png")
     }
 
     func testCaptureGuidanceRespectsLandscapeSafeAreas() {
@@ -3576,8 +3502,8 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 5), app.debugDescription)
+        let photoCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(photoCount.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(
             app.descendants(matching: .any)["first-value-onboarding.state.ONB-01"].exists,
             app.debugDescription
@@ -3690,14 +3616,27 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Let's photograph your item"].exists)
     }
 
-    func testStagedLibraryPhotosSurviveInterruptionAndReachCAP01() {
+    /// Renamed from `...ReachCAP01` (#864): the staged-library handoff used to
+    /// land the seller on the CAP-01 launcher card; it now lands directly on
+    /// the camera preview with the staged photos already counted in.
+    ///
+    /// Unlike the CAP-01 version, this test's "continue to capture" tap
+    /// actually reaches the camera and durably stages a photo into
+    /// `NativeIntake` — deliberately durable across relaunches so a seller's
+    /// staged photo survives one, which means it also survives past this
+    /// test's own process unless cleaned up. `--reset-capture-draft` in the
+    /// existing cleanup relaunch (previously only resetting onboarding
+    /// progress) prevents that leaking into whichever test shares this shard
+    /// invocation's app container next (#864).
+    func testStagedLibraryPhotosSurviveInterruptionAndReachTheCameraPreview() {
         let app = XCUIApplication()
         defer {
             app.terminate()
             let cleanup = XCUIApplication()
             cleanup.launchArguments = [
                 "--fixture=onboarding",
-                "--reset-onboarding-progress"
+                "--reset-onboarding-progress",
+                "--reset-capture-draft"
             ]
             cleanup.launchAfterRetiringPriorInstance()
             cleanup.terminate()
@@ -3721,11 +3660,18 @@ final class SnapListUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Photos ready"].waitForExistence(timeout: 3))
         app.buttons["button.primary.continue-to-capture"].tap()
-        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
-        XCTAssertTrue(app.buttons["capture.choose-library"].exists)
-        XCTAssertFalse(app.staticTexts["Capture entry boundary"].exists)
-        XCTAssertFalse(app.otherElements["boundary.CAP-01"].exists)
+
+        // The handoff transfers one staged library photo at a time
+        // (`OnboardingFlowModel.firstStagedLibraryPhotoForCapture`); the
+        // second staged photo remains available for a later handoff.
+        let photoCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(photoCount.label, "1 of 5")
+        XCTAssertTrue(app.buttons["scan.review"].exists)
+        XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
+        XCTAssertFalse(app.buttons["capture.take-one-item"].exists)
+        XCTAssertFalse(app.buttons["capture.choose-library"].exists)
+        XCTAssertFalse(app.otherElements["visual-state.CAP-01"].exists)
         XCTAssertFalse(app.staticTexts["Photo Review"].exists)
     }
 
@@ -4075,24 +4021,6 @@ final class SnapListUITests: XCTestCase {
         return app
     }
 
-    /// Capture Launcher behavior remains independently testable through its typed
-    /// fixture now that First-Value completion routes straight to canonical Scan.
-    private func launchCaptureLauncherSheet(
-        extraArguments: [String] = []
-    ) -> XCUIApplication {
-        let app = XCUIApplication()
-        app.launchArguments = [
-            "--fixture=capture",
-            "--zero-network-fixtures",
-            "--camera-status=authorized",
-        ] + extraArguments
-        app.launchAfterRetiringPriorInstance()
-        XCTAssertTrue(
-            app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3)
-        )
-        return app
-    }
-
     private func launchFirstValueOnboarding(
         resetProgress: Bool,
         extraArguments: [String] = []
@@ -4137,10 +4065,6 @@ final class SnapListUITests: XCTestCase {
         ]
         app.launchAfterRetiringPriorInstance()
 
-        let resume = app.buttons["button.primary.resume-captured-photo"]
-        XCTAssertTrue(resume.waitForExistence(timeout: 3))
-        resume.tap()
-
         let review = app.buttons["scan.review"]
         XCTAssertTrue(review.waitForExistence(timeout: 3))
         review.tap()
@@ -4169,6 +4093,56 @@ final class SnapListUITests: XCTestCase {
             thenDragTo: destination,
             withVelocity: 1_000,
             thenHoldForDuration: 0
+        )
+    }
+
+    /// #883: a momentum-free horizontal drag across `element`. `swipeLeft()`
+    /// synthesizes a velocity flick that the hero's `DragGesture` inside the
+    /// review's vertical scroll view does not see; a pressed drag does, and it
+    /// mirrors `ListingReviewUITests.scrollUntilClearOfFooter`, which exists for
+    /// the same class of problem.
+    private func dragHorizontally(
+        _ element: XCUIElement,
+        towardsLeading: Bool
+    ) {
+        let startX = towardsLeading ? 0.85 : 0.15
+        let endX = towardsLeading ? 0.15 : 0.85
+        let start = element.coordinate(
+            withNormalizedOffset: CGVector(dx: startX, dy: 0.5)
+        )
+        let end = element.coordinate(
+            withNormalizedOffset: CGVector(dx: endX, dy: 0.5)
+        )
+        // The velocity-and-hold overload is the one that interpolates
+        // intermediate touch points. `swipeLeft()` and the two-point
+        // `press(forDuration:thenDragTo:)` both deliver a jump the hero's
+        // `DragGesture` never sees as movement.
+        start.press(
+            forDuration: 0.05,
+            thenDragTo: end,
+            withVelocity: .default,
+            thenHoldForDuration: 0.05
+        )
+    }
+
+    private func waitFor(
+        _ element: XCUIElement,
+        toSatisfy format: String,
+        _ message: String,
+        timeout: TimeInterval = 3,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: format),
+            object: element
+        )
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [expectation], timeout: timeout),
+            .completed,
+            message,
+            file: file,
+            line: line
         )
     }
 

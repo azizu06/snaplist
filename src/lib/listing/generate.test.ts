@@ -11,6 +11,7 @@ import {
 } from "./schema";
 import { itemSpecificsToPairs } from "./schema.testing";
 import {
+  buildCoreListingDescription,
   fallbackEbayListing,
   corpusReadKey,
   enforceTitleLength,
@@ -251,6 +252,148 @@ describe("listing/generate — seller-visible copy contract (#243)", () => {
 
     expect(calls).toHaveLength(2);
     expect(listing).toEqual(fallbackEbayListing(CORE));
+  });
+});
+
+/**
+ * A field label is a capitalized word (or short phrase) followed by a colon at the
+ * start of the description or of a sentence — the `Item:` / `Condition:` / `Details:`
+ * form shape a seller would never type.
+ *
+ * The lookahead pins the seller-note qualifier as the one deliberate exception: it is
+ * the provenance disclosure the seller-context contract requires, not a form field. As
+ * currently worded it would not match anyway (the `(unverified)` parenthetical breaks
+ * the word run before the colon), so the lookahead is belt-and-braces — it keeps the
+ * exemption true if that qualifier is ever reworded to a plain `Word:` shape.
+ */
+const FIELD_LABEL_PATTERN =
+  /(?:^|[.!?]\s+)(?!Seller note \(unverified\):)[A-Z][A-Za-z]*(?: [A-Za-z]+){0,2}:/;
+
+/** Any label colon — a colon followed by whitespace — anywhere in the description. */
+const LABEL_COLON_PATTERN = /:\s/;
+
+describe("listing/generate — the description reads as sentences, not a form (#894)", () => {
+  it("builds the core description with no field-label prefix", () => {
+    const description = buildCoreListingDescription(CORE);
+
+    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(description).not.toMatch(/\bItem:/);
+    expect(description).not.toMatch(/\bCondition:/);
+    expect(description).not.toMatch(/\bDetails:/);
+  });
+
+  it("still states identity, condition and every validated spec", () => {
+    const description = buildCoreListingDescription(CORE);
+
+    expect(description).toContain("Sony WH-1000XM4");
+    expect(description).toMatch(/good/);
+    for (const spec of CORE.specs ?? []) {
+      expect(description).toContain(spec);
+    }
+  });
+
+  it("keeps the seller note qualified as unverified without a field-label body", () => {
+    const description = buildCoreListingDescription(CORE, {
+      text: "scratch on left hinge",
+      language: "en-US",
+      provenance: "seller_voice",
+      verification: "unverified",
+    });
+
+    expect(description).toContain(
+      "Seller note (unverified): scratch on left hinge",
+    );
+    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+  });
+
+  it("does not double the word condition when the core already carries it", () => {
+    const description = buildCoreListingDescription({
+      ...CORE,
+      condition: "good condition",
+    });
+
+    expect(description).not.toMatch(/condition condition/i);
+    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+  });
+
+  it("does not strand the noun after a condition that is already a terminated phrase", () => {
+    // An extracted condition can arrive punctuated, or carry the noun mid-phrase. Both
+    // used to append a second " condition" — one of them after the value's own period.
+    expect(
+      buildCoreListingDescription({ ...CORE, condition: "Very good condition." }),
+    ).toContain("Sony WH-1000XM4 in Very good condition.");
+    expect(
+      buildCoreListingDescription({ ...CORE, condition: "Very good condition." }),
+    ).not.toMatch(/condition\.?\s+condition/i);
+    expect(
+      buildCoreListingDescription({
+        ...CORE,
+        condition: "used condition, minor scuffs",
+      }),
+    ).not.toMatch(/condition[^.]*\bcondition\b/i);
+  });
+
+  it("does not let a colon-labeled spec put the form shape back", () => {
+    // Specs are model-authored free text, so the field-label shape can arrive from the
+    // DATA side even once the builder stops producing it.
+    const description = buildCoreListingDescription({
+      ...CORE,
+      specs: ["USB-C: 2 ports", "Battery life: 30 hours"],
+    });
+
+    expect(description).not.toMatch(LABEL_COLON_PATTERN);
+    expect(description).toContain("USB-C 2 ports.");
+    expect(description).toContain("Battery life 30 hours.");
+  });
+
+  it("keeps a colon that is part of a value rather than a label", () => {
+    const description = buildCoreListingDescription({
+      ...CORE,
+      specs: ["16:9 aspect ratio"],
+    });
+
+    expect(description).toContain("16:9 aspect ratio.");
+  });
+
+  it("names the item as a sentence when the core establishes nothing else", () => {
+    const description = buildCoreListingDescription({ title: "Vintage desk lamp" });
+
+    expect(description).toBe("Vintage desk lamp.");
+  });
+
+  it("synthesizes a sentence-shaped description even when the model's draft is kept", async () => {
+    // The model's OWN description never reaches the seller: the accepted-draft branch
+    // rebuilds it from the core too, because a description cannot be fact-checked after
+    // generation. This asserts that synthesized text, not a pass-through.
+    const { generate } = scriptedGenerate([GOOD_LISTING]);
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 0,
+    });
+
+    expect(listing.description).not.toMatch(FIELD_LABEL_PATTERN);
+  });
+
+  it("returns a sentence-shaped description on the factual fallback path", async () => {
+    const violating: UnvalidatedEbayListing = {
+      ...GOOD_LISTING,
+      description: "This must-have listing ships fast.",
+    };
+    const { generate, calls } = scriptedGenerate([violating, violating]);
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    // The fallback fired (the model's copy was rejected twice) and what it produced
+    // still reads as sentences.
+    expect(calls).toHaveLength(2);
+    expect(listing).toEqual(fallbackEbayListing(CORE));
+    expect(listing.description).not.toMatch(FIELD_LABEL_PATTERN);
   });
 });
 

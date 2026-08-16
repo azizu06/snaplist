@@ -549,32 +549,34 @@ html:has(.mkt) {
 
 /* -------------------------------------------------------------- phone frame */
 
+/* Same hardware as the explorer device. See the "realistic hardware" block below
+   that rule for where the three ratios come from.
+
+   Computed from the body width rather than written as pixels, because unlike the
+   explorer this frame is not transform-scaled: it is min(400px, 86vw), so it
+   genuinely shrinks on a narrow screen. Fixed 15px of padding against a 322px
+   body at 375px wide would be 4.7% rather than 3.83%, and a fixed 67px radius
+   would be 20.8% rather than 16.8%, so the phone would gain a chunky edge and
+   over-round corners exactly where the screen is smallest. --phone-body is set
+   by whichever rule owns the width. */
 .mkt-phone {
   position: relative;
-  background: var(--ink);
-  padding: 10px;
-  border-radius: 44px;
-  box-shadow: 0 26px 60px rgba(16, 24, 40, 0.22);
+  padding: calc(var(--phone-body, 400px) * 0.0383);
+  border-radius: calc(var(--phone-body, 400px) * 0.168);
+  box-shadow:
+    inset 0 0 0 calc(var(--phone-body, 400px) * 0.0279) var(--device-bezel),
+    0 26px 60px rgba(16, 24, 40, 0.22);
+  background: var(--device-rail);
 }
 
-.mkt-phone__notch {
-  position: absolute;
-  top: 9px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 86px;
-  height: 23px;
-  background: var(--ink);
-  border-radius: 13px;
-  z-index: 5;
-}
 
 .mkt-phone__screen {
   position: relative;
   width: 100%;
   height: 100%;
   background: var(--canvas);
-  border-radius: 34px;
+  /* Outer radius less the frame, so the two curves stay concentric. */
+  border-radius: calc(var(--phone-body, 400px) * 0.1297);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -582,207 +584,184 @@ html:has(.mkt) {
 
 /* --------------------------------------------------------------- hero art */
 
-/* The hero stays a clean device treatment, not a preview of unshipped UI. */
+/* The hero device holds the real camera screen, so it keeps the phone
+   proportions and lets the shot fill it.
+
+   400 wide with 10px padding leaves a 380 x 820 screen, which is the 744 x 1610
+   shot aspect and therefore an actual iPhone screen aspect. The frame is square
+   to the page: it used to sit at -3deg, but the screen is now a capture of the
+   shipping chrome, and rotating the frame shears that chrome along with it.
+
+   It is deliberately larger than the explorer device at 384. The hero phone is
+   the lead visual and the only animated one on the page, so it should outweigh a
+   phone that sits beside step copy. It used to be 360, which inverted that.
+
+   400 / 831 rather than 400 / 840: the frame is 15px a side now rather than 10,
+   so the screen is 370 wide and 370 / 0.46216 is 801, and 801 + 30 is 831. The
+   old pair left the screen at 0.4634 and `cover` trimming a couple of pixels. */
 .mkt-hero__minimal-phone {
-  width: min(268px, 82vw);
-  aspect-ratio: 268 / 552;
-  transform: rotate(-3deg);
+  --phone-body: min(400px, 86vw);
+  width: var(--phone-body, 400px);
+  /* Scale-free, so it holds at every width the clamp above can produce. */
+  aspect-ratio: 400 / 831;
 }
 
-.mkt-hero__neutral-screen {
-  background: linear-gradient(145deg, var(--wash) 0%, var(--canvas) 48%, var(--wash-2) 100%);
-}
-
-/* Screen internals. 9px labels inside the feature frames are decorative
-   chrome, not page copy; they are below AA on purpose and carry no information
-   the page does not also state at full size. */
-.mkt-scr {
-  display: flex;
-  flex-direction: column;
+/* Screen contents. Every screen is now a capture of the shipping app rather
+   than a drawing, so the only rule left is how the image sits in the frame.
+   Cover, anchored to the top: the shots are all cropped just below the status
+   bar, so the frame's own notch is the only one and the trim falls at the
+   bottom edge where nothing decisive lives. */
+.mkt-scr__shot {
+  display: block;
   width: 100%;
   height: 100%;
+  object-fit: cover;
+  object-position: top center;
 }
 
-.mkt-scr__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 32px 16px 12px;
-  border-bottom: 1px solid var(--hairline-2);
-}
+/* ------------------------------------------------------- hero scanning loop */
 
-.mkt-scr__title {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.mkt-scr__pill {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-  background: var(--soft);
-  border: 1px solid var(--hairline-2);
-  padding: 2px 7px;
-  border-radius: 999px;
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-
-.mkt-scr__body {
-  flex: 1 1 auto;
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  overflow: hidden;
-}
-
-.mkt-scr__field {
-  border: 1px solid var(--hairline-2);
-  border-radius: 8px;
-  padding: 8px 10px;
-}
-
-.mkt-scr__field--filled {
-  background: var(--soft);
-}
-
-.mkt-scr__label {
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-
-.mkt-scr__value {
-  font-size: 13px;
-  color: var(--ink);
-  margin-top: 2px;
-  line-height: 1.35;
-}
-
-.mkt-scr__cta {
-  margin: 10px 16px 18px;
-  height: 42px;
-  border-radius: 9px;
-  background: var(--action);
-  color: #ffffff;
-  font-size: 13px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.mkt-scr__capture {
-  background: var(--ink);
-}
-
-.mkt-scr__capture-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 30px 14px 10px;
-  color: #ffffff;
-}
-
-.mkt-scr__viewfinder {
-  flex: 1 1 auto;
-  margin: 0 14px;
-  border-radius: 12px;
-  background: #24262b;
+/* One cycle. Every beat below is a percentage of this, so they cannot drift
+   apart, and the item swap rides the same clock by listening for the iteration
+   boundary rather than running its own timer. */
+.mkt-scanloop {
+  --scanloop-cycle: 3600ms;
   position: relative;
-}
-
-.mkt-scr__viewfinder::after {
-  content: "";
-  position: absolute;
-  inset: 14px;
-  border: 1.5px solid rgba(255, 255, 255, 0.28);
-  border-radius: 8px;
-}
-
-.mkt-scr__strip {
-  display: flex;
-  gap: 6px;
-  padding: 10px 14px 8px;
-}
-
-.mkt-scr__thumb {
-  width: 34px;
-  height: 34px;
-  border-radius: 6px;
-  background: #3a3d44;
-}
-
-.mkt-scr__shutter-row {
-  display: flex;
-  justify-content: center;
-  padding: 4px 0 18px;
-}
-
-.mkt-scr__shutter {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow:
-    0 0 0 3px var(--ink),
-    0 0 0 5px #ffffff;
-}
-
-.mkt-scr__handoff {
-  border: 1px solid var(--hairline-2);
-  border-radius: 9px;
-  padding: 11px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.mkt-scr__handoff-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  min-width: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background: #000;
 }
 
-.mkt-scr__tile {
-  position: relative;
-  width: 62px;
-  height: 62px;
-  border-radius: 9px;
-  background: var(--hairline-2);
-}
-
-.mkt-scr__tile > span {
+.mkt-scanloop__item,
+.mkt-scanloop__chrome {
   position: absolute;
-  top: 4px;
-  left: 5px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--ink-2);
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
-.mkt-scr__tool {
-  flex: 1;
-  height: 44px;
-  border: 1px solid var(--hairline-2);
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
+.mkt-scanloop__item {
+  opacity: 0;
+  z-index: 0;
+  transition: opacity 500ms var(--quint);
+}
+
+.mkt-scanloop__item[data-active="true"] {
+  opacity: 1;
+  z-index: 1;
+}
+
+/* The captured camera chrome, with the viewfinder knocked out to transparency.
+   It sits above the flash so the flash whitens the subject the way a capture
+   does, and leaves the controls legible. */
+.mkt-scanloop__chrome {
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Cut from the same capture as the chrome so the pulse moves real pixels. The
+   offsets are the ring's measured position in that capture.
+
+   The shadow is drawn here rather than carried in the image. The first cut of
+   this layer kept the shutter's shadow as captured, which is a ring of dark
+   pixels burnt in against the photograph it was cut from. Over a darker item
+   that reads as a shadow; over a bright one it reads as a black halo bolted to
+   the button, which is what it did on the guitar frame. drop-shadow recomposites
+   against whatever item is actually behind it. */
+.mkt-scanloop__shutter {
+  position: absolute;
+  left: 39.0385%;
+  top: 77.6066%;
+  width: 22.1795%;
+  height: 10.782%;
+  z-index: 4;
+  pointer-events: none;
+  transform-origin: 50% 50%;
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.45));
+  animation: mkt-scanloop-shutter var(--scanloop-cycle) var(--quint) infinite;
+}
+
+.mkt-scanloop__flash {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  animation: mkt-scanloop-flash var(--scanloop-cycle) linear infinite;
+}
+
+/* The one element here that is not app interface. It is a marketing device and
+   it belongs to this page only: carried into an App Store panel it would read
+   as a claim about a screen the app renders. */
+.mkt-scanloop__sweep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 10%;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(43, 81, 196, 0) 0%,
+    rgba(43, 81, 196, 0.28) 62%,
+    rgba(255, 255, 255, 0.85) 96%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  opacity: 0;
+  animation: mkt-scanloop-sweep var(--scanloop-cycle) linear infinite;
+}
+
+@keyframes mkt-scanloop-shutter {
+  0%,
+  50% {
+    transform: scale(1);
+  }
+  54.5% {
+    transform: scale(0.9);
+  }
+  60.2%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes mkt-scanloop-flash {
+  0%,
+  56.8% {
+    opacity: 0;
+  }
+  59.1% {
+    opacity: 0.9;
+  }
+  61.4%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes mkt-scanloop-sweep {
+  0%,
+  61.4% {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  62% {
+    opacity: 1;
+    transform: translateY(-100%);
+  }
+  87% {
+    opacity: 1;
+    transform: translateY(1000%);
+  }
+  88.6%,
+  100% {
+    opacity: 0;
+    transform: translateY(1000%);
+  }
 }
 
 /* --------------------------------------------------- feature explorer (tabs) */
@@ -1016,7 +995,7 @@ html:has(.mkt) {
 .mkt-explorer {
   --phone-w: 384px;
   --phone-scale: 1.33333;
-  --phone-h: calc(var(--phone-w) * 592 / 288);
+  --phone-h: calc(var(--phone-w) * 598 / 288);
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1096,20 +1075,109 @@ html:has(.mkt) {
 .mkt-explorer__device {
   position: relative;
   width: 288px;
-  height: 592px;
-  background: var(--ink);
-  border-radius: 46px;
-  padding: 10px;
-  box-shadow: 0 24px 56px rgba(16, 24, 40, 0.2);
-}
-
-.mkt-explorer__device .mkt-phone__notch {
-  width: 92px;
-  height: 24px;
+  /* 598 rather than 562.5: the screen inside the 11px frame is then 266 x 576,
+     which is the 1240 x 2683 aspect of every shot and also a real iPhone screen
+     aspect, so `cover` has nothing to trim. 562.5 matched the old 620 x 1255
+     shots, but those had 219px cropped off the top and were squat at 0.494, so
+     the frame built to fit them was squat too and the screens inside it looked
+     shrunken. */
+  height: 598px;
+  border-radius: 48px;
+  padding: 11px;
+  box-shadow:
+    inset 0 0 0 8px var(--device-bezel),
+    0 24px 56px rgba(16, 24, 40, 0.2);
+  background: var(--device-rail);
 }
 
 .mkt-explorer__device .mkt-phone__screen {
-  border-radius: 36px;
+  border-radius: 37px;
+}
+
+/* ------------------------------------------------------- realistic hardware */
+
+/* The frame used to be a flat 10px slab of `--ink` with a 46px radius, which
+   reads as a rounded rectangle rather than a phone. Every number below is
+   measured off Cal AI's `analyzed.webp`, which Aziz gave as the reference: a
+   1275 x 2600 alpha-cut render whose body is 1253 x 2599.
+
+   Frame thickness there is 48px of 1253, so 3.83% of body width, and it is two
+   tones rather than one: 13px of light titanium rail on the outside and 35px of
+   near-black bezel inside it. That is the whole trick. A single dark band at any
+   thickness stays flat, because a real phone edge catches light on its rail and
+   goes black at the glass. At our 288px design width 3.83% is 11px, split 3 and
+   8, so the black arrives as an inset ring and the 3px that shows outside it is
+   the gradient below.
+
+   Corner radius is 16.8% of body width, hence 48px here against the old 46px.
+   The screen radius is the difference, 48 - 11 = 37, so the two curves stay
+   concentric. Get that wrong and the corners read as a sticker on a slab.
+
+   No notch and no Dynamic Island are drawn, which matches Cal AI and is also
+   forced: our shots carry the app's own status bar, so anything drawn on top of
+   them would cover app content. It landed on the Trophy Wall title once. */
+:root {
+  --device-bezel: #05070a;
+  /* Off-axis so the highlight falls left of centre, the way a rail lit from the
+     page's top left would. Flat grey here loses the metal immediately. */
+  --device-rail: linear-gradient(
+    96deg,
+    #8f9298 0%,
+    #5d6167 14%,
+    #3c4046 32%,
+    #33373c 68%,
+    #5b5f65 88%,
+    #8f9298 100%
+  );
+  --device-button: linear-gradient(96deg, #2f3338 0%, #23262a 55%, #3a3e44 100%);
+}
+
+/* Side hardware. Cal AI's render carries three: a short action button and a
+   longer volume bar on the left, and a longer power button on the right, each
+   protruding about 0.7% of body width past the rail. They are what stop the
+   frame reading as CSS, and they cost one element, because two of the three are
+   pseudo-elements on the device itself.
+
+   Percentages of the frame's height rather than pixels, so they survive the
+   `--phone-scale` steps and the hero's larger frame without being restated. */
+.mkt-explorer__device::before,
+.mkt-explorer__device::after,
+.mkt-phone::before,
+.mkt-phone::after,
+.mkt-phone__action {
+  content: "";
+  position: absolute;
+  width: 5px;
+  background: var(--device-button);
+  pointer-events: none;
+}
+
+/* Left: action button, then the volume bar under it. */
+.mkt-phone__action,
+.mkt-explorer__device::before,
+.mkt-phone::before {
+  left: -2px;
+  border-radius: 2px 1px 1px 2px;
+}
+
+.mkt-phone__action {
+  top: 19.1%;
+  height: 4.2%;
+}
+
+.mkt-explorer__device::before,
+.mkt-phone::before {
+  top: 26.6%;
+  height: 6.7%;
+}
+
+/* Right: power. Slightly less proud than the left pair, as measured. */
+.mkt-explorer__device::after,
+.mkt-phone::after {
+  right: -2px;
+  top: 28.9%;
+  height: 11%;
+  border-radius: 1px 2px 2px 1px;
 }
 
 .mkt-explorer__slide {
@@ -1749,8 +1817,26 @@ html:has(.mkt) {
   .mkt-faq__clip,
   .mkt-faq__content,
   .mkt-explorer__slide,
-  .mkt-explorer__slide[data-active="true"] {
+  .mkt-explorer__slide[data-active="true"],
+  .mkt-scanloop__item,
+  .mkt-scanloop__item[data-active="true"] {
     transition: none !important;
+  }
+
+  /* The loop stops on its first item, which is a complete camera screen on its
+     own. Nothing is lost: the item names are already in the container's label,
+     and the shutter and sweep carry no information the still does not. The
+     item never advances either, because the swap rides the animation's
+     iteration event and that event stops firing with the animation. */
+  .mkt-scanloop__shutter,
+  .mkt-scanloop__flash,
+  .mkt-scanloop__sweep {
+    animation: none !important;
+  }
+
+  .mkt-scanloop__flash,
+  .mkt-scanloop__sweep {
+    opacity: 0 !important;
   }
 
   .mkt-tab,

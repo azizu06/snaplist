@@ -355,8 +355,10 @@ final class ItemRunSubmissionHost {
         ItemRunSubmissionCoordinator.AmbiguousRetry?
     private var activePrincipalGeneration: UUID?
     private var activePrincipalContext: ItemRunSubmissionPrincipalContext?
-    private(set) var trophyWallPrincipalScopeProof:
-        ItemRunSubmissionPrincipalScopeProof? = nil
+    /// What Trophy Wall's fence compares. Nil until the first committed
+    /// snapshot, which is also every fixture launch, where the shell never
+    /// synchronizes a principal at all.
+    private(set) var trophyWallPrincipalIdentity: TrophyWallPrincipalIdentity?
     private var activeSubmissionID: UUID?
     private var cancellationRequestedSubmissionID: UUID?
     private var preparationTask:
@@ -414,7 +416,13 @@ final class ItemRunSubmissionHost {
             snapshot: snapshot,
             intake: intake
         )
-        trophyWallPrincipalScopeProof = activePrincipalContext?.scopeProof
+        // The activation id, not the scope proof, is what carries across the
+        // discard that empties this principal's photo list on an ordinary
+        // submit (#867). Publishing both keeps the proof as corroboration.
+        trophyWallPrincipalIdentity = TrophyWallPrincipalIdentity(
+            activationID: nextGeneration,
+            scopeProof: activePrincipalContext?.scopeProof
+        )
     }
 
     func recoverableTrophyWallPendingCard(
@@ -425,8 +433,17 @@ final class ItemRunSubmissionHost {
               let coordinator,
               let attempt = await coordinator.recoverableAttempt(
                   for: context
-              ),
-              activePrincipalContext?.generation == context.generation else {
+              ) else {
+            return nil
+        }
+        // Read while the intake is still staged. Acceptance deletes the bundle,
+        // so this is the only window in which the seller's own photo can be
+        // captured for the wall, and the generation check below still has the
+        // last word on whether the bytes belong to the current principal.
+        let coverPhotoData = await coordinator.stagedCoverPhotoData(
+            for: context
+        )
+        guard activePrincipalContext?.generation == context.generation else {
             return nil
         }
         return TrophyWallCard.pending(
@@ -435,6 +452,7 @@ final class ItemRunSubmissionHost {
                 idempotencyKey: attempt.idempotencyKey
             ),
             itemName: "Local item",
+            localCoverPhotoData: coverPhotoData,
             lastMeaningfulUpdateAt: context.photos.map(\.createdAt).max() ?? Date()
         )
     }
@@ -600,9 +618,18 @@ final class ItemRunSubmissionHost {
             clearedIntake = false
 
             let eventID = UUID()
+            // Read before the shell is told, because the shell's acknowledgement
+            // is what releases `finalize` below, and `finalize` deletes the
+            // intake these bytes come from. This is the only submission that
+            // reaches the wall on the ordinary path, so if the photo does not
+            // ride along here the seller watches their own item process behind
+            // an empty slot.
             let handoff = AcceptedItemRunHandoff(
                 idempotencyKey: submission.attempt.idempotencyKey,
-                acceptedRun: submission.acceptedRun
+                acceptedRun: submission.acceptedRun,
+                localCoverPhotoData: await coordinator.stagedCoverPhotoData(
+                    firstOf: submission.submittedPhotos
+                )
             )
             let gate = ItemRunSubmissionPresentationAcknowledgmentGate(
                 eventID: eventID
@@ -1406,6 +1433,50 @@ final class ItemRunSubmissionCoordinator {
             return nil
         }
         return attempt
+    }
+
+    /// The seller's first staged photo, reduced to the size the wall's slot
+    /// draws. Bytes rather than a path: the staged path stops resolving once the
+    /// resolved scope digest changes (#855) and the bundle itself is deleted at
+    /// acceptance, so the wall cannot go back for it later. The file is a
+    /// full-size capture, not a thumbnail, which is why it is reduced here
+    /// rather than carried whole. A photo that cannot be read or decoded is not
+    /// a failure — the wall keeps its existing slot.
+    fileprivate func stagedCoverPhotoData(
+        firstOf photos: [StagedCapturePhoto]
+    ) async -> Data? {
+        guard let cover = photos.first else {
+            return nil
+        }
+        let readData = readData
+        let thumbnailURL = cover.thumbnailURL
+        return await Task.detached(priority: .userInitiated) {
+            guard let staged = try? readData(thumbnailURL) else {
+                return nil
+            }
+            return CaptureSlotThumbnail.data(
+                from: staged,
+                maximumPixelSize: TrophyWallProcessingPhotoMetrics
+                    .maximumPixelSize
+            )
+        }.value
+    }
+
+    /// The same read for a principal that may still change under it. Bracketed
+    /// by the filesystem-context check on both sides, as `recoverableAttempt` is,
+    /// so a departed principal's file is never read on the strength of a stale
+    /// context.
+    fileprivate func stagedCoverPhotoData(
+        for context: ItemRunSubmissionPrincipalContext
+    ) async -> Data? {
+        guard await context.validatesFilesystemContext() else {
+            return nil
+        }
+        let data = await stagedCoverPhotoData(firstOf: context.photos)
+        guard await context.validatesFilesystemContext() else {
+            return nil
+        }
+        return data
     }
 
     func submit(photos: [StagedCapturePhoto]) async -> ItemRunSubmissionOutcome {

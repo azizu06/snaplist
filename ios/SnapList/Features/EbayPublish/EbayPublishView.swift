@@ -148,7 +148,6 @@ struct EbayPublishView: View {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.openURL) private var openURL
-    @State private var showsDisconnectConfirmation = false
     @State private var showsOutboundDetails = false
 
     var body: some View {
@@ -196,20 +195,6 @@ struct EbayPublishView: View {
                         .foregroundStyle(SnapListColorToken.textSecondary.color)
                 }
             }
-        }
-        .confirmationDialog(
-            "Disconnect eBay account \(accountName)?",
-            isPresented: $showsDisconnectConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Disconnect", role: .destructive) {
-                Task { await store.disconnect() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "Listings already on eBay stay there and keep selling, but SnapList will not be able to see or change them.\n\nTo review which apps can use your eBay account, open your eBay account settings."
-            )
         }
         .task { await store.load() }
     }
@@ -551,26 +536,10 @@ struct EbayPublishView: View {
     }
 
     private var account: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Your eBay account")
-                    .snapListTypography(.displayTitle)
-                    .accessibilityAddTraits(.isHeader)
-                EbayNoticeCard(
-                    title: "Connected as \(accountName)",
-                    detail: "SnapList can post listings to this account.",
-                    caution: false
-                )
-                Text("Payment, shipping and returns are set on your eBay account.")
-                    .snapListTypography(.body)
-                    .ebayCard()
-                SnapListSecondaryButton(title: "Disconnect eBay account") {
-                    showsDisconnectConfirmation = true
-                }
-            }
-            .padding(SnapListMetrics.screenGutter)
-        }
-        .accessibilityIdentifier("ebay-publish.account")
+        EbayAccountScreenView(
+            connectedUsername: store.connectedUsername,
+            disconnect: { await store.disconnect() }
+        )
     }
 
     private func confirmationBanner(
@@ -611,6 +580,66 @@ struct EbayPublishView: View {
         }
     }
 
+}
+
+/// The connected-account screen, extracted so it can be reached from a
+/// second entry point (Settings, #865) without duplicating it. The item
+/// publish journey (`EbayPublishView.account`) and the Settings-scoped
+/// eBay connection screen both instantiate this directly; behavior,
+/// copy, and accessibility identifiers are identical from either entry
+/// point. `disconnect` is listing-independent on both callers'
+/// underlying stores, so this view carries no listing context.
+@MainActor
+struct EbayAccountScreenView: View {
+    let connectedUsername: String?
+    let disconnect: () async -> Void
+
+    @State private var showsDisconnectConfirmation = false
+
+    private var accountName: String {
+        connectedUsername ?? "your account"
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Your eBay account")
+                    .snapListTypography(.displayTitle)
+                    .accessibilityAddTraits(.isHeader)
+                EbayNoticeCard(
+                    title: "Connected as \(accountName)",
+                    detail: "SnapList can post listings to this account.",
+                    caution: false
+                )
+                Text("Payment, shipping and returns are set on your eBay account.")
+                    .snapListTypography(.body)
+                    .ebayCard()
+                SnapListSecondaryButton(title: "Disconnect eBay account") {
+                    showsDisconnectConfirmation = true
+                }
+                .accessibilityIdentifier("ebay-account.disconnect")
+            }
+            .padding(SnapListMetrics.screenGutter)
+        }
+        .accessibilityIdentifier("ebay-publish.account")
+        // This exact wording (including the "does not revoke on eBay's
+        // side" disclosure) is the one text the issue requires stays
+        // verbatim at every entry point (#865).
+        .confirmationDialog(
+            "Disconnect eBay account \(accountName)?",
+            isPresented: $showsDisconnectConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Disconnect", role: .destructive) {
+                Task { await disconnect() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Listings already on eBay stay there and keep selling, but SnapList will not be able to see or change them.\n\nTo review which apps can use your eBay account, open your eBay account settings."
+            )
+        }
+    }
 }
 
 @MainActor
@@ -1837,7 +1866,10 @@ private enum EbayPublishPresentation {
     }
 }
 
-private extension View {
+// Widened from `private` (#865): `EbayConnectionSettingsView`, in a
+// separate file, reuses this same card treatment for Settings' own
+// connect screen.
+extension View {
     func ebayCard() -> some View {
         self
             .padding(14)

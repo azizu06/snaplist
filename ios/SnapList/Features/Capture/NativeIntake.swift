@@ -297,6 +297,18 @@ actor NativeIntake {
         }
     }
 
+    /// Deletes the actor's entire durable on-disk root. Unlike `discard(expected:)`,
+    /// this does not require or update the in-memory `active` bundle, so it is only
+    /// safe before any other actor method has observed state for this launch — the
+    /// debug-only `--reset-capture-draft` launch flag calls it before
+    /// `CaptureFlowModel.restore()` runs, guaranteeing a UI test starts from a clean
+    /// draft regardless of what an earlier test in the same shard invocation staged
+    /// through this same real, file-backed store and never tore down (#864).
+    func discardAllForTesting() {
+        guard fileManager.fileExists(atPath: applicationSupportRoot.path) else { return }
+        try? fileManager.removeItem(at: applicationSupportRoot)
+    }
+
     static func identitySource(
         verifiedClerkSubject: @escaping @Sendable () async -> String?,
         persistedAppAttestKey: @escaping @Sendable () -> AppAttestStoredKey?,

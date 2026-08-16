@@ -599,15 +599,132 @@ describe("feature explorer semantics", () => {
     expect($(`#${labelledBy}`).attr("role")).toBe("tab");
   });
 
-  it("keeps includes cards free of design-stage labels and uses a neutral hero phone", () => {
+  it("keeps includes cards free of design-stage labels and shows the real camera in the hero", () => {
     const $ = load(renderToStaticMarkup(<LandingPage />));
 
     expect($(".mkt-tab .mkt-chip, .mkt-explorer__device .mkt-phone__chip").length).toBe(0);
     expect($(".mkt-hero__minimal-phone").length).toBe(1);
-    expect($(".mkt-hero__minimal-phone .mkt-hero__neutral-screen").length).toBe(1);
+    // The hero screen is a capture of the shipping camera, not a drawing. An
+    // empty device here is the state this replaced, so the assertion is that
+    // the loop is present and described, not merely that the frame rendered.
+    const loop = $(".mkt-hero__minimal-phone .mkt-phone__screen .mkt-scanloop");
+    expect(loop.length).toBe(1);
+    expect(loop.attr("role")).toBe("img");
+    expect(loop.attr("aria-label")).toBeTruthy();
     expect($(".mkt-hero__sbar, .mkt-hero__lbar, .mkt-hero__lbody").length).toBe(0);
     expect($("body").text()).not.toMatch(/\b(?:candidate|illustrative)\b/i);
     expect($("body").text()).not.toMatch(/\b(?:crop|rotate)\b/i);
+  });
+
+  it("loops five branded items behind one set of captured camera chrome", async () => {
+    const $ = load(renderToStaticMarkup(<LandingPage />));
+
+    const items = $(".mkt-scanloop .mkt-scanloop__item");
+    expect(items.length).toBe(5);
+    // Exactly one item is visible at a time, and the server renders the first.
+    expect(items.filter('[data-active="true"]').length).toBe(1);
+    expect(items.eq(0).attr("data-active")).toBe("true");
+    // Five stacked frames of one animation are one image, not five, so the
+    // container carries the description and the frames are silent.
+    items.each((_, node) => expect($(node).attr("alt")).toBe(""));
+    expect($(".mkt-scanloop").attr("aria-label")).toMatch(/Fender|Nike|Rolex|Sony|Nintendo/);
+
+    // The camera chrome is a knockout of the shipping capture rather than a
+    // redrawing of it. Losing this layer is how the hero would start claiming
+    // interface the app does not have (Apple guideline 2.3.3).
+    expect($(".mkt-scanloop .mkt-scanloop__chrome").length).toBe(1);
+    expect($(".mkt-scanloop .mkt-scanloop__shutter").length).toBe(1);
+    const chrome = await sharp(resolve("public/marketing/hero/chrome.webp")).metadata();
+    expect(chrome.hasAlpha).toBe(true);
+  });
+
+  it("keeps every phone screen at a real iPhone aspect and asks for enough pixels", async () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const screens = [
+      "scan",
+      "photo-review",
+      "listing-review",
+      "publish",
+      "trophy-wall",
+    ].map((name) => `public/marketing/screens/${name}.webp`);
+    const heroFrames = ["fender", "nikedunk", "rolex", "sony", "nintendo"].map(
+      (name) => `public/marketing/hero/${name}.webp`,
+    );
+
+    // An iPhone screen is 0.460 wide over tall. The shots shipped at 0.494 for
+    // a while, because 219px had been cropped off the top, and every frame
+    // built to hold them was squat to match.
+    for (const file of [...screens, ...heroFrames]) {
+      const { width = 0, height = 0 } = await sharp(resolve(file)).metadata();
+      expect(width / height).toBeCloseTo(0.462, 3);
+      expect(width).toBeGreaterThanOrEqual(744);
+    }
+
+    // The drawn frames have to agree with that aspect, or `cover` trims the
+    // capture and the trim lands on real controls.
+    //
+    // Derived rather than pinned to a height literal. The frame gained a real
+    // thickness when it was rebuilt as hardware, so the screen inside it is no
+    // longer the body: 288 x 598 with 11px of frame is a 266 x 576 screen. A
+    // pinned height cannot see that, and would pass a frame whose padding had
+    // been changed underneath it, which is exactly the trim this guards against.
+    const device = css.match(/\.mkt-explorer__device\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+    const declared = (property: string) =>
+      Number(device.match(new RegExp(`${property}:\\s*([\\d.]+)px`))?.[1]);
+    const frame = declared("padding");
+    const screen = {
+      width: declared("width") - frame * 2,
+      height: declared("height") - frame * 2,
+    };
+    expect(screen.width / screen.height).toBeCloseTo(0.462, 3);
+    // The scale steps carry the same body ratio, so every breakpoint inherits it.
+    expect(css).toMatch(
+      new RegExp(`--phone-h:\\s*calc\\(var\\(--phone-w\\) \\* ${declared("height")} / ${declared("width")}\\)`),
+    );
+    expect(css).toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*aspect-ratio:\s*400 \/ 831/);
+    // A rotated frame shears the captured chrome inside it.
+    expect(css).not.toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*rotate\(/);
+
+    // The hero phone leads the page and is the only animated one, so it outranks
+    // the explorer device rather than sitting under it. It shipped at 360
+    // against the explorer's 384, which inverted that.
+    const heroWidth = css.match(/\.mkt-hero__minimal-phone\s*\{[^}]*--phone-body:\s*min\((\d+)px/);
+    expect(Number(heroWidth?.[1])).toBeGreaterThan(384);
+  });
+
+  it("keeps the shutter's shadow in CSS rather than burnt into the layer", async () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+
+    // A shadow captured against one photograph is a ring of dark pixels. Over a
+    // bright item it reads as a black halo bolted to the button, which is what
+    // it did on the guitar frame. So the layer carries only the shutter's own
+    // bright chrome and the shadow is recomposited here.
+    expect(css).toMatch(/\.mkt-scanloop__shutter\s*\{[^}]*filter:\s*drop-shadow\(/);
+
+    const { data, info } = await sharp(resolve("public/marketing/hero/shutter.webp"))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // No opaque dark pixels: every surviving pixel belongs to the white ring or
+    // disc. The burnt-in version was 19% of its opaque area below luminance 32.
+    let opaqueDark = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 200) continue;
+      if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < 110) opaqueDark += 1;
+    }
+    expect(opaqueDark / (info.width * info.height)).toBeLessThan(0.01);
+  });
+
+  it("stops the scanning loop under reduced motion without losing the screen", () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)", 1000));
+
+    for (const selector of [".mkt-scanloop__shutter", ".mkt-scanloop__flash", ".mkt-scanloop__sweep"]) {
+      expect(reduced).toContain(selector);
+    }
+    expect(reduced).toMatch(/\.mkt-scanloop__sweep\s*\{[^}]*animation:\s*none !important/);
+    expect(reduced).toMatch(/\.mkt-scanloop__item\[data-active="true"\][^{]*\{[^}]*transition:\s*none !important/);
   });
 
   it("keeps five truthful two-line descriptions, including one optional bounded voice note", () => {

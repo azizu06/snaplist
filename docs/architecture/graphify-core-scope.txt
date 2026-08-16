@@ -73,6 +73,7 @@ ios/SnapList/Features/Capture/NativeIntake.swift
 ios/SnapList/Features/Capture/PhotoReviewViews.swift
 ios/SnapList/Features/Capture/VoiceNoteDomain.swift
 ios/SnapList/Features/Capture/VoiceNoteView.swift
+ios/SnapList/Features/EbayPublish/EbayConnectionSettings.swift
 ios/SnapList/Features/EbayPublish/EbayPublishClient.swift
 ios/SnapList/Features/EbayPublish/EbayPublishDelivery.swift
 ios/SnapList/Features/EbayPublish/EbayPublishFixtureView.swift

@@ -62,12 +62,6 @@ enum AppRoutePresentation: Equatable {
     }
 }
 
-enum AppSheet: String, Identifiable {
-    case capture
-
-    var id: String { rawValue }
-}
-
 enum AppFullScreen: String, Identifiable {
     case guidedCamera
 
@@ -128,7 +122,6 @@ enum RunDeepLink: Equatable, Sendable {
 @Observable
 final class AppRouter {
     var selectedTab: PrimaryTab
-    var presentedSheet: AppSheet?
     var presentedFullScreen: AppFullScreen?
     var presentedAccountEntry = false
     private(set) var captureBoundaryRequest: CaptureBoundaryRequest?
@@ -140,11 +133,9 @@ final class AppRouter {
     init(
         initialTab: PrimaryTab = .scan,
         initialRoute: AppRoute? = nil,
-        initialSheet: AppSheet? = nil,
         initialFullScreen: AppFullScreen? = nil
     ) {
         selectedTab = initialTab
-        presentedSheet = initialSheet
         presentedFullScreen = initialFullScreen
         if let initialRoute {
             setPath([initialRoute], for: initialTab)
@@ -222,7 +213,6 @@ final class AppRouter {
         switch deepLink {
         case .run(let runID):
             selectedTab = .trophyWall
-            presentedSheet = nil
             presentedFullScreen = nil
             // The account boundary lives beside the typed path rather than on it
             // (#799), so `setPath` no longer clears it. Left presented, the sheet
@@ -235,8 +225,8 @@ final class AppRouter {
 
     func handleCaptureRestoration(_ restoration: CaptureRestoration) {
         guard restoration == .stagedPhoto else { return }
-        presentedFullScreen = nil
-        presentedSheet = .capture
+        selectedTab = .scan
+        presentedFullScreen = .guidedCamera
     }
 
     func reset(tab: PrimaryTab) {

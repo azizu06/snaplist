@@ -1,135 +1,94 @@
-import { TROPHY_WALL_ROWS } from "@/lib/marketing/site";
+import Image from "next/image";
 
 /**
- * Marketing phone screens for the feature explorer.
+ * Marketing phone screens for the feature explorer and the hero.
  *
- * Nothing here may show a state the product does not have; the Publish screen
- * in particular labels Mercari, Facebook Marketplace, and Depop as assisted
- * handoffs rather than destinations SnapList posts to.
+ * These were hand-drawn divs until real screens existed. They are now captures
+ * of the shipping app, which removes a whole class of drift: a drawn screen can
+ * claim a control the build does not have, and one of them did (a "3 of 5"
+ * counter on the camera the app never shows).
  *
- * The 9px uppercase field labels are decorative chrome. They sit below AA on
- * purpose and repeat nothing the page does not also state at full size.
+ * Two rules the captures have to keep. Nothing here may show a state the product
+ * does not have, and the marketplace screen in particular has to keep reading as
+ * an assisted handoff rather than a destination SnapList posts to, which its own
+ * "Not shared" rows do. Second, the screen text is now pixels, so the alt text is
+ * the accessible version of it and the step copy beside the phone stays the real
+ * reading path.
  */
 
-export function ScanScreen() {
+/**
+ * Captured at 1560x3376 and shipped at 1240 wide. The previous 620x1255 files
+ * were both the wrong shape and too small: 219px had been cropped off the top,
+ * which made them 0.494 rather than a real iPhone's 0.462, and 620 was under
+ * half the pixels a Retina screen asks for at this size.
+ */
+const SHOT_WIDTH = 1240;
+const SHOT_HEIGHT = 2683;
+
+/**
+ * The explorer screen renders at 268px scaled by --phone-scale, so it is 327px
+ * under 880 and 357px above it. The old "288px" hint understated that, and Next
+ * served a 279px file into a 357px box which the browser upscaled again for
+ * Retina. Every screen on the page was soft.
+ */
+const SHOT_SIZES = "(max-width: 879px) 330px, 360px";
+
+function Shot({ src, alt, priority = false }: { src: string; alt: string; priority?: boolean }) {
   return (
-    <div className="mkt-scr mkt-scr__capture">
-      <div className="mkt-scr__capture-bar">
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Scan</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#C9CDD6" }}>3 of 5</span>
-      </div>
-      <div className="mkt-scr__viewfinder" />
-      <div className="mkt-scr__strip">
-        <div className="mkt-scr__thumb" />
-        <div className="mkt-scr__thumb" />
-        <div className="mkt-scr__thumb" />
-      </div>
-      <div className="mkt-scr__shutter-row">
-        <div className="mkt-scr__shutter" />
-      </div>
-    </div>
+    <Image
+      className="mkt-scr__shot"
+      src={src}
+      alt={alt}
+      width={SHOT_WIDTH}
+      height={SHOT_HEIGHT}
+      sizes={SHOT_SIZES}
+      priority={priority}
+    />
+  );
+}
+
+export function ScanScreen({ priority = false }: { priority?: boolean }) {
+  return (
+    <Shot
+      src="/marketing/screens/scan.webp"
+      alt="The SnapList camera pointed at a pair of Air Jordan 3 sneakers standing on their box, with the shutter and the photo library button below it."
+      priority={priority}
+    />
   );
 }
 
 export function PhotoReviewScreen() {
   return (
-    <div className="mkt-scr">
-      <div className="mkt-scr__bar" style={{ justifyContent: "flex-start" }}>
-        <span className="mkt-scr__title">Photo Review</span>
-      </div>
-      <div className="mkt-scr__body" style={{ gap: 12 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {[1, 2, 3].map((n) => (
-            <div key={n} className="mkt-scr__tile">
-              <span>{n}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <div className="mkt-scr__tool">Replace</div>
-          <div className="mkt-scr__tool">Delete</div>
-        </div>
-      </div>
-    </div>
+    <Shot
+      src="/marketing/screens/photo-review.webp"
+      alt="Photo review showing four of five photos of a sneaker, each one a different angle, the first marked Cover, a tile for adding another, and an empty voice note row offering to add details the photos might miss."
+    />
   );
 }
 
 export function ListingReviewScreen() {
   return (
-    <div className="mkt-scr">
-      <div className="mkt-scr__bar">
-        <span className="mkt-scr__title">Listing Review</span>
-        <span className="mkt-scr__pill">Draft</span>
-      </div>
-      <div className="mkt-scr__body">
-        <Field label="Title" value="Wool blend scarf, gray" />
-        <Field label="Condition" value="Used, good" />
-        <Field label="Item specifics" value="Gray, one size, wool blend" />
-        {/* The no-evidence case is the one the page shows, because a marketing
-            frame that always finds comps sets an expectation the router cannot
-            keep. This wording matches the product's own no-evidence copy. */}
-        <Field label="Price" value="No sold matches found. You set the price." filled />
-      </div>
-      <div className="mkt-scr__cta">Confirm listing</div>
-    </div>
+    <Shot
+      src="/marketing/screens/listing-review.webp"
+      alt="Listing review showing the item identified as an Air Jordan 3 Retro in summit white, an editable price of $118, and the three sold matches between $98 and $135 that the price came from."
+    />
   );
 }
 
 export function PublishScreen() {
   return (
-    <div className="mkt-scr">
-      <div className="mkt-scr__bar" style={{ justifyContent: "flex-start" }}>
-        <span className="mkt-scr__title">Publish</span>
-      </div>
-      <div className="mkt-scr__body" style={{ gap: 14 }}>
-        <div className="mkt-scr__cta" style={{ margin: 0, height: 48 }}>
-          Confirm and publish to eBay
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {["Mercari", "Facebook Marketplace", "Depop"].map((name) => (
-            <div key={name} className="mkt-scr__handoff">
-              <span className="mkt-scr__handoff-name">{name}</span>
-              <span className="mkt-scr__pill">Assisted handoff</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+    <Shot
+      src="/marketing/screens/publish.webp"
+      alt="Share to other marketplaces, with Facebook Marketplace, Mercari and Depop each marked Not shared until you post the prepared listing yourself."
+    />
   );
 }
 
 export function TrophyWallScreen() {
   return (
-    <div className="mkt-scr">
-      <div className="mkt-scr__bar" style={{ justifyContent: "flex-start" }}>
-        <span className="mkt-scr__title">Trophy Wall</span>
-      </div>
-      <div className="mkt-scr__body" style={{ gap: 10, padding: "14px 16px" }}>
-        {TROPHY_WALL_ROWS.map((row) => (
-          <div key={row.id} className="mkt-trophy__row">
-            <div className="mkt-trophy__row-art" />
-            <span className="mkt-trophy__row-title">{row.title}</span>
-            <span className="mkt-trophy__state">{row.state}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  filled = false,
-}: {
-  label: string;
-  value: string;
-  filled?: boolean;
-}) {
-  return (
-    <div className={filled ? "mkt-scr__field mkt-scr__field--filled" : "mkt-scr__field"}>
-      <div className="mkt-scr__label">{label}</div>
-      <div className="mkt-scr__value">{value}</div>
-    </div>
+    <Shot
+      src="/marketing/screens/trophy-wall.webp"
+      alt="Trophy Wall, a grid of items the seller has run through SnapList."
+    />
   );
 }

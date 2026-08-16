@@ -249,17 +249,19 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(router.pathBinding(for: .trophyWall).wrappedValue, [.settings])
     }
 
-    /// Capture is still a sheet, but the dock no longer opens it. Restoration is
-    /// the surviving entry, and it must not move the seller off the tab they are
-    /// standing on.
+    /// Scan opens directly into the camera preview (#864): there is no more
+    /// launcher sheet to stand the seller up in, so a relaunch that restores a
+    /// staged photo has to move the seller onto the Scan tab itself, where
+    /// `ScanCameraView` is mounted, rather than presenting anything over
+    /// whichever tab they happened to be on.
     @MainActor
-    func testRestoredCaptureIsASheetAndDoesNotReplaceTheSelectedTab() {
+    func testRestoredCaptureLandsDirectlyOnScan() {
         let router = AppRouter(initialTab: .trophyWall)
 
         router.handleCaptureRestoration(.stagedPhoto)
 
-        XCTAssertEqual(router.selectedTab, .trophyWall)
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
     @MainActor
@@ -360,11 +362,25 @@ final class AppNavigationTests: XCTestCase {
     /// pending card survived onto another seller's Trophy Wall.
     func testPrincipalFenceResetsOnEveryObservedScopeChangeIncludingFromSignedOut()
         throws {
-        let signedIn = try XCTUnwrap(
-            ItemRunSubmissionPrincipalScopeProof(verifiedClerkSubject: "user_a")
+        let signedIn = TrophyWallPrincipalIdentity(
+            activationID: UUID(
+                uuidString: "84400000-0000-4000-8000-000000000001"
+            )!,
+            scopeProof: try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    verifiedClerkSubject: "user_a"
+                )
+            )
         )
-        let otherSignedIn = try XCTUnwrap(
-            ItemRunSubmissionPrincipalScopeProof(verifiedClerkSubject: "user_b")
+        let otherSignedIn = TrophyWallPrincipalIdentity(
+            activationID: UUID(
+                uuidString: "84400000-0000-4000-8000-000000000002"
+            )!,
+            scopeProof: try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    verifiedClerkSubject: "user_b"
+                )
+            )
         )
         var fence = TrophyWallPrincipalFence()
 
@@ -380,11 +396,83 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertTrue(fence.observe(otherSignedIn))
         XCTAssertTrue(fence.observe(nil), "signing out changes the principal")
 
-        // A cold launch that already carries a proof must stay quiet too, or the
-        // DEBUG `--fixture=trophy-wall` seed would be wiped before it renders.
+        // A cold launch that already carries an identity must stay quiet too, or
+        // the DEBUG `--fixture=trophy-wall` seed would be wiped before it renders.
         var coldSignedInFence = TrophyWallPrincipalFence()
         XCTAssertFalse(coldSignedInFence.observe(signedIn))
         XCTAssertTrue(coldSignedInFence.observe(nil))
+    }
+
+    /// #867. The scope proof is derived from the staged photos' filesystem
+    /// root, so consuming this seller's own intake takes it away while the
+    /// seller has not changed at all. The fence must read that by the activation
+    /// id, which one principal keeps across every mutation of its intake.
+    ///
+    /// The two halves are asserted against each other deliberately: the same
+    /// proof transition is inert under one activation and a reset under two, so
+    /// this cannot pass by ignoring the proof or by ignoring the activation.
+    func testConsumedIntakeIsNotATransitionButTheSameProofChangeAcrossPrincipalsIs()
+        throws {
+        let activation = UUID(
+            uuidString: "86700000-0000-4000-8000-000000000011"
+        )!
+        let proof = try XCTUnwrap(
+            ItemRunSubmissionPrincipalScopeProof(
+                verifiedClerkSubject: "user_staged"
+            )
+        )
+        let staged = TrophyWallPrincipalIdentity(
+            activationID: activation,
+            scopeProof: proof
+        )
+        let consumed = TrophyWallPrincipalIdentity(
+            activationID: activation,
+            scopeProof: nil
+        )
+
+        var fence = TrophyWallPrincipalFence()
+        XCTAssertFalse(fence.observe(staged))
+        XCTAssertFalse(
+            fence.observe(consumed),
+            "an ordinary submit deletes this seller's photos; it does not change the seller"
+        )
+        XCTAssertFalse(
+            fence.observe(staged),
+            "and staging the next item back under the same activation is not one either"
+        )
+
+        // The discriminating half: the identical proof transition under a new
+        // activation is still a reset.
+        var acrossPrincipals = TrophyWallPrincipalFence()
+        XCTAssertFalse(acrossPrincipals.observe(staged))
+        XCTAssertTrue(
+            acrossPrincipals.observe(
+                TrophyWallPrincipalIdentity(
+                    activationID: UUID(
+                        uuidString: "86700000-0000-4000-8000-000000000012"
+                    )!,
+                    scopeProof: nil
+                )
+            ),
+            "a new activation is a new principal, whatever the proof does"
+        )
+
+        // And a proof that disagrees inside one activation, which the bundle
+        // layout makes unreachable, still fails closed rather than open.
+        var disagreeingProofs = TrophyWallPrincipalFence()
+        XCTAssertFalse(disagreeingProofs.observe(staged))
+        XCTAssertTrue(
+            disagreeingProofs.observe(
+                TrophyWallPrincipalIdentity(
+                    activationID: activation,
+                    scopeProof: try XCTUnwrap(
+                        ItemRunSubmissionPrincipalScopeProof(
+                            verifiedClerkSubject: "user_other"
+                        )
+                    )
+                )
+            )
+        )
     }
 
     @MainActor
@@ -536,12 +624,10 @@ final class AppNavigationTests: XCTestCase {
         for fixture in FoundationFixture.allCases {
             let router = AppRouter(
                 initialTab: fixture.initialTab,
-                initialRoute: fixture.initialRoute,
-                initialSheet: fixture.initialSheet
+                initialRoute: fixture.initialRoute
             )
 
             XCTAssertEqual(router.selectedTab, fixture.initialTab)
-            XCTAssertEqual(router.presentedSheet, fixture.initialSheet)
             XCTAssertEqual(
                 router.pathBinding(for: fixture.initialTab).wrappedValue,
                 fixture.initialRoute.map { [$0] } ?? []

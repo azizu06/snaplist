@@ -253,6 +253,22 @@ struct AcceptedItemRun: Equatable, Sendable {
 struct AcceptedItemRunHandoff: Equatable, Sendable {
     let idempotencyKey: UUID
     let acceptedRun: AcceptedItemRun
+    /// The seller's own first photo, slot-sized, read while the intake was still
+    /// staged. Acceptance deletes that intake, and the server has no photo of
+    /// this item to hand back until the run reaches a terminal delivery, so this
+    /// is the only carrier from the capture the seller just took to the row they
+    /// are about to watch.
+    let localCoverPhotoData: Data?
+
+    init(
+        idempotencyKey: UUID,
+        acceptedRun: AcceptedItemRun,
+        localCoverPhotoData: Data? = nil
+    ) {
+        self.idempotencyKey = idempotencyKey
+        self.acceptedRun = acceptedRun
+        self.localCoverPhotoData = localCoverPhotoData
+    }
 }
 
 /// What one transport attempt resolved to. Every case except the two receipts leaves

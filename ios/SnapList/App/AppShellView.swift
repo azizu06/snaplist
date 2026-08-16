@@ -56,7 +56,6 @@ struct AppShellView: View {
     @State private var keyboardProbeText = ""
     @State private var isDeleteAccountFlowPresented = false
     @State private var hasConsumedMountedFirstValueDirectScanCommand = false
-    @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
     @State private var photoReviewSaveFailure: PhotoReviewSaveFailure?
@@ -235,7 +234,13 @@ struct AppShellView: View {
                                 host: photoReviewHost,
                                 router: router,
                                 submissionHost: submissionHost,
-                                setReturnFocus: { pendingScanReturnFocus = $0 }
+                                setReturnFocus: { pendingScanReturnFocus = $0 },
+                                onPersistenceRejected: {
+                                    recordPhotoReviewSaveFailure(
+                                        for: .backToCamera,
+                                        session: session
+                                    )
+                                }
                             )
                         }
                     },
@@ -248,9 +253,7 @@ struct AppShellView: View {
         }
         .fixtureAccessibilityOverrides(configuration)
         .overlay(alignment: .bottom) {
-            if router.presentedSheet == nil {
-                activationGuidanceOverlay
-            }
+            activationGuidanceOverlay
         }
         // Attached above the shell/onboarding split so both sign-in entry points
         // reach the same surface, whichever host is on screen.
@@ -337,17 +340,7 @@ struct AppShellView: View {
                     break
                 }
             case .itemSaved(_, let handoff)?:
-                trophyWallStore.ingest(
-                    TrophyWallCanonicalAcceptedRun(
-                        principalScope: trophyWallStore.principalScope,
-                        runID: handoff.acceptedRun.runID,
-                        linkedLogicalIdentity: TrophyWallLogicalIdentity(
-                            idempotencyKey: handoff.idempotencyKey
-                        ),
-                        state: .accepted,
-                        lastMeaningfulUpdateAt: Date()
-                    )
-                )
+                trophyWallStore.ingestAcceptance(handoff)
             case nil, .submissionRejected?:
                 break
             }
@@ -386,6 +379,16 @@ struct AppShellView: View {
                 captureFlow: captureFlow,
                 router: router
             )
+            if router.presentedFullScreen == .guidedCamera, captureFlow.phase != .camera {
+                // No more launcher sheet to start the camera on dismiss (#864):
+                // arriving here directly must start it itself, or a seller who
+                // removes the last staged photo is stuck on "Preparing camera"
+                // with no recovery. Guarded on `phase != .camera` because this
+                // `.task` can re-run without `presentCaptureLauncher` making a
+                // fresh transition (its own top guard then no-ops), and
+                // restarting an already-live session is wasted work.
+                await captureFlow.startCamera()
+            }
         }
         .task {
             guard let events = await captureFlow.nativeIntakeEvents() else {
@@ -409,7 +412,7 @@ struct AppShellView: View {
                     )
 #endif
                     if trophyWallCollectionRefreshState.observePrincipal(
-                        submissionHost.trophyWallPrincipalScopeProof
+                        submissionHost.trophyWallPrincipalIdentity
                     ) {
                         trophyWallStore.resetForPrincipalTransition()
                         // The reset drops the collection back to `unknown`, and the
@@ -580,33 +583,6 @@ struct AppShellView: View {
             reduceMotion ? nil : .easeInOut(duration: 0.16),
             value: isKeyboardVisible
         )
-        .sheet(
-            item: $router.presentedSheet,
-            onDismiss: presentPendingCaptureIfNeeded
-        ) { sheet in
-            switch sheet {
-            case .capture:
-                CaptureLauncherSheet(
-                    flow: captureFlow,
-                    takeOneItem: {
-                        pendingCapturePresentation = .camera
-                        router.presentedSheet = nil
-                    },
-                    showCapturedPhoto: {
-                        pendingCapturePresentation = .stagedPhoto
-                    }
-                )
-                .overlay(alignment: .bottom) {
-                    activationGuidanceOverlay
-                }
-                // A sheet builds its own environment, so the accessibility
-                // overrides attached to the shell above never reach this
-                // content. Without re-attaching them here `--dynamic-type=`
-                // silently does nothing to Scan and no capture layout can be
-                // measured at an accessibility size (#836).
-                .fixtureAccessibilityOverrides(configuration)
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             isKeyboardVisible = true
         }
@@ -947,7 +923,6 @@ struct AppShellView: View {
                 hasConsumedMountedFirstValueDirectScanCommand,
             recordedOutcome: firstValueOnboardingModel.recordedOutcome,
             isNormalScanShell: router.selectedTab == .scan
-                && router.presentedSheet == nil
                 && router.presentedFullScreen == nil,
             hasRestoredCapture: captureFlow.stagedPhoto != nil,
             stagedPhotoCount: onboardingModel.state.stagedPhotoCount,
@@ -989,12 +964,10 @@ struct AppShellView: View {
             return .photoReview
         }
         if router.selectedTab == .trophyWall,
-           router.presentedSheet == nil,
            router.presentedFullScreen == nil {
             return .trophyWall
         }
         if router.selectedTab == .scan,
-           router.presentedSheet == nil || router.presentedSheet == .capture,
            router.presentedFullScreen == nil
                 || router.presentedFullScreen == .guidedCamera {
             return .scan
@@ -1182,7 +1155,7 @@ struct AppShellView: View {
             hasResolvedCaptureRestoration: captureFlow.hasCompletedRestoration,
             hasRestoredCapture: captureFlow.stagedPhoto != nil
         )
-            && router.presentedSheet != .capture
+            && router.presentedFullScreen != .guidedCamera
     }
 
     private var awaitsCaptureRestorationBeforeOnboarding: Bool {
@@ -1238,14 +1211,6 @@ struct AppShellView: View {
             screen: onboardingModel.state.screen,
             hasCompletedRestoration: captureFlow.hasCompletedRestoration
         )
-    }
-
-    private func presentPendingCaptureIfNeeded() {
-        guard pendingCapturePresentation != nil else { return }
-        self.pendingCapturePresentation = nil
-        router.selectedTab = .scan
-        router.presentedFullScreen = .guidedCamera
-        Task { await captureFlow.startCamera() }
     }
 
     private func returnFromPhotoReview(
@@ -1360,10 +1325,17 @@ struct AppShellView: View {
 
 #if DEBUG
 @MainActor
-private enum TrophyWallProcessingLaunchFixture {
+enum TrophyWallProcessingLaunchFixture {
     private static let principal = TrophyWallPrincipalScope(
         opaqueValue: "trophy-processing-fixture"
     )
+
+    /// Stands in for the thumbnail the capture draft store writes beside a
+    /// staged photo. Without it no fixture route reaches a processing row that
+    /// carries the seller's own photo, so the suite could not see this state.
+    private static let stagedCoverPhoto: Data? = UIImage(
+        named: "FirstValueSneaker"
+    )?.jpegData(compressionQuality: 0.84)
 
     static let store = TrophyWallStore(
             principalScope: principal,
@@ -1419,6 +1391,16 @@ private enum TrophyWallProcessingLaunchFixture {
                         ),
                         itemName: "Polaroid camera",
                         lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 10)
+                    ),
+                    .accepted(
+                        principalScope: principal,
+                        runID: UUID(
+                            uuidString: "37500000-0000-4000-8000-000000000011"
+                        )!,
+                        state: .accepted,
+                        itemName: "White leather sneaker",
+                        localCoverPhotoData: stagedCoverPhoto,
+                        lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 5)
                     ),
                 ]
             )
@@ -1588,7 +1570,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
         host: PhotoReviewLiveHost,
         router: AppRouter,
         submissionHost: ItemRunSubmissionHost,
-        setReturnFocus: (PhotoReviewScanFocus) -> Void
+        setReturnFocus: (PhotoReviewScanFocus) -> Void,
+        onPersistenceRejected: () -> Void = {}
     ) async {
         let receiptMismatchRetryEventID: UUID?
         let ambiguousRetryEventID: UUID?
@@ -1627,7 +1610,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 captureFlow: captureFlow,
                 host: host,
                 router: router,
-                setReturnFocus: setReturnFocus
+                setReturnFocus: setReturnFocus,
+                onPersistenceRejected: onPersistenceRejected
             ) else {
                 return
             }
@@ -1650,7 +1634,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 captureFlow: captureFlow,
                 host: host,
                 router: router,
-                setReturnFocus: setReturnFocus
+                setReturnFocus: setReturnFocus,
+                onPersistenceRejected: onPersistenceRejected
             ) else {
                 return
             }
@@ -1726,25 +1711,53 @@ enum AppShellSettingsEntryPointTransaction {
     /// Photo Review covers the whole shell, so Settings opened from under it would
     /// never be seen. Leave the way Back leaves — the seller's photos stay committed
     /// and Scan takes them back — then open Settings, which owns both the account
-    /// entry point and the subscription's real state. A rejected commit keeps the
-    /// seller in Photo Review with the message that sent them here, rather than
-    /// routing them away from photos that never reached disk.
+    /// entry point and the subscription's real state.
+    ///
+    /// #868: this used to return `false` whenever that commit was refused, so the
+    /// button a denial screen had just handed the seller did nothing at all. A denial
+    /// is a stop only Settings can lift, and a refused commit is not a reason to hold
+    /// the seller inside the screen telling them to go elsewhere. So the destination
+    /// is reached either way, and the refusal travels the Back button's own callback
+    /// rather than being swallowed.
+    ///
+    /// A refusal on this route is a divergence, not lost work. Live intake edits are
+    /// already durable when Photo Review makes them, and the commit only re-checks
+    /// that the durable intake still matches the screen — which is exactly what
+    /// signing in mid-session breaks (#855). Leaving through the departed-intake exit
+    /// says that truthfully: Scan is told this session's photos are no longer its
+    /// intake instead of being handed a set the commit could not confirm.
     @discardableResult
     static func perform(
         session: PhotoReviewLiveSession,
         captureFlow: CaptureFlowModel,
         host: PhotoReviewLiveHost,
         router: AppRouter,
-        setReturnFocus: (PhotoReviewScanFocus) -> Void
+        setReturnFocus: (PhotoReviewScanFocus) -> Void,
+        onPersistenceRejected: () -> Void = {}
     ) async -> Bool {
         let outcome = await AppShellPhotoReviewBackTransaction.perform(
             session: session,
             captureFlow: captureFlow,
             host: host,
             router: router,
-            setReturnFocus: setReturnFocus
+            setReturnFocus: setReturnFocus,
+            onPersistenceRejected: onPersistenceRejected
         )
-        guard case .completed = outcome else {
+        switch outcome {
+        case .completed:
+            break
+        case .persistenceRejected:
+            setReturnFocus(.addPhotoButton)
+            guard host.leaveForDepartedIntake(
+                from: session,
+                using: router
+            ) else {
+                return false
+            }
+        case .sessionChanged:
+            // Either another exit already owns the commit lock or the screen has
+            // moved on to a different session. Neither is this tap's to tear down,
+            // and the owning transaction will finish its own route.
             return false
         }
         // Back reopens the guided camera. Clear it, or the account entry point lands
@@ -1887,7 +1900,6 @@ enum AppCaptureHandoffCoordinator {
     ) async {
         guard onboardingModel.state.screen == .captureBoundary,
               let context = onboardingModel.captureEntryContext,
-              router.presentedSheet == nil,
               router.presentedFullScreen == nil else { return }
 
         if case .library = context,
@@ -1919,7 +1931,7 @@ enum AppCaptureHandoffCoordinator {
                         .rollBackLibraryTransferAfterSourceConsumptionFailure()
                     if !didRollBackCapture {
                         router.selectedTab = .scan
-                        router.presentedSheet = .capture
+                        router.presentedFullScreen = .guidedCamera
                         return
                     }
                 }
@@ -1928,18 +1940,13 @@ enum AppCaptureHandoffCoordinator {
         }
 
         router.selectedTab = .scan
-        router.presentedSheet = .capture
+        router.presentedFullScreen = .guidedCamera
     }
 }
 
 private struct OnboardingCaptureRouteID: Hashable {
     let screen: OnboardingScreen
     let hasCompletedRestoration: Bool
-}
-
-private enum PendingCapturePresentation {
-    case camera
-    case stagedPhoto
 }
 
 extension View {
@@ -1997,19 +2004,38 @@ private struct OptionalBoldTextModifier: ViewModifier {
 /// has no proof, so the nil check reset on sign-out but not on sign-in, and one
 /// seller's local pending card could surface on the next seller's wall. Cold
 /// launch still resets nothing, which keeps the DEBUG fixture seed intact.
+///
+/// What it compares is `TrophyWallPrincipalIdentity`, not the scope proof alone.
+/// The proof exists only while photos are staged, so an ordinary submit — which
+/// deletes them — used to read as a sign-out and wiped the seller's own
+/// processing photo off their wall seconds after it arrived (#867).
 struct TrophyWallPrincipalFence {
-    private var hasObservedScopeProof = false
-    private var scopeProof: ItemRunSubmissionPrincipalScopeProof?
+    private var hasObservedIdentity = false
+    private var identity: TrophyWallPrincipalIdentity?
 
     /// Returns whether this observation is a principal transition.
     mutating func observe(
-        _ nextScopeProof: ItemRunSubmissionPrincipalScopeProof?
+        _ nextIdentity: TrophyWallPrincipalIdentity?
     ) -> Bool {
         defer {
-            hasObservedScopeProof = true
-            scopeProof = nextScopeProof
+            hasObservedIdentity = true
+            identity = nextIdentity
         }
-        return hasObservedScopeProof && scopeProof != nextScopeProof
+        guard hasObservedIdentity else {
+            return false
+        }
+        switch (identity, nextIdentity) {
+        case (let previous?, let next?):
+            return next.isTransition(from: previous)
+        case (nil, nil):
+            return false
+        // A principal appearing where there was none, or disappearing
+        // entirely, is a transition in both directions. The nil side is a
+        // shell that has no committed intake at all, which no signed-in
+        // seller's cards may survive.
+        case (nil, _?), (_?, nil):
+            return true
+        }
     }
 }
 
@@ -2026,9 +2052,9 @@ struct TrophyWallCollectionRefreshState {
     private(set) var generation = 0
 
     mutating func observePrincipal(
-        _ scopeProof: ItemRunSubmissionPrincipalScopeProof?
+        _ identity: TrophyWallPrincipalIdentity?
     ) -> Bool {
-        let didTransition = principalFence.observe(scopeProof)
+        let didTransition = principalFence.observe(identity)
         if didTransition {
             generation += 1
         }
@@ -2076,6 +2102,7 @@ struct TrophyWallFeatureView: View {
                 router.navigate(to: .home(.processing))
             },
             openAccount: { router.navigate(to: .settings) },
+            openRun: { router.navigate(to: .home(.run($0))) },
             onScan: {
                 router.reset(tab: .scan)
                 router.selectedTab = .scan

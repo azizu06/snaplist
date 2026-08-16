@@ -1,6 +1,7 @@
 import AVFoundation
 import ImageIO
 import Observation
+import PhotosUI
 import SwiftUI
 import UIKit
 import XCTest
@@ -8,18 +9,6 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
-    func testCaptureOffersNeitherAHaulNorABarcodeEntryPoint() {
-        XCTAssertEqual(
-            CaptureEntryPoint.allCases.map(\.title),
-            ["Take one item", "Choose from library"]
-        )
-
-        let retired = ["Photograph a haul", "Scan barcode or ISBN"]
-        for title in retired {
-            XCTAssertFalse(CaptureEntryPoint.allCases.map(\.title).contains(title))
-        }
-    }
-
     func testPhotoReviewFixtureMaterializesDecodableImagesBeforeConstruction() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(
@@ -1709,69 +1698,132 @@ final class CaptureFlowTests: XCTestCase {
         try await scenario.assertPreserved()
     }
 
-    func testAccountHandoffLeavesPhotoReviewForTheAccountEntryPoint() async throws {
-        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
-            name: "snaplist-account-handoff-entry-point",
-            photoData: [
-                makeLandscapeImageData(
-                    leftColor: .systemRed,
-                    rightColor: .systemBlue
-                ),
-                makeLandscapeImageData(
-                    leftColor: .systemYellow,
-                    rightColor: .systemPurple
-                ),
-            ]
-        )
-        defer { scenario.cleanUp() }
-        let intake = SubmissionIntakeFixture(
-            stagedPhotos: scenario.displayedPhotos
-        )
-        let attemptStore = LocalItemRunSubmissionAttemptStore(
-            rootDirectory: scenario.attemptRoot
-        )
-        let keySequence = KeySequence(
-            keys: [UUID(uuidString: "50300000-0000-4000-8000-000000000091")!]
-        )
-        let submissionHost = ItemRunSubmissionHost(
-            coordinator: ItemRunSubmissionCoordinator(
-                submitter: RecordingItemRunSubmitter(
-                    outcomes: [.authenticationRequired]
-                ),
-                attemptStore: attemptStore,
-                draftStore: scenario.draftStore,
-                tokenProvider: CaptureFlowGuestBearerTokenProvider(),
-                guestRecoveryCredentials:
-                    CaptureFlowGuestRecoveryCredentialStore(),
-                readData: intake.read,
-                newIdempotencyKey: { keySequence.next() }
+    /// #868: the seller taps the button a denial screen just handed them — `Create an
+    /// account` or `Check subscription` — and lands where the denial can actually be
+    /// resolved, even when the Photo Review draft commit is refused.
+    ///
+    /// The refused commit is not hypothetical. Photo Review commits are gated on the
+    /// intake activation the session opened against, and signing in mid-session
+    /// re-scopes the durable intake under a new activation, so `applyPhotoReviewScanReturn`
+    /// refuses from that point on. The route used to commit Back first and veto itself
+    /// on the refusal, so both taps were consumed and discarded.
+    ///
+    /// This replaces `testAccountHandoffLeavesPhotoReviewForTheAccountEntryPoint`, which
+    /// asserted the same route over a `CaptureFlowModel` built with no `NativeIntake`.
+    /// That flow takes the legacy draft-store branch, whose commit succeeds, so the test
+    /// stayed green through the entire life of the defect.
+    func testDenialHandoffsReachSettingsEvenWhenTheDraftCommitIsRefused() async throws {
+        let cases: [(
+            name: String,
+            tokenProvider: any BearerTokenProviding,
+            outcome: ItemRunSubmissionTransportOutcome,
+            handoff: ItemRunSubmissionDestinationDecision.Handoff,
+            primaryAction: (UUID) -> PhotoReviewBoundaryEvent
+        )] = [
+            (
+                "check subscription",
+                CaptureFlowBearerTokenProvider(),
+                .creditDenied(reason: "storekit-entitlement-unavailable"),
+                .subscriptionSettings(.entitlementInactive),
+                { .openSubscriptionSettings(eventID: $0) }
+            ),
+            (
+                "create an account",
+                CaptureFlowGuestBearerTokenProvider(),
+                .authenticationRequired,
+                .accountClaim12aThrough12c,
+                { .createAccount(eventID: $0) }
+            ),
+        ]
+
+        for testCase in cases {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "snaplist-868-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: root) }
+            let scenario =
+                try await makePhotoReviewSessionOverADivergedIntake(
+                    root: root,
+                    name: testCase.name
+                )
+            let fixture = SubmissionIntakeFixture(
+                stagedPhotos: scenario.photos
             )
-        )
+            let submissionHost = ItemRunSubmissionHost(
+                coordinator: ItemRunSubmissionCoordinator(
+                    submitter: RecordingItemRunSubmitter(
+                        outcomes: [testCase.outcome]
+                    ),
+                    attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                    draftStore: RecordingCaptureDraftStore(
+                        photos: scenario.photos
+                    ),
+                    tokenProvider: testCase.tokenProvider,
+                    guestRecoveryCredentials:
+                        CaptureFlowGuestRecoveryCredentialStore(),
+                    readData: fixture.read,
+                    newIdempotencyKey: { UUID() }
+                )
+            )
 
-        await scenario.perform(submissionHost: submissionHost)
+            await submissionHost.startListing(photos: scenario.photos)
 
-        XCTAssertEqual(submissionHost.retention, .authenticationRequired)
-        XCTAssertNotNil(scenario.photoReviewHost.session)
+            guard case .destinationHandoff(
+                eventID: let eventID,
+                handoff: let handoff
+            )? = submissionHost.pendingPresentationEvent else {
+                XCTFail("Expected one typed denial handoff for \(testCase.name).")
+                continue
+            }
+            XCTAssertEqual(handoff, testCase.handoff, testCase.name)
+            let presentation = PhotoReviewSubmissionPresentation(
+                host: submissionHost
+            )
+            XCTAssertEqual(
+                presentation.primaryActionEvent,
+                testCase.primaryAction(eventID),
+                testCase.name
+            )
 
-        let presentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
-        )
-        await scenario.perform(
-            primaryAction: presentation.primaryActionEvent,
-            submissionHost: submissionHost
-        )
+            var surfacedRefusals = 0
+            var returnFocus: [PhotoReviewScanFocus] = []
+            await AppShellPhotoReviewSubmissionTransaction.perform(
+                primaryAction: testCase.primaryAction(eventID),
+                session: scenario.session,
+                captureFlow: scenario.captureFlow,
+                host: scenario.host,
+                router: scenario.router,
+                submissionHost: submissionHost,
+                setReturnFocus: { returnFocus.append($0) },
+                onPersistenceRejected: { surfacedRefusals += 1 }
+            )
 
-        XCTAssertNil(scenario.photoReviewHost.session)
-        XCTAssertNil(scenario.router.presentedFullScreen)
-        XCTAssertEqual(
-            scenario.router.pathBinding(for: .scan).wrappedValue,
-            [.settings]
-        )
-        XCTAssertNil(submissionHost.pendingPresentationEvent)
-        // The account demand is a stop, not a discard: the photos the seller took
-        // are still on the phone when they come back from making the account.
-        let durablePhotos = try await scenario.draftStore.loadPhotos()
-        XCTAssertEqual(durablePhotos, scenario.expectedDurablePhotos)
+            XCTAssertEqual(
+                scenario.router.pathBinding(for: .scan).wrappedValue,
+                [.settings],
+                "\(testCase.name): the denial's own button must reach Settings."
+            )
+            XCTAssertNil(
+                scenario.host.session,
+                "\(testCase.name): Photo Review covers the shell, so Settings is "
+                    + "only visible once the boundary is gone."
+            )
+            XCTAssertNil(scenario.router.presentedFullScreen, testCase.name)
+            XCTAssertNil(scenario.router.captureBoundaryRequest, testCase.name)
+            XCTAssertNil(
+                submissionHost.pendingPresentationEvent,
+                "\(testCase.name): a routed handoff is spent, not left standing."
+            )
+            // The refusal reaches the shell through the same callback the real Back
+            // button uses, so it records a save failure rather than vanishing.
+            XCTAssertEqual(
+                surfacedRefusals,
+                1,
+                "\(testCase.name): a refused commit must never be silent."
+            )
+        }
     }
 
     func testConflictSubmissionPresentsReviewAndReviewOnlyRetiresMatchingAdvisory() async throws {
@@ -7323,6 +7375,115 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
+    /// Opens Photo Review over a live `NativeIntake` and then re-scopes that intake
+    /// underneath it, which is what signing in mid-session does (#855).
+    ///
+    /// From that point the session's activation no longer names the durable intake, so
+    /// `applyPhotoReviewScanReturn` takes the intake branch and refuses every Photo
+    /// Review commit — the device condition behind #868. The returned session is the
+    /// one the shell would still be showing.
+    private func makePhotoReviewSessionOverADivergedIntake(
+        root: URL,
+        name: String
+    ) async throws -> (
+        captureFlow: CaptureFlowModel,
+        router: AppRouter,
+        host: PhotoReviewLiveHost,
+        session: PhotoReviewLiveSession,
+        photos: [StagedCapturePhoto]
+    ) {
+        let identity = MutableIntakeIdentity(
+            NativeIntake.Identity(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "snaplist-868-guest-key"
+            )
+        )
+        let (identityChanges, identityChanged) =
+            AsyncStream<Void>.makeStream()
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            intake: NativeIntake(
+                applicationSupportDirectory: root,
+                identitySource: NativeIntake.IdentitySource(
+                    current: { await identity.value },
+                    changes: { identityChanges }
+                )
+            )
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .noDraft, name)
+        let staged = await captureFlow.stageLibraryPhotos(
+            (1...2).map { makeIntakeJPEG(seed: $0) }
+        )
+        XCTAssertEqual(staged, 2, name)
+        let photos = captureFlow.stagedPhotos
+        XCTAssertEqual(photos.count, 2, name)
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: photos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(
+            host.consume(
+                router.captureBoundaryRequest,
+                captureFlow: captureFlow
+            ),
+            name
+        )
+        let session = try XCTUnwrap(host.session, name)
+        let openedActivationID = try XCTUnwrap(session.intakeActivationID, name)
+
+        // The seller makes the account the denial asked for, or an existing session
+        // becomes verified, while Photo Review is still on screen.
+        await identity.set(
+            NativeIntake.Identity(
+                verifiedClerkSubject: "user_snaplist_868",
+                persistedAppAttestKeyID: "snaplist-868-guest-key"
+            )
+        )
+        identityChanged.yield()
+        let diverged = await waitUntilTrue(timeout: 10) {
+            captureFlow.intakeSnapshot?.version.activationID
+                != openedActivationID
+        }
+        XCTAssertTrue(
+            diverged,
+            "\(name): signing in mid-session must re-scope the durable intake."
+        )
+
+        // The control this whole scenario exists to establish. Without a refused
+        // commit the assertions it feeds could pass on the old behaviour.
+        let refusedCommit = await captureFlow.applyPhotoReviewScanReturn(
+            session.scanReturn(),
+            expectedActivationID: session.intakeActivationID
+        )
+        XCTAssertNil(
+            refusedCommit,
+            "\(name): the diverged intake must refuse the Back commit."
+        )
+
+        return (captureFlow, router, host, session, photos)
+    }
+
+    private func waitUntilTrue(
+        timeout: TimeInterval,
+        _ condition: @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        return condition()
+    }
+
     private func makeIntakeJPEG(seed: Int) -> Data {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8))
         return renderer.jpegData(withCompressionQuality: 0.9) { context in
@@ -7369,6 +7530,94 @@ final class CaptureFlowTests: XCTestCase {
                 fingerprints: fingerprints
             )
         ]
+    }
+
+    // MARK: - #858 hero navigation fixtures
+
+    private func makeHeroNavigationPhotos(count: Int) -> [StagedCapturePhoto] {
+        (0..<count).map { ordinal in
+            makeStagedPhoto(
+                id: String(
+                    format: "48580000-0000-4000-8000-%012d",
+                    ordinal
+                )
+            )
+        }
+    }
+
+    @MainActor
+    private final class PhotoReviewLayoutObservationBox {
+        var value = PhotoReviewLayoutObservation(frames: [:])
+    }
+
+    /// Hosts a real `PhotoReviewView` in a `UIHostingController`/`UIWindow`
+    /// pair and captures its `PhotoReviewLayoutObservation`, following the
+    /// hosted-window + settle pattern established by
+    /// `HostedTrophyWallTestWindow` (HomeFeatureTests.swift). Frames are
+    /// measured from the real, laid-out SwiftUI tree rather than asserted via
+    /// `isHittable`, which lies about occlusion.
+    @MainActor
+    private final class HostedPhotoReviewTestWindow {
+        // `PhotoReviewView`'s native drag/drop `UIViewRepresentable` mutates
+        // `@State` from `dismantleUIView`, which AttributeGraph invalidation
+        // can run during ordinary ARC deinit of a bare test window/hosting
+        // controller pair — outside a real view controller lifecycle there is
+        // no `viewWillDisappear` to sequence that teardown safely, so it can
+        // race SwiftUI's own graph invalidation and trip the runtime's
+        // exclusivity check. Retaining hosts for the process lifetime (instead
+        // of letting them deinit at end of test) avoids exercising that
+        // teardown path at all; it is a test-harness-only leak, not a
+        // production behavior change.
+        private static var leaked: [HostedPhotoReviewTestWindow] = []
+
+        private let hostingController: UIHostingController<AnyView>
+        private let window: UIWindow
+        private let observationBox: PhotoReviewLayoutObservationBox
+
+        var observation: PhotoReviewLayoutObservation { observationBox.value }
+
+        init(
+            store: PhotoReviewStore,
+            dynamicTypeSize: DynamicTypeSize = .large,
+            size: CGSize = CGSize(width: 390, height: 844)
+        ) {
+            let box = PhotoReviewLayoutObservationBox()
+            observationBox = box
+            hostingController = UIHostingController(
+                rootView: AnyView(
+                    PhotoReviewView(
+                        store: store,
+                        delete: { nil },
+                        openBoundary: { _ in },
+                        onLayoutObservation: { box.value = $0 }
+                    )
+                    .dynamicTypeSize(dynamicTypeSize)
+                    .background(Color.white)
+                )
+            )
+            window = UIWindow(frame: CGRect(origin: .zero, size: size))
+            window.backgroundColor = .white
+            window.rootViewController = hostingController
+            hostingController.loadViewIfNeeded()
+            hostingController.view.frame = window.bounds
+            window.makeKeyAndVisible()
+        }
+
+        func settle() async {
+            for _ in 0..<5 {
+                await Task.yield()
+                window.setNeedsLayout()
+                window.layoutIfNeeded()
+                hostingController.view.setNeedsLayout()
+                hostingController.view.layoutIfNeeded()
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+
+        func close() {
+            window.isHidden = true
+            Self.leaked.append(self)
+        }
     }
 
     private struct NativeInteractionHost {
@@ -8061,10 +8310,10 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(model.stagedPhoto, staged)
         XCTAssertEqual(restoration, .stagedPhoto)
 
-        let router = AppRouter(initialSheet: .capture)
+        let router = AppRouter()
         router.handleCaptureRestoration(restoration)
-        XCTAssertEqual(router.presentedSheet, .capture)
-        XCTAssertNil(router.presentedFullScreen)
+        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
     func testSuccessfulLibraryHandoffConsumesOnlyTransferredPhotoAfterCaptureStages() async throws {
@@ -8094,8 +8343,7 @@ final class CaptureFlowTests: XCTestCase {
         )
 
         XCTAssertEqual(router.selectedTab, .scan)
-        XCTAssertEqual(router.presentedSheet, .capture)
-        XCTAssertNil(router.presentedFullScreen)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(store.stageCount, 1)
         XCTAssertEqual(store.lastStagedImageData, firstPhoto)
         XCTAssertEqual(capture.phase, .captured)
@@ -8142,7 +8390,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(capture.stagedPhoto)
         XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
         XCTAssertEqual(onboarding.state.stagedPhotoCount, photos.count)
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
     func testSourceConsumeFailureRollsBackCaptureAndKeepsADeterministicRetry() async throws {
@@ -8192,10 +8440,10 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
         XCTAssertEqual(onboarding.state.stagedPhotoCount, photos.count)
         XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: photos.count))
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
 
         replaceController.shouldFail = false
-        router.presentedSheet = nil
+        router.presentedFullScreen = nil
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
@@ -8209,7 +8457,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst()))
         XCTAssertEqual(onboarding.state.stagedPhotoCount, 2)
         XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: 2))
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
     func testSinglePhotoConsumeMoveFailureSurvivesRelaunchRetryAndExactExpiry() async throws {
@@ -8626,7 +8874,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
         XCTAssertEqual(onboarding.state.stagedPhotoCount, 4)
         XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: 4))
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
 
         consumeController.shouldFail = false
         let relaunchedCapture = CaptureFlowModel(
@@ -8648,9 +8896,9 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst()))
         XCTAssertEqual(onboarding.state.stagedPhotoCount, 3)
         XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: 3))
-        XCTAssertEqual(relaunchedRouter.presentedSheet, .capture)
+        XCTAssertEqual(relaunchedRouter.presentedFullScreen, .guidedCamera)
 
-        relaunchedRouter.presentedSheet = nil
+        relaunchedRouter.presentedFullScreen = nil
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: relaunchedCapture,
@@ -8697,7 +8945,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(restoredOnboarding.state.stagedPhotoCount, 2)
         XCTAssertEqual(restoredOnboarding.captureEntryContext, .library(stagedPhotoCount: 2))
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst(2)))
-        XCTAssertEqual(expiredRouter.presentedSheet, .capture)
+        XCTAssertEqual(expiredRouter.presentedFullScreen, .guidedCamera)
     }
 
     func testExpiredTransferredLibraryPhotoCannotRestageAfterRelaunch() async throws {
@@ -8811,7 +9059,7 @@ final class CaptureFlowTests: XCTestCase {
             nextStagedPhoto.libraryTransferReceipt?.fingerprint,
             LocalPhotoFingerprint.digest(of: photos[0])
         )
-        XCTAssertEqual(relaunchedRouter.presentedSheet, .capture)
+        XCTAssertEqual(relaunchedRouter.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst(2)))
         XCTAssertEqual(relaunchedOnboarding.state.stagedPhotoCount, 2)
     }
@@ -8889,7 +9137,7 @@ final class CaptureFlowTests: XCTestCase {
             router: router
         )
 
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(store.stageCount, 0)
         XCTAssertNil(store.lastStagedImageData)
         XCTAssertEqual(capture.stagedPhoto, restoredPhoto)
@@ -9420,6 +9668,363 @@ final class CaptureFlowTests: XCTestCase {
             rightColor.setFill()
             context.fill(CGRect(x: 200, y: 0, width: 200, height: 200))
         })
+    }
+
+    // MARK: - Button Shapes (#856)
+
+    /// Left on `.automatic`, iOS paints a second filled shape behind the capsule this
+    /// control already draws for itself whenever a seller has Accessibility > Display &
+    /// Text Size > Button Shapes on.
+    func testScanReviewButtonCarriesAnExplicitNonAutomaticButtonStyle() {
+        let button = ScanReviewButton(
+            photoCount: 1,
+            priority: .live,
+            returnFocus: .constant(nil),
+            review: {}
+        )
+
+        let rendered = String(reflecting: type(of: button.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "scan.review resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
+        )
+    }
+
+    /// `PhotosPicker` resolves a button style the same way `Button` does, so left on
+    /// `.automatic` it gets a second filled shape behind the circle `ScanLibraryLabel`
+    /// already draws whenever a seller has Button Shapes on.
+    func testScanLibraryPickerCarriesAnExplicitNonAutomaticButtonStyle() {
+        let picker = ScanLibraryPicker(
+            style: .icon,
+            selection: .constant([]),
+            maxSelectionCount: 5,
+            isEnabled: true
+        )
+
+        let rendered = String(reflecting: type(of: picker.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "scan.library resolves to .automatic, so Button Shapes doubles its circle: \(rendered)"
+        )
+    }
+
+    // MARK: - #858 taller hero, direct navigation, off-photo delete control
+
+    func testSelectPhotoForNavigationMovesSelectionWithoutOpeningActionsAndClosesAnOpenRow() {
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+
+        XCTAssertTrue(store.selectPhotoForActions(id: photos[0].id))
+        XCTAssertEqual(store.actionsPhotoID, photos[0].id)
+
+        XCTAssertTrue(store.selectPhotoForNavigation(id: photos[1].id))
+        XCTAssertEqual(store.selectedPhotoID, photos[1].id)
+        XCTAssertNil(
+            store.actionsPhotoID,
+            "Navigating away must close any actions row left open on the prior photo."
+        )
+
+        let unknownID = UUID(uuidString: "48580000-0000-4000-8000-999999999999")!
+        XCTAssertFalse(store.selectPhotoForNavigation(id: unknownID))
+        XCTAssertEqual(
+            store.selectedPhotoID,
+            photos[1].id,
+            "An unknown id must not move selection."
+        )
+    }
+
+    func testPhotoReviewHeroIsMeasurablyTallerThanTheOriginalThreeHundredPointContract() async {
+        XCTAssertGreaterThan(
+            PhotoReviewV5VisualContract.heroHeight,
+            300,
+            "#858 requires a measurably taller hero than the original 300pt contract."
+        )
+
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+        store.selectPhotoForActions(id: photos[0].id)
+        let host = HostedPhotoReviewTestWindow(store: store)
+        await host.settle()
+
+        XCTAssertEqual(
+            host.observation.frame(for: .hero).height,
+            PhotoReviewV5VisualContract.heroHeight,
+            accuracy: 1,
+            "The rendered hero frame must actually be the taller contract height."
+        )
+        host.close()
+    }
+
+    func testPhotoReviewHeroAndStripDoNotOverlapTheDeleteControlAtDefaultAndAccessibilityFiveDynamicType() async {
+        for dynamicTypeSize: DynamicTypeSize in [.large, .accessibility5] {
+            let photos = makeHeroNavigationPhotos(count: 5)
+            let store = PhotoReviewStore(photos: photos)
+            store.selectPhotoForActions(id: photos[1].id)
+            let host = HostedPhotoReviewTestWindow(
+                store: store,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            await host.settle()
+
+            let hero = host.observation.frame(for: .hero)
+            let strip = host.observation.frame(for: .thumbnailStrip)
+            let deleteControl = host.observation.frame(for: .deleteControl)
+
+            XCTAssertNotEqual(deleteControl, .zero, "\(dynamicTypeSize)")
+            XCTAssertFalse(
+                hero.intersects(deleteControl),
+                "Delete control must not overlap the hero's bounds at \(dynamicTypeSize): hero=\(hero) delete=\(deleteControl)"
+            )
+            XCTAssertFalse(
+                strip.intersects(deleteControl),
+                "Delete control must not overlap its thumbnail's bounds at \(dynamicTypeSize): strip=\(strip) delete=\(deleteControl)"
+            )
+            host.close()
+        }
+    }
+
+    func testPhotoReviewDeleteControlHoldsTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
+        for dynamicTypeSize: DynamicTypeSize in [.xSmall, .large, .accessibility5] {
+            let photos = makeHeroNavigationPhotos(count: 2)
+            let store = PhotoReviewStore(photos: photos)
+            store.selectPhotoForActions(id: photos[0].id)
+            let host = HostedPhotoReviewTestWindow(
+                store: store,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            await host.settle()
+
+            let deleteControl = host.observation.frame(for: .deleteControl)
+            XCTAssertGreaterThanOrEqual(
+                deleteControl.width,
+                44,
+                "photo-review.delete width at \(dynamicTypeSize)"
+            )
+            XCTAssertGreaterThanOrEqual(
+                deleteControl.height,
+                44,
+                "photo-review.delete height at \(dynamicTypeSize)"
+            )
+            host.close()
+        }
+    }
+
+    // #883: with the chevrons gone, the hero's own record of where the seller
+    // is has to be the page indicator. `facebook-page-dots-reference.png` puts
+    // it centered on the photo's horizontal axis and just above its bottom
+    // edge — on the photo, not below it.
+    func testPhotoReviewHeroPageIndicatorSitsCenteredNearTheBottomOfTheHero() async {
+        let photos = makeHeroNavigationPhotos(count: 5)
+        let store = PhotoReviewStore(photos: photos)
+        store.selectPhotoForActions(id: photos[1].id)
+        let host = HostedPhotoReviewTestWindow(store: store)
+        await host.settle()
+
+        let hero = host.observation.frame(for: .hero)
+        let indicator = host.observation.frame(for: .heroPageIndicator)
+
+        XCTAssertNotEqual(
+            indicator,
+            .zero,
+            "The page indicator must actually render on a multi-photo hero."
+        )
+        XCTAssertEqual(
+            indicator.midX,
+            hero.midX,
+            accuracy: 1,
+            "Centered on the hero: indicator=\(indicator) hero=\(hero)"
+        )
+        XCTAssertTrue(
+            hero.contains(indicator),
+            "The indicator sits on the photo: indicator=\(indicator) hero=\(hero)"
+        )
+        XCTAssertEqual(
+            hero.maxY - indicator.maxY,
+            PhotoReviewV5VisualContract.heroPageIndicatorBottomInset,
+            accuracy: 1,
+            "Near the bottom edge, by the contract's inset."
+        )
+        host.close()
+    }
+
+    func testPhotoReviewHeroPageIndicatorHidesWhenOnlyOnePhotoIsStaged() async {
+        let staged = PhotoReviewStore(photos: makeHeroNavigationPhotos(count: 3))
+        let stagedHost = HostedPhotoReviewTestWindow(store: staged)
+        await stagedHost.settle()
+
+        XCTAssertNotEqual(
+            stagedHost.observation.frame(for: .heroPageIndicator),
+            .zero,
+            "Three photos have pages to indicate."
+        )
+        stagedHost.close()
+
+        let single = PhotoReviewStore(photos: makeHeroNavigationPhotos(count: 1))
+        let singleHost = HostedPhotoReviewTestWindow(store: single)
+        await singleHost.settle()
+
+        XCTAssertEqual(
+            singleHost.observation.frame(for: .heroPageIndicator),
+            .zero,
+            "One photo has no pages to indicate."
+        )
+        singleHost.close()
+    }
+
+    // #883: the chevrons were the affordance VoiceOver and Switch Control could
+    // reach without a swipe. Removing them may not remove that path, so the same
+    // two named moves survive as accessibility actions on the hero. This is the
+    // policy those actions are built from; `SnapListUITests` proves they reach
+    // VoiceOver, and the swipe proof covers the move each one performs.
+    func testPhotoReviewHeroAccessibilityActionsNameBothMovesOnlyWhenThereIsSomewhereToGo() {
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.accessibilityActionLabels(
+                photoCount: 1
+            ),
+            [],
+            "One photo has nowhere to move."
+        )
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.accessibilityActionLabels(
+                photoCount: 2
+            ),
+            ["Previous photo", "Next photo"],
+            "Both named moves survive the chevrons they replace."
+        )
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.accessibilityActionLabels(
+                photoCount: 5
+            ),
+            ["Previous photo", "Next photo"]
+        )
+    }
+
+    func testPhotoReviewHeroPageIndicatorNamesThePositionAndTheTotalForVoiceOver() {
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.pageIndicatorAccessibilityLabel(
+                selectedIndex: 2,
+                photoCount: 5
+            ),
+            "Photo 3 of 5",
+            "VoiceOver must not have to read the dots to know the position."
+        )
+        XCTAssertEqual(
+            PhotoReviewHeroNavigationPolicy.pageIndicatorAccessibilityLabel(
+                selectedIndex: 0,
+                photoCount: 2
+            ),
+            "Photo 1 of 2"
+        )
+    }
+
+    // #883: `replace-delete-reference.png` shows one equal-width pair of tiles
+    // on a single row, Replace leading.
+    func testPhotoReviewReplaceAndDeleteRenderAsAnEqualWidthPairOnOneRow() async {
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+        store.selectPhotoForActions(id: photos[1].id)
+        let host = HostedPhotoReviewTestWindow(store: store)
+        await host.settle()
+
+        let replace = host.observation.frame(for: .replaceControl)
+        let delete = host.observation.frame(for: .deleteControl)
+
+        XCTAssertNotEqual(replace, .zero, "Replace must carry its own landmark.")
+        XCTAssertNotEqual(delete, .zero)
+        XCTAssertEqual(
+            replace.width,
+            delete.width,
+            accuracy: 1,
+            "The reference splits the row evenly: replace=\(replace) delete=\(delete)"
+        )
+        XCTAssertEqual(
+            replace.midY,
+            delete.midY,
+            accuracy: 1,
+            "Both sit on one row."
+        )
+        XCTAssertEqual(
+            delete.minX - replace.maxX,
+            PhotoReviewV5VisualContract.actionRowGap,
+            accuracy: 1,
+            "Replace leads, Delete follows, one contract gap apart."
+        )
+        host.close()
+    }
+
+    func testPhotoReviewReplaceControlHoldsTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
+        for dynamicTypeSize: DynamicTypeSize in [.xSmall, .large, .accessibility5] {
+            let photos = makeHeroNavigationPhotos(count: 3)
+            let store = PhotoReviewStore(photos: photos)
+            store.selectPhotoForActions(id: photos[1].id)
+            let host = HostedPhotoReviewTestWindow(
+                store: store,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            await host.settle()
+
+            let replace = host.observation.frame(for: .replaceControl)
+            XCTAssertGreaterThanOrEqual(
+                replace.width,
+                44,
+                "photo-review.replace width at \(dynamicTypeSize)"
+            )
+            XCTAssertGreaterThanOrEqual(
+                replace.height,
+                44,
+                "photo-review.replace height at \(dynamicTypeSize)"
+            )
+            host.close()
+        }
+    }
+
+    // #883: a row whose height is pinned to 44 clips its own labels once
+    // Dynamic Type passes the size that fits. The 44 is a floor, not a cap.
+    func testPhotoReviewActionRowGrowsWithAccessibilityDynamicTypeRatherThanClippingItsLabels() async {
+        var heights: [DynamicTypeSize: CGFloat] = [:]
+        for dynamicTypeSize: DynamicTypeSize in [.large, .accessibility5] {
+            let photos = makeHeroNavigationPhotos(count: 3)
+            let store = PhotoReviewStore(photos: photos)
+            store.selectPhotoForActions(id: photos[1].id)
+            let host = HostedPhotoReviewTestWindow(
+                store: store,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            await host.settle()
+            heights[dynamicTypeSize] = host.observation
+                .frame(for: .deleteControl)
+                .height
+            host.close()
+        }
+
+        XCTAssertEqual(
+            heights[.large] ?? 0,
+            PhotoReviewV5VisualContract.actionRowHeight,
+            accuracy: 1,
+            "At the default size the row is exactly the contract height."
+        )
+        XCTAssertGreaterThan(
+            heights[.accessibility5] ?? 0,
+            heights[.large] ?? 0,
+            "At AX5 the row must grow instead of squeezing its labels."
+        )
+    }
+
+    func testSelectPhotoForNavigationAtTheFirstAndLastPhotoStaysPinnedToTheBoundary() {
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+
+        XCTAssertTrue(store.selectPhotoForNavigation(id: photos[0].id))
+        XCTAssertFalse(
+            store.photos.indices.contains(-1),
+            "Sanity: there is no index before the first photo."
+        )
+        XCTAssertEqual(store.selectedPhotoID, photos[0].id)
+
+        XCTAssertTrue(store.selectPhotoForNavigation(id: photos[2].id))
+        XCTAssertEqual(store.selectedPhotoID, photos[2].id)
     }
 }
 
@@ -9963,6 +10568,20 @@ private struct RetainedSubmissionPresentationProbe {
 
 private enum RetainedSubmissionProbeError: Error {
     case missingEvent
+}
+
+/// Stands in for the identity `AppDependencies` reads, so a test can move a session
+/// from a guest installation to a verified subject the way signing in does.
+private actor MutableIntakeIdentity {
+    private(set) var value: NativeIntake.Identity
+
+    init(_ value: NativeIntake.Identity) {
+        self.value = value
+    }
+
+    func set(_ value: NativeIntake.Identity) {
+        self.value = value
+    }
 }
 
 private struct CaptureFlowBearerTokenProvider: BearerTokenProviding {

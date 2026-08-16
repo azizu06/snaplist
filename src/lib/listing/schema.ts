@@ -33,7 +33,12 @@ export const EBAY_PLATFORM = "ebay" as const;
  * free-form keyword strings for search relevance.
  */
 export const ebayListingSchema = z.object({
-  /** Keyword-dense eBay title. Required, ≤ 80 chars (the platform cap). */
+  /**
+   * eBay title. Required, ≤ 80 chars (the platform cap). It NAMES THE ITEM FIRST and
+   * carries remaining buyer keywords after that identity; spec detail belongs in the
+   * description (#894). This schema enforces only the cap — the shape is asked for in
+   * `LISTING_SYSTEM_PROMPT`.
+   */
   title: z
     .string()
     .min(1, "eBay title is required")

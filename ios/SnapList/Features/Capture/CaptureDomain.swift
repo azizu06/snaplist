@@ -133,6 +133,49 @@ enum CapturePhotoBudget {
     }
 }
 
+/// Reduces one staged capture to the bytes a small on-screen slot actually
+/// needs.
+///
+/// A staged photo's `thumbnailURL` is not a thumbnail: `NativeIntake.stagePhotos`
+/// writes the same bytes to both names, and `CapturePhotoBudget.bound` returns a
+/// capture already inside its ceiling untouched. So the file behind that URL can
+/// be a full sensor-resolution JPEG, which decodes to tens of megabytes of
+/// bitmap. Anything that wants to hold such a photo for a 44-point well reduces
+/// it here first, once, away from the main thread.
+///
+/// This shrinks; it never rejects. Bytes ImageIO cannot decode come back `nil`
+/// so the caller can fall back to whatever it drew before, rather than showing a
+/// broken image.
+enum CaptureSlotThumbnail {
+    static func data(from data: Data, maximumPixelSize: Int) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize
+              ] as CFDictionary) else {
+            return nil
+        }
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            encoded,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+        CGImageDestinationAddImage(
+            destination,
+            image,
+            [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return encoded as Data
+    }
+}
+
 enum CaptureCameraAuthorization: Equatable {
     case notDetermined
     case authorized
@@ -431,6 +474,20 @@ final class PhotoReviewStore {
         }
         selectedPhotoID = id
         actionsPhotoID = id
+        return true
+    }
+
+    /// Moves the hero's selection to `id` (swipe or previous/next navigation)
+    /// without opening the Replace/Delete actions row for the newly selected
+    /// photo, and closes any actions row already open for the photo being
+    /// navigated away from.
+    @discardableResult
+    func selectPhotoForNavigation(id: StagedCapturePhoto.ID) -> Bool {
+        guard photos.contains(where: { $0.id == id }) else {
+            return false
+        }
+        selectedPhotoID = id
+        actionsPhotoID = nil
         return true
     }
 

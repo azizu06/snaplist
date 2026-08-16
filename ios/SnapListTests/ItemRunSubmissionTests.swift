@@ -1197,6 +1197,435 @@ final class ItemRunSubmissionTests: XCTestCase {
 
     // MARK: Ambiguous outcome and exact retry
 
+    /// The ordinary path — stage, Start listing, accepted — never produces a
+    /// local pending card, because a pending card needs a stored attempt that
+    /// still matches staged photos and no intake mutation happens between
+    /// saving the attempt and clearing it. So the acceptance itself is the only
+    /// carrier for the seller's own photo on the flow the defect was seen on.
+    func testAcceptedHandoffCarriesTheStagedCoverPhotoOnAnOrdinarySubmission()
+        async throws {
+        let staged = SubmissionIntakeFixture.renderedJPEG(sidePixels: 400)
+        let intake = SubmissionIntakeFixture(
+            photoCount: 1,
+            seed: "ordinary-cover",
+            thumbnailData: staged
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: makeCoordinator(
+                intake: intake,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                submitter: RecordingItemRunSubmitter(
+                    outcomes: [.created(intake.receipt)]
+                ),
+                draftStore: RecordingCaptureDraftStore(photos: intake.photos),
+                keys: [Self.firstKey]
+            )
+        )
+
+        let submission = Task { await host.startListing(photos: intake.photos) }
+        defer { submission.cancel() }
+        var saved: AcceptedItemRunHandoff?
+        for _ in 0..<300 {
+            if case .itemSaved(_, let handoff)? = host.pendingPresentationEvent {
+                saved = handoff
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let handoff = try XCTUnwrap(
+            saved,
+            "An accepted submission must publish one saved event."
+        )
+        let carried = try XCTUnwrap(
+            handoff.localCoverPhotoData,
+            "The acceptance must carry the seller's own photo off the device."
+        )
+
+        // Reduced to what the slot draws, not the capture the seller took: the
+        // staged file is a byte copy of that capture and can be sensor-sized.
+        let decoded = try XCTUnwrap(UIImage(data: carried))
+        XCTAssertLessThanOrEqual(
+            max(decoded.size.width, decoded.size.height),
+            CGFloat(TrophyWallProcessingPhotoMetrics.maximumPixelSize)
+        )
+        XCTAssertLessThan(carried.count, staged.count)
+
+        // Read it back the only way the seller can, through the row the wall
+        // draws from the accepted run.
+        let principalScope = TrophyWallPrincipalScope(
+            opaqueValue: "ordinary-cover-photo-test"
+        )
+        let store = TrophyWallStore(
+            principalScope: principalScope,
+            repository: EmptyTrophyWallRepository()
+        )
+        // Through the shell's own ingest, not a hand-written equivalent. The
+        // hand-written one constructed the argument itself, so it would have
+        // stayed green if `AppShellView` dropped the photo (#867).
+        store.ingestAcceptance(
+            handoff,
+            acceptedAt: Date(timeIntervalSince1970: 100)
+        )
+        // The acceptance carries no item name — the server has not identified
+        // the item yet — so the row the seller reads appears only once history
+        // names it. History carries no photo of its own before delivery.
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principalScope,
+                runID: handoff.acceptedRun.runID,
+                linkedLogicalIdentity: nil,
+                state: .workingIdentifying,
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 101),
+                itemName: "White leather sneaker"
+            )
+        )
+        XCTAssertEqual(
+            store.processingRows.first?.localCoverPhotoData,
+            carried
+        )
+    }
+
+    /// #867, the defect itself, driven through the real `NativeIntake` rather
+    /// than a stand-in for it.
+    ///
+    /// An ordinary submit deletes the seller's staged photos the moment the
+    /// item is accepted. That empties the snapshot, which takes the
+    /// filesystem-derived scope proof with it, and the fence read the missing
+    /// proof as a different seller arriving: it wiped the wall, refetched
+    /// server history that has no pre-delivery photo to offer, and the row lost
+    /// the picture #857 had put on it seconds earlier.
+    @MainActor
+    func testConsumingTheStagedIntakeKeepsTheWallsPhotoAndIsNoPrincipalTransition()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "ordinary-submit-consumes-intake-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: applicationSupport,
+            verifiedClerkSubject: "user_ordinary_submit_867",
+            photoData: SubmissionIntakeFixture.renderedJPEG(sidePixels: 400)
+        )
+        let host = ItemRunSubmissionHost(coordinator: nil)
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        let staged = try XCTUnwrap(host.trophyWallPrincipalIdentity)
+        // Positive control: the proof the old fence compared really is present
+        // while the intake is staged, so its absence below is the consumption
+        // and not a principal that never had one.
+        XCTAssertNotNil(staged.scopeProof)
+
+        let principalScope = TrophyWallPrincipalScope(
+            opaqueValue: "ordinary-submit-867"
+        )
+        let store = TrophyWallStore(
+            principalScope: principalScope,
+            repository: EmptyTrophyWallRepository()
+        )
+        var refreshState = TrophyWallCollectionRefreshState()
+        XCTAssertFalse(refreshState.observePrincipal(staged))
+
+        let runID = UUID(uuidString: "86700000-0000-4000-8000-000000000001")!
+        let carried = SubmissionIntakeFixture.renderedJPEG(sidePixels: 44)
+        store.ingestAcceptance(
+            AcceptedItemRunHandoff(
+                idempotencyKey: Self.firstKey,
+                acceptedRun: AcceptedItemRun(
+                    runID: runID,
+                    itemID: UUID(
+                        uuidString: "86700000-0000-4000-8000-000000000002"
+                    )!,
+                    status: "queued",
+                    stage: "queued"
+                ),
+                localCoverPhotoData: carried
+            ),
+            acceptedAt: Date(timeIntervalSince1970: 100)
+        )
+        // The acceptance carries the photo but no item name; history supplies
+        // the name and no photo, because the server has none of this item to
+        // give before delivery. The row the seller watches is the two together.
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principalScope,
+                runID: runID,
+                linkedLogicalIdentity: nil,
+                state: .workingIdentifying,
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 101),
+                itemName: "White leather sneaker"
+            )
+        )
+        XCTAssertEqual(
+            store.processingRows.first?.localCoverPhotoData,
+            carried,
+            "positive control: the photo reaches the row before anything consumes the intake"
+        )
+
+        // Exactly what `finalize(submission)` does on the ordinary path.
+        var iterator = await native.intake.events().makeAsyncIterator()
+        guard case .snapshot(let staging)? = await iterator.next(),
+              staging.version == native.snapshot.version else {
+            return XCTFail("The stream must replay the staged snapshot first.")
+        }
+        let discarded = await native.intake.perform(
+            .discard(expected: native.snapshot.version)
+        )
+        XCTAssertEqual(discarded, .committed)
+        var consumedSnapshot: NativeIntake.Snapshot?
+        while let event = await iterator.next() {
+            guard case .snapshot(let snapshot) = event else { continue }
+            if snapshot.photos.isEmpty {
+                consumedSnapshot = snapshot
+                break
+            }
+        }
+        let consumed = try XCTUnwrap(consumedSnapshot)
+
+        host.synchronizePrincipal(snapshot: consumed, intake: native.intake)
+        let afterConsumption = try XCTUnwrap(host.trophyWallPrincipalIdentity)
+        XCTAssertEqual(
+            afterConsumption.activationID,
+            staged.activationID,
+            "the seller did not change, so the activation must not"
+        )
+        XCTAssertNil(
+            afterConsumption.scopeProof,
+            "the proof the old fence relied on is exactly what consumption destroys"
+        )
+
+        // The shell's own line, verbatim.
+        if refreshState.observePrincipal(afterConsumption) {
+            store.resetForPrincipalTransition()
+        }
+
+        // Step 8 of the proved cause: the wall goes on refreshing from server
+        // history, which still has no pre-delivery photo of this item to offer.
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principalScope,
+                runID: runID,
+                linkedLogicalIdentity: nil,
+                state: .workingPricing,
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 102),
+                itemName: "White leather sneaker"
+            )
+        )
+
+        let row = try XCTUnwrap(
+            store.processingRows.first { $0.id == .run(runID) },
+            "consuming this seller's own intake must not wipe this seller's wall"
+        )
+        XCTAssertEqual(row.itemName, "White leather sneaker")
+        XCTAssertEqual(
+            row.localCoverPhotoData,
+            carried,
+            "the seller's own photo is the only photo this run has before delivery"
+        )
+    }
+
+    /// The other direction of #867's security boundary, and the one that must
+    /// not be traded away for the fix above. `resetForPrincipalTransition`
+    /// exists so one seller's device-local cards cannot surface in another
+    /// seller's session, so a real sign-out has to keep clearing them.
+    ///
+    /// Driven through the real `NativeIntake` because that is where the claim
+    /// lives: the fix leans on `reconcileIdentity` minting a new activation id
+    /// whenever the resolved principal scope changes. A hand-built pair of
+    /// identities would assert the fence and assume the intake.
+    @MainActor
+    func testSigningOutIsStillAPrincipalTransitionThatClearsTheWall()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "sign-out-still-resets-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let identity = SwitchableIntakeIdentity(
+            identity: NativeIntake.Identity(
+                verifiedClerkSubject: "user_867_member",
+                persistedAppAttestKeyID: nil
+            )
+        )
+        let intake = NativeIntake(
+            applicationSupportDirectory: applicationSupport,
+            identitySource: identity.source
+        )
+        var iterator = await intake.events().makeAsyncIterator()
+        guard case .snapshot(let member)? = await iterator.next() else {
+            return XCTFail("The intake must publish a first committed snapshot.")
+        }
+
+        let host = ItemRunSubmissionHost(coordinator: nil)
+        host.synchronizePrincipal(snapshot: member, intake: intake)
+        let memberIdentity = try XCTUnwrap(host.trophyWallPrincipalIdentity)
+
+        let principalScope = TrophyWallPrincipalScope(
+            opaqueValue: "sign-out-867"
+        )
+        let store = TrophyWallStore(
+            principalScope: principalScope,
+            repository: EmptyTrophyWallRepository()
+        )
+        var refreshState = TrophyWallCollectionRefreshState()
+        XCTAssertFalse(refreshState.observePrincipal(memberIdentity))
+        let memberRunID = UUID(
+            uuidString: "86700000-0000-4000-8000-000000000003"
+        )!
+        store.ingestAcceptance(
+            AcceptedItemRunHandoff(
+                idempotencyKey: Self.firstKey,
+                acceptedRun: AcceptedItemRun(
+                    runID: memberRunID,
+                    itemID: UUID(
+                        uuidString: "86700000-0000-4000-8000-000000000004"
+                    )!,
+                    status: "queued",
+                    stage: "queued"
+                ),
+                localCoverPhotoData: SubmissionIntakeFixture
+                    .renderedJPEG(sidePixels: 44)
+            ),
+            acceptedAt: Date(timeIntervalSince1970: 100)
+        )
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principalScope,
+                runID: memberRunID,
+                linkedLogicalIdentity: nil,
+                state: .workingIdentifying,
+                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 101),
+                itemName: "White leather sneaker"
+            )
+        )
+        // Positive control: the departing member's wall is genuinely populated,
+        // and populated all the way to a visible row, so the emptiness at the
+        // end cannot be a store that never rendered anything.
+        XCTAssertEqual(store.processingRows.count, 1)
+        XCTAssertNotNil(store.processingRows.first?.localCoverPhotoData)
+
+        // The member signs out. What is left is the guest this device already
+        // attests as, which is the shape a real sign-out takes here.
+        identity.switchTo(
+            NativeIntake.Identity(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "app-attest-key-867"
+            )
+        )
+        var signedOut: NativeIntake.Snapshot?
+        while let event = await iterator.next() {
+            guard case .snapshot(let snapshot) = event else { continue }
+            if snapshot.version.activationID != member.version.activationID {
+                signedOut = snapshot
+                break
+            }
+        }
+        let guest = try XCTUnwrap(signedOut)
+
+        host.synchronizePrincipal(snapshot: guest, intake: intake)
+        let guestIdentity = try XCTUnwrap(host.trophyWallPrincipalIdentity)
+        XCTAssertNotEqual(
+            guestIdentity.activationID,
+            memberIdentity.activationID,
+            "a resolved principal change mints a new activation"
+        )
+
+        // The shell's own line, verbatim.
+        if refreshState.observePrincipal(guestIdentity) {
+            store.resetForPrincipalTransition()
+        }
+
+        XCTAssertTrue(
+            store.cards.isEmpty,
+            "the departing member's cards must not survive into the next session"
+        )
+        XCTAssertTrue(store.processingRows.isEmpty)
+        XCTAssertTrue(store.settledTiles.isEmpty)
+    }
+
+    /// The recovery path reaches the wall through a local pending card instead,
+    /// and it has the same one chance to read the intake before acceptance
+    /// deletes it.
+    func testPendingTrophyWallProjectionCarriesTheStagedCoverPhoto()
+        async throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pending-cover-photo-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let native = try await makeNativePrincipalIntake(
+            applicationSupport: applicationSupport,
+            verifiedClerkSubject: "user_pending_cover_photo",
+            photoData: SubmissionIntakeFixture.renderedJPEG(sidePixels: 400)
+        )
+        let principalRoot = native.snapshot.photos[0].photoURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let snapshot = try ItemRunSubmissionSnapshot.make(
+            for: native.snapshot.photos,
+            readData: { try Data(contentsOf: $0) }
+        )
+        try await LocalItemRunSubmissionAttemptStore(
+            principalRootDirectory: principalRoot
+        ).saveAttempt(
+            ItemRunSubmissionAttempt(
+                idempotencyKey: Self.firstKey,
+                photos: snapshot.photos
+            )
+        )
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: nil,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: native.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider {
+                    "clerk-session-token"
+                },
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: native.snapshot,
+            intake: native.intake
+        )
+        let principalScope = TrophyWallPrincipalScope(
+            opaqueValue: "pending-cover-photo-test"
+        )
+
+        let recovered = await host.recoverableTrophyWallPendingCard(
+            principalScope: principalScope
+        )
+        let card = try XCTUnwrap(recovered)
+
+        // The card's bytes are private to the wall, so read them back the only
+        // way the seller can: through the row the wall renders.
+        let store = TrophyWallStore(
+            principalScope: principalScope,
+            repository: EmptyTrophyWallRepository()
+        )
+        store.ingest(card)
+        let carried = try XCTUnwrap(
+            store.processingRows.first?.localCoverPhotoData
+        )
+        let staged = try Data(
+            contentsOf: native.snapshot.photos[0].thumbnailURL
+        )
+        let decoded = try XCTUnwrap(UIImage(data: carried))
+        XCTAssertLessThanOrEqual(
+            max(decoded.size.width, decoded.size.height),
+            CGFloat(TrophyWallProcessingPhotoMetrics.maximumPixelSize)
+        )
+        XCTAssertLessThan(carried.count, staged.count)
+    }
+
     func testPendingTrophyWallProjectionRejectsAStoredAttemptForChangedPhotos()
         async throws {
         let applicationSupport = FileManager.default.temporaryDirectory
@@ -5182,7 +5611,7 @@ struct SubmissionIntakeFixture: Sendable {
     let photos: [StagedCapturePhoto]
     private let dataByPath: [String: Data]
 
-    init(photoCount: Int, seed: String = "a") {
+    init(photoCount: Int, seed: String = "a", thumbnailData: Data? = nil) {
         var photos: [StagedCapturePhoto] = []
         var dataByPath: [String: Data] = [:]
         for index in 0..<photoCount {
@@ -5204,6 +5633,11 @@ struct SubmissionIntakeFixture: Sendable {
                 filling: "\(seed)-\(index)",
                 repeated: index + 1
             )
+            // Staging writes the capture's own bytes to both names, so a test
+            // that needs the thumbnail to decode supplies a real image here.
+            if let thumbnailData {
+                dataByPath[photos[index].thumbnailURL.path] = thumbnailData
+            }
         }
         self.photos = photos
         self.dataByPath = dataByPath
@@ -5288,12 +5722,70 @@ struct SubmissionIntakeFixture: Sendable {
         }
     }
 
+    /// A real, decodable JPEG. `jpeg(filling:repeated:)` only fakes the magic
+    /// bytes, which is enough for a transport fixture but not for anything that
+    /// has to decode the photo.
+    @MainActor
+    static func renderedJPEG(sidePixels: Int) -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let side = CGFloat(sidePixels)
+        return UIGraphicsImageRenderer(
+            size: CGSize(width: side, height: side),
+            format: format
+        ).jpegData(withCompressionQuality: 0.9) { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side / 2, height: side / 2))
+        }
+    }
+
     static func jpeg(filling body: String, repeated: Int) -> Data {
         var data = Data([0xFF, 0xD8, 0xFF])
         for _ in 0..<repeated {
             data.append(Data(body.utf8))
         }
         return data
+    }
+}
+
+/// A `NativeIntake` identity that can actually change mid-test, which is what a
+/// sign-out is. The fixed-subject helpers cannot express one, and #867's
+/// security boundary is only meaningful if a real principal change can be run
+/// through the same fence as the consumed intake it narrows.
+final class SwitchableIntakeIdentity: @unchecked Sendable {
+    private let lock = NSLock()
+    private var identity: NativeIntake.Identity
+    private var continuation: AsyncStream<Void>.Continuation?
+
+    init(identity: NativeIntake.Identity) {
+        self.identity = identity
+    }
+
+    var source: NativeIntake.IdentitySource {
+        NativeIntake.IdentitySource(
+            current: { [self] in
+                lock.lock()
+                defer { lock.unlock() }
+                return identity
+            },
+            changes: { [self] in
+                AsyncStream { continuation in
+                    lock.lock()
+                    self.continuation = continuation
+                    lock.unlock()
+                }
+            }
+        )
+    }
+
+    func switchTo(_ next: NativeIntake.Identity) {
+        lock.lock()
+        identity = next
+        let continuation = self.continuation
+        lock.unlock()
+        continuation?.yield()
     }
 }
 
@@ -5780,5 +6272,13 @@ actor RecordingCaptureDraftStore: CaptureDraftStoring {
         guard self.photos == photos else { return false }
         try await discard()
         return true
+    }
+}
+
+private struct EmptyTrophyWallRepository: TrophyWallRepository {
+    func initialCards(
+        for principalScope: TrophyWallPrincipalScope
+    ) -> [TrophyWallCard] {
+        []
     }
 }

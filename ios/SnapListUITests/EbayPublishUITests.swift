@@ -188,6 +188,152 @@ final class EbayPublishUITests: XCTestCase {
         attachEvidence(for: "outcome-unknown-accessibility3", app: unknown)
     }
 
+    /// #865. Before this, the account/disconnect screen was reachable only
+    /// from mid-publish (`Publish to eBay → connected → Manage connection`),
+    /// so a seller who was not mid-publish had no route to it at all. `SET-01`
+    /// reports a confirmed connection on the Settings SELLING row, which is
+    /// exactly the condition that must now make the row a real destination.
+    func testConnectedMarketplacesRowFromSettingsOpensTheSharedEbayAccountScreen() {
+        let app = launchSettings()
+        let row = app.buttons["settings.selling.marketplaces"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(row.isHittable, app.debugDescription)
+        row.tap()
+
+        let account = app.scrollViews["ebay-publish.account"]
+        XCTAssertTrue(
+            account.waitForExistence(timeout: 5),
+            "Settings must reach the same `ebay-publish.account` screen the publish journey uses, not a second one.\n\(app.debugDescription)"
+        )
+        XCTAssertTrue(app.staticTexts["Connected as Jordan Hale"].exists, app.debugDescription)
+        assertHittableButton("ebay-account.disconnect", in: app)
+        attachEvidence(for: "settings-account", app: app)
+    }
+
+    /// The confirmation dialog must carry forward, unchanged, the disclosure
+    /// that disconnecting does not revoke SnapList's grant on eBay's own side.
+    /// Cancel must leave the connection untouched; confirming must return the
+    /// seller to a state with no disconnect control left to tap twice.
+    func testDisconnectFromSettingsShowsTheUnchangedEbayDisclosureThenLeavesNoDisconnectControl() {
+        let app = launchSettings()
+        app.buttons["settings.selling.marketplaces"].tap()
+        let disconnect = app.buttons["ebay-account.disconnect"]
+        XCTAssertTrue(disconnect.waitForExistence(timeout: 5), app.debugDescription)
+
+        disconnect.tap()
+        XCTAssertTrue(
+            app.staticTexts["Disconnect eBay account Jordan Hale?"]
+                .waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        let disclosureText =
+            "Listings already on eBay stay there and keep selling, but SnapList will not be able to see or change them.\n\nTo review which apps can use your eBay account, open your eBay account settings."
+        XCTAssertEqual(
+            app.staticTexts.matching(
+                NSPredicate(format: "label == %@", disclosureText)
+            ).count,
+            1,
+            "The eBay-side disclosure must survive verbatim on the Settings entry point.\n\(app.debugDescription)"
+        )
+
+        // Cancel must not disconnect. SwiftUI renders this confirmationDialog's
+        // cancel action as either an explicit "Cancel" button (compact/
+        // actionSheet presentation) or an outside-tap dismiss region (popover
+        // presentation, which is what this device/OS combination actually
+        // uses); this test asserts the behavior — cancelling leaves the
+        // account connected — not which chrome Apple happens to draw it with.
+        let cancel = app.buttons["Cancel"]
+        if cancel.waitForExistence(timeout: 2) {
+            cancel.tap()
+        } else {
+            let dismissRegion = app.descendants(matching: .any)["PopoverDismissRegion"]
+            XCTAssertTrue(dismissRegion.waitForExistence(timeout: 3), app.debugDescription)
+            dismissRegion.tap()
+        }
+        XCTAssertTrue(
+            app.staticTexts["Connected as Jordan Hale"].waitForExistence(timeout: 5),
+            "Cancelling the dialog must leave the account connected.\n\(app.debugDescription)"
+        )
+
+        disconnect.tap()
+        app.buttons["Disconnect"].tap()
+
+        let notConnected = app.descendants(matching: .any)["ebay-connection-settings.not-connected"]
+        XCTAssertTrue(
+            notConnected.waitForExistence(timeout: 5),
+            "Disconnecting must land on the not-connected state.\n\(app.debugDescription)"
+        )
+        XCTAssertFalse(
+            app.buttons["ebay-account.disconnect"].exists,
+            "A disconnected seller must not be offered disconnect again.\n\(app.debugDescription)"
+        )
+        attachEvidence(for: "settings-disconnected", app: app)
+    }
+
+    /// The core round trip #865 exists to prove: disconnecting from Settings
+    /// must not strand the seller without a way back in. Reconnecting must be
+    /// reachable from the same Settings screen, with no item to open.
+    func testAfterDisconnectingFromSettingsTheSellerCanReconnectWithoutOpeningAnItem() {
+        let app = launchSettings()
+        app.buttons["settings.selling.marketplaces"].tap()
+        app.buttons["ebay-account.disconnect"].tap()
+        app.buttons["Disconnect"].tap()
+
+        let connect = app.buttons["ebay-connection-settings.connect"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 5), app.debugDescription)
+        connect.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Connected as Jordan Hale"].waitForExistence(timeout: 5),
+            "Reconnecting from Settings must reach the connected account screen again, without visiting an item.\n\(app.debugDescription)"
+        )
+        assertHittableButton("ebay-account.disconnect", in: app)
+        attachEvidence(for: "settings-reconnected", app: app)
+    }
+
+    /// No clipping/overlap at default and at the largest accessibility Dynamic
+    /// Type size (`accessibilityExtraExtraExtraLarge` / `.accessibility5`) on
+    /// the screen Settings now reaches.
+    func testEbayAccountScreenFromSettingsHasNoClippingAtDefaultAndLargestAccessibilityDynamicType() {
+        for arguments in [[String](), ["--dynamic-type=accessibility5"]] {
+            let app = launchSettings(extraArguments: arguments)
+            app.buttons["settings.selling.marketplaces"].tap()
+
+            let disconnect = app.buttons["ebay-account.disconnect"]
+            XCTAssertTrue(disconnect.waitForExistence(timeout: 5), app.debugDescription)
+            let window = app.windows.firstMatch
+            for _ in 0..<8 where disconnect.frame.maxY > window.frame.maxY {
+                app.swipeUp()
+            }
+            let receipt = "arguments=\(arguments), disconnect=\(disconnect.frame), window=\(window.frame)"
+            XCTAssertTrue(disconnect.isHittable, receipt)
+            XCTAssertGreaterThanOrEqual(disconnect.frame.minX, window.frame.minX, receipt)
+            XCTAssertLessThanOrEqual(disconnect.frame.maxX, window.frame.maxX, receipt)
+            XCTAssertLessThanOrEqual(disconnect.frame.maxY, window.frame.maxY, receipt)
+
+            let connectedLabel = app.staticTexts["Connected as Jordan Hale"]
+            XCTAssertTrue(connectedLabel.exists, receipt)
+            XCTAssertGreaterThanOrEqual(connectedLabel.frame.minX, window.frame.minX, receipt)
+            XCTAssertLessThanOrEqual(connectedLabel.frame.maxX, window.frame.maxX, receipt)
+            attachEvidence(
+                for: "settings-account-\(arguments.isEmpty ? "default" : "accessibility5")",
+                app: app
+            )
+            app.terminate()
+        }
+    }
+
+    private func launchSettings(extraArguments: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--settings-proof=SET-01"] + extraArguments
+        app.launchAfterRetiringPriorInstance()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["settings.screen"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        return app
+    }
+
     func testAccountClaimCancelPreservesTheExactSavedListingWithoutClaiming() {
         let app = XCUIApplication()
         app.launchArguments = [

@@ -849,6 +849,404 @@ final class TrophyWallDomainTests: XCTestCase {
         )
     }
 
+    /// The wall's whole purpose is to lead back to the listing the seller's
+    /// photos produced, so a settled tile has to name the run it opens. The grid
+    /// #729 built passed the tile nothing but data (#866).
+    func testSettledTileOpensItsOwnRunAndNamesThatDestination() {
+        let runID = UUID(uuidString: "37500000-0000-4000-8000-000000000021")!
+        let tile = TrophyWallSettledTile(
+            id: .run(runID),
+            itemName: "White leather sneaker",
+            stateLabel: "Published to eBay",
+            historyOrderAt: Date(timeIntervalSince1970: 1_753_015_200)
+        )
+
+        XCTAssertEqual(tile.destination, .run(runID))
+        XCTAssertEqual(
+            tile.accessibilityIdentifier,
+            "trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"
+        )
+    }
+
+    /// A tile with nothing behind it must stay a picture. A control that opens
+    /// nothing is a worse lie than an image, and assistive technology would
+    /// announce it as an action the seller cannot take.
+    func testSettledTileWithoutARunOffersNoDestinationOrControlIdentity() {
+        let tile = TrophyWallSettledTile(
+            id: .local(
+                TrophyWallLogicalIdentity(
+                    idempotencyKey: UUID(
+                        uuidString: "37500000-0000-4000-8000-000000000022"
+                    )!
+                )
+            ),
+            itemName: "White leather sneaker",
+            stateLabel: "Published to eBay",
+            historyOrderAt: Date(timeIntervalSince1970: 1_753_015_200)
+        )
+
+        XCTAssertNil(tile.destination)
+        XCTAssertNil(tile.accessibilityIdentifier)
+    }
+
+    /// The seller's own photo is the only photo that exists while a run is still
+    /// processing: the server hands the client no cover until delivery, which is
+    /// terminal. So the bytes the pending intake staged have to survive the swap
+    /// from the local card to the canonical accepted one.
+    func testAcceptedRowCarriesTheStagedCoverPhotoForwardFromTheLocalCard() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let store = fixture.makeStore(cards: [
+            .pending(
+                principalScope: fixture.principal,
+                logicalIdentity: fixture.logicalID,
+                itemName: fixture.matchedItemName,
+                localCoverPhotoData: stagedPhoto,
+                lastMeaningfulUpdateAt: fixture.pendingUpdate
+            ),
+        ])
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                state: .accepted,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate
+            )
+        )
+
+        let row = try XCTUnwrap(
+            store.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertEqual(row.stateLabel, "Accepted")
+        XCTAssertEqual(row.localCoverPhotoData, stagedPhoto)
+        // The photo is decoration beside the row's own label, so wiring it may
+        // not change one word the seller hears.
+        XCTAssertEqual(
+            row.accessibilityLabel,
+            "\(fixture.matchedItemName), accepted."
+        )
+    }
+
+    /// Analyzing is the state the seller actually watches, and it is reached by
+    /// the same canonical card, so the carried photo has to survive every stage
+    /// projection rather than only the first one.
+    func testAnalyzingRowKeepsTheStagedCoverPhotoAcrossStageProjections() throws {
+        let fixture = TrophyWallTestFixture()
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let store = fixture.makeStore(cards: [
+            .pending(
+                principalScope: fixture.principal,
+                logicalIdentity: fixture.logicalID,
+                itemName: fixture.matchedItemName,
+                localCoverPhotoData: stagedPhoto,
+                lastMeaningfulUpdateAt: fixture.pendingUpdate
+            ),
+        ])
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                state: .accepted,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate
+            )
+        )
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: nil,
+                state: .workingIdentifying,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate
+            )
+        )
+
+        let row = try XCTUnwrap(
+            store.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertEqual(row.stateLabel, "Identifying")
+        XCTAssertEqual(row.localCoverPhotoData, stagedPhoto)
+    }
+
+    /// A run the client only learns about from the server — a relaunch, another
+    /// device — never had staged bytes on this phone. It has to render today's
+    /// slot rather than an empty image well.
+    ///
+    /// The second half is the point. As written before #867 this test asserted
+    /// only the nil, which is also exactly what the owner's failing device
+    /// produced, so it was green while the defect shipped. The identical
+    /// server-only projection is run twice — once against a store that never saw
+    /// this device stage anything, once against a store that did — so a store
+    /// that simply never carries a photo cannot pass it.
+    func testServerOnlyRunClaimsNoPhotoWhileADeviceStagedRunKeepsIts() throws {
+        let fixture = TrophyWallTestFixture()
+        let serverOnly = fixture.makeStore(cards: [])
+        let projection = TrophyWallCanonicalAcceptedRun(
+            principalScope: fixture.principal,
+            runID: fixture.runID,
+            linkedLogicalIdentity: nil,
+            state: .accepted,
+            lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+            itemName: fixture.matchedItemName
+        )
+
+        serverOnly.ingest(projection)
+
+        let serverOnlyRow = try XCTUnwrap(
+            serverOnly.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertNil(serverOnlyRow.localCoverPhotoData)
+
+        // Same run, same server-sourced projection, but this device staged the
+        // photo. The nil above must be the absence of bytes, not the store
+        // dropping them.
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let staged = fixture.makeStore(cards: [])
+        staged.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: nil,
+                state: .accepted,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+                itemName: fixture.matchedItemName,
+                localCoverPhotoData: stagedPhoto
+            )
+        )
+        staged.ingest(projection)
+
+        let stagedRow = try XCTUnwrap(
+            staged.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertEqual(stagedRow.localCoverPhotoData, stagedPhoto)
+    }
+
+    /// Step 8 of #867's proved cause, at the store. Every wall refresh rebuilds
+    /// the row from server history, and the server has no pre-delivery photo of
+    /// this item to offer — by design, since the seller's capture never left the
+    /// device. So the acceptance's bytes have to survive a full history fetch,
+    /// not only the first projection after it.
+    func testHistoryRefreshDoesNotBlankTheAcceptancesOwnPhoto() async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                state: .accepted,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+                itemName: fixture.matchedItemName,
+                localCoverPhotoData: stagedPhoto
+            )
+        )
+        XCTAssertEqual(
+            store.processingRows.first?.localCoverPhotoData,
+            stagedPhoto
+        )
+
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [
+                .page(
+                    try fixture.historyPage(
+                        status: .queued,
+                        stage: .queued,
+                        terminalOutcome: nil
+                    )
+                ),
+            ]
+        )
+        await store.refreshCollection(using: repository)
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
+        let row = try XCTUnwrap(
+            store.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertEqual(row.localCoverPhotoData, stagedPhoto)
+    }
+
+    func testProcessingRowSlotDrawsTheSellersOwnStagedPhoto() throws {
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let row = try makeAcceptedProcessingRow(localCoverPhotoData: stagedPhoto)
+
+        guard case .staged(let image) = TrophyWallProcessingRowPhoto
+            .content(for: row) else {
+            return XCTFail("Staged bytes must resolve to a drawable image.")
+        }
+        // The decoded pixels are the seller's own photo, not a tint or a symbol.
+        XCTAssertEqual(image.size, CGSize(width: 12, height: 12))
+    }
+
+    /// Two ways the bytes are genuinely absent: a run this device never staged,
+    /// and bytes that no longer decode. Both keep the slot the wall already
+    /// draws instead of an empty image well.
+    func testProcessingRowSlotKeepsTodaysPlaceholderWhenNoPhotoIsAvailable() throws {
+        let absent = try makeAcceptedProcessingRow(localCoverPhotoData: nil)
+        guard case .placeholder = TrophyWallProcessingRowPhoto
+            .content(for: absent) else {
+            return XCTFail("Absent bytes must keep the existing slot.")
+        }
+
+        let unreadable = try makeAcceptedProcessingRow(
+            localCoverPhotoData: Data("not an image".utf8)
+        )
+        guard case .placeholder = TrophyWallProcessingRowPhoto
+            .content(for: unreadable) else {
+            return XCTFail("Undecodable bytes must keep the existing slot.")
+        }
+    }
+
+    /// Everything above this asserts what the slot is told to draw. This asserts
+    /// what it actually draws, by rendering the view and reading the pixel in
+    /// the middle of the slot: the seller's own photo when there are bytes, and
+    /// the same flat fill as before when there are not.
+    func testProcessingRowSlotRendersThePhotoIntoItsUnchangedSquare() throws {
+        let staged = try renderedSlot(
+            localCoverPhotoData: TrophyWallTestFixture.stagedCoverPhotoData()
+        )
+        let placeholder = try renderedSlot(localCoverPhotoData: nil)
+
+        // The slot the photo draws into is the one the row already laid out.
+        for rendered in [staged, placeholder] {
+            XCTAssertEqual(
+                rendered.size,
+                CGSize(
+                    width: TrophyWallProcessingPhotoMetrics.sidePoints,
+                    height: TrophyWallProcessingPhotoMetrics.sidePoints
+                )
+            )
+        }
+
+        // A 10pt radius on a 44pt square leaves the very corner outside the
+        // shape, so a photo that ignored the clip would paint it opaque.
+        for rendered in [staged, placeholder] {
+            XCTAssertEqual(try pixel(of: rendered, x: 0, y: 0).alpha, 0)
+        }
+
+        let stagedCenter = try pixel(of: staged, x: nil, y: nil)
+        let placeholderCenter = try pixel(of: placeholder, x: nil, y: nil)
+        // The fixture photo is systemTeal, so the drawn pixel is blue-green and
+        // clearly not the neutral hairline the empty slot fills with.
+        XCTAssertGreaterThan(stagedCenter.blue, stagedCenter.red)
+        XCTAssertGreaterThan(stagedCenter.green, stagedCenter.red)
+        XCTAssertGreaterThan(
+            Int(stagedCenter.blue) - Int(stagedCenter.red),
+            40
+        )
+        XCTAssertLessThanOrEqual(
+            Int(placeholderCenter.blue) - Int(placeholderCenter.red),
+            40
+        )
+    }
+
+    @MainActor
+    private func renderedSlot(localCoverPhotoData: Data?) throws -> UIImage {
+        let row = try makeAcceptedProcessingRow(
+            localCoverPhotoData: localCoverPhotoData
+        )
+        let renderer = ImageRenderer(
+            content: TrophyWallProcessingRowPhoto(row: row)
+        )
+        renderer.scale = 1
+        return try XCTUnwrap(renderer.uiImage)
+    }
+
+    /// One pixel of a rendered view. `nil` coordinates read the middle.
+    private func pixel(
+        of image: UIImage,
+        x: Int?,
+        y: Int?
+    ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8) {
+        let source = try XCTUnwrap(image.cgImage)
+        let center = try XCTUnwrap(
+            source.cropping(
+                to: CGRect(
+                    x: x ?? source.width / 2,
+                    y: y ?? source.height / 2,
+                    width: 1,
+                    height: 1
+                )
+            )
+        )
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(
+            CGContext(
+                data: &pixel,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+        context.draw(center, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return (pixel[0], pixel[1], pixel[2], pixel[3])
+    }
+
+    /// No fixture route reached an accepted or analyzing row carrying a photo,
+    /// which is why the missing thumbnail survived every existing test.
+    func testProcessingLaunchFixtureSeedsAnAcceptedRowTheSuiteCanSee() throws {
+        let rows = TrophyWallProcessingLaunchFixture.store.processingRows
+        let acceptedIndex = try XCTUnwrap(
+            rows.firstIndex { $0.stateLabel == "Accepted" }
+        )
+
+        guard case .staged = TrophyWallProcessingRowPhoto
+            .content(for: rows[acceptedIndex]) else {
+            return XCTFail("The seeded accepted row must carry a photo.")
+        }
+
+        // The seeded row is the oldest, so it sits behind the disclosure and
+        // leaves the three rows the UI suite reads before expanding untouched.
+        XCTAssertEqual(acceptedIndex, rows.count - 1)
+        XCTAssertGreaterThan(acceptedIndex, 2)
+
+        // A sixth row moves the collapsed disclosure off its exact-count
+        // wording. The UI suite asserts that string on this same fixture, so
+        // pin it here where it can be checked without a device.
+        let collapsed = TrophyWallProcessingView.presentation(
+            from: rows,
+            refreshRecovery: .idle,
+            availableHeight: 844,
+            isExpanded: false
+        )
+        XCTAssertEqual(collapsed.disclosureAccessibilityLabel, "Show more items")
+        XCTAssertEqual(collapsed.visibleRows.count, 3)
+    }
+
+    private func makeAcceptedProcessingRow(
+        localCoverPhotoData: Data?
+    ) throws -> TrophyWallProcessingRow {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [
+            .pending(
+                principalScope: fixture.principal,
+                logicalIdentity: fixture.logicalID,
+                itemName: fixture.matchedItemName,
+                localCoverPhotoData: localCoverPhotoData,
+                lastMeaningfulUpdateAt: fixture.pendingUpdate
+            ),
+        ])
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                state: .accepted,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate
+            )
+        )
+        return try XCTUnwrap(
+            store.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+    }
+
     func testStoreWithdrawsInvalidatedExportTruthWithoutReorderingTheRun() throws {
         let fixture = TrophyWallTestFixture()
         let store = fixture.makeStore()
@@ -1662,17 +2060,32 @@ final class TrophyWallDomainTests: XCTestCase {
         // the emptiness below cannot be the fixture never having any cards.
         XCTAssertFalse(store.cards.isEmpty)
 
-        let member = try XCTUnwrap(
-            ItemRunSubmissionPrincipalScopeProof(
-                verifiedClerkSubject: "user_2signed_in_member"
+        // Distinct activations as well as distinct proofs, because that is what
+        // `NativeIntake.reconcileIdentity` does when the resolved scope changes
+        // — proved end to end in
+        // `ItemRunSubmissionTests`.`testSigningOutIsStillAPrincipalTransitionThatClearsTheWall`.
+        let member = TrophyWallPrincipalIdentity(
+            activationID: UUID(
+                uuidString: "84400000-0000-4000-8000-000000000011"
+            )!,
+            scopeProof: try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    verifiedClerkSubject: "user_2signed_in_member"
+                )
             )
         )
-        let guestAfterSignOut = try XCTUnwrap(
-            ItemRunSubmissionPrincipalScopeProof(
-                verifiedAppAttestKeyID: "app-attest-key-id-after-sign-out"
+        let guestAfterSignOut = TrophyWallPrincipalIdentity(
+            activationID: UUID(
+                uuidString: "84400000-0000-4000-8000-000000000012"
+            )!,
+            scopeProof: try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    verifiedAppAttestKeyID: "app-attest-key-id-after-sign-out"
+                )
             )
         )
-        XCTAssertNotEqual(member, guestAfterSignOut)
+        XCTAssertNotEqual(member.scopeProof, guestAfterSignOut.scopeProof)
+        XCTAssertNotEqual(member.activationID, guestAfterSignOut.activationID)
 
         var refreshState = TrophyWallCollectionRefreshState()
         // A cold launch observing the member for the first time is not a
@@ -1774,9 +2187,14 @@ final class TrophyWallDomainTests: XCTestCase {
         let initialTaskID = driver.refreshState.taskID(tab: .trophyWall)
 
         XCTAssertFalse(driver.refreshState.observePrincipal(nil))
-        let signedIn = try XCTUnwrap(
-            ItemRunSubmissionPrincipalScopeProof(
-                verifiedClerkSubject: "new-principal"
+        let signedIn = TrophyWallPrincipalIdentity(
+            activationID: UUID(
+                uuidString: "84400000-0000-4000-8000-000000000013"
+            )!,
+            scopeProof: try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    verifiedClerkSubject: "new-principal"
+                )
             )
         )
         XCTAssertTrue(driver.refreshState.observePrincipal(signedIn))
@@ -1970,6 +2388,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     store: store,
                     openProcessing: {},
                     openAccount: {},
+                    openRun: { _ in },
                     onScan: {},
                     onTryAgain: {}
                 ),
@@ -2014,6 +2433,7 @@ final class TrophyWallDomainTests: XCTestCase {
             store: settledStore,
             openProcessing: {},
             openAccount: {},
+            openRun: { _ in },
             onScan: {},
             onTryAgain: {}
         )
@@ -2560,6 +2980,22 @@ private struct TrophyWallTestFixture {
 
     var logicalID: TrophyWallLogicalIdentity {
         TrophyWallLogicalIdentity(idempotencyKey: idempotencyKey)
+    }
+
+    /// Stands in for the JPEG the capture draft store writes beside every staged
+    /// photo. Scale is pinned so the decoded size is the pixel size on any host
+    /// device, which is what the render assertions compare against.
+    static func stagedCoverPhotoData(sidePixels: Int = 12) -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let side = CGFloat(sidePixels)
+        return UIGraphicsImageRenderer(
+            size: CGSize(width: side, height: side),
+            format: format
+        ).jpegData(withCompressionQuality: 0.84) { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        }
     }
 
     var acceptedHandoff: AcceptedItemRunHandoff {

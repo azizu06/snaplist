@@ -28,6 +28,7 @@ struct TrophyWallView: View {
     @Bindable var store: TrophyWallStore
     let openProcessing: () -> Void
     let openAccount: () -> Void
+    let openRun: (UUID) -> Void
     let onScan: () -> Void
     let onTryAgain: () -> Void
 
@@ -193,7 +194,7 @@ struct TrophyWallView: View {
                     spacing: TrophyWallGridMetrics.gutterPoints
                 ) {
                     ForEach(store.settledTiles) { tile in
-                        TrophyWallSettledTileView(tile: tile)
+                        TrophyWallSettledTileView(tile: tile, openRun: openRun)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -208,8 +209,36 @@ struct TrophyWallView: View {
 
 private struct TrophyWallSettledTileView: View {
     let tile: TrophyWallSettledTile
+    let openRun: (UUID) -> Void
 
     var body: some View {
+        // A tile that resolves to a run is a control; one that does not stays
+        // exactly what it was, because a button that opens nothing is a worse
+        // lie than a picture.
+        if let destination = tile.destination,
+           case .run(let runID) = destination,
+           let identifier = tile.accessibilityIdentifier {
+            Button {
+                openRun(runID)
+            } label: {
+                surface
+            }
+            .buttonStyle(.plain)
+            // The rounded fill does not reach the corners of its cell, so
+            // without this the tap dies in the gap the grid leaves around it.
+            .contentShape(.rect)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(tile.accessibilityLabel)
+            .accessibilityIdentifier(identifier)
+        } else {
+            surface
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(tile.accessibilityLabel)
+                .accessibilityAddTraits(.isImage)
+        }
+    }
+
+    private var surface: some View {
         SnapListColorToken.quietFill.color
             .aspectRatio(TrophyWallGridMetrics.tileAspectRatio, contentMode: .fit)
             .overlay {
@@ -224,9 +253,6 @@ private struct TrophyWallSettledTileView: View {
             )
             .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(tile.accessibilityLabel)
-        .accessibilityAddTraits(.isImage)
     }
 
     @ViewBuilder
@@ -817,6 +843,62 @@ struct TrophyWallCollectionMessageView: View {
     }
 }
 
+/// The leading slot on a processing row. Until the run reaches delivery the
+/// server has no cover photo to hand back, so the only photo of this item that
+/// exists anywhere is the one the seller staged on this phone; the row carries
+/// those bytes rather than a staged path, because the intake is deleted the
+/// moment the run is accepted and a path under the scope-digest directory stops
+/// resolving when that digest changes (#855). Bytes that are absent or no longer
+/// decode leave the slot exactly as the wall drew it before.
+struct TrophyWallProcessingRowPhoto: View {
+    static let sidePoints = TrophyWallProcessingPhotoMetrics.sidePoints
+    static let cornerRadiusPoints = TrophyWallProcessingPhotoMetrics
+        .cornerRadiusPoints
+
+    /// Deliberately not `Equatable`: comparing two `.staged` values would rest
+    /// on `UIImage.isEqual:`, which is not a documented value comparison.
+    enum Content {
+        case staged(UIImage)
+        case placeholder
+    }
+
+    let row: TrophyWallProcessingRow
+
+    static func content(for row: TrophyWallProcessingRow) -> Content {
+        guard let data = row.localCoverPhotoData,
+              let image = UIImage(data: data) else {
+            return .placeholder
+        }
+        return .staged(image)
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Self.cornerRadiusPoints)
+            .fill(SnapListColorToken.hairline.color)
+            .frame(width: Self.sidePoints, height: Self.sidePoints)
+            .overlay {
+                switch Self.content(for: row) {
+                case .staged(let image):
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(
+                            width: Self.sidePoints,
+                            height: Self.sidePoints
+                        )
+                        .clipShape(
+                            .rect(cornerRadius: Self.cornerRadiusPoints)
+                        )
+                case .placeholder:
+                    EmptyView()
+                }
+            }
+            // The row already speaks its own name and state. The photo is
+            // decoration beside that sentence, so it stays out of the label.
+            .accessibilityHidden(true)
+    }
+}
+
 private struct TrophyWallProcessingRowView: View {
     let row: TrophyWallProcessingRow
     let openRoute: (HomeRoute) -> Void
@@ -877,10 +959,7 @@ private struct TrophyWallProcessingRowView: View {
 
     private var content: some View {
         HStack(spacing: 11) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(SnapListColorToken.hairline.color)
-                .frame(width: 44, height: 44)
-                .accessibilityHidden(true)
+            TrophyWallProcessingRowPhoto(row: row)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.itemName)

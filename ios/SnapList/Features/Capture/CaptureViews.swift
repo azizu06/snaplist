@@ -9,285 +9,6 @@ extension PhotosPickerItem: CaptureLibraryPhotoLoading {
     }
 }
 
-struct CaptureLauncherSheet: View {
-    @Bindable var flow: CaptureFlowModel
-    let takeOneItem: () -> Void
-    let showCapturedPhoto: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var libraryItem: PhotosPickerItem?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(SnapListColorToken.dragHandle.color)
-                .frame(width: 38, height: 5)
-                .padding(.top, 8)
-
-            HStack {
-                Spacer()
-                Text("Add an item")
-                    .snapListTypography(.sectionHeader)
-                    .accessibilityIdentifier("sheet.capture.title")
-                Spacer()
-            }
-            .overlay(alignment: .leading) {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(
-                            width: 48,
-                            height: 48
-                        )
-                        .background(SnapListColorToken.groupingFill.color)
-                        .clipShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close add item sheet")
-                .accessibilityIdentifier("capture.close")
-            }
-            .padding(.horizontal, SnapListMetrics.screenGutter)
-            .padding(.top, 6)
-
-            ScrollView {
-                if flow.stagedPhoto != nil {
-                    restoredDraft
-                } else {
-                    freshCaptureOptions
-                }
-            }
-            .scrollIndicators(.hidden)
-        }
-        .background(SnapListColorToken.canvas.color)
-        .presentationDragIndicator(.hidden)
-        .presentationCornerRadius(SnapListMetrics.sheetRadius)
-        .presentationDetents([.height(640)])
-        .onChange(of: libraryItem) { _, item in
-            guard let item else { return }
-            Task {
-                if await flow.stageLibraryPhotos([item]) == 1 {
-                    showCapturedPhoto()
-                    dismiss()
-                }
-            }
-        }
-    }
-
-    private var restoredDraft: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                LocalCaptureImage(
-                    url: flow.stagedPhoto?.thumbnailURL,
-                    maximumPixelSize: 240
-                )
-                .scaledToFill()
-                .frame(width: 64, height: 64)
-                .clipShape(.rect(cornerRadius: 14))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(flow.stagedPhotos.count) of 5 photos saved")
-                        .snapListTypography(.rowTitle)
-                    Text("Your staged photo is ready to continue.")
-                        .font(.caption)
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                }
-            }
-
-            SnapListPrimaryButton(title: "Resume captured photo") {
-                showCapturedPhoto()
-                dismiss()
-            }
-            .accessibilityHint("Returns to the staged photo without replacing it")
-
-            CaptureIconCaption(
-                systemImage: "clock",
-                text: "This photo stays on this device for up to 24 hours."
-            )
-        }
-        .padding(.horizontal, SnapListMetrics.screenGutter)
-        .padding(.top, 18)
-        .padding(.bottom, 24)
-    }
-
-    private var freshCaptureOptions: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Button(action: takeOneItem) {
-                CaptureOptionRow(entryPoint: .takeOneItem, isPrimary: true)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Take one item, recommended")
-            .accessibilityHint("Opens the guided camera")
-            .accessibilityIdentifier(CaptureEntryPoint.takeOneItem.identifier)
-
-            Text("Other ways to add")
-                .font(.caption2.weight(.semibold))
-                .textCase(.uppercase)
-                .tracking(0.5)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-
-            VStack(spacing: 0) {
-                PhotosPicker(selection: $libraryItem, matching: .images) {
-                    CaptureOptionRow(entryPoint: .chooseFromLibrary)
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, minHeight: 60)
-                .contentShape(.rect)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(CaptureEntryPoint.chooseFromLibrary.title)
-                .accessibilityIdentifier(CaptureEntryPoint.chooseFromLibrary.identifier)
-            }
-
-            CaptureIconCaption(
-                systemImage: "info.circle",
-                text: "Capture and organize photos before choosing what to list."
-            )
-        }
-        .padding(.horizontal, SnapListMetrics.screenGutter)
-        .padding(.top, 10)
-        .padding(.bottom, 18)
-    }
-}
-
-/// Every way the capture surface lets a seller start an item. The lean MVP offers
-/// exactly one primary path and one alternate; anything else is a destination the
-/// product decided not to ship, so the set is asserted rather than left implicit.
-enum CaptureEntryPoint: String, CaseIterable, Identifiable {
-    case takeOneItem
-    case chooseFromLibrary
-
-    var id: String { rawValue }
-
-    var identifier: String {
-        switch self {
-        case .takeOneItem: "capture.take-one-item"
-        case .chooseFromLibrary: "capture.choose-library"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .takeOneItem: "Take one item"
-        case .chooseFromLibrary: "Choose from library"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .takeOneItem: "Snap one thing and get help listing it."
-        case .chooseFromLibrary: "Use photos you already have."
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .takeOneItem: "camera"
-        case .chooseFromLibrary: "photo"
-        }
-    }
-}
-
-/// An icon and a caption, composed by hand rather than through
-/// `Label(_:systemImage:)`.
-///
-/// `Label`'s internal composition truncated the caption to a single ellipsized
-/// line at AX5 even with `.frame(maxWidth: .infinity)` and `.fixedSize` applied
-/// — a plain `Text` wraps correctly at the identical width in the identical
-/// `ScrollView`, so the constraint is internal to `Label` rather than the
-/// surrounding layout (#831). Three sites had their own copy of the
-/// replacement and the CAP-01 fixture still had the `Label` (#839).
-struct CaptureIconCaption: View {
-    let systemImage: String
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: systemImage)
-            Text(text)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(.caption)
-        .foregroundStyle(SnapListColorToken.textTertiary.color)
-    }
-}
-
-private struct CaptureOptionRow: View {
-    let entryPoint: CaptureEntryPoint
-    var isPrimary = false
-
-    private var title: String { entryPoint.title }
-    private var subtitle: String { entryPoint.subtitle }
-    private var systemImage: String { entryPoint.systemImage }
-    private var badge: String? { isPrimary ? "Recommended" : nil }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(
-                    isPrimary ? SnapListColorToken.onDarkSurface.color : SnapListColorToken.textSecondary.color
-                )
-                .frame(width: 42, height: 42)
-                .background(
-                    isPrimary
-                        ? SnapListColorToken.action.color
-                        : SnapListColorToken.groupingFill.color
-                )
-                .clipShape(.rect(cornerRadius: 11))
-
-            VStack(alignment: .leading, spacing: 3) {
-                // Without `.fixedSize(horizontal: false, vertical: true)`, this
-                // HStack's width negotiation against its icon and chevron
-                // siblings truncates the title to a single ellipsized line at
-                // the largest accessibility Dynamic Type sizes instead of
-                // wrapping — the same fix `restoredDraft` and the info `Label`
-                // below already apply to their own multi-line text (#831).
-                HStack(spacing: 7) {
-                    Text(title)
-                        .snapListTypography(.rowTitle)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let badge {
-                        Text(badge.uppercased())
-                            .font(.system(size: 9, weight: .bold))
-                            .tracking(0.4)
-                            .foregroundStyle(SnapListColorToken.action.color)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(SnapListColorToken.infoChipFill.color)
-                            .clipShape(.capsule)
-                            .fixedSize()
-                    }
-                }
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-        }
-        .padding(.horizontal, isPrimary ? 10 : 8)
-        .frame(minHeight: isPrimary ? 64 : 60)
-        .background(isPrimary ? SnapListColorToken.subtleActionFill.color : SnapListColorToken.canvas.color)
-        .clipShape(.rect(cornerRadius: isPrimary ? 14 : 0))
-        .overlay {
-            if isPrimary {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(SnapListColorToken.action.color.opacity(0.65), lineWidth: 1)
-            }
-        }
-        .contentShape(.rect)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-
 struct ScanCameraView: View {
     @Bindable var flow: CaptureFlowModel
     @Binding var returnFocus: PhotoReviewScanFocus?
@@ -412,18 +133,11 @@ struct ScanCameraView: View {
                 .recoveryLibrary
             }
 
-        return PhotosPicker(
+        return ScanLibraryPicker(
+            style: labelStyle,
             selection: $libraryItems,
             maxSelectionCount: max(1, 5 - flow.stagedPhotos.count),
-            selectionBehavior: .ordered,
-            matching: .images
-        ) {
-            ScanLibraryLabel(style: labelStyle)
-        }
-        .disabled(!isLibraryEnabled)
-        .accessibilityLabel(labelStyle == .icon ? "Library" : "Choose from library")
-        .accessibilityIdentifier(
-            labelStyle == .icon ? "scan.library" : "scan.choose-library"
+            isEnabled: isLibraryEnabled
         )
         .accessibilitySortPriority(60)
         .accessibilityFocused(
@@ -499,9 +213,39 @@ private enum ScanCameraRecoveryMode: Equatable {
     }
 }
 
-private enum ScanLibraryLabelStyle {
+enum ScanLibraryLabelStyle {
     case icon
     case recovery
+}
+
+/// The library opener, isolated from `ScanCameraView`'s focus/state wiring so a unit test
+/// can render it alone and inspect its resolved button style (#856), the same technique
+/// `LegalLinkRow` uses.
+struct ScanLibraryPicker: View {
+    let style: ScanLibraryLabelStyle
+    @Binding var selection: [PhotosPickerItem]
+    let maxSelectionCount: Int
+    let isEnabled: Bool
+
+    var body: some View {
+        PhotosPicker(
+            selection: $selection,
+            maxSelectionCount: maxSelectionCount,
+            selectionBehavior: .ordered,
+            matching: .images
+        ) {
+            ScanLibraryLabel(style: style)
+        }
+        // `PhotosPicker` resolves a button style the same way `Button` does, so
+        // an `.automatic` picker gets a filled shape under Button Shapes on top
+        // of the circle or capsule `ScanLibraryLabel` already draws (#856).
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .accessibilityLabel(style == .icon ? "Library" : "Choose from library")
+        .accessibilityIdentifier(
+            style == .icon ? "scan.library" : "scan.choose-library"
+        )
+    }
 }
 
 private struct ScanLibraryLabel: View {
@@ -565,7 +309,9 @@ private enum ScanReviewFocusTarget: Hashable {
 /// count-sensitive name, the same identifier, and the same accessibility-focus handoff back
 /// from Photo Review. Each surface still supplies its own sort-priority case, which is the one
 /// input that is allowed to differ, even though `.live` and `.recovery` both resolve to 40 today.
-private struct ScanReviewButton: View {
+///
+/// Not `private`: a unit test renders it alone to inspect its resolved button style (#856).
+struct ScanReviewButton: View {
     let photoCount: Int
     let priority: ScanReviewAccessibilityPriority
     @Binding var returnFocus: PhotoReviewScanFocus?
@@ -575,6 +321,11 @@ private struct ScanReviewButton: View {
 
     var body: some View {
         Button("Review", action: review)
+            // The capsule below is this control's whole affordance. Left on
+            // `.automatic`, iOS paints a second filled shape behind it for a
+            // seller with Button Shapes on, which reads as an overlay sitting
+            // on the label (#856).
+            .buttonStyle(.plain)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(SnapListColorToken.onDarkSurface.color)
             .padding(.horizontal, 18)
@@ -762,45 +513,57 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         )
     }
 
+    // A `ZStack` that absolutely centers the shutter over an independent `HStack` let the
+    // review button's AX5-widened capsule (its label grows with Dynamic Type) extend under
+    // the shutter, since nothing in a `ZStack` keeps sibling views from overlapping (#864).
+    // A single `HStack` with two equally flexible side regions keeps every control in its
+    // own non-overlapping region by construction: SwiftUI splits leftover width evenly
+    // between `maxWidth: .infinity` siblings, only yielding more to one side once the other
+    // no longer needs its share, so the shutter stays centered at default sizes and the
+    // regions simply grow asymmetrically at accessibility sizes instead of colliding.
     private var cameraControls: some View {
-        ZStack {
-            HStack {
-                libraryControl()
-                    .disabled(!isLibraryEnabled)
-                Spacer()
-                if !thumbnailURLs.isEmpty {
-                    reviewButton
-                        .transition(reduceMotion ? .identity : .opacity)
-                } else {
-                    Color.clear
-                        .frame(width: 82, height: 48)
-                        .accessibilityHidden(true)
-                }
-            }
-            .padding(.horizontal, 18)
+        HStack {
+            libraryControl()
+                .disabled(!isLibraryEnabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(action: takePhoto) {
-                ZStack {
-                    Circle()
-                        .stroke(SnapListColorToken.onDarkSurface.color, lineWidth: 3)
-                        .frame(width: 72, height: 72)
-                    Circle()
-                        .fill(SnapListColorToken.onDarkSurface.color)
-                        .frame(width: 56, height: 56)
-                }
-                .frame(width: 72, height: 72)
+            shutterButton
+
+            if !thumbnailURLs.isEmpty {
+                reviewButton
+                    .transition(reduceMotion ? .identity : .opacity)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                Color.clear
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .accessibilityHidden(true)
             }
-            .buttonStyle(.plain)
-            .disabled(!isShutterEnabled)
-            .opacity(isShutterEnabled ? 1 : 0.5)
-            .accessibilityLabel(
-                ScanShutterAccessibility(
-                    durablePhotoCount: thumbnailURLs.count
-                ).label
-            )
-            .accessibilityIdentifier("scan.shutter")
-            .accessibilitySortPriority(50)
         }
+        .padding(.horizontal, 18)
+    }
+
+    private var shutterButton: some View {
+        Button(action: takePhoto) {
+            ZStack {
+                Circle()
+                    .stroke(SnapListColorToken.onDarkSurface.color, lineWidth: 3)
+                    .frame(width: 72, height: 72)
+                Circle()
+                    .fill(SnapListColorToken.onDarkSurface.color)
+                    .frame(width: 56, height: 56)
+            }
+            .frame(width: 72, height: 72)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isShutterEnabled)
+        .opacity(isShutterEnabled ? 1 : 0.5)
+        .accessibilityLabel(
+            ScanShutterAccessibility(
+                durablePhotoCount: thumbnailURLs.count
+            ).label
+        )
+        .accessibilityIdentifier("scan.shutter")
+        .accessibilitySortPriority(50)
     }
 
     private var reviewButton: some View {
@@ -1228,12 +991,6 @@ struct CaptureVisualStateView: View {
 
     var body: some View {
         switch state {
-        case .captureLauncher:
-            ZStack(alignment: .bottom) {
-                CaptureFixtureHomeBackdrop()
-                SnapListColorToken.scrimOverlay.color.opacity(0.42).ignoresSafeArea()
-                CaptureLauncherFixture()
-            }
         case .captureCoaching:
             CameraFixtureSurface(guidance: .coaching, captured: false)
         case .captureMoveCloser:
@@ -1247,88 +1004,6 @@ struct CaptureVisualStateView: View {
         default:
             VisualStateBoundaryPlaceholder(state: state)
         }
-    }
-}
-
-private struct CaptureFixtureHomeBackdrop: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("SnapList").snapListTypography(.wordmark)
-            Text("3 things need you").snapListTypography(.displayTitle)
-            Text("Ship an order, answer a buyer, fix a listing.")
-                .snapListTypography(.body)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-            Text("Needs your attention").snapListTypography(.sectionHeader).padding(.top, 12)
-            ForEach(["Ship sold headphones", "Reply to buyer", "Fix listing details"], id: \.self) { title in
-                HStack {
-                    RoundedRectangle(cornerRadius: 11)
-                        .fill(SnapListColorToken.groupingFill.color)
-                        .frame(width: 52, height: 52)
-                    Text(title).snapListTypography(.rowTitle)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                }
-                .padding(12)
-                .overlay { RoundedRectangle(cornerRadius: 16).stroke(SnapListColorToken.hairline.color) }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 58)
-        .background(SnapListColorToken.canvas.color)
-        .accessibilityIdentifier("visual.capture.home-preserved")
-    }
-}
-
-private struct CaptureLauncherFixture: View {
-    var body: some View {
-        VStack(spacing: 0) {
-            Capsule().fill(SnapListColorToken.dragHandle.color).frame(width: 38, height: 5).padding(.top, 8)
-            HStack {
-                Image(systemName: "xmark")
-                    .frame(width: 44, height: 44)
-                    .background(SnapListColorToken.groupingFill.color)
-                    .clipShape(.circle)
-                Spacer()
-                Text("Add an item").snapListTypography(.sectionHeader)
-                Spacer()
-                Color.clear.frame(width: 44, height: 44)
-            }
-            .padding(.horizontal, 20)
-            CaptureOptionRow(entryPoint: .takeOneItem, isPrimary: true)
-                .padding(.horizontal, 20)
-            Text("Other ways to add")
-                .font(.caption2.weight(.semibold))
-                .textCase(.uppercase)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 14)
-            ForEach(CaptureEntryPoint.allCases.filter { $0 != .takeOneItem }) { entryPoint in
-                CaptureOptionRow(entryPoint: entryPoint)
-                    .padding(.horizontal, 20)
-            }
-            // The production sheet's own caption, not a `Label` restatement of
-            // it: `Label`'s internal icon+text composition truncates to one
-            // ellipsized line at an accessibility size, which is exactly the
-            // defect #831 removed from the shipped surface and this fixture
-            // then kept standing in for it (#839).
-            CaptureIconCaption(
-                systemImage: "info.circle",
-                text: "Capture and organize photos before choosing what to list."
-            )
-            .padding(.horizontal, 20)
-            .padding(.top, 6)
-            .padding(.bottom, 14)
-        }
-        // 680pt is the sheet's resting height, not a box its content is
-        // clipped into: a fixed height proposes a size without clipping, so at
-        // an accessibility size the rows drew past it and the fixture stopped
-        // standing for the row it exists to show (#839).
-        .frame(minHeight: 680, alignment: .top)
-        .background(SnapListColorToken.canvas.color)
-        .clipShape(.rect(topLeadingRadius: 26, topTrailingRadius: 26))
-        .accessibilityIdentifier("visual-state.CAP-01")
     }
 }
 

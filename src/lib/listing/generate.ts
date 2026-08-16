@@ -289,22 +289,74 @@ function fallbackListingName(attributes: ExtractedAttributes): string {
   );
 }
 
-/** A factual description assembled only from the validated attribute core. */
+/** Drop a core value's own trailing terminator so a fragment can be re-punctuated. */
+function stripTerminator(fragment: string): string {
+  return fragment.trim().replace(/[.!?\s]+$/u, "");
+}
+
+/**
+ * Neutralize a LABEL colon inside a core value.
+ *
+ * The core's specs are model-authored free text (`vision/extract` constrains them to
+ * strings, nothing more), so a spec can arrive already shaped as `"USB-C: 2 ports"` —
+ * which would reintroduce the very field-label form this module exists to stop, from
+ * the data side rather than the builder side. A label colon is one followed by
+ * WHITESPACE; a colon inside a value ("16:9", "1:1") is not, and is left alone.
+ */
+function neutralizeLabelColons(fragment: string): string {
+  return fragment.replace(/:\s+/gu, " ");
+}
+
+/**
+ * Punctuate a core fragment as one sentence. The core's values arrive unpunctuated
+ * ("wireless") or already terminated ("Tested and working."), so the existing
+ * terminator is dropped and a single period re-added rather than doubled.
+ */
+function asSentence(fragment: string): string {
+  const trimmed = stripTerminator(neutralizeLabelColons(fragment));
+  return trimmed.length > 0 ? `${trimmed}.` : "";
+}
+
+/**
+ * A factual description assembled only from the validated attribute core, written as
+ * SENTENCES (issue #894).
+ *
+ * This is the floor for every listing a seller sees: `generateEbayListing` builds the
+ * seller-visible description from here on BOTH the model pass-through path and the
+ * factual-fallback path, because a description cannot be fact-checked after generation.
+ * It therefore has to read like a person wrote it, not like a filled-in form — the
+ * previous `Item:` / `Condition:` / `Details:` field labels were the exact shape a real
+ * scan shipped to a seller.
+ *
+ * What it may say is unchanged: identity, condition and specs come from the validated
+ * core only (each through `safeSellerCoreValue`), and seller context stays a qualified
+ * unverified note that never becomes an asserted fact.
+ */
 export function buildCoreListingDescription(
   attributes: ExtractedAttributes,
   sellerContext?: SellerContext,
 ): string {
-  const sentences = [`Item: ${fallbackListingName(attributes)}.`];
+  const name = fallbackListingName(attributes);
   const condition = safeSellerCoreValue(attributes.condition);
-  if (condition) sentences.push(`Condition: ${condition}.`);
-  const specs = (attributes.specs ?? [])
-    .map((spec) => safeSellerCoreValue(spec))
-    .filter((spec): spec is string => Boolean(spec));
-  if (specs.length > 0) sentences.push(`Details: ${specs.join(", ")}.`);
+  // A core condition is usually a bare grade ("good"), but an extracted one may already
+  // carry the noun anywhere in the phrase ("good condition", "used condition, minor
+  // scuffs") and may already be terminated ("Very good condition.") — don't say it
+  // twice, and don't strand the appended noun after the value's own full stop.
+  const conditionPhrase = condition ? stripTerminator(condition) : undefined;
+  const identity = conditionPhrase
+    ? /\bcondition\b/iu.test(conditionPhrase)
+      ? `${name} in ${conditionPhrase}`
+      : `${name} in ${conditionPhrase} condition`
+    : name;
+  const sentences = [asSentence(identity)];
+  for (const spec of attributes.specs ?? []) {
+    const safe = safeSellerCoreValue(spec);
+    if (safe) sentences.push(asSentence(safe));
+  }
   if (sellerContext) {
     sentences.push(`Seller note (unverified): ${sellerContext.text}`);
   }
-  return sentences.join(" ");
+  return sentences.filter((sentence) => sentence.length > 0).join(" ");
 }
 
 /**
@@ -600,10 +652,16 @@ const LISTING_SYSTEM_PROMPT =
   "You write competent, native-looking eBay listings for used items. Use ONLY the " +
   "supplied attribute facts (brand, model, category, condition, specs) — never invent " +
   "a brand, model, or spec that is not given. Ground your tone and structure in the " +
-  "provided example listings. The title must be a keyword-dense eBay title of 80 " +
-  "characters or fewer. Provide eBay item specifics as a LIST of {name, value} entries " +
+  "provided example listings. The title must NAME THE ITEM FIRST — brand, model, then " +
+  "what the thing is — and be 80 characters or fewer. After that identity, add only the " +
+  "further keywords a buyer would actually type when searching for it. Do not stuff the " +
+  "title with spec detail: layout, dimensions, port and key listings, and included extras " +
+  "belong in the description, not the title. Provide eBay item specifics as a LIST of " +
+  "{name, value} entries " +
   "drawn from the given attributes, with each name appearing at most once, plus a clear " +
-  "description, and relevant search tags. Description and item " +
+  "description, and relevant search tags. The description must be plain sentences a " +
+  "seller would type. Never label fields: no \"Item:\", no \"Condition:\", no \"Details:\", " +
+  "no colon-prefixed fragments, and no bullet lists. Description and item " +
   "specifics must use plain seller voice: no em dashes or en dashes; no promotional " +
   "adjectives (stunning, elevate, boasts, must-have, exquisite, seamless, vibrant, " +
   "top-notch, sleek, gorgeous, breathtaking); no urgency or hype (don't miss, act fast, " +

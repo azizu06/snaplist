@@ -91,23 +91,7 @@ struct SettingsView: View {
                         ) {
                             // Routed rather than pushed: the account boundary opens
                             // modally, and a NavigationLink would push it (#799).
-                            Button {
-                                navigate(accountEntry)
-                            } label: {
-                                Text("Create an account")
-                                    // `maxHeight: .infinity` claims the full
-                                    // row `settingsCardRow` proposes, not
-                                    // just this text's own line height, the
-                                    // same fix `LegalLinkRow` needed (#831).
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        maxHeight: .infinity,
-                                        alignment: .leading
-                                    )
-                                    .contentShape(Rectangle())
-                            }
-                            .accessibilityIdentifier("settings.create-account")
-                            .accessibilityHint("Opens the account entry screen")
+                            SettingsCreateAccountRow(open: { navigate(accountEntry) })
                         } else {
                             valueRow("Sign-in method", profile.methodLabel)
                         }
@@ -118,22 +102,7 @@ struct SettingsView: View {
                     if SettingsSignOutPolicy.isAvailable(for: profile.identity) {
                         settingsCardDivider
                         settingsCardRow {
-                            NavigationLink {
-                                SettingsSignOutView(signOut: signOut)
-                            } label: {
-                                Text(SettingsSignOutCopy.rowLabel)
-                                    // Same `settingsCardRow` fixed-height
-                                    // touch-target gap `LegalLinkRow` and
-                                    // "Create an account" needed (#831).
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        maxHeight: .infinity,
-                                        alignment: .leading
-                                    )
-                                    .contentShape(Rectangle())
-                            }
-                            .accessibilityIdentifier("settings.sign-out")
-                            .accessibilityHint("Explains what signing out does before it runs")
+                            SettingsSignOutRow(signOut: signOut)
                         }
                     }
                 }
@@ -141,11 +110,40 @@ struct SettingsView: View {
                 settingsSectionHeader("SELLING")
                 settingsCard {
                     settingsCardRow {
-                        valueRow(
-                            "Connected marketplaces",
-                            sellingPresentation.marketplaceValue
-                        )
-                        .accessibilityIdentifier("settings.selling.marketplaces")
+                        // Only a confirmed connection is a real destination —
+                        // "Checking"/"Not connected"/"Not available" stay the
+                        // plain value row they always were, offering no
+                        // disconnect (#865).
+                        if sellingPresentation.isConnected {
+                            NavigationLink {
+                                EbayConnectionSettingsView(
+                                    makeStore: makeEbayConnectionSettingsStore,
+                                    forceReducedMotion: false
+                                )
+                                .onDisappear {
+                                    Task {
+                                        guard !isSettingsHubProof else { return }
+                                        await loadEbayConnection()
+                                    }
+                                }
+                            } label: {
+                                valueRow(
+                                    "Connected marketplaces",
+                                    sellingPresentation.marketplaceValue
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("settings.selling.marketplaces")
+                            .accessibilityHint("Opens your connected eBay account")
+                        } else {
+                            valueRow(
+                                "Connected marketplaces",
+                                sellingPresentation.marketplaceValue
+                            )
+                            .accessibilityIdentifier("settings.selling.marketplaces")
+                        }
                     }
                     settingsCardDivider
                     if let hint = sellingPresentation.hint {
@@ -208,20 +206,14 @@ struct SettingsView: View {
                 settingsCard {
                     settingsCardRow {
                         if hasLocalData {
-                            NavigationLink {
-                                SettingsLocalRemovalView(
-                                    isGuest: profile.isGuest,
-                                    remove: {
-                                        guard await removeLocalData() else { return false }
-                                        hasLocalData = false
-                                        return true
-                                    }
-                                )
-                            } label: {
-                                Text("Remove unsent photos and voice notes")
-                            }
-                            .accessibilityIdentifier("settings.local-removal")
-                            .accessibilityHint("Explains what SnapList removes from this iPhone")
+                            SettingsLocalRemovalRow(
+                                isGuest: profile.isGuest,
+                                remove: {
+                                    guard await removeLocalData() else { return false }
+                                    hasLocalData = false
+                                    return true
+                                }
+                            )
                         } else {
                             Text("No unsent photos or voice notes")
                                 .foregroundStyle(.secondary)
@@ -234,45 +226,24 @@ struct SettingsView: View {
                     settingsSectionHeader("ACCOUNT MANAGEMENT")
                     settingsCard {
                         settingsCardRow {
-                            NavigationLink {
-                                SettingsDeletionConsequencesView(
-                                    profile: profile,
-                                    subscriptionTruth: SettingsDeletionSubscriptionTruth(
-                                        state: subscriptionStore.state,
-                                        loadPhase: subscriptionLoadPhase
-                                    ),
-                                    proofSafeExit: nil,
-                                    reservesFloatingDock: false,
-                                    deletionFlowPresentationChanged:
-                                        deletionFlowPresentationChanged
-                                )
-                            } label: {
-                                Text("Delete account")
-                                    // Same `settingsCardRow` fixed-height
-                                    // touch-target gap `LegalLinkRow` and
-                                    // "Create an account" needed (#831).
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        maxHeight: .infinity,
-                                        alignment: .leading
-                                    )
-                                    .contentShape(Rectangle())
-                            }
-                            .accessibilityIdentifier("settings.delete-account")
-                            .accessibilityHint("Opens a screen that explains what deletion does")
+                            SettingsDeleteAccountRow(
+                                profile: profile,
+                                subscriptionTruth: SettingsDeletionSubscriptionTruth(
+                                    state: subscriptionStore.state,
+                                    loadPhase: subscriptionLoadPhase
+                                ),
+                                deletionFlowPresentationChanged:
+                                    deletionFlowPresentationChanged
+                            )
                         }
                     }
                 } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(SettingsGuestBoundaryCopy.title)
-                            .font(.subheadline.weight(.semibold))
-                        Text(SettingsGuestBoundaryCopy.body)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 24)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("settings.guest-boundary")
+                    Text(SettingsGuestBoundaryCopy.body)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 24)
+                        .accessibilityIdentifier("settings.guest-boundary")
                 }
                 Text(
                     "SnapList \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") · \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1")"
@@ -368,6 +339,7 @@ struct SettingsView: View {
                         .frame(maxHeight: .infinity)
                         .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityIdentifier("settings.subscription.manage")
                     .accessibilityHint("Opens the App Store")
@@ -383,6 +355,8 @@ struct SettingsView: View {
                             )
                             .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityIdentifier("settings.subscription.restore")
                     .accessibilityHint("Asks Apple for a purchase on this Apple Account, then waits for the server to confirm it")
                 case .retry:
@@ -397,6 +371,8 @@ struct SettingsView: View {
                             )
                             .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityIdentifier("settings.subscription.retry")
                     .accessibilityHint("Loads your subscription details again")
                 }
@@ -599,6 +575,10 @@ struct SettingsView: View {
             // accessibility size the label draws ~67pt and the extra glyphs
             // spill into the card below instead of pushing it down (#836).
             .frame(minHeight: 18, alignment: .leading)
+            // Matches settingsCardRow's own horizontal padding (#888) so the
+            // header text lines up with the row label under it instead of
+            // the card edge.
+            .padding(.leading, 16)
             .padding(.top, 19)
             .padding(.bottom, 3)
     }
@@ -717,6 +697,162 @@ struct SettingsView: View {
     /// navigate should use a real `Button`, as `LegalLinkRow` does.
     private func valueRow(_ label: String, _ value: String) -> some View {
         SettingsValueRow(label: label, value: value)
+    }
+
+    /// #865: the connected-marketplaces row's own destination. Reuses the
+    /// same `ebayPublishService` this screen already holds for its own read
+    /// (`loadEbayConnection()`), so production and DEBUG zero-network
+    /// composition automatically match what the row itself is showing.
+    /// `--settings-proof=SET-01` is the one exception: that fixture hardcodes
+    /// the row's *display* to a healthy connection regardless of the real
+    /// service (`isSettingsHubProof` in `sellingPresentation`), and the real
+    /// `ebayPublishService` underneath it is `UnavailableEbayPublishFeatureService`
+    /// (zero-network), which cannot prove a disconnect/reconnect round trip.
+    /// `EbaySettingsFixtureAdapter` is the stateful stand-in that can.
+    private func makeEbayConnectionSettingsStore() -> EbayConnectionSettingsStore {
+#if DEBUG
+        if isSettingsHubProof {
+            let adapter = EbaySettingsFixtureAdapter()
+            return EbayConnectionSettingsStore(
+                service: adapter,
+                oauth: EbaySettingsFixtureOAuthRunner(adapter: adapter)
+            )
+        }
+#endif
+        return EbayConnectionSettingsStore(
+            service: ebayPublishService,
+            oauth: AppleEbayOAuthRunner(callbackURL: ebayOAuthCallbackURL)
+        )
+    }
+
+    /// Mirrors `AppDependencies.make`'s non-fixture eBay OAuth callback
+    /// derivation (`MobileAPIClient.swift`) without adding a constructor
+    /// parameter routed through `AppShellView.swift`, which #865 does not own.
+    private var ebayOAuthCallbackURL: URL {
+        (HomeRepositoryFactory.defaultAPIOrigin ?? URL(string: "http://127.0.0.1:3001")!)
+            .appending(path: "/mobile/ebay/oauth")
+    }
+}
+
+/// The ACCOUNT card's opener into account creation, isolated so a unit test can render
+/// it alone and inspect its resolved button style (#856), the same technique
+/// `LegalLinkRow` uses.
+struct SettingsCreateAccountRow: View {
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            Text("Create an account")
+                // `maxHeight: .infinity` claims the full row `settingsCardRow`
+                // proposes, not just this text's own line height, the same fix
+                // `LegalLinkRow` needed (#831).
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .leading
+                )
+                .contentShape(Rectangle())
+        }
+        // `.automatic` would let iOS paint its own filled capsule behind this
+        // row whenever the seller has Button Shapes on, on top of the
+        // affordance `settingsCardRow` already provides (#856). Going plain
+        // drops the accent tint with it, so the blue that marks the row as
+        // tappable is stated here.
+        .buttonStyle(.plain)
+        .foregroundStyle(SnapListColorToken.action.color)
+        .accessibilityIdentifier("settings.create-account")
+        .accessibilityHint("Opens the account entry screen")
+    }
+}
+
+/// The ACCOUNT card's sign-out opener, isolated the same way
+/// `SettingsCreateAccountRow` is so a unit test can inspect its resolved
+/// button style (#856 follow-up, discovered while implementing #865:
+/// `NavigationLink` rows were left off #856's original `Button`-only sweep).
+///
+/// Unlike the four `Button` rows #861 fixed, this row was never accent-
+/// tinted: a bare `NavigationLink` label renders `.primary` by default
+/// (the classic disclosure-row look — black text, grey chevron), not the
+/// `accentColor` text a `Button` on `.automatic` gets. `.buttonStyle(.plain)`
+/// only removes the filled shape Button Shapes paints behind it; there is no
+/// tint to restate.
+struct SettingsSignOutRow: View {
+    let signOut: () async -> SettingsSignOutOutcome
+
+    var body: some View {
+        NavigationLink {
+            SettingsSignOutView(signOut: signOut)
+        } label: {
+            Text(SettingsSignOutCopy.rowLabel)
+                // Same `settingsCardRow` fixed-height touch-target gap
+                // `LegalLinkRow` and "Create an account" needed (#831).
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .leading
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.sign-out")
+        .accessibilityHint("Explains what signing out does before it runs")
+    }
+}
+
+/// THIS IPHONE card's local-removal opener. See `SettingsSignOutRow` for why
+/// no `foregroundStyle` restatement is needed here.
+struct SettingsLocalRemovalRow: View {
+    let isGuest: Bool
+    let remove: () async -> Bool
+
+    var body: some View {
+        NavigationLink {
+            SettingsLocalRemovalView(isGuest: isGuest, remove: remove)
+        } label: {
+            Text("Remove unsent photos and voice notes")
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .leading
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.local-removal")
+        .accessibilityHint("Explains what SnapList removes from this iPhone")
+    }
+}
+
+/// ACCOUNT MANAGEMENT card's deletion opener. See `SettingsSignOutRow` for
+/// why no `foregroundStyle` restatement is needed here.
+struct SettingsDeleteAccountRow: View {
+    let profile: SettingsProfile
+    let subscriptionTruth: SettingsDeletionSubscriptionTruth
+    let deletionFlowPresentationChanged: (Bool) -> Void
+
+    var body: some View {
+        NavigationLink {
+            SettingsDeletionConsequencesView(
+                profile: profile,
+                subscriptionTruth: subscriptionTruth,
+                proofSafeExit: nil,
+                reservesFloatingDock: false,
+                deletionFlowPresentationChanged: deletionFlowPresentationChanged
+            )
+        } label: {
+            Text("Delete account")
+                // Same `settingsCardRow` fixed-height touch-target gap
+                // `LegalLinkRow` and "Create an account" needed (#831).
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .leading
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.delete-account")
+        .accessibilityHint("Opens a screen that explains what deletion does")
     }
 }
 
@@ -1938,7 +2074,10 @@ private extension SettingsActionTray where Destination == EmptyView {
     }
 }
 
-private struct SettingsProfile {
+// Widened from `private` (#865): `SettingsDeleteAccountRow` takes one as a
+// plain parameter, and its unit test (`SettingsTests.swift`) needs to
+// construct one directly the same way `SettingsCreateAccountRow`'s does.
+struct SettingsProfile {
     let isGuest: Bool
     let name: String
     let email: String

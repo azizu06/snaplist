@@ -18,8 +18,7 @@ enum SettingsReauthenticationResolution: Equatable {
 }
 
 enum SettingsGuestBoundaryCopy {
-    static let title = "Guest Settings stops here"
-    static let body = "A guest cannot read entitlements and has no account record, so the Subscription group and the account management group are both absent rather than empty. Server held guest data deletes itself within 24 hours of acceptance, which is a guarantee in the retention contract rather than a hope. Removing it sooner, or managing it at all, requires claiming the account first."
+    static let body = "Create an account to manage your data and your subscription."
 }
 
 enum SettingsAccountEntryPolicy {
@@ -409,18 +408,24 @@ struct SettingsSellingPresentation: Equatable {
 
     let marketplaceValue: String
     let hint: Hint?
+    /// #865: the row only becomes a route to the account/disconnect screen
+    /// once a connection is confirmed. `checking`/`failed`/not-connected all
+    /// stay a plain, non-misleading value row that offers no disconnect.
+    let isConnected: Bool
 
     init(connection: EbayConnectionStatus?, loadPhase: LoadPhase) {
         switch loadPhase {
         case .loading:
             marketplaceValue = "Checking"
             hint = nil
+            isConnected = false
             return
         case .failed:
             // The connection was not readable. Saying "Not connected" would
             // claim something SnapList does not know.
             marketplaceValue = "Not available"
             hint = nil
+            isConnected = false
             return
         case .loaded:
             break
@@ -428,8 +433,10 @@ struct SettingsSellingPresentation: Equatable {
         guard let connection, connection.connected else {
             marketplaceValue = "Not connected"
             hint = nil
+            isConnected = false
             return
         }
+        isConnected = true
         marketplaceValue = "eBay"
         // `ready` and any state this build does not recognise both stay silent.
         // A hint with no message would be a warning the seller cannot act on.

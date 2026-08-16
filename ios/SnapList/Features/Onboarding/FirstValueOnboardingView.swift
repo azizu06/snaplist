@@ -639,16 +639,10 @@ struct FirstValueOnboardingView: View {
 
     private var footer: some View {
         VStack(spacing: 8) {
-            Button(model.screen == .onb06 ? "Start scanning" : "Continue") {
-                finish(using: model.continueForward)
-            }
-            .font(.body.bold())
-            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .background(SnapListColorToken.action.color, in: RoundedRectangle(cornerRadius: 14))
-            .accessibilityIdentifier(model.screen == .onb06
-                ? "first-value-onboarding.start-scanning"
-                : "first-value-onboarding.continue")
+            FirstValueOnboardingContinueButton(
+                isFinalScreen: model.screen == .onb06,
+                action: { finish(using: model.continueForward) }
+            )
 
             if model.screen == .onb06 {
                 Button(action: openExistingAccount) {
@@ -831,6 +825,28 @@ struct FirstValueOnboardingView: View {
             .background(SnapListColorToken.canvas.color, in: RoundedRectangle(cornerRadius: 18))
             .overlay { RoundedRectangle(cornerRadius: 18).stroke(SnapListColorToken.cardHairline.color) }
             .shadow(color: .black.opacity(0.05), radius: 14, y: 5)
+    }
+}
+
+/// The footer's forward opener, isolated so a unit test can render it alone and inspect
+/// its resolved button style (#856), the same technique `LegalLinkRow` uses.
+struct FirstValueOnboardingContinueButton: View {
+    let isFinalScreen: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(isFinalScreen ? "Start scanning" : "Continue", action: action)
+            .font(.body.bold())
+            .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(SnapListColorToken.action.color, in: RoundedRectangle(cornerRadius: 14))
+            // The filled capsule above is this control's whole affordance. Left on
+            // `.automatic`, iOS paints a second filled shape behind it for a seller
+            // with Button Shapes on, which reads as an overlay sitting on the label (#856).
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(isFinalScreen
+                ? "first-value-onboarding.start-scanning"
+                : "first-value-onboarding.continue")
     }
 }
 
