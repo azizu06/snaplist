@@ -202,7 +202,12 @@ describe("device_tokens tenancy under live RLS", () => {
     await expect(ownedTokens(intruder)).resolves.toContain(SHARED_DEVICE_TOKEN);
   });
 
-  it("lets two sellers hold the same device string without either seeing the other", async () => {
+  it("gives the handset to the seller who registered it last, and to only them", async () => {
+    // The intruder is holding SHARED_DEVICE_TOKEN from the previous test. The
+    // owner now registers the same handset — the shape of a phone that changed
+    // hands. Two live accounts must not both be addressable at one APNs token:
+    // whoever registered last is the one actually holding the phone, and the
+    // earlier row is a working address for a device its owner no longer has.
     const { error } = await owner.client.from("device_tokens").insert({
       platform: "ios",
       token: SHARED_DEVICE_TOKEN,
@@ -217,13 +222,15 @@ describe("device_tokens tenancy under live RLS", () => {
         SHARED_DEVICE_TOKEN,
         [owner.id, intruder.id],
       ]),
-    ).resolves.toBe(2);
+    ).resolves.toBe(1);
 
     await expect(ownedTokens(owner)).resolves.toEqual([
       SHARED_DEVICE_TOKEN,
       OWNER_ONLY_TOKEN,
     ]);
-    await expect(ownedTokens(intruder)).resolves.toEqual([SHARED_DEVICE_TOKEN]);
+    // The previous holder keeps nothing pointing at a phone they handed over,
+    // and still cannot see anything of the owner's.
+    await expect(ownedTokens(intruder)).resolves.toEqual([]);
   });
 
   it("keeps one row when the same device registers again", async () => {
@@ -248,6 +255,46 @@ describe("device_tokens tenancy under live RLS", () => {
 
     const after = await lastSeenAt(owner.id, OWNER_ONLY_TOKEN);
     expect(after).toBeGreaterThanOrEqual(before);
+  });
+
+  it("moves the handset to whoever signed in last when a device changes hands", async () => {
+    // An APNs token addresses one physical device, so two live accounts cannot
+    // both be reachable at it. The composite key makes a cross-tenant *write*
+    // unrepresentable, but on its own it would leave the previous seller's row
+    // behind as a working address for a phone that is no longer theirs — and
+    // nothing else can delete it, because `authenticated` has no delete grant.
+    // The sender would then post one seller's listing to another's lock screen.
+    const HANDSET = "c".repeat(64);
+
+    await storeFor(owner).register({
+      bearerToken: "unused: the client is already bound to this seller",
+      platform: "ios",
+      token: HANDSET,
+      userId: owner.id,
+    });
+    await expect(
+      storedRowCount("token = $1", [HANDSET]),
+    ).resolves.toBe(1);
+
+    // The handset is sold, wiped, or simply handed over; the next seller signs
+    // in on it and submits an item.
+    await storeFor(intruder).register({
+      bearerToken: "unused: the client is already bound to this seller",
+      platform: "ios",
+      token: HANDSET,
+      userId: intruder.id,
+    });
+
+    // Exactly one row, owned by the seller actually holding the phone.
+    await expect(
+      storedRowCount("token = $1", [HANDSET]),
+    ).resolves.toBe(1);
+    await expect(
+      storedRowCount("token = $1 and user_id = $2", [HANDSET, intruder.id]),
+    ).resolves.toBe(1);
+    await expect(
+      storedRowCount("token = $1 and user_id = $2", [HANDSET, owner.id]),
+    ).resolves.toBe(0);
   });
 });
 

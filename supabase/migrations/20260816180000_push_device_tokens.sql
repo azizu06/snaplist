@@ -203,9 +203,57 @@ $$;
 revoke all on function private.rekey_device_tokens_for_guest_claim()
   from public, anon, authenticated, service_role;
 
+drop trigger if exists rekey_device_tokens_for_guest_claim
+  on private.guest_draft_recoveries;
+
 create trigger rekey_device_tokens_for_guest_claim
   after update on private.guest_draft_recoveries
-  for each row execute function private.rekey_device_tokens_for_guest_claim();
+  for each row
+  when (new.state = 'claimed' and old.state is distinct from 'claimed')
+  execute function private.rekey_device_tokens_for_guest_claim();
+
+-- A device that changes hands.
+--
+-- An APNs token addresses one physical device, so two live accounts cannot both
+-- be reachable at it. The composite key makes a cross-tenant *write*
+-- unrepresentable, but that is a different property from cross-tenant
+-- *delivery*: without this, a seller who signs out leaves a working address for
+-- a phone that is no longer theirs, and no client can clear it because
+-- `authenticated` holds no delete grant. A sender would then post one seller's
+-- listing to another seller's lock screen.
+--
+-- Security definer because the row being removed belongs to the previous
+-- holder, which the new holder cannot see under RLS and must not be able to
+-- enumerate. It learns the token from the row being written, so it can only
+-- ever clear an address the caller's own device already answers to.
+create or replace function private.claim_device_token_for_current_holder()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, private, pg_temp
+as $$
+begin
+  delete from public.device_tokens
+  where platform = new.platform
+    and token = new.token
+    and user_id <> new.user_id;
+
+  return new;
+end;
+$$;
+
+revoke all on function private.claim_device_token_for_current_holder()
+  from public, anon, authenticated, service_role;
+
+-- Named to sort before `zzy_`/`zzz_`, so the erasure lock and the tenant fence
+-- still get the last word: if either raises, this delete rolls back with the
+-- rest of the statement.
+drop trigger if exists claim_device_token_for_current_holder
+  on public.device_tokens;
+
+create trigger claim_device_token_for_current_holder
+  before insert on public.device_tokens
+  for each row execute function private.claim_device_token_for_current_holder();
 
 -- Keep the completion proof exhaustive after adding this tenant table. This is
 -- the latest definition from #799 plus device_tokens.

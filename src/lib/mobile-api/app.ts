@@ -507,21 +507,10 @@ export function createMobileApiHandler(
           "This method is not allowed.",
         );
       }
-      let requestBody: unknown;
-      try {
-        requestBody = await request.json();
-      } catch {
-        requestBody = null;
-      }
-      const registration = deviceTokenRegistrationSchema.safeParse(requestBody);
-      if (!registration.success) {
-        return errorResponse(
-          requestId,
-          400,
-          "invalid_request",
-          "A valid device registration is required.",
-        );
-      }
+      // Authenticate before reading the body, like the sibling branches. An
+      // unauthenticated caller who learns 400-versus-401 from the shape of
+      // their payload has been told something about the route they had not
+      // earned yet.
       const token = bearerToken(request);
       if (!token) {
         return errorResponse(
@@ -541,6 +530,21 @@ export function createMobileApiHandler(
           401,
           "unauthorized",
           "Authentication is required.",
+        );
+      }
+      let requestBody: unknown;
+      try {
+        requestBody = await request.json();
+      } catch {
+        requestBody = null;
+      }
+      const registration = deviceTokenRegistrationSchema.safeParse(requestBody);
+      if (!registration.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid device registration is required.",
         );
       }
       if (!dependencies.deviceTokens) {
