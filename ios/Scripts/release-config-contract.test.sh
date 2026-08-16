@@ -52,6 +52,15 @@ assert_succeeds_with() {
   fi
 }
 
+assert_succeeds() {
+  local output
+  if ! output=$("$@" 2>&1); then
+    print -u2 -r -- "expected command to succeed"
+    print -u2 -r -- "$output"
+    exit 1
+  fi
+}
+
 test -x "$release_lint"
 test -x "$pairing_lint"
 test -x "$dsyms_upload"
@@ -82,6 +91,10 @@ assert_rejected_with 'development Clerk instance cannot authenticate' env \
   CONFIGURATION=Release \
   SNAPLIST_CLERK_PUBLISHABLE_KEY=pk_test_rejected \
   SNAPLIST_API_ORIGIN=https://api.snaplist.dev \
+  "$pairing_lint"
+assert_rejected_with 'is not a Clerk publishable key' env \
+  CONFIGURATION=Release \
+  SNAPLIST_CLERK_PUBLISHABLE_KEY=not-a-clerk-key \
   "$pairing_lint"
 env \
   CONFIGURATION=Release \
@@ -128,6 +141,14 @@ assert_rejected_with 'no Sentry auth token configured' /usr/bin/env \
   ACTION=install \
   DWARF_DSYM_FOLDER_PATH=/tmp \
   SENTRY_AUTH_TOKEN= \
+  HOME="$authless_home" \
+  PATH="$test_path" \
+  "$dsyms_upload"
+assert_succeeds /usr/bin/env \
+  CONFIGURATION=Release \
+  ACTION=install \
+  DWARF_DSYM_FOLDER_PATH=/tmp \
+  SENTRY_AUTH_TOKEN=present \
   HOME="$authless_home" \
   PATH="$test_path" \
   "$dsyms_upload"
