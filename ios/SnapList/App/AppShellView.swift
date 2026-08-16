@@ -235,7 +235,13 @@ struct AppShellView: View {
                                 host: photoReviewHost,
                                 router: router,
                                 submissionHost: submissionHost,
-                                setReturnFocus: { pendingScanReturnFocus = $0 }
+                                setReturnFocus: { pendingScanReturnFocus = $0 },
+                                onPersistenceRejected: {
+                                    recordPhotoReviewSaveFailure(
+                                        for: .backToCamera,
+                                        session: session
+                                    )
+                                }
                             )
                         }
                     },
@@ -1595,7 +1601,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
         host: PhotoReviewLiveHost,
         router: AppRouter,
         submissionHost: ItemRunSubmissionHost,
-        setReturnFocus: (PhotoReviewScanFocus) -> Void
+        setReturnFocus: (PhotoReviewScanFocus) -> Void,
+        onPersistenceRejected: () -> Void = {}
     ) async {
         let receiptMismatchRetryEventID: UUID?
         let ambiguousRetryEventID: UUID?
@@ -1634,7 +1641,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 captureFlow: captureFlow,
                 host: host,
                 router: router,
-                setReturnFocus: setReturnFocus
+                setReturnFocus: setReturnFocus,
+                onPersistenceRejected: onPersistenceRejected
             ) else {
                 return
             }
@@ -1657,7 +1665,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 captureFlow: captureFlow,
                 host: host,
                 router: router,
-                setReturnFocus: setReturnFocus
+                setReturnFocus: setReturnFocus,
+                onPersistenceRejected: onPersistenceRejected
             ) else {
                 return
             }
@@ -1742,14 +1751,16 @@ enum AppShellSettingsEntryPointTransaction {
         captureFlow: CaptureFlowModel,
         host: PhotoReviewLiveHost,
         router: AppRouter,
-        setReturnFocus: (PhotoReviewScanFocus) -> Void
+        setReturnFocus: (PhotoReviewScanFocus) -> Void,
+        onPersistenceRejected: () -> Void = {}
     ) async -> Bool {
         let outcome = await AppShellPhotoReviewBackTransaction.perform(
             session: session,
             captureFlow: captureFlow,
             host: host,
             router: router,
-            setReturnFocus: setReturnFocus
+            setReturnFocus: setReturnFocus,
+            onPersistenceRejected: onPersistenceRejected
         )
         guard case .completed = outcome else {
             return false
