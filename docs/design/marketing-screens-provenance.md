@@ -10,8 +10,8 @@ of it from the binaries.
 
 | File | Section | Content |
 | --- | --- | --- |
-| `screens/scan.webp` | Scan | camera view framing an Air Jordan 3 |
-| `screens/photo-review.webp` | Photo Review | three-photo strip for the same shoe, a Cover marker, an Add tile, and the voice note row in its empty state |
+| `screens/scan.webp` | Scan | camera view framing a licensed studio Air Jordan 1 Low. This is the one screen whose item is not Aziz's own, and the reason is in "Whose shoes these are" below |
+| `screens/photo-review.webp` | Photo Review | three-photo strip of Aziz's Air Jordan 3, a Cover marker, an Add tile, and the voice note row in its empty state |
 | `screens/listing-review.webp` | Listing Review | title, condition, price recommendation, sold matches |
 | `screens/publish.webp` | Publish | assisted export and share, second-half publish screen |
 | `screens/trophy-wall.webp` | Trophy Wall | chronological item states |
@@ -100,6 +100,37 @@ change to that script stops reproducing them, the script is what drifted.
 The sweep line is the one element in the hero that is not app interface. It is a marketing device.
 It belongs to this page and must not be carried into an App Store panel, where it would read as a
 claim about a screen the app renders.
+
+## Whose shoes these are
+
+The fixture item used to be a licensed studio photograph of an Air Jordan 1 Low on a dark seamless,
+cropped five ways. Aziz photographed his own pair on an iPhone 16 Pro, so Photo Review, Listing
+Review and the Trophy Wall tile now show his Air Jordan 3 Retro, Summit White / Fire Red / Black,
+US 10, style DN3707-100, on its box. Every one of those facts is legible on the box label in
+`IMG_9832`, so the listing copy in the canvases is describable from the photographs rather than
+recalled.
+
+Sources live in `snaplist-appstore/source/fx/aziz/`. `scripts/aziz-jordan-crops.mjs` in that repo
+holds the crop rects and regenerates every derived file. Two traps are recorded there: all four
+originals carry EXIF orientation 6 and must be `.rotate()`d before any extract, and Listing Review
+paints its photos into a band about 1.5:1, so its three files are cut to that aspect rather than
+square. A square pair shot survived `cover` in that band as two toe boxes with the Jumpman sliced
+off the top.
+
+**Scan keeps the licensed studio photograph, and this is not an oversight.** Scan paints a white
+9:41, a white flash glyph, white framing brackets and a white shutter ring directly onto the
+viewfinder image, and the approved v4 Scan package bans a shelf, panel, scrim, or grounding
+gradient, so the photograph is the only thing holding that chrome up. The old plate's top band
+measures a mean luminance of 19. The wall behind Aziz's shoes measures 211 to 221. Burning a
+gradient into the plate to fix that would depict a screen the app does not render, which is the
+same class of problem guideline 2.3.3 covers. Scan changes when there is a photograph of his shoes
+shot against something dark, not before.
+
+The sold matches beside the price are still licensed Air Jordan 1 photographs, correctly titled as
+Air Jordan 1s. They are other sellers' listings, so they are supposed to be other photographs, but
+a set of Air Jordan 1 comps under an Air Jordan 3 is a loose match set. Tightening it needs three
+licensed Air Jordan 3 photographs, which is a spend decision, so it is recorded here rather than
+guessed at.
 
 ## Known honesty gap
 
