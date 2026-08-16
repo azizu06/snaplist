@@ -70,6 +70,49 @@ struct ItemRunSubmissionPrincipalScopeProof: Equatable, Sendable {
     }
 }
 
+/// Who Trophy Wall's device-local cards belong to, as the shell can observe it
+/// from one committed NativeIntake snapshot.
+///
+/// The activation id is the authority. NativeIntake mints a new one only in
+/// `reconcileIdentity`, which runs only when the resolved principal scope
+/// changes — a different signed-in seller, a sign-out, or an identity it cannot
+/// resolve at all. Every mutation of one principal's staged intake keeps the
+/// activation id and bumps only the revision.
+///
+/// The scope proof is derived from the staged photos' filesystem root, so it is
+/// present only while photos are staged. An ordinary submit deletes them, and
+/// the proof goes nil while the seller has not changed at all (#867). It can
+/// therefore corroborate a transition but never announce one on its own.
+struct TrophyWallPrincipalIdentity: Equatable, Sendable {
+    let activationID: UUID
+    let scopeProof: ItemRunSubmissionPrincipalScopeProof?
+
+    init(
+        activationID: UUID,
+        scopeProof: ItemRunSubmissionPrincipalScopeProof?
+    ) {
+        self.activationID = activationID
+        self.scopeProof = scopeProof
+    }
+
+    /// Whether moving from `previous` to `self` is a principal transition, and
+    /// so whether the departing principal's cards must be cleared.
+    func isTransition(from previous: TrophyWallPrincipalIdentity) -> Bool {
+        guard activationID == previous.activationID else {
+            return true
+        }
+        // One activation is one principal. Inside it, a proof that appears or
+        // disappears is the staged intake being created or consumed. Two proofs
+        // that are both present and disagree cannot happen — every photo in a
+        // bundle lives under that bundle's one root — but if it ever did, the
+        // safe reading is that the wall can no longer be trusted.
+        guard let scopeProof, let previousProof = previous.scopeProof else {
+            return false
+        }
+        return scopeProof != previousProof
+    }
+}
+
 /// One immutable handoff from #540's committed NativeIntake snapshot into the
 /// submission boundary. The generation is process-local fencing authority. The
 /// filesystem root is already opaque and principal-scoped; no identity value or

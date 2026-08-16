@@ -28,6 +28,7 @@ struct TrophyWallView: View {
     @Bindable var store: TrophyWallStore
     let openProcessing: () -> Void
     let openAccount: () -> Void
+    let openRun: (UUID) -> Void
     let onScan: () -> Void
     let onTryAgain: () -> Void
 
@@ -193,7 +194,7 @@ struct TrophyWallView: View {
                     spacing: TrophyWallGridMetrics.gutterPoints
                 ) {
                     ForEach(store.settledTiles) { tile in
-                        TrophyWallSettledTileView(tile: tile)
+                        TrophyWallSettledTileView(tile: tile, openRun: openRun)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -208,8 +209,36 @@ struct TrophyWallView: View {
 
 private struct TrophyWallSettledTileView: View {
     let tile: TrophyWallSettledTile
+    let openRun: (UUID) -> Void
 
     var body: some View {
+        // A tile that resolves to a run is a control; one that does not stays
+        // exactly what it was, because a button that opens nothing is a worse
+        // lie than a picture.
+        if let destination = tile.destination,
+           case .run(let runID) = destination,
+           let identifier = tile.accessibilityIdentifier {
+            Button {
+                openRun(runID)
+            } label: {
+                surface
+            }
+            .buttonStyle(.plain)
+            // The rounded fill does not reach the corners of its cell, so
+            // without this the tap dies in the gap the grid leaves around it.
+            .contentShape(.rect)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(tile.accessibilityLabel)
+            .accessibilityIdentifier(identifier)
+        } else {
+            surface
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(tile.accessibilityLabel)
+                .accessibilityAddTraits(.isImage)
+        }
+    }
+
+    private var surface: some View {
         SnapListColorToken.quietFill.color
             .aspectRatio(TrophyWallGridMetrics.tileAspectRatio, contentMode: .fit)
             .overlay {
@@ -224,9 +253,6 @@ private struct TrophyWallSettledTileView: View {
             )
             .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(tile.accessibilityLabel)
-        .accessibilityAddTraits(.isImage)
     }
 
     @ViewBuilder

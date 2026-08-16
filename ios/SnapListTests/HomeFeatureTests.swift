@@ -849,6 +849,46 @@ final class TrophyWallDomainTests: XCTestCase {
         )
     }
 
+    /// The wall's whole purpose is to lead back to the listing the seller's
+    /// photos produced, so a settled tile has to name the run it opens. The grid
+    /// #729 built passed the tile nothing but data (#866).
+    func testSettledTileOpensItsOwnRunAndNamesThatDestination() {
+        let runID = UUID(uuidString: "37500000-0000-4000-8000-000000000021")!
+        let tile = TrophyWallSettledTile(
+            id: .run(runID),
+            itemName: "White leather sneaker",
+            stateLabel: "Published to eBay",
+            historyOrderAt: Date(timeIntervalSince1970: 1_753_015_200)
+        )
+
+        XCTAssertEqual(tile.destination, .run(runID))
+        XCTAssertEqual(
+            tile.accessibilityIdentifier,
+            "trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"
+        )
+    }
+
+    /// A tile with nothing behind it must stay a picture. A control that opens
+    /// nothing is a worse lie than an image, and assistive technology would
+    /// announce it as an action the seller cannot take.
+    func testSettledTileWithoutARunOffersNoDestinationOrControlIdentity() {
+        let tile = TrophyWallSettledTile(
+            id: .local(
+                TrophyWallLogicalIdentity(
+                    idempotencyKey: UUID(
+                        uuidString: "37500000-0000-4000-8000-000000000022"
+                    )!
+                )
+            ),
+            itemName: "White leather sneaker",
+            stateLabel: "Published to eBay",
+            historyOrderAt: Date(timeIntervalSince1970: 1_753_015_200)
+        )
+
+        XCTAssertNil(tile.destination)
+        XCTAssertNil(tile.accessibilityIdentifier)
+    }
+
     /// The seller's own photo is the only photo that exists while a run is still
     /// processing: the server hands the client no cover until delivery, which is
     /// terminal. So the bytes the pending intake staged have to survive the swap
@@ -934,25 +974,100 @@ final class TrophyWallDomainTests: XCTestCase {
     /// A run the client only learns about from the server — a relaunch, another
     /// device — never had staged bytes on this phone. It has to render today's
     /// slot rather than an empty image well.
-    func testAcceptedRowWithoutStagedBytesCarriesNoPhoto() throws {
+    ///
+    /// The second half is the point. As written before #867 this test asserted
+    /// only the nil, which is also exactly what the owner's failing device
+    /// produced, so it was green while the defect shipped. The identical
+    /// server-only projection is run twice — once against a store that never saw
+    /// this device stage anything, once against a store that did — so a store
+    /// that simply never carries a photo cannot pass it.
+    func testServerOnlyRunClaimsNoPhotoWhileADeviceStagedRunKeepsIts() throws {
         let fixture = TrophyWallTestFixture()
-        let store = fixture.makeStore(cards: [])
+        let serverOnly = fixture.makeStore(cards: [])
+        let projection = TrophyWallCanonicalAcceptedRun(
+            principalScope: fixture.principal,
+            runID: fixture.runID,
+            linkedLogicalIdentity: nil,
+            state: .accepted,
+            lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+            itemName: fixture.matchedItemName
+        )
 
-        store.ingest(
+        serverOnly.ingest(projection)
+
+        let serverOnlyRow = try XCTUnwrap(
+            serverOnly.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertNil(serverOnlyRow.localCoverPhotoData)
+
+        // Same run, same server-sourced projection, but this device staged the
+        // photo. The nil above must be the absence of bytes, not the store
+        // dropping them.
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+        let staged = fixture.makeStore(cards: [])
+        staged.ingest(
             TrophyWallCanonicalAcceptedRun(
                 principalScope: fixture.principal,
                 runID: fixture.runID,
                 linkedLogicalIdentity: nil,
                 state: .accepted,
                 lastMeaningfulUpdateAt: fixture.acceptedUpdate,
-                itemName: fixture.matchedItemName
+                itemName: fixture.matchedItemName,
+                localCoverPhotoData: stagedPhoto
             )
         )
+        staged.ingest(projection)
 
+        let stagedRow = try XCTUnwrap(
+            staged.processingRows.first { $0.id == .run(fixture.runID) }
+        )
+        XCTAssertEqual(stagedRow.localCoverPhotoData, stagedPhoto)
+    }
+
+    /// Step 8 of #867's proved cause, at the store. Every wall refresh rebuilds
+    /// the row from server history, and the server has no pre-delivery photo of
+    /// this item to offer — by design, since the seller's capture never left the
+    /// device. So the acceptance's bytes have to survive a full history fetch,
+    /// not only the first projection after it.
+    func testHistoryRefreshDoesNotBlankTheAcceptancesOwnPhoto() async throws {
+        let fixture = TrophyWallTestFixture()
+        let store = fixture.makeStore(cards: [])
+        let stagedPhoto = TrophyWallTestFixture.stagedCoverPhotoData()
+
+        store.ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: fixture.principal,
+                runID: fixture.runID,
+                linkedLogicalIdentity: fixture.logicalID,
+                state: .accepted,
+                lastMeaningfulUpdateAt: fixture.acceptedUpdate,
+                itemName: fixture.matchedItemName,
+                localCoverPhotoData: stagedPhoto
+            )
+        )
+        XCTAssertEqual(
+            store.processingRows.first?.localCoverPhotoData,
+            stagedPhoto
+        )
+
+        let repository = ScriptedTrophyWallRunHistoryRepository(
+            results: [
+                .page(
+                    try fixture.historyPage(
+                        status: .queued,
+                        stage: .queued,
+                        terminalOutcome: nil
+                    )
+                ),
+            ]
+        )
+        await store.refreshCollection(using: repository)
+
+        XCTAssertEqual(store.collectionOutcome, .loaded)
         let row = try XCTUnwrap(
             store.processingRows.first { $0.id == .run(fixture.runID) }
         )
-        XCTAssertNil(row.localCoverPhotoData)
+        XCTAssertEqual(row.localCoverPhotoData, stagedPhoto)
     }
 
     func testProcessingRowSlotDrawsTheSellersOwnStagedPhoto() throws {
@@ -1945,17 +2060,32 @@ final class TrophyWallDomainTests: XCTestCase {
         // the emptiness below cannot be the fixture never having any cards.
         XCTAssertFalse(store.cards.isEmpty)
 
-        let member = try XCTUnwrap(
-            ItemRunSubmissionPrincipalScopeProof(
-                verifiedClerkSubject: "user_2signed_in_member"
+        // Distinct activations as well as distinct proofs, because that is what
+        // `NativeIntake.reconcileIdentity` does when the resolved scope changes
+        // — proved end to end in
+        // `ItemRunSubmissionTests`.`testSigningOutIsStillAPrincipalTransitionThatClearsTheWall`.
+        let member = TrophyWallPrincipalIdentity(
+            activationID: UUID(
+                uuidString: "84400000-0000-4000-8000-000000000011"
+            )!,
+            scopeProof: try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    verifiedClerkSubject: "user_2signed_in_member"
+                )
             )
         )
-        let guestAfterSignOut = try XCTUnwrap(
-            ItemRunSubmissionPrincipalScopeProof(
-                verifiedAppAttestKeyID: "app-attest-key-id-after-sign-out"
+        let guestAfterSignOut = TrophyWallPrincipalIdentity(
+            activationID: UUID(
+                uuidString: "84400000-0000-4000-8000-000000000012"
+            )!,
+            scopeProof: try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    verifiedAppAttestKeyID: "app-attest-key-id-after-sign-out"
+                )
             )
         )
-        XCTAssertNotEqual(member, guestAfterSignOut)
+        XCTAssertNotEqual(member.scopeProof, guestAfterSignOut.scopeProof)
+        XCTAssertNotEqual(member.activationID, guestAfterSignOut.activationID)
 
         var refreshState = TrophyWallCollectionRefreshState()
         // A cold launch observing the member for the first time is not a
@@ -2057,9 +2187,14 @@ final class TrophyWallDomainTests: XCTestCase {
         let initialTaskID = driver.refreshState.taskID(tab: .trophyWall)
 
         XCTAssertFalse(driver.refreshState.observePrincipal(nil))
-        let signedIn = try XCTUnwrap(
-            ItemRunSubmissionPrincipalScopeProof(
-                verifiedClerkSubject: "new-principal"
+        let signedIn = TrophyWallPrincipalIdentity(
+            activationID: UUID(
+                uuidString: "84400000-0000-4000-8000-000000000013"
+            )!,
+            scopeProof: try XCTUnwrap(
+                ItemRunSubmissionPrincipalScopeProof(
+                    verifiedClerkSubject: "new-principal"
+                )
             )
         )
         XCTAssertTrue(driver.refreshState.observePrincipal(signedIn))
@@ -2253,6 +2388,7 @@ final class TrophyWallDomainTests: XCTestCase {
                     store: store,
                     openProcessing: {},
                     openAccount: {},
+                    openRun: { _ in },
                     onScan: {},
                     onTryAgain: {}
                 ),
@@ -2297,6 +2433,7 @@ final class TrophyWallDomainTests: XCTestCase {
             store: settledStore,
             openProcessing: {},
             openAccount: {},
+            openRun: { _ in },
             onScan: {},
             onTryAgain: {}
         )

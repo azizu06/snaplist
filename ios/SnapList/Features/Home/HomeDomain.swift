@@ -344,6 +344,26 @@ struct TrophyWallSettledTile: Identifiable, Hashable {
         self.historyOrderAt = historyOrderAt
     }
 
+    /// Where this tile opens. Trophy Wall is the seller's one return
+    /// destination, so the tile is how they reach the listing their photos
+    /// produced. A tile the client cannot resolve to a run opens nothing rather
+    /// than guessing at one.
+    var destination: HomeRoute? {
+        guard case .run(let runID) = id else {
+            return nil
+        }
+        return .run(runID)
+    }
+
+    /// Present only for a tile that actually opens something, so a tile with no
+    /// destination cannot be published as a control.
+    var accessibilityIdentifier: String? {
+        guard case .run(let runID) = id else {
+            return nil
+        }
+        return "trophy.wall.tile.run.\(runID.uuidString.lowercased())"
+    }
+
     var accessibilityLabel: String {
         let identity = coverPhotoURL == nil && coverPhotoAssetName == nil
             ? "\(itemName), photo unavailable"
@@ -842,6 +862,29 @@ final class TrophyWallStore {
                 )
             )
         }
+    }
+
+    /// The one ingest the shell performs when a submission is accepted. It is a
+    /// named seam rather than a call site inlined in `AppShellView` so a test
+    /// can drive the wiring the product uses. The hand-written equivalent that
+    /// stood in for it would still have passed if the shell dropped the
+    /// seller's photo (#867).
+    func ingestAcceptance(
+        _ handoff: AcceptedItemRunHandoff,
+        acceptedAt: Date = Date()
+    ) {
+        ingest(
+            TrophyWallCanonicalAcceptedRun(
+                principalScope: principalScope,
+                runID: handoff.acceptedRun.runID,
+                linkedLogicalIdentity: TrophyWallLogicalIdentity(
+                    idempotencyKey: handoff.idempotencyKey
+                ),
+                state: .accepted,
+                lastMeaningfulUpdateAt: acceptedAt,
+                localCoverPhotoData: handoff.localCoverPhotoData
+            )
+        )
     }
 
     func ingest(
