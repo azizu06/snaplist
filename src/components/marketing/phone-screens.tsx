@@ -70,7 +70,7 @@ export function ListingReviewScreen() {
   return (
     <Shot
       src="/marketing/screens/listing-review.webp"
-      alt="Listing review showing an editable title, condition and price of $118, with the sold matches the price came from."
+      alt="Listing review showing the item identified as an Air Jordan 3 Retro in summit white, an editable price of $118, and the three sold matches between $98 and $135 that the price came from."
     />
   );
 }

@@ -662,16 +662,33 @@ describe("feature explorer semantics", () => {
 
     // The drawn frames have to agree with that aspect, or `cover` trims the
     // capture and the trim lands on real controls.
-    expect(css).toMatch(/\.mkt-explorer__device\s*\{[\s\S]*?height:\s*600px/);
-    expect(css).toMatch(/--phone-h:\s*calc\(var\(--phone-w\) \* 600 \/ 288\)/);
-    expect(css).toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*aspect-ratio:\s*400 \/ 840/);
+    //
+    // Derived rather than pinned to a height literal. The frame gained a real
+    // thickness when it was rebuilt as hardware, so the screen inside it is no
+    // longer the body: 288 x 598 with 11px of frame is a 266 x 576 screen. A
+    // pinned height cannot see that, and would pass a frame whose padding had
+    // been changed underneath it, which is exactly the trim this guards against.
+    const device = css.match(/\.mkt-explorer__device\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+    const declared = (property: string) =>
+      Number(device.match(new RegExp(`${property}:\\s*([\\d.]+)px`))?.[1]);
+    const frame = declared("padding");
+    const screen = {
+      width: declared("width") - frame * 2,
+      height: declared("height") - frame * 2,
+    };
+    expect(screen.width / screen.height).toBeCloseTo(0.462, 3);
+    // The scale steps carry the same body ratio, so every breakpoint inherits it.
+    expect(css).toMatch(
+      new RegExp(`--phone-h:\\s*calc\\(var\\(--phone-w\\) \\* ${declared("height")} / ${declared("width")}\\)`),
+    );
+    expect(css).toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*aspect-ratio:\s*400 \/ 831/);
     // A rotated frame shears the captured chrome inside it.
     expect(css).not.toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*rotate\(/);
 
     // The hero phone leads the page and is the only animated one, so it outranks
     // the explorer device rather than sitting under it. It shipped at 360
     // against the explorer's 384, which inverted that.
-    const heroWidth = css.match(/\.mkt-hero__minimal-phone\s*\{[^}]*width:\s*min\((\d+)px/);
+    const heroWidth = css.match(/\.mkt-hero__minimal-phone\s*\{[^}]*--phone-body:\s*min\((\d+)px/);
     expect(Number(heroWidth?.[1])).toBeGreaterThan(384);
   });
 
