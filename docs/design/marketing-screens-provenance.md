@@ -11,10 +11,16 @@ of it from the binaries.
 | File | Section | Content |
 | --- | --- | --- |
 | `screens/scan.webp` | Scan | camera view framing a licensed studio Air Jordan 1 Low. This is the one screen whose item is not Aziz's own, and the reason is in "Whose shoes these are" below |
-| `screens/photo-review.webp` | Photo Review | three-photo strip of Aziz's Air Jordan 3, a Cover marker, an Add tile, and the voice note row in its empty state |
-| `screens/listing-review.webp` | Listing Review | title, condition, price recommendation, sold matches |
-| `screens/publish.webp` | Publish | assisted export and share, second-half publish screen |
-| `screens/trophy-wall.webp` | Trophy Wall | chronological item states |
+| `screens/photo-review.webp` | Photo Review | four-photo strip of Aziz's Air Jordan 3, one frame per source photograph, a Cover marker, an Add tile, and the voice note row in its empty state |
+| `screens/listing-review.webp` | Listing Review | the same four photos, title, condition, price recommendation, and three Air Jordan 3 sold matches |
+| `screens/publish.webp` | Publish | assisted export and share for the same item, second-half publish screen |
+| `screens/trophy-wall.webp` | Trophy Wall | chronological item states, with Aziz's Air Jordan 3 leading the wall |
+
+Four of the five are one item carried end to end. That is deliberate: the explorer's tabs are
+pipeline stages, so a visitor clicking through is being shown one thing moving, and five unrelated
+items would undercut the claim the section is making. Trophy Wall is legitimately several items,
+because it is a wall of everything the seller has run. Scan is the one break in the chain, and the
+reason is a photographic constraint recorded under "Whose shoes these are".
 
 ## How they are produced
 
@@ -105,17 +111,30 @@ claim about a screen the app renders.
 
 The fixture item used to be a licensed studio photograph of an Air Jordan 1 Low on a dark seamless,
 cropped five ways. Aziz photographed his own pair on an iPhone 16 Pro, so Photo Review, Listing
-Review and the Trophy Wall tile now show his Air Jordan 3 Retro, Summit White / Fire Red / Black,
-US 10, style DN3707-100, on its box. Every one of those facts is legible on the box label in
+Review, Publish and the Trophy Wall tile now show his Air Jordan 3 Retro, Summit White / Fire Red /
+Black, US 10, style DN3707-100, on its box. Every one of those facts is legible on the box label in
 `IMG_9832`, so the listing copy in the canvases is describable from the photographs rather than
 recalled.
 
 Sources live in `snaplist-appstore/source/fx/aziz/`. `scripts/aziz-jordan-crops.mjs` in that repo
-holds the crop rects and regenerates every derived file. Two traps are recorded there: all four
-originals carry EXIF orientation 6 and must be `.rotate()`d before any extract, and Listing Review
-paints its photos into a band about 1.5:1, so its three files are cut to that aspect rather than
-square. A square pair shot survived `cover` in that band as two toe boxes with the Jumpman sliced
-off the top.
+holds the crop rects and regenerates every derived file. Three traps are recorded there.
+
+All four originals carry EXIF orientation 6 and must be `.rotate()`d before any extract.
+
+Listing Review paints its photos into a band about 1.5:1, so its files are cut to that aspect rather
+than square. A square pair shot survived `cover` in that band as two toe boxes with the Jumpman
+sliced off the top.
+
+**One frame per source photograph.** There are four originals and the strip shows four frames, so
+each frame comes from a different one. An earlier pass cut both the pair shot and a tongue close-up
+out of `IMG_9832`; the strip then put two frontal white-shoe thumbnails next to each other and read
+as the same photo twice, which Aziz caught. `IMG_9829` is a second lateral view, so a whole-shoe cut
+from it lands almost on top of the `IMG_9831` profile. It earns its slot as the close detail
+instead, the elephant print over the black midsole. A fifth frame means finding a fifth angle in the
+sources, not cutting one of the four twice.
+
+Photo Review and Listing Review carry the same four frames in the same order, and the Publish export
+pack says four photos, so the photo count does not change as the item moves down the pipeline.
 
 **Scan keeps the licensed studio photograph, and this is not an oversight.** Scan paints a white
 9:41, a white flash glyph, white framing brackets and a white shutter ring directly onto the
@@ -126,11 +145,22 @@ gradient into the plate to fix that would depict a screen the app does not rende
 same class of problem guideline 2.3.3 covers. Scan changes when there is a photograph of his shoes
 shot against something dark, not before.
 
-The sold matches beside the price are still licensed Air Jordan 1 photographs, correctly titled as
-Air Jordan 1s. They are other sellers' listings, so they are supposed to be other photographs, but
-a set of Air Jordan 1 comps under an Air Jordan 3 is a loose match set. Tightening it needs three
-licensed Air Jordan 3 photographs, which is a spend decision, so it is recorded here rather than
-guessed at.
+The sold matches beside the price used to be Air Jordan 1 photographs, correctly titled as Air
+Jordan 1s. They are other sellers' listings, so they are supposed to be other photographs, but a set
+of Air Jordan 1 comps sitting under the heading "Verified sold matches" on an Air Jordan 3 is a
+wrong match set. They are now five genuine Air Jordan 3 photographs, cut by
+`scripts/comp-jordan3-crops.mjs` from `source/fx/comp3/` at 4:3, which is the aspect the rail card
+paints.
+
+The source is Unsplash, the same place the Air Jordan 1 set came from. The Unsplash License permits
+commercial use with no permission and no attribution required; the photographers are Jay Nuetey,
+Taru Goyal, Daniel Cheney, Joel Muniz and Sysoda Chau, credited here anyway. Adobe Stock was checked
+and rejected: branded resale photography there is editorial-use-only, which excludes App Store and
+marketing use.
+
+Always render a candidate before trusting its identification. One Unsplash photograph read as an Air
+Jordan 3 in a square-cropped contact sheet and showed its Air Jordan 4 wing panel once the sheet
+preserved the original aspect. Contact sheets that crop are not evidence of what a photograph shows.
 
 ## Known honesty gap
 

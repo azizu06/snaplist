@@ -61,7 +61,7 @@ export function PhotoReviewScreen() {
   return (
     <Shot
       src="/marketing/screens/photo-review.webp"
-      alt="Photo review showing three of five photos of a sneaker, the first marked Cover, a tile for adding another, and an empty voice note row offering to add details the photos might miss."
+      alt="Photo review showing four of five photos of a sneaker, each one a different angle, the first marked Cover, a tile for adding another, and an empty voice note row offering to add details the photos might miss."
     />
   );
 }
