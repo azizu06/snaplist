@@ -10,17 +10,16 @@ of it from the binaries.
 
 | File | Section | Content |
 | --- | --- | --- |
-| `screens/scan.webp` | Scan | camera view framing a licensed studio Air Jordan 1 Low. This is the one screen whose item is not Aziz's own, and the reason is in "Whose shoes these are" below |
+| `screens/scan.webp` | Scan | camera view framing Aziz's Air Jordan 3 on its box, with the framing brackets removed. Why they are removed is in "Whose shoes these are" below |
 | `screens/photo-review.webp` | Photo Review | four-photo strip of Aziz's Air Jordan 3, one frame per source photograph, a Cover marker, an Add tile, and the voice note row in its empty state |
 | `screens/listing-review.webp` | Listing Review | the same four photos, title, condition, price recommendation, and three Air Jordan 3 sold matches |
 | `screens/publish.webp` | Publish | assisted export and share for the same item, second-half publish screen |
 | `screens/trophy-wall.webp` | Trophy Wall | chronological item states, with Aziz's Air Jordan 3 leading the wall |
 
-Four of the five are one item carried end to end. That is deliberate: the explorer's tabs are
-pipeline stages, so a visitor clicking through is being shown one thing moving, and five unrelated
-items would undercut the claim the section is making. Trophy Wall is legitimately several items,
-because it is a wall of everything the seller has run. Scan is the one break in the chain, and the
-reason is a photographic constraint recorded under "Whose shoes these are".
+All five are one item carried end to end. That is deliberate: the explorer's tabs are pipeline
+stages, so a visitor clicking through is being shown one thing moving, and unrelated items on each
+tab would undercut the claim the section is making. Trophy Wall is legitimately several items,
+because it is a wall of everything the seller has run, and his Air Jordan 3 leads it.
 
 ## How they are produced
 
@@ -110,9 +109,9 @@ claim about a screen the app renders.
 ## Whose shoes these are
 
 The fixture item used to be a licensed studio photograph of an Air Jordan 1 Low on a dark seamless,
-cropped five ways. Aziz photographed his own pair on an iPhone 16 Pro, so Photo Review, Listing
-Review, Publish and the Trophy Wall tile now show his Air Jordan 3 Retro, Summit White / Fire Red /
-Black, US 10, style DN3707-100, on its box. Every one of those facts is legible on the box label in
+cropped five ways. Aziz photographed his own pair on an iPhone 16 Pro, so Scan, Photo Review,
+Listing Review, Publish and the Trophy Wall tile now show his Air Jordan 3 Retro, Summit White /
+Fire Red / Black, US 10, style DN3707-100, on its box. Every one of those facts is legible on the box label in
 `IMG_9832`, so the listing copy in the canvases is describable from the photographs rather than
 recalled.
 
@@ -136,14 +135,37 @@ sources, not cutting one of the four twice.
 Photo Review and Listing Review carry the same four frames in the same order, and the Publish export
 pack says four photos, so the photo count does not change as the item moves down the pipeline.
 
-**Scan keeps the licensed studio photograph, and this is not an oversight.** Scan paints a white
-9:41, a white flash glyph, white framing brackets and a white shutter ring directly onto the
-viewfinder image, and the approved v4 Scan package bans a shelf, panel, scrim, or grounding
-gradient, so the photograph is the only thing holding that chrome up. The old plate's top band
-measures a mean luminance of 19. The wall behind Aziz's shoes measures 211 to 221. Burning a
-gradient into the plate to fix that would depict a screen the app does not render, which is the
-same class of problem guideline 2.3.3 covers. Scan changes when there is a photograph of his shoes
-shot against something dark, not before.
+### Scan, and why its framing brackets are gone
+
+Scan paints a white 9:41, a white flash glyph, white framing brackets and a white shutter ring
+directly onto the viewfinder image, and the approved v4 Scan package bans a shelf, panel, scrim, or
+grounding gradient, so the photograph is the only thing holding that chrome up. The licensed studio
+plate it used to carry measured a mean luminance of 19 top to bottom. Aziz's photographs are
+near-white at the top and near-black at the bottom: on the full-height crop the status band measures
+218, the bracket band 220, and the bottom 500px under the shutter and dock measure 28.
+
+So the bottom half carries white chrome and the top half does not, and the brackets straddle both.
+Aziz's call, made after seeing those numbers: **drop the brackets and use his shoes.** The controls
+that have to read are the shutter, the dock and the library button, and all three sit on the dark
+half. The 9:41 and the status icons stay white on a light wall and are faint. That is a known cost,
+taken deliberately, not an oversight.
+
+Two things were checked before accepting it. A tighter crop does reach a dark top, 72 at `IMG_9830`
+cy 0.70 w 0.26, but at that zoom the frame is mostly black box with a sliver of midsole, and a
+camera pointed at nothing recognisable is worse than a faint status bar. Nothing was painted into
+the plate to fix the contrast, because a burned-in gradient would depict a screen the app does not
+render, which is the class of problem guideline 2.3.3 covers.
+
+**The bracket removal is a capture-time override, not a canvas edit.** It lives in
+`scripts/shot-marketing.mjs` as a style injected into the served copy, scoped to `data-dc-tpl` 22
+through 25, which is the live phone. The canvas on disk still carries the approved v4.1.5 geometry
+and still points at the licensed plate, so the App Store panel set built from that same file is
+unaffected, and so are the twelve static geometry renderings, which use `data-dc-tpl` 338 through
+341. Rerunning `scripts/aziz-jordan-crops.mjs` regenerates `scan-aziz-pair.png` beside the licensed
+plate rather than over it.
+
+The hero keeps its framing brackets, and that is correct rather than inconsistent. Every hero
+subject is chosen with a dark top strip, so the brackets have something to read against there.
 
 The sold matches beside the price used to be Air Jordan 1 photographs, correctly titled as Air
 Jordan 1s. They are other sellers' listings, so they are supposed to be other photographs, but a set
