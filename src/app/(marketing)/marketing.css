@@ -600,7 +600,13 @@ html:has(.mkt) {
    so the screen is 370 wide and 370 / 0.46216 is 801, and 801 + 30 is 831. The
    old pair left the screen at 0.4634 and `cover` trimming a couple of pixels. */
 .mkt-hero__minimal-phone {
-  --phone-body: min(400px, 86vw);
+  /* The declared number is not the number that renders at every width. The art
+     column is 544 at 1440 and 447 at 1030, and the phone cannot exceed it, so
+     this clamps to the column well before it clamps to 86vw. Raising it past
+     the column is not a mistake: it lifts the wide end while the narrow end
+     keeps taking the column's width. Measured actuals are 468 at 1440 and 447
+     at 1030, both still ahead of the explorer's 440 and 420 there. */
+  --phone-body: min(468px, 86vw);
   width: var(--phone-body, 400px);
   /* Scale-free, so it holds at every width the clamp above can produce. */
   aspect-ratio: 400 / 831;
@@ -993,21 +999,31 @@ html:has(.mkt) {
    width (1440, 1024, 768, 430, 390, 375) and to stay inside the section's
    content box at every one, so nothing can overflow horizontally.
 
-   Grown once. Aziz read the Trophy Wall screen as cramped, and it was the
-   smallest case: a two-column grid of tiles inside a 314px screen. The ceiling
-   is the hero phone at 400, which leads the page and stays the larger of the
-   two, so the widest step is 392 rather than a proportional bump. Measured at
-   each responding width against the live page: 1440 goes to 392, 1279 to 376,
-   1058 to 370, 759 to 376. None overflow, and none squeeze the card column,
-   which held 540 until 384 and so sets the practical cap below 1280 too.
+   Grown twice. The first pass moved the widest step to 392 and stopped there
+   because the hero was 400 and had to stay ahead. Aziz then said the explorer
+   still looked far off the hero and that the hero could grow to make room:
+   "you could still probably make it bigger without it becoming bigger than the
+   hero section". So the hero moved up first and these followed it.
+
+   Nothing here is limited by overflow. Sweeping 370 through 456 at 1030 and 392
+   through 472 at 1440 produced a document overflow of 0 at every step. Two
+   other things bind instead, and they differ by width. At 1440 the tab column
+   is capped at 540 and does not move at all, so the phone costs only tab
+   height. At 1030 the tab column is whatever is left, so it narrows one pixel
+   per pixel the phone gains: 474 at 420, 462 at 432, 438 at 456. The stop is
+   where the reading column would stop being the wider of the two, which is why
+   1030 lands on 420 and not higher.
+
+   Measured actuals after the change: 1440 renders 440 against a 468 hero, 1030
+   renders 420 against a 447 hero. The hero leads at both ends.
 
    Below about 410 the frame is a flex item narrower than its declared width and
    shrinks to the column, so these values stop being the governing number. The
    last two steps are left alone for that reason rather than raised into no
    effect. */
 .mkt-explorer {
-  --phone-w: 392px;
-  --phone-scale: 1.36111;
+  --phone-w: 440px;
+  --phone-scale: 1.52778;
   --phone-h: calc(var(--phone-w) * 598 / 288);
   display: flex;
   flex-direction: row;
@@ -1018,18 +1034,45 @@ html:has(.mkt) {
 
 @media (max-width: 1279px) {
   .mkt-explorer {
-    --phone-w: 376px;
-    --phone-scale: 1.30556;
+    --phone-w: 424px;
+    --phone-scale: 1.47222;
   }
 }
 
 @media (max-width: 1139px) {
   .mkt-explorer {
-    --phone-w: 370px;
-    --phone-scale: 1.28472;
+    --phone-w: 420px;
+    --phone-scale: 1.45833;
   }
 }
 
+/* Two steps the earlier sizes did not need. The row is still two columns down
+   to 760, and the tab column is whatever the phone leaves, so the growth above
+   has to be given back before the phone becomes the wider of the two. Measured
+   at 420: the tab column is 474 at 1030 and 349 at 900, so it crosses somewhere
+   in between. These land it back on the near side, 495 at 1023 and 393 at 900,
+   and leave the band from 760 to 1023 within a few pixels of what it rendered
+   before this change. */
+@media (max-width: 1023px) {
+  .mkt-explorer {
+    --phone-w: 392px;
+    --phone-scale: 1.36111;
+  }
+}
+
+@media (max-width: 939px) {
+  .mkt-explorer {
+    --phone-w: 376px;
+    --phone-scale: 1.30556;
+  }
+}
+
+/* Left where it was. Raising this band to 424 put the frame's right edge at 445
+   inside a 430 viewport. Nothing reported an overflow, because `.mkt` sets
+   overflow-x: hidden and the overhang was simply clipped, so the check that
+   catches it is the frame's own right edge against the viewport rather than
+   documentElement.scrollWidth. Aziz was looking at a desktop window, and there
+   is no evidence this band needed the growth. */
 @media (max-width: 759px) {
   .mkt-explorer {
     --phone-w: 376px;
