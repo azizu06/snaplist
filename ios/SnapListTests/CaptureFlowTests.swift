@@ -1710,69 +1710,132 @@ final class CaptureFlowTests: XCTestCase {
         try await scenario.assertPreserved()
     }
 
-    func testAccountHandoffLeavesPhotoReviewForTheAccountEntryPoint() async throws {
-        let scenario = try await RetainedSubmissionPhotoReviewScenario.standard(
-            name: "snaplist-account-handoff-entry-point",
-            photoData: [
-                makeLandscapeImageData(
-                    leftColor: .systemRed,
-                    rightColor: .systemBlue
-                ),
-                makeLandscapeImageData(
-                    leftColor: .systemYellow,
-                    rightColor: .systemPurple
-                ),
-            ]
-        )
-        defer { scenario.cleanUp() }
-        let intake = SubmissionIntakeFixture(
-            stagedPhotos: scenario.displayedPhotos
-        )
-        let attemptStore = LocalItemRunSubmissionAttemptStore(
-            rootDirectory: scenario.attemptRoot
-        )
-        let keySequence = KeySequence(
-            keys: [UUID(uuidString: "50300000-0000-4000-8000-000000000091")!]
-        )
-        let submissionHost = ItemRunSubmissionHost(
-            coordinator: ItemRunSubmissionCoordinator(
-                submitter: RecordingItemRunSubmitter(
-                    outcomes: [.authenticationRequired]
-                ),
-                attemptStore: attemptStore,
-                draftStore: scenario.draftStore,
-                tokenProvider: CaptureFlowGuestBearerTokenProvider(),
-                guestRecoveryCredentials:
-                    CaptureFlowGuestRecoveryCredentialStore(),
-                readData: intake.read,
-                newIdempotencyKey: { keySequence.next() }
+    /// #868: the seller taps the button a denial screen just handed them — `Create an
+    /// account` or `Check subscription` — and lands where the denial can actually be
+    /// resolved, even when the Photo Review draft commit is refused.
+    ///
+    /// The refused commit is not hypothetical. Photo Review commits are gated on the
+    /// intake activation the session opened against, and signing in mid-session
+    /// re-scopes the durable intake under a new activation, so `applyPhotoReviewScanReturn`
+    /// refuses from that point on. The route used to commit Back first and veto itself
+    /// on the refusal, so both taps were consumed and discarded.
+    ///
+    /// This replaces `testAccountHandoffLeavesPhotoReviewForTheAccountEntryPoint`, which
+    /// asserted the same route over a `CaptureFlowModel` built with no `NativeIntake`.
+    /// That flow takes the legacy draft-store branch, whose commit succeeds, so the test
+    /// stayed green through the entire life of the defect.
+    func testDenialHandoffsReachSettingsEvenWhenTheDraftCommitIsRefused() async throws {
+        let cases: [(
+            name: String,
+            tokenProvider: any BearerTokenProviding,
+            outcome: ItemRunSubmissionTransportOutcome,
+            handoff: ItemRunSubmissionDestinationDecision.Handoff,
+            primaryAction: (UUID) -> PhotoReviewBoundaryEvent
+        )] = [
+            (
+                "check subscription",
+                CaptureFlowBearerTokenProvider(),
+                .creditDenied(reason: "storekit-entitlement-unavailable"),
+                .subscriptionSettings(.entitlementInactive),
+                { .openSubscriptionSettings(eventID: $0) }
+            ),
+            (
+                "create an account",
+                CaptureFlowGuestBearerTokenProvider(),
+                .authenticationRequired,
+                .accountClaim12aThrough12c,
+                { .createAccount(eventID: $0) }
+            ),
+        ]
+
+        for testCase in cases {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "snaplist-868-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: root) }
+            let scenario =
+                try await makePhotoReviewSessionOverADivergedIntake(
+                    root: root,
+                    name: testCase.name
+                )
+            let fixture = SubmissionIntakeFixture(
+                stagedPhotos: scenario.photos
             )
-        )
+            let submissionHost = ItemRunSubmissionHost(
+                coordinator: ItemRunSubmissionCoordinator(
+                    submitter: RecordingItemRunSubmitter(
+                        outcomes: [testCase.outcome]
+                    ),
+                    attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                    draftStore: RecordingCaptureDraftStore(
+                        photos: scenario.photos
+                    ),
+                    tokenProvider: testCase.tokenProvider,
+                    guestRecoveryCredentials:
+                        CaptureFlowGuestRecoveryCredentialStore(),
+                    readData: fixture.read,
+                    newIdempotencyKey: { UUID() }
+                )
+            )
 
-        await scenario.perform(submissionHost: submissionHost)
+            await submissionHost.startListing(photos: scenario.photos)
 
-        XCTAssertEqual(submissionHost.retention, .authenticationRequired)
-        XCTAssertNotNil(scenario.photoReviewHost.session)
+            guard case .destinationHandoff(
+                eventID: let eventID,
+                handoff: let handoff
+            )? = submissionHost.pendingPresentationEvent else {
+                XCTFail("Expected one typed denial handoff for \(testCase.name).")
+                continue
+            }
+            XCTAssertEqual(handoff, testCase.handoff, testCase.name)
+            let presentation = PhotoReviewSubmissionPresentation(
+                host: submissionHost
+            )
+            XCTAssertEqual(
+                presentation.primaryActionEvent,
+                testCase.primaryAction(eventID),
+                testCase.name
+            )
 
-        let presentation = PhotoReviewSubmissionPresentation(
-            host: submissionHost
-        )
-        await scenario.perform(
-            primaryAction: presentation.primaryActionEvent,
-            submissionHost: submissionHost
-        )
+            var surfacedRefusals = 0
+            var returnFocus: [PhotoReviewScanFocus] = []
+            await AppShellPhotoReviewSubmissionTransaction.perform(
+                primaryAction: testCase.primaryAction(eventID),
+                session: scenario.session,
+                captureFlow: scenario.captureFlow,
+                host: scenario.host,
+                router: scenario.router,
+                submissionHost: submissionHost,
+                setReturnFocus: { returnFocus.append($0) },
+                onPersistenceRejected: { surfacedRefusals += 1 }
+            )
 
-        XCTAssertNil(scenario.photoReviewHost.session)
-        XCTAssertNil(scenario.router.presentedFullScreen)
-        XCTAssertEqual(
-            scenario.router.pathBinding(for: .scan).wrappedValue,
-            [.settings]
-        )
-        XCTAssertNil(submissionHost.pendingPresentationEvent)
-        // The account demand is a stop, not a discard: the photos the seller took
-        // are still on the phone when they come back from making the account.
-        let durablePhotos = try await scenario.draftStore.loadPhotos()
-        XCTAssertEqual(durablePhotos, scenario.expectedDurablePhotos)
+            XCTAssertEqual(
+                scenario.router.pathBinding(for: .scan).wrappedValue,
+                [.settings],
+                "\(testCase.name): the denial's own button must reach Settings."
+            )
+            XCTAssertNil(
+                scenario.host.session,
+                "\(testCase.name): Photo Review covers the shell, so Settings is "
+                    + "only visible once the boundary is gone."
+            )
+            XCTAssertNil(scenario.router.presentedFullScreen, testCase.name)
+            XCTAssertNil(scenario.router.captureBoundaryRequest, testCase.name)
+            XCTAssertNil(
+                submissionHost.pendingPresentationEvent,
+                "\(testCase.name): a routed handoff is spent, not left standing."
+            )
+            // The refusal reaches the shell through the same callback the real Back
+            // button uses, so it records a save failure rather than vanishing.
+            XCTAssertEqual(
+                surfacedRefusals,
+                1,
+                "\(testCase.name): a refused commit must never be silent."
+            )
+        }
     }
 
     func testConflictSubmissionPresentsReviewAndReviewOnlyRetiresMatchingAdvisory() async throws {
@@ -7324,6 +7387,115 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
+    /// Opens Photo Review over a live `NativeIntake` and then re-scopes that intake
+    /// underneath it, which is what signing in mid-session does (#855).
+    ///
+    /// From that point the session's activation no longer names the durable intake, so
+    /// `applyPhotoReviewScanReturn` takes the intake branch and refuses every Photo
+    /// Review commit — the device condition behind #868. The returned session is the
+    /// one the shell would still be showing.
+    private func makePhotoReviewSessionOverADivergedIntake(
+        root: URL,
+        name: String
+    ) async throws -> (
+        captureFlow: CaptureFlowModel,
+        router: AppRouter,
+        host: PhotoReviewLiveHost,
+        session: PhotoReviewLiveSession,
+        photos: [StagedCapturePhoto]
+    ) {
+        let identity = MutableIntakeIdentity(
+            NativeIntake.Identity(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "snaplist-868-guest-key"
+            )
+        )
+        let (identityChanges, identityChanged) =
+            AsyncStream<Void>.makeStream()
+        let captureFlow = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            intake: NativeIntake(
+                applicationSupportDirectory: root,
+                identitySource: NativeIntake.IdentitySource(
+                    current: { await identity.value },
+                    changes: { identityChanges }
+                )
+            )
+        )
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .noDraft, name)
+        let staged = await captureFlow.stageLibraryPhotos(
+            (1...2).map { makeIntakeJPEG(seed: $0) }
+        )
+        XCTAssertEqual(staged, 2, name)
+        let photos = captureFlow.stagedPhotos
+        XCTAssertEqual(photos.count, 2, name)
+
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: photos,
+            opener: .reviewButton
+        )
+        let host = PhotoReviewLiveHost()
+        XCTAssertTrue(
+            host.consume(
+                router.captureBoundaryRequest,
+                captureFlow: captureFlow
+            ),
+            name
+        )
+        let session = try XCTUnwrap(host.session, name)
+        let openedActivationID = try XCTUnwrap(session.intakeActivationID, name)
+
+        // The seller makes the account the denial asked for, or an existing session
+        // becomes verified, while Photo Review is still on screen.
+        await identity.set(
+            NativeIntake.Identity(
+                verifiedClerkSubject: "user_snaplist_868",
+                persistedAppAttestKeyID: "snaplist-868-guest-key"
+            )
+        )
+        identityChanged.yield()
+        let diverged = await waitUntilTrue(timeout: 10) {
+            captureFlow.intakeSnapshot?.version.activationID
+                != openedActivationID
+        }
+        XCTAssertTrue(
+            diverged,
+            "\(name): signing in mid-session must re-scope the durable intake."
+        )
+
+        // The control this whole scenario exists to establish. Without a refused
+        // commit the assertions it feeds could pass on the old behaviour.
+        let refusedCommit = await captureFlow.applyPhotoReviewScanReturn(
+            session.scanReturn(),
+            expectedActivationID: session.intakeActivationID
+        )
+        XCTAssertNil(
+            refusedCommit,
+            "\(name): the diverged intake must refuse the Back commit."
+        )
+
+        return (captureFlow, router, host, session, photos)
+    }
+
+    private func waitUntilTrue(
+        timeout: TimeInterval,
+        _ condition: @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        return condition()
+    }
+
     private func makeIntakeJPEG(seed: Int) -> Data {
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8))
         return renderer.jpegData(withCompressionQuality: 0.9) { context in
@@ -10275,6 +10447,20 @@ private struct RetainedSubmissionPresentationProbe {
 
 private enum RetainedSubmissionProbeError: Error {
     case missingEvent
+}
+
+/// Stands in for the identity `AppDependencies` reads, so a test can move a session
+/// from a guest installation to a verified subject the way signing in does.
+private actor MutableIntakeIdentity {
+    private(set) var value: NativeIntake.Identity
+
+    init(_ value: NativeIntake.Identity) {
+        self.value = value
+    }
+
+    func set(_ value: NativeIntake.Identity) {
+        self.value = value
+    }
 }
 
 private struct CaptureFlowBearerTokenProvider: BearerTokenProviding {

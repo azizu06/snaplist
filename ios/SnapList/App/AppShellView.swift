@@ -235,7 +235,13 @@ struct AppShellView: View {
                                 host: photoReviewHost,
                                 router: router,
                                 submissionHost: submissionHost,
-                                setReturnFocus: { pendingScanReturnFocus = $0 }
+                                setReturnFocus: { pendingScanReturnFocus = $0 },
+                                onPersistenceRejected: {
+                                    recordPhotoReviewSaveFailure(
+                                        for: .backToCamera,
+                                        session: session
+                                    )
+                                }
                             )
                         }
                     },
@@ -1595,7 +1601,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
         host: PhotoReviewLiveHost,
         router: AppRouter,
         submissionHost: ItemRunSubmissionHost,
-        setReturnFocus: (PhotoReviewScanFocus) -> Void
+        setReturnFocus: (PhotoReviewScanFocus) -> Void,
+        onPersistenceRejected: () -> Void = {}
     ) async {
         let receiptMismatchRetryEventID: UUID?
         let ambiguousRetryEventID: UUID?
@@ -1634,7 +1641,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 captureFlow: captureFlow,
                 host: host,
                 router: router,
-                setReturnFocus: setReturnFocus
+                setReturnFocus: setReturnFocus,
+                onPersistenceRejected: onPersistenceRejected
             ) else {
                 return
             }
@@ -1657,7 +1665,8 @@ enum AppShellPhotoReviewSubmissionTransaction {
                 captureFlow: captureFlow,
                 host: host,
                 router: router,
-                setReturnFocus: setReturnFocus
+                setReturnFocus: setReturnFocus,
+                onPersistenceRejected: onPersistenceRejected
             ) else {
                 return
             }
@@ -1733,25 +1742,53 @@ enum AppShellSettingsEntryPointTransaction {
     /// Photo Review covers the whole shell, so Settings opened from under it would
     /// never be seen. Leave the way Back leaves — the seller's photos stay committed
     /// and Scan takes them back — then open Settings, which owns both the account
-    /// entry point and the subscription's real state. A rejected commit keeps the
-    /// seller in Photo Review with the message that sent them here, rather than
-    /// routing them away from photos that never reached disk.
+    /// entry point and the subscription's real state.
+    ///
+    /// #868: this used to return `false` whenever that commit was refused, so the
+    /// button a denial screen had just handed the seller did nothing at all. A denial
+    /// is a stop only Settings can lift, and a refused commit is not a reason to hold
+    /// the seller inside the screen telling them to go elsewhere. So the destination
+    /// is reached either way, and the refusal travels the Back button's own callback
+    /// rather than being swallowed.
+    ///
+    /// A refusal on this route is a divergence, not lost work. Live intake edits are
+    /// already durable when Photo Review makes them, and the commit only re-checks
+    /// that the durable intake still matches the screen — which is exactly what
+    /// signing in mid-session breaks (#855). Leaving through the departed-intake exit
+    /// says that truthfully: Scan is told this session's photos are no longer its
+    /// intake instead of being handed a set the commit could not confirm.
     @discardableResult
     static func perform(
         session: PhotoReviewLiveSession,
         captureFlow: CaptureFlowModel,
         host: PhotoReviewLiveHost,
         router: AppRouter,
-        setReturnFocus: (PhotoReviewScanFocus) -> Void
+        setReturnFocus: (PhotoReviewScanFocus) -> Void,
+        onPersistenceRejected: () -> Void = {}
     ) async -> Bool {
         let outcome = await AppShellPhotoReviewBackTransaction.perform(
             session: session,
             captureFlow: captureFlow,
             host: host,
             router: router,
-            setReturnFocus: setReturnFocus
+            setReturnFocus: setReturnFocus,
+            onPersistenceRejected: onPersistenceRejected
         )
-        guard case .completed = outcome else {
+        switch outcome {
+        case .completed:
+            break
+        case .persistenceRejected:
+            setReturnFocus(.addPhotoButton)
+            guard host.leaveForDepartedIntake(
+                from: session,
+                using: router
+            ) else {
+                return false
+            }
+        case .sessionChanged:
+            // Either another exit already owns the commit lock or the screen has
+            // moved on to a different session. Neither is this tap's to tear down,
+            // and the owning transaction will finish its own route.
             return false
         }
         // Back reopens the guided camera. Clear it, or the account entry point lands
