@@ -56,7 +56,6 @@ struct AppShellView: View {
     @State private var keyboardProbeText = ""
     @State private var isDeleteAccountFlowPresented = false
     @State private var hasConsumedMountedFirstValueDirectScanCommand = false
-    @State private var pendingCapturePresentation: PendingCapturePresentation?
     @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
     @State private var photoReviewSaveFailure: PhotoReviewSaveFailure?
@@ -254,9 +253,7 @@ struct AppShellView: View {
         }
         .fixtureAccessibilityOverrides(configuration)
         .overlay(alignment: .bottom) {
-            if router.presentedSheet == nil {
-                activationGuidanceOverlay
-            }
+            activationGuidanceOverlay
         }
         // Attached above the shell/onboarding split so both sign-in entry points
         // reach the same surface, whichever host is on screen.
@@ -382,6 +379,16 @@ struct AppShellView: View {
                 captureFlow: captureFlow,
                 router: router
             )
+            if router.presentedFullScreen == .guidedCamera, captureFlow.phase != .camera {
+                // No more launcher sheet to start the camera on dismiss (#864):
+                // arriving here directly must start it itself, or a seller who
+                // removes the last staged photo is stuck on "Preparing camera"
+                // with no recovery. Guarded on `phase != .camera` because this
+                // `.task` can re-run without `presentCaptureLauncher` making a
+                // fresh transition (its own top guard then no-ops), and
+                // restarting an already-live session is wasted work.
+                await captureFlow.startCamera()
+            }
         }
         .task {
             guard let events = await captureFlow.nativeIntakeEvents() else {
@@ -576,33 +583,6 @@ struct AppShellView: View {
             reduceMotion ? nil : .easeInOut(duration: 0.16),
             value: isKeyboardVisible
         )
-        .sheet(
-            item: $router.presentedSheet,
-            onDismiss: presentPendingCaptureIfNeeded
-        ) { sheet in
-            switch sheet {
-            case .capture:
-                CaptureLauncherSheet(
-                    flow: captureFlow,
-                    takeOneItem: {
-                        pendingCapturePresentation = .camera
-                        router.presentedSheet = nil
-                    },
-                    showCapturedPhoto: {
-                        pendingCapturePresentation = .stagedPhoto
-                    }
-                )
-                .overlay(alignment: .bottom) {
-                    activationGuidanceOverlay
-                }
-                // A sheet builds its own environment, so the accessibility
-                // overrides attached to the shell above never reach this
-                // content. Without re-attaching them here `--dynamic-type=`
-                // silently does nothing to Scan and no capture layout can be
-                // measured at an accessibility size (#836).
-                .fixtureAccessibilityOverrides(configuration)
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             isKeyboardVisible = true
         }
@@ -943,7 +923,6 @@ struct AppShellView: View {
                 hasConsumedMountedFirstValueDirectScanCommand,
             recordedOutcome: firstValueOnboardingModel.recordedOutcome,
             isNormalScanShell: router.selectedTab == .scan
-                && router.presentedSheet == nil
                 && router.presentedFullScreen == nil,
             hasRestoredCapture: captureFlow.stagedPhoto != nil,
             stagedPhotoCount: onboardingModel.state.stagedPhotoCount,
@@ -985,12 +964,10 @@ struct AppShellView: View {
             return .photoReview
         }
         if router.selectedTab == .trophyWall,
-           router.presentedSheet == nil,
            router.presentedFullScreen == nil {
             return .trophyWall
         }
         if router.selectedTab == .scan,
-           router.presentedSheet == nil || router.presentedSheet == .capture,
            router.presentedFullScreen == nil
                 || router.presentedFullScreen == .guidedCamera {
             return .scan
@@ -1178,7 +1155,7 @@ struct AppShellView: View {
             hasResolvedCaptureRestoration: captureFlow.hasCompletedRestoration,
             hasRestoredCapture: captureFlow.stagedPhoto != nil
         )
-            && router.presentedSheet != .capture
+            && router.presentedFullScreen != .guidedCamera
     }
 
     private var awaitsCaptureRestorationBeforeOnboarding: Bool {
@@ -1234,14 +1211,6 @@ struct AppShellView: View {
             screen: onboardingModel.state.screen,
             hasCompletedRestoration: captureFlow.hasCompletedRestoration
         )
-    }
-
-    private func presentPendingCaptureIfNeeded() {
-        guard pendingCapturePresentation != nil else { return }
-        self.pendingCapturePresentation = nil
-        router.selectedTab = .scan
-        router.presentedFullScreen = .guidedCamera
-        Task { await captureFlow.startCamera() }
     }
 
     private func returnFromPhotoReview(
@@ -1931,7 +1900,6 @@ enum AppCaptureHandoffCoordinator {
     ) async {
         guard onboardingModel.state.screen == .captureBoundary,
               let context = onboardingModel.captureEntryContext,
-              router.presentedSheet == nil,
               router.presentedFullScreen == nil else { return }
 
         if case .library = context,
@@ -1963,7 +1931,7 @@ enum AppCaptureHandoffCoordinator {
                         .rollBackLibraryTransferAfterSourceConsumptionFailure()
                     if !didRollBackCapture {
                         router.selectedTab = .scan
-                        router.presentedSheet = .capture
+                        router.presentedFullScreen = .guidedCamera
                         return
                     }
                 }
@@ -1972,18 +1940,13 @@ enum AppCaptureHandoffCoordinator {
         }
 
         router.selectedTab = .scan
-        router.presentedSheet = .capture
+        router.presentedFullScreen = .guidedCamera
     }
 }
 
 private struct OnboardingCaptureRouteID: Hashable {
     let screen: OnboardingScreen
     let hasCompletedRestoration: Bool
-}
-
-private enum PendingCapturePresentation {
-    case camera
-    case stagedPhoto
 }
 
 extension View {

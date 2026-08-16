@@ -9,18 +9,6 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
-    func testCaptureOffersNeitherAHaulNorABarcodeEntryPoint() {
-        XCTAssertEqual(
-            CaptureEntryPoint.allCases.map(\.title),
-            ["Take one item", "Choose from library"]
-        )
-
-        let retired = ["Photograph a haul", "Scan barcode or ISBN"]
-        for title in retired {
-            XCTAssertFalse(CaptureEntryPoint.allCases.map(\.title).contains(title))
-        }
-    }
-
     func testPhotoReviewFixtureMaterializesDecodableImagesBeforeConstruction() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(
@@ -8322,10 +8310,10 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(model.stagedPhoto, staged)
         XCTAssertEqual(restoration, .stagedPhoto)
 
-        let router = AppRouter(initialSheet: .capture)
+        let router = AppRouter()
         router.handleCaptureRestoration(restoration)
-        XCTAssertEqual(router.presentedSheet, .capture)
-        XCTAssertNil(router.presentedFullScreen)
+        XCTAssertEqual(router.selectedTab, .scan)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
     func testSuccessfulLibraryHandoffConsumesOnlyTransferredPhotoAfterCaptureStages() async throws {
@@ -8355,8 +8343,7 @@ final class CaptureFlowTests: XCTestCase {
         )
 
         XCTAssertEqual(router.selectedTab, .scan)
-        XCTAssertEqual(router.presentedSheet, .capture)
-        XCTAssertNil(router.presentedFullScreen)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(store.stageCount, 1)
         XCTAssertEqual(store.lastStagedImageData, firstPhoto)
         XCTAssertEqual(capture.phase, .captured)
@@ -8403,7 +8390,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(capture.stagedPhoto)
         XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
         XCTAssertEqual(onboarding.state.stagedPhotoCount, photos.count)
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
     func testSourceConsumeFailureRollsBackCaptureAndKeepsADeterministicRetry() async throws {
@@ -8453,10 +8440,10 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
         XCTAssertEqual(onboarding.state.stagedPhotoCount, photos.count)
         XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: photos.count))
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
 
         replaceController.shouldFail = false
-        router.presentedSheet = nil
+        router.presentedFullScreen = nil
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: capture,
@@ -8470,7 +8457,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst()))
         XCTAssertEqual(onboarding.state.stagedPhotoCount, 2)
         XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: 2))
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
     func testSinglePhotoConsumeMoveFailureSurvivesRelaunchRetryAndExactExpiry() async throws {
@@ -8887,7 +8874,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
         XCTAssertEqual(onboarding.state.stagedPhotoCount, 4)
         XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: 4))
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
 
         consumeController.shouldFail = false
         let relaunchedCapture = CaptureFlowModel(
@@ -8909,9 +8896,9 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst()))
         XCTAssertEqual(onboarding.state.stagedPhotoCount, 3)
         XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: 3))
-        XCTAssertEqual(relaunchedRouter.presentedSheet, .capture)
+        XCTAssertEqual(relaunchedRouter.presentedFullScreen, .guidedCamera)
 
-        relaunchedRouter.presentedSheet = nil
+        relaunchedRouter.presentedFullScreen = nil
         await AppCaptureHandoffCoordinator.presentCaptureLauncher(
             onboardingModel: onboarding,
             captureFlow: relaunchedCapture,
@@ -8958,7 +8945,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(restoredOnboarding.state.stagedPhotoCount, 2)
         XCTAssertEqual(restoredOnboarding.captureEntryContext, .library(stagedPhotoCount: 2))
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst(2)))
-        XCTAssertEqual(expiredRouter.presentedSheet, .capture)
+        XCTAssertEqual(expiredRouter.presentedFullScreen, .guidedCamera)
     }
 
     func testExpiredTransferredLibraryPhotoCannotRestageAfterRelaunch() async throws {
@@ -9072,7 +9059,7 @@ final class CaptureFlowTests: XCTestCase {
             nextStagedPhoto.libraryTransferReceipt?.fingerprint,
             LocalPhotoFingerprint.digest(of: photos[0])
         )
-        XCTAssertEqual(relaunchedRouter.presentedSheet, .capture)
+        XCTAssertEqual(relaunchedRouter.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(try stagedLibraryPhotos.load(), Array(photos.dropFirst(2)))
         XCTAssertEqual(relaunchedOnboarding.state.stagedPhotoCount, 2)
     }
@@ -9150,7 +9137,7 @@ final class CaptureFlowTests: XCTestCase {
             router: router
         )
 
-        XCTAssertEqual(router.presentedSheet, .capture)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
         XCTAssertEqual(store.stageCount, 0)
         XCTAssertNil(store.lastStagedImageData)
         XCTAssertEqual(capture.stagedPhoto, restoredPhoto)
