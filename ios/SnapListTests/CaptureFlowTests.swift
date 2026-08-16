@@ -7372,6 +7372,94 @@ final class CaptureFlowTests: XCTestCase {
         ]
     }
 
+    // MARK: - #858 hero navigation fixtures
+
+    private func makeHeroNavigationPhotos(count: Int) -> [StagedCapturePhoto] {
+        (0..<count).map { ordinal in
+            makeStagedPhoto(
+                id: String(
+                    format: "48580000-0000-4000-8000-%012d",
+                    ordinal
+                )
+            )
+        }
+    }
+
+    @MainActor
+    private final class PhotoReviewLayoutObservationBox {
+        var value = PhotoReviewLayoutObservation(frames: [:])
+    }
+
+    /// Hosts a real `PhotoReviewView` in a `UIHostingController`/`UIWindow`
+    /// pair and captures its `PhotoReviewLayoutObservation`, following the
+    /// hosted-window + settle pattern established by
+    /// `HostedTrophyWallTestWindow` (HomeFeatureTests.swift). Frames are
+    /// measured from the real, laid-out SwiftUI tree rather than asserted via
+    /// `isHittable`, which lies about occlusion.
+    @MainActor
+    private final class HostedPhotoReviewTestWindow {
+        // `PhotoReviewView`'s native drag/drop `UIViewRepresentable` mutates
+        // `@State` from `dismantleUIView`, which AttributeGraph invalidation
+        // can run during ordinary ARC deinit of a bare test window/hosting
+        // controller pair — outside a real view controller lifecycle there is
+        // no `viewWillDisappear` to sequence that teardown safely, so it can
+        // race SwiftUI's own graph invalidation and trip the runtime's
+        // exclusivity check. Retaining hosts for the process lifetime (instead
+        // of letting them deinit at end of test) avoids exercising that
+        // teardown path at all; it is a test-harness-only leak, not a
+        // production behavior change.
+        private static var leaked: [HostedPhotoReviewTestWindow] = []
+
+        private let hostingController: UIHostingController<AnyView>
+        private let window: UIWindow
+        private let observationBox: PhotoReviewLayoutObservationBox
+
+        var observation: PhotoReviewLayoutObservation { observationBox.value }
+
+        init(
+            store: PhotoReviewStore,
+            dynamicTypeSize: DynamicTypeSize = .large,
+            size: CGSize = CGSize(width: 390, height: 844)
+        ) {
+            let box = PhotoReviewLayoutObservationBox()
+            observationBox = box
+            hostingController = UIHostingController(
+                rootView: AnyView(
+                    PhotoReviewView(
+                        store: store,
+                        delete: { nil },
+                        openBoundary: { _ in },
+                        onLayoutObservation: { box.value = $0 }
+                    )
+                    .dynamicTypeSize(dynamicTypeSize)
+                    .background(Color.white)
+                )
+            )
+            window = UIWindow(frame: CGRect(origin: .zero, size: size))
+            window.backgroundColor = .white
+            window.rootViewController = hostingController
+            hostingController.loadViewIfNeeded()
+            hostingController.view.frame = window.bounds
+            window.makeKeyAndVisible()
+        }
+
+        func settle() async {
+            for _ in 0..<5 {
+                await Task.yield()
+                window.setNeedsLayout()
+                window.layoutIfNeeded()
+                hostingController.view.setNeedsLayout()
+                hostingController.view.layoutIfNeeded()
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+
+        func close() {
+            window.isHidden = true
+            Self.leaked.append(self)
+        }
+    }
+
     private struct NativeInteractionHost {
         let window: UIWindow
         let outerScreenScroll: UIScrollView
@@ -9461,6 +9549,189 @@ final class CaptureFlowTests: XCTestCase {
             rendered.contains("PlainButtonStyle"),
             "scan.library resolves to .automatic, so Button Shapes doubles its circle: \(rendered)"
         )
+    }
+
+    // MARK: - #858 taller hero, direct navigation, off-photo delete control
+
+    func testSelectPhotoForNavigationMovesSelectionWithoutOpeningActionsAndClosesAnOpenRow() {
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+
+        XCTAssertTrue(store.selectPhotoForActions(id: photos[0].id))
+        XCTAssertEqual(store.actionsPhotoID, photos[0].id)
+
+        XCTAssertTrue(store.selectPhotoForNavigation(id: photos[1].id))
+        XCTAssertEqual(store.selectedPhotoID, photos[1].id)
+        XCTAssertNil(
+            store.actionsPhotoID,
+            "Navigating away must close any actions row left open on the prior photo."
+        )
+
+        let unknownID = UUID(uuidString: "48580000-0000-4000-8000-999999999999")!
+        XCTAssertFalse(store.selectPhotoForNavigation(id: unknownID))
+        XCTAssertEqual(
+            store.selectedPhotoID,
+            photos[1].id,
+            "An unknown id must not move selection."
+        )
+    }
+
+    func testPhotoReviewHeroIsMeasurablyTallerThanTheOriginalThreeHundredPointContract() async {
+        XCTAssertGreaterThan(
+            PhotoReviewV5VisualContract.heroHeight,
+            300,
+            "#858 requires a measurably taller hero than the original 300pt contract."
+        )
+
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+        store.selectPhotoForActions(id: photos[0].id)
+        let host = HostedPhotoReviewTestWindow(store: store)
+        await host.settle()
+
+        XCTAssertEqual(
+            host.observation.frame(for: .hero).height,
+            PhotoReviewV5VisualContract.heroHeight,
+            accuracy: 1,
+            "The rendered hero frame must actually be the taller contract height."
+        )
+        host.close()
+    }
+
+    func testPhotoReviewHeroAndStripDoNotOverlapTheDeleteControlAtDefaultAndAccessibilityFiveDynamicType() async {
+        for dynamicTypeSize: DynamicTypeSize in [.large, .accessibility5] {
+            let photos = makeHeroNavigationPhotos(count: 5)
+            let store = PhotoReviewStore(photos: photos)
+            store.selectPhotoForActions(id: photos[1].id)
+            let host = HostedPhotoReviewTestWindow(
+                store: store,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            await host.settle()
+
+            let hero = host.observation.frame(for: .hero)
+            let strip = host.observation.frame(for: .thumbnailStrip)
+            let deleteControl = host.observation.frame(for: .deleteControl)
+
+            XCTAssertNotEqual(deleteControl, .zero, "\(dynamicTypeSize)")
+            XCTAssertFalse(
+                hero.intersects(deleteControl),
+                "Delete control must not overlap the hero's bounds at \(dynamicTypeSize): hero=\(hero) delete=\(deleteControl)"
+            )
+            XCTAssertFalse(
+                strip.intersects(deleteControl),
+                "Delete control must not overlap its thumbnail's bounds at \(dynamicTypeSize): strip=\(strip) delete=\(deleteControl)"
+            )
+            host.close()
+        }
+    }
+
+    func testPhotoReviewDeleteControlHoldsTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
+        for dynamicTypeSize: DynamicTypeSize in [.xSmall, .large, .accessibility5] {
+            let photos = makeHeroNavigationPhotos(count: 2)
+            let store = PhotoReviewStore(photos: photos)
+            store.selectPhotoForActions(id: photos[0].id)
+            let host = HostedPhotoReviewTestWindow(
+                store: store,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            await host.settle()
+
+            let deleteControl = host.observation.frame(for: .deleteControl)
+            XCTAssertGreaterThanOrEqual(
+                deleteControl.width,
+                44,
+                "photo-review.delete width at \(dynamicTypeSize)"
+            )
+            XCTAssertGreaterThanOrEqual(
+                deleteControl.height,
+                44,
+                "photo-review.delete height at \(dynamicTypeSize)"
+            )
+            host.close()
+        }
+    }
+
+    func testPhotoReviewHeroNavigationButtonsHoldTheFortyFourPointTouchFloorAtEveryDynamicTypeSize() async {
+        for dynamicTypeSize: DynamicTypeSize in [.xSmall, .large, .accessibility5] {
+            let photos = makeHeroNavigationPhotos(count: 3)
+            let store = PhotoReviewStore(photos: photos)
+            store.selectPhotoForActions(id: photos[1].id)
+            let host = HostedPhotoReviewTestWindow(
+                store: store,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            await host.settle()
+
+            for landmark in [
+                PhotoReviewLayoutLandmark.heroPrevious,
+                PhotoReviewLayoutLandmark.heroNext
+            ] {
+                let frame = host.observation.frame(for: landmark)
+                XCTAssertGreaterThanOrEqual(
+                    frame.width,
+                    44,
+                    "\(landmark) width at \(dynamicTypeSize)"
+                )
+                XCTAssertGreaterThanOrEqual(
+                    frame.height,
+                    44,
+                    "\(landmark) height at \(dynamicTypeSize)"
+                )
+            }
+            host.close()
+        }
+    }
+
+    func testPhotoReviewHeroNavigationButtonsExistWithAccessibleIdentifiersRegardlessOfBoundary() async {
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+        store.selectPhotoForActions(id: photos[1].id)
+        let host = HostedPhotoReviewTestWindow(store: store)
+        await host.settle()
+
+        XCTAssertNotEqual(
+            host.observation.frame(for: .heroPrevious),
+            .zero,
+            "Previous must be reachable by VoiceOver/Switch Control, not swipe alone."
+        )
+        XCTAssertNotEqual(
+            host.observation.frame(for: .heroNext),
+            .zero,
+            "Next must be reachable by VoiceOver/Switch Control, not swipe alone."
+        )
+        host.close()
+    }
+
+    func testPhotoReviewHeroNavigationHidesWhenOnlyOnePhotoIsStaged() async {
+        let photos = makeHeroNavigationPhotos(count: 1)
+        let store = PhotoReviewStore(photos: photos)
+        store.selectPhotoForActions(id: photos[0].id)
+        let host = HostedPhotoReviewTestWindow(store: store)
+        await host.settle()
+
+        XCTAssertEqual(
+            host.observation.frame(for: .heroPrevious),
+            .zero,
+            "A single staged photo has nothing to navigate to."
+        )
+        XCTAssertEqual(host.observation.frame(for: .heroNext), .zero)
+        host.close()
+    }
+
+    func testSelectPhotoForNavigationAtTheFirstAndLastPhotoStaysPinnedToTheBoundary() {
+        let photos = makeHeroNavigationPhotos(count: 3)
+        let store = PhotoReviewStore(photos: photos)
+
+        XCTAssertTrue(store.selectPhotoForNavigation(id: photos[0].id))
+        XCTAssertFalse(
+            store.photos.indices.contains(-1),
+            "Sanity: there is no index before the first photo."
+        )
+        XCTAssertEqual(store.selectedPhotoID, photos[0].id)
+
+        XCTAssertTrue(store.selectPhotoForNavigation(id: photos[2].id))
+        XCTAssertEqual(store.selectedPhotoID, photos[2].id)
     }
 }
 

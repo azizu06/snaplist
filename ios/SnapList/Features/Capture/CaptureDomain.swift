@@ -477,6 +477,20 @@ final class PhotoReviewStore {
         return true
     }
 
+    /// Moves the hero's selection to `id` (swipe or previous/next navigation)
+    /// without opening the Replace/Delete actions row for the newly selected
+    /// photo, and closes any actions row already open for the photo being
+    /// navigated away from.
+    @discardableResult
+    func selectPhotoForNavigation(id: StagedCapturePhoto.ID) -> Bool {
+        guard photos.contains(where: { $0.id == id }) else {
+            return false
+        }
+        selectedPhotoID = id
+        actionsPhotoID = nil
+        return true
+    }
+
     @discardableResult
     func dismissActions() -> StagedCapturePhoto.ID? {
         guard let photoID = actionsPhotoID else {
