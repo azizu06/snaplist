@@ -11,6 +11,7 @@ import {
 } from "./schema";
 import { itemSpecificsToPairs } from "./schema.testing";
 import {
+  buildCoreListingDescription,
   fallbackEbayListing,
   corpusReadKey,
   enforceTitleLength,
@@ -251,6 +252,99 @@ describe("listing/generate — seller-visible copy contract (#243)", () => {
 
     expect(calls).toHaveLength(2);
     expect(listing).toEqual(fallbackEbayListing(CORE));
+  });
+});
+
+/**
+ * A field label is a capitalized word (or short phrase) followed by a colon at the
+ * start of the description or of a sentence — the `Item:` / `Condition:` / `Details:`
+ * form shape a seller would never type. The seller-note qualifier is the one
+ * deliberate exception: it is the provenance disclosure the seller-context contract
+ * requires, not a form field.
+ */
+const FIELD_LABEL_PATTERN =
+  /(?:^|[.!?]\s+)(?!Seller note \(unverified\):)[A-Z][A-Za-z]*(?: [A-Za-z]+){0,2}:/;
+
+describe("listing/generate — the description reads as sentences, not a form (#894)", () => {
+  it("builds the core description with no field-label prefix", () => {
+    const description = buildCoreListingDescription(CORE);
+
+    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+    expect(description).not.toMatch(/\bItem:/);
+    expect(description).not.toMatch(/\bCondition:/);
+    expect(description).not.toMatch(/\bDetails:/);
+  });
+
+  it("still states identity, condition and every validated spec", () => {
+    const description = buildCoreListingDescription(CORE);
+
+    expect(description).toContain("Sony WH-1000XM4");
+    expect(description).toMatch(/good/);
+    for (const spec of CORE.specs ?? []) {
+      expect(description).toContain(spec);
+    }
+  });
+
+  it("keeps the seller note qualified as unverified without a field-label body", () => {
+    const description = buildCoreListingDescription(CORE, {
+      text: "scratch on left hinge",
+      language: "en-US",
+      provenance: "seller_voice",
+      verification: "unverified",
+    });
+
+    expect(description).toContain(
+      "Seller note (unverified): scratch on left hinge",
+    );
+    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+  });
+
+  it("does not double the word condition when the core already carries it", () => {
+    const description = buildCoreListingDescription({
+      ...CORE,
+      condition: "good condition",
+    });
+
+    expect(description).not.toMatch(/condition condition/i);
+    expect(description).not.toMatch(FIELD_LABEL_PATTERN);
+  });
+
+  it("names the item as a sentence when the core establishes nothing else", () => {
+    const description = buildCoreListingDescription({ title: "Vintage desk lamp" });
+
+    expect(description).toBe("Vintage desk lamp.");
+  });
+
+  it("returns a sentence-shaped description on the model pass-through path", async () => {
+    const { generate } = scriptedGenerate([GOOD_LISTING]);
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 0,
+    });
+
+    expect(listing.description).not.toMatch(FIELD_LABEL_PATTERN);
+  });
+
+  it("returns a sentence-shaped description on the factual fallback path", async () => {
+    const violating: UnvalidatedEbayListing = {
+      ...GOOD_LISTING,
+      description: "This must-have listing ships fast.",
+    };
+    const { generate, calls } = scriptedGenerate([violating, violating]);
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 1,
+    });
+
+    // The fallback fired (the model's copy was rejected twice) and what it produced
+    // still reads as sentences.
+    expect(calls).toHaveLength(2);
+    expect(listing).toEqual(fallbackEbayListing(CORE));
+    expect(listing.description).not.toMatch(FIELD_LABEL_PATTERN);
   });
 });
 
