@@ -574,13 +574,17 @@ html:has(.mkt) {
 /* The hero device holds the real camera screen, so it keeps the phone
    proportions and lets the shot fill it.
 
-   360 wide with 10px padding leaves a 340 x 736 screen, which is the 744 x 1610
+   400 wide with 10px padding leaves a 380 x 820 screen, which is the 744 x 1610
    shot aspect and therefore an actual iPhone screen aspect. The frame is square
    to the page: it used to sit at -3deg, but the screen is now a capture of the
-   shipping chrome, and rotating the frame shears that chrome along with it. */
+   shipping chrome, and rotating the frame shears that chrome along with it.
+
+   It is deliberately larger than the explorer device at 384. The hero phone is
+   the lead visual and the only animated one on the page, so it should outweigh a
+   phone that sits beside step copy. It used to be 360, which inverted that. */
 .mkt-hero__minimal-phone {
-  width: min(360px, 86vw);
-  aspect-ratio: 360 / 756;
+  width: min(400px, 86vw);
+  aspect-ratio: 400 / 840;
 }
 
 /* Screen contents. Every screen is now a capture of the shipping app rather
@@ -602,7 +606,7 @@ html:has(.mkt) {
    apart, and the item swap rides the same clock by listening for the iteration
    boundary rather than running its own timer. */
 .mkt-scanloop {
-  --scanloop-cycle: 4400ms;
+  --scanloop-cycle: 3600ms;
   position: relative;
   width: 100%;
   height: 100%;
@@ -639,7 +643,14 @@ html:has(.mkt) {
 }
 
 /* Cut from the same capture as the chrome so the pulse moves real pixels. The
-   offsets are the ring's measured position in that capture. */
+   offsets are the ring's measured position in that capture.
+
+   The shadow is drawn here rather than carried in the image. The first cut of
+   this layer kept the shutter's shadow as captured, which is a ring of dark
+   pixels burnt in against the photograph it was cut from. Over a darker item
+   that reads as a shadow; over a bright one it reads as a black halo bolted to
+   the button, which is what it did on the guitar frame. drop-shadow recomposites
+   against whatever item is actually behind it. */
 .mkt-scanloop__shutter {
   position: absolute;
   left: 39.0385%;
@@ -649,6 +660,7 @@ html:has(.mkt) {
   z-index: 4;
   pointer-events: none;
   transform-origin: 50% 50%;
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.45));
   animation: mkt-scanloop-shutter var(--scanloop-cycle) var(--quint) infinite;
 }
 
