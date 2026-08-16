@@ -18,8 +18,10 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(
             settled.scrollViews["trophy.wall.grid"].waitForExistence(timeout: 3)
         )
+        // A settled tile is a control now that it opens its run (#866), so it is
+        // published as a button. Its spoken label is unchanged.
         XCTAssertTrue(
-            settled.images.element(
+            settled.buttons.element(
                 matching: NSPredicate(
                     format: "label BEGINSWITH %@ AND NOT label CONTAINS %@",
                     "White leather sneaker",
@@ -39,15 +41,22 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(empty.buttons["trophy.wall.account"].isHittable)
     }
 
-    /// The seller-Home run row that used to open this screen is gone, so the
-    /// route is entered the way it is still reachable in the product. What Back
-    /// must restore is the wall itself, which is now the one return destination.
+    /// Trophy Wall is the seller's one return destination, and the tile is how
+    /// they reach the listing their photos produced. Every Run Detail test used
+    /// to enter by deep link, which is exactly why a tile that opened nothing
+    /// shipped unnoticed (#866), so this one enters the way a seller does.
     func testRunDetailUsesSystemBackAndReturnsToTrophyWall() {
         let app = launch("HOME-01")
         let wall = app.otherElements["trophy.wall"]
         XCTAssertTrue(wall.waitForExistence(timeout: 3))
 
-        app.openRunDetail()
+        let tile = app.firstSettledWallTile
+        XCTAssertTrue(tile.waitForExistence(timeout: 3))
+        // Measured rather than asked: `isHittable` answers true for a control
+        // sitting under an overlay, and the whole tile has to be the target.
+        XCTAssertGreaterThanOrEqual(tile.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(tile.frame.height, 44)
+        tile.tap()
 
         XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
         let back = app.buttons["Back"]
@@ -55,6 +64,25 @@ final class HomeUITests: XCTestCase {
         back.tap()
 
         XCTAssertTrue(wall.waitForExistence(timeout: 3))
+    }
+
+    /// The tile is one cell of the grid at every text size, so the target it
+    /// offers is the cell rather than a label that grows or shrinks inside it.
+    func testWallTilesStayTappableAtTheLargestAccessibilitySize() {
+        let app = launch(
+            "HOME-01",
+            extraArguments: ["--dynamic-type=accessibility5"]
+        )
+        let grid = app.scrollViews["trophy.wall.grid"]
+        XCTAssertTrue(grid.waitForExistence(timeout: 5))
+
+        let tile = app.firstSettledWallTile
+        XCTAssertTrue(tile.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(tile.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(tile.frame.height, 44)
+        tile.tap()
+
+        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 5))
     }
 
     func testRunDetailShowsFactualUnavailableState() {
@@ -749,7 +777,7 @@ final class HomeUITests: XCTestCase {
     func testFinalWallTileClearsTheFloatingDockWhenScrolled() {
         let app = launch("HOME-01")
         let scroll = app.scrollViews["trophy.wall.grid"]
-        let finalTile = app.images.element(
+        let finalTile = app.buttons.element(
             matching: NSPredicate(
                 format: "label BEGINSWITH %@",
                 "White desk lamp, second item"
@@ -897,11 +925,18 @@ final class HomeUITests: XCTestCase {
 }
 
 private extension XCUIApplication {
-    /// Run Detail used to be entered by tapping a seller-Home run row. That row
-    /// went with the retired surface, so the tests enter through the route the
-    /// product still exposes. The identifier is the run the detail fixtures
-    /// resolve against.
+    /// The deep link is kept for the cases that are about a specific run rather
+    /// than about reaching one: the run-detail fixtures resolve against this
+    /// exact identifier, and no wall tile carries it. Reaching Run Detail the
+    /// way a seller does is covered by tapping
+    /// `firstSettledWallTile` instead.
     func openRunDetail() {
         open(URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!)
+    }
+
+    /// The first HOME-01 tile. Its run id comes from the fixture wall, so a
+    /// missing element here means the tile carries no run destination at all.
+    var firstSettledWallTile: XCUIElement {
+        buttons["trophy.wall.tile.run.37500000-0000-4000-8000-000000000021"]
     }
 }

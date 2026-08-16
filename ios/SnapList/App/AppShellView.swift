@@ -337,18 +337,7 @@ struct AppShellView: View {
                     break
                 }
             case .itemSaved(_, let handoff)?:
-                trophyWallStore.ingest(
-                    TrophyWallCanonicalAcceptedRun(
-                        principalScope: trophyWallStore.principalScope,
-                        runID: handoff.acceptedRun.runID,
-                        linkedLogicalIdentity: TrophyWallLogicalIdentity(
-                            idempotencyKey: handoff.idempotencyKey
-                        ),
-                        state: .accepted,
-                        lastMeaningfulUpdateAt: Date(),
-                        localCoverPhotoData: handoff.localCoverPhotoData
-                    )
-                )
+                trophyWallStore.ingestAcceptance(handoff)
             case nil, .submissionRejected?:
                 break
             }
@@ -410,7 +399,7 @@ struct AppShellView: View {
                     )
 #endif
                     if trophyWallCollectionRefreshState.observePrincipal(
-                        submissionHost.trophyWallPrincipalScopeProof
+                        submissionHost.trophyWallPrincipalIdentity
                     ) {
                         trophyWallStore.resetForPrincipalTransition()
                         // The reset drops the collection back to `unknown`, and the
@@ -2015,19 +2004,38 @@ private struct OptionalBoldTextModifier: ViewModifier {
 /// has no proof, so the nil check reset on sign-out but not on sign-in, and one
 /// seller's local pending card could surface on the next seller's wall. Cold
 /// launch still resets nothing, which keeps the DEBUG fixture seed intact.
+///
+/// What it compares is `TrophyWallPrincipalIdentity`, not the scope proof alone.
+/// The proof exists only while photos are staged, so an ordinary submit — which
+/// deletes them — used to read as a sign-out and wiped the seller's own
+/// processing photo off their wall seconds after it arrived (#867).
 struct TrophyWallPrincipalFence {
-    private var hasObservedScopeProof = false
-    private var scopeProof: ItemRunSubmissionPrincipalScopeProof?
+    private var hasObservedIdentity = false
+    private var identity: TrophyWallPrincipalIdentity?
 
     /// Returns whether this observation is a principal transition.
     mutating func observe(
-        _ nextScopeProof: ItemRunSubmissionPrincipalScopeProof?
+        _ nextIdentity: TrophyWallPrincipalIdentity?
     ) -> Bool {
         defer {
-            hasObservedScopeProof = true
-            scopeProof = nextScopeProof
+            hasObservedIdentity = true
+            identity = nextIdentity
         }
-        return hasObservedScopeProof && scopeProof != nextScopeProof
+        guard hasObservedIdentity else {
+            return false
+        }
+        switch (identity, nextIdentity) {
+        case (let previous?, let next?):
+            return next.isTransition(from: previous)
+        case (nil, nil):
+            return false
+        // A principal appearing where there was none, or disappearing
+        // entirely, is a transition in both directions. The nil side is a
+        // shell that has no committed intake at all, which no signed-in
+        // seller's cards may survive.
+        case (nil, _?), (_?, nil):
+            return true
+        }
     }
 }
 
@@ -2044,9 +2052,9 @@ struct TrophyWallCollectionRefreshState {
     private(set) var generation = 0
 
     mutating func observePrincipal(
-        _ scopeProof: ItemRunSubmissionPrincipalScopeProof?
+        _ identity: TrophyWallPrincipalIdentity?
     ) -> Bool {
-        let didTransition = principalFence.observe(scopeProof)
+        let didTransition = principalFence.observe(identity)
         if didTransition {
             generation += 1
         }
@@ -2094,6 +2102,7 @@ struct TrophyWallFeatureView: View {
                 router.navigate(to: .home(.processing))
             },
             openAccount: { router.navigate(to: .settings) },
+            openRun: { router.navigate(to: .home(.run($0))) },
             onScan: {
                 router.reset(tab: .scan)
                 router.selectedTab = .scan
