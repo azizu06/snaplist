@@ -932,6 +932,57 @@ final class SettingsTests: XCTestCase {
             "settings.create-account resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
         )
     }
+
+    /// #856 follow-up, found while implementing #865: the original sweep
+    /// enumerated `Button`s only, so the three `NavigationLink`-based
+    /// Settings rows were still left on `.automatic`. Same technique as
+    /// `testCreateAccountRowCarriesAnExplicitNonAutomaticButtonStyle`.
+    @MainActor
+    func testSignOutRowCarriesAnExplicitNonAutomaticButtonStyle() {
+        let row = SettingsSignOutRow(signOut: { .signedOut })
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "settings.sign-out resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
+        )
+    }
+
+    @MainActor
+    func testLocalRemovalRowCarriesAnExplicitNonAutomaticButtonStyle() {
+        let row = SettingsLocalRemovalRow(isGuest: false, remove: { true })
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "settings.local-removal resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
+        )
+    }
+
+    @MainActor
+    func testDeleteAccountRowCarriesAnExplicitNonAutomaticButtonStyle() {
+        let row = SettingsDeleteAccountRow(
+            profile: SettingsProfile(
+                isGuest: false,
+                name: "Jordan Hale",
+                email: "jordan.hale@icloud.com",
+                emailAddressID: "fixture-primary-email",
+                initials: "JH",
+                method: .apple
+            ),
+            subscriptionTruth: SettingsDeletionSubscriptionTruth(state: .available([])),
+            deletionFlowPresentationChanged: { _ in }
+        )
+
+        let rendered = String(reflecting: type(of: row.body))
+
+        XCTAssertTrue(
+            rendered.contains("PlainButtonStyle"),
+            "settings.delete-account resolves to .automatic, so Button Shapes doubles its capsule: \(rendered)"
+        )
+    }
 }
 
 private final class FailingSettingsAnalyticsClient: AnalyticsClient {
@@ -974,11 +1025,13 @@ extension SettingsTests {
 
         XCTAssertEqual(loading.marketplaceValue, "Checking")
         XCTAssertNil(loading.hint)
+        XCTAssertFalse(loading.isConnected)
 
         let failed = SettingsSellingPresentation(connection: nil, loadPhase: .failed)
 
         XCTAssertEqual(failed.marketplaceValue, "Not available")
         XCTAssertNil(failed.hint)
+        XCTAssertFalse(failed.isConnected)
     }
 
     func testSellingSectionShowsNoHintForASellerWhoIsNotConnected() {
@@ -993,6 +1046,23 @@ extension SettingsTests {
 
         XCTAssertEqual(presentation.marketplaceValue, "Not connected")
         XCTAssertNil(presentation.hint)
+        XCTAssertFalse(presentation.isConnected)
+    }
+
+    /// #865: `isConnected` is the seam `SettingsView` reads to decide whether
+    /// "Connected marketplaces" becomes a real destination. Only a confirmed
+    /// connection may offer one — every other case above stays `false`.
+    func testSellingSectionIsConnectedOnlyOnceAConnectionIsConfirmed() {
+        let presentation = SettingsSellingPresentation(
+            connection: EbayConnectionStatus(
+                connected: true,
+                ebayUsername: "sandbox-seller",
+                policySetup: nil
+            ),
+            loadPhase: .loaded
+        )
+
+        XCTAssertTrue(presentation.isConnected)
     }
 
     func testSellingSectionShowsNoHintForAConnectedSellerWhoIsReadyToPublish() {
@@ -1007,6 +1077,7 @@ extension SettingsTests {
 
         XCTAssertEqual(presentation.marketplaceValue, "eBay")
         XCTAssertNil(presentation.hint)
+        XCTAssertTrue(presentation.isConnected)
     }
 
     /// A binding exists only once publish-time discovery has written one, so

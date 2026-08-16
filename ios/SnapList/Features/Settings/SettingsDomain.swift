@@ -409,18 +409,24 @@ struct SettingsSellingPresentation: Equatable {
 
     let marketplaceValue: String
     let hint: Hint?
+    /// #865: the row only becomes a route to the account/disconnect screen
+    /// once a connection is confirmed. `checking`/`failed`/not-connected all
+    /// stay a plain, non-misleading value row that offers no disconnect.
+    let isConnected: Bool
 
     init(connection: EbayConnectionStatus?, loadPhase: LoadPhase) {
         switch loadPhase {
         case .loading:
             marketplaceValue = "Checking"
             hint = nil
+            isConnected = false
             return
         case .failed:
             // The connection was not readable. Saying "Not connected" would
             // claim something SnapList does not know.
             marketplaceValue = "Not available"
             hint = nil
+            isConnected = false
             return
         case .loaded:
             break
@@ -428,8 +434,10 @@ struct SettingsSellingPresentation: Equatable {
         guard let connection, connection.connected else {
             marketplaceValue = "Not connected"
             hint = nil
+            isConnected = false
             return
         }
+        isConnected = true
         marketplaceValue = "eBay"
         // `ready` and any state this build does not recognise both stay silent.
         // A hint with no message would be a warning the seller cannot act on.
