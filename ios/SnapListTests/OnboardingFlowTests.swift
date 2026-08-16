@@ -15,6 +15,92 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(trophyInset, scanInset)
     }
 
+    func testVoiceExampleWaveformMovesOverOneCycle() {
+        let resting = FirstValueVoiceWaveform.restingBarHeights
+        XCTAssertFalse(resting.isEmpty)
+
+        let quarter = (0..<resting.count).map { index in
+            FirstValueVoiceWaveform.barHeight(
+                resting: resting[index],
+                index: index,
+                phase: 0.25
+            )
+        }
+        let threeQuarters = (0..<resting.count).map { index in
+            FirstValueVoiceWaveform.barHeight(
+                resting: resting[index],
+                index: index,
+                phase: 0.75
+            )
+        }
+
+        XCTAssertNotEqual(
+            quarter,
+            threeQuarters,
+            "the bars are identical half a cycle apart, so the waveform reads as paused"
+        )
+    }
+
+    func testVoiceExampleWaveformLoopsSeamlessly() {
+        let resting = FirstValueVoiceWaveform.restingBarHeights
+        for index in resting.indices {
+            let start = FirstValueVoiceWaveform.barHeight(
+                resting: resting[index],
+                index: index,
+                phase: 0
+            )
+            let end = FirstValueVoiceWaveform.barHeight(
+                resting: resting[index],
+                index: index,
+                phase: 1
+            )
+            XCTAssertEqual(
+                start,
+                end,
+                accuracy: 0.001,
+                "bar \(index) jumps at the loop seam"
+            )
+        }
+    }
+
+    func testVoiceExampleWaveformKeepsEveryBarVisible() {
+        let resting = FirstValueVoiceWaveform.restingBarHeights
+        for step in 0..<24 {
+            let phase = Double(step) / 24
+            for index in resting.indices {
+                let height = FirstValueVoiceWaveform.barHeight(
+                    resting: resting[index],
+                    index: index,
+                    phase: phase
+                )
+                XCTAssertGreaterThanOrEqual(
+                    height,
+                    4,
+                    "bar \(index) collapses at phase \(phase)"
+                )
+                XCTAssertLessThanOrEqual(
+                    height,
+                    resting[index],
+                    "bar \(index) grows past its resting height at phase \(phase)"
+                )
+            }
+        }
+    }
+
+    func testVoiceExampleWaveformRestsWhenReduceMotionIsOn() {
+        let resting = FirstValueVoiceWaveform.restingBarHeights
+        for index in resting.indices {
+            XCTAssertEqual(
+                FirstValueVoiceWaveform.barHeight(
+                    resting: resting[index],
+                    index: index,
+                    phase: nil
+                ),
+                resting[index]
+            )
+        }
+    }
+
     func testFinalOnboardingStepReservesTheSkipControlSlot() {
         XCTAssertEqual(
             FirstValueOnboardingHeaderMetrics.trailingSlotWidth(for: .onb05),

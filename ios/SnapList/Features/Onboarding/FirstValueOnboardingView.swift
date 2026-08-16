@@ -850,21 +850,68 @@ struct FirstValueOnboardingContinueButton: View {
     }
 }
 
-private struct FirstValueVoiceWaveform: View {
-    private let barHeights: [CGFloat] = [
+/// The ONB-02 voice-note example. The row shows a play control and a running
+/// time, so a frozen waveform reads as a clip that stopped rather than one that
+/// is playing. The bars ride a travelling wave whose phase comes from the
+/// timeline clock, which loops seamlessly because the phase is periodic.
+///
+/// Reduce Motion gets the resting bar heights and no timeline, so the example
+/// still reads as a voice note without any movement.
+struct FirstValueVoiceWaveform: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Seconds for one full pass of the wave across the bars.
+    static let cycleDuration: Double = 1.5
+
+    static let restingBarHeights: [CGFloat] = [
         14, 22, 30, 18, 34, 24, 16, 28, 20, 32, 18, 26, 38, 22, 30, 16,
     ]
 
     var body: some View {
-        HStack(alignment: .center, spacing: 2) {
-            ForEach(Array(barHeights.enumerated()), id: \.offset) { _, height in
-                Capsule()
-                    .fill(SnapListColorToken.action.color)
-                    .frame(width: 3, height: height)
+        Group {
+            if reduceMotion {
+                bars(phase: nil)
+            } else {
+                TimelineView(.animation) { context in
+                    bars(phase: Self.phase(at: context.date))
+                }
             }
         }
         .frame(height: 40)
         .accessibilityHidden(true)
+    }
+
+    private func bars(phase: Double?) -> some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(Array(Self.restingBarHeights.enumerated()), id: \.offset) { index, resting in
+                Capsule()
+                    .fill(SnapListColorToken.action.color)
+                    .frame(
+                        width: 3,
+                        height: Self.barHeight(resting: resting, index: index, phase: phase)
+                    )
+            }
+        }
+    }
+
+    /// Position within one loop, in `0..<1`.
+    static func phase(at date: Date) -> Double {
+        let elapsed = date.timeIntervalSinceReferenceDate
+        return elapsed.truncatingRemainder(dividingBy: cycleDuration) / cycleDuration
+    }
+
+    /// A `nil` phase means Reduce Motion, which returns the resting height
+    /// untouched. Otherwise the bar is scaled by a sine offset by its own
+    /// position, which is what makes the wave travel instead of pulsing as one
+    /// block. The scale never reaches zero, so no bar disappears mid-loop.
+    static func barHeight(resting: CGFloat, index: Int, phase: Double?) -> CGFloat {
+        guard let phase else {
+            return resting
+        }
+        let offset = Double(index) / Double(restingBarHeights.count)
+        let angle = (phase + offset) * 2 * .pi
+        let scale = 0.55 + (0.45 * ((sin(angle) + 1) / 2))
+        return max(4, resting * CGFloat(scale))
     }
 }
 
