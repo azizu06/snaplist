@@ -207,7 +207,7 @@ final class AssistedExportUITests: XCTestCase {
         XCTAssertTrue(
             marker("assisted-export.workspace.mercari", in: app)
                 .label.localizedCaseInsensitiveContains(
-                    "you post it in mercari"
+                    "you finish this in mercari"
                 )
         )
 

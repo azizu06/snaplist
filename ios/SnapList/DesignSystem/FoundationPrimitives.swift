@@ -32,10 +32,14 @@ private struct SnapListPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .background(SnapListColorToken.action.color)
             .clipShape(.rect(cornerRadius: SnapListMetrics.primaryButtonRadius))
+            // Issue #898: a 0.36-opacity, radius-10 glow read as the button
+            // lifting off the page. Toned down to an ordinary elevation cue
+            // rather than removed outright, since this is the shared primary
+            // button and every screen using it still wants some depth.
             .shadow(
-                color: SnapListColorToken.action.color.opacity(0.36),
-                radius: 10,
-                y: 8
+                color: SnapListColorToken.action.color.opacity(0.16),
+                radius: 4,
+                y: 2
             )
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.99 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)

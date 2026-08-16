@@ -290,21 +290,9 @@ struct AssistedExportView: View {
             withMotion { store.toggle(destination) }
         } label: {
             HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(SnapListColorToken.quietFill.color)
-                    Image(systemName: "macwindow")
-                        .font(.system(size: 16, weight: .regular))
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                }
-                .frame(width: 34, height: 34)
-                .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(destination.displayName)
-                        .snapListTypography(.cardTitle)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    statusLine(destination)
-                }
+                destinationMark(destination)
+                    .accessibilityHidden(true)
+                statusLine(destination)
                 Spacer(minLength: 0)
                 Image(systemName: domain.isWorkspaceOpen(destination) ? "chevron.up" : "chevron.down")
                     .font(.system(size: 12, weight: .semibold))
@@ -325,28 +313,58 @@ struct AssistedExportView: View {
         .accessibilityIdentifier("assisted-export.row.\(destination.rawValue)")
     }
 
+    /// The destination's own mark, in place of a generic glyph and a plain
+    /// text name. Facebook Marketplace has no icon of its own — Marketplace
+    /// is a tab inside the Facebook app — so its mark is a square badge in
+    /// Facebook's own icon; Mercari and Depop are recognized by their own
+    /// wordmarks, so those render at their natural aspect ratio instead of
+    /// being forced into a square. See `docs/demo-asset-provenance.md`.
+    @ViewBuilder
+    private func destinationMark(_ destination: AssistedExportDestination) -> some View {
+        switch destination {
+        case .facebookMarketplace:
+            Image("MarketplaceMarkFacebook")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+        case .mercari:
+            Image("MarketplaceMarkMercari")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 20)
+        case .depop:
+            Image("MarketplaceMarkDepop")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 22)
+        }
+    }
+
     /// A confirmed destination is set apart by a checkmark, the wording, and
     /// text weight. The approved package is explicit that this difference
     /// carries no colour, badge, or banner: the seller's own note about their
-    /// own listing is not an achievement SnapList celebrates.
+    /// own listing is not an achievement SnapList celebrates. A destination
+    /// nothing has been done to renders nothing here at all.
     @ViewBuilder
     private func statusLine(_ destination: AssistedExportDestination) -> some View {
-        switch domain.handoff(for: destination) {
-        case .prepared:
-            Text(domain.statusText(for: destination))
-                .snapListTypography(.status)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-        case .shared:
-            HStack(spacing: 5) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .accessibilityHidden(true)
-                Text(domain.statusText(for: destination))
+        if let status = domain.statusText(for: destination) {
+            switch domain.handoff(for: destination) {
+            case .prepared:
+                Text(status)
                     .snapListTypography(.status)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .monospacedDigit()
+                    .foregroundStyle(SnapListColorToken.textSecondary.color)
+            case .shared:
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .accessibilityHidden(true)
+                    Text(status)
+                        .snapListTypography(.status)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        .monospacedDigit()
+                }
             }
         }
     }
@@ -387,8 +405,6 @@ struct AssistedExportView: View {
             deviceActions(destination)
 
             shareAnotherWay(destination)
-
-            whatHappensNext(destination)
 
             if domain.offersMarkAsShared(for: destination) {
                 markAsShared(destination)
@@ -540,21 +556,6 @@ struct AssistedExportView: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("assisted-export.share-another-way.\(destination.rawValue)")
         .disabled(store.isWriting)
-    }
-
-    private func whatHappensNext(_ destination: AssistedExportDestination) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(AssistedExportCopy.whatHappensNextTitle)
-                .snapListTypography(.rowTitle)
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            Text(domain.whatHappensNextText(for: destination))
-                .snapListTypography(.status)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-        }
-        .padding(.horizontal, 15)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SnapListColorToken.groupingFill.color)
     }
 
     /// Withheld until the seller has actually handed the pack over, and never a

@@ -61,3 +61,27 @@ clearly in the product's actual media component.
 
 The generated review artifact listed in the #136 PR includes side-by-side
 old/local-candidate and selected-final contact sheets plus this provenance table.
+
+## Marketplace destination marks (issue #898)
+
+The Share to other marketplaces screen (`AssistedExportView.swift`) identifies
+Facebook Marketplace, Mercari, and Depop by their own marks instead of a generic
+placeholder glyph plus black text. Facebook, Mercari, and Depop are trademarks of
+Meta Platforms, Inc., Mercari, Inc., and Depop Ltd. respectively. Displaying a
+destination's own mark to tell a seller which third-party app SnapList prepared
+their listing for is nominative fair use: it identifies the destination, not an
+endorsement or affiliation claim, and SnapList does not modify the marks beyond
+format conversion and resizing.
+
+| Local asset | Destination row | Source | License / rationale |
+| --- | --- | --- | --- |
+| `Assets.xcassets/MarketplaceMarkFacebook.imageset/facebook-marketplace.png` | Facebook Marketplace | [2023 Facebook icon.svg](https://commons.wikimedia.org/wiki/File:2023_Facebook_icon.svg), Wikimedia Commons | Commons-listed public domain (simple logo, below the threshold of originality); Facebook is a trademark of Meta Platforms, Inc. Facebook Marketplace has no standalone app icon of its own — Marketplace is a tab inside the Facebook app — so the Facebook mark is what a seller actually recognizes for this destination. |
+| `Assets.xcassets/MarketplaceMarkMercari.imageset/mercari.png` | Mercari | [Mercari logo 2018.svg](https://commons.wikimedia.org/wiki/File:Mercari_logo_2018.svg), Wikimedia Commons | Commons-listed public domain (simple wordmark); Mercari is a trademark of Mercari, Inc. |
+| `Assets.xcassets/MarketplaceMarkDepop.imageset/depop.png` | Depop | [Depop logo.svg](https://commons.wikimedia.org/wiki/File:Depop_logo.svg), Wikimedia Commons | Commons-listed public domain (simple wordmark); Depop is a trademark of Depop Ltd. |
+
+Local transform: downloaded as SVG, rasterized with `rsvg-convert` at the
+source viewBox's aspect ratio (240×240 for the Facebook mark, 800×175 for the
+Mercari wordmark, 800×206 for the Depop wordmark), and stored as a single
+`universal` 1x PNG in the asset catalog, matching the single-scale convention
+already used by this catalog's other image sets (e.g. `FirstValueJacket.imageset`).
+No color, geometry, or wordmark text was altered.
