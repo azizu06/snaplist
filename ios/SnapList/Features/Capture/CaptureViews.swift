@@ -77,6 +77,9 @@ struct ScanCameraView: View {
             isLibraryEnabled: flow.canOpenLibrary,
             isFlashAvailable: flow.isFlashAvailable,
             flashMode: flow.flashMode,
+            zoomControl: flow.zoomControl,
+            selectedZoomLens: flow.zoomLens,
+            selectZoomLens: flow.selectZoomLens,
             reduceMotion: reduceMotion,
             motionStateIdentifier: nil,
             fixturePreviewDescription: nil,
@@ -277,6 +280,79 @@ private struct ScanLibraryLabel: View {
     }
 }
 
+/// The `.5x` / `1x` selector the reference puts directly above the bottom row.
+///
+/// It renders nothing when the hardware cannot reach a second field of view,
+/// which is the honest alternative to showing a factor the device will refuse.
+/// The whole capsule is one accessibility container carrying the current
+/// factor as its value, and each option additionally announces its own factor
+/// and whether it is the selected one.
+struct ScanZoomControlView: View {
+    let control: ScanZoomControl
+    let selectedLens: ScanZoomLens
+    let selectLens: (ScanZoomLens) -> Void
+
+    var body: some View {
+        if control.isOffered {
+            HStack(spacing: 4) {
+                ForEach(control.lenses, id: \.self) { lens in
+                    option(lens)
+                }
+            }
+            .padding(4)
+            .background(SnapListColorToken.cameraControlFill.color.opacity(0.66))
+            .overlay {
+                Capsule().stroke(
+                    SnapListColorToken.onDarkSurface.color.opacity(0.12),
+                    lineWidth: 1
+                )
+            }
+            .clipShape(.capsule)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Zoom")
+            .accessibilityValue(control.spokenFactor(for: selectedLens))
+            .accessibilityIdentifier("scan.zoom")
+            .accessibilitySortPriority(55)
+        }
+    }
+
+    private func option(_ lens: ScanZoomLens) -> some View {
+        let isSelected = lens == selectedLens
+
+        return Button {
+            selectLens(lens)
+        } label: {
+            Text(control.label(for: lens))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(
+                    isSelected
+                        ? SnapListColorToken.inkPrimary.color
+                        : SnapListColorToken.onDarkSurface.color
+                )
+                .padding(.horizontal, 10)
+                // The visible chip stays compact the way the reference draws
+                // it. The 44pt floor lives on the button below it, so the
+                // target never shrinks with the artwork.
+                .frame(minWidth: 40, minHeight: 36)
+                .background {
+                    if isSelected {
+                        Capsule().fill(SnapListColorToken.onDarkSurface.color)
+                    }
+                }
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(.capsule)
+        .accessibilityLabel(control.accessibilityLabel(for: lens))
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityIdentifier(
+            lens == .ultraWide ? "scan.zoom.ultra-wide" : "scan.zoom.wide"
+        )
+        .accessibilitySortPriority(55)
+    }
+}
+
 struct ScanShutterAccessibility {
     let durablePhotoCount: Int
 
@@ -392,6 +468,9 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
     let isLibraryEnabled: Bool
     let isFlashAvailable: Bool
     let flashMode: CaptureFlashMode
+    let zoomControl: ScanZoomControl
+    let selectedZoomLens: ScanZoomLens
+    let selectZoomLens: (ScanZoomLens) -> Void
     let reduceMotion: Bool
     let motionStateIdentifier: String?
     let fixturePreviewDescription: String?
@@ -430,11 +509,14 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     .accessibilitySortPriority(10)
             }
 
+            ResponsiveFramingCorners()
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+
             VStack(spacing: 0) {
                 HStack {
                     closeButton
                     Spacer()
-                    flashButton
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 8)
@@ -443,16 +525,35 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
 
                 if !thumbnailURLs.isEmpty {
                     photoProgress
-                        .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 38 : 28)
                         .transition(
                             reduceMotion
                                 ? .identity
                                 : .opacity.combined(with: .offset(y: 10))
                         )
+
+                    // Review keeps its own line rather than riding the strip.
+                    // Its name grows with the photo count and again with
+                    // Dynamic Type, so sharing a row with five thumbnails and
+                    // the count capsule would collide at accessibility sizes.
+                    HStack {
+                        Spacer(minLength: 8)
+                        reviewButton
+                            .transition(reduceMotion ? .identity : .opacity)
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 14 : 10)
                 }
+
+                ScanZoomControlView(
+                    control: zoomControl,
+                    selectedLens: selectedZoomLens,
+                    selectLens: selectZoomLens
+                )
+                .padding(.top, dynamicTypeSize.isAccessibilitySize ? 16 : 12)
 
                 cameraControls
                     .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
+                    .padding(.top, dynamicTypeSize.isAccessibilitySize ? 18 : 14)
             }
             .safeAreaPadding(.top, 2)
             .safeAreaPadding(.bottom, 30)
@@ -513,31 +614,28 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
         )
     }
 
-    // A `ZStack` that absolutely centers the shutter over an independent `HStack` let the
-    // review button's AX5-widened capsule (its label grows with Dynamic Type) extend under
-    // the shutter, since nothing in a `ZStack` keeps sibling views from overlapping (#864).
-    // A single `HStack` with two equally flexible side regions keeps every control in its
-    // own non-overlapping region by construction: SwiftUI splits leftover width evenly
-    // between `maxWidth: .infinity` siblings, only yielding more to one side once the other
-    // no longer needs its share, so the shutter stays centered at default sizes and the
-    // regions simply grow asymmetrically at accessibility sizes instead of colliding.
+    // A `ZStack` that absolutely centers the shutter over an independent `HStack` once let
+    // an AX5-widened side control extend under the shutter, since nothing in a `ZStack`
+    // keeps sibling views from overlapping (#864). A single `HStack` with two equally
+    // flexible side regions keeps every control in its own non-overlapping region by
+    // construction: SwiftUI splits leftover width evenly between `maxWidth: .infinity`
+    // siblings, only yielding more to one side once the other no longer needs its share,
+    // so the shutter stays centered at default sizes and the regions simply grow
+    // asymmetrically at accessibility sizes instead of colliding.
+    //
+    // #885 swapped the occupants (flash left, library right, review moved above the row)
+    // and kept the technique, which is why both side controls are fixed-size circles now
+    // and the guarantee costs nothing.
     private var cameraControls: some View {
         HStack {
-            libraryControl()
-                .disabled(!isLibraryEnabled)
+            flashButton
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             shutterButton
 
-            if !thumbnailURLs.isEmpty {
-                reviewButton
-                    .transition(reduceMotion ? .identity : .opacity)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            } else {
-                Color.clear
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .accessibilityHidden(true)
-            }
+            libraryControl()
+                .disabled(!isLibraryEnabled)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 18)
     }
@@ -780,10 +878,19 @@ private struct ScanCameraFixturePreview: View {
 struct ScanCameraVisualStateView: View {
     let state: ApprovedVisualStateID
     let forceReducedMotion: Bool
+    /// Absent means what it means on a real simulator: no ultra wide, so no
+    /// zoom control.
+    var zoomFixture: ScanZoomFixtureState? = nil
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
+    @State private var zoomLens: ScanZoomLens = .wide
+
     private var reduceMotion: Bool { forceReducedMotion || systemReduceMotion }
+
+    private var zoomControl: ScanZoomControl {
+        zoomFixture?.control ?? .wideOnly
+    }
 
     /// The fixture route renders a camera surface without the app shell, so it
     /// floats the approved dock itself. Scan is a primary destination, so a
@@ -835,6 +942,9 @@ struct ScanCameraVisualStateView: View {
                 isLibraryEnabled: fixturePhotoCount < 5,
                 isFlashAvailable: true,
                 flashMode: .off,
+                zoomControl: zoomControl,
+                selectedZoomLens: zoomLens,
+                selectZoomLens: { zoomLens = $0 },
                 reduceMotion: reduceMotion,
                 motionStateIdentifier: reduceMotion ? "scan.motion-reduced" : nil,
                 fixturePreviewDescription: "Simulator camera fixture. No live camera feed.",

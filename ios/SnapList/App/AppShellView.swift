@@ -146,7 +146,8 @@ struct AppShellView: View {
                 } else if visualState.ownerIssue == 424 {
                     ScanCameraVisualStateView(
                         state: visualState,
-                        forceReducedMotion: configuration.forceReducedMotion
+                        forceReducedMotion: configuration.forceReducedMotion,
+                        zoomFixture: configuration.scanZoomFixture
                     )
                 } else if visualState.ownerIssue == 729 || visualState == .runDetail {
                     shell
