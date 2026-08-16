@@ -664,9 +664,39 @@ describe("feature explorer semantics", () => {
     // capture and the trim lands on real controls.
     expect(css).toMatch(/\.mkt-explorer__device\s*\{[\s\S]*?height:\s*600px/);
     expect(css).toMatch(/--phone-h:\s*calc\(var\(--phone-w\) \* 600 \/ 288\)/);
-    expect(css).toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*aspect-ratio:\s*360 \/ 756/);
+    expect(css).toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*aspect-ratio:\s*400 \/ 840/);
     // A rotated frame shears the captured chrome inside it.
     expect(css).not.toMatch(/\.mkt-hero__minimal-phone\s*\{[^}]*rotate\(/);
+
+    // The hero phone leads the page and is the only animated one, so it outranks
+    // the explorer device rather than sitting under it. It shipped at 360
+    // against the explorer's 384, which inverted that.
+    const heroWidth = css.match(/\.mkt-hero__minimal-phone\s*\{[^}]*width:\s*min\((\d+)px/);
+    expect(Number(heroWidth?.[1])).toBeGreaterThan(384);
+  });
+
+  it("keeps the shutter's shadow in CSS rather than burnt into the layer", async () => {
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+
+    // A shadow captured against one photograph is a ring of dark pixels. Over a
+    // bright item it reads as a black halo bolted to the button, which is what
+    // it did on the guitar frame. So the layer carries only the shutter's own
+    // bright chrome and the shadow is recomposited here.
+    expect(css).toMatch(/\.mkt-scanloop__shutter\s*\{[^}]*filter:\s*drop-shadow\(/);
+
+    const { data, info } = await sharp(resolve("public/marketing/hero/shutter.webp"))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // No opaque dark pixels: every surviving pixel belongs to the white ring or
+    // disc. The burnt-in version was 19% of its opaque area below luminance 32.
+    let opaqueDark = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 200) continue;
+      if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < 110) opaqueDark += 1;
+    }
+    expect(opaqueDark / (info.width * info.height)).toBeLessThan(0.01);
   });
 
   it("stops the scanning loop under reduced motion without losing the screen", () => {
