@@ -549,16 +549,22 @@ html:has(.mkt) {
 
 /* -------------------------------------------------------------- phone frame */
 
-/* Same hardware as the explorer device, scaled to the hero's 400px body: 3.83%
-   of that is 15px of frame, split 4 rail and 11 bezel, and 16.8% of it is a 67px
-   radius. See the "realistic hardware" block below the explorer device for where
-   those three ratios come from. */
+/* Same hardware as the explorer device. See the "realistic hardware" block below
+   that rule for where the three ratios come from.
+
+   Computed from the body width rather than written as pixels, because unlike the
+   explorer this frame is not transform-scaled: it is min(400px, 86vw), so it
+   genuinely shrinks on a narrow screen. Fixed 15px of padding against a 322px
+   body at 375px wide would be 4.7% rather than 3.83%, and a fixed 67px radius
+   would be 20.8% rather than 16.8%, so the phone would gain a chunky edge and
+   over-round corners exactly where the screen is smallest. --phone-body is set
+   by whichever rule owns the width. */
 .mkt-phone {
   position: relative;
-  padding: 15px;
-  border-radius: 67px;
+  padding: calc(var(--phone-body, 400px) * 0.0383);
+  border-radius: calc(var(--phone-body, 400px) * 0.168);
   box-shadow:
-    inset 0 0 0 11px var(--device-bezel),
+    inset 0 0 0 calc(var(--phone-body, 400px) * 0.0279) var(--device-bezel),
     0 26px 60px rgba(16, 24, 40, 0.22);
   background: var(--device-rail);
 }
@@ -569,7 +575,8 @@ html:has(.mkt) {
   width: 100%;
   height: 100%;
   background: var(--canvas);
-  border-radius: 52px;
+  /* Outer radius less the frame, so the two curves stay concentric. */
+  border-radius: calc(var(--phone-body, 400px) * 0.1297);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -593,7 +600,9 @@ html:has(.mkt) {
    so the screen is 370 wide and 370 / 0.46216 is 801, and 801 + 30 is 831. The
    old pair left the screen at 0.4634 and `cover` trimming a couple of pixels. */
 .mkt-hero__minimal-phone {
-  width: min(400px, 86vw);
+  --phone-body: min(400px, 86vw);
+  width: var(--phone-body, 400px);
+  /* Scale-free, so it holds at every width the clamp above can produce. */
   aspect-ratio: 400 / 831;
 }
 

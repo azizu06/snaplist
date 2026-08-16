@@ -239,6 +239,12 @@ outside, near-black bezel inside it. A single dark band stays flat at any thickn
 phone edge catches light on its rail and goes black at the glass. It costs no extra element: the
 bezel is an inset `box-shadow` and the rail is the gradient underneath it.
 
+The explorer device writes those ratios as pixels because it is transform-scaled, so one set of
+numbers survives every breakpoint. The hero frame computes them from its own width instead, because
+it is `min(400px, 86vw)` and genuinely shrinks: fixed padding and a fixed radius would be 4.7% and
+20.8% of a 322px body, giving the phone a chunky edge and over-round corners exactly where the
+screen is smallest.
+
 The three side buttons are what stop it reading as CSS. Two are pseudo-elements on the device and
 the third is a single `span`, and their offsets are percentages of frame height so they survive the
 `--phone-scale` steps and the hero's larger frame without being restated.

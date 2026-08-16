@@ -14,6 +14,30 @@ const APPROVED_MARKETING_TOKENS = new Set([
   "#f7f9ff", "#3665f3", "#244cc0", "#3a589e",
 ]);
 
+/**
+ * The phone frame is a drawing of hardware, not part of the marketing color
+ * system, so its tones are allowed by name instead of being folded into the
+ * palette above. They are the titanium rail gradient, the bezel behind the
+ * glass, and the side buttons.
+ *
+ * Kept separate for two reasons. The palette is a claim about what the page's
+ * surfaces, text and actions are made of, and nine greys added to it would
+ * quietly stop it being that. And these are confined to the stylesheet that
+ * draws the frame, so a component reaching for a device grey is still a
+ * violation. They remain subject to the green check like everything else.
+ */
+// Written without the leading # because this file is itself inside the scanned
+// tree, so a literal here would be read as a marketing color and report itself.
+// The vendored-wordmark map below dodges the same trap the same way.
+const DEVICE_HARDWARE_TONES = new Set(
+  [
+    "8f9298", "5d6167", "3c4046", "33373c", "5b5f65",
+    "05070a", "2f3338", "23262a", "3a3e44",
+  ].map((tone) => `#${tone}`),
+);
+
+const DEVICE_HARDWARE_FILE = "src/app/(marketing)/marketing.css";
+
 const VENDORED_WORDMARK_COLORS = new Map([
   // Logotyp's supplied Mercari wordmark uses this blue inside its standalone SVG.
   [resolve("public/marketplaces/mercari.svg"), new Set(["#" + "5e6df2"])],
@@ -42,7 +66,12 @@ describe("marketing palette", () => {
       .concat(marketingSourceFiles(MARKETING_ROOTS[1]))
       .flatMap((file) => [...readFileSync(file, "utf8").matchAll(/#[0-9a-f]{6}\b/gi)]
         .map((match) => ({ file: relative(process.cwd(), file), hex: match[0].toLowerCase() })))
-      .filter(({ hex }) => !APPROVED_MARKETING_TOKENS.has(hex) || isGreenDominant(hex));
+      .filter(({ file, hex }) => {
+        const allowed =
+          APPROVED_MARKETING_TOKENS.has(hex) ||
+          (file === DEVICE_HARDWARE_FILE && DEVICE_HARDWARE_TONES.has(hex));
+        return !allowed || isGreenDominant(hex);
+      });
 
     expect(violations).toEqual([]);
   });
