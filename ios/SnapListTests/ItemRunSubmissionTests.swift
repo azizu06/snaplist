@@ -72,6 +72,17 @@ final class ItemRunSubmissionTests: XCTestCase {
                 "Your sign-in needs renewing. Your item is still saved on this phone.",
                 .startListing
             ),
+            // #843 item 3. Same retry, and it must not borrow `.tryAgain`'s
+            // words either: this send fails identically every time until the
+            // device earns a principal, so the copy has to name that instead of
+            // describing a send that failed once.
+            (
+                .deviceIdentityUnavailable,
+                .deviceIdentity,
+                "Try again",
+                "This phone isn't ready to send yet. Your item is saved, so try again in a moment or sign in.",
+                .startListing
+            ),
         ]
 
         for testCase in cases {
@@ -85,6 +96,26 @@ final class ItemRunSubmissionTests: XCTestCase {
                 family?.primaryActionEvent(eventID: eventID),
                 testCase.action
             )
+        }
+    }
+
+    /// The SnapList copy contract bans em dashes and en dashes in seller-facing
+    /// strings. Eight of the nine families already obeyed it and the ninth did
+    /// not, which is the kind of drift a per-string review catches only by luck.
+    /// `CaseIterable` makes this cover a family added after today as well.
+    func testNoRejectionCopyUsesADashTheCopyContractBans() {
+        let banned: Set<Character> = ["\u{2014}", "\u{2013}"]
+        for family in PhotoReviewSubmissionRejectionFamily.allCases {
+            for string in [
+                family.message,
+                family.primaryActionLabel,
+                family.accessibilityAnnouncement
+            ] {
+                XCTAssertNil(
+                    string.first(where: banned.contains),
+                    "\(family) ships a banned dash: \(string)"
+                )
+            }
         }
     }
 
@@ -5003,6 +5034,178 @@ final class ItemRunSubmissionTests: XCTestCase {
         )
     }
 
+    /// #843 item 2, and why the departed generation stays silent.
+    ///
+    /// An App Attest key rotation posts `didChange` while a submission is open,
+    /// `synchronizePrincipal` resets the departing submission out from under the
+    /// seller's tap, and the tap produces nothing. The obvious repair is to
+    /// publish a retention from that exit. This row proves it cannot work.
+    ///
+    /// Every `.photoReview` destination renders through
+    /// `PhotoReviewSubmissionPresentation`, which exists only while
+    /// `PhotoReviewLiveHost.session` does. The same generation change drives the
+    /// shell's departed-intake dismissal, which is `leaveForDepartedIntake`, and
+    /// after it there is no session and therefore no renderer. A published
+    /// banner would also claim the item is still saved on this phone while the
+    /// new scope points at an empty bundle in a different directory.
+    ///
+    /// So the assertion is silence at the submission seam plus an absent
+    /// surface at the shell seam. The seller-visible answer belongs on Scan,
+    /// which has no notice surface today; that is #855.
+    @MainActor
+    func testAPrincipalChangeDuringASubmissionLeavesNoSurfaceToAnswerOn()
+        async throws {
+        let departingSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "principal-rotation-departing-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        let arrivingSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "principal-rotation-arriving-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer {
+            try? FileManager.default.removeItem(at: departingSupport)
+            try? FileManager.default.removeItem(at: arrivingSupport)
+        }
+        let photoData = SubmissionIntakeFixture.jpeg(
+            filling: "principal-rotation",
+            repeated: 1
+        )
+        let departing = try await makeNativePrincipalIntake(
+            applicationSupport: departingSupport,
+            verifiedClerkSubject: "user_before_rotation",
+            photoData: photoData
+        )
+        let arriving = try await makeNativePrincipalIntake(
+            applicationSupport: arrivingSupport,
+            verifiedClerkSubject: "user_after_rotation",
+            photoData: photoData
+        )
+        let gate = SubmissionResponseGate()
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: RecordingItemRunSubmitter(outcomes: [.ambiguous]),
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: departing.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof:
+                        ItemRunSubmissionPrincipalScopeProof(
+                            verifiedClerkSubject: "user_before_rotation"
+                        )
+                ) {
+                    await gate.hold()
+                    return "clerk-session-token"
+                },
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: departing.snapshot,
+            intake: departing.intake
+        )
+
+        // The shell surface the seller tapped Start listing on.
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let reviewHost = PhotoReviewLiveHost()
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: departing.snapshot.photos,
+            opener: .reviewButton
+        )
+        XCTAssertTrue(reviewHost.consume(router.captureBoundaryRequest))
+        XCTAssertNotNil(
+            reviewHost.session,
+            "Without a live session there is no tap for this row to be about."
+        )
+
+        let listing = Task { @MainActor in
+            await host.startListing(photos: departing.snapshot.photos)
+        }
+        await gate.waitUntilHeld()
+        host.synchronizePrincipal(
+            snapshot: arriving.snapshot,
+            intake: arriving.intake
+        )
+        // What the shell does with the same generation change, via
+        // `AppShellDepartedPhotoReviewTransaction`.
+        XCTAssertTrue(reviewHost.leaveForDepartedIntake(using: router))
+        await gate.release()
+        await listing.value
+
+        XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(
+            host.retention,
+            """
+            A departed generation published a retention whose only renderer the \
+            shell has already taken away, and whose copy claims an item the new \
+            scope does not hold.
+            """
+        )
+        XCTAssertNil(host.pendingPresentationEvent)
+        XCTAssertNil(
+            reviewHost.session,
+            "Photo Review is the only surface that renders a rejection, and it is gone."
+        )
+    }
+
+    func testAnAnonymousInstallationScopeSaysSoInsteadOfFailingLikeAnyOtherSend()
+        async throws {
+        let support = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "anonymous-installation-scope-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: support) }
+        let anonymous = try await makeAnonymousInstallationIntake(
+            applicationSupport: support,
+            photoData: SubmissionIntakeFixture.jpeg(
+                filling: "anonymous-installation",
+                repeated: 1
+            )
+        )
+        let submitter = RecordingItemRunSubmitter(outcomes: [.ambiguous])
+        let host = ItemRunSubmissionHost(
+            coordinator: ItemRunSubmissionCoordinator(
+                submitter: submitter,
+                attemptStore: InMemoryItemRunSubmissionAttemptStore(),
+                draftStore: RecordingCaptureDraftStore(
+                    photos: anonymous.snapshot.photos
+                ),
+                tokenProvider: TestBearerTokenProvider(
+                    principalScopeProof:
+                        ItemRunSubmissionPrincipalScopeProof(
+                            verifiedAppAttestKeyID: "anonymous-scope-key"
+                        )
+                ) {
+                    "guest-capability-token"
+                },
+                readData: { try Data(contentsOf: $0) }
+            )
+        )
+        host.synchronizePrincipal(
+            snapshot: anonymous.snapshot,
+            intake: anonymous.intake
+        )
+
+        await host.startListing(photos: anonymous.snapshot.photos)
+
+        // #843 item 3. This scope is bound to the installation, so no bearer
+        // this device can mint will ever match its proof. Naming that keeps the
+        // seller off a `Try again` that is guaranteed to fail the same way.
+        XCTAssertEqual(host.retention, .deviceIdentityUnavailable)
+        let payloads = await submitter.payloads
+        XCTAssertTrue(
+            payloads.isEmpty,
+            "An unbindable scope must be refused before any network call."
+        )
+        XCTAssertFalse(host.isSubmitting)
+        XCTAssertNil(host.acceptedRun)
+    }
+
     private static func fixedVoiceWAV() -> Data {
         Data([
             0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00,
@@ -5012,6 +5215,52 @@ final class ItemRunSubmissionTests: XCTestCase {
             0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61,
             0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
         ])
+    }
+
+    /// A durable intake for a device with neither a Clerk subject nor a
+    /// persisted App Attest key, which is the state production reaches before
+    /// enrollment succeeds. `.installation` matches the production identity
+    /// source, so the bundle survives relaunch rather than staying ephemeral.
+    private func makeAnonymousInstallationIntake(
+        applicationSupport: URL,
+        photoData: Data,
+        fileManager: FileManager = .default
+    ) async throws -> (
+        intake: NativeIntake,
+        snapshot: NativeIntake.Snapshot
+    ) {
+        let intake = NativeIntake(
+            applicationSupportDirectory: applicationSupport,
+            identitySource: NativeIntake.IdentitySource(
+                current: {
+                    NativeIntake.Identity(
+                        verifiedClerkSubject: nil,
+                        persistedAppAttestKeyID: nil
+                    )
+                },
+                changes: { AsyncStream { _ in } },
+                anonymousScopePersistence: .installation
+            ),
+            fileManager: fileManager
+        )
+        let events = await intake.events()
+        var iterator = events.makeAsyncIterator()
+        guard let initialEvent = await iterator.next(),
+              case .snapshot(_) = initialEvent else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        guard await intake.perform(
+            .addPhotos([NativeIntake.PhotoInput { photoData }])
+        ) == .committed else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        while let event = await iterator.next() {
+            if case .snapshot(let snapshot) = event,
+               snapshot.photos.count == 1 {
+                return (intake, snapshot)
+            }
+        }
+        throw CocoaError(.fileReadUnknown)
     }
 
     private func makeNativePrincipalIntake(

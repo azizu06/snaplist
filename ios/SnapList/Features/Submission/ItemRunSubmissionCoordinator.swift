@@ -98,11 +98,18 @@ enum ItemRunSubmissionDestinationDecision: Equatable, Sendable {
             self = .photoReview(.sub06)
         case .submissionUnavailable:
             self = .photoReview(.sub06)
+        case .deviceIdentityUnavailable:
+            // The item is intact and a later enrollment or sign-in makes it
+            // sendable, so the retry destination is still the right one. Only
+            // its words have to change, which the rejection family below does.
+            self = .photoReview(.sub06)
         }
     }
 }
 
-enum PhotoReviewSubmissionRejectionFamily: Equatable {
+/// `CaseIterable` so the copy contract can be asserted over every family rather
+/// than over a list a new case can be added without.
+enum PhotoReviewSubmissionRejectionFamily: Equatable, CaseIterable {
     case cancelled
     case offline
     case ambiguity
@@ -111,6 +118,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
     case review
     case photosTooLarge
     case sessionRenewal
+    case deviceIdentity
 
     init?(retention: ItemRunSubmissionRetention) {
         // `sub07` carries every refusal the seller has to fix by hand, so the
@@ -125,6 +133,13 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         // idea what to do about it. Name the sign-in ahead of the shared map.
         if case .sessionRenewalRequired = retention {
             self = .sessionRenewal
+            return
+        }
+        // #843 item 3, and the same reason. `sub06`'s retry is right, but "this
+        // didn't go through" describes a send that failed once. This one fails
+        // identically every time until the device earns a principal.
+        if case .deviceIdentityUnavailable = retention {
+            self = .deviceIdentity
             return
         }
         switch ItemRunSubmissionDestinationDecision(retention: retention) {
@@ -147,7 +162,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
 
     var primaryActionLabel: String {
         switch self {
-        case .offline, .ambiguity, .tryAgain, .sessionRenewal:
+        case .offline, .ambiguity, .tryAgain, .sessionRenewal, .deviceIdentity:
             "Try again"
         case .cancelled:
             "Start listing"
@@ -180,6 +195,13 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
             // promise every other retention makes, and it is the one the seller
             // most needs after watching their photos upload into nothing.
             "Your sign-in needs renewing. Your item is still saved on this phone."
+        case .deviceIdentity:
+            // "This phone" is the seller's word for the installation the intake
+            // is filed under; scope, principal, and attestation are ours. The
+            // wait is real, because enrollment retries on its own, and signing
+            // in ends it immediately, so the copy offers both without ordering
+            // them. Two sentences and no dash, like every other message here.
+            "This phone isn't ready to send yet. Your item is saved, so try again in a moment or sign in."
         }
     }
 
@@ -188,7 +210,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         case .conflict:
             "Something changed since your last try."
         case .cancelled, .offline, .ambiguity, .tryAgain, .review, .photosTooLarge,
-             .sessionRenewal:
+             .sessionRenewal, .deviceIdentity:
             message
         }
     }
@@ -198,7 +220,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         case .offline:
             .offline
         case .cancelled, .ambiguity, .conflict, .tryAgain, .review, .photosTooLarge,
-             .sessionRenewal:
+             .sessionRenewal, .deviceIdentity:
             .warning
         }
     }
@@ -208,7 +230,7 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
         case .cancelled, .conflict:
             .filled
         case .offline, .ambiguity, .tryAgain, .review, .photosTooLarge,
-             .sessionRenewal:
+             .sessionRenewal, .deviceIdentity:
             .outlined
         }
     }
@@ -223,10 +245,12 @@ enum PhotoReviewSubmissionRejectionFamily: Equatable {
             .retryAmbiguousSubmission(eventID: eventID)
         case .conflict:
             .reviewConflictedSubmission(eventID: eventID)
-        case .tryAgain, .sessionRenewal:
+        case .tryAgain, .sessionRenewal, .deviceIdentity:
             // A fresh Start listing transaction reloads the exact stored key and
             // asks the token provider for a new bearer, so the retry that fixes
-            // a rejected session is the one already wired here.
+            // a rejected session is the one already wired here. It is also the
+            // one that re-reads the intake scope once the device earns a
+            // principal, which is what #843 item 3 leaves the seller waiting on.
             .startListing
         case .review, .photosTooLarge:
             .reviewSubmission(eventID: eventID)
@@ -462,8 +486,10 @@ final class ItemRunSubmissionHost {
             return
         }
         guard let coordinator else {
-            // A build with no API origin has nowhere to submit. Saying so beats a
-            // button that silently does nothing.
+            // There is no submission machinery behind this host at all. A nil
+            // API origin does not reach here — it nils `submitter` and is
+            // refused further down, after the photos are durably committed.
+            // Saying so beats a button that silently does nothing.
             acceptedRun = nil
             clearedIntake = false
             retention = .submissionUnavailable
@@ -549,6 +575,33 @@ final class ItemRunSubmissionHost {
         guard activeSubmissionID == submissionID,
               isCurrent(),
               !Task.isCancelled else {
+            // #843 item 2, and why this stays silent rather than publishing.
+            //
+            // Three shapes reach here. `activeSubmissionID == nil` is a
+            // principal reset; a different non-nil ID means a later tap already
+            // owns the screen and will answer for itself; a cancelled task means
+            // nobody is waiting on this one.
+            //
+            // The reset is the one that strands a seller, and a retention cannot
+            // reach them: every `.photoReview` destination renders through
+            // `PhotoReviewSubmissionPresentation`, and the same generation change
+            // that resets this submission makes `NativeIntake.reconcileIdentity`
+            // publish `.dismissActivePhotoReview`, which the shell turns into
+            // `leaveForDepartedIntake` plus a return to Scan. By the time a
+            // banner could be read, the screen that reads it is gone.
+            //
+            // Publishing anyway would also lie. A changed scope loads a new
+            // empty bundle under a different directory component with no
+            // migration, so "your item is still saved on this phone" is false
+            // exactly when the seller most needs it to be true, and every retry
+            // this family offers would target an empty intake.
+            //
+            // The seller-visible answer therefore belongs on Scan, which has no
+            // notice surface to carry it. That surface and the orphaned bundle
+            // behind it are #855.
+            //
+            // `testAPrincipalChangeDuringASubmissionLeavesNoSurfaceToAnswerOn`
+            // holds this shut: it fails if a retention is published here.
             return
         }
         preparationTask = nil
@@ -690,7 +743,12 @@ final class ItemRunSubmissionHost {
         case .conflict, .creditDenied, .rateLimited, .rejected,
              .authenticationRequired, .sessionRenewalRequired, .receiptMismatch,
              .intakeUnavailable, .attemptNotPersisted, .submissionUnavailable,
-             .photosTooLarge:
+             .photosTooLarge, .deviceIdentityUnavailable:
+            // `deviceIdentityUnavailable` sits here because this gate replays a
+            // dispatched attempt, and that submission never reached dispatch.
+            // The seller's `Try again` starts a fresh one, which is the retry
+            // a newly bound principal actually needs.
+            //
             // `photosTooLarge` sits here rather than above because the retry this
             // gate offers resends the identical bytes, which the platform already
             // refused for their size.
@@ -1244,6 +1302,11 @@ final class ItemRunSubmissionCoordinator {
         let photos: [StagedCapturePhoto]
         let voice: NativeIntake.Voice?
         let scopeProof: ItemRunSubmissionPrincipalScopeProof?
+        /// #843 item 3. False when the intake is filed under the installation,
+        /// whose scope proof no bearer can ever match. Defaults to true so the
+        /// principal-less entry point keeps behaving exactly as it did; only a
+        /// live NativeIntake principal can say otherwise.
+        var isPrincipalBound: Bool = true
         let attemptStore: any ItemRunSubmissionAttemptStoring
         let validateFilesystemContext:
             @MainActor () async -> Bool
@@ -1264,6 +1327,10 @@ final class ItemRunSubmissionCoordinator {
     private enum BearerAcquisition {
         case captured(CapturedBearer)
         case principalMismatch
+        /// #843 item 3. The intake's scope belongs to the installation, so no
+        /// bearer this device can mint will ever match it. Unlike every other
+        /// failure here, retrying the same send cannot change the answer.
+        case principalUnbindable
         /// There is no usable credential: no session, or a session that cannot be
         /// bound to a principal. Only this says anything about the seller's account.
         case credentialAbsent
@@ -1467,6 +1534,7 @@ final class ItemRunSubmissionCoordinator {
                 photos: principalContext.photos,
                 voice: principalContext.voice,
                 scopeProof: principalContext.scopeProof,
+                isPrincipalBound: principalContext.isPrincipalBound,
                 attemptStore: principalContext.attemptStore,
                 validateFilesystemContext: {
                     await principalContext
@@ -1498,6 +1566,8 @@ final class ItemRunSubmissionCoordinator {
             capturedBearer = bearer
         case .principalMismatch:
             return .retained(.submissionUnavailable)
+        case .principalUnbindable:
+            return .retained(.deviceIdentityUnavailable)
         case .credentialAbsent:
             return .retained(.authenticationRequired)
         case .temporarilyUnavailable:
@@ -1671,6 +1741,26 @@ final class ItemRunSubmissionCoordinator {
             payload,
             bearerToken: dispatchBearer.token
         )
+        // Everything below runs with a request the server may already have
+        // committed, which is what `resolveAfterDispatch` is named for.
+        return await resolveAfterDispatch(
+            outcome,
+            context: context,
+            payload: payload,
+            dispatchBearer: dispatchBearer,
+            isCurrent: isCurrent
+        )
+    }
+
+    /// Resolves a transport outcome for a request that has already left the
+    /// device, so nothing here may treat the run as un-sent.
+    private func resolveAfterDispatch(
+        _ outcome: ItemRunSubmissionTransportOutcome,
+        context: CapturedContext,
+        payload: ItemRunSubmissionPayload,
+        dispatchBearer: CapturedBearer,
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> Preparation {
         if Task.isCancelled {
             return await resolve(
                 .cancelled,
@@ -1718,6 +1808,8 @@ final class ItemRunSubmissionCoordinator {
             capturedBearer = bearer
         case .principalMismatch:
             return .retained(.submissionUnavailable)
+        case .principalUnbindable:
+            return .retained(.deviceIdentityUnavailable)
         case .credentialAbsent:
             return .retained(.authenticationRequired)
         case .temporarilyUnavailable:
@@ -1754,6 +1846,25 @@ final class ItemRunSubmissionCoordinator {
             retry.payload,
             bearerToken: dispatchBearer.token
         )
+        // As in `prepareSubmission`, the replay has now left the device.
+        return await resolveRetryAfterDispatch(
+            outcome,
+            retry: retry,
+            currentPhotos: currentPhotos,
+            dispatchBearer: dispatchBearer,
+            isCurrent: isCurrent
+        )
+    }
+
+    /// Resolves a replay outcome for a request that has already left the
+    /// device, so nothing here may treat the run as un-sent.
+    private func resolveRetryAfterDispatch(
+        _ outcome: ItemRunSubmissionTransportOutcome,
+        retry: AmbiguousRetry,
+        currentPhotos: [StagedCapturePhoto],
+        dispatchBearer: CapturedBearer,
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> Preparation {
         guard await revalidatedBearer(
             captured: dispatchBearer,
             for: retry.context,
@@ -1778,6 +1889,9 @@ final class ItemRunSubmissionCoordinator {
     private func acquireBearer(
         for context: CapturedContext
     ) async -> BearerAcquisition {
+        guard context.isPrincipalBound else {
+            return .principalUnbindable
+        }
         do {
             if let expectedScopeProof = context.scopeProof {
                 let bound = try await tokenProvider
@@ -1800,7 +1914,8 @@ final class ItemRunSubmissionCoordinator {
             switch error {
             case .sessionAbsent:
                 return .credentialAbsent
-            case .principalBindingUnavailable:
+            case .principalBindingUnavailable,
+                 .credentialTemporarilyUnavailable:
                 return .temporarilyUnavailable
             }
         } catch {

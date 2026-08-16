@@ -77,14 +77,68 @@ final class AppAttestClientTests: XCTestCase {
         let truth = await client.attestInstallation()
 
         XCTAssertEqual(truth, .invalid(.appleRejected))
-        XCTAssertEqual(
-            keyStore.key,
-            AppAttestStoredKey(id: "native-fixed-key-id", state: .pending)
-        )
+        // The pending write is what this row is named for, and `savedKeys` still
+        // proves it happened before attestation was attempted.
         XCTAssertEqual(
             keyStore.savedKeys,
             [AppAttestStoredKey(id: "native-fixed-key-id", state: .pending)]
         )
+        // #843 item 5. What survives the failure is a separate question, and the
+        // row below owns it.
+        XCTAssertNil(keyStore.key)
+    }
+
+    func testARejectedEnrollmentLeavesNoKeyForTheIntakeToScopeItselfTo() async {
+        let keyStore = AppAttestKeyStoreStub()
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            keyStore: keyStore,
+            server: AppAttestServerStub(),
+            service: AppAttestServiceStub(
+                isSupported: true,
+                attestationError: AppAttestServiceStubError.appleRejected
+            )
+        )
+
+        let truth = await client.attestInstallation()
+
+        XCTAssertEqual(truth, .invalid(.appleRejected))
+        // #843 item 5. `NativeIntake.identitySource` reads the persisted key with
+        // no state filter, while the bearer path requires `.verified`. A key left
+        // behind by a rejected enrollment therefore scopes the intake to an
+        // identity no bearer can ever present, which is item 3's stranding by a
+        // second route. Apple refused to attest this key, so no later attempt can
+        // change that answer and there is nothing to keep.
+        XCTAssertNil(keyStore.key)
+        XCTAssertEqual(keyStore.removeCallCount, 1)
+    }
+
+    func testAnEnrollmentInterruptedByAnOutageKeepsItsKeyForTheNextAttempt() async {
+        let keyStore = AppAttestKeyStoreStub()
+        let client = AppAttestClient(
+            appID: "TEAMID1234.dev.snaplist.ios",
+            environment: .production,
+            keyStore: keyStore,
+            server: AppAttestServerStub(),
+            service: AppAttestServiceStub(
+                isSupported: true,
+                attestationError: URLError(.notConnectedToInternet)
+            )
+        )
+
+        let truth = await client.attestInstallation()
+
+        XCTAssertEqual(truth, .unavailable(.serverUnavailable))
+        // #843 item 5's other half, and the same principle item 1 turns on: a
+        // transient failure is not a denial. `attestInstallation` retries a stored
+        // pending key on the next launch, and discarding it here would burn an
+        // Apple key generation for a network drop.
+        XCTAssertEqual(
+            keyStore.key,
+            AppAttestStoredKey(id: "native-fixed-key-id", state: .pending)
+        )
+        XCTAssertEqual(keyStore.removeCallCount, 0)
     }
 
     func testPersistedKeyRequiresFreshServerVerifiedAssertion() async {

@@ -116,6 +116,11 @@ extension ClerkSessionTokenProviding {
 enum BearerTokenProviderError: Error, Equatable {
     case sessionAbsent
     case principalBindingUnavailable
+    /// The credential could not be reached on this attempt — no network, Apple's
+    /// attestation service down, a keychain that would not open. A phone with no
+    /// signal has told us nothing about whether the seller has an account, so
+    /// this may never become the account-claim handoff (#843 item 1).
+    case credentialTemporarilyUnavailable
 }
 
 /// Which credential a request actually carried.
@@ -456,7 +461,7 @@ enum ClerkAuthenticationComposition {
             liveClerkChanges()
         },
         appAttestChanges: @escaping @MainActor @Sendable () -> AsyncStream<Void> = {
-            liveAppAttestChanges()
+            appAttestChanges()
         }
     ) -> NativeIntake.IdentitySource {
         let streams = [clerkChanges(), appAttestChanges()]
@@ -495,18 +500,36 @@ enum ClerkAuthenticationComposition {
         }
     }
 
-    private static func liveAppAttestChanges() -> AsyncStream<Void> {
-        let notifications = NotificationCenter.default.notifications(
-            named: KeychainAppAttestKeyIDStore.didChange
+    /// #843 item 4. The observer registers here, before this function returns,
+    /// rather than whenever something first awaits the stream. Enrollment
+    /// finishing in that gap is ordinary — it races the same launch that started
+    /// it — and a change dropped there leaves the intake on the scope it had at
+    /// launch until something else happens to wake it.
+    ///
+    /// `NotificationCenter.notifications(named:)` happens to register when the
+    /// sequence value is made, which is why this was not already broken. That is
+    /// a detail of an API this code does not own, so `addObserver` states the
+    /// requirement instead of inheriting it.
+    static func appAttestChanges(
+        center: NotificationCenter = .default
+    ) -> AsyncStream<Void> {
+        let (stream, continuation) = AsyncStream<Void>.makeStream(
+            // Every consumer re-reads the key store when it wakes, so two
+            // changes and one change ask for the same work. Coalescing keeps a
+            // stream nobody is draining from growing without bound.
+            bufferingPolicy: .bufferingNewest(1)
         )
-        return AsyncStream { continuation in
-            let task = Task {
-                for await _ in notifications {
-                    continuation.yield()
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
+        let observer = center.addObserver(
+            forName: KeychainAppAttestKeyIDStore.didChange,
+            object: nil,
+            queue: nil
+        ) { _ in
+            continuation.yield()
         }
+        continuation.onTermination = { _ in
+            center.removeObserver(observer)
+        }
+        return stream
     }
 }
 

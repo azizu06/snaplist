@@ -251,7 +251,13 @@ final class GuestCapabilityBearerTests: XCTestCase {
             )
         }
 
-        await assertSessionAbsent(from: makeProvider())
+        // #843 item 1. It still fails closed, and the closed failure is now
+        // named for what it is: unreachable this time, not absent. Only the
+        // absent form may become the demand to make an account.
+        await assertBearerError(
+            .credentialTemporarilyUnavailable,
+            from: makeProvider()
+        )
         let token = try await makeProvider().bearerToken()
 
         XCTAssertEqual(token, refreshedToken)
@@ -789,7 +795,105 @@ final class GuestCapabilityBearerTests: XCTestCase {
         XCTAssertEqual(host.retention, .authenticationRequired)
     }
 
+    /// #843 item 1. Renewal failing for a transient reason says nothing about
+    /// whether this seller has an account, so it may not become the demand to
+    /// make one. The retryable destination is the only honest answer.
+    @MainActor
+    func testATransientRenewalFailureKeepsAGuestRetryableInsteadOfDemandingAnAccount()
+        async throws {
+        let retention = try await scopedGuestRetention(
+            applicationSupportName: "guest-transient-renewal",
+            renewalOutcome: .unavailable(.serverUnavailable),
+            idempotencyKey: UUID(
+                uuidString: "84300000-0000-4000-8000-000000000001"
+            )!
+        )
+
+        XCTAssertEqual(retention, .submissionUnavailable)
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(retention: retention!),
+            .photoReview(.sub06)
+        )
+    }
+
+    /// #843 item 1 control. Apple refusing the attestation outright proves no
+    /// guest capability can exist on this installation, which is the one case
+    /// that still has to ask for an account.
+    @MainActor
+    func testARenewalAppleRejectedOutrightStillAsksForAnAccount() async throws {
+        let retention = try await scopedGuestRetention(
+            applicationSupportName: "guest-terminal-renewal",
+            renewalOutcome: .invalid(.appleRejected),
+            idempotencyKey: UUID(
+                uuidString: "84300000-0000-4000-8000-000000000002"
+            )!
+        )
+
+        XCTAssertEqual(retention, .authenticationRequired)
+        XCTAssertEqual(
+            ItemRunSubmissionDestinationDecision(retention: retention!),
+            .handoff(.accountClaim12aThrough12c)
+        )
+    }
+
+    /// #843 item 1 control. Hardware that cannot attest can never earn a guest
+    /// capability either, so it belongs with the terminal outcomes even though
+    /// its truth is spelled `.unavailable`. Routing it to a retry would loop
+    /// forever with no way to reach an account.
+    @MainActor
+    func testAnUnsupportedDeviceStillAsksForAnAccount() async throws {
+        let retention = try await scopedGuestRetention(
+            applicationSupportName: "guest-unsupported-device",
+            renewalOutcome: .unavailable(.unsupportedDevice),
+            idempotencyKey: UUID(
+                uuidString: "84300000-0000-4000-8000-000000000003"
+            )!
+        )
+
+        XCTAssertEqual(retention, .authenticationRequired)
+    }
+
     // MARK: Helpers
+
+    /// Drives one signed-out, App Attest-scoped submission whose guest bearer is
+    /// missing, so the renewing provider always reaches `renewalOutcome`.
+    @MainActor
+    private func scopedGuestRetention(
+        applicationSupportName: String,
+        renewalOutcome: AppAttestGuestCapabilityEnrollmentOutcome,
+        idempotencyKey: UUID
+    ) async throws -> ItemRunSubmissionRetention? {
+        let keyStore = AppAttestKeyStoreDouble(
+            key: AppAttestStoredKey(
+                id: "app-attest-key-\(applicationSupportName)",
+                state: .verified
+            )
+        )
+        let guestStore = GuestCapabilityStoreDouble(bearer: nil)
+        let renewal = GuestCapabilityRenewalDouble(
+            outcomes: [renewalOutcome, renewalOutcome, renewalOutcome]
+        ) { _ in }
+        let provider = GuestCapabilityRenewingBearerTokenProvider(
+            base: GuestCapableBearerTokenProvider(
+                clerk: ClerkProviderDouble(
+                    error: BearerTokenProviderError.sessionAbsent
+                ),
+                guestCapabilities: guestStore,
+                appAttestKeys: keyStore,
+                now: { Self.instant }
+            ),
+            guestCapabilities: guestStore,
+            renewGuestCapability: { await renewal.renew() },
+            now: { Self.instant }
+        )
+        let submission = try await submitScopedNativeIntake(
+            applicationSupportName: applicationSupportName,
+            keyStore: keyStore,
+            tokenProvider: provider,
+            idempotencyKey: idempotencyKey
+        )
+        return submission.host.retention
+    }
 
     @MainActor
     private func makeAppAttestScopedNativeIntake(
@@ -923,13 +1027,27 @@ final class GuestCapabilityBearerTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
+        await assertBearerError(
+            .sessionAbsent,
+            from: provider,
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertBearerError(
+        _ expected: BearerTokenProviderError,
+        from provider: any BearerTokenProviding,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
         do {
             let token = try await provider.bearerToken()
-            XCTFail("Expected sessionAbsent, got \(token)", file: file, line: line)
-        } catch BearerTokenProviderError.sessionAbsent {
+            XCTFail("Expected \(expected), got \(token)", file: file, line: line)
+        } catch let error as BearerTokenProviderError where error == expected {
             return
         } catch {
-            XCTFail("Expected sessionAbsent, got \(error)", file: file, line: line)
+            XCTFail("Expected \(expected), got \(error)", file: file, line: line)
         }
     }
 

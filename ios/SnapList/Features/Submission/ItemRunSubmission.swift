@@ -336,8 +336,19 @@ enum ItemRunSubmissionRetention: Equatable, Sendable {
     /// without a persisted key would let a retry mint a second key for the same photos
     /// and buy a second run.
     case attemptNotPersisted
-    /// The app has no API origin configured, so there is nowhere to submit.
+    /// The submission could not proceed for a reason that says nothing about
+    /// the seller or their item: no API origin is configured, the bearer stopped
+    /// matching the intake's principal, a transient credential failure, or the
+    /// generation moved on mid-flight. All of them take the same conservative
+    /// retry, and none of them may be read as a verdict on the account.
     case submissionUnavailable
+    /// #843 item 3. The intake is filed under this installation rather than
+    /// under a seller, so its scope can never match a bearer's principal proof.
+    /// Every send from it fails the same way, which makes the generic retry a
+    /// loop. A later App Attest enrollment or sign-in binds a real principal and
+    /// makes the item sendable, so this stays retryable — it just says which
+    /// thing has to change first.
+    case deviceIdentityUnavailable
 }
 
 struct ItemRunAcceptance: Equatable, Sendable {

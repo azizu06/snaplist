@@ -57,6 +57,30 @@ actor NativeIntake {
         let photos: [Photo]
         let voice: Voice?
         let recovery: Recovery
+        /// #843 item 3. False when this intake is filed under the installation
+        /// rather than under a seller, which is the state before App Attest
+        /// enrollment or sign-in. Submission needs it because the scope proof
+        /// it derives from the path is a digest that hides the difference, and
+        /// a bearer can never match an installation-scoped proof.
+        let isPrincipalBound: Bool
+
+        init(
+            version: Version,
+            photos: [Photo],
+            voice: Voice?,
+            recovery: Recovery,
+            // Defaults to the value every snapshot carried implicitly before
+            // this field existed, so fixtures keep describing a bound intake
+            // unless they say otherwise. The one production construction site
+            // below always passes the real answer.
+            isPrincipalBound: Bool = true
+        ) {
+            self.version = version
+            self.photos = photos
+            self.voice = voice
+            self.recovery = recovery
+            self.isPrincipalBound = isPrincipalBound
+        }
     }
 
     struct PhotoInput: @unchecked Sendable {
@@ -139,7 +163,14 @@ actor NativeIntake {
     static let retentionRetryInterval: TimeInterval = 5 * 60
     static let writingOptions: Data.WritingOptions = [.atomic, .completeFileProtection]
 
-    private struct Scope: Equatable { let directoryComponent: String }
+    private struct Scope: Equatable {
+        let directoryComponent: String
+        /// Whether this scope is filed under a seller principal — a Clerk
+        /// subject or a persisted App Attest key — rather than under the
+        /// installation. The directory component is a digest, so nothing
+        /// downstream can recover this from the path (#843 item 3).
+        let isPrincipalBound: Bool
+    }
 
     private struct StoredBundle: Codable {
         let schemaVersion: Int
@@ -193,7 +224,11 @@ actor NativeIntake {
 
         var version: Version { Version(activationID: activationID, revision: revision) }
         var snapshot: Snapshot {
-            Snapshot(version: version, photos: photos, voice: voice, recovery: recovery)
+            Snapshot(
+                version: version, photos: photos, voice: voice, recovery: recovery,
+                // A nil scope is the ephemeral root, which no principal owns.
+                isPrincipalBound: scope?.isPrincipalBound ?? false
+            )
         }
         var assetsRoot: URL { root.appendingPathComponent("Current/Assets", isDirectory: true) }
 
@@ -617,7 +652,7 @@ actor NativeIntake {
         let taggedIdentity = authenticated.map { ("clerk-subject", $0) }
             ?? guest.map { ("app-attest-key-id", $0) }
         if let (tag, value) = taggedIdentity {
-            return Self.scope(tag: tag, value: value)
+            return Self.scope(tag: tag, value: value, isPrincipalBound: true)
         }
         switch identitySource.anonymousScopePersistence {
         case .processPrivate:
@@ -626,18 +661,26 @@ actor NativeIntake {
             let identity = try loadOrCreateAnonymousInstallationIdentity()
             return Self.scope(
                 tag: "anonymous-installation-id",
-                value: identity.id.uuidString.lowercased()
+                value: identity.id.uuidString.lowercased(),
+                isPrincipalBound: false
             )
         }
     }
 
-    private static func scope(tag: String, value: String) -> Scope {
+    private static func scope(
+        tag: String,
+        value: String,
+        isPrincipalBound: Bool
+    ) -> Scope {
         let tagged = ["dev.snaplist.native-intake-principal", "v1", tag, value]
             .joined(separator: "\u{0}")
         let digest = SHA256.hash(data: Data(tagged.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
-        return Scope(directoryComponent: "v1-\(digest)")
+        return Scope(
+            directoryComponent: "v1-\(digest)",
+            isPrincipalBound: isPrincipalBound
+        )
     }
 
     private func loadOrCreateAnonymousInstallationIdentity() throws
