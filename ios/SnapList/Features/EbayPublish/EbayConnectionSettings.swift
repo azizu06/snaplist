@@ -97,12 +97,25 @@ final class EbayConnectionSettingsStore {
 
 @MainActor
 struct EbayConnectionSettingsView: View {
-    @Bindable var store: EbayConnectionSettingsStore
+    // `makeStore` is a factory, not a value: `SettingsView` builds this view
+    // inside a `NavigationLink` destination closure, which SwiftUI can
+    // re-invoke on every render pass the row is on screen for. Taking the
+    // store as a plain parameter re-created it on every one of those passes,
+    // which reset `state` to `.checking` before `.task` ever finished loading
+    // it (#865). `@State`'s initializer runs the factory exactly once, the
+    // first time this view's identity is installed, and keeps the same
+    // store across every subsequent re-render.
     let forceReducedMotion: Bool
 
+    @State private var store: EbayConnectionSettingsStore
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     private var reduceMotion: Bool { systemReduceMotion || forceReducedMotion }
+
+    init(makeStore: @escaping () -> EbayConnectionSettingsStore, forceReducedMotion: Bool) {
+        self.forceReducedMotion = forceReducedMotion
+        _store = State(initialValue: makeStore())
+    }
 
     var body: some View {
         Group {

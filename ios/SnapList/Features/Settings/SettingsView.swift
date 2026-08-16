@@ -117,7 +117,7 @@ struct SettingsView: View {
                         if sellingPresentation.isConnected {
                             NavigationLink {
                                 EbayConnectionSettingsView(
-                                    store: makeEbayConnectionSettingsStore(),
+                                    makeStore: makeEbayConnectionSettingsStore,
                                     forceReducedMotion: false
                                 )
                                 .onDisappear {

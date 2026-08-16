@@ -226,15 +226,30 @@ final class EbayPublishUITests: XCTestCase {
                 .waitForExistence(timeout: 5),
             app.debugDescription
         )
-        XCTAssertTrue(
-            app.staticTexts[
-                "Listings already on eBay stay there and keep selling, but SnapList will not be able to see or change them.\n\nTo review which apps can use your eBay account, open your eBay account settings."
-            ].exists,
+        let disclosureText =
+            "Listings already on eBay stay there and keep selling, but SnapList will not be able to see or change them.\n\nTo review which apps can use your eBay account, open your eBay account settings."
+        XCTAssertEqual(
+            app.staticTexts.matching(
+                NSPredicate(format: "label == %@", disclosureText)
+            ).count,
+            1,
             "The eBay-side disclosure must survive verbatim on the Settings entry point.\n\(app.debugDescription)"
         )
 
-        // Cancel must not disconnect.
-        app.buttons["Cancel"].tap()
+        // Cancel must not disconnect. SwiftUI renders this confirmationDialog's
+        // cancel action as either an explicit "Cancel" button (compact/
+        // actionSheet presentation) or an outside-tap dismiss region (popover
+        // presentation, which is what this device/OS combination actually
+        // uses); this test asserts the behavior — cancelling leaves the
+        // account connected — not which chrome Apple happens to draw it with.
+        let cancel = app.buttons["Cancel"]
+        if cancel.waitForExistence(timeout: 2) {
+            cancel.tap()
+        } else {
+            let dismissRegion = app.descendants(matching: .any)["PopoverDismissRegion"]
+            XCTAssertTrue(dismissRegion.waitForExistence(timeout: 3), app.debugDescription)
+            dismissRegion.tap()
+        }
         XCTAssertTrue(
             app.staticTexts["Connected as Jordan Hale"].waitForExistence(timeout: 5),
             "Cancelling the dialog must leave the account connected.\n\(app.debugDescription)"
