@@ -443,7 +443,6 @@ enum AssistedExportCopy {
     // `ListingReviewView.swift`; #896 should drop them from this file in the
     // same change that removes their last render.
     static let entryTitle = "Share to other marketplaces"
-    static let entryDetail = "Prepared for Facebook Marketplace, Mercari, and Depop"
     static let saveBeforeSharing = "Save your changes before sharing."
 
     static func savePhotos(count: Int) -> String {
@@ -493,7 +492,6 @@ enum AssistedExportCopy {
         retry,
         actionFailed,
         entryTitle,
-        entryDetail,
         saveBeforeSharing,
         savePhotos(count: 8),
         savePhotos(count: 1),

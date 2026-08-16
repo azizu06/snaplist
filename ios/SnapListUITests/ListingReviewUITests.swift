@@ -128,7 +128,10 @@ final class ListingReviewUITests: XCTestCase {
         var app = launch(fixture: "zero-evidence", resetDraft: true)
         _ = openReview(in: app)
 
-        XCTAssertTrue(app.staticTexts["Starting price estimate"].exists)
+        // #896 retired this label from the screen: the formatted number under
+        // it already read as a price. What the screen asserts is true did not
+        // change, so the no-evidence line below is still required here.
+        XCTAssertFalse(app.staticTexts["Starting price estimate"].exists)
         XCTAssertTrue(
             app.staticTexts["No verified sold matches found."].exists
         )

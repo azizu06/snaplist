@@ -56,6 +56,7 @@ ios/SnapList/Core/Subscriptions/SubscriptionModels.swift
 ios/SnapList/Core/Subscriptions/SubscriptionStatusView.swift
 ios/SnapList/Core/Subscriptions/SubscriptionStore.swift
 ios/SnapList/DesignSystem/FoundationPrimitives.swift
+ios/SnapList/DesignSystem/SnapListPageDots.swift
 ios/SnapList/DesignSystem/SnapListTokens.swift
 ios/SnapList/Features/ActivationGuidance/ActivationGuidanceCoachMark.swift
 ios/SnapList/Features/ActivationGuidance/ActivationGuidanceDomain.swift

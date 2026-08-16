@@ -481,7 +481,7 @@ struct ListingReviewPhotoPager: View {
     @State private var selectedOrdinal = 0
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .bottom) {
             TabView(selection: $selectedOrdinal) {
                 ForEach(photos, id: \.ordinal) { photo in
                     ListingReviewImage(
@@ -506,14 +506,16 @@ struct ListingReviewPhotoPager: View {
             .frame(maxWidth: .infinity)
             .aspectRatio(4 / 3, contentMode: .fit)
 
-            Text("\(selectedOrdinal + 1) of \(photos.count)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.black.opacity(0.64), in: Capsule())
-                .padding(12)
-                .accessibilityHidden(true)
+            // #896: a gallery reports its count with dots, not a "1 of 2" pill
+            // pinned to a corner. This is #883's Photo Review indicator, now
+            // shared, so the two photo surfaces count the same way. The dots
+            // stay silent for VoiceOver because every photo above already
+            // announces itself as `Photo 1 of 2, cover`.
+            SnapListPageDots(
+                pageCount: photos.count,
+                selectedIndex: selectedOrdinal
+            )
+            .padding(.bottom, SnapListPageDots.Metrics.bottomInset)
         }
         .background(SnapListColorToken.quietFill.color)
         .accessibilityElement(children: .contain)
@@ -606,7 +608,12 @@ struct ListingReviewDisclosureRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
+                // #896: 4pt left the label sitting on its value. Measured in
+                // the simulator, the hairline below a two-line value landed
+                // about 9pt under the text while the next row's label started
+                // about 6pt below the same line, so the pair read as one block
+                // rather than two rows.
+                VStack(alignment: .leading, spacing: 6) {
                     Text(title.uppercased())
                         .font(.caption2.weight(.bold))
                         .tracking(0.4)
@@ -633,6 +640,12 @@ struct ListingReviewDisclosureRow: View {
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
+            // #896: the row carried no vertical padding at all — `minHeight`
+            // was the only thing holding it open, so any value that wrapped
+            // grew the row by pushing its own text into the dividers. Real
+            // padding means the divider always has air on both sides, and the
+            // floor stays for the short single-line rows.
+            .padding(.vertical, 14)
             .frame(minHeight: 60)
             .contentShape(Rectangle())
         }

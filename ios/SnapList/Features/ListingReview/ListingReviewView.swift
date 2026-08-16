@@ -277,13 +277,13 @@ struct ListingReviewView: View {
         snapshot: ListingReviewResult,
         draft: ListingReviewDraft
     ) -> some View {
+        // #896 dropped the "Starting price estimate" line that used to open
+        // this stack: it cost a full line to say what the formatted number
+        // under it already said. `ListingReviewCopy.startingPriceEstimate`
+        // survives the deletion because the read contract still carries
+        // `startingPriceCopy` and `ListingReviewResult`'s decoder still checks
+        // the wire value against that exact string.
         VStack(alignment: .leading, spacing: 6) {
-            if snapshot.verifiedSoldMatches.isEmpty {
-                Text(ListingReviewCopy.startingPriceEstimate)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(SnapListColorToken.textTertiary.color)
-            }
-
             if priceEditing {
                 // A bare HStack squeezed the Apply button down to an
                 // unreadable sliver once the price field's title-weight text
@@ -476,7 +476,10 @@ struct ListingReviewView: View {
                 .foregroundStyle(SnapListColorToken.textTertiary.color)
                 .padding(.horizontal, 14)
                 .padding(.top, 14)
-                .padding(.bottom, 5)
+                // #896: 5pt put the card's own heading almost on top of the
+                // first row's TITLE label, two tertiary caps lines running
+                // together. The rows below now breathe, so this matches them.
+                .padding(.bottom, 9)
 
             detailRow(
                 title: "Title",
@@ -555,14 +558,11 @@ struct ListingReviewView: View {
                     .font(.headline)
                     .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(AssistedExportCopy.entryTitle)
-                        .font(.headline)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    Text(AssistedExportCopy.entryDetail)
-                        .font(.caption)
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                }
+                // #896: the row pushes to a screen that explains itself, so the
+                // headline carries it alone and the row gets skinnier.
+                Text(AssistedExportCopy.entryTitle)
+                    .font(.headline)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
@@ -606,14 +606,11 @@ struct ListingReviewView: View {
                     .font(.headline)
                     .foregroundStyle(SnapListColorToken.action.color)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Publish to eBay")
-                        .font(.headline)
-                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    Text("Connect, review, and post when you are ready.")
-                        .font(.caption)
-                        .foregroundStyle(SnapListColorToken.textSecondary.color)
-                }
+                // #896: same as the sharing row above — the screen behind this
+                // one explains the connect-and-post sequence in full.
+                Text("Publish to eBay")
+                    .font(.headline)
+                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
@@ -800,6 +797,15 @@ struct ListingReviewView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // #896: measured in the simulator, this button and Done are already the
+        // same width — 407pt against 403pt — so the complaint that Done "takes
+        // twice the width" is about weight, not geometry. A hairline outline on
+        // the same white as the footer behind it left this reading as empty
+        // canvas next to a saturated blue block. A quiet fill gives it a body
+        // to be seen against; it keeps the outlined treatment the criterion
+        // asks for rather than becoming a second filled button.
+        .background(SnapListColorToken.quietFill.color)
+        .clipShape(RoundedRectangle(cornerRadius: 15))
         .overlay {
             RoundedRectangle(cornerRadius: 15)
                 .stroke(SnapListColorToken.inputBorder.color)
