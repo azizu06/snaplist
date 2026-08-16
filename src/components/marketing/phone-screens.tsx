@@ -51,7 +51,7 @@ export function ScanScreen({ priority = false }: { priority?: boolean }) {
   return (
     <Shot
       src="/marketing/screens/scan.webp"
-      alt="The SnapList camera pointed at a pair of sneakers, with the shutter and the photo library button below it."
+      alt="The SnapList camera pointed at a pair of Air Jordan 3 sneakers standing on their box, with the shutter and the photo library button below it."
       priority={priority}
     />
   );
