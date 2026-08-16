@@ -97,6 +97,44 @@ final class ListingReviewPresentationTests: XCTestCase {
         XCTAssertTrue(SnapListPageDots.isVisible(pageCount: 2))
     }
 
+    func testANonIdentitySpecificEditsInPlaceAndAnIdentityOneReachesGuidedCorrection() {
+        // The route is the whole contract. A reserved identity key can never
+        // resolve to an in-place edit, because a typed value would bypass the
+        // pricing rerun, the composite confidence, and the generator.
+        XCTAssertEqual(
+            ListingReviewSpecificEditing.mode(
+                forSpecificNamed: "Color",
+                correctionAvailable: true
+            ),
+            .inPlace
+        )
+        XCTAssertEqual(
+            ListingReviewSpecificEditing.mode(
+                forSpecificNamed: "Color",
+                correctionAvailable: false
+            ),
+            .inPlace
+        )
+        for reserved in ["Brand", "model", "Condition", "ISBN", "upc", "Category", "Type"] {
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: reserved,
+                    correctionAvailable: true
+                ),
+                .guidedCorrection,
+                reserved
+            )
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: reserved,
+                    correctionAvailable: false
+                ),
+                .spent,
+                reserved
+            )
+        }
+    }
+
     private func soldMatches(
         _ facts: [(Int, String)]
     ) throws -> [ListingReviewSoldMatch] {

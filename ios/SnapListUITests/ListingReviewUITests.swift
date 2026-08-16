@@ -42,7 +42,7 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(
             String(
                 describing:
-                    app.buttons["listing-review.title"].value as Any
+                    app.textFields["listing-review.title"].value as Any
             ).contains("seller edit")
         )
 
@@ -151,7 +151,7 @@ final class ListingReviewUITests: XCTestCase {
                 NSPredicate(format: "label BEGINSWITH %@", "5 sold")
             ).firstMatch.exists
         )
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         XCTAssertTrue(price.exists)
         XCTAssertTrue(String(describing: price.value as Any).contains("$58"))
 
@@ -248,9 +248,9 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(done.isHittable)
         XCTAssertGreaterThanOrEqual(secondary.frame.height, 44)
         XCTAssertGreaterThanOrEqual(done.frame.height, 44)
-        XCTAssertTrue(app.buttons["listing-review.title"].exists)
+        XCTAssertTrue(app.textFields["listing-review.title"].exists)
         secondary.tap()
-        XCTAssertTrue(app.buttons["listing-review.title"].exists)
+        XCTAssertTrue(app.textFields["listing-review.title"].exists)
         // XCUITest cannot inspect the VoiceOver cursor without assistive
         // technology running; ListingReviewFocus binds this action to Title.
 
@@ -280,7 +280,7 @@ final class ListingReviewUITests: XCTestCase {
             app.otherElements["listing-review.motion-reduced"]
                 .waitForExistence(timeout: 3)
         )
-        let longTitle = app.buttons["listing-review.title"]
+        let longTitle = app.textFields["listing-review.title"]
         XCTAssertTrue(longTitle.exists)
         XCTAssertGreaterThan(
             String(describing: longTitle.value as Any).count,
@@ -371,26 +371,30 @@ final class ListingReviewUITests: XCTestCase {
         }
     }
 
-    func testEditorsStageConditionSpecificAndPriceWithoutLosingInvoker() {
+    func testInlineFieldsAndDrawersStageEveryValueWithoutLosingInvoker() {
         let app = launch(resetDraft: true)
         _ = openReview(in: app)
 
-        app.buttons["listing-review.description"].tap()
-        XCTAssertTrue(
-            app.textViews["listing-review.editor.description"]
-                .waitForExistence(timeout: 3)
-        )
+        // Description is typed where it sits. Nothing is pushed, so the
+        // retired one-field editor must not exist to be reached at all.
+        let description = app.textFields["listing-review.description"]
+        XCTAssertTrue(description.waitForExistence(timeout: 3))
+        description.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
-        app.buttons["listing-review.editor.back"].tap()
+        XCTAssertFalse(app.textViews["listing-review.editor.description"].exists)
+        description.typeText(" Boxed.")
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
-            app.buttons["listing-review.description"]
-                .waitForExistence(timeout: 3)
+            String(describing: description.value as Any).contains("Boxed.")
         )
 
+        // Condition has a fixed option set, so it opens the drawer and only
+        // commits on the drawer's own save.
         app.buttons["listing-review.condition"].tap()
         let acceptable = app.buttons["listing-review.condition.acceptable"]
         XCTAssertTrue(acceptable.waitForExistence(timeout: 3))
         acceptable.tap()
+        app.buttons["listing-review.condition.save"].tap()
         let condition = app.buttons["listing-review.condition"]
         XCTAssertTrue(condition.waitForExistence(timeout: 3))
         XCTAssertTrue(
@@ -399,21 +403,33 @@ final class ListingReviewUITests: XCTestCase {
         )
 
         app.buttons["listing-review.specifics"].tap()
-        let color = app.buttons["listing-review.specific.color"]
+        let color = app.textFields["listing-review.specific.color"]
         XCTAssertTrue(color.waitForExistence(timeout: 3))
         color.tap()
-        let specificField = app.textFields["listing-review.specific.field"]
-        XCTAssertTrue(specificField.waitForExistence(timeout: 3))
-        specificField.tap()
-        specificField.typeText(" Silver")
-        app.buttons["listing-review.specific.apply"].tap()
-        XCTAssertTrue(color.waitForExistence(timeout: 3))
+        color.typeText(" Silver")
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
             String(describing: color.value as Any).contains("Silver")
         )
 
+        // Brand is a reserved identity key. It gets a drawer that states the
+        // consequence and routes to guided correction. It never becomes a
+        // field, so the value cannot be typed past the pricing rerun.
         let brand = app.buttons["listing-review.specific.brand"]
+        XCTAssertTrue(brand.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.textFields["listing-review.specific.brand"].exists)
         brand.tap()
+        XCTAssertTrue(
+            app.staticTexts[
+                "Changing this reruns the price and rewrites the listing."
+            ].waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            app.staticTexts[
+                "It uses the guided correction included with this item."
+            ].exists
+        )
+        app.buttons["listing-review.specific.correction"].tap()
         XCTAssertTrue(
             anyElement("listing-review.correction-boundary", in: app)
                 .waitForExistence(timeout: 3)
@@ -423,27 +439,26 @@ final class ListingReviewUITests: XCTestCase {
         XCTAssertTrue(brand.isHittable)
 
         app.navigationBars.buttons.firstMatch.tap()
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         XCTAssertTrue(price.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            app.buttons["listing-review.price.apply"].exists,
+            "The two-step price editor is retired; the box is the field."
+        )
         for _ in 0..<4 where !price.isHittable {
             app.scrollViews.firstMatch.swipeDown()
         }
         XCTAssertTrue(price.isHittable)
-        price.tap()
-        let priceField = app.textFields["listing-review.price.field"]
-        let apply = app.buttons["listing-review.price.apply"]
-        XCTAssertEqual(apply.label, "Apply price, keeps it on this phone")
-        XCTAssertTrue(
-            apply.frame.height >= 44,
-            "apply target measured \(apply.frame.height)pt"
-        )
-        priceField.typeText("0")
-        apply.tap()
+        clear(price, in: app)
+        price.typeText("0")
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
             app.staticTexts["Must be above $0."].waitForExistence(timeout: 2)
         )
-        priceField.typeText("1")
-        apply.tap()
+        price.tap()
+        clear(price, in: app)
+        price.typeText("61")
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertFalse(app.staticTexts["Must be above $0."].exists)
         XCTAssertTrue(
             anyElement("listing-review.unsaved", in: app).exists
@@ -453,19 +468,18 @@ final class ListingReviewUITests: XCTestCase {
     /// The price editor used to be a bare `HStack`, so the title-weight price
     /// field squeezed the Apply button down to an unreadable sliver once
     /// Dynamic Type scaled up to the largest accessibility size (#831). The
-    /// fix reuses `footer`'s existing `isAccessibilitySize` idiom to switch
-    /// to a `VStack` instead, which this test proves two ways: both controls
-    /// stay reachable and on-screen, and the field sits structurally above
-    /// the button rather than beside it, which a squeezed `HStack` could
-    /// never produce.
-    func testPriceEditorStacksInsteadOfSqueezingAtTheLargestAccessibilitySize() {
+    /// fix stacked the two controls. #899 removes the second control entirely:
+    /// the price is one bordered field that is typed in place, so the failure
+    /// this test guards is now the field itself reflowing off screen or
+    /// dropping below the touch-target floor at that size.
+    func testThePriceFieldStaysOnScreenAtTheLargestAccessibilitySize() {
         let app = launch(
             resetDraft: true,
             extraArguments: ["--dynamic-type=accessibility5"]
         )
         _ = openReview(in: app)
 
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         let secondary = app.buttons["listing-review.secondary"]
         XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
         XCTAssertTrue(secondary.waitForExistence(timeout: loadedTreeTimeout))
@@ -493,30 +507,20 @@ final class ListingReviewUITests: XCTestCase {
         )
         price.tap()
 
-        let priceField = app.textFields["listing-review.price.field"]
-        let apply = app.buttons["listing-review.price.apply"]
         let window = app.windows.firstMatch
-        // Accessibility-size layout and the accessibility-tree snapshot it
-        // forces are measurably slower than default size (this file already
-        // budgets `loadedTreeTimeout` for the same reason elsewhere), so this
-        // waits longer than the default-size price test does for the same
-        // field.
-        XCTAssertTrue(priceField.waitForExistence(timeout: loadedTreeTimeout))
-        XCTAssertTrue(apply.waitForExistence(timeout: loadedTreeTimeout))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        // The two-step editor is gone, so there is no second control left to
+        // squeeze. What has to hold is that the one field is still typable
+        // and still inside the window at this size.
+        XCTAssertFalse(app.textFields["listing-review.price.field"].exists)
+        XCTAssertFalse(app.buttons["listing-review.price.apply"].exists)
 
         let frameReceipt =
-            "priceField.frame=\(priceField.frame), apply.frame=\(apply.frame), window.frame=\(window.frame)"
-        XCTAssertTrue(priceField.isHittable, frameReceipt)
-        XCTAssertTrue(apply.isHittable, frameReceipt)
-        XCTAssertGreaterThanOrEqual(apply.frame.height, 44, frameReceipt)
-        XCTAssertGreaterThanOrEqual(priceField.frame.height, 44, frameReceipt)
-        XCTAssertLessThanOrEqual(priceField.frame.maxX, window.frame.maxX, frameReceipt)
-        XCTAssertLessThanOrEqual(apply.frame.maxX, window.frame.maxX, frameReceipt)
-        XCTAssertLessThanOrEqual(apply.frame.maxY, window.frame.maxY, frameReceipt)
-        // The structural proof: a `VStack` puts the field's bottom edge at or
-        // above the button's top edge. A bare `HStack` squeezed to this width
-        // would instead place them side by side, sharing a vertical range.
-        XCTAssertLessThanOrEqual(priceField.frame.maxY, apply.frame.minY, frameReceipt)
+            "price.frame=\(price.frame), window.frame=\(window.frame)"
+        XCTAssertTrue(price.isHittable, frameReceipt)
+        XCTAssertGreaterThanOrEqual(price.frame.height, 44, frameReceipt)
+        XCTAssertGreaterThanOrEqual(price.frame.minX, window.frame.minX, frameReceipt)
+        XCTAssertLessThanOrEqual(price.frame.maxX, window.frame.maxX, frameReceipt)
     }
 
     /// The real OS-level Bold Text accessibility setting cannot be toggled
@@ -533,7 +537,7 @@ final class ListingReviewUITests: XCTestCase {
         let app = launch(resetDraft: true, extraArguments: ["--bold-text"])
         _ = openReview(in: app)
 
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         let secondary = app.buttons["listing-review.secondary"]
         let done = app.buttons["listing-review.done"]
         let window = app.windows.firstMatch
@@ -563,7 +567,7 @@ final class ListingReviewUITests: XCTestCase {
         let app = launch(resetDraft: true, extraArguments: ["--dynamic-type=xSmall"])
         _ = openReview(in: app)
 
-        let price = app.buttons["listing-review.price"]
+        let price = app.textFields["listing-review.price"]
         XCTAssertTrue(price.waitForExistence(timeout: loadedTreeTimeout))
         let frameReceipt = "price.frame=\(price.frame)"
         XCTAssertTrue(price.isHittable, frameReceipt)
@@ -601,6 +605,60 @@ final class ListingReviewUITests: XCTestCase {
             let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
+    }
+
+    func testANonIdentitySpecificCommitsInPlaceWithoutAPushedEditor() {
+        let app = launch(resetDraft: true)
+        _ = openReview(in: app)
+        app.buttons["listing-review.specifics"].tap()
+
+        let color = app.textFields["listing-review.specific.color"]
+        XCTAssertTrue(color.waitForExistence(timeout: 3))
+        color.tap()
+        color.typeText(" Silver")
+
+        // Nothing pushed. The seller is still on Item specifics and the
+        // retired one-field screen and its helper paragraph are both gone.
+        XCTAssertTrue(app.navigationBars["Item specifics"].exists)
+        XCTAssertFalse(app.textFields["listing-review.specific.field"].exists)
+        XCTAssertFalse(
+            app.staticTexts[
+                "Saved on this phone when you tap Done. Editing a specific never spends another AI item."
+            ].exists
+        )
+
+        app.buttons["listing-review.keyboard-done"].tap()
+        XCTAssertTrue(
+            String(describing: color.value as Any).contains("Silver")
+        )
+
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(
+            anyElement("listing-review.unsaved", in: app)
+                .waitForExistence(timeout: 3)
+        )
+    }
+
+    func testASpentCorrectionLeavesIdentitySpecificsUnavailableAndSaysWhy() {
+        let app = launch(fixture: "correction-unavailable", resetDraft: true)
+        _ = openReview(in: app)
+        app.buttons["listing-review.specifics"].tap()
+
+        let brand = app.buttons["listing-review.specific.brand"]
+        XCTAssertTrue(brand.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            brand.isEnabled,
+            "A spent correction leaves no route into an identity value."
+        )
+        XCTAssertFalse(app.textFields["listing-review.specific.brand"].exists)
+        XCTAssertEqual(
+            app.staticTexts["listing-review.specifics.correction-spent"].label,
+            "Brand and Type need guided correction, and you have used yours."
+        )
+
+        // Nothing about a spent correction stops a manual edit. Those never
+        // cost a credit, so they stay typable.
+        XCTAssertTrue(app.textFields["listing-review.specific.color"].exists)
     }
 
     private func launch(
@@ -660,7 +718,7 @@ final class ListingReviewUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let row = app.buttons["listing-review.title"]
+        let row = app.textFields["listing-review.title"]
         XCTAssertTrue(
             row.waitForExistence(timeout: 3),
             file: file,
@@ -686,20 +744,26 @@ final class ListingReviewUITests: XCTestCase {
             line: line
         )
         row.tap()
-
-        let editor = app.textViews["listing-review.editor.title"]
+        row.typeText(suffix)
+        app.buttons["listing-review.keyboard-done"].tap()
         XCTAssertTrue(
-            editor.waitForExistence(timeout: 3),
+            String(describing: row.value as Any).contains(suffix),
+            "The typed suffix must survive the field giving up focus.",
             file: file,
             line: line
         )
-        editor.tap()
-        editor.typeText(suffix)
-        app.buttons["listing-review.editor.back"].tap()
-        XCTAssertTrue(
-            row.waitForExistence(timeout: 3),
-            file: file,
-            line: line
+    }
+
+    /// Empties a field the seller would clear with the keyboard's delete key.
+    /// The price field is prefilled, so a test that only appends can never
+    /// produce the values the invalid-price path needs.
+    private func clear(_ field: XCUIElement, in app: XCUIApplication) {
+        let existing = String(describing: field.value as Any)
+        field.typeText(
+            String(
+                repeating: XCUIKeyboardKey.delete.rawValue,
+                count: max(existing.count, 1)
+            )
         )
     }
 

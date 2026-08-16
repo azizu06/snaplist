@@ -564,6 +564,52 @@ final class ListingReviewStoreTests: XCTestCase {
         XCTAssertFalse(store.isDirty)
     }
 
+    func testTheIdentityDrawerRouteLeavesNothingToSaveOnAnIdentitySpecific() async throws {
+        let snapshot = try Self.makeSnapshot()
+        // `open` re-fetches canonically rather than trusting what it was
+        // handed, so the reload has to be stocked even though this test never
+        // means to reload.
+        let service = ListingReviewRecordingService(
+            saves: [],
+            reloads: [.success(snapshot)]
+        )
+        let store = makeStore(service: service)
+        let opened = await store.open(snapshot)
+        XCTAssertTrue(opened)
+
+        // Every identity specific on the review resolves to the drawer, and
+        // the drawer's only commit is the guided correction route. Nothing on
+        // that route can reach the draft, so the screen stays clean and Done
+        // has nothing to write. A direct write here would ship a brand the
+        // pricing router and the generator never saw.
+        let identityNames = try XCTUnwrap(store.draft?.specifics)
+            .map(\.name)
+            .filter(store.isIdentitySpecific)
+        XCTAssertEqual(identityNames, ["Brand", "Model", "Condition"])
+
+        for name in identityNames {
+            XCTAssertEqual(
+                ListingReviewSpecificEditing.mode(
+                    forSpecificNamed: name,
+                    correctionAvailable: true
+                ),
+                .guidedCorrection,
+                name
+            )
+            await store.setSpecific(name: name, value: "Typed by hand")
+        }
+
+        XCTAssertEqual(
+            store.draft?.specifics.map(\.value),
+            ["Sony", "WH-1000XM4", "very-good", "Black"]
+        )
+        XCTAssertFalse(store.isDirty)
+        let outcome = await store.done()
+        XCTAssertEqual(outcome, .dismissedWithoutWrite)
+        let requests = await service.recordedSaveRequests()
+        XCTAssertEqual(requests.count, 0)
+    }
+
     private func makeStore(
         service: any ListingReviewServing,
         persistence: any ListingReviewDraftPersisting =
