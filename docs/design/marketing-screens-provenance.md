@@ -81,16 +81,33 @@ were defects and they showed up together as "the phone got shrunk and the screen
 
 The chrome is derived, not drawn. The Scan canvas is captured twice, once normally and once with the
 viewfinder photograph replaced by `#FF00FF`, and the alpha channel is a knockout of wherever the
-second capture is magenta. So the flash button, framing corners, shutter, library button, tab bar
-and status bar in the hero are the same pixels as the App Store panel. Nothing about the camera is a
-drawing that could drift from the build, which is what keeps the hero inside Apple guideline 2.3.3.
+second capture is magenta. So the flash button, framing corners, shutter, library button and tab bar
+in the hero are the same pixels as the App Store panel. Nothing about the camera is a drawing that
+could drift from the build, which is what keeps the hero inside Apple guideline 2.3.3.
 
-That knockout also settled a question worth writing down: the viewfinder photograph is full bleed at
-94% of the screen with no status-bar band above it. The white status text sits directly on the
-subject, and the approved v4 Scan package says in as many words "No shelf, panel, scrim, grounding
-gradient, or merged pill". So there is nothing to darken behind that text, and the only lever left
-is which photograph goes in. Every loop subject is chosen with a dark top strip for that reason.
-Two otherwise good candidates, a Polaroid on cyan and Ray-Bans on pale grey, were rejected on it.
+The hero carried the OS status bar and the Dynamic Island for a while after the five explorer screens
+had both stripped, so the page showed one phone with an island and five without. Aziz: "we need to
+keep it uniform so just remove the notch from both or keep the notch on both." He chose removing.
+`scripts/hero-chrome.mjs` owns that cut. It clears everything above row 176 of the 1240-wide capture
+and asserts the layer's own alpha profile first, because the status band ends at 149 and the flash
+button begins at 203, and a canvas change that moved the button up into that gap would otherwise
+clip it off the hero silently.
+
+Two things about that script are worth knowing before touching it. It operates on the captured PNG
+rather than re-deriving the knockout, because the knockout was run as a one-off and left no script
+on disk, only `tmp/scan-chrome-noshutter-1240.png`. Re-deriving it would mean guessing at a pipeline
+nobody wrote down. And the gap assertion has already paid for itself: the profile was first read
+every tenth row, which put the flash button at 210, and the assertion caught the 276 antialiased
+pixels between 203 and 209 that the sampling had stepped over.
+
+The knockout also settled a question worth writing down: the viewfinder photograph is full bleed at
+94% of the screen with no status-bar band above it, and the approved v4 Scan package says in as many
+words "No shelf, panel, scrim, grounding gradient, or merged pill". So there is nothing to darken
+behind white chrome, and the only lever is which photograph goes in. Removing the status bar took the
+worst of that away, since the white 9:41 and the status icons were the smallest, faintest marks on
+the brightest part of the frame. The flash glyph and the framing corners are still white and still
+sit on the top strip, so subjects are still chosen with a dark top. Two otherwise good candidates,
+a Polaroid on cyan and Ray-Bans on pale grey, were rejected on it.
 
 The subjects are all recognisably branded, because a generic object does not read as something
 somebody is reselling. They also have to survive a 0.462 crop, which rules out wide landscape
@@ -253,9 +270,19 @@ Neither frame draws a notch or an island. That matches Cal AI and is also forced
 the app's own chrome, so anything drawn over them lands on app content. It sat on the Trophy Wall
 title once.
 
-Their phone renders at 300px wide, 350 at their large breakpoint. Ours renders 340 to 384. Close
+Their phone renders at 300px wide, 350 at their large breakpoint. Ours renders 370 to 392. Close
 enough to Aziz's "approximately the same size", and the explorer device is deliberately the smaller
 of our two so the hero stays the lead visual.
+
+The explorer device grew once, from 340 to 392 across its steps. Aziz read the Trophy Wall screen as
+cramped, and it was the worst case of the five: a two-column grid of tiles inside a 314px screen. The
+hero at 400 is the ceiling, because he had already chosen for it to lead, so the widest step is 392
+rather than a proportional bump and the desktop gain is small. The steps were measured against the
+live page at each width that responds to them, checking that nothing overflows and that the card
+column beside the phone is not squeezed; it held 540px until the phone reached 384. Below about 410
+the frame is a flex item narrower than its declared width and shrinks to the column instead, so the
+last two steps were left alone rather than raised into no effect. The card stack takes its height
+from the row and its width from `--phone-w` once stacked, so it grew with the phone on its own.
 
 ## Known honesty gap
 
