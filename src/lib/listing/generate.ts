@@ -289,13 +289,31 @@ function fallbackListingName(attributes: ExtractedAttributes): string {
   );
 }
 
+/** Drop a core value's own trailing terminator so a fragment can be re-punctuated. */
+function stripTerminator(fragment: string): string {
+  return fragment.trim().replace(/[.!?\s]+$/u, "");
+}
+
+/**
+ * Neutralize a LABEL colon inside a core value.
+ *
+ * The core's specs are model-authored free text (`vision/extract` constrains them to
+ * strings, nothing more), so a spec can arrive already shaped as `"USB-C: 2 ports"` —
+ * which would reintroduce the very field-label form this module exists to stop, from
+ * the data side rather than the builder side. A label colon is one followed by
+ * WHITESPACE; a colon inside a value ("16:9", "1:1") is not, and is left alone.
+ */
+function neutralizeLabelColons(fragment: string): string {
+  return fragment.replace(/:\s+/gu, " ");
+}
+
 /**
  * Punctuate a core fragment as one sentence. The core's values arrive unpunctuated
  * ("wireless") or already terminated ("Tested and working."), so the existing
  * terminator is dropped and a single period re-added rather than doubled.
  */
 function asSentence(fragment: string): string {
-  const trimmed = fragment.trim().replace(/[.!?\s]+$/u, "");
+  const trimmed = stripTerminator(neutralizeLabelColons(fragment));
   return trimmed.length > 0 ? `${trimmed}.` : "";
 }
 
@@ -321,11 +339,14 @@ export function buildCoreListingDescription(
   const name = fallbackListingName(attributes);
   const condition = safeSellerCoreValue(attributes.condition);
   // A core condition is usually a bare grade ("good"), but an extracted one may already
-  // carry the noun ("good condition") — don't say it twice.
-  const identity = condition
-    ? /\bcondition$/iu.test(condition)
-      ? `${name} in ${condition}`
-      : `${name} in ${condition} condition`
+  // carry the noun anywhere in the phrase ("good condition", "used condition, minor
+  // scuffs") and may already be terminated ("Very good condition.") — don't say it
+  // twice, and don't strand the appended noun after the value's own full stop.
+  const conditionPhrase = condition ? stripTerminator(condition) : undefined;
+  const identity = conditionPhrase
+    ? /\bcondition\b/iu.test(conditionPhrase)
+      ? `${name} in ${conditionPhrase}`
+      : `${name} in ${conditionPhrase} condition`
     : name;
   const sentences = [asSentence(identity)];
   for (const spec of attributes.specs ?? []) {
