@@ -572,11 +572,15 @@ html:has(.mkt) {
 /* --------------------------------------------------------------- hero art */
 
 /* The hero device holds the real camera screen, so it keeps the phone
-   proportions and lets the shot fill it. */
+   proportions and lets the shot fill it.
+
+   360 wide with 10px padding leaves a 340 x 736 screen, which is the 744 x 1610
+   shot aspect and therefore an actual iPhone screen aspect. The frame is square
+   to the page: it used to sit at -3deg, but the screen is now a capture of the
+   shipping chrome, and rotating the frame shears that chrome along with it. */
 .mkt-hero__minimal-phone {
-  width: min(268px, 82vw);
-  aspect-ratio: 268 / 522;
-  transform: rotate(-3deg);
+  width: min(360px, 86vw);
+  aspect-ratio: 360 / 756;
 }
 
 /* Screen contents. Every screen is now a capture of the shipping app rather
@@ -590,6 +594,143 @@ html:has(.mkt) {
   height: 100%;
   object-fit: cover;
   object-position: top center;
+}
+
+/* ------------------------------------------------------- hero scanning loop */
+
+/* One cycle. Every beat below is a percentage of this, so they cannot drift
+   apart, and the item swap rides the same clock by listening for the iteration
+   boundary rather than running its own timer. */
+.mkt-scanloop {
+  --scanloop-cycle: 4400ms;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+.mkt-scanloop__item,
+.mkt-scanloop__chrome {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mkt-scanloop__item {
+  opacity: 0;
+  z-index: 0;
+  transition: opacity 500ms var(--quint);
+}
+
+.mkt-scanloop__item[data-active="true"] {
+  opacity: 1;
+  z-index: 1;
+}
+
+/* The captured camera chrome, with the viewfinder knocked out to transparency.
+   It sits above the flash so the flash whitens the subject the way a capture
+   does, and leaves the controls legible. */
+.mkt-scanloop__chrome {
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Cut from the same capture as the chrome so the pulse moves real pixels. The
+   offsets are the ring's measured position in that capture. */
+.mkt-scanloop__shutter {
+  position: absolute;
+  left: 39.0385%;
+  top: 77.6066%;
+  width: 22.1795%;
+  height: 10.782%;
+  z-index: 4;
+  pointer-events: none;
+  transform-origin: 50% 50%;
+  animation: mkt-scanloop-shutter var(--scanloop-cycle) var(--quint) infinite;
+}
+
+.mkt-scanloop__flash {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  animation: mkt-scanloop-flash var(--scanloop-cycle) linear infinite;
+}
+
+/* The one element here that is not app interface. It is a marketing device and
+   it belongs to this page only: carried into an App Store panel it would read
+   as a claim about a screen the app renders. */
+.mkt-scanloop__sweep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 10%;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(43, 81, 196, 0) 0%,
+    rgba(43, 81, 196, 0.28) 62%,
+    rgba(255, 255, 255, 0.85) 96%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  opacity: 0;
+  animation: mkt-scanloop-sweep var(--scanloop-cycle) linear infinite;
+}
+
+@keyframes mkt-scanloop-shutter {
+  0%,
+  50% {
+    transform: scale(1);
+  }
+  54.5% {
+    transform: scale(0.9);
+  }
+  60.2%,
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes mkt-scanloop-flash {
+  0%,
+  56.8% {
+    opacity: 0;
+  }
+  59.1% {
+    opacity: 0.9;
+  }
+  61.4%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes mkt-scanloop-sweep {
+  0%,
+  61.4% {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  62% {
+    opacity: 1;
+    transform: translateY(-100%);
+  }
+  87% {
+    opacity: 1;
+    transform: translateY(1000%);
+  }
+  88.6%,
+  100% {
+    opacity: 0;
+    transform: translateY(1000%);
+  }
 }
 
 /* --------------------------------------------------- feature explorer (tabs) */
@@ -823,7 +964,7 @@ html:has(.mkt) {
 .mkt-explorer {
   --phone-w: 384px;
   --phone-scale: 1.33333;
-  --phone-h: calc(var(--phone-w) * 562.5 / 288);
+  --phone-h: calc(var(--phone-w) * 600 / 288);
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -903,11 +1044,13 @@ html:has(.mkt) {
 .mkt-explorer__device {
   position: relative;
   width: 288px;
-  /* 562.5 rather than 592: the screen inside the 10px padding is then
-     268 x 542.5, exactly the 620 x 1255 aspect of every shot, so `cover` has
-     nothing to trim. At 592 it trimmed 2.5% off each side and cut the "3 of 5"
-     photo counter in half. */
-  height: 562.5px;
+  /* 600 rather than 562.5: the screen inside the 10px padding is then 268 x 580,
+     which is the 1240 x 2683 aspect of every shot and also a real iPhone screen
+     aspect, so `cover` has nothing to trim. 562.5 matched the old 620 x 1255
+     shots, but those had 219px cropped off the top and were squat at 0.494, so
+     the frame built to fit them was squat too and the screens inside it looked
+     shrunken. */
+  height: 600px;
   background: var(--ink);
   border-radius: 46px;
   padding: 10px;
@@ -1555,8 +1698,26 @@ html:has(.mkt) {
   .mkt-faq__clip,
   .mkt-faq__content,
   .mkt-explorer__slide,
-  .mkt-explorer__slide[data-active="true"] {
+  .mkt-explorer__slide[data-active="true"],
+  .mkt-scanloop__item,
+  .mkt-scanloop__item[data-active="true"] {
     transition: none !important;
+  }
+
+  /* The loop stops on its first item, which is a complete camera screen on its
+     own. Nothing is lost: the item names are already in the container's label,
+     and the shutter and sweep carry no information the still does not. The
+     item never advances either, because the swap rides the animation's
+     iteration event and that event stops firing with the animation. */
+  .mkt-scanloop__shutter,
+  .mkt-scanloop__flash,
+  .mkt-scanloop__sweep {
+    animation: none !important;
+  }
+
+  .mkt-scanloop__flash,
+  .mkt-scanloop__sweep {
+    opacity: 0 !important;
   }
 
   .mkt-tab,
