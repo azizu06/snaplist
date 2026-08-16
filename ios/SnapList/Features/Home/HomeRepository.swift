@@ -112,6 +112,16 @@ enum TrophyWallStoreFactory {
     /// bearing: the grid's dock-sized bottom padding can only be proved by a
     /// last tile that starts below the fold, and the two-column gutter only
     /// shows in a capture across several rows.
+    /// Fixed, so a capture of this wall is the same image every time. These
+    /// dates were seconds either side of the Unix epoch while they were only an
+    /// ordering key; the tiles now show them, and a wall of "Dec 31" is not a
+    /// wall anyone would recognise (#897). Order is unchanged: still newest
+    /// first, one step per tile.
+    private static let fixtureNewestUpdate = Date(
+        timeIntervalSince1970: 1_753_015_200
+    )
+    private static let fixtureUpdateStride: TimeInterval = 60 * 60 * 24
+
     private static func fixtureCards(
         principalScope: TrophyWallPrincipalScope
     ) -> [TrophyWallCard] {
@@ -128,7 +138,9 @@ enum TrophyWallStoreFactory {
                 itemName: photo.itemName,
                 coverPhotoAssetName: photo.assetName,
                 coverPhotoCrop: photo.crop,
-                lastMeaningfulUpdateAt: Date(timeIntervalSince1970: 40 - Double(index * 2))
+                lastMeaningfulUpdateAt: fixtureNewestUpdate.addingTimeInterval(
+                    -fixtureUpdateStride * Double(index)
+                )
             )
         }
     }

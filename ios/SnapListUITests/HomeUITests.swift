@@ -583,6 +583,97 @@ final class HomeUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["run.detail"].exists)
     }
 
+    /// The pill was one tap to the listing and the rest of the row was two,
+    /// through a Run Detail screen that only repeated what the row already said
+    /// and offered the same Review button again (#897). Tapping the body now
+    /// lands on the same listing the pill reaches.
+    func testProcessingReadyRowBodyOpensListingReviewAndNeverRunDetail() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--run-detail-fixture=reviewable",
+            "--listing-review-fixture=loaded",
+            "--reset-listing-review-draft",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let runID = "37500000-0000-4000-8000-000000000003"
+        let listingID = "37500000-0000-4000-8000-000000000008"
+        let row = app.buttons["trophy.processing.row.run.\(runID)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+
+        // Off to the leading side, where the item name is, so this is the row
+        // body and not the trailing pill the other test already taps.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+
+        let listingReview = app.otherElements["listing-review"]
+        XCTAssertTrue(listingReview.waitForExistence(timeout: 3))
+        XCTAssertEqual(
+            listingReview.value as? String,
+            "listing-review.binding.run.\(runID).listing.\(listingID)"
+        )
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+    }
+
+    /// The row that cannot be finished still owes the seller the screen that
+    /// explains why and offers Retry, so only the ready state changed.
+    func testProcessingUnreadyRowBodyStillOpensItsExactRunDetail() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let runID = "37500000-0000-4000-8000-000000000004"
+        let row = app.buttons["trophy.processing.row.run.\(runID)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+
+        let detail = app.otherElements["run.detail"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.otherElements["listing-review"].exists)
+    }
+
+    /// Processing had no way to ask the server for fresh status short of
+    /// leaving the screen and coming back (#897). Nothing polls, so the control
+    /// has to be here, and it has to say when it is working.
+    func testProcessingRefreshControlRunsAndReportsWhileItWorks() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=trophy-processing",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+        ]
+        app.launchAfterRetiringPriorInstance()
+
+        let refresh = app.buttons["trophy.processing.refresh"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 3))
+        XCTAssertEqual(refresh.value as? String, "")
+
+        refresh.tap()
+
+        let working = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Refreshing"),
+            object: refresh
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [working], timeout: 3), .completed)
+
+        let settled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", ""),
+            object: refresh
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [settled], timeout: 5), .completed)
+
+        // The seller asked for status, not for a different screen.
+        XCTAssertTrue(app.buttons["trophy.processing.row.run.37500000-0000-4000-8000-000000000003"].exists)
+        XCTAssertFalse(app.otherElements["run.detail"].exists)
+    }
+
     func testProcessingRetryActionProjectsOnlyServerAcceptedRetryTruth() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -717,22 +808,25 @@ final class HomeUITests: XCTestCase {
     /// `dynamicTypeSize.isAccessibilitySize ? nil : 2`, the same idiom used
     /// at the state-label site above.
     ///
-    /// This proves it structurally. "Sony Walkman" (two words, 12
-    /// characters) fits on a single line at accessibility5 whether the
-    /// title's line limit is 2 or unbounded, so its height is unaffected by
-    /// the fix and serves as this font scale's true baseline. "Vintage
-    /// Pyrex bowl set" (23 characters) does not fit within two lines at this
-    /// scale: unfixed, `.lineLimit(2)` caps it at a two-line height
-    /// (ellipsizing); fixed, it wraps to as many lines as it needs. A flat
-    /// margin over the baseline would not discriminate here, because even
-    /// the *unfixed* two-line cap is already taller than a one-line title —
-    /// so the assertion instead requires the long title to clear a multiple
-    /// of the short title's height, calibrated so the two-line unfixed
-    /// height fails it and the fixed multi-line height clears it. (Measured
-    /// against this head: "Sony Walkman" renders at 50.7pt; "Vintage Pyrex
-    /// bowl set" renders at 123.3pt unfixed — its two-line-capped height,
-    /// which does not clear the 2.5x-plus-margin threshold — and 224.3pt
-    /// fixed, roughly 4.4x the baseline, consistent with a four-line wrap.)
+    /// This used to be proved by height alone: the name shared its line with
+    /// the action pill, so at accessibility5 it had barely a third of the row
+    /// to wrap in, needed four lines, and a two-line cap visibly cut it. The
+    /// threshold was calibrated against that narrow column — clear 2.5x the
+    /// one-line baseline and the title must have wrapped past two lines.
+    ///
+    /// #897 moved the action onto its own line at accessibility sizes, so the
+    /// name now owns the full row. The same title fits inside two lines there,
+    /// and the old threshold no longer discriminates: measured against this
+    /// head, "Vintage Pyrex bowl set" renders at 123.3pt with the line limit
+    /// unbounded and at 123.3pt with `.lineLimit(2)` forced, because two lines
+    /// is all it asks for. Height cannot tell the two apart anymore.
+    ///
+    /// What the wider column can still prove is the condition that made
+    /// truncation possible in the first place. "Sony Walkman" (12 characters)
+    /// fits one line at this scale and shares its row with a pill, so it is
+    /// the squeezed-column baseline. The long title must be given more width
+    /// than that, must wrap past a single line, and must be drawn complete
+    /// inside its own row rather than clipped against it.
     func testTrophyWallProcessingItemNameStopsTruncatingAtLargestAccessibilitySize() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -759,15 +853,24 @@ final class HomeUITests: XCTestCase {
 
         let receipt =
             "shortTitle.frame=\(shortTitle.frame), longTitle.frame=\(longTitle.frame)"
-        // The unfixed two-line cap already renders taller than one line, so
-        // a flat margin over the short title would pass on both sides of
-        // the fix. Requiring more than 2.5x the one-line baseline instead
-        // fails against the unfixed two-line-capped height and only clears
-        // once the title is free to wrap past two lines.
+        // Wider than the column a pill leaves beside it: this is the #897 fix,
+        // and it is what keeps the title inside two lines at this scale.
+        XCTAssertGreaterThan(
+            longTitle.frame.width,
+            shortTitle.frame.width,
+            receipt
+        )
+        // Still wrapping rather than collapsing onto one clipped line.
         XCTAssertGreaterThan(
             longTitle.frame.height,
-            (shortTitle.frame.height * 2.5) + 10,
+            shortTitle.frame.height,
             receipt
+        )
+        // Drawn complete inside its row. A row that failed to grow for the
+        // name would cut it here even though the name itself is unbounded.
+        XCTAssertTrue(
+            firstRow.frame.contains(longTitle.frame),
+            receipt + ", firstRow.frame=\(firstRow.frame)"
         )
     }
 

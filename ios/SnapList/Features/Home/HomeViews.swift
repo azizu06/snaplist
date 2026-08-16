@@ -227,7 +227,12 @@ private struct TrophyWallSettledTileView: View {
             // The rounded fill does not reach the corners of its cell, so
             // without this the tap dies in the gap the grid leaves around it.
             .contentShape(.rect)
-            .accessibilityElement(children: .ignore)
+            // `.accessibilityElement(children: .ignore)` used to sit here. On a
+            // button it publishes a fresh element and the label and identifier
+            // land on that one, leaving the button itself nameless and
+            // unaddressable, which is why every test that reaches a tile by id
+            // stopped finding one. The tile's contents are decoration and hide
+            // themselves, so the button needs nothing but its own two facts.
             .accessibilityLabel(tile.accessibilityLabel)
             .accessibilityIdentifier(identifier)
         } else {
@@ -239,22 +244,50 @@ private struct TrophyWallSettledTileView: View {
     }
 
     private var surface: some View {
-        SnapListColorToken.quietFill.color
-            .aspectRatio(TrophyWallGridMetrics.tileAspectRatio, contentMode: .fit)
-            .overlay {
-                photo
-            }
-        .clipShape(
-            .rect(cornerRadius: TrophyWallGridMetrics.tileCornerRadiusPoints)
-        )
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: TrophyWallGridMetrics.tileCornerRadiusPoints
-            )
-            .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
+        VStack(
+            alignment: .leading,
+            spacing: TrophyWallGridMetrics.tileCaptionSpacingPoints
+        ) {
+            SnapListColorToken.quietFill.color
+                .aspectRatio(
+                    TrophyWallGridMetrics.tileAspectRatio,
+                    contentMode: .fit
+                )
+                .overlay {
+                    photo
+                }
+                .clipShape(
+                    .rect(
+                        cornerRadius: TrophyWallGridMetrics
+                            .tileCornerRadiusPoints
+                    )
+                )
+                .overlay {
+                    RoundedRectangle(
+                        cornerRadius: TrophyWallGridMetrics
+                            .tileCornerRadiusPoints
+                    )
+                    .stroke(SnapListColorToken.hairline.color, lineWidth: 0.5)
+                }
+
+            // The wall stayed a grid of photos with no date anywhere on it,
+            // even though the tile already knew when the item went up (#897).
+            Text(tile.publishedDateLabel)
+                .snapListTypography(.status)
+                .foregroundStyle(SnapListColorToken.textSecondary.color)
+                .lineLimit(1)
+                // The spoken label already names this date in full, and a
+                // second child inside the button's label is enough for SwiftUI
+                // to build the control's accessibility from the caption
+                // instead, dropping the tile's own label and identifier.
+                .accessibilityHidden(true)
         }
     }
 
+    /// Decoration. An asset-backed `Image` publishes itself with the asset name
+    /// as its label, and inside the tile button that child outranked the tile's
+    /// own label and identifier, so the wall spoke "FirstValueSneaker" and no
+    /// test could address a tile by id.
     @ViewBuilder
     private var photo: some View {
         GeometryReader { proxy in
@@ -280,6 +313,7 @@ private struct TrophyWallSettledTileView: View {
                 fallback
             }
         }
+        .accessibilityHidden(true)
     }
 
     private var fallback: some View {
@@ -427,6 +461,9 @@ struct TrophyWallProcessingView: View {
     let onAction: (TrophyWallProcessingAction) -> Void
     let onScan: () -> Void
     let onTryAgain: () -> Void
+    let onRefresh: () async -> Void
+
+    @State private var refreshHost = TrophyWallProcessingRefreshHost()
 
     init(
         rows: [TrophyWallProcessingRow],
@@ -436,7 +473,8 @@ struct TrophyWallProcessingView: View {
         openRoute: @escaping (HomeRoute) -> Void,
         onAction: @escaping (TrophyWallProcessingAction) -> Void,
         onScan: @escaping () -> Void,
-        onTryAgain: @escaping () -> Void
+        onTryAgain: @escaping () -> Void,
+        onRefresh: @escaping () async -> Void = {}
     ) {
         self.rows = rows
         self.collectionOutcome = collectionOutcome
@@ -446,6 +484,39 @@ struct TrophyWallProcessingView: View {
         self.onAction = onAction
         self.onScan = onScan
         self.onTryAgain = onTryAgain
+        self.onRefresh = onRefresh
+    }
+
+    /// The seller's one way to ask Processing for fresh status. It reports
+    /// while it works and refuses a second ask until that one finishes, so the
+    /// screen never claims to be doing two things at once (#897).
+    private var refreshControl: some View {
+        Button {
+            Task { await refreshHost.refresh(onRefresh) }
+        } label: {
+            Group {
+                switch refreshHost.state {
+                case .idle:
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 17, weight: .medium))
+                case .refreshing:
+                    ProgressView()
+                }
+            }
+            .frame(
+                width: SnapListMetrics.minimumTouchTarget,
+                height: SnapListMetrics.minimumTouchTarget
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(refreshHost.state == .refreshing)
+        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+        .accessibilityLabel("Refresh")
+        .accessibilityValue(
+            refreshHost.state == .refreshing ? "Refreshing" : ""
+        )
+        .accessibilityIdentifier("trophy.processing.refresh")
     }
 
     var body: some View {
@@ -480,6 +551,8 @@ struct TrophyWallProcessingView: View {
                         .foregroundStyle(SnapListColorToken.inkPrimary.color)
 
                     Spacer(minLength: 0)
+
+                    refreshControl
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 10)
@@ -522,7 +595,11 @@ struct TrophyWallProcessingView: View {
                                 if row.id != presentation.visibleRows.last?.id {
                                     Divider()
                                         .foregroundStyle(SnapListColorToken.hairline.color)
-                                        .padding(.leading, 69)
+                                        .padding(
+                                            .leading,
+                                            TrophyWallProcessingRowMetrics
+                                                .nameColumnInsetPoints
+                                        )
                                 }
                             }
 
@@ -899,6 +976,41 @@ struct TrophyWallProcessingRowPhoto: View {
     }
 }
 
+/// How a processing row arranges the item name and the action beside it. Both
+/// sat on one horizontal line at every type size with only the row's own
+/// trailing padding between them, so a long name was squeezed against the pill
+/// and, at an accessibility size, broke mid-word (#897).
+enum TrophyWallProcessingRowMetrics {
+    enum Layout: Hashable {
+        /// Name on the leading side, action on the trailing side.
+        case sideBySide
+        /// Action under the name, which then owns the full row width.
+        case actionBelowName
+    }
+
+    /// Kept clear between the name and the action so a name that wraps to the
+    /// end of its line still reads as separate from the pill.
+    static let actionGapPoints: CGFloat = 12
+    static let minimumHeightPoints: CGFloat = 66
+    static let horizontalPaddingPoints: CGFloat = 14
+    static let verticalPaddingPoints: CGFloat = 11
+    /// Between the photo slot and the name beside it.
+    static let photoGapPoints: CGFloat = 11
+
+    /// Where the name column starts. The row divider is inset to the same
+    /// place, and so is the action once it moves under the name, so all three
+    /// share one edge instead of three literals that can drift apart.
+    static var nameColumnInsetPoints: CGFloat {
+        horizontalPaddingPoints
+            + TrophyWallProcessingPhotoMetrics.sidePoints
+            + photoGapPoints
+    }
+
+    static func layout(for dynamicTypeSize: DynamicTypeSize) -> Layout {
+        dynamicTypeSize.isAccessibilitySize ? .actionBelowName : .sideBySide
+    }
+}
+
 private struct TrophyWallProcessingRowView: View {
     let row: TrophyWallProcessingRow
     let openRoute: (HomeRoute) -> Void
@@ -906,59 +1018,121 @@ private struct TrophyWallProcessingRowView: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    private var layout: TrophyWallProcessingRowMetrics.Layout {
+        TrophyWallProcessingRowMetrics.layout(for: dynamicTypeSize)
+    }
+
     var body: some View {
-        HStack(spacing: 0) {
-            Group {
-                if let destination = row.destination {
-                    Button {
-                        openRoute(destination)
-                    } label: {
-                        content
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(row.accessibilityLabel)
-                    .accessibilityIdentifier(row.accessibilityIdentifier)
-                } else {
-                    content
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(row.accessibilityLabel)
-                        .accessibilityIdentifier(row.accessibilityIdentifier)
+        switch layout {
+        case .sideBySide:
+            HStack(spacing: 0) {
+                activatableContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if row.action != nil {
+                    actionControl
+                        // The row's own trailing padding was the only thing
+                        // between a wrapped name and the pill, so the two read
+                        // as one crowded block (#897).
+                        .padding(
+                            .leading,
+                            TrophyWallProcessingRowMetrics.actionGapPoints
+                        )
+                        .padding(
+                            .trailing,
+                            TrophyWallProcessingRowMetrics
+                                .horizontalPaddingPoints
+                        )
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let action = row.action {
-                Button {
-                    onAction(action)
-                } label: {
-                    Text(action.label)
-                        .snapListTypography(.status)
-                        .foregroundStyle(action.foregroundColor)
-                        .frame(minWidth: SnapListMetrics.minimumTouchTarget)
-                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                        .padding(.horizontal, 10)
-                        .background(action.backgroundColor)
-                        .clipShape(.rect(cornerRadius: 12))
-                        .overlay {
-                            if action.showsBorder {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(
-                                        SnapListColorToken.hairline.color,
-                                        lineWidth: 1
-                                    )
-                            }
-                        }
+        case .actionBelowName:
+            // The pill's own width leaves the name too narrow to wrap at an
+            // accessibility size, so the action takes its own line and the
+            // name gets the whole row (#897).
+            VStack(
+                alignment: .leading,
+                spacing: TrophyWallProcessingRowMetrics.actionGapPoints
+            ) {
+                activatableContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if row.action != nil {
+                    actionControl
+                        // Lined up with the name above it and the row divider
+                        // below, rather than with the row's own edge.
+                        .padding(
+                            .leading,
+                            TrophyWallProcessingRowMetrics.nameColumnInsetPoints
+                        )
+                        .padding(
+                            .trailing,
+                            TrophyWallProcessingRowMetrics
+                                .horizontalPaddingPoints
+                        )
+                        .padding(
+                            .bottom,
+                            TrophyWallProcessingRowMetrics.verticalPaddingPoints
+                        )
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(action.accessibilityLabel(for: row.itemName))
-                .accessibilityIdentifier(action.accessibilityIdentifier)
-                .padding(.trailing, 14)
             }
         }
     }
 
+    private var activatableContent: some View {
+        Group {
+            if let activation = row.activation {
+                Button {
+                    switch activation {
+                    case .route(let destination):
+                        openRoute(destination)
+                    case .action(let action):
+                        onAction(action)
+                    }
+                } label: {
+                    content
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(row.accessibilityLabel)
+                .accessibilityIdentifier(row.accessibilityIdentifier)
+            } else {
+                content
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(row.accessibilityLabel)
+                    .accessibilityIdentifier(row.accessibilityIdentifier)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var actionControl: some View {
+        if let action = row.action {
+            Button {
+                onAction(action)
+            } label: {
+                Text(action.label)
+                    .snapListTypography(.status)
+                    .foregroundStyle(action.foregroundColor)
+                    .frame(minWidth: SnapListMetrics.minimumTouchTarget)
+                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                    .padding(.horizontal, 10)
+                    .background(action.backgroundColor)
+                    .clipShape(.rect(cornerRadius: 12))
+                    .overlay {
+                        if action.showsBorder {
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(
+                                    SnapListColorToken.hairline.color,
+                                    lineWidth: 1
+                                )
+                        }
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(action.accessibilityLabel(for: row.itemName))
+            .accessibilityIdentifier(action.accessibilityIdentifier)
+        }
+    }
+
     private var content: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: TrophyWallProcessingRowMetrics.photoGapPoints) {
             TrophyWallProcessingRowPhoto(row: row)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -972,7 +1146,7 @@ private struct TrophyWallProcessingRowView: View {
                     Text(row.stateLabel)
                         .snapListTypography(.status)
                         .foregroundStyle(
-                            row.destination == nil
+                            row.activation == nil
                                 ? SnapListColorToken.textSecondary.color
                                 : SnapListColorToken.inkPrimary.color
                         )
@@ -982,9 +1156,15 @@ private struct TrophyWallProcessingRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .frame(minHeight: 66)
+        .padding(
+            .horizontal,
+            TrophyWallProcessingRowMetrics.horizontalPaddingPoints
+        )
+        .padding(
+            .vertical,
+            TrophyWallProcessingRowMetrics.verticalPaddingPoints
+        )
+        .frame(minHeight: TrophyWallProcessingRowMetrics.minimumHeightPoints)
         .contentShape(.rect)
     }
 }
