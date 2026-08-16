@@ -986,15 +986,28 @@ html:has(.mkt) {
   }
 }
 
-/* The frame is drawn at 288x592 and scaled uniformly, so `scale()` needs a
+/* The frame is drawn at 288x598 and scaled uniformly, so `scale()` needs a
    unitless factor. CSS cannot divide a length by a length, so the width and its
    factor are declared together in fixed steps rather than derived from a clamp().
    The steps are chosen to land on the design's computed width at each proof
    width (1440, 1024, 768, 430, 390, 375) and to stay inside the section's
-   content box at every one, so nothing can overflow horizontally. */
+   content box at every one, so nothing can overflow horizontally.
+
+   Grown once. Aziz read the Trophy Wall screen as cramped, and it was the
+   smallest case: a two-column grid of tiles inside a 314px screen. The ceiling
+   is the hero phone at 400, which leads the page and stays the larger of the
+   two, so the widest step is 392 rather than a proportional bump. Measured at
+   each responding width against the live page: 1440 goes to 392, 1279 to 376,
+   1058 to 370, 759 to 376. None overflow, and none squeeze the card column,
+   which held 540 until 384 and so sets the practical cap below 1280 too.
+
+   Below about 410 the frame is a flex item narrower than its declared width and
+   shrinks to the column, so these values stop being the governing number. The
+   last two steps are left alone for that reason rather than raised into no
+   effect. */
 .mkt-explorer {
-  --phone-w: 384px;
-  --phone-scale: 1.33333;
+  --phone-w: 392px;
+  --phone-scale: 1.36111;
   --phone-h: calc(var(--phone-w) * 598 / 288);
   display: flex;
   flex-direction: row;
@@ -1005,22 +1018,22 @@ html:has(.mkt) {
 
 @media (max-width: 1279px) {
   .mkt-explorer {
-    --phone-w: 360px;
-    --phone-scale: 1.25;
+    --phone-w: 376px;
+    --phone-scale: 1.30556;
   }
 }
 
 @media (max-width: 1139px) {
   .mkt-explorer {
-    --phone-w: 340px;
-    --phone-scale: 1.18056;
+    --phone-w: 370px;
+    --phone-scale: 1.28472;
   }
 }
 
 @media (max-width: 759px) {
   .mkt-explorer {
-    --phone-w: 352px;
-    --phone-scale: 1.22222;
+    --phone-w: 376px;
+    --phone-scale: 1.30556;
   }
 }
 
@@ -1056,7 +1069,7 @@ html:has(.mkt) {
   max-width: 100%;
 }
 
-/* The frame is designed at 288x592 and scaled uniformly, so every internal
+/* The frame is designed at 288x598 and scaled uniformly, so every internal
    dimension stays in proportion at any breakpoint. */
 .mkt-explorer__frame {
   position: relative;

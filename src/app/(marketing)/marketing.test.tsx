@@ -688,8 +688,17 @@ describe("feature explorer semantics", () => {
     // The hero phone leads the page and is the only animated one, so it outranks
     // the explorer device rather than sitting under it. It shipped at 360
     // against the explorer's 384, which inverted that.
-    const heroWidth = css.match(/\.mkt-hero__minimal-phone\s*\{[^}]*--phone-body:\s*min\((\d+)px/);
-    expect(Number(heroWidth?.[1])).toBeGreaterThan(384);
+    //
+    // Both sides are read out of the stylesheet. Pinning the explorer's width as
+    // a literal here is what let it go stale when the explorer grew, and a stale
+    // number on this side of the comparison silently stops guarding the ranking.
+    const heroWidth = Number(
+      css.match(/\.mkt-hero__minimal-phone\s*\{[^}]*--phone-body:\s*min\((\d+)px/)?.[1],
+    );
+    const widestExplorer = Number(css.match(/\.mkt-explorer\s*\{[^}]*--phone-w:\s*(\d+)px/)?.[1]);
+    expect(heroWidth).toBeGreaterThan(0);
+    expect(widestExplorer).toBeGreaterThan(0);
+    expect(heroWidth).toBeGreaterThan(widestExplorer);
   });
 
   it("keeps the shutter's shadow in CSS rather than burnt into the layer", async () => {
