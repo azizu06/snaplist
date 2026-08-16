@@ -67,6 +67,34 @@ export const activationGuidanceEnvelopeSchema = z
   })
   .strict();
 
+/**
+ * A push registration as the client may state it (#890).
+ *
+ * No user id, and strict: the seller's identity comes from the verified bearer,
+ * so a body carrying a tenant is refused outright rather than quietly dropped.
+ * A client that sent one believed it was choosing the owner, and answering 200
+ * to that would be agreeing. The token shape mirrors the column's own check
+ * constraint, so a malformed registration is a client error here instead of an
+ * unavailable service after the database rejects it.
+ */
+export const deviceTokenRegistrationSchema = z
+  .object({
+    platform: z.literal("ios"),
+    token: z.string().regex(/^[0-9a-f]{64,512}$/),
+  })
+  .strict();
+
+export type DeviceTokenRegistration = z.infer<
+  typeof deviceTokenRegistrationSchema
+>;
+
+export const deviceTokenEnvelopeSchema = z
+  .object({
+    data: z.object({ registered: z.boolean() }).strict(),
+    meta: apiMetaSchema,
+  })
+  .strict();
+
 export const ebayOauthSessionSchema = z
   .object({
     sessionId: z.string().uuid(),

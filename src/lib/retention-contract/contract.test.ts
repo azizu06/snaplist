@@ -105,6 +105,7 @@ describe("lean-MVP release retention contract", () => {
       "items",
       "user-settings",
       "activation-guidance-completion",
+      "device-tokens",
       "ebay-drafts",
       "export-packs",
       "pipeline-runs",
@@ -179,6 +180,34 @@ describe("lean-MVP release retention contract", () => {
             "snaplist-account-erasure-activation-guidance-completion-trigger",
           completionProof:
             "the tenant activation_guidance_completions row is absent and the exhaustive account-erasure owned-row count includes the table",
+        },
+      ],
+    });
+  });
+
+  // A device token is the address of a specific phone. Erasure that left one
+  // behind would keep a deleted account reachable, so the row has to name the
+  // trigger that removes it and the counter that proves it is gone — and it has
+  // to survive the one identity change SnapList performs, guest to member,
+  // without becoming an orphan nothing will ever delete.
+  it("defines the push device token deletion disposition", () => {
+    const devices = contract.data.find(({ id }) => id === "device-tokens");
+
+    expect(devices).toEqual({
+      id: "device-tokens",
+      releaseDatum: true,
+      dispositions: [
+        {
+          treatment: "delete",
+          owner: "seller-snaplist-tenant",
+          deletionTriggers: ["account-erasure"],
+          maximumRetention:
+            "for the account lifetime; a claimed guest's row is re-keyed to the claiming account rather than orphaned, and every row is deleted synchronously when account erasure begins",
+          executor: "snaplist-account-erasure-device-token-trigger",
+          completionProof:
+            "the tenant device_tokens rows are absent and private.account_erasure_owned_row_count includes the table",
+          ownerDecision:
+            "Issue #890 stores only the APNs token, platform, owning Clerk subject, and last-seen timestamp. The row is keyed on (user_id, platform, token), so a device shared by two sellers is two independently owned rows and neither account can be re-keyed onto the other; the one legitimate re-key runs inside the guest-claim trigger, which learns both identities from the recovery record rather than from a caller.",
         },
       ],
     });

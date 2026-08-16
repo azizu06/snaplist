@@ -14,6 +14,7 @@ import {
   type ItemDeletionReceipt,
 } from "@/lib/item-deletion/service";
 import type { ActivationGuidanceCompletionStore } from "@/lib/activation-guidance/store";
+import type { PushDeviceTokenStore } from "@/lib/push-device-tokens/store";
 import {
   ListingReviewIdempotencyConflictError,
   ListingReviewNotEditableError,
@@ -88,6 +89,8 @@ import {
   revenueCatConfigurationEnvelopeSchema,
   sessionEnvelopeSchema,
   activationGuidanceEnvelopeSchema,
+  deviceTokenEnvelopeSchema,
+  deviceTokenRegistrationSchema,
   workerSummaryEnvelopeSchema,
   type ApiErrorCode,
   type EbayOauthSession,
@@ -162,6 +165,12 @@ export interface MobileApiDependencies {
   authenticate(token: string): Promise<MobileApiPrincipal>;
   /** #566 signed-in seller completion marker, read and written through RLS. */
   activationGuidance?: ActivationGuidanceCompletionStore;
+  /**
+   * #890 push registration, written through RLS. Optional because an
+   * unconfigured deployment must decline the registration rather than accept
+   * one it cannot store; nothing a seller does depends on it succeeding.
+   */
+  deviceTokens?: PushDeviceTokenStore;
   /** #387 owns the tenant-bound, one-time mobile eBay Sandbox OAuth seam. */
   ebayOauth?: {
     createSession(input: {
@@ -482,6 +491,92 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "Activation guidance is temporarily unavailable.",
+        );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/device-tokens`) {
+      // Write-only. A device token is an address the server holds, not state
+      // the app reads back, and a route that returned one would be a way to
+      // ask the server for a seller's phone.
+      if (request.method !== "POST") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      let requestBody: unknown;
+      try {
+        requestBody = await request.json();
+      } catch {
+        requestBody = null;
+      }
+      const registration = deviceTokenRegistrationSchema.safeParse(requestBody);
+      if (!registration.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid device registration is required.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      if (!dependencies.deviceTokens) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Device registration is temporarily unavailable.",
+        );
+      }
+      try {
+        // A guest's bearer is an App Attest capability rather than a project
+        // JWT, so the RLS-scoped write needs one freshly minted per-operation
+        // token. Guests are exactly the sellers who reach a first submission.
+        const registrationToken = principal.mintOperationToken
+          ? await principal.mintOperationToken()
+          : token;
+        await dependencies.deviceTokens.register({
+          bearerToken: registrationToken,
+          platform: registration.data.platform,
+          token: registration.data.token,
+          userId: principal.userId,
+        });
+        return json(
+          deviceTokenEnvelopeSchema.parse({
+            data: { registered: true },
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.device-tokens", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Device registration is temporarily unavailable.",
         );
       }
     }
