@@ -8,8 +8,12 @@ import ImageIO
 
 enum PhotoReviewV5VisualContract {
     static let contentGutter: CGFloat = 18
-    static let heroHeight: CGFloat = 300
+    // #858: taller than the original 300pt Photo Review v5 hero so a seller can
+    // read more of the photo before scrolling. 380 keeps the hero comfortably
+    // inside the scrollable region above the pinned Start Listing footer.
+    static let heroHeight: CGFloat = 380
     static let heroRadius: CGFloat = 16
+    static let heroNavigationTargetSize: CGFloat = 44
     static let thumbnailSize: CGFloat = 64
     static let thumbnailRadius: CGFloat = 12
     static let thumbnailGap: CGFloat = 10
@@ -83,14 +87,59 @@ enum PhotoReviewLayoutLandmark: Hashable {
     case title
     case countPill
     case hero
+    case heroPrevious
+    case heroNext
     case thumbnailStrip
     case thumbnail(Int)
     case addPhoto
     case coverPill
     case actionRow
+    case deleteControl
     case voiceNote
     case footer
     case startListing
+}
+
+/// #858: the hero's direct-navigation direction. Shared by the swipe gesture
+/// and the visible chevron buttons so both paths move selection identically.
+private enum PhotoReviewHeroNavigationDirection {
+    case previous
+    case next
+
+    var indexOffset: Int {
+        switch self {
+        case .previous: -1
+        case .next: 1
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .previous: "chevron.left"
+        case .next: "chevron.right"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .previous: "Previous photo"
+        case .next: "Next photo"
+        }
+    }
+
+    var accessibilityIdentifier: String {
+        switch self {
+        case .previous: "photo-review.hero.previous"
+        case .next: "photo-review.hero.next"
+        }
+    }
+
+    var landmark: PhotoReviewLayoutLandmark {
+        switch self {
+        case .previous: .heroPrevious
+        case .next: .heroNext
+        }
+    }
 }
 
 struct PhotoReviewLayoutObservation: Equatable {
@@ -3895,8 +3944,103 @@ struct PhotoReviewView: View {
                 )
             )
             .accessibilityIdentifier("photo-review.hero")
+            .simultaneousGesture(heroSwipeGesture)
+            .overlay {
+                heroNavigationControls(selectedIndex: selectedIndex)
+            }
             .photoReviewLayoutLandmark(.hero)
         }
+    }
+
+    // #858: direct hero navigation. A swipe is a fast path for a sighted seller;
+    // the chevrons are the accessible equivalent VoiceOver and Switch Control can
+    // reach without depending on a swipe gesture at all. Both call the same
+    // `navigateHero`, so the two stay in sync with the thumbnail strip, which
+    // already re-renders its selected state from `store.selectedPhotoID`.
+    @ViewBuilder
+    private func heroNavigationControls(selectedIndex: Int) -> some View {
+        if store.photos.count > 1 {
+            HStack(spacing: 0) {
+                heroNavigationButton(
+                    direction: .previous,
+                    isEnabled: selectedIndex > 0
+                )
+                Spacer(minLength: 0)
+                heroNavigationButton(
+                    direction: .next,
+                    isEnabled: selectedIndex < store.photos.count - 1
+                )
+            }
+            .padding(.horizontal, 10)
+        }
+    }
+
+    private func heroNavigationButton(
+        direction: PhotoReviewHeroNavigationDirection,
+        isEnabled: Bool
+    ) -> some View {
+        Button {
+            navigateHero(direction)
+        } label: {
+            Image(systemName: direction.systemImageName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
+                // Explicit frame, not padding: padding-based targets collapse
+                // below 44pt at xSmall Dynamic Type while an explicit minimum
+                // holds regardless of the glyph's rendered size.
+                .frame(
+                    width: PhotoReviewV5VisualContract.heroNavigationTargetSize,
+                    height: PhotoReviewV5VisualContract.heroNavigationTargetSize
+                )
+                .background(
+                    SnapListColorToken.scrimOverlay.color.opacity(0.55),
+                    in: Circle()
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.35)
+        .disabled(!isEnabled)
+        .accessibilityLabel(direction.accessibilityLabel)
+        .accessibilityIdentifier(direction.accessibilityIdentifier)
+        .photoReviewLayoutLandmark(direction.landmark)
+    }
+
+    private var heroSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height)
+                else {
+                    return
+                }
+                navigateHero(value.translation.width < 0 ? .next : .previous)
+            }
+    }
+
+    private func navigateHero(_ direction: PhotoReviewHeroNavigationDirection) {
+        guard let selectedPhoto,
+              let currentIndex = store.photos.firstIndex(
+                  where: { $0.id == selectedPhoto.id }
+              )
+        else {
+            return
+        }
+        let targetIndex = currentIndex + direction.indexOffset
+        guard store.photos.indices.contains(targetIndex) else {
+            return
+        }
+        let targetPhoto = store.photos[targetIndex]
+        guard store.selectPhotoForNavigation(id: targetPhoto.id) else {
+            return
+        }
+        UIAccessibility.post(
+            notification: .announcement,
+            argument: photoAccessibilityLabel(
+                index: targetIndex,
+                isSelected: true,
+                includesThumbnailActions: false
+            )
+        )
     }
 
     private var thumbnailStrip: some View {
@@ -4360,6 +4504,7 @@ struct PhotoReviewView: View {
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Delete this photo")
                 .accessibilityIdentifier("photo-review.delete")
+                .photoReviewLayoutLandmark(.deleteControl)
         }
     }
 

@@ -2409,7 +2409,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(recoveryLibrary.label, "Choose from library")
     }
 
-    func testPhotoReviewREV02UsesLive300PointHeroAt402x874() {
+    func testPhotoReviewREV02UsesTallerThreeEightyPointHeroAt402x874() {
         let app = launch(extraArguments: ["--photo-review-state=REV-02"])
         let window = app.windows.firstMatch
         let hero = app.buttons["photo-review.hero"]
@@ -2420,9 +2420,66 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(hero.waitForExistence(timeout: 3))
         XCTAssertEqual(
             hero.frame.height,
-            300,
+            380,
             accuracy: 1,
-            "Live Photo Review v5 fixes the hero at 300 points."
+            "#858: Photo Review v5's hero grew from 300 to 380 points."
+        )
+    }
+
+    // #858: direct hero navigation. REV-03 stages five photos so both chevrons
+    // are reachable mid-strip, and this is real `XCUIElement.tap()` — the one
+    // seam that actually proves the button's action wires through to the
+    // store and that the thumbnail strip stays in sync, which cannot be
+    // proved below the UI layer.
+    func testPhotoReviewHeroNavigationButtonsAdvanceSelectionAndStayInSyncWithTheThumbnailStrip() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-03"])
+        let hero = app.buttons["photo-review.hero"]
+        let next = app.buttons["photo-review.hero.next"]
+        let previous = app.buttons["photo-review.hero.previous"]
+        let firstThumbnail = app.buttons["photo-review.thumbnail.1"]
+        let secondThumbnail = app.buttons["photo-review.thumbnail.2"]
+        let thirdThumbnail = app.buttons["photo-review.thumbnail.3"]
+
+        XCTAssertTrue(hero.waitForExistence(timeout: 3))
+        XCTAssertTrue(next.exists)
+        XCTAssertEqual(next.label, "Next photo")
+        XCTAssertTrue(previous.exists)
+        XCTAssertEqual(previous.label, "Previous photo")
+        XCTAssertTrue(firstThumbnail.isSelected)
+        XCTAssertFalse(secondThumbnail.isSelected)
+
+        next.tap()
+
+        XCTAssertTrue(secondThumbnail.isSelected)
+        XCTAssertFalse(firstThumbnail.isSelected)
+        XCTAssertTrue(hero.label.hasPrefix("Photo 2 of 5"))
+
+        next.tap()
+
+        XCTAssertTrue(thirdThumbnail.isSelected)
+        XCTAssertFalse(secondThumbnail.isSelected)
+        XCTAssertTrue(hero.label.hasPrefix("Photo 3 of 5"))
+
+        previous.tap()
+
+        XCTAssertTrue(secondThumbnail.isSelected)
+        XCTAssertFalse(thirdThumbnail.isSelected)
+        XCTAssertTrue(hero.label.hasPrefix("Photo 2 of 5"))
+    }
+
+    func testPhotoReviewHeroNavigationHidesAtOnePhotoAndDoesNotOpenActionsRow() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-01"])
+        let hero = app.buttons["photo-review.hero"]
+
+        XCTAssertTrue(hero.waitForExistence(timeout: 3))
+        XCTAssertFalse(
+            app.buttons["photo-review.hero.next"].exists,
+            "A single staged photo has nothing to navigate to."
+        )
+        XCTAssertFalse(app.buttons["photo-review.hero.previous"].exists)
+        XCTAssertFalse(
+            app.buttons["photo-review.delete"].exists,
+            "Navigation must not open the Replace/Delete actions row by itself."
         )
     }
 
