@@ -3557,6 +3557,15 @@ final class SnapListUITests: XCTestCase {
     /// Renamed from `...ReachCAP01` (#864): the staged-library handoff used to
     /// land the seller on the CAP-01 launcher card; it now lands directly on
     /// the camera preview with the staged photos already counted in.
+    ///
+    /// Unlike the CAP-01 version, this test's "continue to capture" tap
+    /// actually reaches the camera and durably stages a photo into
+    /// `NativeIntake` — deliberately durable across relaunches so a seller's
+    /// staged photo survives one, which means it also survives past this
+    /// test's own process unless cleaned up. `--reset-capture-draft` in the
+    /// existing cleanup relaunch (previously only resetting onboarding
+    /// progress) prevents that leaking into whichever test shares this shard
+    /// invocation's app container next (#864).
     func testStagedLibraryPhotosSurviveInterruptionAndReachTheCameraPreview() {
         let app = XCUIApplication()
         defer {
@@ -3564,7 +3573,8 @@ final class SnapListUITests: XCTestCase {
             let cleanup = XCUIApplication()
             cleanup.launchArguments = [
                 "--fixture=onboarding",
-                "--reset-onboarding-progress"
+                "--reset-onboarding-progress",
+                "--reset-capture-draft"
             ]
             cleanup.launchAfterRetiringPriorInstance()
             cleanup.terminate()
