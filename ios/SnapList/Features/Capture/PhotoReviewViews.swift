@@ -13,13 +13,31 @@ enum PhotoReviewV5VisualContract {
     // inside the scrollable region above the pinned Start Listing footer.
     static let heroHeight: CGFloat = 380
     static let heroRadius: CGFloat = 16
-    static let heroNavigationTargetSize: CGFloat = 44
+    // #883: the hero's page indicator, measured off
+    // `facebook-page-dots-reference.png` — a small scrim capsule of dots sitting
+    // on the photo just above its bottom edge, centered on its horizontal axis.
+    // The dots are deliberately smaller than a `UIPageControl`'s: the reference
+    // reads as a quiet marker on the photo, not a control competing with it.
+    static let heroPageIndicatorDotSize: CGFloat = 6
+    static let heroPageIndicatorDotSpacing: CGFloat = 4
+    static let heroPageIndicatorHorizontalPadding: CGFloat = 7
+    static let heroPageIndicatorVerticalPadding: CGFloat = 5
+    static let heroPageIndicatorBottomInset: CGFloat = 12
+    static let heroPageIndicatorFillOpacity: Double = 0.55
+    static let heroPageIndicatorInactiveDotOpacity: Double = 0.45
     static let thumbnailSize: CGFloat = 64
     static let thumbnailRadius: CGFloat = 12
     static let thumbnailGap: CGFloat = 10
     static let thumbnailStripTopPadding: CGFloat = 16
     static let actionRowHeight: CGFloat = 44
     static let actionRowGap: CGFloat = 8
+    // #883: Replace and Delete, measured off `replace-delete-reference.png` —
+    // an equal-width pair of outlined tiles on the canvas, each carrying a
+    // leading glyph beside its label, both in the same neutral ink. The
+    // reference does not tint Delete red, so neither does this row.
+    static let actionRowRadius: CGFloat = 12
+    static let actionRowIconSpacing: CGFloat = 8
+    static let actionRowBorderWidth: CGFloat = 1
     static let voiceRowHeight: CGFloat = 56
     static let voiceRowTopPadding: CGFloat = 16
     static let voiceRowRadius: CGFloat = 14
@@ -81,19 +99,44 @@ private struct PhotoReviewSecondaryActionButtonStyle: ButtonStyle {
     }
 }
 
+/// #883: the outlined tile `replace-delete-reference.png` shows for Replace and
+/// Delete. `.bordered` filled them with the system's tint instead, which is what
+/// the reference was given to correct.
+private struct PhotoReviewActionRowButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(SnapListColorToken.canvas.color)
+            .clipShape(
+                .rect(cornerRadius: PhotoReviewV5VisualContract.actionRowRadius)
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: PhotoReviewV5VisualContract.actionRowRadius
+                )
+                .stroke(
+                    SnapListColorToken.neutralOutline.color,
+                    lineWidth: PhotoReviewV5VisualContract.actionRowBorderWidth
+                )
+            }
+            .opacity(isEnabled ? (configuration.isPressed ? 0.72 : 1) : 0.45)
+    }
+}
+
 enum PhotoReviewLayoutLandmark: Hashable {
     case header
     case back
     case title
     case countPill
     case hero
-    case heroPrevious
-    case heroNext
+    case heroPageIndicator
     case thumbnailStrip
     case thumbnail(Int)
     case addPhoto
     case coverPill
     case actionRow
+    case replaceControl
     case deleteControl
     case voiceNote
     case footer
@@ -101,8 +144,9 @@ enum PhotoReviewLayoutLandmark: Hashable {
 }
 
 /// #858: the hero's direct-navigation direction. Shared by the swipe gesture
-/// and the visible chevron buttons so both paths move selection identically.
-private enum PhotoReviewHeroNavigationDirection {
+/// and, since #883 retired the chevron buttons, by the named accessibility
+/// actions that took their place, so every path moves selection identically.
+private enum PhotoReviewHeroNavigationDirection: CaseIterable, Hashable {
     case previous
     case next
 
@@ -113,32 +157,35 @@ private enum PhotoReviewHeroNavigationDirection {
         }
     }
 
-    var systemImageName: String {
-        switch self {
-        case .previous: "chevron.left"
-        case .next: "chevron.right"
-        }
-    }
-
     var accessibilityLabel: String {
         switch self {
         case .previous: "Previous photo"
         case .next: "Next photo"
         }
     }
+}
 
-    var accessibilityIdentifier: String {
-        switch self {
-        case .previous: "photo-review.hero.previous"
-        case .next: "photo-review.hero.next"
-        }
+/// #883: what the hero says about where the seller is, and which moves it
+/// offers to VoiceOver and Switch Control now that no chevron carries either
+/// answer. Kept out of the view so both can be asserted directly.
+enum PhotoReviewHeroNavigationPolicy {
+    static func hasSomewhereToGo(photoCount: Int) -> Bool {
+        photoCount > 1
     }
 
-    var landmark: PhotoReviewLayoutLandmark {
-        switch self {
-        case .previous: .heroPrevious
-        case .next: .heroNext
+    static func accessibilityActionLabels(photoCount: Int) -> [String] {
+        guard hasSomewhereToGo(photoCount: photoCount) else {
+            return []
         }
+        return PhotoReviewHeroNavigationDirection.allCases
+            .map(\.accessibilityLabel)
+    }
+
+    static func pageIndicatorAccessibilityLabel(
+        selectedIndex: Int,
+        photoCount: Int
+    ) -> String {
+        "Photo \(selectedIndex + 1) of \(photoCount)"
     }
 }
 
@@ -3528,12 +3575,12 @@ struct PhotoReviewView: View {
                                 }
 
                                 if store.actionsPhotoID != nil {
+                                    // #883: width only. A fixed height here is a
+                                    // hard clamp the row's own 44pt floor cannot
+                                    // push past, which is what truncated Replace
+                                    // and Delete at accessibility Dynamic Type.
                                     actionRow
-                                        .frame(
-                                            width: contentWidth,
-                                            height: PhotoReviewV5VisualContract
-                                                .actionRowHeight
-                                        )
+                                        .frame(width: contentWidth)
                                         .photoReviewLayoutLandmark(.actionRow)
                                         .padding(
                                             .top,
@@ -3944,66 +3991,98 @@ struct PhotoReviewView: View {
                 )
             )
             .accessibilityIdentifier("photo-review.hero")
-            .simultaneousGesture(heroSwipeGesture)
-            .overlay {
-                heroNavigationControls(selectedIndex: selectedIndex)
+            // #883: the chevrons were the path VoiceOver and Switch Control
+            // could take without a swipe gesture. They are gone from the photo,
+            // but the two named moves they carried stay on the hero itself, so
+            // nobody is left with the swipe as their only way forward.
+            .accessibilityActions {
+                if PhotoReviewHeroNavigationPolicy.hasSomewhereToGo(
+                    photoCount: store.photos.count
+                ) {
+                    ForEach(
+                        PhotoReviewHeroNavigationDirection.allCases,
+                        id: \.self
+                    ) { direction in
+                        Button(direction.accessibilityLabel) {
+                            navigateHero(direction)
+                        }
+                    }
+                }
+            }
+            // #883: the swipe outranks the hero's own tap. Under
+            // `simultaneousGesture` both fired on lift, and the tap's
+            // `selectPhotoForActions` carried the photo captured when the view
+            // last rendered, so every swipe advanced selection and then handed
+            // it straight back while opening Replace and Delete. The drag needs
+            // 24pt to recognize, so a tap still opens the actions row.
+            .highPriorityGesture(heroSwipeGesture)
+            .overlay(alignment: .bottom) {
+                heroPageIndicator(selectedIndex: selectedIndex)
             }
             .photoReviewLayoutLandmark(.hero)
         }
     }
 
-    // #858: direct hero navigation. A swipe is a fast path for a sighted seller;
-    // the chevrons are the accessible equivalent VoiceOver and Switch Control can
-    // reach without depending on a swipe gesture at all. Both call the same
-    // `navigateHero`, so the two stay in sync with the thumbnail strip, which
-    // already re-renders its selected state from `store.selectedPhotoID`.
+    // #883: the page indicator, built to `facebook-page-dots-reference.png` — a
+    // scrim capsule of dots sitting on the photo just above its bottom edge,
+    // centered. It is a marker, not a control: `allowsHitTesting(false)` keeps
+    // the hero's own tap and swipe working straight through it, and VoiceOver
+    // reads the position off the label rather than counting dots.
     @ViewBuilder
-    private func heroNavigationControls(selectedIndex: Int) -> some View {
-        if store.photos.count > 1 {
-            HStack(spacing: 0) {
-                heroNavigationButton(
-                    direction: .previous,
-                    isEnabled: selectedIndex > 0
-                )
-                Spacer(minLength: 0)
-                heroNavigationButton(
-                    direction: .next,
-                    isEnabled: selectedIndex < store.photos.count - 1
-                )
+    private func heroPageIndicator(selectedIndex: Int) -> some View {
+        if PhotoReviewHeroNavigationPolicy.hasSomewhereToGo(
+            photoCount: store.photos.count
+        ) {
+            HStack(
+                spacing: PhotoReviewV5VisualContract.heroPageIndicatorDotSpacing
+            ) {
+                ForEach(store.photos.indices, id: \.self) { index in
+                    Circle()
+                        .fill(
+                            SnapListColorToken.onDarkSurface.color.opacity(
+                                index == selectedIndex
+                                    ? 1
+                                    : PhotoReviewV5VisualContract
+                                        .heroPageIndicatorInactiveDotOpacity
+                            )
+                        )
+                        .frame(
+                            width: PhotoReviewV5VisualContract
+                                .heroPageIndicatorDotSize,
+                            height: PhotoReviewV5VisualContract
+                                .heroPageIndicatorDotSize
+                        )
+                }
             }
-            .padding(.horizontal, 10)
-        }
-    }
-
-    private func heroNavigationButton(
-        direction: PhotoReviewHeroNavigationDirection,
-        isEnabled: Bool
-    ) -> some View {
-        Button {
-            navigateHero(direction)
-        } label: {
-            Image(systemName: direction.systemImageName)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(SnapListColorToken.onDarkSurface.color)
-                // Explicit frame, not padding: padding-based targets collapse
-                // below 44pt at xSmall Dynamic Type while an explicit minimum
-                // holds regardless of the glyph's rendered size.
-                .frame(
-                    width: PhotoReviewV5VisualContract.heroNavigationTargetSize,
-                    height: PhotoReviewV5VisualContract.heroNavigationTargetSize
+            .padding(
+                .horizontal,
+                PhotoReviewV5VisualContract.heroPageIndicatorHorizontalPadding
+            )
+            .padding(
+                .vertical,
+                PhotoReviewV5VisualContract.heroPageIndicatorVerticalPadding
+            )
+            .background(
+                SnapListColorToken.scrimOverlay.color.opacity(
+                    PhotoReviewV5VisualContract.heroPageIndicatorFillOpacity
+                ),
+                in: Capsule()
+            )
+            .allowsHitTesting(false)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                PhotoReviewHeroNavigationPolicy.pageIndicatorAccessibilityLabel(
+                    selectedIndex: selectedIndex,
+                    photoCount: store.photos.count
                 )
-                .background(
-                    SnapListColorToken.scrimOverlay.color.opacity(0.55),
-                    in: Circle()
-                )
-                .contentShape(Circle())
+            )
+            .accessibilityIdentifier("photo-review.hero.page-indicator")
+            .photoReviewLayoutLandmark(.heroPageIndicator)
+            .padding(
+                .bottom,
+                PhotoReviewV5VisualContract.heroPageIndicatorBottomInset
+            )
         }
-        .buttonStyle(.plain)
-        .opacity(isEnabled ? 1 : 0.35)
-        .disabled(!isEnabled)
-        .accessibilityLabel(direction.accessibilityLabel)
-        .accessibilityIdentifier(direction.accessibilityIdentifier)
-        .photoReviewLayoutLandmark(direction.landmark)
     }
 
     private var heroSwipeGesture: some Gesture {
@@ -4468,44 +4547,71 @@ struct PhotoReviewView: View {
         )
     }
 
+    // #883: built to `replace-delete-reference.png` — an equal-width pair of
+    // outlined tiles on the canvas, each carrying a leading glyph beside its
+    // label, both in the same neutral ink. The reference does not tint Delete
+    // red, so this row does not either; the destructive moment is the
+    // confirmation that follows, not the button that opens it. At accessibility
+    // Dynamic Type the pair stacks, because half a row cannot hold either label
+    // at those sizes without truncating it.
     @ViewBuilder
     private var actionRow: some View {
-        HStack(spacing: PhotoReviewV5VisualContract.actionRowGap) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(
+                VStackLayout(spacing: PhotoReviewV5VisualContract.actionRowGap)
+            )
+            : AnyLayout(
+                HStackLayout(spacing: PhotoReviewV5VisualContract.actionRowGap)
+            )
+
+        layout {
             if let photoID = store.actionsPhotoID {
                 Button {
                     presentPicker(.replace(photoID: photoID))
                 } label: {
-                    Text("Replace")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    actionRowLabel(
+                        systemImageName: "arrow.triangle.2.circlepath",
+                        title: "Replace"
+                    )
                 }
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: PhotoReviewV5VisualContract.actionRowHeight,
-                    maxHeight: PhotoReviewV5VisualContract.actionRowHeight
-                )
-                .buttonStyle(.bordered)
+                .buttonStyle(PhotoReviewActionRowButtonStyle())
                 .accessibilityLabel("Replace this photo")
                 .accessibilityIdentifier("photo-review.replace")
+                .photoReviewLayoutLandmark(.replaceControl)
                 .accessibilityFocused(
                     $focusedPickerOpener,
                     equals: .replaceButton(photoID: photoID)
                 )
             }
 
-            Button(role: .destructive, action: performDelete) {
-                Text("Delete")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Button(action: performDelete) {
+                actionRowLabel(systemImageName: "trash", title: "Delete")
             }
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: PhotoReviewV5VisualContract.actionRowHeight,
-                    maxHeight: PhotoReviewV5VisualContract.actionRowHeight
-                )
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Delete this photo")
-                .accessibilityIdentifier("photo-review.delete")
-                .photoReviewLayoutLandmark(.deleteControl)
+            .buttonStyle(PhotoReviewActionRowButtonStyle())
+            .accessibilityLabel("Delete this photo")
+            .accessibilityIdentifier("photo-review.delete")
+            .photoReviewLayoutLandmark(.deleteControl)
         }
+    }
+
+    private func actionRowLabel(
+        systemImageName: String,
+        title: String
+    ) -> some View {
+        HStack(spacing: PhotoReviewV5VisualContract.actionRowIconSpacing) {
+            Image(systemName: systemImageName)
+                .accessibilityHidden(true)
+            Text(title)
+        }
+        .snapListTypography(.rowTitle)
+        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: PhotoReviewV5VisualContract.actionRowHeight
+        )
+        .contentShape(.rect)
     }
 
     // Live Photo Review v5 owns this collapsed row. Voice Note v8 owns only the
