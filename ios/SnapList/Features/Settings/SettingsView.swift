@@ -238,16 +238,12 @@ struct SettingsView: View {
                         }
                     }
                 } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(SettingsGuestBoundaryCopy.title)
-                            .font(.subheadline.weight(.semibold))
-                        Text(SettingsGuestBoundaryCopy.body)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 24)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("settings.guest-boundary")
+                    Text(SettingsGuestBoundaryCopy.body)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 24)
+                        .accessibilityIdentifier("settings.guest-boundary")
                 }
                 Text(
                     "SnapList \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") · \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1")"
@@ -579,6 +575,10 @@ struct SettingsView: View {
             // accessibility size the label draws ~67pt and the extra glyphs
             // spill into the card below instead of pushing it down (#836).
             .frame(minHeight: 18, alignment: .leading)
+            // Matches settingsCardRow's own horizontal padding (#888) so the
+            // header text lines up with the row label under it instead of
+            // the card edge.
+            .padding(.leading, 16)
             .padding(.top, 19)
             .padding(.bottom, 3)
     }
