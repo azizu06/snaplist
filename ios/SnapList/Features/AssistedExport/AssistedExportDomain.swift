@@ -278,14 +278,13 @@ struct AssistedExportDomain: Equatable, Sendable {
     }
 
     func accessibilityLabel(for destination: AssistedExportDestination) -> String {
-        let status: String
-        switch handoff(for: destination) {
-        case .prepared:
-            status = "not shared"
-        case let .shared(at: date):
-            status = AssistedExportCopy.sharedStatus(on: date).lowercased()
-        }
         let disclosure = isWorkspaceOpen(destination) ? "open" : "closed"
+        // Routed through `statusText` rather than re-deriving the same
+        // status: a sighted seller and a VoiceOver seller must agree on
+        // whether an untouched row says anything at all.
+        guard let status = statusText(for: destination)?.lowercased() else {
+            return "\(destination.displayName), \(disclosure)"
+        }
         return "\(destination.displayName), \(status), \(disclosure)"
     }
 

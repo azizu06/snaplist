@@ -802,7 +802,9 @@ final class AssistedExportDomainTests: XCTestCase {
         )
         XCTAssertEqual(
             domain.accessibilityLabel(for: .mercari),
-            "Mercari, not shared, open"
+            "Mercari, open",
+            "The new pack text retired the handoff too, so a sighted seller "
+                + "and a VoiceOver seller must agree the row says nothing yet."
         )
     }
 
