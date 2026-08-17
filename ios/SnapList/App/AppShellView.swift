@@ -479,6 +479,15 @@ struct AppShellView: View {
                         )
                     }
                     let recoveryScope = trophyWallStore.principalScope
+                    // `currentScope` cannot disagree with `recoveryScope` here:
+                    // `principalScope` is a `let`, and this loop captured one
+                    // store instance that is never replaced for its lifetime.
+                    // What actually keeps the load from landing on a departed
+                    // seller is the fence above, which runs before this line on
+                    // the same snapshot. The re-check stays because
+                    // `TrophyWallPendingCardRecovery` is a general seam with its
+                    // own `.stalePrincipal` coverage, but at this call site it
+                    // is a restatement, not the protection.
                     let localCardRecovery = await TrophyWallPendingCardRecovery
                         .resolve(
                             scopedTo: recoveryScope,

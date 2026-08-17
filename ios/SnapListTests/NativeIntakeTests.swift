@@ -1519,13 +1519,29 @@ final class NativeIntakeTests: XCTestCase {
     }
     /// The shell reads the principal exactly once, from the snapshot it is
     /// already processing, so the snapshot has to name the principal the intake
-    /// filed it under (#871). Two sellers sharing a component would share a
+    /// filed it under (#871) — the same directory, not merely some name derived
+    /// from the same seller. Two sellers sharing a component would share a
     /// durable directory, and an installation-scoped intake names no principal
     /// at all rather than one nobody can claim.
     func testASnapshotNamesThePrincipalItIsFiledUnder() async throws {
         let (harness, session) = try await makeSession(.clerk("user_native_intake_scope_a"))
         XCTAssertTrue(session.snapshot.isPrincipalBound)
         let seller = try XCTUnwrap(session.snapshot.principalScopeComponent)
+
+        // Distinctness alone would hold for any principal-derived digest, and a
+        // digest that is merely distinct sends the wall's photos to a directory
+        // beside the intake's rather than inside the same principal's. Staging a
+        // photo makes the intake commit to a directory on disk, so the name the
+        // snapshot hands the shell can be compared against the one the intake
+        // actually filed under.
+        let staged = try await session.commit(.addPhotos([harness.photoInput(seed: 7)]))
+        let filedUnder = intakeRoot(
+            containing: try XCTUnwrap(staged.photos.first?.photoURL)
+        ).lastPathComponent
+        XCTAssertEqual(staged.principalScopeComponent, filedUnder,
+            "The snapshot has to name the directory the intake filed it under.")
+        XCTAssertEqual(seller, filedUnder,
+            "Staging a photo does not move the seller to a different principal.")
 
         await harness.identity.set(.clerk("user_native_intake_scope_b"))
         let arriving = try await session.nextSnapshot()
