@@ -2139,11 +2139,20 @@ final class SnapListUITests: XCTestCase {
     ///
     /// CAM-04 stages photos, so the review row and the thumbnail strip are both
     /// present and competing for the same vertical space.
+    ///
+    /// Activation guidance is parked on another surface on purpose. Left where
+    /// the preceding tests put it, the ACT-01 coach mark docks over this band
+    /// and takes the zoom control's taps, which is a real defect this issue
+    /// found and did not fix. Pinning it means this test measures reach at AX5,
+    /// which #885 owns, rather than that overlap, which belongs to #914. So
+    /// this test cannot fail for #914 by construction, and that gap is recorded
+    /// in #916.
     func testIssue885EveryMovedScanControlKeepsA44ptTargetAtAX5() {
         let app = launch(extraArguments: [
             "--visual-state=CAM-04",
             "--scan-zoom=dual-wide",
-            "--dynamic-type=accessibility5"
+            "--dynamic-type=accessibility5",
+            "--activation-guidance-step=listingReview"
         ])
         let window = app.windows.firstMatch
         let flash = app.buttons["scan.flash"]
@@ -2164,6 +2173,10 @@ final class SnapListUITests: XCTestCase {
             .joined(separator: " ") + " window=\(window.frame)"
 
         for control in controls {
+            // A 44pt frame a seller cannot land a finger on is not a 44pt
+            // target, and XCUITest drops a tap on an unhittable element without
+            // erroring, so measuring only the rectangle would pass either way.
+            XCTAssertTrue(control.isHittable, "\(control.identifier) \(receipt)")
             XCTAssertGreaterThanOrEqual(control.frame.width, 44, receipt)
             XCTAssertGreaterThanOrEqual(control.frame.height, 44, receipt)
             XCTAssertGreaterThanOrEqual(control.frame.minX, window.frame.minX, receipt)
@@ -2211,7 +2224,16 @@ final class SnapListUITests: XCTestCase {
         // thing above the home indicator rather than the second to last.
         XCTAssertFalse(app.buttons["dock.scan"].exists)
         XCTAssertFalse(app.buttons["dock.trophy-wall"].exists)
-        XCTAssertLessThanOrEqual(shutter.frame.maxY, window.frame.maxY)
+        // Absence of the dock buttons is not the same as the space they used to
+        // occupy being gone, so pin the gap the shutter row now leaves below
+        // itself. Asserting only that the shutter is above the window bottom
+        // would hold for any layout, dock or no dock.
+        XCTAssertEqual(
+            window.frame.maxY - shutter.frame.maxY,
+            66.5,
+            accuracy: 2,
+            "shutter=\(shutter.frame) window=\(window.frame)"
+        )
     }
 
     func testIssue775RealAppShellRemovesDockFromLiveCameraPreviewAt402x874() {
