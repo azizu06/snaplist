@@ -520,15 +520,16 @@ final class ListingReviewUITests: XCTestCase {
         // a dirty screen and takes the refusal it already takes for any other
         // unsaved edit. Nothing is pushed and the seller stays put.
         //
-        // `entry.isHittable` below is the assertion that carries the claim, so
-        // do not trim it as the redundant-looking one. The other three are true
-        // in both worlds and are kept only as diagnosis: pushing resigns focus,
-        // which fires the blur flush, so the unsaved strip appears either way;
-        // the field's own State holds the typed title whether or not it reached
-        // the draft; and the `ebay-publish.back` negative is a race with that
-        // same late flush. Only still being on the review screen, with the
-        // entry hittable, distinguishes the guard refusing from the guard
-        // passing and the pushed screen going blank.
+        // Two assertions carry the claim and neither is redundant, because the
+        // fix can fail in two different directions. The `listing-review.unsaved`
+        // assertion is the one that actually went red: once the guard passes,
+        // the strip is on the screen left behind and the tree shows only the
+        // pushed destination, so it is absent. `entry.isHittable` catches the
+        // other direction, where the seller ends up off this screen for a
+        // reason that has nothing to do with the guard. The remaining two are
+        // diagnosis only — the field's own State holds the typed title whether
+        // or not it reached the draft, and the `ebay-publish.back` negative
+        // races the late blur flush that lands after the push.
         XCTAssertTrue(
             anyElement("listing-review.unsaved", in: app)
                 .waitForExistence(timeout: 5),
@@ -601,9 +602,12 @@ final class ListingReviewUITests: XCTestCase {
         )
         entry.tap()
 
-        // As above, `entry.isHittable` is the discriminating assertion: the
-        // commit runs before the guard, the guard sees a dirty screen, and the
-        // seller stays on review instead of reaching eBay or a blank push.
+        // As above, and in the same two directions. The recorded RED for this
+        // selector failed at the `listing-review.unsaved` assertion below, not
+        // at `entry.isHittable`: without the commit the guard passes, the push
+        // happens, and the strip is no longer in the tree. `entry.isHittable`
+        // is the backstop for leaving this screen some other way — a tap that
+        // lands on the footer's Done, for instance, which saves and dismisses.
         XCTAssertTrue(
             anyElement("listing-review.unsaved", in: app)
                 .waitForExistence(timeout: 5),
