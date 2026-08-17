@@ -48,8 +48,10 @@ export async function stackReachable({
   return reachable;
 }
 
-// Isolated per file: vitest runs each file in its own process, so this counts
-// only the current file's skips, and the `afterAll` below fires once per file.
+// Isolated per file: vitest's default isolation resets this module's state
+// between test files (confirmed empirically — each file sees a fresh forked
+// process under the default `pool`), so this counts only the current file's
+// skips, and the `afterAll` below fires once per file.
 let skippedInThisFile = 0;
 let filePath: string | undefined;
 
