@@ -657,17 +657,8 @@ final class HomeUITests: XCTestCase {
 
         refresh.tap()
 
-        let working = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "Refreshing"),
-            object: refresh
-        )
-        XCTAssertEqual(XCTWaiter().wait(for: [working], timeout: 3), .completed)
-
-        let settled = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", ""),
-            object: refresh
-        )
-        XCTAssertEqual(XCTWaiter().wait(for: [settled], timeout: 5), .completed)
+        assertValueIsReached("Refreshing", on: refresh, timeout: 3)
+        assertValueIsReached("", on: refresh, timeout: 5)
 
         // The seller asked for status, not for a different screen.
         XCTAssertTrue(app.buttons["trophy.processing.row.run.37500000-0000-4000-8000-000000000003"].exists)
@@ -919,6 +910,45 @@ final class HomeUITests: XCTestCase {
         ] + extraArguments
         app.launchAfterRetiringPriorInstance()
         return app
+    }
+
+    /// Waits for an element's accessibility `value` to be exactly `expected`,
+    /// sampling the element itself rather than handing the question to
+    /// `XCTNSPredicateExpectation`.
+    ///
+    /// #926. The refresh control's `Refreshing` state lives about a second, and
+    /// a predicate expectation could not be relied on to sample inside it: over
+    /// six probe taps on iPhone 17 Pro / iOS 26.5, reading `value` directly the
+    /// instant `tap()` returned saw `Refreshing` 6 times out of 6, while
+    /// `XCTNSPredicateExpectation(value == "Refreshing")` reported `.completed`
+    /// only once. Raising the timeout cannot fix that — by the time the
+    /// expectation's next sample lands the state is over — and widening what
+    /// counts as in-flight would assert nothing. Sampling as fast as a snapshot
+    /// allows keeps the claim exact and stops it from missing a state the app
+    /// really did show.
+    ///
+    /// `value` is `Any?`, so it is unwrapped through `as? String` rather than
+    /// interpolated; a `String(describing:)` comparison would be measuring
+    /// `Optional(Refreshing)`.
+    private func assertValueIsReached(
+        _ expected: String,
+        on element: XCUIElement,
+        timeout: TimeInterval,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var observed = element.value as? String
+        while observed != expected, Date() < deadline {
+            observed = element.value as? String
+        }
+        XCTAssertEqual(
+            observed,
+            expected,
+            "\(element) never reached value \(expected) within \(timeout)s.",
+            file: file,
+            line: line
+        )
     }
 
     private func waitForDisappearance(

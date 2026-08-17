@@ -177,13 +177,30 @@ struct EbayPublishView: View {
                 }
             } else if showsBackButton {
                 ToolbarItem(placement: .topBarLeading) {
+                    // A minimum target on a toolbar button has to be inside the
+                    // button's own label, and the toolbar's own button style has
+                    // to be off. Measured on iPhone 17 Pro / iOS 26.5 (#926):
+                    // this button wrapped in `.frame(min…: 44)` reported a
+                    // 36x36 hit rect, because the toolbar's button style draws
+                    // its own 36pt capsule; adding `.buttonStyle(.plain)` while
+                    // the frame stayed outside dropped it to 22.67, the bare
+                    // chevron, because a frame around a `ToolbarItem`'s button
+                    // never reaches that button's hit rect at all. Sizing the
+                    // label from inside, with the toolbar style off, is the one
+                    // arrangement that actually produces 44x44.
                     Button(action: backToListing) {
                         Label("Back", systemImage: "chevron.left")
+                            .frame(
+                                minWidth: SnapListMetrics.minimumTouchTarget,
+                                minHeight: SnapListMetrics.minimumTouchTarget
+                            )
+                            .contentShape(.rect)
                     }
-                    .frame(
-                        minWidth: SnapListMetrics.minimumTouchTarget,
-                        minHeight: SnapListMetrics.minimumTouchTarget
-                    )
+                    .buttonStyle(.plain)
+                    // `.buttonStyle(.plain)` drops the toolbar's tint along with
+                    // its capsule, so the chevron keeps its accent colour here
+                    // rather than turning into body text.
+                    .foregroundStyle(.tint)
                     .accessibilityLabel("Back to my listing")
                     .accessibilityIdentifier("ebay-publish.back")
                 }
@@ -227,17 +244,20 @@ struct EbayPublishView: View {
         }
     }
 
+    // Same toolbar hit-rect rule as the plain back button above: the minimum
+    // target only counts from inside the label (#926).
     private var approvedConnectBackButton: some View {
         Button(action: backToListing) {
             Image(systemName: "chevron.left")
                 .font(.system(size: 21, weight: .medium))
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                .frame(
+                    minWidth: SnapListMetrics.minimumTouchTarget,
+                    minHeight: SnapListMetrics.minimumTouchTarget
+                )
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .frame(
-            minWidth: SnapListMetrics.minimumTouchTarget,
-            minHeight: SnapListMetrics.minimumTouchTarget
-        )
         .offset(x: -8)
         .accessibilityLabel("Back to my listing")
         .accessibilityIdentifier("ebay-publish.back")
@@ -670,15 +690,19 @@ struct GuestClaimView: View {
         .toolbar {
             if showsAuthenticationBack {
                 ToolbarItem(placement: .topBarLeading) {
+                    // Same toolbar hit-rect rule as `ebay-publish.back` (#926).
                     Button {
                         store.cancelAuthentication()
                     } label: {
                         Label("Back", systemImage: "chevron.left")
+                            .frame(
+                                minWidth: SnapListMetrics.minimumTouchTarget,
+                                minHeight: SnapListMetrics.minimumTouchTarget
+                            )
+                            .contentShape(.rect)
                     }
-                    .frame(
-                        minWidth: SnapListMetrics.minimumTouchTarget,
-                        minHeight: SnapListMetrics.minimumTouchTarget
-                    )
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tint)
                     .accessibilityLabel(authenticationBackLabel)
                     .accessibilityIdentifier("guest-claim.auth-back")
                 }
