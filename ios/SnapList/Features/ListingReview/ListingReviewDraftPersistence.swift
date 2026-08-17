@@ -69,7 +69,7 @@ struct ListingReviewDraft: Codable, Equatable, Sendable {
         let name = name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        switch name {
+        return switch name {
         case "brand", "model", "condition", "isbn", "upc":
             "reserved:\(name)"
         case "category", "type":
