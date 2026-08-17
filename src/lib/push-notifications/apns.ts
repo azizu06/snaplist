@@ -239,8 +239,11 @@ export function createApnsHttp2Transport(
     const open = sessions.get(origin);
     if (open && !open.closed && !open.destroyed) return open;
     const session = connect(origin);
-    session.on("close", () => sessions.delete(origin));
-    session.on("error", () => sessions.delete(origin));
+    const evictSelf = () => {
+      if (sessions.get(origin) === session) sessions.delete(origin);
+    };
+    session.on("close", evictSelf);
+    session.on("error", evictSelf);
     sessions.set(origin, session);
     return session;
   }
