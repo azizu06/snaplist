@@ -214,8 +214,15 @@ describe("marketing honesty", () => {
 });
 
 describe("marketing destinations", () => {
-  it("sizes the includes cards to their copy beside the phone and keeps them equal once stacked", () => {
-    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8");
+  it("sizes the includes cards to their copy, keeps the gaps small, and sizes the phone under the hero", () => {
+    // Comments are stripped first. These rules explain themselves at length and
+    // name the shapes they replaced, so a `not.toMatch` against the raw text
+    // fails on the prose that documents the old value rather than on a real
+    // declaration.
+    const css = readFileSync(resolve("src/app/(marketing)/marketing.css"), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    );
     const explorer = css.match(/\.mkt-explorer\s*\{[^}]*\}/)?.[0] ?? "";
     const stage = css.match(/\.mkt-explorer__stage\s*\{[^}]*\}/)?.[0] ?? "";
     // There is more than one `@media (max-width: 759px)` block in the file, so
@@ -234,18 +241,36 @@ describe("marketing destinations", () => {
     expect(stage).toMatch(/transform:\s*translateY\(31px\)/);
     expect(tablist).toMatch(/display:\s*grid/);
 
-    // Beside the phone the rows take their own copy's height and the leftover
-    // column height goes between the cards. Equal 1fr rows used to stretch each
-    // card to a fifth of the phone, which left about 59px of empty card at a
-    // desktop width once the phone grew.
+    // Beside the phone the rows take their own copy's height and nothing
+    // stretches the column to the phone, so the leftover cannot land inside the
+    // cards or between them. Both earlier shapes are pinned out by name: 1fr
+    // rows put 174px of card around 115px of text, and auto rows over
+    // `space-between` moved that same leftover into 76px gaps.
     expect(tablist).toMatch(/grid-template-rows:\s*repeat\(5,\s*auto\)/);
-    expect(tablist).toMatch(/align-content:\s*space-between/);
+    expect(tablist).toMatch(/align-content:\s*center/);
+    expect(tablist).not.toMatch(/align-content:\s*space-between/);
     expect(tablist).not.toMatch(/grid-template-rows:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
+    expect(tablist).not.toMatch(/min-height:\s*var\(--phone-w?h?\)/);
+    expect(tablist).not.toMatch(/align-self:\s*stretch/);
 
-    // Stacked, there is no phone to match and no leftover to redistribute, so
-    // the five stay equal to the tallest.
-    expect(stackedTablist).toMatch(/min-height:\s*auto/);
+    // The gap is small and bounded rather than derived from the phone. Cal AI
+    // runs 22px around cards of about 173px; this holds 16 to 20 around 137 to
+    // 150, which is the same 0.13 ratio.
+    expect(tablist).toMatch(/gap:\s*clamp\(16px,\s*1\.7vw,\s*20px\)/);
+
+    // Stacked, the cards sit below the phone rather than beside it, so 1fr
+    // simply sizes all five to the tallest.
     expect(stackedTablist).toMatch(/grid-template-rows:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
+
+    // The phone is now sized to the stack, so its widest step has to stay under
+    // the hero's. This compares two fixed pixel values and covers the desktop
+    // band only; below 760 the hero is a viewport share and the ordering there
+    // is proved by measuring rendered heights, not by reading this file.
+    const explorerSteps = [...css.matchAll(/--phone-w:\s*(\d+)px/g)].map((m) => Number(m[1]));
+    const heroBody = css.match(/--phone-body:\s*min\((\d+)px/)?.[1];
+    expect(explorerSteps.length).toBeGreaterThan(4);
+    expect(heroBody).toBeDefined();
+    expect(Math.max(...explorerSteps)).toBeLessThan(Number(heroBody));
 
     expect(selectedCard).toMatch(/transform:\s*translateY\(-8px\)/);
     expect(selectedCard).not.toMatch(/scale\(/);
