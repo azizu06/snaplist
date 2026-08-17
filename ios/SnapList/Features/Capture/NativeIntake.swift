@@ -703,9 +703,18 @@ actor NativeIntake {
     /// call's caller reschedules already removes exactly that, along with any
     /// deferred unmatched voice under it at its own original deadline.
     ///
-    /// Fails closed: anything unexpected leaves both directories untouched and
-    /// the arriving scope loads whatever it owns, which is what happened before
-    /// this existed.
+    /// Fails closed on the bytes rather than on the directories. A move that
+    /// does not happen leaves `Current` in the departing root, where it keeps
+    /// its own expiry and stays readable for the rest of its window, which is
+    /// what happened before this existed. `prepareRoot` runs first, so a failed
+    /// move can leave the arriving root created and empty; `readStoredBundle`
+    /// reports that as `.malformed` and the sweep removes it.
+    ///
+    /// Only `Current` travels. The sibling `ItemRunSubmission/attempt.json` is
+    /// deliberately left behind: it holds an idempotency key minted under the
+    /// departing App Attest key, and replaying it under the key that replaced it
+    /// is a question about credit accounting rather than about staged photos.
+    /// #935 owns that decision.
     private func adoptDepartingDeviceBundle(into arriving: Scope?, at root: URL) {
         guard let arriving,
               arriving.authority == .device,

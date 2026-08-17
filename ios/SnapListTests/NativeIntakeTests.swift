@@ -217,6 +217,72 @@ final class NativeIntakeTests: XCTestCase {
             try staged.photos.map { try Data(contentsOf: $0.photoURL) }
         )
     }
+    /// A key that comes back is not authority to overwrite what it left behind.
+    ///
+    /// This one passes on the parent commit by construction — the parent adopts
+    /// nothing, so the arriving scope trivially keeps its own bundle. It is a
+    /// regression guard rather than evidence for #855: it holds the rule that
+    /// the arriving bundle wins, which an adoption written as remove-then-move
+    /// would break silently, taking a seller's item with it.
+    func testAScopeThatAlreadyHoldsABundleKeepsItsOwnRatherThanTheArrivingOne()
+        async throws
+    {
+        let harness = NativeIntakeHarness(
+            identity: .init(
+                verifiedClerkSubject: nil,
+                persistedAppAttestKeyID: "guest-key-that-comes-back"
+            )
+        )
+        addTeardownBlock { harness.cleanUp() }
+        let session = try await installationScopedSession(harness)
+        let original = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 5)])
+        )
+        XCTAssertEqual(original.photos.count, 1)
+        // Sign in, which parks the first bundle under the guest scope, then sign
+        // out onto a *different* key so the second bundle is built somewhere
+        // else. Neither hop adopts: an account is not a phone.
+        await harness.identity.set(
+            clerkSubject: "user_native_intake_855_return",
+            appAttestKey: .init(
+                id: "guest-key-that-comes-back",
+                state: .verified
+            )
+        )
+        assertEmpty(try await session.nextSnapshot())
+        await harness.identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(id: "guest-key-somewhere-else", state: .verified)
+        )
+        assertEmpty(try await session.nextSnapshot())
+        let elsewhere = try await session.commit(
+            .addPhotos([harness.photoInput(seed: 6)])
+        )
+        XCTAssertNotEqual(
+            elsewhere.photos.map(\.id), original.photos.map(\.id),
+            "Control: the second bundle has to be a different item to tell apart."
+        )
+        await harness.identity.set(
+            clerkSubject: nil,
+            appAttestKey: .init(
+                id: "guest-key-that-comes-back",
+                state: .verified
+            )
+        )
+        let returned = try await session.nextSnapshot()
+        XCTAssertEqual(
+            returned.photos.map(\.id), original.photos.map(\.id),
+            """
+            Both roots hold a bundle here, and the one the seller is arriving \
+            at is the one they left there. Adoption has to decline rather than \
+            replace it.
+            """
+        )
+        XCTAssertEqual(
+            try returned.photos.map { try Data(contentsOf: $0.photoURL) },
+            try original.photos.map { try Data(contentsOf: $0.photoURL) }
+        )
+    }
     /// #855 acceptance: leaving Photo Review and what the seller finds after it
     /// have to agree. A device-identity change still dismisses the review — the
     /// bearer the submission behind it was built against is gone, and the
