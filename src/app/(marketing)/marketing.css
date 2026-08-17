@@ -1014,16 +1014,30 @@ html:has(.mkt) {
    where the reading column would stop being the wider of the two, which is why
    1030 lands on 420 and not higher.
 
-   Measured actuals after the change: 1440 renders 440 against a 468 hero, 1030
-   renders 420 against a 447 hero. The hero leads at both ends.
+   Then stepped back down. Once the card stack stopped being stretched to the
+   phone's height, the phone became the thing that has to match the cards, and
+   at 440 it stood 914 tall against a 786 stack. These values put `--phone-h`
+   within about 5% of the stack the cards actually produce, which is the
+   relationship measured off Cal AI (761 of stack against a 720 phone). The
+   three top steps came down together so the ordering between them is unchanged.
 
-   Below about 410 the frame is a flex item narrower than its declared width and
-   shrinks to the column, so these values stop being the governing number. The
-   last two steps are left alone for that reason rather than raised into no
-   effect. */
+   Measured actuals after the change: 1440 renders 400 against a 468 hero, 1030
+   renders 380 against a 447 hero. The hero leads at both ends.
+
+   From 939 down the copy already wraps to three or four lines, so the stack is
+   taller than the phone there without any help from these values.
+
+   The last two steps came down 8px each for a different reason. Below 760 the
+   hero phone is `min(468px, 86vw)`, so at 430 it renders 370 wide and 768 tall
+   while the explorer's fixed 376 rendered 781. The explorer was the taller of
+   the two at 430 and at 375, which inverts the hero-leads rule in the one band
+   where a viewport share and a fixed step are being compared. 368 and 320
+   render 764 and 664 against a 768 and 670 hero. This was true on main before
+   this change and is fixed here rather than routed out, since it is two values
+   inside the same set the change is already tuning. */
 .mkt-explorer {
-  --phone-w: 440px;
-  --phone-scale: 1.52778;
+  --phone-w: 400px;
+  --phone-scale: 1.38889;
   --phone-h: calc(var(--phone-w) * 598 / 288);
   display: flex;
   flex-direction: row;
@@ -1034,15 +1048,15 @@ html:has(.mkt) {
 
 @media (max-width: 1279px) {
   .mkt-explorer {
-    --phone-w: 424px;
-    --phone-scale: 1.47222;
+    --phone-w: 392px;
+    --phone-scale: 1.36111;
   }
 }
 
 @media (max-width: 1139px) {
   .mkt-explorer {
-    --phone-w: 420px;
-    --phone-scale: 1.45833;
+    --phone-w: 388px;
+    --phone-scale: 1.34722;
   }
 }
 
@@ -1055,8 +1069,8 @@ html:has(.mkt) {
    before this change. */
 @media (max-width: 1023px) {
   .mkt-explorer {
-    --phone-w: 392px;
-    --phone-scale: 1.36111;
+    --phone-w: 380px;
+    --phone-scale: 1.31944;
   }
 }
 
@@ -1075,15 +1089,15 @@ html:has(.mkt) {
    is no evidence this band needed the growth. */
 @media (max-width: 759px) {
   .mkt-explorer {
-    --phone-w: 376px;
-    --phone-scale: 1.30556;
+    --phone-w: 368px;
+    --phone-scale: 1.27778;
   }
 }
 
 @media (max-width: 409px) {
   .mkt-explorer {
-    --phone-w: 328px;
-    --phone-scale: 1.13889;
+    --phone-w: 320px;
+    --phone-scale: 1.11111;
   }
 }
 
@@ -1300,23 +1314,30 @@ html:has(.mkt) {
   flex: 1 1 0;
   min-width: 0;
   max-width: 540px;
-  min-height: var(--phone-h);
-  align-self: stretch;
+  align-self: center;
   margin-inline: auto;
   display: grid;
-  /* Rows size to their own copy, and the height left over against the phone
-     goes between the cards rather than inside them. Equal 1fr rows used to
-     stretch each card to a fifth of the phone column, which at a desktop width
-     is 174px around 115px of text. Aziz, after the phone grew: "it made the
-     height of the cards longer ... about two to three lines could fit in the
-     height of the card." The measured slack was 59px per card, and it is worst
-     between roughly 1000 and 1300 because the blurbs still fit on two lines
-     there while the column keeps the phone's height. space-between keeps the
-     first card on the phone's top edge and the last on its bottom, so the two
-     columns still read as one block. */
+  /* The card stack sizes itself and the phone is sized to it, rather than the
+     stack being stretched to whatever height the phone happens to be.
+
+     Two earlier attempts both failed against the same arithmetic. Equal 1fr
+     rows over `min-height: var(--phone-h)` stretched each card to a fifth of
+     the phone, which put 174px of card around 115px of text. Auto rows with
+     `align-content: space-between` moved that same leftover into the gaps
+     instead, which Aziz rejected next to the reference: "I don't like the
+     decision we made where we compensated for the spacing by adding extra
+     gaps. Try to make it sort of like the Cal AI style of section where the
+     cards aren't that far apart from each other."
+
+     Measured off his two screenshots at the same 1080 width, Cal AI runs 22px
+     gaps around cards of about 173px, a gap-to-card ratio of 0.13; ours ran
+     76px around 126px, which is 0.62. Their stack is 761 tall against a 720
+     phone, so the phone tracks the cards. The fix is the same shape: a small
+     fixed gap, no stretch, and phone widths stepped down so `--phone-h` lands
+     near the stack's own height. */
   grid-template-rows: repeat(5, auto);
-  align-content: space-between;
-  gap: clamp(16px, 1.6vw, 20px);
+  align-content: center;
+  gap: clamp(16px, 1.7vw, 20px);
 }
 
 .mkt-tab {
@@ -1325,7 +1346,13 @@ html:has(.mkt) {
   background: var(--canvas);
   border: 1px solid var(--hairline-2);
   border-radius: 16px;
-  padding: clamp(20px, 2vw, 26px) clamp(22px, 2.2vw, 30px);
+  /* Vertical padding rises with the viewport and the copy shortens as it does,
+     so the plate stays dense at both ends. At a desktop width the blurbs fit
+     on two lines and this pads a 126px card up to 140; below about 940 they
+     wrap to three or four lines and the same expression gives back padding
+     rather than compounding the taller copy. Cal AI's cards carry about 31px
+     against three lines, which is the shape being matched. */
+  padding: clamp(20px, 2.6vw, 30px) clamp(22px, 2.2vw, 30px);
   min-height: 44px;
   cursor: pointer;
   display: flex;
@@ -1402,11 +1429,10 @@ html:has(.mkt) {
   .mkt-tablist {
     width: 100%;
     max-width: var(--phone-w);
-    min-height: auto;
-    /* Equal rows are kept here on purpose. In the stacked layout the column has
-       no phone to match, so 1fr sizes every card to the tallest one and the
-       five read as a set. There is no leftover height to redistribute, which is
-       the only thing the desktop rule was changed to fix. */
+    /* Equal rows are kept here on purpose. In the stacked layout the cards sit
+       below the phone rather than beside it, so there is no second column to
+       match and 1fr simply sizes every card to the tallest one, which makes the
+       five read as a set. */
     grid-template-rows: repeat(5, minmax(0, 1fr));
     gap: 14px;
   }
